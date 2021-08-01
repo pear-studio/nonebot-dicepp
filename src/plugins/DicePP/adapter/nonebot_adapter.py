@@ -71,9 +71,9 @@ async def handle_notice(bot: NoneBot, event: NoticeEvent):
     # 构建data
     data: Optional[NoticeData] = None
     if event.notice_type == "group_increase":
-        data = GroupIncreaseNoticeData(event.user_id, event.group_id, event.operator_id)
+        data = GroupIncreaseNoticeData(str(event.user_id), str(event.group_id), str(event.operator_id))
     elif event.notice_type == "friend_add":
-        data = FriendAddNoticeData(event.user_id)
+        data = FriendAddNoticeData(str(event.user_id))
 
     # 处理消息提示
     if data:
@@ -87,12 +87,12 @@ async def handle_request(bot: NoneBot, event: RequestEvent):
     # 构建data
     data: Optional[RequestData] = None
     if event.request_type == "friend":
-        data = FriendRequestData(event.user_id, event.comment)
+        data = FriendRequestData(str(event.user_id), event.comment)
     elif event.request_type == "group":
         if event.sub_type == "add":
-            data = JoinGroupRequestData(event.user_id, event.group_id, event.comment)
+            data = JoinGroupRequestData(str(event.user_id), str(event.group_id), str(event.comment))
         elif event.sub_type == "invite":
-            data = InviteGroupRequestData(event.user_id, event.group_id, event.comment)
+            data = InviteGroupRequestData(str(event.user_id), str(event.group_id), event.comment)
 
     # 处理请求
     if data:

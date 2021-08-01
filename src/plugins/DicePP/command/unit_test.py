@@ -102,7 +102,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__check_group_msg_res(".help", checker=lambda s: "DicePP" in s)
         await self.__check_group_msg_res(".help r", checker=lambda s: "骰" in s)
         await self.__check_group_msg_res(".help 指令", checker=lambda s: ".r" in s)
-        await self.__check_group_msg_res(".help 链接", checker=lambda s: "暂无信息" in s)
+        await self.__check_group_msg_res(".help 链接", checker=lambda s: "pear-studio/nonebot-dicepp" in s)
 
     async def test_3_init(self):
         # Basic

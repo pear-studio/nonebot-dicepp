@@ -23,14 +23,9 @@ for dirPath in ALL_LOCAL_DIR_PATH:
         os.makedirs(dirPath)
         logger.Log("[Config] [Init] 创建文件夹: " + dirPath)
 
-BOT_DESCRIBE = "DicePP by 梨子 Ver 1.0.0 (Early Access)\n" \
-               "@骰娘 .bot on/off 开启或关闭骰娘\n" \
-               ".help指令 查看指令列表\n" \
-               ".help链接 查看源码地址\n" \
-               ".help协议 查看使用协议\n" \
-               ".help更新 查看最近更新内容\n" \
-               "DicePP说明手册: https://docs.qq.com/doc/DV1ZueVVmZkV2dWpI\n" \
-               "欢迎加入交流群:861919492 伊丽莎白粉丝群或联系开发者:821480843 梨子报告bug和提出意见~"
+BOT_VERSION = "Ver 1.0.0 (Early Access 210801)"
+
+BOT_DESCRIBE = "DicePP by 梨子"
 
 BOT_AGREEMENT = "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议视为同意并承诺遵守此协议，否则请移除骰娘。\n" \
                 "2.不允许禁言骰娘或刷屏掷骰等对骰娘的不友善行为，这些行为将会提高骰娘被制裁的风险。开关骰娘响应请使用.bot on/off。\n" \
@@ -41,6 +36,8 @@ BOT_AGREEMENT = "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议�
                 "7.对于违反协议的行为，骰娘将视情况终止对用户和所在群提供服务。\n" \
                 "8.本协议内容可能改动，请注意查看最新协议。\n" \
                 "9.本服务最终解释权归服务提供方所有。"
+
+BOT_GIT_LINK = "https://github.com/pear-studio/nonebot-dicepp"
 
 DEFAULT_CONFIG: Dict[str, str] = {}
 DEFAULT_CONFIG_COMMENT: Dict[str, str] = {}
@@ -58,6 +55,9 @@ CFG_FRIEND_TOKEN = "friend_token"
 DEFAULT_CONFIG[CFG_FRIEND_TOKEN] = ""
 DEFAULT_CONFIG_COMMENT[CFG_FRIEND_TOKEN] = "用户申请好友时在验证中输入参数中的文本之一骰娘才会通过, 若字符串为空则通过所有的好友验证"
 
+CFG_AGREEMENT = "agreement"
+DEFAULT_CONFIG[CFG_AGREEMENT] = BOT_AGREEMENT
+DEFAULT_CONFIG_COMMENT[CFG_AGREEMENT] = "使用协议"
 
 CONFIG_FILE_PATH = "config.xlsx"
 
