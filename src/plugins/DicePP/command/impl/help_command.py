@@ -7,6 +7,7 @@ from command.dicepp_command import UserCommandBase, custom_user_command, Message
 from command.bot_command import BotCommandBase
 
 LOC_HELP = "help_command"
+LOC_HELP_AGREEMENT = "help_agreement"
 LOC_HELP_NOT_FOUND = "help_command_not_found"
 
 MAX_NICKNAME_LENGTH = 30  # 昵称长度上限
@@ -42,7 +43,7 @@ class HelpCommand(UserCommandBase):
             feedback = BOT_DESCRIBE
         else:  # 具体指令
             help_text = ""
-            for command in self.bot.commands:
+            for command in self.bot.command_dict.values():
                 help_text = command.get_help(arg_str, meta)
                 if help_text:
                     break
@@ -63,7 +64,7 @@ class HelpCommand(UserCommandBase):
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "指令":
             feedback: str = ""
-            for command in self.bot.commands:
+            for command in self.bot.command_dict.values():
                 description_text = command.get_description()
                 if description_text:
                     feedback += description_text + "\n"
@@ -71,10 +72,10 @@ class HelpCommand(UserCommandBase):
                 return feedback[:-1]
             else:
                 return "暂无信息"
-        elif keyword == "链接":  # ToDo: 更新链接
-            return "暂无信息"
+        elif keyword == "链接":
+            return bot_config.BOT_GIT_LINK
         elif keyword == "协议":
-            return bot_config.BOT_AGREEMENT
+            return self.bot.cfg_helper.get_config(bot_config.CFG_AGREEMENT)[0]
         elif keyword == "更新":  # ToDo: 更新内容
             return "暂无信息"
 

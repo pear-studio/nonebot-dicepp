@@ -42,6 +42,8 @@ BOT_AGREEMENT = "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议�
                 "8.本协议内容可能改动，请注意查看最新协议。\n" \
                 "9.本服务最终解释权归服务提供方所有。"
 
+BOT_GIT_LINK = "https://github.com/pear-studio/nonebot-dicepp"
+
 DEFAULT_CONFIG: Dict[str, str] = {}
 DEFAULT_CONFIG_COMMENT: Dict[str, str] = {}
 
@@ -58,6 +60,9 @@ CFG_FRIEND_TOKEN = "friend_token"
 DEFAULT_CONFIG[CFG_FRIEND_TOKEN] = ""
 DEFAULT_CONFIG_COMMENT[CFG_FRIEND_TOKEN] = "用户申请好友时在验证中输入参数中的文本之一骰娘才会通过, 若字符串为空则通过所有的好友验证"
 
+CFG_AGREEMENT = "agreement"
+DEFAULT_CONFIG[CFG_AGREEMENT] = BOT_AGREEMENT
+DEFAULT_CONFIG_COMMENT[CFG_AGREEMENT] = "使用协议"
 
 CONFIG_FILE_PATH = "config.xlsx"
 
