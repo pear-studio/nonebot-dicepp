@@ -185,7 +185,7 @@ class QueryCommand(UserCommandBase):
         elif mode == "search":
             feedback = self.query_info(arg_str, source_port, search_mode=1)
         elif mode == "select":
-            index = int(arg_str)
+            index = int(arg_str) + (self.record_dict[source_port].page-1) * MAX_QUERY_CANDIDATE_NUM
             uuid = self.record_dict[source_port].uuid_list[index]
             item: QueryItem = self.item_uuid_dict[uuid]
             feedback = self.format_single_item_feedback(item)
@@ -405,14 +405,14 @@ class QueryCommand(UserCommandBase):
                 workbook = get_template_query_workbook()
                 update_xlsx(workbook, path)
                 workbook.close()
-        elif "." not in path:  # 是文件夹
+        elif path:  # 是文件夹
             try:
                 inner_paths = os.listdir(path)  # 遍历文件夹下所有文件
                 for inner_path in inner_paths:
                     inner_path = os.path.join(path, inner_path)
                     self.load_data_from_path(inner_path, error_info)
-            except FileNotFoundError:  # 文件夹不存在
-                pass
+            except FileNotFoundError as e:  # 文件夹不存在
+                error_info.append(f"读取{path}时遇到错误: {e}")
 
 
 def get_template_query_workbook() -> openpyxl.Workbook:

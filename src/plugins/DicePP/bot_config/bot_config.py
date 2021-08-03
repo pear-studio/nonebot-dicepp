@@ -123,7 +123,7 @@ class ConfigHelper:
         workbook.save(self.data_path)
         workbook.close()
 
-        logger.Log(f"[Localization] [Save] {feedback} {self.data_path}")
+        logger.Log(f"[BotConfig] [Save] {feedback} {self.data_path}")
 
     def register_config(self, key: str, origin_str: str, comment: str = ""):
         """

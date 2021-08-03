@@ -108,4 +108,7 @@ class LocalizationHelper:
             **kwargs: 本地化语句需要的参数, 可以传不会用到的参数
         """
         loc_text: LocalizationText = self.get_loc_text(key)
-        return loc_text.get().format(**kwargs)
+        if kwargs:
+            return loc_text.get().format(**kwargs)
+        else:
+            return loc_text.get()
