@@ -1,10 +1,9 @@
 import unittest
 from unittest.async_case import IsolatedAsyncioTestCase
 import os
-from typing import Callable, Dict
+from typing import Callable
 
 from bot_core import Bot, MessageMetaData, MessageSender
-from bot_command import BotCommandBase
 
 
 class MyTestCase(IsolatedAsyncioTestCase):
@@ -135,8 +134,52 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__check_group_msg_res(".ri 地精-1", checker=lambda s: "先攻列表大小超出限制" in s)
         await self.__check_group_msg_res(".init del 炎魔", checker=lambda s: "炎魔 not exist" in s)
 
+    # noinspection SpellCheckingInspection
     async def test_3_query(self):
-        await self.__check_group_msg_res(".查询 火球术", is_show=True)
+        # noinspection PyBroadException
+        try:
+            condition_a, condition_b, condition_c = False, False, False
+            sources = self.test_bot.command_dict["QueryCommand"].src_uuid_dict.values()
+            for source in sources:
+                if "test.xlsx" in source.path and source.sheet == "test_sheet_A":
+                    condition_a = True
+                if "test.xlsx" in source.path and source.sheet == "test_sheet_B":
+                    condition_b = True
+                if "测试.xlsx" in source.path and source.sheet == "test_sheet_A":
+                    condition_c = True
+            assert condition_a and condition_b and condition_c
+        except Exception as e:
+            self.assertTrue(False, f"测试查询资料库未加载成功, 无法测试查询功能! {e}")
+            return
+        await self.__check_group_msg_res(".查询 TEST_KEY",
+                                         checker=lambda s: "TEST_KEY: \nCONTENT_3" in s and "目录: TEST_CAT_3" in s)
+        await self.__check_group_msg_res(".q TEST_KEY",
+                                         checker=lambda s: "TEST_KEY: \nCONTENT_3" in s and "目录: TEST_CAT_3" in s)
+        await self.__check_group_msg_res(".q TEST_KEY_REPEAT",
+                                         checker=lambda s: ("0. TEST_KEY_REPEAT: TEST_DESC_1" in s
+                                                            and " #Tag1A #Tag1B #Tag1C Space 目录: TEST_CAT_1" in s
+                                                            and "1. TEST_KEY_REPEAT: TEST_DESC_2 目录: TEST_CAT_2" in s))
+        await self.__check_group_msg_res(".q TEST_KEY_MULT_A",
+                                         checker=lambda s: ("0. TEST_KEY_MULT_A: CONTENT_4..." in s
+                                                            and " #OTHER_TAG 目录: OTHER_CAT" in s))
+        await self.__check_group_msg_res(".q TEST_KEY_MULT_B",
+                                         checker=lambda s: ("TEST_KEY_MULT_B: \nCONTENT_5" in s and "#" not in s))
+        await self.__check_group_msg_res(".q TEST/MULT",
+                                         checker=lambda s: "4. " in s and "CONTENT_7..." in s and " OTHER_DESC #" in s)
+        await self.__check_group_msg_res(".q SYN_1A",
+                                         checker=lambda s: "TEST_KEY_REPEAT" in s and "CONTENT_1" in s)
+        await self.__check_group_msg_res("-", checker=lambda s: "This is the first page!" not in s)
+        await self.__check_group_msg_res(".q PAGE_TEST",
+                                         checker=lambda s: "9. " in s and "+ for next page, - for prev page" in s)
+        await self.__check_group_msg_res("-", checker=lambda s: "This is the first page!" in s)
+        await self.__check_group_msg_res("+", checker=lambda s: "Page2/3" in s)
+        await self.__check_group_msg_res("+", checker=lambda s: "Page3/3" in s)
+        await self.__check_group_msg_res("+", checker=lambda s: "This is the final page!" in s)
+        await self.__check_group_msg_res(".s CONTENT_7", checker=lambda s: "TEST_KEY_MULT_D: \nCONTENT_7" in s)
+        await self.__check_group_msg_res(".s B", checker=lambda s: "Page1/4" in s)
+        await self.__check_group_msg_res("-", checker=lambda s: "This is the first page!" in s)
+        await self.__check_group_msg_res(".s TENT_1/KEY_REP",
+                                         checker=lambda s: "0." not in s and "TEST_KEY_REPEAT" in s)
 
 
 if __name__ == '__main__':

@@ -1,18 +1,17 @@
-from typing import List, Tuple, Dict, Optional, Set, Literal, Iterable, Union, Any
+from typing import List, Tuple, Dict, Optional, Set, Literal, Iterable, Any
 import os
 import datetime
 import openpyxl
 from openpyxl.comments import Comment
 import random
-from openpyxl.utils import get_column_letter
+# from openpyxl.utils import get_column_letter
 
 import bot_utils
 from bot_core import Bot
 import bot_config
 from command.command_config import *
-from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
+from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData, preprocess_msg
 from command.bot_command import BotCommandBase, MessagePort, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
-from data_manager import DataManagerError
 from bot_utils.localdata import read_xlsx, update_xlsx, create_parent_dir
 
 # LOC_NICKNAME_SET = "nickname_set"
@@ -55,8 +54,8 @@ RECORD_CLEAN_FREQ = 50  # 每隔多少次查询指令尝试清理一次查询记
 
 
 class QueryItem:
-    def __init__(self, uuid: int, key: Tuple[str], content: str, desc: str, catalogue: str, tag: List[str]
-                 , src_file_uuid: int, src_file_index: int):
+    def __init__(self, uuid: int, key: Tuple[str], content: str, desc: str, catalogue: str, tag: List[str],
+                 src_file_uuid: int, src_file_index: int):
         """表示一个可以被查询到的条目"""
         self.uuid = uuid  # 唯一标识符
         self.key = key  # 查询关键字
@@ -68,6 +67,9 @@ class QueryItem:
         self.src_file_uuid = src_file_uuid  # 用来标志这个条目是从哪个源文件读取的, uuid对应的path从Command实例中找到
         self.src_file_row = src_file_index  # 属于源文件的第几个条目, 从1开始
 
+    def __repr__(self):
+        return f"uuid:{self.uuid}, key:{self.key}, desc:{self.desc}"
+
 
 class QuerySource:
     def __init__(self, uuid: int, path: str, sheet: str):
@@ -75,6 +77,9 @@ class QuerySource:
         self.uuid = uuid  # 唯一标识符
         self.path = path  # 文件路径
         self.sheet = sheet  # 分页名称
+
+    def __repr__(self):
+        return f"uuid:{self.uuid}, path:{self.path}, sheet:{self.sheet}"
 
 
 class QueryRecord:
@@ -104,12 +109,12 @@ class QueryCommand(UserCommandBase):
 
         reg_loc = bot.loc_helper.register_loc_text
         reg_loc(LOC_QUERY_RESULT, "{result}", "查询成功时返回的内容")
-        reg_loc(LOC_QUERY_SINGLE_RESULT, "{keyword}: {tag}\n{content}{cat}{syn}",
+        reg_loc(LOC_QUERY_SINGLE_RESULT, "{keyword}: {tag}\n{content}{cat}",
                 "查询找到唯一条目, keyword: 主关键字, content: 词条内容"
                 ", cat: 换行+目录*, tag: 标签*, syn: 换行+同义词*  (*如果有则显示, 没有则忽略)")
         reg_loc(LOC_QUERY_MULTI_RESULT, "{multi_results}",
                 f"查询找到多个条目, multi_results由多行{LOC_QUERY_MULTI_RESULT_ITEM}构成")
-        reg_loc(LOC_QUERY_MULTI_RESULT_ITEM, "{keyword}: {description} {cat} {tag} {syn}",
+        reg_loc(LOC_QUERY_MULTI_RESULT_ITEM, "{keyword}: {description}{tag}{cat}",
                 "查询找到多个条目时单个条目的描述, keyword: 主关键字, description: 简短描述"
                 ", cat: 目录*, tag: 标签*, syn: 同义词*  (*如果有则显示, 没有则忽略)")
         reg_loc(LOC_QUERY_MULTI_RESULT_PAGE, "Page{page_cur}/{page_total}, + for next page, - for prev page",
@@ -126,7 +131,7 @@ class QueryCommand(UserCommandBase):
         # 从本地文件中读取资料
         data_path_list: List[str] = self.bot.cfg_helper.get_config(CFG_QUERY_DATA_PATH)
         for i, path in enumerate(data_path_list):
-            if path[:2] == "./":  # 用DATA_PATH作为当前路径
+            if path.startswith("./"):  # 用DATA_PATH作为当前路径
                 data_path_list[i] = os.path.join(bot_config.DATA_PATH, path[2:])
         error_info: List[str] = []
         for data_path in data_path_list:
@@ -253,15 +258,19 @@ class QueryCommand(UserCommandBase):
 
     def search_item(self, query_key_list: List[str], search_mode: int) -> List[int]:
         poss_result: List[int] = []
+        query_key_len: int = sum((len(key) for key in query_key_list))
         if search_mode == 0:  # 仅匹配条目关键字
             for candidate_key in self.query_dict.keys():
                 if all(((key in candidate_key) for key in query_key_list)):  # 所有关键字都在candidate_key中出现
+                    if query_key_len == len(candidate_key):  # 关键字正好和candidate_key一模一样, 可以直接返回了
+                        return self.query_dict[candidate_key]
                     poss_result += self.query_dict[candidate_key]
         else:  # 匹配条目关键字和内容
             for item in self.item_uuid_dict.values():
                 candidate_key: str = "/".join(list(item.key) + [item.content])
-                if all(((key in candidate_key) for key in query_key_list)):  # 所有关键字都在candidate_key中出现
-                    poss_result.append(item.uuid)  # self.query_dict[item.key[0]]
+                candidate_key = preprocess_msg(candidate_key)
+                if all(((key in candidate_key) for key in query_key_list)):  # 所有关键字都在content中出现
+                    poss_result.append(item.uuid)
         # 去除重复的条目
         poss_result = list(set(poss_result))
         return poss_result
@@ -280,7 +289,7 @@ class QueryCommand(UserCommandBase):
         for index, item in enumerate(items):
             item_keyword = item.key[0]
             item_desc = item.desc
-            item_tag = " Tag: " + get_tag_string(item.tag) if item.catalogue else ""
+            item_tag = " " + get_tag_string(item.tag) if item.tag else ""
             item_cat = " 目录: " + item.catalogue if item.catalogue else ""
             item_syn = " 同义词: " + get_syn_string(item.key[1:]) if item.key[1:] else ""
             item_info = self.format_loc(LOC_QUERY_MULTI_RESULT_ITEM, keyword=item_keyword, description=item_desc,
@@ -391,6 +400,7 @@ class QueryCommand(UserCommandBase):
                     for item in qi_list:
                         self.item_uuid_dict[item.uuid] = item
                         for k in item.key:
+                            k = preprocess_msg(k)  # 进行与输入语句一样的预处理
                             if k not in self.query_dict:
                                 self.query_dict[k] = [item.uuid]
                             else:
@@ -398,7 +408,11 @@ class QueryCommand(UserCommandBase):
 
         if path.endswith(".xlsx"):
             if os.path.exists(path):
-                workbook = read_xlsx(path)
+                try:
+                    workbook = read_xlsx(path)
+                except PermissionError:
+                    error_info.append(f"读取{path}时遇到错误: 权限不足")
+                    return
                 load_data_from_xlsx(workbook)
             else:
                 create_parent_dir(path)  # 父文件夹不存在需先创建父文件夹

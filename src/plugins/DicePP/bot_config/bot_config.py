@@ -23,7 +23,7 @@ for dirPath in ALL_LOCAL_DIR_PATH:
         os.makedirs(dirPath)
         logger.Log("[Config] [Init] 创建文件夹: " + dirPath)
 
-BOT_VERSION = "Ver 1.0.0 (Early Access 210801)"
+BOT_VERSION = "Ver 1.0.0 (Early Access 210804)"
 
 BOT_DESCRIBE = "DicePP by 梨子"
 
