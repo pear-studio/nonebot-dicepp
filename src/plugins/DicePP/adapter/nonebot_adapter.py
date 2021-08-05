@@ -44,8 +44,10 @@ class NoneBotClientProxy(ClientProxy):
 
 @command_matcher.handle()
 async def handle_command(bot: NoneBot, event: MessageEvent):
-    msg = str(event.get_message())
-    Log(f"processing msg {msg}")
+    cq_message = event.get_message()
+    plain_msg = cq_message.extract_plain_text()
+    raw_msg = str(cq_message)
+    Log(f"processing msg {raw_msg}")
 
     # 构建Meta信息
     group_id: str = ""
@@ -58,10 +60,12 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
     sender.area, sender.level, sender.role = event.sender.area, event.sender.level, event.sender.role
     sender.title = event.sender.title
 
-    meta = MessageMetaData(msg, sender, group_id)
+    to_me = event.to_me
+
+    meta = MessageMetaData(plain_msg, raw_msg, sender, group_id, to_me)
 
     # 让机器人处理信息
-    await all_bots[bot.self_id].process_message(msg, meta)
+    await all_bots[bot.self_id].process_message(plain_msg, meta)
 
 
 @notice_matcher.handle()

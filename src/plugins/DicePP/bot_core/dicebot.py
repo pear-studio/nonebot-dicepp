@@ -69,10 +69,10 @@ class Bot:
         import command
         command_cls_dict = command.dicepp_command.USER_COMMAND_CLS_DICT
         command_names = command_cls_dict.keys()
-        command_names = sorted(command_names, key=lambda n: command_cls_dict[n].priority)
+        command_names = sorted(command_names, key=lambda n: command_cls_dict[n].priority)  # 按优先级排序
         for command_name in command_names:
             command_cls = command_cls_dict[command_name]
-            self.command_dict[command_name] = command_cls(bot=self)  # 默认的Dict是有序的
+            self.command_dict[command_name] = command_cls(bot=self)  # 默认的Dict是有序的, 所以之后用values拿到的也是有序的
 
     def delay_init(self):
         asyncio.run(self.delay_init_command())
@@ -83,7 +83,7 @@ class Bot:
             error_info += command.delay_init()
         if self.proxy:
             from command import PrivateMessagePort, BotSendMsgCommand
-            feedback = "完成加载, " + "所有组件无错误" if not error_info else f"发现如下错误:\n {error_info}"
+            feedback = "完成加载" + "\n".join(error_info)
             from bot_config import CFG_MASTER
             print(feedback)
             master_list = self.cfg_helper.get_config(CFG_MASTER)

@@ -41,7 +41,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
                                     checker: Callable[[str], bool] = lambda s: True, is_show: bool = False):
         group_id += f"_in_test{self.test_index}"
         user_id += f"_in_test{self.test_index}"
-        meta = MessageMetaData(msg, MessageSender(user_id, nickname), group_id)
+        meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id)
         bot_commands = await self.test_bot.process_message(msg, meta)
         result = "\n".join([str(command) for command in bot_commands])
         info_str = f"\033[0;32m{msg}\033[0m -> {result}"
@@ -52,12 +52,13 @@ class MyTestCase(IsolatedAsyncioTestCase):
     async def __check_private_msg_res(self, msg: str, user_id: str = "user", nickname: str = "测试用户",
                                       checker: Callable[[str], bool] = lambda s: True, is_show: bool = False):
         user_id += f"_in_test{self.test_index}"
-        meta = MessageMetaData(msg, MessageSender(user_id, nickname), "")
+        meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), "")
         bot_commands = await self.test_bot.process_message(msg, meta)
         result = "\n".join([str(command) for command in bot_commands])
+        info_str = f"\033[0;32m{msg}\033[0m -> {result}"
         if is_show:
-            print(f"\033[0;32m{msg}\033[0m -> {result}")
-        self.assertTrue(checker(result))
+            print(info_str)
+        self.assertTrue(checker(result), f"Info:\n{info_str}")
 
     async def test_1_localization(self):
         self.test_bot.loc_helper.save_localization()
@@ -112,7 +113,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__check_group_msg_res(".ri+1", checker=lambda s: "伊丽莎白's initiative result is 1D20+1" in s)
         await self.__check_group_msg_res(".ri d4+D20 大地精", checker=lambda s: "大地精" in s and "result is 1D4+1D20" in s)
         await self.__check_group_msg_res(".init", checker=lambda s: s.count("伊丽莎白") == 1 and "大地精" in s)
-        await self.__check_group_msg_res(".init", group_id="group2", checker=lambda s: "Cannot find initiative info" in s)
+        await self.__check_group_msg_res(".init", group_id="group2",
+                                         checker=lambda s: "Cannot find initiative info" in s)
         await self.__check_group_msg_res(".init clr", checker=lambda s: "Already delete initiative info" in s)
         await self.__check_group_msg_res(".init", checker=lambda s: "Cannot find initiative info" in s)
         # Complex
@@ -122,8 +124,10 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__check_group_msg_res(".init", checker=lambda s: s.count("大地精") == 2 and s.count("地精") == 6)
         await self.__check_group_msg_res(".init del 地精a", checker=lambda s: "Already" in s and "地精a" in s)
         await self.__check_group_msg_res(".init", checker=lambda s: s.count("地精") == 5 and "地精a" not in s)
-        await self.__check_group_msg_res(".init del 地精b/地精c", checker=lambda s: "Already" in s and "地精b" in s and "地精c" in s)
-        await self.__check_group_msg_res(".init", checker=lambda s: s.count("地精") == 3 and "地精b" not in s and "地精c" not in s)
+        await self.__check_group_msg_res(".init del 地精b/地精c",
+                                         checker=lambda s: "Already" in s and "地精b" in s and "地精c" in s)
+        await self.__check_group_msg_res(".init",
+                                         checker=lambda s: s.count("地精") == 3 and "地精b" not in s and "地精c" not in s)
         await self.__check_group_msg_res(".init" + "clr", checker=lambda s: "Already delete initiative info" in s)
         # Exception
         await self.__check_group_msg_res(".ri 100000000000#地精", checker=lambda s: "不是一个有效的数字" in s)
@@ -156,27 +160,36 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__check_group_msg_res(".q TEST_KEY",
                                          checker=lambda s: "TEST_KEY: \nCONTENT_3" in s and "目录: TEST_CAT_3" in s)
         await self.__check_group_msg_res(".q TEST_KEY_REPEAT",
-                                         checker=lambda s: ("0. TEST_KEY_REPEAT: TEST_DESC_1" in s
-                                                            and " #Tag1A #Tag1B #Tag1C Space 目录: TEST_CAT_1" in s
-                                                            and "1. TEST_KEY_REPEAT: TEST_DESC_2 目录: TEST_CAT_2" in s))
+                                         checker=lambda s: ("0.TEST_KEY_REPEAT, 1.TEST_KEY_REPEAT" in s))
+        await self.__check_private_msg_res(".q TEST_KEY_REPEAT",
+                                           checker=lambda s: ("0. TEST_KEY_REPEAT: TEST_DESC_1" in s
+                                                              and " #Tag1A #Tag1B #Tag1C Space 目录: TEST_CAT_1" in s
+                                                              and "1. TEST_KEY_REPEAT: TEST_DESC_2 目录: T" in s))
         await self.__check_group_msg_res(".q TEST_KEY_MULT_A",
-                                         checker=lambda s: ("0. TEST_KEY_MULT_A: CONTENT_4..." in s
-                                                            and " #OTHER_TAG 目录: OTHER_CAT" in s))
+                                         checker=lambda s: ("0.TEST_KEY_MULT_A, 1.TEST_KEY_MULT_A" in s))
+        await self.__check_private_msg_res(".q TEST_KEY_MULT_A",
+                                           checker=lambda s: ("0. TEST_KEY_MULT_A: CONTENT_4..." in s
+                                                              and " #OTHER_TAG 目录: OTHER_CAT" in s))
         await self.__check_group_msg_res(".q TEST_KEY_MULT_B",
                                          checker=lambda s: ("TEST_KEY_MULT_B: \nCONTENT_5" in s and "#" not in s))
-        await self.__check_group_msg_res(".q TEST/MULT",
-                                         checker=lambda s: "4. " in s and "CONTENT_7..." in s and " OTHER_DESC #" in s)
+        await self.__check_group_msg_res(".q TEST/MULT", checker=lambda s: "0." in s and "4." in s)
+        await self.__check_private_msg_res(".q TEST/MULT",
+                                           checker=lambda s: "4. " in s and "CONTENT_7..." in s and " OTHER_DESC #" in s)
         await self.__check_group_msg_res(".q SYN_1A",
                                          checker=lambda s: "TEST_KEY_REPEAT" in s and "CONTENT_1" in s)
         await self.__check_group_msg_res("-", checker=lambda s: "This is the first page!" not in s)
         await self.__check_group_msg_res(".q PAGE_TEST",
-                                         checker=lambda s: "9. " in s and "+ for next page, - for prev page" in s)
-        await self.__check_group_msg_res("-", checker=lambda s: "This is the first page!" in s)
-        await self.__check_group_msg_res("+", checker=lambda s: "Page2/3" in s)
-        await self.__check_group_msg_res("+", checker=lambda s: "Page3/3" in s)
+                                         checker=lambda s: "27." in s and "0." in s and "PAGE_TEST_28" in s)
         await self.__check_group_msg_res("+", checker=lambda s: "This is the final page!" in s)
+        await self.__check_private_msg_res(".q PAGE_TEST",
+                                           checker=lambda s: "9. " in s and "+ for next page, - for prev page" in s)
+        await self.__check_private_msg_res("-", checker=lambda s: "This is the first page!" in s)
+        await self.__check_private_msg_res("+", checker=lambda s: "Page2/3" in s)
+        await self.__check_private_msg_res("+", checker=lambda s: "Page3/3" in s)
+        await self.__check_private_msg_res("+", checker=lambda s: "This is the final page!" in s)
         await self.__check_group_msg_res(".s CONTENT_7", checker=lambda s: "TEST_KEY_MULT_D: \nCONTENT_7" in s)
-        await self.__check_group_msg_res(".s B", checker=lambda s: "Page1/4" in s)
+        await self.__check_group_msg_res(".s B", checker=lambda s: "Page1/4" not in s)
+        await self.__check_private_msg_res(".s B", checker=lambda s: "Page1/4" in s)
         await self.__check_group_msg_res("-", checker=lambda s: "This is the first page!" in s)
         await self.__check_group_msg_res(".s TENT_1/KEY_REP",
                                          checker=lambda s: "0." not in s and "TEST_KEY_REPEAT" in s)

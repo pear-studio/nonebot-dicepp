@@ -49,7 +49,8 @@ QUERY_ITEM_FIELD_DESC_DEFAULT_LEN = 20  # 默认用前多少个字符作为默�
 
 MAX_QUERY_KEY_NUM = 5  # 最多能同时用多少个查询关键字
 MAX_QUERY_CANDIDATE_NUM = 10  # 详细查询时一页最多能同时展示多少个条目
-RECORD_RESPONSE_TIME = 60  # 至多响应多久以前的查询指令, 多余的将被清理
+MAX_QUERY_CANDIDATE_SIMPLE_NUM = 30  # 简略查询时一页最多能同时展示多少个条目
+RECORD_RESPONSE_TIME = 60  # 至多响应多久以前的查询指令, 多余的将被清理, 单位为秒
 RECORD_CLEAN_FREQ = 50  # 每隔多少次查询指令尝试清理一次查询记录
 
 
@@ -88,6 +89,7 @@ class QueryRecord:
         self.uuid_list = uuid_list  # 当前可以选择的条目的uuid列表
         self.time = time  # 更新时间
         self.page = 1  # 当前的页数
+        self.mode = 0  # 0代表简易模式, 1代表详细模式
 
 
 @custom_user_command(priority=2,
@@ -151,7 +153,7 @@ class QueryCommand(UserCommandBase):
             if bot_utils.time.get_current_date_raw() - record.time < datetime.timedelta(seconds=RECORD_RESPONSE_TIME):
                 # 选择条目
                 try:
-                    should_proc = (0 < int(msg_str) <= len(record.uuid_list))
+                    should_proc = (0 <= int(msg_str) <= len(record.uuid_list))
                     mode, arg_str = "select", msg_str
                 except ValueError:
                     pass
@@ -183,16 +185,20 @@ class QueryCommand(UserCommandBase):
         mode: Literal["query", "search", "select", "flip_page"] = hint[0]
         arg_str: str = hint[1]
         feedback: str
+        show_mode = 0 if meta.group_id else 1
 
         # 处理指令
         if mode == "query":
-            feedback = self.query_info(arg_str, source_port, search_mode=0)
+            feedback = self.query_info(arg_str, source_port, search_mode=0, show_mode=show_mode)
         elif mode == "search":
-            feedback = self.query_info(arg_str, source_port, search_mode=1)
+            feedback = self.query_info(arg_str, source_port, search_mode=1, show_mode=show_mode)
         elif mode == "select":
-            index = int(arg_str) + (self.record_dict[source_port].page-1) * MAX_QUERY_CANDIDATE_NUM
+            record = self.record_dict[source_port]
+            page_item_num = MAX_QUERY_CANDIDATE_NUM if record.mode != 0 else MAX_QUERY_CANDIDATE_SIMPLE_NUM
+            index = int(arg_str) + (record.page-1) * page_item_num
             uuid = self.record_dict[source_port].uuid_list[index]
             item: QueryItem = self.item_uuid_dict[uuid]
+            record.time = bot_utils.time.get_current_date_raw()  # 更新记录有效期
             feedback = self.format_single_item_feedback(item)
         elif mode == "flip_page":
             record = self.record_dict[source_port]
@@ -225,7 +231,7 @@ class QueryCommand(UserCommandBase):
     def get_description(self) -> str:
         return ".查询 根据关键字查找资料 .索引 根据资料内容查找资料"
 
-    def query_info(self, query_key: str, port: MessagePort, search_mode: int) -> str:
+    def query_info(self, query_key: str, port: MessagePort, search_mode: int, show_mode: int = 0) -> str:
         """
         查询信息, 返回输出给用户的字符串, 若给出选项将会记录信息以便响应用户之后的快速查询.
         search_mode != 0则使用模糊查找
@@ -248,12 +254,17 @@ class QueryCommand(UserCommandBase):
         else:  # len(poss_result) > 1  找到多个结果, 记录当前信息并提示用户选择
             # 记录当前信息以备将来查询
             self.record_dict[port] = QueryRecord(poss_result, bot_utils.time.get_current_date_raw())
-            show_result: List[int] = poss_result[:MAX_QUERY_CANDIDATE_NUM]
+            self.record_dict[port].mode = show_mode
+            page_item_num = MAX_QUERY_CANDIDATE_NUM if show_mode != 0 else MAX_QUERY_CANDIDATE_SIMPLE_NUM
+            show_result: List[int] = poss_result[:page_item_num]
             items: List[QueryItem] = [self.item_uuid_dict[uuid] for uuid in show_result]
-            feedback = self.format_multiple_items_feedback(items)
-            if len(poss_result) > MAX_QUERY_CANDIDATE_NUM:
+            if show_mode != 0:
+                feedback = self.format_multiple_items_feedback(items)
+            else:
+                feedback = self.format_multiple_items_simple_feedback(items)
+            if len(poss_result) > page_item_num:
                 feedback += "\n" + self.format_loc(LOC_QUERY_MULTI_RESULT_PAGE, page_cur=1,
-                                                   page_total=len(poss_result) // MAX_QUERY_CANDIDATE_NUM + 1)
+                                                   page_total=len(poss_result) // page_item_num + 1)
             return feedback
 
     def search_item(self, query_key_list: List[str], search_mode: int) -> List[int]:
@@ -298,28 +309,37 @@ class QueryCommand(UserCommandBase):
         feedback = feedback.strip()
         return feedback
 
+    @staticmethod
+    def format_multiple_items_simple_feedback(items: List[QueryItem]):
+        return ", ".join((f"{index}.{item.key[0]}" for index, item in enumerate(items)))
+
     def flip_page(self, record: QueryRecord, next_page: bool) -> Tuple[str, int]:
+        def get_feedback(page) -> str:
+            index = (cur_page - 1) * page_item_num
+            uuids = record.uuid_list[index:index + page_item_num]
+            items = [self.item_uuid_dict[uuid] for uuid in uuids]
+            if record.mode != 0:
+                return self.format_multiple_items_feedback(items)
+            else:
+                return self.format_multiple_items_simple_feedback(items)
+
         cur_page = record.page
-        total_page = len(record.uuid_list) // MAX_QUERY_CANDIDATE_NUM + 1
+        page_item_num = MAX_QUERY_CANDIDATE_NUM if record.mode != 0 else MAX_QUERY_CANDIDATE_SIMPLE_NUM
+
+        total_page = len(record.uuid_list) // page_item_num + 1
         if not next_page:
             if cur_page == 1:
                 feedback = self.format_loc(LOC_QUERY_MULTI_RESULT_PAGE_UNDERFLOW)
             else:
                 cur_page = cur_page - 1
-                index = (cur_page - 1) * MAX_QUERY_CANDIDATE_NUM
-                uuids = record.uuid_list[index:index + MAX_QUERY_CANDIDATE_NUM]
-                items = [self.item_uuid_dict[uuid] for uuid in uuids]
-                feedback = self.format_multiple_items_feedback(items)
+                feedback = get_feedback(cur_page)
         else:
             if cur_page == total_page:
                 feedback = self.format_loc(LOC_QUERY_MULTI_RESULT_PAGE_OVERFLOW)
             else:
                 cur_page = cur_page + 1
-                index = (cur_page - 1) * MAX_QUERY_CANDIDATE_NUM
-                uuids = record.uuid_list[index:index + MAX_QUERY_CANDIDATE_NUM]
-                items = [self.item_uuid_dict[uuid] for uuid in uuids]
-                feedback = self.format_multiple_items_feedback(items)
-        if len(record.uuid_list) > MAX_QUERY_CANDIDATE_NUM:
+                feedback = get_feedback(cur_page)
+        if len(record.uuid_list) > page_item_num:
             feedback += "\n" + self.format_loc(LOC_QUERY_MULTI_RESULT_PAGE, page_cur=cur_page, page_total=total_page)
         return feedback, cur_page
 
