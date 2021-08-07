@@ -12,7 +12,7 @@ def preprocess_msg(msg_str: str) -> str:
     """
     from bot_utils.string import to_english_str
     msg_str = to_english_str(msg_str)  # 转换中文标点
-    msg_str = msg_str.lower()
+    msg_str = msg_str.lower().strip()  # 转换小写, 去掉前后空格
     return msg_str
 
 

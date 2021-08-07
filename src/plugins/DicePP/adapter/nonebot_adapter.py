@@ -15,7 +15,7 @@ from bot_core import Bot as DicePPBot
 from bot_core import MessageMetaData, MessageSender
 from bot_core import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from bot_core import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
-from command import BotSendMsgCommand, BotCommandBase
+from command import BotCommandBase, BotSendMsgCommand, BotLeaveGroupCommand
 from logger import Log
 
 from adapter.client_proxy import ClientProxy
@@ -38,6 +38,8 @@ class NoneBotClientProxy(ClientProxy):
                     await self.bot.send_group_msg(group_id=int(target.group_id), message=command.msg)
                 else:
                     await self.bot.send_private_msg(user_id=int(target.user_id), message=command.msg)
+        elif isinstance(command, BotLeaveGroupCommand):
+            await self.bot.set_group_leave(group_id=int(command.target_group_id))
         else:
             raise NotImplementedError("未定义的BotCommand类型")
 

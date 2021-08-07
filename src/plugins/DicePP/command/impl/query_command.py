@@ -217,19 +217,23 @@ class QueryCommand(UserCommandBase):
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
-        if keyword in ["查询", "索引", "q", "i"]:
-            help_str = "设置昵称：.nn [昵称]\n" \
-                       "私聊.nn视为操作全局昵称\n" \
-                       "昵称优先级:群昵称>私聊昵称>群名片>QQ昵称\n" \
-                       "群聊中的nn指令会智能修改先攻列表中的名字\n" \
-                       "示例:\n" \
-                       ".nn	//视为删除昵称\n" \
-                       ".nn dm //将昵称设置为dm"
+        if keyword in ["查询", "搜索", "q", "s"]:
+            help_str = "查询资料: .查询 查询目标"\
+                    "\n查询指令支持部分匹配, 可用/区分多个关键字"\
+                    "\n可以用搜索指令来匹配词条内容(而不是仅匹配关键字)"\
+                    "\n若有多条可能的结果, 可以通过查询或搜索后直接输入序号查询, 输入+或-可以翻页" \
+                    "\n可以用q作为查询(query)的缩写, 或用s作为搜索(search)的缩写" \
+                    "\n示例:"\
+                    "\n.查询 借机攻击"\
+                    "\n.查询 长弓"\
+                    "\n.查询 法师/6环"\
+                    "\n.搜索 长弓 // 返回所有含有长弓的词条(如物品, 怪物, 魔法物品, 能力)"\
+                    "\n.搜索 昏迷/施法时间 //利用法术词条中必然含有施法时间的规律查询和昏迷相关的法术"
             return help_str
         return ""
 
     def get_description(self) -> str:
-        return ".查询 根据关键字查找资料 .索引 根据资料内容查找资料"
+        return ".查询 根据关键字查找资料 .搜索 根据关键字和内容查找资料"
 
     def query_info(self, query_key: str, port: MessagePort, search_mode: int, show_mode: int = 0) -> str:
         """
@@ -283,7 +287,7 @@ class QueryCommand(UserCommandBase):
                 if all(((key in candidate_key) for key in query_key_list)):  # 所有关键字都在content中出现
                     poss_result.append(item.uuid)
         # 去除重复的条目
-        poss_result = list(set(poss_result))
+        poss_result = list(bot_utils.data.yield_deduplicate(poss_result))
         return poss_result
 
     def format_single_item_feedback(self, item: QueryItem) -> str:
@@ -440,13 +444,17 @@ class QueryCommand(UserCommandBase):
                 update_xlsx(workbook, path)
                 workbook.close()
         elif path:  # 是文件夹
-            try:
-                inner_paths = os.listdir(path)  # 遍历文件夹下所有文件
-                for inner_path in inner_paths:
-                    inner_path = os.path.join(path, inner_path)
-                    self.load_data_from_path(inner_path, error_info)
-            except FileNotFoundError as e:  # 文件夹不存在
-                error_info.append(f"读取{path}时遇到错误: {e}")
+            if os.path.exists(path):
+                try:
+                    inner_paths = os.listdir(path)  # 遍历文件夹下所有文件
+                    for inner_path in inner_paths:
+                        inner_path = os.path.join(path, inner_path)
+                        self.load_data_from_path(inner_path, error_info)
+                except FileNotFoundError as e:  # 文件夹不存在
+                    error_info.append(f"读取{path}时遇到错误: {e}")
+            else:
+                create_parent_dir(path)
+                os.mkdir(path)
 
 
 def get_template_query_workbook() -> openpyxl.Workbook:

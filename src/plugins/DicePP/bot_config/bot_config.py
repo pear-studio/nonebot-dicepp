@@ -23,7 +23,7 @@ for dirPath in ALL_LOCAL_DIR_PATH:
         os.makedirs(dirPath)
         logger.Log("[Config] [Init] 创建文件夹: " + dirPath)
 
-BOT_VERSION = "Ver 1.0.0 (Early Access 210804)"
+BOT_VERSION = "Ver 1.0.0 (Early Access 210807)"
 
 BOT_DESCRIBE = "DicePP by 梨子"
 
@@ -100,8 +100,11 @@ class ConfigHelper:
             header = sheet.cell(row=row, column=1, value=item.key)
             if item.comment:
                 header.comment = Comment(item.comment, "DicePP")
-            for ci, text in enumerate(item.contents):
-                sheet.cell(row=row, column=ci + 2, value=text)
+            if not item.contents:
+                sheet.cell(row=row, column=2, value="")
+            else:
+                for ci, text in enumerate(item.contents):
+                    sheet.cell(row=row, column=ci + 2, value=text)
 
         feedback: str
         if os.path.exists(self.data_path):

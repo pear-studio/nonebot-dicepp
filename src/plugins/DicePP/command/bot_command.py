@@ -70,3 +70,17 @@ class BotSendMsgCommand(BotCommandBase):
         s = f"Bot \033[0;37m{self.bot_id}\033[0m send message \033[0;33m{self.msg}\033[0m to "
         s += '\n\t'.join([str(target) for target in self.targets])
         return s
+
+
+class BotLeaveGroupCommand(BotCommandBase):
+    """
+    退出群
+    """
+
+    def __init__(self, bot_id: str, target_group_id: str):
+        self.bot_id = bot_id
+        self.target_group_id = target_group_id
+
+    def __str__(self):
+        s = f"Bot \033[0;37m{self.bot_id}\033[0m leave group \033[0;33m{self.target_group_id}\033[0m"
+        return s

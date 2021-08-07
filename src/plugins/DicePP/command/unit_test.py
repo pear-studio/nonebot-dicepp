@@ -38,10 +38,11 @@ class MyTestCase(IsolatedAsyncioTestCase):
 
     async def __check_group_msg_res(self, msg: str,
                                     group_id: str = "group", user_id: str = "user", nickname: str = "测试用户",
-                                    checker: Callable[[str], bool] = lambda s: True, is_show: bool = False):
+                                    checker: Callable[[str], bool] = lambda s: True, is_show: bool = False,
+                                    to_me: bool = False):
         group_id += f"_in_test{self.test_index}"
         user_id += f"_in_test{self.test_index}"
-        meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id)
+        meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id, to_me)
         bot_commands = await self.test_bot.process_message(msg, meta)
         result = "\n".join([str(command) for command in bot_commands])
         info_str = f"\033[0;32m{msg}\033[0m -> {result}"
@@ -52,7 +53,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
     async def __check_private_msg_res(self, msg: str, user_id: str = "user", nickname: str = "测试用户",
                                       checker: Callable[[str], bool] = lambda s: True, is_show: bool = False):
         user_id += f"_in_test{self.test_index}"
-        meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), "")
+        meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), "", True)
         bot_commands = await self.test_bot.process_message(msg, meta)
         result = "\n".join([str(command) for command in bot_commands])
         info_str = f"\033[0;32m{msg}\033[0m -> {result}"
@@ -79,6 +80,25 @@ class MyTestCase(IsolatedAsyncioTestCase):
         # Error
         await self.__check_group_msg_res(".r2(DK3)")
         await self.__check_group_msg_res(".rh()")
+
+    async def test_2_activate(self):
+        await self.__check_group_msg_res(".bot", checker=lambda s: "DicePP by 梨子" in s)
+        await self.__check_group_msg_res(".bot on", group_id="group_activate", checker=lambda s: not s)
+        await self.__check_group_msg_res(".bot on", group_id="group_activate", to_me=True,
+                                         checker=lambda s: "G'Day, I'm on" in s)
+        await self.__check_group_msg_res(".r", group_id="group_activate", checker=lambda s: not not s)
+        await self.__check_group_msg_res(".bot off", group_id="group_activate", checker=lambda s: not s)
+        await self.__check_group_msg_res(".bot off", group_id="group_activate", to_me=True,
+                                         checker=lambda s: "See you, I'm off" in s)
+        await self.__check_group_msg_res(".r", group_id="group_activate", checker=lambda s: not s)
+        await self.__check_group_msg_res(".r", checker=lambda s: not not s)
+        await self.__check_group_msg_res(".bot on", group_id="group_activate", to_me=True,
+                                         checker=lambda s: "G'Day, I'm on" in s)
+        await self.__check_group_msg_res(".r", group_id="group_activate", checker=lambda s: not not s)
+        await self.__check_group_msg_res(".dismiss", group_id="group_activate", checker=lambda s: not s)
+
+        await self.__check_group_msg_res(".dismiss", group_id="group_activate", to_me=True,
+                                         checker=lambda s: "leave group" in s and "Good bye!" in s)
 
     async def test_2_nickname(self):
         # Group Nickname
@@ -184,9 +204,13 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__check_private_msg_res(".q PAGE_TEST",
                                            checker=lambda s: "9. " in s and "+ for next page, - for prev page" in s)
         await self.__check_private_msg_res("-", checker=lambda s: "This is the first page!" in s)
+        await self.__check_private_msg_res("0", checker=lambda s: "PAGE_TEST_1: \nDUMB" in s)
         await self.__check_private_msg_res("+", checker=lambda s: "Page2/3" in s)
+        await self.__check_private_msg_res("0", checker=lambda s: "PAGE_TEST_11: \nDUMB" in s)
         await self.__check_private_msg_res("+", checker=lambda s: "Page3/3" in s)
         await self.__check_private_msg_res("+", checker=lambda s: "This is the final page!" in s)
+        await self.__check_private_msg_res(".q PAGE_TEST_1", checker=lambda s: "PAGE_TEST_1: \nDUMB" in s)
+        await self.__check_private_msg_res("0", checker=lambda s: not s)
         await self.__check_group_msg_res(".s CONTENT_7", checker=lambda s: "TEST_KEY_MULT_D: \nCONTENT_7" in s)
         await self.__check_group_msg_res(".s B", checker=lambda s: "Page1/4" not in s)
         await self.__check_private_msg_res(".s B", checker=lambda s: "Page1/4" in s)

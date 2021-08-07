@@ -3,3 +3,4 @@ from .initiative_command import InitiativeCommand
 from .nickname_command import NicknameCommand
 from .roll_dice_command import RollDiceCommand
 from .query_command import QueryCommand
+from .activate_command import ActivateCommand
