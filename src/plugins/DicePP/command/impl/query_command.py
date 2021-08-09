@@ -92,7 +92,8 @@ class QueryRecord:
         self.mode = 0  # 0代表简易模式, 1代表详细模式
 
 
-@custom_user_command(priority=2,
+@custom_user_command(readable_name="查询指令",
+                     priority=2,
                      group_only=False,
                      flag=DPP_COMMAND_FLAG_DEFAULT,
                      cluster=DPP_COMMAND_CLUSTER_DEFAULT)
@@ -135,10 +136,11 @@ class QueryCommand(UserCommandBase):
         for i, path in enumerate(data_path_list):
             if path.startswith("./"):  # 用DATA_PATH作为当前路径
                 data_path_list[i] = os.path.join(bot_config.DATA_PATH, path[2:])
-        error_info: List[str] = []
+        init_info: List[str] = []
         for data_path in data_path_list:
-            self.load_data_from_path(data_path, error_info)
-        return error_info
+            self.load_data_from_path(data_path, init_info)
+        init_info.append(self.get_state())
+        return init_info
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = False
@@ -455,6 +457,15 @@ class QueryCommand(UserCommandBase):
             else:
                 create_parent_dir(path)
                 os.mkdir(path)
+
+    def get_state(self) -> str:
+        feedback: str
+        if self.src_uuid_dict:
+            feedback = f"已加载{len(self.src_uuid_dict)}个资料库, {len(self.item_uuid_dict)}个查询条目"
+        else:
+            feedback = f"尚未加载任何资料库"
+        return feedback
+
 
 
 def get_template_query_workbook() -> openpyxl.Workbook:

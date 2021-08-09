@@ -45,7 +45,7 @@ class LocalizationHelper:
             for text in [str(cell.value) for cell in row[1:] if cell.value]:
                 self.all_local_texts[key].add(text)
         workbook.close()
-        logger.Log(f"[Localization] [Load] 成功读取本地化文件 {self.data_path}")
+        logger.dice_log(f"[Localization] [Load] 成功读取本地化文件 {self.data_path}")
 
     def save_localization(self):
         """按现在的设置多个机器人会读写同一个配置文件, 如果并行可能存在写冲突, 现在应该是单线程异步, 应该没问题"""
@@ -80,7 +80,7 @@ class LocalizationHelper:
         workbook.save(self.data_path)
         workbook.close()
 
-        logger.Log(f"[Localization] [Save] {feedback} {self.data_path}")
+        logger.dice_log(f"[Localization] [Save] {feedback} {self.data_path}")
 
     def register_loc_text(self, key: str, default_text: str, comment: str = ""):
         """

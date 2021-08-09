@@ -26,7 +26,8 @@ LOC_ROLL_D20_16_18 = "roll_d20_16_18"
 LOC_ROLL_D20_19 = "roll_d20_19"
 
 
-@custom_user_command(priority=0,
+@custom_user_command(readable_name="掷骰指令",
+                     priority=0,
                      group_only=False,
                      flag=DPP_COMMAND_FLAG_DEFAULT,
                      cluster=DPP_COMMAND_CLUSTER_DEFAULT)

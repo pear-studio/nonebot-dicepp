@@ -10,6 +10,7 @@ from data_manager import DataManager, DataManagerError, custom_data_chunk, DataC
 import localization
 from localization import LocalizationHelper
 from bot_config import ConfigHelper
+from logger import dice_log, get_exception_info
 
 
 @custom_data_chunk(identifier="nickname")
@@ -18,6 +19,7 @@ class _(DataChunkBase):
         super().__init__()
 
 
+# noinspection PyBroadException
 class Bot:
     def __init__(self, account: str):
         """
@@ -78,22 +80,31 @@ class Bot:
         asyncio.run(self.delay_init_command())
 
     async def delay_init_command(self):
-        error_info: List[str] = []
+        init_info: List[str] = []
         for command in self.command_dict.values():
-            error_info += command.delay_init()
+            try:
+                init_info += command.delay_init()
+                for i in range(len(init_info)):
+                    init_info[i] = f"{command.__class__.readable_name}: {init_info[i]}"
+            except Exception:
+                if self.proxy:
+                    bc_list = self.handle_exception(f"加载{command.__class__.__name__}失败")  # 报错不用中文名
+                    for bc in bc_list:
+                        await self.proxy.process_bot_command(bc)
         if self.proxy:
             from command import PrivateMessagePort, BotSendMsgCommand
-            feedback = "完成加载" + "\n".join(error_info)
+            feedback = "\n".join(["初始化完成!"] + init_info + ["准备好开始工作啦~"])
             from bot_config import CFG_MASTER
-            print(feedback)
+            dice_log(feedback)
             master_list = self.cfg_helper.get_config(CFG_MASTER)
             for master in master_list:  # 给Master汇报
                 command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
                 await self.proxy.process_bot_command(command)
 
+    # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:
         from command import preprocess_msg
-        from src.plugins.DicePP import BotCommandBase
+        from command import PrivateMessagePort, BotCommandBase, BotSendMsgCommand
 
         self.update_nickname(meta.user_id, "origin", meta.nickname)
 
@@ -102,15 +113,23 @@ class Bot:
         bot_commands: List[BotCommandBase] = []
 
         for command in self.command_dict.values():
-            should_proc, should_pass, hint = command.can_process_msg(msg, meta)
+            try:
+                should_proc, should_pass, hint = command.can_process_msg(msg, meta)
+            except Exception:
+                # 发现未处理的错误, 汇报给主Master
+                should_proc, should_pass, hint = False, False, None
+                bot_commands += self.handle_exception(f"来源:{msg} 用户:{meta.user_id} 群:{meta.group_id} CODE100")
             if should_proc:
                 if command.group_only and not meta.group_id:
                     # 在非群聊中企图执行群聊指令, 回复一条提示
                     feedback = self.loc_helper.format_loc_text(localization.LOC_GROUP_ONLY_NOTICE)
-                    from command import PrivateMessagePort, BotSendMsgCommand
                     bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
                 else:
-                    bot_commands += command.process_msg(msg, meta, hint)
+                    try:
+                        bot_commands += command.process_msg(msg, meta, hint)
+                    except Exception:
+                        # 发现未处理的错误, 汇报给主Master
+                        bot_commands += self.handle_exception(f"来源:{msg} 用户:{meta.user_id} 群:{meta.group_id} CODE101")
                 if not should_pass:
                     break
         if self.proxy:
@@ -151,6 +170,19 @@ class Bot:
             for command in bot_commands:
                 await self.proxy.process_bot_command(command)
         return bot_commands
+
+    def handle_exception(self, info: str) -> List:
+        from command import PrivateMessagePort, BotSendMsgCommand
+        exception_info = get_exception_info()
+        exception_info = "\n".join(exception_info[-8:]) if len(exception_info) > 8 else "\n".join(exception_info)
+        additional_info = f"\n{info}" if info else ""
+        feedback = f"未处理的错误:\n{exception_info}{additional_info}"
+        from bot_config import CFG_MASTER
+        master_list = self.cfg_helper.get_config(CFG_MASTER)
+        if master_list:
+            return [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_list[0])])]
+        else:
+            return []
 
     def get_nickname(self, user_id: str, group_id: str = "") -> str:
         """

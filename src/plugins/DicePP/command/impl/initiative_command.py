@@ -22,7 +22,8 @@ LOC_INIT_UNKNOWN = "initiative_unknown_command"
 LOC_INIT_ERROR = "initiative_error"
 
 
-@custom_user_command(priority=-1,  # 要比掷骰命令前, 否则.r会覆盖.ri
+@custom_user_command(readable_name="先攻指令",
+                     priority=-1,  # 要比掷骰命令前, 否则.r会覆盖.ri
                      group_only=True,
                      flag=DPP_COMMAND_FLAG_DEFAULT,
                      cluster=DPP_COMMAND_CLUSTER_DEFAULT)

@@ -20,7 +20,8 @@ class UserCommandBase(metaclass=abc.ABCMeta):
     """
     所有用户指令的基类
     """
-    priority = DPP_COMMAND_PRIORITY_DEFAULT
+    readable_name: str = "未命名指令"
+    priority: int = DPP_COMMAND_PRIORITY_DEFAULT
     group_only: bool = False
     flag: int = DPP_COMMAND_FLAG_DEFAULT
     cluster: int = DPP_COMMAND_CLUSTER_DEFAULT
@@ -88,13 +89,15 @@ class UserCommandBase(metaclass=abc.ABCMeta):
         return ""
 
 
-def custom_user_command(priority: int = DPP_COMMAND_PRIORITY_DEFAULT,
+def custom_user_command(readable_name: str,
+                        priority: int = DPP_COMMAND_PRIORITY_DEFAULT,
                         group_only: bool = False,
                         flag: int = DPP_COMMAND_FLAG_DEFAULT,
                         cluster: int = DPP_COMMAND_CLUSTER_DEFAULT):
     """
     装饰Command类, 给自定义的Command附加一些参数
     Args:
+        readable_name: 可读的名称, 应当为中文
         priority: 优先级, 优先级高的类会先处理指令, 数字越小优先级越高
         group_only: 是否只能在群内使用, 如果为True且在私聊中捕获了对应消息, 则会返回提示
         flag: 标志位, 标志着指令的类型是DND指令, 娱乐指令等等, 主要用于profiler
@@ -107,6 +110,7 @@ def custom_user_command(priority: int = DPP_COMMAND_PRIORITY_DEFAULT,
             cls: 要修饰的类, 必须继承自UserCommandBase
         """
         assert issubclass(cls, UserCommandBase)
+        cls.readable_name = readable_name
         cls.priority = priority
         cls.group_only = group_only
         cls.flag = flag

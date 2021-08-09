@@ -15,7 +15,8 @@ LOC_NICKNAME_ILLEGAL = "nickname_illegal"
 MAX_NICKNAME_LENGTH = 30  # 昵称长度上限
 
 
-@custom_user_command(priority=0,
+@custom_user_command(readable_name="自定义昵称指令",
+                     priority=0,
                      group_only=False,
                      flag=DPP_COMMAND_FLAG_DEFAULT,
                      cluster=DPP_COMMAND_CLUSTER_DEFAULT)

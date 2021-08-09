@@ -16,7 +16,7 @@ from bot_core import MessageMetaData, MessageSender
 from bot_core import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from bot_core import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from command import BotCommandBase, BotSendMsgCommand, BotLeaveGroupCommand
-from logger import Log
+from logger import dice_log
 
 from adapter.client_proxy import ClientProxy
 
@@ -49,7 +49,7 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
     cq_message = event.get_message()
     plain_msg = cq_message.extract_plain_text()
     raw_msg = str(cq_message)
-    Log(f"processing msg {raw_msg}")
+    dice_log(f"processing msg {raw_msg}")
 
     # 构建Meta信息
     group_id: str = ""
@@ -72,7 +72,7 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
 
 @notice_matcher.handle()
 async def handle_notice(bot: NoneBot, event: NoticeEvent):
-    Log(f"processing notice {event.get_event_name()}")
+    dice_log(f"processing notice {event.get_event_name()}")
 
     # 构建data
     data: Optional[NoticeData] = None
@@ -88,7 +88,7 @@ async def handle_notice(bot: NoneBot, event: NoticeEvent):
 
 @request_matcher.handle()
 async def handle_request(bot: NoneBot, event: RequestEvent):
-    Log(f"processing request {event.get_event_name()}")
+    dice_log(f"processing request {event.get_event_name()}")
 
     # 构建data
     data: Optional[RequestData] = None

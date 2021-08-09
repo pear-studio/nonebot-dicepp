@@ -29,7 +29,7 @@ class DataManager:
         self.dataPath = data_path
         if not os.path.exists(data_path):
             os.makedirs(data_path)
-            logger.Log(f"[DataManager] [Init] 创建文件夹: {data_path}")
+            logger.dice_log(f"[DataManager] [Init] 创建文件夹: {data_path}")
 
         self.__dataChunks: Dict[str, DataChunkBase] = {}
         self.load_data()
@@ -190,22 +190,22 @@ class DataManager:
                 try:
                     json_dict = read_json(json_path_tmp)
                     self.__dataChunks[dc_name] = dcType.from_json(json_dict)
-                    logger.Log(f"[DataManager] [Init] 从备份{json_path_tmp}中载入{dc_name}")
+                    logger.dice_log(f"[DataManager] [Init] 从备份{json_path_tmp}中载入{dc_name}")
                     continue
                 except JSONDecodeError as e:
-                    logger.Log(f"[DataManager] [Init] 无法从备份{json_path_tmp}中载入{dc_name}: {e.args}")
+                    logger.dice_log(f"[DataManager] [Init] 无法从备份{json_path_tmp}中载入{dc_name}: {e.args}")
             elif os.path.exists(json_path):  # 如果存在该文件, 则读取json文件并用它初始化数据
                 try:
                     json_dict = read_json(json_path)
                     self.__dataChunks[dc_name] = dcType.from_json(json_dict)
-                    logger.Log(f"[DataManager] [Init] 从{json_path}中载入{dc_name}")
+                    logger.dice_log(f"[DataManager] [Init] 从{json_path}中载入{dc_name}")
                     continue
                 except JSONDecodeError as e:
                     if not os.path.exists(json_path_tmp):
-                        logger.Log(f"[DataManager] [Init] 无法从{json_path}中载入{dc_name}: {e.args}")
+                        logger.dice_log(f"[DataManager] [Init] 无法从{json_path}中载入{dc_name}: {e.args}")
             # 文件不存在则用默认构造函数生成一个数据对象
             self.__dataChunks[dc_name] = dcType()
-            logger.Log(f"[DataManager] [Init] 找不到{json_path}, 生成空白{dc_name}")
+            logger.dice_log(f"[DataManager] [Init] 找不到{json_path}, 生成空白{dc_name}")
 
     async def save_data_async(self):
         for dataChunk in self.__dataChunks.values():
@@ -219,20 +219,20 @@ class DataManager:
             try:
                 await update_json_async(dataChunk.to_json(), json_path_tmp)
             except JSONDecodeError as e:
-                logger.Log(f"[SaveData] 序列化过程中出现错误: {e.msg}")
+                logger.dice_log(f"[SaveData] 序列化过程中出现错误: {e.msg}")
                 continue
             # 删除正式文件
             try:
                 if os.path.exists(json_path):
                     os.remove(json_path)
             except OSError as e:
-                logger.Log(f"[SaveData] 无法删除文件{json_path}: {e.args}")
+                logger.dice_log(f"[SaveData] 无法删除文件{json_path}: {e.args}")
                 continue
             # 重命名临时文件
             try:
                 os.rename(json_path_tmp, json_path)
             except OSError as e:
-                logger.Log(f"[SaveData] 无法重命名文件{json_path_tmp} -> {json_path} 原因: {e.args}")
+                logger.dice_log(f"[SaveData] 无法重命名文件{json_path_tmp} -> {json_path} 原因: {e.args}")
                 continue
 
     def save_data(self):

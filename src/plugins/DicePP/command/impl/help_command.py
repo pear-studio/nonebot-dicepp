@@ -22,7 +22,8 @@ HELP_INFO_DEFAULT = "@骰娘 .bot on/off 开启或关闭骰娘\n" \
                     "欢迎加入交流群:861919492 伊丽莎白粉丝群或联系开发者:821480843 梨子报告bug和提出意见~"
 
 
-@custom_user_command(priority=0,
+@custom_user_command(readable_name="帮助指令",
+                     priority=0,
                      flag=DPP_COMMAND_FLAG_DEFAULT,
                      cluster=DPP_COMMAND_CLUSTER_DEFAULT)
 class HelpCommand(UserCommandBase):

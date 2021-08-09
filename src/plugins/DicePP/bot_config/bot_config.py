@@ -21,9 +21,9 @@ ALL_LOCAL_DIR_PATH = [DATA_PATH, BOT_DATA_PATH, CONFIG_PATH]
 for dirPath in ALL_LOCAL_DIR_PATH:
     if not os.path.exists(dirPath):
         os.makedirs(dirPath)
-        logger.Log("[Config] [Init] 创建文件夹: " + dirPath)
+        logger.dice_log("[Config] [Init] 创建文件夹: " + dirPath)
 
-BOT_VERSION = "Ver 1.0.0 (Early Access 210807)"
+BOT_VERSION = "Ver 1.0.0 (Early Access 210810)"
 
 BOT_DESCRIBE = "DicePP by 梨子"
 
@@ -92,7 +92,7 @@ class ConfigHelper:
             for text in [str(cell.value) for cell in row[1:] if cell.value]:
                 self.all_configs[key].add(text)
         workbook.close()
-        logger.Log(f"[BotConfig] [Load] 成功读取配置文件 {self.data_path}")
+        logger.dice_log(f"[BotConfig] [Load] 成功读取配置文件 {self.data_path}")
 
     def save_config(self):
         """按现在的设置多个机器人会读写同一个配置文件, 如果并行可能存在写冲突, 现在应该是单线程异步, 应该没问题"""
@@ -126,7 +126,7 @@ class ConfigHelper:
         workbook.save(self.data_path)
         workbook.close()
 
-        logger.Log(f"[BotConfig] [Save] {feedback} {self.data_path}")
+        logger.dice_log(f"[BotConfig] [Save] {feedback} {self.data_path}")
 
     def register_config(self, key: str, origin_str: str, comment: str = ""):
         """

@@ -4,16 +4,34 @@ import os
 from typing import Callable
 
 from bot_core import Bot, MessageMetaData, MessageSender
+from bot_config import ConfigItem, CFG_MASTER
 
 
 class MyTestCase(IsolatedAsyncioTestCase):
     test_bot = None
+    test_proxy = None
     test_index = 0
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.test_bot = Bot("test_bot")
+        cls.test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
+
+        from adapter import ClientProxy
+        from command import BotCommandBase
+
+        class TestProxy(ClientProxy):
+            def __init__(self):
+                self.mute = False
+
+            async def process_bot_command(self, command: BotCommandBase):
+                if not self.mute:
+                    print(f"Process Command: {command}")
+
+        cls.test_proxy = TestProxy()
+        cls.test_bot.set_client_proxy(cls.test_proxy)
         cls.test_bot.delay_init()
+        cls.test_proxy.mute = True
 
     @classmethod
     def tearDownClass(cls) -> None:
