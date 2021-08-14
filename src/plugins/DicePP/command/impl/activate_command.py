@@ -20,6 +20,7 @@ LOC_BOT_DISMISS = "bot_dismiss"
 
 DC_ACTIVATE = "activate"
 
+BOT_SHOW_APPEND = f"{bot_config.BOT_DESCRIBE} {bot_config.BOT_VERSION}"
 
 @custom_data_chunk(identifier=DC_ACTIVATE)
 class _(DataChunkBase):
@@ -42,8 +43,7 @@ class ActivateCommand(UserCommandBase):
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
-        bot_show_default = f"{bot_config.BOT_DESCRIBE} {bot_config.BOT_VERSION}"
-        bot.loc_helper.register_loc_text(LOC_BOT_SHOW, bot_show_default, ".bot时回应的语句")
+        bot.loc_helper.register_loc_text(LOC_BOT_SHOW, "", ".bot时回应的语句")
         bot.loc_helper.register_loc_text(LOC_BOT_ON, "G'Day, I'm on", ".bot on时回应的语句")
         bot.loc_helper.register_loc_text(LOC_BOT_OFF, "See you, I'm off", ".bot off时回应的语句")
         bot.loc_helper.register_loc_text(LOC_BOT_DISMISS, "Good bye!", ".dismiss时回应的语句")
@@ -82,7 +82,9 @@ class ActivateCommand(UserCommandBase):
         if mode == "hold":
             return bot_commands
         elif mode == "show":
-            feedback = self.format_loc(LOC_BOT_SHOW)
+            bot_show = self.format_loc(LOC_BOT_SHOW)
+            bot_show = bot_show + "\n" if bot_show else ""
+            feedback = f"{bot_show}{BOT_SHOW_APPEND}"
         elif mode == "on":
             activate_data = get_default_activate_data()
             self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
