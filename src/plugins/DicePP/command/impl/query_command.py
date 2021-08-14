@@ -111,7 +111,7 @@ class QueryCommand(UserCommandBase):
         self.record_clean_flag: int = 0
 
         reg_loc = bot.loc_helper.register_loc_text
-        reg_loc(LOC_QUERY_RESULT, "{result}", "查询成功时返回的内容")
+        reg_loc(LOC_QUERY_RESULT, "{result}", "查询成功时返回的内容, result为single_result或multi_result")
         reg_loc(LOC_QUERY_SINGLE_RESULT, "{keyword}: {tag}\n{content}{cat}",
                 "查询找到唯一条目, keyword: 主关键字, content: 词条内容"
                 ", cat: 换行+目录*, tag: 标签*, syn: 换行+同义词*  (*如果有则显示, 没有则忽略)")
@@ -256,7 +256,7 @@ class QueryCommand(UserCommandBase):
             return self.format_loc(LOC_QUERY_NO_RESULT)
         elif len(poss_result) == 1:  # 找到唯一结果
             item: QueryItem = self.item_uuid_dict[poss_result[0]]
-            return self.format_single_item_feedback(item)
+            feedback = self.format_single_item_feedback(item)
         else:  # len(poss_result) > 1  找到多个结果, 记录当前信息并提示用户选择
             # 记录当前信息以备将来查询
             self.record_dict[port] = QueryRecord(poss_result, bot_utils.time.get_current_date_raw())
@@ -271,7 +271,8 @@ class QueryCommand(UserCommandBase):
             if len(poss_result) > page_item_num:
                 feedback += "\n" + self.format_loc(LOC_QUERY_MULTI_RESULT_PAGE, page_cur=1,
                                                    page_total=len(poss_result) // page_item_num + 1)
-            return feedback
+        feedback = self.format_loc(LOC_QUERY_RESULT, result=feedback)
+        return feedback
 
     def search_item(self, query_key_list: List[str], search_mode: int) -> List[int]:
         poss_result: List[int] = []
