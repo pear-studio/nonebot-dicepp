@@ -83,9 +83,10 @@ class Bot:
         init_info: List[str] = []
         for command in self.command_dict.values():
             try:
-                init_info += command.delay_init()
-                for i in range(len(init_info)):
-                    init_info[i] = f"{command.__class__.readable_name}: {init_info[i]}"
+                init_info_cur = command.delay_init()
+                for i in range(len(init_info_cur)):
+                    init_info_cur[i] = f"{command.__class__.readable_name}: {init_info_cur[i]}"
+                init_info += init_info_cur
             except Exception:
                 if self.proxy:
                     bc_list = self.handle_exception(f"加载{command.__class__.__name__}失败")  # 报错不用中文名

@@ -10,6 +10,7 @@ from nonebot.adapters.cqhttp.event import MessageEvent, PrivateMessageEvent, Gro
 from nonebot.adapters.cqhttp.event import NoticeEvent, GroupIncreaseNoticeEvent, FriendAddNoticeEvent
 from nonebot.adapters.cqhttp.event import RequestEvent, FriendRequestEvent, GroupRequestEvent
 from nonebot.adapters.cqhttp.bot import Bot as NoneBot
+from nonebot.adapters.cqhttp import Message as CQMessage
 
 from bot_core import Bot as DicePPBot
 from bot_core import MessageMetaData, MessageSender
@@ -35,9 +36,9 @@ class NoneBotClientProxy(ClientProxy):
         if isinstance(command, BotSendMsgCommand):
             for target in command.targets:
                 if target.group_id:
-                    await self.bot.send_group_msg(group_id=int(target.group_id), message=command.msg)
+                    await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
                 else:
-                    await self.bot.send_private_msg(user_id=int(target.user_id), message=command.msg)
+                    await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
         elif isinstance(command, BotLeaveGroupCommand):
             await self.bot.set_group_leave(group_id=int(command.target_group_id))
         else:

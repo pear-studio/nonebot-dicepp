@@ -1,4 +1,9 @@
+import os
+import re
 import random
+import bot_utils
+from bot_config import LOCAL_IMG_PATH
+from logger import dice_log
 
 
 class LocalizationText:
@@ -17,4 +22,15 @@ class LocalizationText:
         """
         返回一个可选择的本地化字符串, 若没有可用的本地化字符串, 返回空字符串
         """
-        return random.choice(self.loc_texts) if self.loc_texts else ""
+        def replace_image_code(match):
+            key = match.group(1)
+            file_path = os.path.join(LOCAL_IMG_PATH, key)
+            if os.path.exists(file_path):
+                return bot_utils.cq_code.get_cq_image(file_path)
+            else:
+                dice_log(f"[Local Image] Cannot find file: {file_path}")
+                return key
+
+        loc_text = random.choice(self.loc_texts) if self.loc_texts else ""
+        loc_text = re.sub(r"\$(.{1,20}?)\$", replace_image_code, loc_text)
+        return loc_text
