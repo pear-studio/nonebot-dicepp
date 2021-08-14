@@ -31,7 +31,7 @@ async def update_json_async(json_dict: dict, path: str) -> None:
 
 def read_xlsx(path: str) -> openpyxl.Workbook:
     """
-    读取xlsx, 为保证workbook正确关闭, 请用类似 with read_xlsx(data_path) as workbook 的方式读取
+    读取xlsx, 记得之后手动关闭workbook
     """
     return openpyxl.load_workbook(path)
 

@@ -373,6 +373,7 @@ class QueryCommand(UserCommandBase):
                     if field not in field_index_dict:
                         error_info.append(f"不完整的表格{path}/{sheet_name}, 缺少{field}, 未加载该工作表")
                         flag = True
+                        break
                 if flag:
                     continue
 
@@ -465,7 +466,6 @@ class QueryCommand(UserCommandBase):
         else:
             feedback = f"尚未加载任何资料库"
         return feedback
-
 
 
 def get_template_query_workbook() -> openpyxl.Workbook:

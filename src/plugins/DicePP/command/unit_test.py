@@ -236,6 +236,14 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__check_group_msg_res(".s TENT_1/KEY_REP",
                                          checker=lambda s: "0." not in s and "TEST_KEY_REPEAT" in s)
 
+    async def test_4_utils(self):
+        await self.__check_group_msg_res(".dnd", checker=lambda s: "DND Result" in s and s.count("\n") == 1)
+        await self.__check_group_msg_res(".dnd3", checker=lambda s: "DND Result" in s and s.count("\n") == 3)
+        await self.__check_group_msg_res(".dnd 3", checker=lambda s: "DND Result" in s and s.count("\n") == 3)
+        await self.__check_group_msg_res(".dnd3 foo", checker=lambda s: "DND Result foo:\n" in s and s.count("\n") == 3)
+        await self.__check_group_msg_res(".dnd 3   foo",
+                                         checker=lambda s: "DND Result foo:\n" in s and s.count("\n") == 3)
+
 
 if __name__ == '__main__':
     unittest.main()
