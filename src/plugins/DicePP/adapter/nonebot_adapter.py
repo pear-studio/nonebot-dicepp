@@ -33,6 +33,7 @@ class NoneBotClientProxy(ClientProxy):
         self.bot = bot
 
     async def process_bot_command(self, command: BotCommandBase):
+        dice_log(f"[Proxy Bot Command] {command}")
         if isinstance(command, BotSendMsgCommand):
             for target in command.targets:
                 if target.group_id:
@@ -50,7 +51,7 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
     cq_message = event.get_message()
     plain_msg = cq_message.extract_plain_text()
     raw_msg = str(cq_message)
-    dice_log(f"processing msg {raw_msg}")
+    dice_log(f"[Proxy Message] {raw_msg}")
 
     # 构建Meta信息
     group_id: str = ""
@@ -73,7 +74,7 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
 
 @notice_matcher.handle()
 async def handle_notice(bot: NoneBot, event: NoticeEvent):
-    dice_log(f"processing notice {event.get_event_name()}")
+    dice_log(f"[Proxy Notice] {event.get_event_name()}")
 
     # 构建data
     data: Optional[NoticeData] = None
@@ -89,7 +90,7 @@ async def handle_notice(bot: NoneBot, event: NoticeEvent):
 
 @request_matcher.handle()
 async def handle_request(bot: NoneBot, event: RequestEvent):
-    dice_log(f"processing request {event.get_event_name()}")
+    dice_log(f"[Proxy Request] {event.get_event_name()}")
 
     # 构建data
     data: Optional[RequestData] = None
@@ -120,13 +121,13 @@ try:
         all_bots[bot.self_id] = DicePPBot(bot.self_id)
         all_bots[bot.self_id].set_client_proxy(proxy)
         await all_bots[bot.self_id].delay_init_command()
-        print(f"Bot {bot.self_id} Connected!")
+        dice_log(f"[NB Adapter] Bot {bot.self_id} Connected!")
 
 
     @driver.on_bot_disconnect
     async def disconnect(bot: NoneBot) -> None:
         await all_bots[bot.self_id].shutdown_async()
         del all_bots[bot.self_id]
-        print(f"Bot {bot.self_id} Disconnected!")
+        dice_log(f"[NB Adapter] Bot {bot.self_id} Disconnected!")
 except ValueError:
-    print("NoneBot has not been initialized")
+    dice_log("[NB Adapter] NoneBot has not been initialized")
