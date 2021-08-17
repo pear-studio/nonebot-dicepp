@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Iterable
 
 
 def to_english_str(input_str: str) -> str:
@@ -20,7 +20,7 @@ def to_english_str(input_str: str) -> str:
     return output_str
 
 
-def match_substring(substring, str_list) -> List[str]:
+def match_substring(substring: str, str_list: Iterable[str]) -> List[str]:
     """
     在一个字符串列表中找到所有包含输入字符串的字符串并返回
     Args:

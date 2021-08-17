@@ -190,7 +190,9 @@ class QueryCommand(UserCommandBase):
         show_mode = 0 if meta.group_id else 1
 
         # 处理指令
-        if mode == "query":
+        if not arg_str and (mode == "query" or mode == "search"):
+            feedback = self.get_state()
+        elif mode == "query":
             feedback = self.query_info(arg_str, source_port, search_mode=0, show_mode=show_mode)
         elif mode == "search":
             feedback = self.query_info(arg_str, source_port, search_mode=1, show_mode=show_mode)
@@ -364,7 +366,7 @@ class QueryCommand(UserCommandBase):
 
         def load_data_from_xlsx(wb: openpyxl.Workbook):
             for sheet_name in wb.sheetnames:
-                field_index_dict: Dict[str, str] = {}
+                field_index_dict: Dict[str, int] = {}
                 ws = wb[sheet_name]
                 for header_cell in ws[1]:
                     if header_cell.value in QUERY_ITEM_FIELD:
@@ -408,10 +410,10 @@ class QueryCommand(UserCommandBase):
                     item_tag: List[str] = [tag.strip() for tag in item_tag if tag.strip()]
 
                     if not main_key:
-                        error_info.append(f"表格{wb.path}/{sheet_name}第{row_index}缺少key, 该条目未加载")
+                        error_info.append(f"表格{wb.path}/{sheet_name}第{row_index}行缺少key, 该条目未加载")
                         continue
                     if not item_content:
-                        error_info.append(f"表格{wb.path}/{sheet_name}第{row_index}缺少content, 该条目未加载")
+                        error_info.append(f"表格{wb.path}/{sheet_name}第{row_index}行缺少content, 该条目未加载")
                         continue
                     if not item_desc:  # 用content的前一部分自动生成desc
                         item_desc = item_content[:QUERY_ITEM_FIELD_DESC_DEFAULT_LEN].replace("\n", " ") + "..."
@@ -458,7 +460,6 @@ class QueryCommand(UserCommandBase):
                     error_info.append(f"读取{path}时遇到错误: {e}")
             else:
                 create_parent_dir(path)
-                os.mkdir(path)
 
     def get_state(self) -> str:
         feedback: str

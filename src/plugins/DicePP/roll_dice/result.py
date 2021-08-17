@@ -49,4 +49,7 @@ class RollResult:
         return sum(self.val_list)
 
     def get_complete_result(self):
+        """
+        获得形如 2D20*2=(1+1)*2=4的字符串, 不包括掷骰表达式
+        """
         return f"{self.get_exp()}={self.get_result()}"

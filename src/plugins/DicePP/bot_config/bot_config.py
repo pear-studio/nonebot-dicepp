@@ -124,7 +124,11 @@ class ConfigHelper:
             save_loc_text_to_row(cur_sheet, cfg_item, ri + 1)
 
         format_worksheet(cur_sheet)
-        workbook.save(self.data_path)
+        try:
+            workbook.save(self.data_path)
+        except PermissionError:
+            logger.dice_log(f"[BotConfig] [Save] Save config {self.data_path} failed as permission denied!")
+
         workbook.close()
 
         logger.dice_log(f"[BotConfig] [Save] {feedback} {self.data_path}")

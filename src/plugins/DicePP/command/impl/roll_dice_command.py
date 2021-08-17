@@ -25,6 +25,8 @@ LOC_ROLL_D20_11_15 = "roll_d20_11_15"
 LOC_ROLL_D20_16_18 = "roll_d20_16_18"
 LOC_ROLL_D20_19 = "roll_d20_19"
 
+MULTI_ROLL_LIMIT = 10  # 多轮掷骰上限次数
+
 
 @custom_user_command(readable_name="掷骰指令",
                      priority=0,
@@ -97,7 +99,11 @@ class RollDiceCommand(UserCommandBase):
         times = 1  # 掷骰次数
         if "#" in exp_str:
             time_str, exp_str = exp_str.split("#", 1)
-            times = int(time_str)
+            try:
+                times = int(time_str)
+                assert 0 < times <= MULTI_ROLL_LIMIT
+            except (ValueError, AssertionError):
+                times = 1
 
         # 解析表达式并生成结果
         try:

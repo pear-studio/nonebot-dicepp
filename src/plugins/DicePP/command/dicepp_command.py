@@ -4,13 +4,13 @@ from typing import List, Tuple, Dict, Type, Any
 from command.command_config import *
 from command.bot_command import BotCommandBase
 from bot_core import Bot, MessageMetaData
+from bot_utils.string import to_english_str
 
 
 def preprocess_msg(msg_str: str) -> str:
     """
     预处理消息字符串
     """
-    from bot_utils.string import to_english_str
     msg_str = to_english_str(msg_str)  # 转换中文标点
     msg_str = msg_str.lower().strip()  # 转换小写, 去掉前后空格
     return msg_str

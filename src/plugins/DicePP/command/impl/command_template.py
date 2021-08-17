@@ -22,8 +22,8 @@ CFG_TEMP = "template_config"
 
 
 # 使用之前取消注释掉下面几行
-# @custom_user_command(priority=DPP_COMMAND_PRIORITY_DEFAULT)
-class HelpCommand(UserCommandBase):
+# @custom_user_command(readable_name="指令模板", priority=DPP_COMMAND_PRIORITY_DEFAULT)
+class TemplateCommand(UserCommandBase):
     """
     模板命令, 不要使用
     """
@@ -56,4 +56,4 @@ class HelpCommand(UserCommandBase):
         return ""
 
     def get_description(self) -> str:
-        return ".help 查看帮助"  # help指令中返回的内容
+        return ".xxx 指令描述"  # help指令中返回的内容
