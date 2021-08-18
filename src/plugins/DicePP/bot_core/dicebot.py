@@ -161,11 +161,16 @@ class Bot:
             bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(data.user_id)])]
         elif isinstance(data, GroupIncreaseNoticeData):
             data: GroupIncreaseNoticeData = data
-            # ToDo .welcome 指令
             if data.user_id != self.account:
-                feedback = "欢迎~"
+                from command.impl import DC_WELCOME
                 from command import GroupMessagePort, BotSendMsgCommand
-                bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(data.group_id)])]
+                try:
+                    feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id])
+                except DataManagerError:
+                    feedback = ""
+
+                if feedback:
+                    bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(data.group_id)])]
 
         if self.proxy:
             for command in bot_commands:

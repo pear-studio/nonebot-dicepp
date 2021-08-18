@@ -6,6 +6,7 @@ from typing import List, Tuple, Any
 
 import bot_config
 from bot_core import Bot
+from data_manager import custom_data_chunk, DataChunkBase
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
 from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
@@ -15,7 +16,8 @@ LOC_TEMP = "template_loc"
 CFG_TEMP = "template_config"
 
 # 增加自定义DataChunk
-# @custom_data_chunk(identifier="DATA_CHUNK_ID")
+# DC_TEMP = "template_data"
+# @custom_data_chunk(identifier=DC_TEMP)
 # class _(DataChunkBase):
 #     def __init__(self):
 #         super().__init__()

@@ -22,6 +22,7 @@ DC_ACTIVATE = "activate"
 
 BOT_SHOW_APPEND = f"{bot_config.BOT_DESCRIBE} {bot_config.BOT_VERSION}"
 
+
 @custom_data_chunk(identifier=DC_ACTIVATE)
 class _(DataChunkBase):
     def __init__(self):

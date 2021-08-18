@@ -4,6 +4,7 @@ import os
 from typing import Callable
 
 from bot_core import Bot, MessageMetaData, MessageSender
+from bot_core import NoticeData, GroupIncreaseNoticeData, FriendAddNoticeData
 from bot_config import ConfigItem, CFG_MASTER
 
 
@@ -59,8 +60,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
                        checker: Callable[[str], bool] = lambda s: True, is_show: bool = False,
                        test_times=1, to_me: bool = False):
         """Validate Group Message Result"""
-        group_id += f"_in_test{self.test_index}"
-        user_id += f"_in_test{self.test_index}"
+        # group_id += f"_in_test{self.test_index}"
+        # user_id += f"_in_test{self.test_index}"
         meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id, to_me)
         info_str = ""
         for t in range(test_times):
@@ -75,13 +76,25 @@ class MyTestCase(IsolatedAsyncioTestCase):
                        checker: Callable[[str], bool] = lambda s: True, is_show: bool = False,
                        test_times=1):
         """Validate Private Message Result"""
-        user_id += f"_in_test{self.test_index}"
+        # user_id += f"_in_test{self.test_index}"
         meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), "", True)
         info_str = ""
         for t in range(test_times):
             bot_commands = await self.test_bot.process_message(msg, meta)
             result = "\n".join([str(command) for command in bot_commands])
             info_str = f"\033[0;32m{msg}\033[0m -> {result}"
+            self.assertTrue(checker(result), f"Info:\n{info_str}")
+        if is_show:
+            print(info_str)
+
+    async def __v_notice(self, notice: NoticeData, checker: Callable[[str], bool] = lambda s: True,
+                         is_show: bool = False, test_times=1):
+        """Validate Notice Result"""
+        info_str = ""
+        for t in range(test_times):
+            bot_commands = await self.test_bot.process_notice(notice)
+            result = "\n".join([str(command) for command in bot_commands])
+            info_str = f"\033[0;32m{notice}\033[0m -> {result}"
             self.assertTrue(checker(result), f"Info:\n{info_str}")
         if is_show:
             print(info_str)
@@ -247,6 +260,21 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".dnd 3", checker=lambda s: "DND Result" in s and s.count("\n") == 3)
         await self.__vg_msg(".dnd3 foo", checker=lambda s: "DND Result foo:\n" in s and s.count("\n") == 3)
         await self.__vg_msg(".dnd 3   foo", checker=lambda s: "DND Result foo:\n" in s and s.count("\n") == 3)
+
+    async def test_5_welcome(self):
+        gi_notice_A = GroupIncreaseNoticeData("test_user_a", "test_group_a", "test_user_b")
+        gi_notice_B = GroupIncreaseNoticeData("test_user_c", "test_group_b", "test_user_c")
+        await self.__v_notice(gi_notice_A, checker=lambda s: not s)
+        await self.__vg_msg(".welcome", checker=lambda s: "Welcoming word has been reset" in s)
+        await self.__v_notice(gi_notice_A, checker=lambda s: not s)
+        await self.__vg_msg(".welcome ABC", group_id="test_group_a", checker=lambda s: "Welcoming word is \"ABC\" now" in s)
+        await self.__v_notice(gi_notice_A, checker=lambda s: "ABC" in s)
+        await self.__v_notice(gi_notice_B, checker=lambda s: not s)
+        await self.__vg_msg(".welcome "+"*"*999, group_id="test_group_a", checker=lambda s: "Welcoming word is illegal: 欢迎词长度大于100" in s)
+        await self.__vg_msg(".welcome", checker=lambda s: "Welcoming word has been reset" in s)
+        await self.__v_notice(gi_notice_A, checker=lambda s: "ABC" in s)
+        await self.__vg_msg(".welcome", group_id="test_group_a", checker=lambda s: "Welcoming word has been reset" in s)
+        await self.__v_notice(gi_notice_A, checker=lambda s: not s)
 
 
 if __name__ == '__main__':

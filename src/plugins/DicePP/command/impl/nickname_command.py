@@ -55,12 +55,12 @@ class NicknameCommand(UserCommandBase):
                 group_id = "default"
             else:
                 group_id = meta.group_id
-            try:
-                nickname_prev = self.bot.data_manager.delete_data("nickname", [meta.user_id, group_id])
+
+            nickname_prev = self.bot.data_manager.delete_data("nickname", [meta.user_id, group_id])
+            if nickname_prev:
                 nickname_new = self.bot.get_nickname(meta.user_id, group_id)
-                feedback = self.format_loc(LOC_NICKNAME_RESET,
-                                                               nickname_prev=nickname_prev, nickname_new=nickname_new)
-            except DataManagerError:  # 获取不到当前昵称
+                feedback = self.format_loc(LOC_NICKNAME_RESET, nickname_prev=nickname_prev, nickname_new=nickname_new)
+            else:  # 获取不到当前昵称
                 nickname_prev = self.bot.get_nickname(meta.user_id, group_id)
                 feedback = self.format_loc(LOC_NICKNAME_RESET_FAIL, nickname=nickname_prev)
         else:  # 设置昵称

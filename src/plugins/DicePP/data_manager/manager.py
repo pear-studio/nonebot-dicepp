@@ -129,14 +129,15 @@ class DataManager:
             parent_node = parent_node[cur_path]  # 继续访问下一节点
         return
 
-    def delete_data(self, target: str, path: List[str], force_delete: bool = False) -> Any:
+    def delete_data(self, target: str, path: List[str], force_delete: bool = False, ignore_miss: bool = True) -> Any:
         """
-        从DataManager中删除数据, 若该数据不存在, 则会抛出异常
+        从DataManager中删除数据, 若该数据不存在且ignore_miss为False, 则会抛出异常
         如果path为空列表会清除该dataChunk的所有数据, 仅当force_delete为True时生效, 否则抛出异常
         Args:
             target(str): 目标DataChunk的名字, 通过identifier定义
             path(Tuple[str]): 路径节点
             force_delete(bool): 是否允许删除所有数据
+            ignore_miss(bool): 想删除的数据不存在时是否抛出异常
         Returns:
             data(Any): 被删除的数据
         """
@@ -159,8 +160,11 @@ class DataManager:
             if type(parent_node) is not dict:
                 raise DataManagerError(f"[DeleteData] 尝试获取的路径非终端节点不是字典类型! 类型: {type(parent_node)}")
 
-            if cur_path not in parent_node:  # 不存在则用缺省值设置
-                raise DataManagerError(f"[DeleteData] 无法删除不存在的路径")
+            if cur_path not in parent_node:  # 不存在则抛出异常
+                if ignore_miss:
+                    return None
+                else:
+                    raise DataManagerError(f"[DeleteData] 无法删除不存在的路径")
             cur_node = parent_node[cur_path]
 
             if is_last:
