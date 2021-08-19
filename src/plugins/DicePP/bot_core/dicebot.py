@@ -162,12 +162,12 @@ class Bot:
         elif isinstance(data, GroupIncreaseNoticeData):
             data: GroupIncreaseNoticeData = data
             if data.user_id != self.account:
-                from command.impl import DC_WELCOME
+                from command.impl import DC_WELCOME, LOC_WELCOME_DEFAULT
                 from command import GroupMessagePort, BotSendMsgCommand
                 try:
                     feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id])
                 except DataManagerError:
-                    feedback = ""
+                    feedback = self.loc_helper.format_loc_text(LOC_WELCOME_DEFAULT)
 
                 if feedback:
                     bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(data.group_id)])]

@@ -4,7 +4,6 @@
 
 from typing import List, Tuple, Any
 
-import bot_config
 from bot_core import Bot
 from data_manager import custom_data_chunk, DataChunkBase
 from command.command_config import *

@@ -264,17 +264,19 @@ class MyTestCase(IsolatedAsyncioTestCase):
     async def test_5_welcome(self):
         gi_notice_A = GroupIncreaseNoticeData("test_user_a", "test_group_a", "test_user_b")
         gi_notice_B = GroupIncreaseNoticeData("test_user_c", "test_group_b", "test_user_c")
-        await self.__v_notice(gi_notice_A, checker=lambda s: not s)
+        await self.__v_notice(gi_notice_A, checker=lambda s: "Welcome!" in s)
         await self.__vg_msg(".welcome", checker=lambda s: "Welcoming word has been reset" in s)
-        await self.__v_notice(gi_notice_A, checker=lambda s: not s)
+        await self.__v_notice(gi_notice_A, checker=lambda s: "Welcome!" in s)
         await self.__vg_msg(".welcome ABC", group_id="test_group_a", checker=lambda s: "Welcoming word is \"ABC\" now" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "ABC" in s)
-        await self.__v_notice(gi_notice_B, checker=lambda s: not s)
+        await self.__v_notice(gi_notice_B, checker=lambda s: "Welcome!" in s)
         await self.__vg_msg(".welcome "+"*"*999, group_id="test_group_a", checker=lambda s: "Welcoming word is illegal: 欢迎词长度大于100" in s)
         await self.__vg_msg(".welcome", checker=lambda s: "Welcoming word has been reset" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "ABC" in s)
         await self.__vg_msg(".welcome", group_id="test_group_a", checker=lambda s: "Welcoming word has been reset" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: not s)
+        await self.__vg_msg(".welcome default", group_id="test_group_a", checker=lambda s: "Welcoming word is \"Welcome!\" now" in s)
+        await self.__v_notice(gi_notice_A, checker=lambda s: "Welcome!" in s)
 
 
 if __name__ == '__main__':
