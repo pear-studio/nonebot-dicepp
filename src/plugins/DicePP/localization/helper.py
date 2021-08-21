@@ -5,7 +5,7 @@ import openpyxl
 from openpyxl.comments import Comment
 
 import logger
-from bot_utils.localdata import read_xlsx, format_worksheet
+from bot_utils.localdata import read_xlsx
 
 import localization
 from localization.localization_text import LocalizationText
@@ -64,10 +64,6 @@ class LocalizationHelper:
             workbook = openpyxl.Workbook()
             for name in workbook.sheetnames:
                 del workbook[name]
-            # default_sheet = workbook.create_sheet("Default")
-            # for ri, loc_text in enumerate(self.all_local_texts.values()):
-            #     save_loc_text_to_row(default_sheet, loc_text, ri+1)
-            # format_sheet(default_sheet)
             feedback = "成功创建本地化文件"
         if self.identifier in workbook.sheetnames:
             cur_sheet = workbook[self.identifier]
@@ -76,8 +72,10 @@ class LocalizationHelper:
         for ri, loc_text in enumerate(self.all_local_texts.values()):
             save_loc_text_to_row(cur_sheet, loc_text, ri+1)
 
-        format_worksheet(cur_sheet)
-        workbook.save(self.data_path)
+        try:
+            workbook.save(self.data_path)
+        except PermissionError:
+            logger.dice_log(f"[Localization] [Save] Save localization {self.data_path} failed as permission denied!")
         workbook.close()
 
         logger.dice_log(f"[Localization] [Save] {feedback} {self.data_path}")

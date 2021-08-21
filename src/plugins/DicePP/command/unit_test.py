@@ -31,12 +31,12 @@ class MyTestCase(IsolatedAsyncioTestCase):
 
         cls.test_proxy = TestProxy()
         cls.test_bot.set_client_proxy(cls.test_proxy)
-        cls.test_bot.delay_init()
+        cls.test_bot.delay_init_debug()
         cls.test_proxy.mute = True
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls.test_bot.shutdown()
+        cls.test_bot.shutdown_debug()
 
         test_path = cls.test_bot.data_path
         if os.path.exists(test_path):
@@ -277,6 +277,19 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__v_notice(gi_notice_A, checker=lambda s: not s)
         await self.__vg_msg(".welcome default", group_id="test_group_a", checker=lambda s: "Welcoming word is \"Welcome!\" now" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "Welcome!" in s)
+
+    async def test_5_master(self):
+        await self.__vg_msg(".m reboot", checker=lambda s: not s)
+        await self.__vg_msg(".m reboot", user_id="test_master", checker=lambda s: "Reboot Complete" in s)
+        await self.__vg_msg(".m send", checker=lambda s: not s)
+        await self.__vg_msg(".m send", user_id="test_master", checker=lambda s: "非法输入" in s)
+        await self.__vg_msg(".m send user:1234:ABC", user_id="test_master",
+                            checker=lambda s: "|Private: 1234|" in s and "Send message: abc to 1234 (type:user)" in s)
+        await self.__vp_msg(".m send group:1234:ABC", user_id="test_master",
+                            checker=lambda s: "|Group: 1234|" in s and "Send message: abc to 1234 (type:group)" in s)
+        await self.__vg_msg(".m send USER:1234:ABC", user_id="test_master",
+                            checker=lambda s: "|Private: 1234|" in s and "Send message: abc to 1234 (type:user)" in s)
+        await self.__vg_msg(".m send ABC:1234:ABC", user_id="test_master", checker=lambda s: "目标必须为user或group" in s)
 
 
 if __name__ == '__main__':

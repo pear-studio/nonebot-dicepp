@@ -5,7 +5,7 @@ import openpyxl
 from openpyxl.comments import Comment
 
 import logger
-from bot_utils.localdata import read_xlsx, format_worksheet
+from bot_utils.localdata import read_xlsx
 
 from bot_config.config_item import ConfigItem
 
@@ -123,7 +123,6 @@ class ConfigHelper:
         for ri, cfg_item in enumerate(self.all_configs.values()):
             save_loc_text_to_row(cur_sheet, cfg_item, ri + 1)
 
-        format_worksheet(cur_sheet)
         try:
             workbook.save(self.data_path)
         except PermissionError:

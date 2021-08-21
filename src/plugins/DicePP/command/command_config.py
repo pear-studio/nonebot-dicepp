@@ -1,4 +1,5 @@
 DPP_COMMAND_PRIORITY_DEFAULT = 1 << 10  # 默认优先级
 DPP_COMMAND_PRIORITY_USUAL_LOWER_BOUND = -(1 << 10)  # 能被.bot off屏蔽掉的指令都要在这之后响应
+DPP_COMMAND_PRIORITY_MASTER = 1 << 11  # Master指令优先级
 DPP_COMMAND_FLAG_DEFAULT = 0  # 命令所属的标志位
 DPP_COMMAND_CLUSTER_DEFAULT = 0  # 命令所属的功能群

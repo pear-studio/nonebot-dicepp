@@ -324,7 +324,7 @@ class QueryCommand(UserCommandBase):
 
     def flip_page(self, record: QueryRecord, next_page: bool) -> Tuple[str, int]:
         def get_feedback(page) -> str:
-            index = (cur_page - 1) * page_item_num
+            index = (page - 1) * page_item_num
             uuids = record.uuid_list[index:index + page_item_num]
             items = [self.item_uuid_dict[uuid] for uuid in uuids]
             if record.mode != 0:

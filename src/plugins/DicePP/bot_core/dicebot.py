@@ -32,12 +32,16 @@ class Bot:
         self.account: str = account
         self.proxy: Optional[ClientProxy] = None
         self.data_path = os.path.join(bot_config.BOT_DATA_PATH, account)
+
         self.data_manager = DataManager(self.data_path)
         self.loc_helper = LocalizationHelper(bot_config.CONFIG_PATH, self.account)
         self.cfg_helper = ConfigHelper(bot_config.CONFIG_PATH, self.account)
 
         self.command_dict: Dict[str, command.UserCommandBase] = {}
 
+        self.start_up()
+
+    def start_up(self):
         self.register_command()
         self.loc_helper.load_localization()  # 要在注册完命令后再读取本地化文件
         self.loc_helper.save_localization()  # 更新本地文件
@@ -52,9 +56,11 @@ class Bot:
             raise TypeError("Incorrect Client Proxy!")
 
     def shutdown(self):
-        """
-        销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的
-        """
+        """销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的"""
+        asyncio.create_task(self.shutdown_async())
+
+    def shutdown_debug(self):
+        """在载入本地化文本和配置等数据后调用, 必须是同步环境下调用"""
         asyncio.run(self.shutdown_async())
 
     async def shutdown_async(self):
@@ -67,6 +73,16 @@ class Bot:
         # self.loc_helper.save_localization() # 暂时不会在运行时修改, 不需要保存
         # self.cfg_helper.save_config() # 暂时不会在运行时修改, 不需要保存
 
+    def reboot(self):
+        """重启bot"""
+        asyncio.create_task(self.reboot_async())
+
+    async def reboot_async(self):
+        dice_log("[Bot] [Reboot] 开始重启")
+        await self.shutdown_async()
+        self.start_up()
+        await self.delay_init_command()
+
     def register_command(self):
         import command
         command_cls_dict = command.dicepp_command.USER_COMMAND_CLS_DICT
@@ -77,9 +93,16 @@ class Bot:
             self.command_dict[command_name] = command_cls(bot=self)  # 默认的Dict是有序的, 所以之后用values拿到的也是有序的
 
     def delay_init(self):
-        asyncio.run(self.delay_init_command())
+        """在载入本地化文本和配置等数据后调用"""
+        asyncio.create_task(self.delay_init_command())
+
+    def delay_init_debug(self):
+        """在载入本地化文本和配置等数据后调用, 必须是同步环境下调用"""
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.delay_init_command())
 
     async def delay_init_command(self):
+        """在载入本地化文本和配置等数据后调用"""
         init_info: List[str] = []
         for command in self.command_dict.values():
             try:
