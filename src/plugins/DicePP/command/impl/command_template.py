@@ -34,9 +34,6 @@ class TemplateCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_TEMP, "内容", "注释")
         bot.cfg_helper.register_config(CFG_TEMP, "内容", "注释")
 
-    def delay_init(self) -> List[str]:
-        return []
-
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".xxx")
         should_pass: bool = False

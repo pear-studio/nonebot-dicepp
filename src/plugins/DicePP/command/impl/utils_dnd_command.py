@@ -26,10 +26,7 @@ class UtilsDNDCommand(UserCommandBase):
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
-        bot.loc_helper.register_loc_text(LOC_DND_RES, "DND Result{reason}:\n{result}", ".dnd返回的内容")
-
-    def delay_init(self) -> List[str]:
-        return []
+        bot.loc_helper.register_loc_text(LOC_DND_RES, "{name} DND Result {reason}:\n{result}", ".dnd返回的内容 name为用户昵称, reason为原因")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".dnd")
@@ -60,7 +57,8 @@ class UtilsDNDCommand(UserCommandBase):
             dnd_result.append(f"{attr_result_str} = {sum(attr_result)}")
         dnd_result = "\n".join(dnd_result)
 
-        feedback: str = self.format_loc(LOC_DND_RES, reason=f" {reason}", result=dnd_result)
+        user_name = self.bot.get_nickname(meta.user_id, meta.group_id)
+        feedback: str = self.format_loc(LOC_DND_RES, name=user_name, reason=reason, result=dnd_result)
 
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 

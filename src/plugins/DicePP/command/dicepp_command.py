@@ -38,6 +38,14 @@ class UserCommandBase(metaclass=abc.ABCMeta):
         """在机器人完成初始化后调用, 此时可以读取本地化文本和配置, 返回提示信息"""
         return []
 
+    def tick(self) -> List[BotCommandBase]:
+        """每秒调用一次的方法"""
+        return []
+
+    def tick_daily(self) -> List[BotCommandBase]:
+        """每天调用一次"""
+        return []
+
     @abc.abstractmethod
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         """

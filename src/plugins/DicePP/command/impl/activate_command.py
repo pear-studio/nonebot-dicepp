@@ -49,9 +49,6 @@ class ActivateCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_BOT_OFF, "See you, I'm off", ".bot off时回应的语句")
         bot.loc_helper.register_loc_text(LOC_BOT_DISMISS, "Good bye!", ".dismiss时回应的语句")
 
-    def delay_init(self) -> List[str]:
-        return []
-
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         if meta.group_id:
             activate_data = self.bot.data_manager.get_data(DC_ACTIVATE, [meta.group_id],

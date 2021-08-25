@@ -1,6 +1,6 @@
 from typing import List, Tuple, Any
 
-from bot_core import Bot
+from bot_core import Bot, DC_USER_DATA, DC_GROUP_DATA
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
 from command import BotCommandBase
@@ -26,6 +26,15 @@ LOC_ROLL_D20_16_18 = "roll_d20_16_18"
 LOC_ROLL_D20_19 = "roll_d20_19"
 
 MULTI_ROLL_LIMIT = 10  # 多轮掷骰上限次数
+
+DCP_USER_DATA_ROLL_A_UID = ["roll"]  # 所有用户掷骰相关信息存储路径, 跟在user_id后面
+DCP_GROUP_DATA_ROLL_A_GID = ["roll"]  # 所有群掷骰相关信息存储路径, 跟在group_id后面, 私聊时group_id为private
+
+DCP_ROLL_TIME_A_ID_ROLL = ["time"]  # 掷骰次数信息的相对路径
+DCP_ROLL_D20_A_ID_ROLL = ["d20"]  # D20信息的相关路径
+
+DCK_ROLL_TODAY = "today"  # 获取每日信息的key, 适用范围包括 DCP_ROLL_TIME_A_ID_ROLL 和 DCP_ROLL_D20_A_ID_ROLL
+DCK_ROLL_TOTAL = "total"  # 获取所有历史信息的key, 适用范围包括 DCP_ROLL_TIME_A_ID_ROLL 和 DCP_ROLL_D20_A_ID_ROLL
 
 
 @custom_user_command(readable_name="掷骰指令",
@@ -147,6 +156,9 @@ class RollDiceCommand(UserCommandBase):
             elif not reason_str:
                 feedback = self.format_loc(LOC_ROLL_RESULT, **loc_args)
 
+        # 记录掷骰结果
+        record_roll_data(self.bot, meta, res_list)
+
         # 回复端口
         port = GroupMessagePort(meta.group_id) if not is_hidden and meta.group_id else PrivateMessagePort(meta.user_id)
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -205,3 +217,49 @@ def get_d20_state_loc_text(bot: Bot, res_list: List[RollResult]):
             d20_state = bot.loc_helper.format_loc_text(LOC_ROLL_D20_19)
 
     return d20_state
+
+
+def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollResult]):
+    """统计掷骰数据"""
+    roll_times = len(res_list)
+    cur_roll_result: List[int] = [sum([res.d20_num != 1 for res in res_list])]  # 第0个元素为非D20数量
+    for i in range(1, 21):
+        cur_roll_result.append(sum([res.d20_num == 1 and res.d20_state == i for res in res_list]))
+    # 更新用户数据
+    dcp_user_prefix = [meta.user_id] + DCP_USER_DATA_ROLL_A_UID
+    bot.data_manager.get_data(DC_USER_DATA, dcp_user_prefix, default_val={})
+    # 掷骰次数
+    user_time_data = bot.data_manager.get_data(DC_USER_DATA,
+                                               dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL,
+                                               default_val={DCK_ROLL_TODAY: 0, DCK_ROLL_TOTAL: 0})
+    user_time_data[DCK_ROLL_TODAY] += roll_times
+    user_time_data[DCK_ROLL_TOTAL] += roll_times
+    bot.data_manager.set_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL, user_time_data)
+    # D20信息
+    user_d20_data = bot.data_manager.get_data(DC_USER_DATA,
+                                              dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL,
+                                              default_val={DCK_ROLL_TODAY: [0]*21, DCK_ROLL_TOTAL: [0]*21})
+    for i in range(1, 21):
+        user_d20_data[DCK_ROLL_TODAY][i] += cur_roll_result[i]
+        user_d20_data[DCK_ROLL_TOTAL][i] += cur_roll_result[i]
+    bot.data_manager.set_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL, user_d20_data)
+    # 更新群数据
+    group_id = meta.group_id if meta.group_id else "private"
+    dcp_group_prefix = [group_id] + DCP_USER_DATA_ROLL_A_UID
+    bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix, default_val={})
+    # 掷骰次数
+    group_time_data = bot.data_manager.get_data(DC_GROUP_DATA,
+                                                dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL,
+                                                default_val={DCK_ROLL_TODAY: 0, DCK_ROLL_TOTAL: 0})
+    group_time_data[DCK_ROLL_TODAY] += roll_times
+    group_time_data[DCK_ROLL_TOTAL] += roll_times
+    bot.data_manager.set_data(DC_GROUP_DATA, dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL, group_time_data)
+    # D20信息
+    group_d20_data = bot.data_manager.get_data(DC_GROUP_DATA,
+                                               dcp_group_prefix + DCP_ROLL_D20_A_ID_ROLL,
+                                               default_val={DCK_ROLL_TODAY: [0] * 21, DCK_ROLL_TOTAL: [0] * 21})
+    for i in range(1, 21):
+        group_d20_data[DCK_ROLL_TODAY][i] += cur_roll_result[i]
+        group_d20_data[DCK_ROLL_TOTAL][i] += cur_roll_result[i]
+    bot.data_manager.set_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_D20_A_ID_ROLL, group_d20_data)
+    return

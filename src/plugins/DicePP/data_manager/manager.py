@@ -173,6 +173,28 @@ class DataManager:
 
         return cur_node
 
+    def get_keys(self, target: str, path: str):
+        """类似get_data, 但是不会返回数据的拷贝, 而是返回当前path的所有key, 当前path不存在或不是dict则抛出异常"""
+        if len(path) > 1 and not path[-1]:
+            raise DataManagerError(f"[GetData] 叶子结点的名称不能为空 完整路径: {path}")
+
+        data_chunk = self.__get_data_chunk(target)
+        parent_node = data_chunk.root
+        cur_node = parent_node
+        for i in range(len(path)):
+            # 获取当前节点的内容
+            if type(parent_node) is not dict:
+                raise DataManagerError(f"[GetKey] 尝试获取的路径节点不是字典类型! 类型: {type(parent_node)}")
+
+            cur_path = path[i]
+            if cur_path not in parent_node:  # 不存在则抛出异常
+                raise DataManagerError(f"[GetKey] 尝试访问不存在的路径! 路径: {path}")
+            cur_node = parent_node[cur_path]
+            if type(cur_node) is not dict:
+                raise DataManagerError(f"[GetKey] 尝试获取的路径节点不是字典类型! 类型: {type(cur_node)}")
+            parent_node = cur_node
+        return cur_node.keys()
+
     def __get_data_chunk(self, target: str) -> DataChunkBase:
         if target not in self.__dataChunks:
             raise DataManagerError(f"[GetDataChunk] 找不到指定的DataChunk: {target}")

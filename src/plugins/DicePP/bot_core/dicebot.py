@@ -1,8 +1,9 @@
 import os
 import asyncio
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Iterable
 
 import bot_config
+import bot_utils
 from bot_core import MessageMetaData, NoticeData, RequestData
 from bot_core import FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from bot_core import FriendAddNoticeData, GroupIncreaseNoticeData
@@ -12,8 +13,34 @@ from localization import LocalizationHelper
 from bot_config import ConfigHelper
 from logger import dice_log, get_exception_info
 
+DC_META = "meta"
+DC_USER_DATA = "user_data"
+DC_GROUP_DATA = "group_data"
+DC_NICKNAME = "nickname"
 
-@custom_data_chunk(identifier="nickname")
+DCP_META_ONLINE_LAST = ["online", "last"]
+DCP_META_ONLINE_PERIOD = ["online", "period"]
+
+
+@custom_data_chunk(identifier=DC_META)
+class _(DataChunkBase):
+    def __init__(self):
+        super().__init__()
+
+
+@custom_data_chunk(identifier=DC_USER_DATA)
+class _(DataChunkBase):
+    def __init__(self):
+        super().__init__()
+
+
+@custom_data_chunk(identifier=DC_GROUP_DATA)
+class _(DataChunkBase):
+    def __init__(self):
+        super().__init__()
+
+
+@custom_data_chunk(identifier=DC_NICKNAME)
 class _(DataChunkBase):
     def __init__(self):
         super().__init__()
@@ -39,7 +66,16 @@ class Bot:
 
         self.command_dict: Dict[str, command.UserCommandBase] = {}
 
+        self.tick_task: Optional[asyncio.Task] = None
+
         self.start_up()
+
+    def set_client_proxy(self, proxy):
+        from adapter import ClientProxy
+        if isinstance(proxy, ClientProxy):
+            self.proxy = proxy
+        else:
+            raise TypeError("Incorrect Client Proxy!")
 
     def start_up(self):
         self.register_command()
@@ -48,12 +84,54 @@ class Bot:
         self.cfg_helper.load_config()
         self.cfg_helper.save_config()
 
-    def set_client_proxy(self, proxy):
-        from adapter import ClientProxy
-        if isinstance(proxy, ClientProxy):
-            self.proxy = proxy
-        else:
-            raise TypeError("Incorrect Client Proxy!")
+        try:
+            asyncio.get_running_loop()
+            self.tick_task = asyncio.create_task(self.tick_loop())
+        except RuntimeError:  # 在Debug中
+            pass
+
+    async def tick_loop(self):
+        from command import BotCommandBase
+        loop = asyncio.get_event_loop()
+        loop_time_prev = loop.time()
+
+        init_online_str = bot_utils.time.get_current_date_str()
+        online_period = self.data_manager.get_data(DC_META, DCP_META_ONLINE_PERIOD, default_val=[])
+        online_period.append([init_online_str, init_online_str])
+
+        while True:
+            bot_commands: List[BotCommandBase] = []
+            # tick
+            for command in self.command_dict.values():
+                try:
+                    bot_commands += command.tick()
+                except Exception:
+                    dice_log(self.handle_exception(f"Tick: {command.readable_name} CODE110"))
+
+            if loop.time() - loop_time_prev > 60:  # 一分钟执行一次
+                # tick_daily
+                last_online_str = self.data_manager.get_data(DC_META, DCP_META_ONLINE_LAST, default_val=init_online_str)
+                last_online_day_str = bot_utils.time.datetime_to_str_day(bot_utils.time.str_to_datetime(last_online_str))
+                cur_online_day_str = bot_utils.time.datetime_to_str_day(bot_utils.time.get_current_date_raw())
+                if cur_online_day_str != last_online_day_str:  # 最后在线时间和当前时间不是同一天
+                    for command in self.command_dict.values():
+                        try:
+                            bot_commands += command.tick_daily()
+                        except Exception:
+                            dice_log(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111"))
+                # 更新最后在线时间
+                cur_online_str = bot_utils.time.get_current_date_str()
+                online_period[-1][-1] = cur_online_str
+                self.data_manager.set_data(DC_META, DCP_META_ONLINE_LAST, cur_online_str)
+                self.data_manager.set_data(DC_META, DCP_META_ONLINE_PERIOD, online_period)
+
+                loop_time_prev = loop.time()
+
+            if self.proxy:
+                for command in bot_commands:
+                    await self.proxy.process_bot_command(command)
+
+            await asyncio.sleep(1)
 
     def shutdown(self):
         """销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的"""
@@ -68,6 +146,8 @@ class Bot:
         shutdown的异步版本
         销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的
         """
+        if self.tick_task:
+            self.tick_task.cancel()
         await self.data_manager.save_data_async()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
         # self.loc_helper.save_localization() # 暂时不会在运行时修改, 不需要保存
@@ -127,6 +207,7 @@ class Bot:
 
     # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:
+        """处理消息"""
         from command import preprocess_msg
         from command import PrivateMessagePort, BotCommandBase, BotSendMsgCommand
 
@@ -148,7 +229,7 @@ class Bot:
                     # 在非群聊中企图执行群聊指令, 回复一条提示
                     feedback = self.loc_helper.format_loc_text(localization.LOC_GROUP_ONLY_NOTICE)
                     bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
-                else:
+                else:  # 执行指令
                     try:
                         bot_commands += command.process_msg(msg, meta, hint)
                     except Exception:
@@ -162,6 +243,7 @@ class Bot:
         return bot_commands
 
     def process_request(self, data: RequestData) -> bool:
+        """处理请求"""
         if isinstance(data, FriendRequestData):
             from bot_config import CFG_FRIEND_TOKEN
             passwords: List[str] = self.cfg_helper.get_config(CFG_FRIEND_TOKEN)
@@ -175,6 +257,7 @@ class Bot:
         return False
 
     async def process_notice(self, data: NoticeData) -> List:
+        """处理提醒"""
         from src.plugins.DicePP import BotCommandBase
         bot_commands: List[BotCommandBase] = []
 
@@ -201,6 +284,7 @@ class Bot:
         return bot_commands
 
     def handle_exception(self, info: str) -> List:
+        """在捕获异常后的Except语句中调用"""
         from command import PrivateMessagePort, BotSendMsgCommand
         exception_info = get_exception_info()
         exception_info = "\n".join(exception_info[-8:]) if len(exception_info) > 8 else "\n".join(exception_info)
@@ -224,13 +308,13 @@ class Bot:
             group_id = "default"
 
         try:
-            nickname = self.data_manager.get_data("nickname", [user_id, group_id])  # 使用用户在群内的昵称
+            nickname = self.data_manager.get_data(DC_NICKNAME, [user_id, group_id])  # 使用用户在群内的昵称
         except DataManagerError:
             try:
-                nickname = self.data_manager.get_data("nickname", [user_id, "default"])  # 使用用户定义的默认昵称
+                nickname = self.data_manager.get_data(DC_NICKNAME, [user_id, "default"])  # 使用用户定义的默认昵称
             except DataManagerError:
                 try:
-                    nickname = self.data_manager.get_data("nickname", [user_id, "origin"])  # 使用用户本身的用户名
+                    nickname = self.data_manager.get_data(DC_NICKNAME, [user_id, "origin"])  # 使用用户本身的用户名
                 except DataManagerError:
                     nickname = "异常用户名"
         return nickname
@@ -245,6 +329,6 @@ class Bot:
         """
         if not group_id:
             group_id = "default"
-        nickname_prev = self.data_manager.get_data("nickname", [user_id, group_id], nickname)
+        nickname_prev = self.data_manager.get_data(DC_NICKNAME, [user_id, group_id], nickname)
         if nickname_prev != nickname:
-            self.data_manager.set_data("nickname", [user_id, group_id], nickname)
+            self.data_manager.set_data(DC_NICKNAME, [user_id, group_id], nickname)

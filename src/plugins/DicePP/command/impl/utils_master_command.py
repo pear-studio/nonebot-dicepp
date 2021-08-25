@@ -31,9 +31,6 @@ class MasterCommand(UserCommandBase):
                                          "用.m send指令发送消息时给Master的回复")
         bot.loc_helper.register_loc_text(LOC_SEND_TARGET, "From Master: {msg}", "用.m send指令发送消息时给目标的回复")
 
-    def delay_init(self) -> List[str]:
-        return []
-
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         master_list = self.bot.cfg_helper.get_config(CFG_MASTER)
         should_proc: bool = False

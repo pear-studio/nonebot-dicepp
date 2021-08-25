@@ -18,6 +18,7 @@ from bot_utils.localdata import read_xlsx, update_xlsx, create_parent_dir
 from bot_utils.string import match_substring
 from localization import LocalizationHelper
 from roll_dice import preprocess_roll_exp, is_roll_exp, exec_roll_exp
+from logger import dice_log
 
 LOC_DRAW_RESULT = "draw_result"
 LOC_DRAW_RESULT_INLINE = "draw_result_inline"
@@ -346,7 +347,7 @@ class DeckCommand(UserCommandBase):
                         final = 0
 
                     if not content:
-                        error_info.append(f"表格{sheet_name}第{row_index}行缺少content, 该条目未加载")
+                        dice_log(f"表格{sheet_name}第{row_index}行缺少content, 该条目未加载")
                         continue
 
                     item = DeckItem(content, weight, redraw, final)

@@ -1,6 +1,7 @@
 import unittest
 from unittest.async_case import IsolatedAsyncioTestCase
 import os
+import asyncio
 from typing import Callable
 
 from bot_core import Bot, MessageMetaData, MessageSender
@@ -98,6 +99,9 @@ class MyTestCase(IsolatedAsyncioTestCase):
             self.assertTrue(checker(result), f"Info:\n{info_str}")
         if is_show:
             print(info_str)
+
+    async def test_0_reboot(self):
+        await self.test_bot.reboot_async()
 
     async def test_1_localization(self):
         self.test_bot.loc_helper.save_localization()
@@ -291,6 +295,21 @@ class MyTestCase(IsolatedAsyncioTestCase):
                             checker=lambda s: "|Private: 1234|" in s and "Send message: abc to 1234 (type:user)" in s)
         await self.__vg_msg(".m send ABC:1234:ABC", user_id="test_master", checker=lambda s: "目标必须为user或group" in s)
 
+    async def test_5_point(self):
+        await self.__vg_msg(".point", checker=lambda s: "100/500" in s)
+        await self.__vg_msg(".m point", checker=lambda s: not s)
+        await self.__vp_msg(".m point test_uid", user_id="test_master",
+                            checker=lambda s: "Point: test_uid(测试用户): 100" in s)
+        await self.__vp_msg(".m point test_uid=50", user_id="test_master",
+                            checker=lambda s: "Point: test_uid(测试用户) 100->50" in s)
+        await self.__vp_msg(".m point test_uid", user_id="test_master",
+                            checker=lambda s: "Point: test_uid(测试用户): 50" in s)
+        await self.__vg_msg(".point", user_id="test_uid", checker=lambda s: "Point of 测试用户: 50/500" in s)
+
 
 if __name__ == '__main__':
-    unittest.main()
+    async def main():
+        unittest.main()
+
+    asyncio.run(main())
+
