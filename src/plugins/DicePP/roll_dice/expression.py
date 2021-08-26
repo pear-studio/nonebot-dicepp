@@ -243,25 +243,29 @@ def parse_roll_exp(input_str: str, depth: int = 0) -> RollExpression:
                         next_con = ROLL_CONNECTORS_DICT[cur_symbol]()
                         left_str = left_str[len(cur_symbol):]
                         break
+            exp.append_exp(cur_con, cur_exp)
         else:  # 没有括号则暴力匹配连接符来找到最左侧的表达式和下一个连接符
             next_con_str_index = -1
             next_symbol = None
             # python的dict自从3.5以后默认是有序的
-            for cur_symbol in reversed(list(ROLL_CONNECTORS_DICT.keys())):
+            for cur_symbol in ROLL_CONNECTORS_DICT.keys():
                 cur_index = left_str.find(cur_symbol)
-                # index小的覆盖cur_index大的, 早注册symbol的覆盖晚注册symbol的
-                if cur_index != -1 and (next_con_str_index == -1 or cur_index <= next_con_str_index):
+                # 早注册symbol的优先于晚注册symbol的
+                if cur_index != -1:
                     next_con_str_index, next_symbol = cur_index, cur_symbol
+                    break
             # print(left_str, next_con_str_index, next_symbol)
             if next_symbol:  # 如果有下一个连接符
+                # print(cur_con.symbol, left_str[:next_con_str_index], next_symbol, left_str[next_con_str_index+1:])
                 cur_exp = parse_roll_exp(left_str[:next_con_str_index], depth+1)
+                exp.append_exp(cur_con, cur_exp)
                 next_con = ROLL_CONNECTORS_DICT[next_symbol]()
-                left_str = left_str[next_con_str_index+1:]
+                next_exp = parse_roll_exp(left_str[next_con_str_index+1:], depth+1)
+                exp.append_exp(next_con, next_exp)
             else:
                 cur_exp = parse_roll_exp(left_str, depth+1)
-                left_str = ""
-
-        exp.append_exp(cur_con, cur_exp)
+                exp.append_exp(cur_con, cur_exp)
+            break
 
         if next_con and left_str == "":  # 如果存在下一个连接符但表达式为空, 肯定有问题
             raise RollDiceError(f"连接符{next_con.symbol}后为空表达式!")
@@ -281,6 +285,12 @@ def preprocess_roll_exp(input_str: str) -> str:
                         output_str)
     output_str = re.sub(r"(^|[^0-9])(D[0-9]*劣势)",
                         lambda match: match.group(1) + "2" + match.group(2)[:-2] + "KL1",
+                        output_str)
+    output_str = re.sub(r"^(.+)抗性$",
+                        lambda match: f"({match.group(1)})/2",
+                        output_str)
+    output_str = re.sub(r"^(.+)易伤$",
+                        lambda match: f"({match.group(1)})*2",
                         output_str)
     return output_str
 

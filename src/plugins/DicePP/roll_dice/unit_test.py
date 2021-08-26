@@ -79,6 +79,11 @@ class MyTestCase(unittest.TestCase):
         self.__show_exec_res("2*3D20")
         self.__show_exec_res("2/3D20")
 
+        # connector
+        self.__show_exec_res("5/2+3/2")
+        self.__show_exec_res("1+2*2")
+        self.__show_exec_res("1*2+2")
+
         # 带空格和中文字符情况 (由于判断指令中表达式和掷骰原因的问题去掉了过滤空格的代码)
         self.__show_exec_res("1d20")
         self.__show_exec_res("d20＋1")
@@ -112,13 +117,20 @@ class MyTestCase(unittest.TestCase):
         self.__show_exception("2D20优势+1")
         self.__show_exception("1+20优势")
 
+        # 抗性与易伤
+        self.__show_exec_res("D20+2抗性")
+        self.__show_exec_res("5抗性")
+        self.__show_exec_res("2D4+D20易伤")
+        self.__show_exception("抗性")
+        self.__show_exception("+抗性")
+
         # 非法输入
         self.__show_exception("")
         self.__show_exception("()")
         self.__show_exception("1D(20)")
         self.__show_exception("(1)D20")
         self.__show_exception("1(D)20")
-        self.__show_exception("1++1")
+        self.__show_exception("1+++1")
         self.__show_exception("1+1+")
         self.__show_exception("+")
         self.__show_exception("*")
@@ -138,7 +150,7 @@ class MyTestCase(unittest.TestCase):
         def repeat_until_checked(exp_str: str) -> bool:
             exp: RollExpression = parse_roll_exp(preprocess_roll_exp(exp_str))
             has_succ, has_fail = False, False
-            for _ in range(1000):
+            for _ in range(2000):
                 res: RollResult = exp.get_result()
                 if res.d20_num == 1:
                     if res.d20_state == 20:
