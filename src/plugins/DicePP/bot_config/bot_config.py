@@ -62,6 +62,10 @@ DEFAULT_CONFIG_COMMENT[CFG_AGREEMENT] = "使用协议"
 
 CONFIG_FILE_PATH = "config.xlsx"
 
+CFG_COMMAND_SPLIT = "command_split"  # \\ 来分割多条指令
+DEFAULT_CONFIG[CFG_COMMAND_SPLIT] = "\\\\"
+DEFAULT_CONFIG_COMMENT[CFG_COMMAND_SPLIT] = "分割多条指令的关键字, 默认为 \\\\"
+
 
 class ConfigHelper:
     def __init__(self, data_path: str, identifier: str):

@@ -7,22 +7,30 @@ import bot_utils
 from bot_core import MessageMetaData, NoticeData, RequestData
 from bot_core import FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from bot_core import FriendAddNoticeData, GroupIncreaseNoticeData
+from bot_core import BotMacro
 from data_manager import DataManager, DataManagerError, custom_data_chunk, DataChunkBase
 import localization
 from localization import LocalizationHelper
-from bot_config import ConfigHelper
+from bot_config import ConfigHelper, CFG_COMMAND_SPLIT
 from logger import dice_log, get_exception_info
 
 DC_META = "meta"
+DCP_META_ONLINE_LAST = ["online", "last"]
+DCP_META_ONLINE_PERIOD = ["online", "period"]
+
+DC_MACRO = "macro"
 DC_USER_DATA = "user_data"
 DC_GROUP_DATA = "group_data"
 DC_NICKNAME = "nickname"
 
-DCP_META_ONLINE_LAST = ["online", "last"]
-DCP_META_ONLINE_PERIOD = ["online", "period"]
-
 
 @custom_data_chunk(identifier=DC_META)
+class _(DataChunkBase):
+    def __init__(self):
+        super().__init__()
+
+
+@custom_data_chunk(identifier=DC_MACRO, include_json_object=True)
 class _(DataChunkBase):
     def __init__(self):
         super().__init__()
@@ -209,7 +217,7 @@ class Bot:
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:
         """处理消息"""
         from command import preprocess_msg
-        from command import PrivateMessagePort, BotCommandBase, BotSendMsgCommand
+        from command import MessagePort, PrivateMessagePort, BotCommandBase, BotSendMsgCommand
 
         self.update_nickname(meta.user_id, "origin", meta.nickname)
 
@@ -217,26 +225,60 @@ class Bot:
 
         bot_commands: List[BotCommandBase] = []
 
-        for command in self.command_dict.values():
-            try:
-                should_proc, should_pass, hint = command.can_process_msg(msg, meta)
-            except Exception:
-                # 发现未处理的错误, 汇报给主Master
-                should_proc, should_pass, hint = False, False, None
-                bot_commands += self.handle_exception(f"来源:{msg} 用户:{meta.user_id} 群:{meta.group_id} CODE100")
-            if should_proc:
-                if command.group_only and not meta.group_id:
-                    # 在非群聊中企图执行群聊指令, 回复一条提示
-                    feedback = self.loc_helper.format_loc_text(localization.LOC_GROUP_ONLY_NOTICE)
-                    bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
-                else:  # 执行指令
-                    try:
-                        bot_commands += command.process_msg(msg, meta, hint)
-                    except Exception:
-                        # 发现未处理的错误, 汇报给主Master
-                        bot_commands += self.handle_exception(f"来源:{msg} 用户:{meta.user_id} 群:{meta.group_id} CODE101")
-                if not should_pass:
-                    break
+        # 处理宏
+        macro_list: List[BotMacro]
+        try:
+            assert not msg.startswith(".define")
+            macro_list = self.data_manager.get_data(DC_MACRO, [meta.user_id], get_ref=True)
+        except (DataManagerError, AssertionError):
+            macro_list = []
+        for macro in macro_list:
+            msg = macro.process(msg)
+
+        # 处理分行指令
+        command_split: str = self.cfg_helper.get_config(CFG_COMMAND_SPLIT)[0]
+        msg_list = msg.split(command_split)
+        msg_list = [m.strip() for m in msg_list]
+
+        is_multi_command = len(msg_list) > 1
+        for msg_cur in msg_list:
+            for command in self.command_dict.values():
+                try:
+                    should_proc, should_pass, hint = command.can_process_msg(msg_cur, meta)
+                except Exception:
+                    # 发现未处理的错误, 汇报给主Master
+                    should_proc, should_pass, hint = False, False, None
+                    info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
+                    bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} 群:{meta.group_id} CODE100")
+                if should_proc:
+                    if command.group_only and not meta.group_id:
+                        # 在非群聊中企图执行群聊指令, 回复一条提示
+                        feedback = self.loc_helper.format_loc_text(localization.LOC_GROUP_ONLY_NOTICE)
+                        bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
+                    else:  # 执行指令
+                        try:
+                            bot_commands += command.process_msg(msg_cur, meta, hint)
+                        except Exception:
+                            # 发现未处理的错误, 汇报给主Master
+                            info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
+                            bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} 群:{meta.group_id} CODE101")
+                    if not should_pass:
+                        break
+
+        if is_multi_command:  # 多行指令的话合并port相同的send msg
+            invalid_command_count = 0
+            send_msg_command_merged: Dict[MessagePort, BotSendMsgCommand] = {}
+            for command in bot_commands:
+                if isinstance(command, BotSendMsgCommand):
+                    for port in command.targets:
+                        if port in send_msg_command_merged:
+                            send_msg_command_merged[port].msg += f"\n{command.msg}"
+                        else:
+                            send_msg_command_merged[port] = BotSendMsgCommand(self.account, command.msg, [port])
+                    invalid_command_count += 1
+            if invalid_command_count == len(bot_commands):  # 全都是SendMsg则合并
+                bot_commands = list(send_msg_command_merged.values())
+
         if self.proxy:
             for command in bot_commands:
                 await self.proxy.process_bot_command(command)

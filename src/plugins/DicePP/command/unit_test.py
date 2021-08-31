@@ -163,6 +163,26 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".help 指令", checker=lambda s: ".r" in s)
         await self.__vg_msg(".help 链接", checker=lambda s: "pear-studio/nonebot-dicepp" in s)
 
+    async def test_2_multi_command(self):
+        await self.__vg_msg(".help\\\\.r", checker=lambda s: "提出意见~\n测试用户's" in s)
+        await self.__vg_msg(".r\\\\.r\\\\", checker=lambda s: s.count("测试用户's roll result") == 2)
+
+    async def test_2_define(self):
+        await self.__vg_msg(".define", checker=lambda s: "Macro list:" in s and "1" not in s)
+        await self.__vg_msg(".define 掷骰指令宏 .r", checker=lambda s: "Define 掷骰指令宏 as .r, args are: []" in s)
+        await self.__vg_msg("掷骰指令宏", checker=lambda s: "roll result is" in s)
+        await self.__vg_msg(".define", checker=lambda s: "1. Keywords: 掷骰指令宏 Args: [] -> .r" in s)
+        await self.__vg_msg(".define 参数指令宏(A,B,C) .A B C", checker=lambda s: "Define 参数指令宏 as .{a} {b} {c}, args are: ['a', 'b', 'c']" in s)
+        await self.__vg_msg("参数指令宏:r:d4:原因", checker=lambda s: "roll result for 原因 is 1D4" in s)
+        await self.__vg_msg(".define", checker=lambda s: "2. Keywords: 参数指令宏 Args: ['a', 'b', 'c'] -> .{a} {b} {c}" in s)
+        await self.__vg_msg(".define del 参数指令宏", checker=lambda s: "Delete macro: 参数指令宏" in s)
+        await self.__vg_msg("参数指令宏:r:d4:原因", checker=lambda s: not s)
+        await self.__vg_msg(".define", checker=lambda s: "2" not in s)
+        await self.__vg_msg("掷骰指令宏", checker=lambda s: "roll result is" in s)
+        await self.__vg_msg(".define del 掷骰指令宏", checker=lambda s: "Delete macro: 掷骰指令宏" in s)
+        await self.__vg_msg(".define del", checker=lambda s: "Delete macro: 参数指令宏" not in s)
+        await self.__vg_msg("掷骰指令宏", checker=lambda s: not s)
+
     async def test_3_init(self):
         # Basic
         await self.__vg_msg(".nn 伊丽莎白")

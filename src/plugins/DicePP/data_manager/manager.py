@@ -35,7 +35,8 @@ class DataManager:
         self.load_data()
 
     def get_data(self, target: str, path: List[str],
-                 default_val: Optional[Any] = None, default_gen: Optional[Callable[[], Any]] = None) -> Any:
+                 default_val: Optional[Any] = None, default_gen: Optional[Callable[[], Any]] = None,
+                 get_ref: bool = False) -> Any:
         """
         从DataManager中取得数据, 若该数据不存在, 则用defaultVal创建该数据并返回
         如果不指定defaultVal, 访问不存在的数据将会抛出一个异常
@@ -45,8 +46,9 @@ class DataManager:
             path(Tuple[str]): 路径节点
             default_val(Optional[Any]): 数据默认值, 如果给出默认值, 在访问不存在的数据时会自动创建该数据, 否则抛出异常
             default_gen(Optional[Callable[]]): 数据默认值生成器, 如果有数据默认值, 则以默认值优先, 否则调用生成器得到默认值
+            get_ref(bool): 返回数据的拷贝还是引用, 默认返回拷贝, 返回引用容易污染数据
         Returns:
-            data(Any): 取得数据的拷贝
+            data(Any): 取得的数据
         """
         if len(path) > 1 and not path[-1]:
             raise DataManagerError(f"[GetData] 叶子结点的名称不能为空 完整路径: {path}")
@@ -85,7 +87,10 @@ class DataManager:
                                            f"路径: {path} 当前节点: {path[i]} 已有值:{cur_node}")
             parent_node = cur_node
 
-        return copy.deepcopy(cur_node)
+        if get_ref:
+            return cur_node
+        else:  # 默认返回拷贝
+            return copy.deepcopy(cur_node)
 
     def set_data(self, target: str, path: List[str], new_val: Any) -> None:
         """

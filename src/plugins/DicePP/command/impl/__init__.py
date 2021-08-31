@@ -1,3 +1,4 @@
+from .utils_common_command import MacroCommand
 from .utils_common_command import PointCommand, DC_POINT
 from .utils_common_command import WelcomeCommand, DC_WELCOME, LOC_WELCOME_DEFAULT
 from .utils_master_command import MasterCommand

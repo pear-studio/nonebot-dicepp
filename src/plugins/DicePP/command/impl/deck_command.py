@@ -288,13 +288,14 @@ class DeckCommand(UserCommandBase):
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
-        if keyword == "TMP":  # help后的接着的内容
-            feedback: str = ""
+        if keyword == "draw":  # help后的接着的内容
+            feedback: str = ".draw [次数#, 可选][牌库名]" \
+                            "示例: .draw 4#万象无常牌"
             return feedback
         return ""
 
     def get_description(self) -> str:
-        return ".xxx 指令描述"  # help指令中返回的内容
+        return ".draw 抽卡指令"  # help指令中返回的内容
 
     def load_data_from_path(self, path: str, error_info: List[str]) -> None:
         """从指定文件或目录读取信息"""
