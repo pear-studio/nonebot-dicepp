@@ -185,14 +185,14 @@ def get_d20_state_loc_text(bot: Bot, res_list: List[RollResult]):
     d20_state: str = ""
     success_time = sum([res.d20_num == 1 and res.d20_state == 20 for res in res_list])
     failure_time = sum([res.d20_num == 1 and res.d20_state == 1 for res in res_list])
-    if success_time + failure_time == 1:  # 存在一次大成功或大失败
+    if len(res_list) == 1 and (success_time + failure_time) != 0:  # 掷骰轮数等于1且存在大成功或大失败
         if success_time:
             d20_state = bot.loc_helper.format_loc_text(LOC_ROLL_D20_BS)
         elif failure_time:
             d20_state = bot.loc_helper.format_loc_text(LOC_ROLL_D20_BF)
-    elif success_time + failure_time > 1:  # 存在多次大成功或大失败
+    elif len(res_list) > 1:  # 掷骰轮数大于1且存在大成功或大失败
         success_state = bot.loc_helper.format_loc_text(LOC_ROLL_D20_BS_SHORT)
-        failure_state = bot.loc_helper.format_loc_text(LOC_ROLL_D20_BS_SHORT)
+        failure_state = bot.loc_helper.format_loc_text(LOC_ROLL_D20_BF_SHORT)
         success_info, failure_info = "", ""
         if success_time:
             success_info = bot.loc_helper.format_loc_text(LOC_ROLL_D20_MULTI,
@@ -201,7 +201,7 @@ def get_d20_state_loc_text(bot: Bot, res_list: List[RollResult]):
             failure_info = bot.loc_helper.format_loc_text(LOC_ROLL_D20_MULTI,
                                                           time=failure_time, short_state=failure_state)
         d20_state = " ".join([info for info in [success_info, failure_info] if info])
-    elif len(res_list) == 1 and res_list[0].d20_num == 1:  # 额外提示
+    elif len(res_list) == 1 and res_list[0].d20_num == 1:  # 掷骰轮数等于1且不存在大成功或大失败且有唯一D20
         d20_result = res_list[0].d20_state
         if d20_result == 2:
             d20_state = bot.loc_helper.format_loc_text(LOC_ROLL_D20_2)
