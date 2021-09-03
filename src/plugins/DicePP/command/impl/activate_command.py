@@ -56,8 +56,12 @@ class ActivateCommand(UserCommandBase):
         else:
             activate_data = None
         should_pass: bool = False
+        # 下列情况允许处理: 私聊, 被at, 处于开启状态
         if not meta.group_id or meta.to_me or activate_data[0]:
             should_pass = True
+        # 下列情况不允许处理: 群聊且在开头at其他人而不是自己
+        if meta.group_id and meta.raw_msg.startswith("[CQ:at,qq=") and not meta.to_me:
+            should_pass = False
 
         if msg_str.startswith(".bot"):
             arg_str = msg_str[4:].strip()
@@ -102,12 +106,12 @@ class ActivateCommand(UserCommandBase):
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "bot":  # help后的接着的内容
             feedback: str = ".bot 查看机器人信息, 即使是关闭状态也会响应" \
-                            "\n.bot on 开启骰娘, 一定要在最开始at骰娘才能生效" \
-                            "\n.bot off 关闭骰娘, 同上"
+                            "\n@机器人 .bot on 在群里开启机器人, 一定要在最开始at机器人才能生效" \
+                            "\n@机器人 .bot off 关闭机器人, 同上"
             return feedback
         elif keyword == "dismiss":
-            return ".dismiss 让骰娘退出本群, 一定要在最开始at骰娘才能生效, 私聊无效"
+            return "@机器人 .dismiss 让机器人退出本群, 一定要在最开始at机器人才能生效, 私聊无效"
         return ""
 
     def get_description(self) -> str:
-        return ".bot 开关机器人 .dismiss 退出当前群聊"  # help指令中返回的内容
+        return "@机器人 .bot 开关机器人 .dismiss 退出当前群聊"  # help指令中返回的内容
