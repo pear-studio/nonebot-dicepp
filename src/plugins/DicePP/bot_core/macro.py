@@ -33,17 +33,19 @@ class BotMacro(JsonObject):
 
     def deserialize(self, json_str: str) -> None:
         json_dict = json.loads(json_str)
-        self.raw = json_dict["raw"]
-        self.command_split = json_dict["split"]
-        self.parse()
+        self.initialize(json_dict["raw"], json_dict["split"])
 
-    def __init__(self, raw: str, command_split: str):
-        self.raw: str = raw  # 定义宏时的字符串
+    def __init__(self):
+        self.raw: str = ""  # 定义宏时的字符串
         self.key: str = ""  # 宏的关键字
         self.args: List[str] = []  # 宏的参数, 为空则不需要参数
         self.target: str = ""  # 将宏关键字替换为的对象
-        self.command_split: str = command_split
+        self.command_split: str = ""
         self.pattern: re.Pattern = re.compile("")  # parse时生成
+
+    def initialize(self, raw: str, command_split: str):
+        self.raw = raw  # 定义宏时的字符串
+        self.command_split = command_split
         self.parse()
 
     def parse(self):

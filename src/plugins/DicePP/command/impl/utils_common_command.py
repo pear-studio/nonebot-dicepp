@@ -85,7 +85,8 @@ class MacroCommand(UserCommandBase):
             macro_num_limit = int(self.bot.cfg_helper.get_config(CFG_DEFINE_NUM_MAX)[0])
             try:
                 assert len(arg_str) <= macro_len_limit
-                macro_new = BotMacro(arg_str, self.bot.cfg_helper.get_config(CFG_COMMAND_SPLIT)[0])
+                macro_new = BotMacro()
+                macro_new.initialize(arg_str, self.bot.cfg_helper.get_config(CFG_COMMAND_SPLIT)[0])
             except ValueError as e:
                 feedback = self.format_loc(LOC_DEFINE_FAIL, error=e)
             except AssertionError:
