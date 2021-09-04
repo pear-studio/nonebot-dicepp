@@ -182,6 +182,10 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".define del 掷骰指令宏", checker=lambda s: "Delete macro: 掷骰指令宏" in s)
         await self.__vg_msg(".define del", checker=lambda s: "Delete macro: 参数指令宏" not in s)
         await self.__vg_msg("掷骰指令宏", checker=lambda s: not s)
+        await self.__vg_msg(".define 长剑攻击 .rd+4 攻击检定 %% .rd8+2 伤害掷骰", checker=lambda s: "Define 长剑攻击" in s)
+        await self.__vg_msg("长剑攻击", checker=lambda s: s.count("测试用户's roll result for") == 2)
+        await self.__vg_msg(".define 长剑攻击 .rd+4 攻击检定", checker=lambda s: "Define 长剑攻击" in s)
+        await self.__vg_msg("长剑攻击", checker=lambda s: s.count("测试用户's roll result for") == 1)
 
     async def test_3_init(self):
         # Basic

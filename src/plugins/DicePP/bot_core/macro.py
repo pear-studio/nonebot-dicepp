@@ -5,6 +5,7 @@ import re
 from data_manager import JsonObject, custom_json_object
 
 MACRO_COMMAND_SPLIT = "%%"
+MACRO_PARSE_LIMIT = 500  # 宏展开以后的长度限制
 
 
 @custom_json_object
@@ -65,10 +66,8 @@ class BotMacro(JsonObject):
 
         for arg in self.args:
             target = target.replace(arg, "{"+arg+"}")
-        target.replace(MACRO_COMMAND_SPLIT, self.command_split)
-
+        target = target.replace(MACRO_COMMAND_SPLIT, self.command_split)
         re_pattern = ":".join([self.key] + ["(.*)"]*len(self.args))
-        print(re_pattern)
         self.pattern = re.compile(re_pattern)
         self.target = target
 

@@ -96,6 +96,10 @@ class MacroCommand(UserCommandBase):
                 macro_new = None
 
             if macro_new:
+                # 先移除同名宏
+                for macro_prev in macro_list:
+                    if macro_prev.key == macro_new.key:
+                        macro_list.remove(macro_prev)
                 macro_list.append(macro_new)
                 self.bot.data_manager.set_data(DC_MACRO, [meta.user_id], macro_list)
                 feedback = self.format_loc(LOC_DEFINE_SUCCESS, macro=macro_new.key, args=macro_new.args, target=macro_new.target)
@@ -109,7 +113,7 @@ class MacroCommand(UserCommandBase):
                             "\t目标字符串中与参数同名的字符串将在使用宏时被替换为给定的参数\n" \
                             "\t在定义时给定参数就必须在使用时给出, 否则不会被认定为宏\n" \
                             f"\t用{MACRO_COMMAND_SPLIT}来表示指令分隔符, {MACRO_COMMAND_SPLIT}左右的空格和换行将会被忽略\n" \
-                            "\t注意:" \
+                            "\t注意:\n" \
                             "\t\t第一个空格的位置非常关键, 用来区分替换前的内容和替换后的内容\n" \
                             "\t\t参数名字不要重名, 宏可以嵌套, 但不会处理递归(即不可重入), 先定义的宏会先处理\n" \
                             "\t示例:\n" \

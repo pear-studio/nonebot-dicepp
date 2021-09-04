@@ -7,7 +7,7 @@ import bot_utils
 from bot_core import MessageMetaData, NoticeData, RequestData
 from bot_core import FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from bot_core import FriendAddNoticeData, GroupIncreaseNoticeData
-from bot_core import BotMacro
+from bot_core import BotMacro, MACRO_PARSE_LIMIT
 from data_manager import DataManager, DataManagerError, custom_data_chunk, DataChunkBase
 import localization
 from localization import LocalizationHelper
@@ -234,6 +234,8 @@ class Bot:
             macro_list = []
         for macro in macro_list:
             msg = macro.process(msg)
+            if len(msg) > MACRO_PARSE_LIMIT:
+                break
 
         # 处理分行指令
         command_split: str = self.cfg_helper.get_config(CFG_COMMAND_SPLIT)[0]
