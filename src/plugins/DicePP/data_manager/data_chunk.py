@@ -46,19 +46,28 @@ class DataChunkBase(metaclass=abc.ABCMeta):
         """
         from data_manager.json_object import JsonObject, JSON_OBJECT_PREFIX
 
+        # noinspection PyBroadException
         def deserialize_json_object_in_node(node: Any) -> None:
             if isinstance(node, dict):
                 for key, value in node.items():
                     if isinstance(value, dict) or isinstance(value, list):
                         deserialize_json_object_in_node(value)
                     elif isinstance(value, str) and value.find(JSON_OBJECT_PREFIX) == 0:  # 反序列化JsonObject
-                        node[key] = JsonObject.construct_from_json(value)
+                        try:
+                            node[key] = JsonObject.construct_from_json(value)
+                        except Exception as e:
+                            from logger import dice_log
+                            dice_log(f"[DataManager] [Load] 从字典中加载{key}: {value}时出现错误 {e}")
             elif isinstance(node, list):
                 for index, value in enumerate(node):
                     if isinstance(value, dict) or isinstance(value, list):
                         deserialize_json_object_in_node(value)
                     elif isinstance(value, str) and value.find(JSON_OBJECT_PREFIX) == 0:  # 处理Json Object
-                        node[index] = JsonObject.construct_from_json(value)
+                        try:
+                            node[index] = JsonObject.construct_from_json(value)
+                        except Exception as e:
+                            from logger import dice_log
+                            dice_log(f"[DataManager] [Load] 从列表中加载{index}: {value}时出现错误 {e}")
 
         obj = cls()
         obj.__dict__ = json_dict
