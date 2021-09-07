@@ -41,9 +41,10 @@ def match_outer_parentheses(input_str: str) -> int:
     raise ValueError("Input's parentheses is incomplete!")
 
 
-def remove_redundant_parentheses(input_str: str) -> str:
+def remove_redundant_parentheses(input_str: str, readable: bool = True) -> str:
     """
     递归地去掉字符串中一些冗余的括号, 字符串必须不包含空格, 即连接符紧跟着括号
+    readable为True则会尽可能少的清除括号, readable为False则会在保留数学正确性的情况下清除尽可能多的括号
     """
     priority_dict = {"+": 1, "-": 2, "*": 3, "/": 4}
     max_priority = 5
@@ -95,22 +96,25 @@ def remove_redundant_parentheses(input_str: str) -> str:
             if len(inner_operators) == 0:  # 内部没有运算符, 直接递归剔除[1:-1]
                 assert len(inner_par_info_list) == 1
                 output_str = f"({remove_par(par_str[1:-1], outer_priority_lhs, outer_priority_rhs)})"
-            else:  # 内部有运算符, 尝试剔除内部的括号, 为了可读性, 不需要去掉所有没有数学意义的括号, 所以把记录优先级相关的去掉了而是直接用最高优先级跳过后面的检查
+            else:  # 内部有运算符, 尝试剔除内部的括号
                 output_list = []
-                # priority_lhs, priority_rhs = outer_priority_lhs, inner_operators[0][1]  # 当前处理的括号的左侧优先级和右侧优先级
+                priority_lhs, priority_rhs = outer_priority_lhs, inner_operators[0][1]  # 当前处理的括号的左侧优先级和右侧优先级
                 operator_index = 0
                 left, right = 0, inner_operators[0][0]  # 左右侧运算符的索引
                 for par_info in inner_par_info_list:
                     while right < par_info[1]:  # 找到最右侧的运算符
                         if operator_index < len(inner_operators):
                             right = inner_operators[operator_index][0]
-                            # priority_lhs, priority_rhs = priority_rhs, inner_operators[operator_index][1]
+                            priority_lhs, priority_rhs = priority_rhs, inner_operators[operator_index][1]
                             operator_index += 1
                         else:
                             right = par_info[1]+1
-                            # priority_lhs, priority_rhs = priority_rhs, outer_priority_rhs
+                            priority_lhs, priority_rhs = priority_rhs, outer_priority_rhs
                     output_list.append(par_str[left:par_info[0]])
-                    output_list.append(remove_par(par_str[par_info[0]:par_info[1]+1], max_priority, max_priority))
+                    if readable:  # 为了可读性, 不需要去掉所有没有数学意义的括号, 所以把记录优先级相关的去掉了而是直接用最高优先级跳过后面的检查
+                        output_list.append(remove_par(par_str[par_info[0]:par_info[1]+1], max_priority, max_priority))
+                    else:
+                        output_list.append(remove_par(par_str[par_info[0]:par_info[1] + 1], priority_lhs, priority_rhs))
                     left = right
 
                 output_list.append(par_str[left:])

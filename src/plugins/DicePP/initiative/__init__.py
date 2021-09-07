@@ -1,3 +1,4 @@
-from initiative.initiative_list import DATA_CHUNK_INIT, InitiativeError, get_default_init_data
+from initiative.initiative_list import DC_INIT, InitiativeError, get_default_init_data
+from initiative.initiative_list import DCK_ENTITY, DCK_MOD_TIME
 from initiative.initiative_list import add_initiative_entity, del_initiative_entity
 from initiative.initiative_entity import InitEntity

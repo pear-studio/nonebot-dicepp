@@ -7,7 +7,7 @@ from command.bot_command import BotCommandBase
 from data_manager import DataManagerError
 from roll_dice import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, RollDiceError, \
     is_roll_exp
-from initiative import DATA_CHUNK_INIT, get_default_init_data, add_initiative_entity, del_initiative_entity
+from initiative import DC_INIT, DCK_ENTITY, DCK_MOD_TIME, get_default_init_data, add_initiative_entity, del_initiative_entity
 from initiative import InitEntity, InitiativeError
 from bot_utils.string import match_substring
 
@@ -149,7 +149,7 @@ class InitiativeCommand(UserCommandBase):
                     name_dict[n] = roll_res
 
             # 获取init data
-            init_data: dict = self.bot.data_manager.get_data(DATA_CHUNK_INIT, [meta.group_id],
+            init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id],
                                                              default_gen=lambda: get_default_init_data(meta.group_id))
             feedback = ""
             for name, roll_res in name_dict.items():
@@ -161,27 +161,57 @@ class InitiativeCommand(UserCommandBase):
                     feedback += self.format_loc(LOC_INIT_ERROR, error_info=e.info) + "\n"
 
             feedback = feedback.strip()
-            self.bot.data_manager.set_data(DATA_CHUNK_INIT, [meta.group_id], init_data)
+            self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         elif mode == "inspect":  # 查看先攻信息
             try:
-                init_data: dict = self.bot.data_manager.get_data(DATA_CHUNK_INIT, [meta.group_id])
+                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
             except DataManagerError:
                 feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+            # 尝试获取生命值信息
+            hp_dict = {}
+            try:
+                from command.impl import DC_CHAR_HP, HPInfo
+                hp_dict: Dict[str, HPInfo] = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id])
+            except (ImportError, DataManagerError):
+                pass
             init_info = ""
-            init_data["init_entities"] = sorted(init_data["init_entities"], key=lambda x: -x.init)
-            for index, entity in enumerate(init_data["init_entities"]):
+            init_data[DCK_ENTITY] = sorted(init_data[DCK_ENTITY], key=lambda x: -x.init)
+            for index, entity in enumerate(init_data[DCK_ENTITY]):
                 entity: InitEntity = entity
-                init_info += f"{index + 1}.{entity.get_info()}\n"
+                # 生命值信息
+                entity_hp_info: str = ""
+                if entity.owner and entity.owner in hp_dict:  # 玩家
+                    entity_hp_info = f" {hp_dict[entity.owner].get_info()}"
+                    entity.name = self.bot.get_nickname(entity.owner, meta.group_id)  # 更新玩家姓名
+                elif not entity.owner and entity.name in hp_dict:  # NPC
+                    entity_hp_info = f" {hp_dict[entity.name].get_info()}"
+                init_info += f"{index + 1}.{entity.get_info()} {entity_hp_info}\n"
             init_info = init_info.strip()  # 去掉末尾的换行
             feedback = self.format_loc(LOC_INIT_INFO, init_info=init_info)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
-        elif mode == "clear":  # 清除先攻信息
+        elif mode == "clear":  # 清除所有先攻信息
+            # 尝试删除临时生命值信息
             try:
-                self.bot.data_manager.delete_data(DATA_CHUNK_INIT, [meta.group_id])
+                from command.impl import DC_CHAR_HP, HPInfo
+                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
+                for entity in init_data[DCK_ENTITY]:
+                    entity: InitEntity = entity
+                    if not entity.owner:
+                        try:
+                            hp_info: HPInfo = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id, entity.name])
+                            assert hp_info.hp_max != 0  # 不清除已经设置了最大生命值的生命值信息
+                            self.bot.data_manager.delete_data(DC_CHAR_HP, [meta.group_id, entity.name])
+                        except (AssertionError, DataManagerError):  # 没有设置生命值信息或已经设置最大生命值
+                            pass
+            except (ImportError, DataManagerError):  # 没有生命值模块或没有先攻信息
+                pass
+            # 尝试删除先攻信息
+            try:
+                self.bot.data_manager.delete_data(DC_INIT, [meta.group_id])
                 feedback = self.format_loc(LOC_INIT_INFO_CLR)
             except DataManagerError:  # 数据不存在
                 feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
@@ -189,7 +219,7 @@ class InitiativeCommand(UserCommandBase):
 
         elif mode == "delete":  # 删除先攻条目
             try:
-                init_data: dict = self.bot.data_manager.get_data(DATA_CHUNK_INIT, [meta.group_id])
+                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
             except DataManagerError:
                 feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -197,7 +227,7 @@ class InitiativeCommand(UserCommandBase):
             # 在列表中搜索名字, 结果加入到name_list_valid
             name_list: List[str] = [name.strip() for name in arg_str.split("/")]  # 类似.init del A/B/C 这样的用法
             name_list_valid: List[str] = []
-            entity_name_list = [entity.name for entity in init_data["init_entities"]]
+            entity_name_list = [entity.name for entity in init_data[DCK_ENTITY]]
             for name in name_list:
                 match_num = sum([e_name == name for e_name in entity_name_list])  # O(N*M)暴力搜索
                 if match_num == 1:  # 正好有一个同名条目
@@ -216,15 +246,28 @@ class InitiativeCommand(UserCommandBase):
             if name_list_valid:
                 name_list_deleted: List[str] = []
                 for v_name in name_list_valid:
+                    # 删除生命值信息
+                    index = None
+                    for i, entity in enumerate(init_data[DCK_ENTITY]):
+                        if entity.name == v_name:
+                            index = i
+                            break
+                    if not init_data[DCK_ENTITY][index].owner:
+                        try:
+                            from command.impl import DC_CHAR_HP
+                            self.bot.data_manager.delete_data(DC_CHAR_HP, [meta.group_id, v_name])
+                        except (ImportError, DataManagerError):  # 没有设置生命值信息
+                            pass
+                    # 删除先攻信息
                     try:
                         del_initiative_entity(init_data, v_name)
                         name_list_deleted.append(v_name)
                     except InitiativeError as e:
-                        feedback += self.format_loc(LOC_INIT_ROLL, error_info=e.info) + "\n"
+                        feedback += self.format_loc(LOC_INIT_ERROR, error_info=e.info) + "\n"
                 if name_list_deleted:
                     feedback += self.format_loc(LOC_INIT_INFO_DEL, entity_list=name_list_deleted)
             feedback = feedback.strip()
-            self.bot.data_manager.set_data(DATA_CHUNK_INIT, [meta.group_id], init_data)
+            self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:

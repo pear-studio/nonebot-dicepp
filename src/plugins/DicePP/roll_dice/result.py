@@ -20,7 +20,7 @@ class RollResult:
         获得形如 (1+1)*2=4的字符串, 不包括掷骰表达式
         """
         inter_info = self.get_info()
-        final_res = str(sum(self.val_list))
+        final_res = str(self.get_val())
         if inter_info == final_res:
             return final_res
         else:
@@ -39,7 +39,7 @@ class RollResult:
         获得形如D20+1的掷骰表达式
         """
         final_exp = self.exp if self.exp[0] != "+" else self.exp[1:]
-        final_exp = remove_redundant_parentheses(final_exp)
+        final_exp = remove_redundant_parentheses(final_exp, readable=False)
         return final_exp
 
     def get_val(self) -> int:
@@ -52,4 +52,12 @@ class RollResult:
         """
         获得形如 2D20*2=(1+1)*2=4的字符串, 不包括掷骰表达式
         """
-        return f"{self.get_exp()}={self.get_result()}"
+        exp = self.get_exp()
+        info = self.get_info()
+        val = str(self.get_val())
+        res = exp
+        if res != info:
+            res += f"={info}"
+        if res != val:
+            res += f"={val}"
+        return res

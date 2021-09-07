@@ -1,4 +1,6 @@
 import unittest
+from typing import Callable
+
 import roll_config
 from roll_dice.expression import parse_roll_exp, exec_roll_exp, RollExpression, preprocess_roll_exp
 from roll_dice.roll_utils import match_outer_parentheses, remove_redundant_parentheses, RollDiceError
@@ -39,16 +41,20 @@ class MyTestCase(unittest.TestCase):
         self.assertEqual("A*(A+B)+C", remove_redundant_parentheses("A*(A+B)+C"))
         self.assertEqual("max{max2{+(5+14+5+12)}}", remove_redundant_parentheses("max{max2{+(5+14+5+12)}}"))
 
-    def __show_exec_res(self, exp_str: str):
+    def __show_exec_res(self, exp_str: str, checker: Callable[[str], bool] = None):
         for _ in range(100):
             exec_roll_exp(exp_str)
         res = exec_roll_exp(exp_str)
         self.assertIsNotNone(res)
         output = f"Values: {res.val_list} \tInfo: {res.get_info()} \tType: {res.type} \tExpression: {res.get_exp()}"
-        output += f"\nFinal Output: \033[0;33m{res.get_exp()} = {res.get_result()}"
+        output += f"\nFinal Output: \033[0;33m{res.get_complete_result()}"
+        output = f"Origin Exp: \033[0;32m{exp_str} \033[0m\t{output}"
 
-        print("\t\t--- Check Result ---")
-        print(f"Origin Exp: \033[0;32m{exp_str} \033[0m\t{output}")
+        if checker:
+            self.assertTrue(checker(res.get_complete_result()), output)
+        else:
+            print("\t\t--- Check Result ---")
+            print(output)
 
     def __show_exception(self, exp_str: str):
         self.assertRaises(RollDiceError, exec_roll_exp, exp_str)
@@ -60,14 +66,14 @@ class MyTestCase(unittest.TestCase):
 
     def test_basic_roll(self):
         # 基础情况
-        self.__show_exec_res("1D20")
+        self.__show_exec_res("1D20", checker=lambda s: s.split("=")[0] == "1D20" and 1 <= int(s.split("=")[1]) <= 20)
         self.__show_exec_res("3D20")
-        self.__show_exec_res("D")
-        self.__show_exec_res("1D")
-        self.__show_exec_res("D4")
-        self.__show_exec_res("1")
-        self.__show_exec_res("+1D20")
-        self.__show_exec_res("-1D20")
+        self.__show_exec_res("D", checker=lambda s: s.split("=")[0] == "1D20" and 1 <= int(s.split("=")[1]) <= 20)
+        self.__show_exec_res("1D", checker=lambda s: s.split("=")[0] == "1D20" and 1 <= int(s.split("=")[1]) <= 20)
+        self.__show_exec_res("D4", checker=lambda s: s.split("=")[0] == "1D4" and 1 <= int(s.split("=")[1]) <= 4)
+        self.__show_exec_res("1", checker=lambda s: "1" == s)
+        self.__show_exec_res("+1D20", checker=lambda s: s.split("=")[0] == "1D20" and 1 <= int(s.split("=")[1]) <= 20)
+        self.__show_exec_res("-1D20", checker=lambda s: s.split("=")[0] == "-1D20" and -20 <= int(s.split("=")[1]) <= -1)
 
         # 基础运算
         self.__show_exec_res("1D20+1")
@@ -80,12 +86,17 @@ class MyTestCase(unittest.TestCase):
         self.__show_exec_res("2/3D20")
 
         # connector
-        self.__show_exec_res("5/2+3/2")
-        self.__show_exec_res("1+2*2")
-        self.__show_exec_res("1*2+2")
+        self.__show_exec_res("1-1-1", checker=lambda s: s.endswith("-1"))
+        self.__show_exec_res("1+1-1", checker=lambda s: s.endswith("1"))
+        self.__show_exec_res("1-1+1", checker=lambda s: s.endswith("1"))
+        self.__show_exec_res("5/2+3/2", checker=lambda s: s.endswith("3"))
+        self.__show_exec_res("1+2*2", checker=lambda s: s.endswith("5"))
+        self.__show_exec_res("1*2+2", checker=lambda s: s.endswith("4"))
+        self.__show_exec_res("1-1+1-1", checker=lambda s: s.endswith("0"))
+        self.__show_exec_res("1+1-1+1")
 
         # 带空格和中文字符情况 (由于判断指令中表达式和掷骰原因的问题去掉了过滤空格的代码)
-        self.__show_exec_res("1d20")
+        self.__show_exec_res("1d20", checker=lambda s: s.split("=")[0] == "1D20" and 1 <= int(s.split("=")[1]) <= 20)
         self.__show_exec_res("d20＋1")
         # self.__show_exec_res(" 1 D 2 0 ")
         # self.__show_exec_res("1D20 ＋ 1")

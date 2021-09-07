@@ -62,7 +62,7 @@ class REModAdd(RollExpConnector):
 @roll_connector("-")
 class REModSubstract(RollExpConnector):
     """
-    表示加法
+    表示减法
     """
     def connect(self, lhs: RollResult, rhs: RollResult) -> RollResult:
         lhs.val_list += [v*-1 for v in rhs.val_list]

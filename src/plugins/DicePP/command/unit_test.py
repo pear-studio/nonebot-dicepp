@@ -116,6 +116,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".r2#d20+1")
         await self.__vg_msg(".rd20 Attack")
         await self.__vg_msg(".r2#d20 Attack Twice")
+        await self.__vg_msg(".r(1+1)d6", checker=lambda s: "表达式D6格式不正确" in s)
         # Normal - Private
         await self.__vp_msg(".r")
         await self.__vp_msg(".rd20")
@@ -217,6 +218,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
             await self.__vg_msg(f".ri 地精{i}", checker=lambda s: s.count("地精") == 1)
         await self.__vg_msg(".ri 地精-1", checker=lambda s: "先攻列表大小超出限制" in s)
         await self.__vg_msg(".init del 炎魔", checker=lambda s: "炎魔 not exist" in s)
+        await self.__vg_msg(".init clr", checker=lambda s: "Already delete initiative info" in s)
+        await self.__vg_msg(".nn")
 
     # noinspection SpellCheckingInspection
     async def test_3_query(self):
@@ -298,7 +301,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".welcome ABC", group_id="test_group_a", checker=lambda s: "Welcoming word is \"ABC\" now" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "ABC" in s)
         await self.__v_notice(gi_notice_B, checker=lambda s: "Welcome!" in s)
-        await self.__vg_msg(".welcome "+"*"*999, group_id="test_group_a", checker=lambda s: "Welcoming word is illegal: 欢迎词长度大于100" in s)
+        await self.__vg_msg(".welcome " + "*" * 999, group_id="test_group_a", checker=lambda s: "Welcoming word is illegal: 欢迎词长度大于100" in s)
         await self.__vg_msg(".welcome", checker=lambda s: "Welcoming word has been reset" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "ABC" in s)
         await self.__vg_msg(".welcome", group_id="test_group_a", checker=lambda s: "Welcoming word has been reset" in s)
@@ -330,10 +333,43 @@ class MyTestCase(IsolatedAsyncioTestCase):
                             checker=lambda s: "Point: test_uid(测试用户): 50" in s)
         await self.__vg_msg(".point", user_id="test_uid", checker=lambda s: "Point of 测试用户: 50/500" in s)
 
+    async def test_5_hp(self):
+        await self.__vg_msg(".hp", checker=lambda s: "Cannot find hp info" in s)
+        await self.__vg_msg(".hp 10", checker=lambda s: "HP=10\n当前HP:10" in s)
+        await self.__vg_msg(".hp 30/20", checker=lambda s: "HP=30/20\n当前HP:20/20" in s)
+        await self.__vg_msg(".hp (5)", checker=lambda s: "临时HP=5\n当前HP:20/20 (5)" in s)
+        await self.__vg_msg(".hp", checker=lambda s: "HP:20/20 (5)" in s)
+        await self.__vg_msg(".hp -10", checker=lambda s: "当前HP减少10\nHP:20/20 (5) -> HP:15/20" in s)
+        await self.__vg_msg(".hp -100", checker=lambda s: "当前HP减少100\nHP:15/20 -> HP:0/20 昏迷" in s)
+        await self.__vg_msg(".hp +1", checker=lambda s: "当前HP增加1\nHP:0/20 昏迷 -> HP:1/20" in s)
+        await self.__vg_msg(".hp +1", user_id="123456", checker=lambda s: "当前HP增加1\n损失HP:0 -> 损失HP:0" in s)
+        await self.__vg_msg(".hp list", checker=lambda s: "测试用户 HP:1/20\n测试用户 损失HP:0" in s)
+        await self.__vg_msg(".hp 测试用户+1", user_id="123456", checker=lambda s: "当前HP增加1\n损失HP:0 -> 损失HP:0" in s)
+        await self.__vg_msg(".nn 战士", user_id="654321", checker=lambda s: "Set your nickname as 战士" in s)
+        await self.__vg_msg(".hp 测试用户+100", user_id="654321", checker=lambda s: "当前HP增加100\nHP:1/20 -> HP:20/20" in s)
+        await self.__vg_msg(".hp +10/20", checker=lambda s: "最大HP增加20, 当前HP增加10\nHP:20/20 -> HP:30/40" in s)
+        await self.__vg_msg(".hp +40/20 (10)", checker=lambda s: "最大HP增加20, 当前HP增加40, 临时HP增加10\nHP:30/40 -> HP:60/60 (10)" in s)
+        await self.__vg_msg(".hp -10 (15)", checker=lambda s: "临时HP减少15, 当前HP减少10\nHP:60/60 (10) -> HP:50/60" in s)
+        await self.__vg_msg(".hp -0/20", checker=lambda s: "最大HP减少20, 当前HP减少0\nHP:50/60 -> HP:40/40" in s)
+        await self.__vg_msg(".hp -4d6抗性", checker=lambda s: "当前HP减少" in s)
+
+        await self.__vg_msg(".hp del", checker=lambda s: "Delete hp info for 测试用户" in s)
+        await self.__vg_msg(".hp", checker=lambda s: "Cannot find hp info" in s)
+        await self.__vg_msg(".hp 巨兽+2", checker=lambda s: "Cannot find hp info for: 巨兽" in s)
+
+        await self.__vg_msg(".ri 3#哥布林", checker=lambda s: "哥布林a's initiative result" in s)
+        await self.__vg_msg(".hp 哥布林a-10", checker=lambda s: "哥布林a: 当前HP减少10\n损失HP:0 -> 损失HP:10" in s)
+        await self.__vg_msg(".hp 哥布林a+20", checker=lambda s: "哥布林a: 当前HP增加20\n损失HP:10 -> 损失HP:0" in s)
+        await self.__vg_msg(".hp a+(10)", checker=lambda s: "哥布林a: 临时HP增加10\n损失HP:0 -> 损失HP:0 (10)" in s)
+        await self.__vg_msg(".hp a-20", checker=lambda s: "哥布林a: 当前HP减少20\n损失HP:0 (10) -> 损失HP:10" in s)
+        await self.__vg_msg(".hp a-4d6+2", checker=lambda s: "哥布林a: 当前HP减少" in s and "损失HP:10 -> 损失HP:" in s)
+        await self.__vg_msg(".hp a;b;c-4d6", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 2)
+        await self.__vg_msg(".hp list", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 3 and "测试用户 损失HP:0" in s)
+
 
 if __name__ == '__main__':
     async def main():
         unittest.main()
 
-    asyncio.run(main())
 
+    asyncio.run(main())

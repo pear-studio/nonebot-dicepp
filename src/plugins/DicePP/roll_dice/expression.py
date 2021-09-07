@@ -232,7 +232,6 @@ def parse_roll_exp(input_str: str, depth: int = 0) -> RollExpression:
             par_match = match_outer_parentheses(left_str)
         except ValueError:
             raise RollDiceError("含有不完整的括号")
-
         if par_match != -1:  # 有括号则递归处理括号
             par_str, left_str = left_str[:par_match+1], left_str[par_match+1:]
             cur_exp = parse_roll_exp(par_str[1:-1], depth+1)
@@ -243,13 +242,15 @@ def parse_roll_exp(input_str: str, depth: int = 0) -> RollExpression:
                         next_con = ROLL_CONNECTORS_DICT[cur_symbol]()
                         left_str = left_str[len(cur_symbol):]
                         break
+                if not next_con:
+                    raise RollDiceError(f"表达式{left_str}格式不正确")
             exp.append_exp(cur_con, cur_exp)
         else:  # 没有括号则暴力匹配连接符来找到最左侧的表达式和下一个连接符
             next_con_str_index = -1
             next_symbol = None
             # python的dict自从3.5以后默认是有序的
             for cur_symbol in ROLL_CONNECTORS_DICT.keys():
-                cur_index = left_str.find(cur_symbol)
+                cur_index = left_str.rfind(cur_symbol)
                 # 早注册symbol的优先于晚注册symbol的
                 if cur_index != -1:
                     next_con_str_index, next_symbol = cur_index, cur_symbol
@@ -276,7 +277,7 @@ def preprocess_roll_exp(input_str: str) -> str:
     """
     预处理掷骰表达式
     """
-    output_str = input_str
+    output_str = input_str.strip()
     # output_str = re.sub(r"\s", "", output_str)  # 去除空格和换行
     output_str = output_str.upper()
     output_str = to_english_str(output_str)
