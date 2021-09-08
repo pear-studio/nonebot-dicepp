@@ -42,7 +42,7 @@ class LocalizationHelper:
                 continue
             comment: str = self.all_local_texts[key].comment  # 沿用原来的注释, 不用文件里的
             self.all_local_texts[key] = LocalizationText(key, comment=comment)
-            for text in [str(cell.value) for cell in row[1:] if cell.value]:
+            for text in [str(cell.value) for cell in row[1:] if cell.value and cell.value.strip()]:
                 self.all_local_texts[key].add(text)
         workbook.close()
         logger.dice_log(f"[Localization] [Load] 成功读取本地化文件 {self.data_path}")

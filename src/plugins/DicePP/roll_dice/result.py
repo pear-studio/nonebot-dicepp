@@ -58,6 +58,6 @@ class RollResult:
         res = exp
         if res != info:
             res += f"={info}"
-        if res != val:
+        if res != val and info != val:
             res += f"={val}"
         return res
