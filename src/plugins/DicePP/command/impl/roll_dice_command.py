@@ -12,6 +12,7 @@ LOC_ROLL_RESULT = "roll_result"
 LOC_ROLL_RESULT_REASON = "roll_result_reason"
 LOC_ROLL_RESULT_HIDE = "roll_result_hide"
 LOC_ROLL_RESULT_HIDE_REASON = "roll_result_hide_reason"
+LOC_ROLL_RESULT_HIDE_GROUP = "roll_result_hide_group"
 LOC_ROLL_RESULT_MULTI = "roll_result_multi"
 LOC_ROLL_D20_BS = "roll_d20_success"
 LOC_ROLL_D20_BF = "roll_d20_failure"
@@ -64,6 +65,9 @@ class RollDiceCommand(UserCommandBase):
                                          "{nickname}'s hidden roll result for {roll_reason}" +
                                          " is {roll_result_final} {d20_state}",
                                          ".rh带原因时返回的语句 关键字见上文同名关键字")
+        bot.loc_helper.register_loc_text(LOC_ROLL_RESULT_HIDE_GROUP,
+                                         "{nickname} process a hidden rolling",
+                                         "执行.rh时在群里的回复")
         bot.loc_helper.register_loc_text(LOC_ROLL_RESULT_MULTI,
                                          "{time}times {roll_exp}: [{roll_result}]",
                                          "当掷骰表达式中含有#来多次掷骰时, 用这个格式组成上文的{roll_result_final}")
@@ -145,11 +149,14 @@ class RollDiceCommand(UserCommandBase):
 
         # 生成最终回复字符串
         feedback: str = ""
+        commands: List[BotCommandBase] = []
         if is_hidden:
             if reason_str:
-                feedback = self.format_loc(LOC_ROLL_RESULT_HIDE, **loc_args)
-            elif not reason_str:
                 feedback = self.format_loc(LOC_ROLL_RESULT_HIDE_REASON, **loc_args)
+            elif not reason_str:
+                feedback = self.format_loc(LOC_ROLL_RESULT_HIDE, **loc_args)
+            group_feedback: str = self.format_loc(LOC_ROLL_RESULT_HIDE_GROUP, nickname=nickname)
+            commands.append(BotSendMsgCommand(self.bot.account, group_feedback, [GroupMessagePort(meta.group_id)]))
         elif not is_hidden:
             if reason_str:
                 feedback = self.format_loc(LOC_ROLL_RESULT_REASON, **loc_args)
@@ -161,7 +168,8 @@ class RollDiceCommand(UserCommandBase):
 
         # 回复端口
         port = GroupMessagePort(meta.group_id) if not is_hidden and meta.group_id else PrivateMessagePort(meta.user_id)
-        return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+        commands.append(BotSendMsgCommand(self.bot.account, feedback, [port]))
+        return commands
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "r":

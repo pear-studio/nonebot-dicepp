@@ -103,19 +103,21 @@ class InitiativeCommand(UserCommandBase):
         if mode == "roll":  # 创造先攻条目
             # 分割条目名称与掷骰表达式
             exp_str: str
-            name: str
+            name: str = ""
             if " " in arg_str:  # 类似.ri+1 地精 这样的用法
-                exp_str, name = arg_str.split(" ", 1)
+                arg_str, name = arg_str.split(" ", 1)
                 name = name.strip()
-            else:
-                if not arg_str or is_roll_exp(arg_str):  # 类似.ri+1 这样的用法
-                    exp_str, name = arg_str, ""
-                else:  # 类似.ri 强盗 这样的用法
-                    exp_str, name = "", arg_str
 
-            # 如果表达式为空以+或-开头, 说明有个默认的d20
-            if not exp_str or exp_str[0] == "+" or exp_str[0] == "-":
-                exp_str = "d20" + exp_str
+            if not arg_str:  # 类似.ri 这样的用法
+                exp_str = "d20"
+            elif is_roll_exp(arg_str) and arg_str[0] != "+" and arg_str[0] != "-":  # 类似.ri15 的用法
+                exp_str = arg_str
+            elif is_roll_exp("d20"+arg_str):  # 类似.ri优势 或 .ri+1 的用法
+                exp_str = "d20"+arg_str
+            elif not name:  # 类似.ri 强盗 这样的用法
+                exp_str, name = "d20", arg_str
+            else:
+                return [BotSendMsgCommand(self.bot.account, "掷骰表达式无效", [port])]
 
             # 得到先攻结果
             try:

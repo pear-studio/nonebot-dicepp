@@ -117,6 +117,9 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".rd20 Attack")
         await self.__vg_msg(".r2#d20 Attack Twice")
         await self.__vg_msg(".r(1+1)d6", checker=lambda s: "表达式D6格式不正确" in s)
+        await self.__vg_msg(".rh", checker=lambda s: "|Group: group|" in s and "|Private: user|" in s)
+        await self.__vg_msg(".rh d20 原因", checker=lambda s: "测试用户's hidden roll result for 原因 is 1D20=" in s and
+                                                            "测试用户 process a hidden rolling" in s)
         # Normal - Private
         await self.__vp_msg(".r")
         await self.__vp_msg(".rd20")
@@ -209,10 +212,12 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".init", checker=lambda s: s.count("地精") == 5 and "地精a" not in s)
         await self.__vg_msg(".init del 地精b/地精c", checker=lambda s: "Already" in s and "地精b" in s and "地精c" in s)
         await self.__vg_msg(".init", checker=lambda s: s.count("地精") == 3 and "地精b" not in s and "地精c" not in s)
+        await self.__vg_msg(".ri优势 地精", checker=lambda s: "2D20K1=max" in s)
+        await self.__vg_msg(".ri优势+3 地精", checker=lambda s: "2D20K1+3=max" in s)
         await self.__vg_msg(".init" + "clr", checker=lambda s: "Already delete initiative info" in s)
         # Exception
         await self.__vg_msg(".ri 100000000000#地精", checker=lambda s: "不是一个有效的数字" in s)
-        await self.__vg_msg(".ri1000000D20 地精", checker=lambda s: "骰子数量不能大于" in s)
+        await self.__vg_msg(".ri1000000D20 地精", checker=lambda s: "掷骰表达式无效" in s)
         from initiative.initiative_list import INIT_LIST_SIZE
         for i in range(INIT_LIST_SIZE):
             await self.__vg_msg(f".ri 地精{i}", checker=lambda s: s.count("地精") == 1)
