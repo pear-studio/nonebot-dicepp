@@ -200,10 +200,13 @@ class QueryCommand(UserCommandBase):
             record = self.record_dict[source_port]
             page_item_num = MAX_QUERY_CANDIDATE_NUM if record.mode != 0 else MAX_QUERY_CANDIDATE_SIMPLE_NUM
             index = int(arg_str) + (record.page-1) * page_item_num
-            uuid = self.record_dict[source_port].uuid_list[index]
-            item: QueryItem = self.item_uuid_dict[uuid]
-            record.time = bot_utils.time.get_current_date_raw()  # 更新记录有效期
-            feedback = self.format_single_item_feedback(item)
+            try:
+                uuid = self.record_dict[source_port].uuid_list[index]
+                item: QueryItem = self.item_uuid_dict[uuid]
+                record.time = bot_utils.time.get_current_date_raw()  # 更新记录有效期
+                feedback = self.format_single_item_feedback(item)
+            except IndexError:
+                feedback = self.format_loc(LOC_QUERY_NO_RESULT)
         elif mode == "flip_page":
             record = self.record_dict[source_port]
             next_page = (arg_str == "+")
