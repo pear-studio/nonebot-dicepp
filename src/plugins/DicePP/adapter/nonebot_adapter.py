@@ -104,10 +104,10 @@ async def handle_request(bot: NoneBot, event: RequestEvent):
 
     # 处理请求
     if data:
-        approve: bool = all_bots[bot.self_id].process_request(data)
+        approve: Optional[bool] = all_bots[bot.self_id].process_request(data)
         if approve:
             await event.approve(bot)
-        else:
+        elif (approve is not None) and (not approve):
             await event.reject(bot)
 
 # 全局Driver

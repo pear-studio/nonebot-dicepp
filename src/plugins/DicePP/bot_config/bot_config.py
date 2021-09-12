@@ -24,7 +24,7 @@ for dirPath in ALL_LOCAL_DIR_PATH:
         os.makedirs(dirPath)
         logger.dice_log("[Config] [Init] 创建文件夹: " + dirPath)
 
-BOT_VERSION = "Ver 1.0.0 (Early Access 210909)"
+BOT_VERSION = "Ver 1.0.0 (Early Access 210912)"
 
 BOT_DESCRIBE = "DicePP by 梨子"
 
@@ -55,6 +55,10 @@ DEFAULT_CONFIG_COMMENT[CFG_ADMIN] = "管理员账号, 拥有次高权限, 可以
 CFG_FRIEND_TOKEN = "friend_token"
 DEFAULT_CONFIG[CFG_FRIEND_TOKEN] = ""
 DEFAULT_CONFIG_COMMENT[CFG_FRIEND_TOKEN] = "用户申请好友时在验证中输入参数中的文本之一骰娘才会通过, 若字符串为空则通过所有的好友验证"
+
+CFG_GROUP_INVITE = "group_invite"
+DEFAULT_CONFIG[CFG_GROUP_INVITE] = "1"
+DEFAULT_CONFIG_COMMENT[CFG_GROUP_INVITE] = "好友邀请加群时是否同意, 0为总是拒绝, 1为总是同意"
 
 CFG_AGREEMENT = "agreement"
 DEFAULT_CONFIG[CFG_AGREEMENT] = BOT_AGREEMENT

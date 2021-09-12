@@ -287,7 +287,7 @@ class Bot:
                 await self.proxy.process_bot_command(command)
         return bot_commands
 
-    def process_request(self, data: RequestData) -> bool:
+    def process_request(self, data: RequestData) -> Optional[bool]:
         """处理请求"""
         if isinstance(data, FriendRequestData):
             from bot_config import CFG_FRIEND_TOKEN
@@ -296,9 +296,11 @@ class Bot:
             comment: str = data.comment.strip()
             return not passwords or comment in passwords
         elif isinstance(data, JoinGroupRequestData):
-            return True
+            return None
         elif isinstance(data, InviteGroupRequestData):
-            return True
+            from bot_config import CFG_GROUP_INVITE
+            should_allow: int = int(self.cfg_helper.get_config(CFG_GROUP_INVITE)[0])
+            return should_allow == 1
         return False
 
     async def process_notice(self, data: NoticeData) -> List:
