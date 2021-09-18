@@ -5,6 +5,7 @@ from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
 from command import BotCommandBase
 from command.bot_command import PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
+from command.impl import try_use_point
 
 from roll_dice import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, RollDiceError
 
@@ -25,6 +26,9 @@ LOC_ROLL_D20_6_10 = "roll_d20_6_10"
 LOC_ROLL_D20_11_15 = "roll_d20_11_15"
 LOC_ROLL_D20_16_18 = "roll_d20_16_18"
 LOC_ROLL_D20_19 = "roll_d20_19"
+LOC_ROLL_EXP = "roll_exp"
+
+CFG_ROLL_EXP_COST = "roll_exp_cost"
 
 MULTI_ROLL_LIMIT = 10  # 多轮掷骰上限次数
 
@@ -84,6 +88,9 @@ class RollDiceCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_ROLL_D20_11_15, "", "唯一d20的骰值在11到15之间的反馈, 替换{d20_state}")
         bot.loc_helper.register_loc_text(LOC_ROLL_D20_16_18, "", "唯一d20的骰值在16到18之间的反馈, 替换{d20_state}")
         bot.loc_helper.register_loc_text(LOC_ROLL_D20_19, "", "唯一d20的骰值等于19的反馈, 替换{d20_state}")
+        bot.loc_helper.register_loc_text(LOC_ROLL_EXP, "Expectation of {expression} is:\n{expectation}", "计算掷骰表达式期望时的回复")
+
+        bot.cfg_helper.register_config(CFG_ROLL_EXP_COST, "10", "计算掷骰表达式期望所花费的点数")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".r")
@@ -92,11 +99,15 @@ class RollDiceCommand(UserCommandBase):
 
     def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 解析掷骰语句
-        msg_str = msg_str[2:]
+        msg_str = msg_str[2:].strip()
         is_hidden = False
+        compute_exp = False
         if msg_str and msg_str[0] == 'h':  # 暗骰
             msg_str = msg_str[1:]
             is_hidden = True
+        if msg_str[:3] == "exp":
+            msg_str = msg_str[3:]
+            compute_exp = True
         msg_str = msg_str.strip()
         if not msg_str:
             msg_str = 'd'
@@ -104,7 +115,7 @@ class RollDiceCommand(UserCommandBase):
         exp_str: str
         reason_str: str
         # 分割掷骰原因与掷骰表达式
-        if " " in msg_str:
+        if " " in msg_str and not compute_exp:
             exp_str, reason_str = msg_str.split(" ", 1)
             reason_str = reason_str.strip()
         else:
@@ -129,10 +140,25 @@ class RollDiceCommand(UserCommandBase):
             port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
+        # 回复端口
+        port = GroupMessagePort(meta.group_id) if not is_hidden and meta.group_id else PrivateMessagePort(meta.user_id)
+
+        if compute_exp:  # 计算期望走单独的流程
+            # 尝试扣除点数
+            cost_point = int(self.bot.cfg_helper.get_config(CFG_ROLL_EXP_COST)[0])
+            res = try_use_point(self.bot, meta.user_id, cost_point)
+            # 点数不足
+            if res:
+                return [BotSendMsgCommand(self.bot.account, res, [port])]
+            else:
+                exp_result = get_roll_exp_result(exp)
+                feedback = self.format_loc(LOC_ROLL_EXP, expression=exp.get_result().get_exp(), expectation=exp_result)
+                return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+
         # 得到结果字符串
         if len(res_list) > 1:
             roll_exp = res_list[0].get_exp()
-            roll_result = ",\n".join([res.get_result() for res in res_list])
+            roll_result = "\n" + (",\n".join([res.get_result() for res in res_list]))
 
             roll_result_final = self.format_loc(LOC_ROLL_RESULT_MULTI,
                                                 time=times, roll_exp=roll_exp, roll_result=roll_result)
@@ -165,9 +191,6 @@ class RollDiceCommand(UserCommandBase):
 
         # 记录掷骰结果
         record_roll_data(self.bot, meta, res_list)
-
-        # 回复端口
-        port = GroupMessagePort(meta.group_id) if not is_hidden and meta.group_id else PrivateMessagePort(meta.user_id)
         commands.append(BotSendMsgCommand(self.bot.account, feedback, [port]))
         return commands
 
@@ -187,6 +210,25 @@ class RollDiceCommand(UserCommandBase):
 
     def get_description(self) -> str:
         return ".r 掷骰"
+
+
+def get_roll_exp_result(expression: RollExpression) -> str:
+    repeat_times = 10000
+    stat_range = [1, 5, 25, 45, 55, 75, 95, 99]  # 统计区间, 大于0, 小于100
+    res_list: List[int] = list(sorted((expression.get_result().get_val() for _ in range(repeat_times))))
+    mean = sum(res_list)/repeat_times
+    info = []
+    stat_range_num: List[int] = [0] + [repeat_times*r//100 for r in stat_range] + [-1]
+    for num in stat_range_num:
+        info.append(res_list[num])
+    feedback = ""
+    left_range = 0
+    for index, right_range in enumerate(stat_range):
+        feedback += f"{left_range}%~{right_range}% -> [{info[index]}~{info[index + 1]}]\n"
+        left_range = right_range
+    feedback += f"{stat_range[-1]}%~100% -> [{info[-2]}~{info[-1]}]\n"
+    feedback += f"均值: {mean}"
+    return feedback
 
 
 def get_d20_state_loc_text(bot: Bot, res_list: List[RollResult]):

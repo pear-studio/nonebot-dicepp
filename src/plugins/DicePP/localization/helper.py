@@ -50,9 +50,14 @@ class LocalizationHelper:
     def save_localization(self):
         """按现在的设置多个机器人会读写同一个配置文件, 如果并行可能存在写冲突, 现在应该是单线程异步, 应该没问题"""
         def save_loc_text_to_row(sheet, l_text: LocalizationText, row: int):
+            # 先清空旧数据
+            sheet.delete_rows(idx=row)
+            sheet.insert_rows(idx=row)
+            # 加入新数据
             header = sheet.cell(row=row, column=1, value=l_text.key)
             if l_text.comment:
                 header.comment = Comment(l_text.comment, "DicePP")
+
             for ci, text in enumerate(l_text.loc_texts):
                 sheet.cell(row=row, column=ci+2, value=text)
 

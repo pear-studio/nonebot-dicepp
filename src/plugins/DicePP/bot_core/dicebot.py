@@ -115,9 +115,9 @@ class Bot:
                 try:
                     bot_commands += command.tick()
                 except Exception:
-                    dice_log(self.handle_exception(f"Tick: {command.readable_name} CODE110"))
+                    dice_log(str(self.handle_exception(f"Tick: {command.readable_name} CODE110")[0]))
 
-            if loop.time() - loop_time_prev > 60:  # 一分钟执行一次
+            if loop.time() - loop_time_prev > 300:  # 五分钟执行一次
                 # tick_daily
                 last_online_str = self.data_manager.get_data(DC_META, DCP_META_ONLINE_LAST, default_val=init_online_str)
                 last_online_day_str = bot_utils.time.datetime_to_str_day(bot_utils.time.str_to_datetime(last_online_str))
@@ -127,7 +127,12 @@ class Bot:
                         try:
                             bot_commands += command.tick_daily()
                         except Exception:
-                            dice_log(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111"))
+                            dice_log(str(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111")[0]))
+                    # 给Master发送每日更新通知
+                    from localization import LOC_DAILY_UPDATE
+                    feedback = self.loc_helper.format_loc_text(LOC_DAILY_UPDATE)
+                    if feedback and feedback != "$":
+                        await self.send_msg_to_master(feedback)
                 # 更新最后在线时间
                 cur_online_str = bot_utils.time.get_current_date_str()
                 online_period[-1][-1] = cur_online_str
@@ -135,6 +140,8 @@ class Bot:
                 self.data_manager.set_data(DC_META, DCP_META_ONLINE_PERIOD, online_period)
 
                 loop_time_prev = loop.time()
+                # 保存数据到本地
+                await self.data_manager.save_data_async()
 
             if self.proxy:
                 for command in bot_commands:
@@ -204,15 +211,21 @@ class Bot:
                     bc_list = self.handle_exception(f"加载{command.__class__.__name__}失败")  # 报错不用中文名
                     for bc in bc_list:
                         await self.proxy.process_bot_command(bc)
+
         if self.proxy:
             from command import PrivateMessagePort, BotSendMsgCommand
-            feedback = "\n".join(["初始化完成!"] + init_info + ["准备好开始工作啦~"])
-            from bot_config import CFG_MASTER
-            dice_log(feedback)
-            master_list = self.cfg_helper.get_config(CFG_MASTER)
-            for master in master_list:  # 给Master汇报
-                command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
-                await self.proxy.process_bot_command(command)
+            from localization import LOC_LOGIN_NOTICE
+            feedback = self.loc_helper.format_loc_text(LOC_LOGIN_NOTICE)
+            if feedback and feedback != "$":
+                feedback = f"{init_info}\n{feedback}"
+                dice_log(feedback)
+                # 给所有Master汇报
+                from bot_config import CFG_MASTER
+                for master in self.cfg_helper.get_config(CFG_MASTER):
+                    command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
+                    await self.proxy.process_bot_command(command)
+            else:
+                dice_log(init_info)
 
     # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:
@@ -343,6 +356,14 @@ class Bot:
             return [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_list[0])])]
         else:
             return []
+
+    async def send_msg_to_master(self, msg: str) -> None:
+        """发送信息给主Master"""
+        from bot_config import CFG_MASTER
+        from command import PrivateMessagePort, BotSendMsgCommand
+        master_list = self.cfg_helper.get_config(CFG_MASTER)
+        if master_list:
+            await self.proxy.process_bot_command(BotSendMsgCommand(self.account, msg, [PrivateMessagePort(master_list[0])]))
 
     def get_nickname(self, user_id: str, group_id: str = "") -> str:
         """

@@ -7,7 +7,7 @@ from typing import List, Tuple, Any, Literal, Optional
 from bot_core import Bot
 from bot_core import BotMacro, DC_MACRO, MACRO_COMMAND_SPLIT
 from bot_config import CFG_MASTER, CFG_COMMAND_SPLIT
-from data_manager import custom_data_chunk, DataChunkBase, DataManagerError
+from data_manager import custom_data_chunk, DataChunkBase, DataManagerError, DataManager
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
 from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
@@ -204,6 +204,7 @@ class WelcomeCommand(UserCommandBase):
 
 
 LOC_POINT_SHOW = "point_show"
+LOC_POINT_LACK = "point_lack"
 LOC_POINT_CHECK = "point_check"
 LOC_POINT_EDIT = "point_edit"
 LOC_POINT_EDIT_ERROR = "point_edit_error"
@@ -234,6 +235,7 @@ class PointCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(LOC_POINT_SHOW, "Point of {name}: {point}", "用户查看点数的回复")
+        bot.loc_helper.register_loc_text(LOC_POINT_LACK, "Cannot cost point: {reason}", "用户扣除点数失败的回复")
         bot.loc_helper.register_loc_text(LOC_POINT_CHECK, "Point of {id}: {result}", "Master查看某人的点数")
         bot.loc_helper.register_loc_text(LOC_POINT_EDIT, "Point: {result}", "Master调整某人的点数")
         bot.loc_helper.register_loc_text(LOC_POINT_EDIT_ERROR, "Error when editing points: {error}", "Master调整某人的点数时出现错误")
@@ -248,14 +250,14 @@ class PointCommand(UserCommandBase):
         from bot_core import DC_USER_DATA
         from command.impl import DCP_USER_DATA_ROLL_A_UID, DCP_ROLL_TIME_A_ID_ROLL, DCK_ROLL_TODAY
         from data_manager import DataManagerError
-        point_init = int(self.bot.cfg_helper.get_config(CFG_POINT_INIT))
-        point_add = int(self.bot.cfg_helper.get_config(CFG_POINT_ADD))
-        point_max = int(self.bot.cfg_helper.get_config(CFG_POINT_MAX))
+        point_init = int(self.bot.cfg_helper.get_config(CFG_POINT_INIT)[0])
+        point_add = int(self.bot.cfg_helper.get_config(CFG_POINT_ADD)[0])
+        point_max = int(self.bot.cfg_helper.get_config(CFG_POINT_MAX)[0])
         user_ids = self.bot.data_manager.get_keys(DC_USER_DATA, [])
-        dcp_roll_total_a_uid = DCP_USER_DATA_ROLL_A_UID + DCP_ROLL_TIME_A_ID_ROLL + [DCK_ROLL_TODAY]
+        dcp_today_roll_total_a_uid = DCP_USER_DATA_ROLL_A_UID + DCP_ROLL_TIME_A_ID_ROLL + [DCK_ROLL_TODAY]
         for user_id in user_ids:
             try:
-                roll_time = self.bot.data_manager.get_data(DC_USER_DATA, [user_id] + dcp_roll_total_a_uid)
+                roll_time = self.bot.data_manager.get_data(DC_USER_DATA, [user_id] + dcp_today_roll_total_a_uid)
                 assert roll_time > 0
             except (DataManagerError, AssertionError):
                 continue
@@ -321,3 +323,21 @@ class PointCommand(UserCommandBase):
 
     def get_description(self) -> str:
         return ".point 查看当前点数"  # help指令中返回的内容
+
+
+def try_use_point(bot: Bot, user_id: str, point: int) -> str:
+    """尝试为user_id扣除点数, 点数不足返回失败原因, 扣除成功返回空字符串"""
+    point_init = int(bot.cfg_helper.get_config(CFG_POINT_INIT)[0])
+    point_limit = int(bot.cfg_helper.get_config(CFG_POINT_LIMIT)[0])
+
+    if point < 0:
+        return bot.loc_helper.format_loc_text(LOC_POINT_LACK, reason=f"{point} < 0")
+    prev_point = bot.data_manager.get_data(DC_POINT, [user_id, DCK_POINT_CUR], default_val=point_init)
+    today_point = bot.data_manager.get_data(DC_POINT, [user_id, DCK_POINT_TODAY], 0)
+    if prev_point < point:
+        return bot.loc_helper.format_loc_text(LOC_POINT_LACK, reason=f"当前:{prev_point} < {point}")
+    if today_point + point > point_limit:
+        return bot.loc_helper.format_loc_text(LOC_POINT_LACK, reason=f"今日已使用:{prev_point} + {point} > {point_limit}")
+    cur_point = prev_point - point
+    bot.data_manager.set_data(DC_POINT, [user_id, DCK_POINT_CUR], cur_point)
+    return ""

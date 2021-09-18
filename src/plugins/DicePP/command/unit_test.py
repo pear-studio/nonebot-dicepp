@@ -126,6 +126,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         # Error
         await self.__vg_msg(".r2(DK3)")
         await self.__vg_msg(".rh()")
+        # Get Expectation
+        await self.__vp_msg(".r exp 2d20k1", checker=lambda s: "Expectation of 2D20K1 is:\n" in s and "均值" in s)
 
     async def test_2_activate(self):
         await self.__vg_msg(".bot", checker=lambda s: "DicePP by 梨子" in s)
@@ -328,7 +330,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".m send ABC:1234:ABC", user_id="test_master", checker=lambda s: "目标必须为user或group" in s)
 
     async def test_5_point(self):
-        await self.__vg_msg(".point", checker=lambda s: "100/500" in s)
+        await self.__vg_msg(".point", checker=lambda s: "/500" in s)
         await self.__vg_msg(".m point", checker=lambda s: not s)
         await self.__vp_msg(".m point test_uid", user_id="test_master",
                             checker=lambda s: "Point: test_uid(测试用户): 100" in s)
