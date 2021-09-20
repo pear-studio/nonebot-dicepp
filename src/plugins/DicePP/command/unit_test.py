@@ -193,6 +193,23 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".define 长剑攻击 .rd+4 攻击检定", checker=lambda s: "Define 长剑攻击" in s)
         await self.__vg_msg("长剑攻击", checker=lambda s: s.count("测试用户's roll result for") == 1)
 
+    async def test_2_variable(self):
+        await self.__vg_msg(".set 战斗如潮=2", checker=lambda s: "set variable 战斗如潮 as 2" in s)
+        await self.__vg_msg(".r %战斗如潮%d20", checker=lambda s: "测试用户's roll result is 2D20" in s)
+        await self.__vg_msg(".set 战斗如潮-1", checker=lambda s: "set variable 战斗如潮 as 2-1=1" in s)
+        await self.__vg_msg(".r %战斗如潮%d20", checker=lambda s: "测试用户's roll result is 1D20" in s)
+        await self.__vg_msg(".set 生命骰=4d6", checker=lambda s: "set variable 生命骰 as" in s)
+        await self.__vg_msg(".set 生命骰-1d20", checker=lambda s: "set variable 生命骰 as" in s)
+        await self.__vg_msg(".get 战斗如潮", checker=lambda s: "战斗如潮 = 1" in s)
+        await self.__vg_msg(".get", checker=lambda s: "All Variables:\n战斗如潮=1; 生命骰=" in s)
+        await self.__vg_msg(".get ABC", checker=lambda s: "Error when process var: abc不存在, 当前可用变量: ['战斗如潮', '生命骰']" in s)
+        await self.__vg_msg(".set ABC", checker=lambda s: "Error when process var: 至少包含['=', '+', '-']其中之一" in s)
+        await self.__vg_msg(".set ABC=1", checker=lambda s: "set variable abc as 1" in s)
+        await self.__vg_msg(".del 生命骰", checker=lambda s: "Delete variable: 生命骰" in s)
+        await self.__vg_msg(".get", checker=lambda s: "All Variables:\n战斗如潮=1; abc=1" in s)
+        await self.__vg_msg(".del all", checker=lambda s: "Delete variable: 战斗如潮; abc" in s)
+        await self.__vg_msg(".get", checker=lambda s: "All Variables:\n暂无任何变量" in s)
+
     async def test_3_init(self):
         # Basic
         await self.__vg_msg(".nn 伊丽莎白")

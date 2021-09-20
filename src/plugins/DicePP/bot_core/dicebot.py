@@ -8,51 +8,15 @@ from bot_core import MessageMetaData, NoticeData, RequestData
 from bot_core import FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from bot_core import FriendAddNoticeData, GroupIncreaseNoticeData
 from bot_core import BotMacro, MACRO_PARSE_LIMIT
-from data_manager import DataManager, DataManagerError, custom_data_chunk, DataChunkBase
+from bot_core import BotVariable
+from bot_core import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE
+from bot_core import DCP_META_ONLINE_PERIOD, DCP_META_ONLINE_LAST
+from bot_core import NICKNAME_ERROR
+from data_manager import DataManager, DataManagerError
 import localization
 from localization import LocalizationHelper
 from bot_config import ConfigHelper, CFG_COMMAND_SPLIT
 from logger import dice_log, get_exception_info
-
-DC_META = "meta"
-DCP_META_ONLINE_LAST = ["online", "last"]
-DCP_META_ONLINE_PERIOD = ["online", "period"]
-
-DC_MACRO = "macro"
-DC_USER_DATA = "user_data"
-DC_GROUP_DATA = "group_data"
-DC_NICKNAME = "nickname"
-NICKNAME_ERROR = "Undefined Name"
-
-
-@custom_data_chunk(identifier=DC_META)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
-
-
-@custom_data_chunk(identifier=DC_MACRO, include_json_object=True)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
-
-
-@custom_data_chunk(identifier=DC_USER_DATA)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
-
-
-@custom_data_chunk(identifier=DC_GROUP_DATA)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
-
-
-@custom_data_chunk(identifier=DC_NICKNAME)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
 
 
 # noinspection PyBroadException
@@ -250,6 +214,17 @@ class Bot:
             msg = macro.process(msg)
             if len(msg) > MACRO_PARSE_LIMIT:
                 break
+
+        # 处理变量
+        try:
+            var_name_list: List[str] = self.data_manager.get_keys(DC_VARIABLE, [meta.user_id, meta.group_id])
+        except DataManagerError:
+            var_name_list = []
+        for var_name in var_name_list:
+            key = f"%{var_name}%"
+            if key in msg:
+                var: BotVariable = self.data_manager.get_data(DC_VARIABLE, [meta.user_id, meta.group_id, var_name])
+                msg = msg.replace(key, str(var.val))
 
         # 处理分行指令
         command_split: str = self.cfg_helper.get_config(CFG_COMMAND_SPLIT)[0]

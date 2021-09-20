@@ -42,15 +42,12 @@ class BotMacro(JsonObject):
         self.args: List[str] = []  # 宏的参数, 为空则不需要参数
         self.target: str = ""  # 将宏关键字替换为的对象
         self.command_split: str = ""
-        self.pattern: re.Pattern = re.compile("")  # parse时生成
+        self.pattern: re.Pattern = re.compile("")
 
     def initialize(self, raw: str, command_split: str):
         self.raw = raw  # 定义宏时的字符串
         self.command_split = command_split
-        self.parse()
-
-    def parse(self):
-        """解析定义字符串"""
+        # 解析定义字符串
         if self.raw.find(" ") == -1:
             raise ValueError("宏定义中缺少空格")
         key_args, target = self.raw.split(" ", 1)
@@ -81,10 +78,7 @@ class BotMacro(JsonObject):
                 res = res.format(**kwargs)
             return res
 
-        if self.args:  # 有参数
-            return self.pattern.sub(handle_macro, input_str)
-        else:
-            return self.pattern.sub(handle_macro, input_str)
+        return self.pattern.sub(handle_macro, input_str)
 
     def __repr__(self):
         return f"Macro({self.key}, Args:{self.args} -> {self.target})"

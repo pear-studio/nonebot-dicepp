@@ -178,7 +178,7 @@ class DataManager:
 
         return cur_node
 
-    def get_keys(self, target: str, path: str):
+    def get_keys(self, target: str, path: List[str]):
         """类似get_data, 但是不会返回数据的拷贝, 而是返回当前path的所有key, 当前path不存在或不是dict则抛出异常"""
         if len(path) > 1 and not path[-1]:
             raise DataManagerError(f"[GetData] 叶子结点的名称不能为空 完整路径: {path}")
