@@ -64,8 +64,9 @@ class VariableCommand(UserCommandBase):
         if cmd_type == "set":
             # 判断操作类型
             set_type_list = ["=", "+", "-"]
-            set_type: Optional[Literal["=", "+", "-"]] = None
-            set_info_tmp = [(s_type, arg_str.find(s_type)) for s_type in set_type_list if arg_str.find(s_type) != -1]
+            set_type: Optional[Literal["=", "+", "-"]]
+            # 此处any为Literal["=", "+", "-"]
+            set_info_tmp: List[Tuple[any, int]] = [(s_type, arg_str.find(s_type)) for s_type in set_type_list if arg_str.find(s_type) != -1]
             if not set_info_tmp:
                 feedback = self.format_loc(LOC_VAR_ERROR, error=f"至少包含{set_type_list}其中之一")
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -81,10 +82,13 @@ class VariableCommand(UserCommandBase):
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             # 获取修改值
             try:
-                var_val: int = exec_roll_exp(var_val_str).get_val()
-            except RollDiceError as e:   # ToDo 支持依赖其他变量
-                feedback = self.format_loc(LOC_VAR_ERROR, error=f"{var_val_str}: {e.info}")
-                return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+                var_val: int = int(var_val_str)
+            except ValueError:
+                try:
+                    var_val: int = exec_roll_exp(var_val_str).get_val()
+                except RollDiceError as e:   # ToDo 支持依赖其他变量
+                    feedback = self.format_loc(LOC_VAR_ERROR, error=f"{var_val_str}: {e.info}")
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             if set_type == "=":
                 bot_var = BotVariable()
                 bot_var.initialize(var_name, var_val)

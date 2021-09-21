@@ -192,6 +192,9 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg("长剑攻击", checker=lambda s: s.count("测试用户's roll result for") == 2)
         await self.__vg_msg(".define 长剑攻击 .rd+4 攻击检定", checker=lambda s: "Define 长剑攻击" in s)
         await self.__vg_msg("长剑攻击", checker=lambda s: s.count("测试用户's roll result for") == 1)
+        await self.__vg_msg(".define 掷骰指令宏 .r", checker=lambda s: "Define 掷骰指令宏 as .r, args are: []" in s)
+        await self.__vg_msg(".define del all", checker=lambda s: "Delete macro: ['长剑攻击', '掷骰指令宏']" in s)
+        await self.__vg_msg(".define", checker=lambda s: "1" not in s)
 
     async def test_2_variable(self):
         await self.__vg_msg(".set 战斗如潮=2", checker=lambda s: "set variable 战斗如潮 as 2" in s)
@@ -205,6 +208,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".get ABC", checker=lambda s: "Error when process var: abc不存在, 当前可用变量: ['战斗如潮', '生命骰']" in s)
         await self.__vg_msg(".set ABC", checker=lambda s: "Error when process var: 至少包含['=', '+', '-']其中之一" in s)
         await self.__vg_msg(".set ABC=1", checker=lambda s: "set variable abc as 1" in s)
+        await self.__vg_msg(".set 生命骰=10000000", checker=lambda s: "set variable 生命骰 as 10000000" in s)
         await self.__vg_msg(".del 生命骰", checker=lambda s: "Delete variable: 生命骰" in s)
         await self.__vg_msg(".get", checker=lambda s: "All Variables:\n战斗如潮=1; abc=1" in s)
         await self.__vg_msg(".del all", checker=lambda s: "Delete variable: 战斗如潮; abc" in s)

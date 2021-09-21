@@ -68,18 +68,22 @@ class MacroCommand(UserCommandBase):
             feedback = self.format_loc(LOC_DEFINE_LIST, macro_list=macro_list_str)
         elif arg_str.startswith("del"):
             macro_key = arg_str[3:].strip()
-            del_index = -1
-            for i, macro in enumerate(macro_list):
-                if macro.key == macro_key:
-                    del_index = i
-                    break
-            if del_index != -1:
-                del macro_list[del_index]
-                self.bot.data_manager.set_data(DC_MACRO, [meta.user_id], macro_list)
-                feedback = self.format_loc(LOC_DEFINE_DEL, macro=macro_key)
+            if macro_key == "all":
+                self.bot.data_manager.delete_data(DC_MACRO, [meta.user_id])
+                feedback = self.format_loc(LOC_DEFINE_DEL, macro=str([macro.key for macro in macro_list]))
             else:
-                feedback = self.format_loc(LOC_DEFINE_FAIL, error=f"找不到关键字为{macro_key}的宏")
-        else:
+                del_index = -1
+                for i, macro in enumerate(macro_list):
+                    if macro.key == macro_key:
+                        del_index = i
+                        break
+                if del_index != -1:
+                    del macro_list[del_index]
+                    self.bot.data_manager.set_data(DC_MACRO, [meta.user_id], macro_list)
+                    feedback = self.format_loc(LOC_DEFINE_DEL, macro=macro_key)
+                else:
+                    feedback = self.format_loc(LOC_DEFINE_FAIL, error=f"找不到关键字为{macro_key}的宏")
+        else:  # 定义新宏
             macro_new: Optional[BotMacro] = None
             macro_len_limit = int(self.bot.cfg_helper.get_config(CFG_DEFINE_LEN_MAX)[0])
             macro_num_limit = int(self.bot.cfg_helper.get_config(CFG_DEFINE_NUM_MAX)[0])
@@ -93,6 +97,9 @@ class MacroCommand(UserCommandBase):
                 feedback = self.format_loc(LOC_DEFINE_FAIL, error=f"自定义宏长度超出上限: {macro_len_limit}字符")
             if len(macro_list) >= macro_num_limit:
                 feedback = self.format_loc(LOC_DEFINE_FAIL, error=f"自定义宏数量超出上限: {macro_num_limit} 请先删除已有宏")
+                macro_new = None
+            if macro_new.key == "all":
+                feedback = self.format_loc(LOC_DEFINE_FAIL, error=f"宏关键字为保留字: {macro_new.key}")
                 macro_new = None
 
             if macro_new:
@@ -125,8 +132,10 @@ class MacroCommand(UserCommandBase):
                             "\t输入: 掷骰两次:d20+2:某种原因  -> 等同于: 执行指令.r d20+2 某种原因 + 执行指令.r d20+2 某种原因\n" \
                             "查看当前定义的宏:\n" \
                             "\t.define\n" \
-                            "删除已经定义的宏:\n" \
-                            "\t.define del [关键字]"
+                            "删除某个已经定义的宏:\n" \
+                            "\t.define del [关键字]\n" \
+                            "删除所有宏:\n" \
+                            "\t.define del all"
             return feedback
         return ""
 
