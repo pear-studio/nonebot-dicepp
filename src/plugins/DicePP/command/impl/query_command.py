@@ -13,6 +13,7 @@ from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData, preprocess_msg
 from command.bot_command import BotCommandBase, MessagePort, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
 from bot_utils.localdata import read_xlsx, update_xlsx, create_parent_dir
+from logger import dice_log
 
 # LOC_NICKNAME_SET = "nickname_set"
 
@@ -413,7 +414,7 @@ class QueryCommand(UserCommandBase):
                     item_tag: List[str] = [tag.strip() for tag in item_tag if tag.strip()]
 
                     if not main_key:
-                        error_info.append(f"表格{wb.path}/{sheet_name}第{row_index}行缺少key, 该条目未加载")
+                        dice_log(f"表格{wb.path}/{sheet_name}第{row_index}行缺少key, 该条目未加载")
                         continue
                     if not item_content:
                         error_info.append(f"表格{wb.path}/{sheet_name}第{row_index}行缺少content, 该条目未加载")
