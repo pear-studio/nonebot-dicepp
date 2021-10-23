@@ -1,6 +1,6 @@
 import os
 import asyncio
-from typing import List, Optional, Dict, Iterable
+from typing import List, Optional, Dict
 
 import bot_config
 import bot_utils
@@ -17,6 +17,7 @@ import localization
 from localization import LocalizationHelper
 from bot_config import ConfigHelper, CFG_COMMAND_SPLIT
 from logger import dice_log, get_exception_info
+from dice_hub import HubManager
 
 
 # noinspection PyBroadException
@@ -34,6 +35,7 @@ class Bot:
         self.data_path = os.path.join(bot_config.BOT_DATA_PATH, account)
 
         self.data_manager = DataManager(self.data_path)
+        self.hub_manager = HubManager(self.account)
         self.loc_helper = LocalizationHelper(bot_config.CONFIG_PATH, self.account)
         self.cfg_helper = ConfigHelper(bot_config.CONFIG_PATH, self.account)
 
@@ -332,11 +334,14 @@ class Bot:
         else:
             return []
 
+    def get_master_ids(self) -> List[str]:
+        from bot_config import CFG_MASTER
+        return self.cfg_helper.get_config(CFG_MASTER)
+
     async def send_msg_to_master(self, msg: str) -> None:
         """发送信息给主Master"""
-        from bot_config import CFG_MASTER
         from command import PrivateMessagePort, BotSendMsgCommand
-        master_list = self.cfg_helper.get_config(CFG_MASTER)
+        master_list = self.get_master_ids()
         if master_list:
             await self.proxy.process_bot_command(BotSendMsgCommand(self.account, msg, [PrivateMessagePort(master_list[0])]))
 
