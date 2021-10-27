@@ -185,18 +185,22 @@ class InitiativeCommand(UserCommandBase):
                 entity: InitEntity = entity
                 # 生命值信息
                 entity_hp_info: str = ""
-                if entity.owner and entity.owner in hp_dict:  # 玩家
-                    entity_hp_info = f" {hp_dict[entity.owner].get_info()}"
-                    entity.name = self.bot.get_nickname(entity.owner, meta.group_id)  # 更新玩家姓名
-                elif not entity.owner and entity.name in hp_dict:  # NPC
-                    entity_hp_info = f" {hp_dict[entity.name].get_info()}"
+                if entity.owner:  # 更新玩家姓名
+                    entity.name = self.bot.get_nickname(entity.owner, meta.group_id)
+                if entity.owner and entity.owner in hp_dict:  # 玩家HP信息
+                    entity_hp_info = f"{hp_dict[entity.owner].get_info()}"
+                if not entity.owner and entity.name in hp_dict:  # NPC信息
+                    entity_hp_info = f"{hp_dict[entity.name].get_info()}"
                 init_info += f"{index + 1}.{entity.get_info()} {entity_hp_info}\n"
             init_info = init_info.strip()  # 去掉末尾的换行
             feedback = self.format_loc(LOC_INIT_INFO, init_info=init_info)
+            # 更新生命值信息
+            self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         elif mode == "clear":  # 清除所有先攻信息
             # 尝试删除临时生命值信息
+            feedback = ""
             try:
                 from command.impl import DC_CHAR_HP, HPInfo
                 init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
@@ -205,18 +209,25 @@ class InitiativeCommand(UserCommandBase):
                     if not entity.owner:
                         try:
                             hp_info: HPInfo = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id, entity.name])
-                            assert hp_info.hp_max != 0  # 不清除已经设置了最大生命值的生命值信息
+                            assert hp_info.hp_max == 0  # 不清除已经设置了最大生命值的生命值信息
                             self.bot.data_manager.delete_data(DC_CHAR_HP, [meta.group_id, entity.name])
-                        except (AssertionError, DataManagerError):  # 没有设置生命值信息或已经设置最大生命值
+                        except DataManagerError:  # 没有设置生命值信息
                             pass
+                        except AssertionError:  # 已经设置最大生命值
+                            if not feedback:
+                                feedback = "注意: 没有清除已设置最大生命值的 "
+                            feedback += entity.name + " "
             except (ImportError, DataManagerError):  # 没有生命值模块或没有先攻信息
                 pass
+            if feedback:
+                feedback = feedback.strip() + "的生命值信息\n"
+
             # 尝试删除先攻信息
             try:
                 self.bot.data_manager.delete_data(DC_INIT, [meta.group_id])
-                feedback = self.format_loc(LOC_INIT_INFO_CLR)
+                feedback += self.format_loc(LOC_INIT_INFO_CLR)
             except DataManagerError:  # 数据不存在
-                feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
+                feedback += self.format_loc(LOC_INIT_INFO_NOT_EXIST)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         elif mode == "delete":  # 删除先攻条目

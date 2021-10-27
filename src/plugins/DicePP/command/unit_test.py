@@ -224,6 +224,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".ri d4+D20 大地精", checker=lambda s: "大地精" in s and "result is 1D4+1D20" in s)
         await self.__vg_msg(".init", checker=lambda s: s.count("伊丽莎白") == 1 and "大地精" in s)
         await self.__vg_msg(".init", group_id="group2", checker=lambda s: "Cannot find initiative info" in s)
+        await self.__vg_msg(".nn 雷电将军")
+        await self.__vg_msg(".init", checker=lambda s: s.count("伊丽莎白") == 0 and s.count("雷电将军") == 1 and "大地精" in s)
         await self.__vg_msg(".init clr", checker=lambda s: "Already delete initiative info" in s)
         await self.__vg_msg(".init", checker=lambda s: "Cannot find initiative info" in s)
         # Complex
