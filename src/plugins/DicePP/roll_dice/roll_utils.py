@@ -94,7 +94,7 @@ def remove_redundant_parentheses(input_str: str, readable: bool = True) -> str:
         # 递归剔除内部括号
         if len(inner_par_info_list) != 0:
             if len(inner_operators) == 0:  # 内部没有运算符, 直接递归剔除[1:-1]
-                assert len(inner_par_info_list) == 1
+                assert len(inner_par_info_list) == 1, str(inner_par_info_list)
                 output_str = f"({remove_par(par_str[1:-1], outer_priority_lhs, outer_priority_rhs)})"
             else:  # 内部有运算符, 尝试剔除内部的括号
                 output_list = []

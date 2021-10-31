@@ -110,6 +110,10 @@ class MyTestCase(unittest.TestCase):
         self.__show_exec_res("4D20xo<10")
         self.__show_exec_res("4D20r<10x>10")
         self.__show_exec_res("4D20x>10r<10")
+        self.__show_exec_res("D20cs>5")
+        self.__show_exec_res("10D20cs>10")
+        self.__show_exec_res("5+10D20cs>10+5")
+        self.__show_exec_res("10D20kl5cs>10")
 
         # 带括号
         self.__show_exec_res("(1+2)")
@@ -149,6 +153,7 @@ class MyTestCase(unittest.TestCase):
         self.__show_exception("D20)")
         self.__show_exception("(D20)+(1")
         self.__show_exception("((D20)+1))))")
+        self.__show_exception("(10D20+5)cs>10")
 
         # 边界条件
         self.__show_exception(f"1D{roll_config.DICE_TYPE_MAX + 1}")

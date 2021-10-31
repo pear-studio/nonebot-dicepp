@@ -223,3 +223,42 @@ class REModMin(RollExpModifier):
             if roll_res.d20_num == 1:
                 roll_res.d20_state = roll_res.val_list[0]
         return roll_res
+
+
+@roll_modifier("CS(<|>|=)?[1-9][0-9]*")
+class REModCountSuccess(RollExpModifier):
+    """
+    表示计算当前结果中符合条件的骰值的数量
+    """
+
+    def __init__(self, args: str):
+        super().__init__(args)
+
+        args = args[2:]
+        # 判定条件
+        if args[0] in ("<", ">", "="):
+            comp, rhs = args[0], args[1:]
+        else:
+            comp, rhs = "=", args
+
+        if comp == ">":
+            self.op = operator.gt
+        elif comp == "<":
+            self.op = operator.lt
+        elif comp == "=":
+            self.op = operator.eq
+
+        self.comp: str = comp
+        self.rhs: int = int(rhs)
+        if self.rhs < roll_config.DICE_CONSTANT_MIN or self.rhs > roll_config.DICE_CONSTANT_MAX:
+            raise RollDiceError(f"常量大小必须在{roll_config.DICE_CONSTANT_MIN}至{roll_config.DICE_CONSTANT_MAX}之间")
+
+    def modify(self, roll_res: RollResult) -> RollResult:
+        result = sum([self.op(val, self.rhs) for val in roll_res.val_list])
+
+        roll_res.info = f"[count{self.comp}{self.rhs}" + "{" + str(roll_res.val_list)[1:-1] + "}" + f"={result}]"
+        roll_res.val_list = [result]
+        roll_res.exp = f"{roll_res.exp}CS{self.comp}{self.rhs}"
+        roll_res.d20_num = 2  # 使用了这个修饰器以后无法判断d20数量, 设成2以后之后就不会用到d20_state了
+        roll_res.d20_state = 0
+        return roll_res

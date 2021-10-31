@@ -48,7 +48,7 @@ class RollResult:
         """
         return sum(self.val_list)
 
-    def get_complete_result(self):
+    def get_complete_result(self) -> str:
         """
         获得形如 2D20*2=(1+1)*2=4的字符串, 不包括掷骰表达式
         """
@@ -61,3 +61,12 @@ class RollResult:
         if res != val and info != val:
             res += f"={val}"
         return res
+
+    def get_exp_val(self) -> str:
+        exp = self.get_exp()
+        val = str(self.get_val())
+
+        if exp != val:
+            return f"{exp}={val}"
+        else:
+            return val

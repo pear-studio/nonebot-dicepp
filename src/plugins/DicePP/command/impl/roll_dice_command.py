@@ -101,10 +101,14 @@ class RollDiceCommand(UserCommandBase):
         # 解析掷骰语句
         msg_str = msg_str[2:].strip()
         is_hidden = False
+        is_show_info = True
         compute_exp = False
-        if msg_str and msg_str[0] == 'h':  # 暗骰
+        while msg_str and msg_str[0] in ["h", "s"]:
+            if msg_str[0] == "h":  # 暗骰
+                is_hidden = True
+            if msg_str[0] == "s":  # 缩略中间结果
+                is_show_info = False
             msg_str = msg_str[1:]
-            is_hidden = True
         if msg_str[:3] == "exp":
             msg_str = msg_str[3:]
             compute_exp = True
@@ -158,12 +162,15 @@ class RollDiceCommand(UserCommandBase):
         # 得到结果字符串
         if len(res_list) > 1:
             roll_exp = res_list[0].get_exp()
-            roll_result = "\n" + (",\n".join([res.get_result() for res in res_list]))
+            roll_result = "\n" + (",\n".join([res.get_result() if is_show_info else res.get_val() for res in res_list]))
 
             roll_result_final = self.format_loc(LOC_ROLL_RESULT_MULTI,
                                                 time=times, roll_exp=roll_exp, roll_result=roll_result)
         else:
-            roll_result_final = res_list[0].get_complete_result()
+            if is_show_info:
+                roll_result_final = res_list[0].get_complete_result()
+            else:
+                roll_result_final = res_list[0].get_exp_val()
 
         # 获取其他信息
         nickname = self.bot.get_nickname(meta.user_id, meta.group_id)

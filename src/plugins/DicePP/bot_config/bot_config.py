@@ -26,7 +26,7 @@ for dirPath in ALL_LOCAL_DIR_PATH:
         os.makedirs(dirPath)
         logger.dice_log("[Config] [Init] 创建文件夹: " + dirPath)
 
-BOT_VERSION = "Ver 1.0.0 (Early Access 210919)"
+BOT_VERSION = "Ver 1.0.0 (Early Access 211031)"
 
 BOT_DESCRIBE = "DicePP by 梨子"
 
