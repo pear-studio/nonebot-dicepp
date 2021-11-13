@@ -12,6 +12,7 @@ from typing import Tuple, List, Dict, Any, Optional, Callable
 import logger
 from data_manager.data_chunk import DATA_CHUNK_TYPES, DataChunkBase
 from bot_utils.localdata import update_json_async, read_json
+from bot_config import DATA_PATH as ROOT_DATA_PATH
 
 
 class DataManager:
@@ -29,7 +30,7 @@ class DataManager:
         self.dataPath = data_path
         if not os.path.exists(data_path):
             os.makedirs(data_path)
-            logger.dice_log(f"[DataManager] [Init] 创建文件夹: {data_path}")
+            logger.dice_log(f"[DataManager] [Init] 创建文件夹: {data_path.replace(ROOT_DATA_PATH, '~')}")
 
         self.__dataChunks: Dict[str, DataChunkBase] = {}
         self.load_data()
@@ -216,27 +217,29 @@ class DataManager:
         for dcType in DATA_CHUNK_TYPES:
             dc_name = dcType.get_identifier()
             json_path = os.path.join(self.dataPath, f"{dc_name}.json")
+            json_path_readable = json_path.replace(ROOT_DATA_PATH, "~")
             json_path_tmp = json_path + ".tmp"
+            json_path_tmp_readable = json_path_tmp.replace(ROOT_DATA_PATH, "~")
             if os.path.exists(json_path_tmp):  # 先看看能不能从临时文件恢复, 临时文件应该比正式文件更新
                 try:
                     json_dict = read_json(json_path_tmp)
                     self.__dataChunks[dc_name] = dcType.from_json(json_dict)
-                    logger.dice_log(f"[DataManager] [Init] 从备份{json_path_tmp}中载入{dc_name}")
+                    logger.dice_log(f"[DataManager] [Init] 从备份{json_path_tmp_readable}中载入{dc_name}")
                     continue
                 except JSONDecodeError as e:
-                    logger.dice_log(f"[DataManager] [Init] 无法从备份{json_path_tmp}中载入{dc_name}: {e.args}")
+                    logger.dice_log(f"[DataManager] [Init] 无法从备份{json_path_tmp_readable}中载入{dc_name}: {e.args}")
             elif os.path.exists(json_path):  # 如果存在该文件, 则读取json文件并用它初始化数据
                 try:
                     json_dict = read_json(json_path)
                     self.__dataChunks[dc_name] = dcType.from_json(json_dict)
-                    logger.dice_log(f"[DataManager] [Init] 从{json_path}中载入{dc_name}")
+                    logger.dice_log(f"[DataManager] [Init] 从{json_path_readable}中载入{dc_name}")
                     continue
                 except JSONDecodeError as e:
                     if not os.path.exists(json_path_tmp):
-                        logger.dice_log(f"[DataManager] [Init] 无法从{json_path}中载入{dc_name}: {e.args}")
+                        logger.dice_log(f"[DataManager] [Init] 无法从{json_path_readable}中载入{dc_name}: {e.args}")
             # 文件不存在则用默认构造函数生成一个数据对象
             self.__dataChunks[dc_name] = dcType()
-            logger.dice_log(f"[DataManager] [Init] 找不到{json_path}, 生成空白{dc_name}")
+            # logger.dice_log(f"[DataManager] [Init] 找不到{json_path_readable}, 使用空白数据")
 
     async def save_data_async(self):
         for dataChunk in self.__dataChunks.values():
@@ -246,7 +249,9 @@ class DataManager:
             dataChunk.hash_code = hash(dataChunk)
             json_path = os.path.join(self.dataPath, f"{dc_name}.json")
             # 为了安全起见, 先将文件保存在临时文件中
+            json_path_readable = json_path.replace(ROOT_DATA_PATH, "~")
             json_path_tmp = json_path + ".tmp"
+            json_path_tmp_readable = json_path_tmp.replace(ROOT_DATA_PATH, "~")
             try:
                 await update_json_async(dataChunk.to_json(), json_path_tmp)
             except JSONDecodeError as e:
@@ -257,13 +262,13 @@ class DataManager:
                 if os.path.exists(json_path):
                     os.remove(json_path)
             except OSError as e:
-                logger.dice_log(f"[SaveData] 无法删除文件{json_path}: {e.args}")
+                logger.dice_log(f"[SaveData] 无法删除文件{json_path_readable}: {e.args}")
                 continue
             # 重命名临时文件
             try:
                 os.rename(json_path_tmp, json_path)
             except OSError as e:
-                logger.dice_log(f"[SaveData] 无法重命名文件{json_path_tmp} -> {json_path} 原因: {e.args}")
+                logger.dice_log(f"[SaveData] 无法重命名文件{json_path_tmp_readable} -> {json_path_readable} 原因: {e.args}")
                 continue
 
     def save_data(self):

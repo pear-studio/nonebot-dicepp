@@ -106,6 +106,11 @@ class MyTestCase(IsolatedAsyncioTestCase):
     async def test_1_localization(self):
         self.test_bot.loc_helper.save_localization()
         self.test_bot.loc_helper.load_localization()
+        self.test_bot.loc_helper.load_chat()
+        # 默认对话
+        await self.__vg_msg("HI", checker=lambda s: "Hello" in s or "G'Day" in s)
+        await self.__vg_msg("hi", checker=lambda s: "Hello" in s or "G'Day" in s)
+        await self.__vg_msg("HI123", checker=lambda s: "Hello" not in s and "G'Day" not in s)
 
     async def test_1_roll_dice(self):
         # Normal - Group

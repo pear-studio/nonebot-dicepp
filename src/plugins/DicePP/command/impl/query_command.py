@@ -2,7 +2,6 @@ from typing import List, Tuple, Dict, Optional, Set, Literal, Iterable, Any
 import os
 import datetime
 import openpyxl
-from openpyxl.comments import Comment
 import random
 # from openpyxl.utils import get_column_letter
 
@@ -12,7 +11,7 @@ import bot_config
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData, preprocess_msg
 from command.bot_command import BotCommandBase, MessagePort, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
-from bot_utils.localdata import read_xlsx, update_xlsx, create_parent_dir
+from bot_utils.localdata import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from logger import dice_log
 
 # LOC_NICKNAME_SET = "nickname_set"
@@ -369,55 +368,41 @@ class QueryCommand(UserCommandBase):
         """从指定文件或目录读取信息"""
 
         def load_data_from_xlsx(wb: openpyxl.Workbook):
-            for sheet_name in wb.sheetnames:
-                field_index_dict: Dict[str, int] = {}
-                ws = wb[sheet_name]
-                for header_cell in ws[1]:
-                    if header_cell.value in QUERY_ITEM_FIELD:
-                        field_index_dict[header_cell.value] = header_cell.column - 1
-                flag = False
-                for field in QUERY_ITEM_FIELD:
-                    if field not in field_index_dict:
-                        error_info.append(f"不完整的表格{path}/{sheet_name}, 缺少{field}, 未加载该工作表")
-                        flag = True
-                        break
-                if flag:
-                    continue
-
+            data_dict = col_based_workbook_to_dict(wb, QUERY_ITEM_FIELD, error_info)
+            for sheet_name in data_dict.keys():
+                sheet_data = data_dict[sheet_name]
                 # 生成QuerySource
                 qs_uuid = get_query_uuid()
                 qs = QuerySource(qs_uuid, path, sheet_name)
                 # 逐行生成QueryItem
                 qi_list: List[QueryItem] = []
-                row_index = 1
-                for row in ws.iter_rows(min_row=2):
-                    row_index += 1
-                    main_key = row[field_index_dict[QUERY_ITEM_FIELD_KEY]].value
-                    main_key: str = str(main_key).strip() if main_key else ""
+                item_num = len(sheet_data[QUERY_ITEM_FIELD_KEY])
+                for item_index in range(item_num):
+                    main_key = sheet_data[QUERY_ITEM_FIELD_KEY][item_index]
 
-                    item_key = row[field_index_dict[QUERY_ITEM_FIELD_SYN]].value
+                    item_key = sheet_data[QUERY_ITEM_FIELD_SYN][item_index]
                     item_key = str(item_key).strip().split("/") if item_key else []  # 用/分隔同义词
                     item_key: List[str] = [main_key] + [syn.strip() for syn in item_key if syn.strip()]
                     item_key_tuple: Tuple[str] = tuple(item_key)
 
-                    item_content = row[field_index_dict[QUERY_ITEM_FIELD_CONTENT]].value
+                    item_content = sheet_data[QUERY_ITEM_FIELD_CONTENT][item_index]
                     item_content: str = str(item_content).strip() if item_content else ""
 
-                    item_desc = row[field_index_dict[QUERY_ITEM_FIELD_DESC]].value
+                    item_desc = sheet_data[QUERY_ITEM_FIELD_DESC][item_index]
                     item_desc: str = str(item_desc).strip() if item_desc else ""
 
-                    item_cat = row[field_index_dict[QUERY_ITEM_FIELD_CAT]].value
+                    item_cat = sheet_data[QUERY_ITEM_FIELD_CAT][item_index]
                     item_cat: str = str(item_cat).strip() if item_cat else ""
 
-                    item_tag = row[field_index_dict[QUERY_ITEM_FIELD_TAG]].value
+                    item_tag = sheet_data[QUERY_ITEM_FIELD_TAG][item_index]
                     item_tag = str(item_tag).strip().split("#") if item_tag else []  # 用#分隔Tag
                     item_tag: List[str] = [tag.strip() for tag in item_tag if tag.strip()]
 
                     if not main_key:
-                        dice_log(f"表格{wb.path}/{sheet_name}第{row_index}行缺少key, 该条目未加载")
+                        dice_log(f"表格{wb.path}/{sheet_name}第{item_index+2}行缺少key, 该条目未加载")
                         continue
                     if not item_content:
-                        error_info.append(f"表格{wb.path}/{sheet_name}第{row_index}行缺少content, 该条目未加载")
+                        error_info.append(f"表格{wb.path}/{sheet_name}第{item_index+2}行缺少content, 该条目未加载")
                         continue
                     if not item_desc:  # 用content的前一部分自动生成desc
                         item_desc = item_content[:QUERY_ITEM_FIELD_DESC_DEFAULT_LEN].replace("\n", " ") + "..."
@@ -426,7 +411,7 @@ class QueryCommand(UserCommandBase):
 
                     qi_uuid = get_query_uuid()
                     qi = QueryItem(qi_uuid, item_key_tuple, item_content, item_desc, item_cat, item_tag,
-                                   qs_uuid, row_index - 1)
+                                   qs_uuid, item_index + 1)
                     qi_list.append(qi)
                 # 记录到self字典中
                 if qi_list:
@@ -441,28 +426,28 @@ class QueryCommand(UserCommandBase):
                                 self.query_dict[k].append(item.uuid)
 
         if path.endswith(".xlsx"):
-            if os.path.exists(path):
+            if os.path.exists(path):  # 存在文件则读取文件
                 try:
                     workbook = read_xlsx(path)
                 except PermissionError:
                     error_info.append(f"读取{path}时遇到错误: 权限不足")
                     return
                 load_data_from_xlsx(workbook)
-            else:
+            else:  # 创建一个模板文件
                 create_parent_dir(path)  # 父文件夹不存在需先创建父文件夹
-                workbook = get_template_query_workbook()
+                workbook = get_empty_col_based_workbook(QUERY_ITEM_FIELD, QUERY_ITEM_FIELD_COMMENT)
                 update_xlsx(workbook, path)
                 workbook.close()
         elif path:  # 是文件夹
-            if os.path.exists(path):
+            if os.path.exists(path):  # 遍历文件夹下所有文件
                 try:
-                    inner_paths = os.listdir(path)  # 遍历文件夹下所有文件
+                    inner_paths = os.listdir(path)
                     for inner_path in inner_paths:
                         inner_path = os.path.join(path, inner_path)
                         self.load_data_from_path(inner_path, error_info)
                 except FileNotFoundError as e:  # 文件夹不存在
                     error_info.append(f"读取{path}时遇到错误: {e}")
-            else:
+            else:  # 创建空文件夹
                 create_parent_dir(path)
 
     def get_state(self) -> str:
@@ -472,18 +457,6 @@ class QueryCommand(UserCommandBase):
         else:
             feedback = f"尚未加载任何资料库"
         return feedback
-
-
-def get_template_query_workbook() -> openpyxl.Workbook:
-    """获得一个模板工作簿"""
-    wb = openpyxl.Workbook()
-    for name in wb.sheetnames:
-        del wb[name]
-    ws_temp = wb.create_sheet("template")
-    for i, text in enumerate(QUERY_ITEM_FIELD):
-        cell_field = ws_temp.cell(row=1, column=1 + i, value=text)
-        cell_field.comment = Comment(QUERY_ITEM_FIELD_COMMENT[text], "DicePP")
-    return wb
 
 
 QUERY_UUID_SET: Set[int] = set()

@@ -1,20 +1,15 @@
-"""
-命令模板, 复制到新创建的文件里修改
-"""
-
 from typing import List, Tuple, Any, Iterable, Set, Dict
 import random
 import re
 import os
 import openpyxl
-from openpyxl.comments import Comment
 
 import bot_config
 from bot_core import Bot
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData, preprocess_msg
 from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
-from bot_utils.localdata import read_xlsx, update_xlsx, create_parent_dir
+from bot_utils.localdata import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from bot_utils.string import match_substring
 from localization import LocalizationHelper
 from roll_dice import preprocess_roll_exp, is_roll_exp, exec_roll_exp
@@ -301,38 +296,27 @@ class DeckCommand(UserCommandBase):
         """从指定文件或目录读取信息"""
 
         def load_data_from_xlsx(wb: openpyxl.Workbook):
-            for sheet_name in wb.sheetnames:
-                field_index_dict: Dict[str, int] = {}
-                ws = wb[sheet_name]
-                for header_cell in ws[1]:
-                    if header_cell.value in DECK_ITEM_FIELD:
-                        field_index_dict[header_cell.value] = header_cell.column - 1
-                flag = False
-                for field in DECK_ITEM_FIELD:
-                    if field not in field_index_dict:
-                        error_info.append(f"不完整的表格{path}/{sheet_name}, 缺少{field}, 未加载该工作表")
-                        flag = True
-                        break
-                if flag:
-                    continue
-
+            data_dict = col_based_workbook_to_dict(wb, DECK_ITEM_FIELD, error_info)
+            for sheet_name in data_dict.keys():
+                sheet_data = data_dict[sheet_name]
                 # 生成Deck
                 deck = Deck(sheet_name)
                 # 逐行生成DeckItem
-                row_index = 1
-                for row in ws.iter_rows(min_row=2):
-                    row_index += 1
-                    content = row[field_index_dict[DECK_ITEM_FIELD_CONTENT]].value
-                    content: str = str(content).strip() if content else ""
+                item_num = len(sheet_data[DECK_ITEM_FIELD_CONTENT])
+                for item_index in range(item_num):
+                    content = sheet_data[DECK_ITEM_FIELD_CONTENT][item_index]
+                    if not content:
+                        dice_log(f"表格{sheet_name}第{item_index + 2}行缺少content, 该条目未加载")
+                        continue
 
-                    weight = row[field_index_dict[DECK_ITEM_FIELD_WEIGHT]].value
+                    weight = sheet_data[DECK_ITEM_FIELD_WEIGHT][item_index]
                     try:
                         weight = int(weight)
                         assert weight >= 1
                     except (TypeError, ValueError, AssertionError):
                         weight = 1
 
-                    redraw = row[field_index_dict[DECK_ITEM_FIELD_REDRAW]].value
+                    redraw = sheet_data[DECK_ITEM_FIELD_REDRAW][item_index]
                     try:
                         redraw = int(redraw)
                         assert redraw in (0, 1)
@@ -340,16 +324,12 @@ class DeckCommand(UserCommandBase):
                         redraw = 1
                     redraw = True if redraw == 1 else False
 
-                    final = row[field_index_dict[DECK_ITEM_FIELD_FINAL]].value
+                    final = sheet_data[DECK_ITEM_FIELD_FINAL][item_index]
                     try:
                         final = int(final)
                         assert final in (0, 1, 2)
                     except (TypeError, ValueError, AssertionError):
                         final = 0
-
-                    if not content:
-                        dice_log(f"表格{sheet_name}第{row_index}行缺少content, 该条目未加载")
-                        continue
 
                     item = DeckItem(content, weight, redraw, final)
                     deck.add_item(item)
@@ -360,28 +340,28 @@ class DeckCommand(UserCommandBase):
                     self.deck_dict[deck_name] = deck
 
         if path.endswith(".xlsx"):
-            if os.path.exists(path):
+            if os.path.exists(path):  # 存在文件则读取文件
                 try:
                     workbook = read_xlsx(path)
                 except PermissionError:
                     error_info.append(f"读取{path}时遇到错误: 权限不足")
                     return
                 load_data_from_xlsx(workbook)
-            else:
+            else:  # 创建一个模板文件
                 create_parent_dir(path)  # 父文件夹不存在需先创建父文件夹
-                workbook = get_template_query_workbook()
+                workbook = get_empty_col_based_workbook(DECK_ITEM_FIELD, DECK_ITEM_FIELD_COMMENT)
                 update_xlsx(workbook, path)
                 workbook.close()
         elif path:  # 是文件夹
-            if os.path.exists(path):
+            if os.path.exists(path):  # 遍历文件夹下所有文件
                 try:
-                    inner_paths = os.listdir(path)  # 遍历文件夹下所有文件
+                    inner_paths = os.listdir(path)
                     for inner_path in inner_paths:
                         inner_path = os.path.join(path, inner_path)
                         self.load_data_from_path(inner_path, error_info)
                 except FileNotFoundError as e:  # 文件夹不存在
                     error_info.append(f"读取{path}时遇到错误: {e}")
-            else:
+            else:  # 创建空文件夹
                 create_parent_dir(path)
 
     def get_state(self) -> str:
@@ -391,15 +371,3 @@ class DeckCommand(UserCommandBase):
         else:
             feedback = f"尚未加载任何牌库"
         return feedback
-
-
-def get_template_query_workbook() -> openpyxl.Workbook:
-    """获得一个模板工作簿"""
-    wb = openpyxl.Workbook()
-    for name in wb.sheetnames:
-        del wb[name]
-    ws_temp = wb.create_sheet("template")
-    for i, text in enumerate(DECK_ITEM_FIELD):
-        cell_field = ws_temp.cell(row=1, column=1 + i, value=text)
-        cell_field.comment = Comment(DECK_ITEM_FIELD_COMMENT[text], "DicePP")
-    return wb

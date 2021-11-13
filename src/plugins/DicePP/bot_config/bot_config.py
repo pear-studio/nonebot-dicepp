@@ -86,6 +86,7 @@ class ConfigHelper:
     def load_config(self):
         """用文档里的配置覆写之前的配置"""
         if not os.path.exists(self.data_path):
+            logger.dice_log(f"[BotConfig] [Load] 无法读取配置文件 {self.data_path.replace(DATA_PATH, '~')}")
             return
         workbook = read_xlsx(self.data_path)
         if self.identifier in workbook.sheetnames:
@@ -93,6 +94,7 @@ class ConfigHelper:
         elif "Default" in workbook.sheetnames:
             sheet = workbook["Default"]
         else:
+            logger.dice_log(f"[BotConfig] [Load] 无法读取配置文件 {self.data_path.replace(DATA_PATH, '~')} {self.identifier}")
             return
         for row in sheet.iter_rows():
             key = str(row[0].value)  # 第一个元素为关键字
@@ -103,7 +105,7 @@ class ConfigHelper:
             for text in [str(cell.value) for cell in row[1:] if cell.value]:
                 self.all_configs[key].add(text)
         workbook.close()
-        logger.dice_log(f"[BotConfig] [Load] 成功读取配置文件 {self.data_path}")
+        logger.dice_log(f"[BotConfig] [Load] 成功读取配置文件 {self.data_path.replace(DATA_PATH, '~')}")
 
     def save_config(self):
         """按现在的设置多个机器人会读写同一个配置文件, 如果并行可能存在写冲突, 现在应该是单线程异步, 应该没问题"""
@@ -117,15 +119,12 @@ class ConfigHelper:
                 for ci, text in enumerate(item.contents):
                     sheet.cell(row=row, column=ci + 2, value=text)
 
-        feedback: str
         if os.path.exists(self.data_path):
             workbook = read_xlsx(self.data_path)
-            feedback = "成功更新配置文件"
         else:
             workbook = openpyxl.Workbook()
             for name in workbook.sheetnames:
                 del workbook[name]
-            feedback = "成功创建配置文件"
         if self.identifier in workbook.sheetnames:
             cur_sheet = workbook[self.identifier]
         else:
@@ -136,11 +135,11 @@ class ConfigHelper:
         try:
             workbook.save(self.data_path)
         except PermissionError:
-            logger.dice_log(f"[BotConfig] [Save] Save config {self.data_path} failed as permission denied!")
+            logger.dice_log(f"[BotConfig] [Save] 无法保存本地化文件 {self.data_path.replace(DATA_PATH, '~')}, 没有写入权限")
 
         workbook.close()
 
-        logger.dice_log(f"[BotConfig] [Save] {feedback} {self.data_path}")
+        logger.dice_log(f"[BotConfig] [Save] 成功更新配置文件 {self.data_path.replace(DATA_PATH, '~')}")
 
     def register_config(self, key: str, origin_str: str, comment: str = ""):
         """

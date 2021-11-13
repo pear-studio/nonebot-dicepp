@@ -15,4 +15,4 @@ from .utils_dnd_command import UtilsDNDCommand
 from .hp_command import HPCommand, DC_CHAR_HP, HPInfo
 from .query_command import QueryCommand
 from .deck_command import DeckCommand
-
+from .chat_command import ChatCommand

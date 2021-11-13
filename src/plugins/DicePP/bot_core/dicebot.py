@@ -56,6 +56,8 @@ class Bot:
         self.register_command()
         self.loc_helper.load_localization()  # 要在注册完命令后再读取本地化文件
         self.loc_helper.save_localization()  # 更新本地文件
+        self.loc_helper.load_chat()
+        self.loc_helper.save_chat()
         self.cfg_helper.load_config()
         self.cfg_helper.save_config()
 
