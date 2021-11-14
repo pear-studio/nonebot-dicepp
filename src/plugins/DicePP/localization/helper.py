@@ -70,28 +70,31 @@ class LocalizationHelper:
 
     def load_chat(self):
         """从xlsx中读取自定义对话文件"""
-        workbook, local_sheet = load_sheet_from_path(self.chat_data_path, self.identifier)
+        def add_default_chat():
+            """增加默认自定义对话"""
+            self.all_chat_texts[DEFAULT_CHAT_KEY] = LocalizationText(DEFAULT_CHAT_KEY, comment=DEFAULT_CHAT_COMMENT)
+            for default_text in DEFAULT_CHAT_TEXT:
+                self.all_chat_texts[DEFAULT_CHAT_KEY].add(default_text)
+
+        workbook, chat_sheet = load_sheet_from_path(self.chat_data_path, self.identifier)
         if not workbook:
             dice_log(f"[Local] [ChatLoad] 无法找到自定义对话文件 {self.chat_data_path.replace(ROOT_DATA_PATH, '.')} {self.identifier}")
+            add_default_chat()
             return
 
         from command import preprocess_msg
-        for row in local_sheet.iter_rows():
+        for row in chat_sheet.iter_rows():
             key = str(row[0].value)  # 第一个元素为关键字
             key = preprocess_msg(key)  # 对key做一下预处理, 因为匹配的目标是预处理过后的
-            if key not in self.all_chat_texts:  # 无效的关键字
-                continue
             comment: str = row[0].comment  # 沿用文件里的注释
             self.all_chat_texts[key] = LocalizationText(key, comment=comment)
             for text in [str(cell.value) for cell in row[1:] if cell.value and cell.value.strip()]:
                 self.all_chat_texts[key].add(text)
 
         has_chat: bool = (len(self.all_chat_texts) != 0)
-        if not has_chat:  # 增加默认自定义对话
-            self.all_chat_texts[DEFAULT_CHAT_KEY] = LocalizationText(DEFAULT_CHAT_KEY, comment=DEFAULT_CHAT_COMMENT)
-            for text in DEFAULT_CHAT_TEXT:
-                self.all_chat_texts[DEFAULT_CHAT_KEY].add(text)
-        dice_log(f"[Local] [ChatLoad] 成功读取本地化文件 {self.data_path.replace(ROOT_DATA_PATH, '~')}")
+        if not has_chat:
+            add_default_chat()
+        dice_log(f"[Local] [ChatLoad] 成功读取本地化文件 {self.chat_data_path.replace(ROOT_DATA_PATH, '~')}")
         workbook.close()
 
     def save_chat(self):

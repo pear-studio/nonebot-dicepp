@@ -5,10 +5,12 @@ import os
 import openpyxl
 
 import bot_config
+from bot_config import DATA_PATH, LOCAL_IMG_PATH
 from bot_core import Bot
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData, preprocess_msg
 from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
+import bot_utils
 from bot_utils.localdata import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from bot_utils.string import match_substring
 from localization import LocalizationHelper
@@ -27,6 +29,7 @@ LOC_DRAW_ERR_NO_DECK = "draw_error_no_deck"
 LOC_DRAW_ERR_VAGUE_DECK = "draw_error_vague_deck"
 
 CFG_DECK_DATA_PATH = "deck_data_path"
+DRAW_DATA_PATH = "DeckData"
 
 DRAW_LIMIT = 10  # 指令抽卡的上限
 HLDL_DRAW_LIMIT = 50  # 高级抽卡语言中抽卡的上限
@@ -72,7 +75,7 @@ class DeckItem:
         if self.weight <= 0:
             self.weight = 1
 
-    def get_result(self, decks: Iterable["Deck"], loc_helper: LocalizationHelper, ignore: bool = True) -> str:
+    def get_result(self, source: "Deck", decks: Iterable["Deck"], loc_helper: LocalizationHelper, ignore: bool = True) -> str:
         """处理高级抽卡语言"""
 
         def handle_roll(match):
@@ -125,9 +128,25 @@ class DeckItem:
             return loc_helper.format_loc_text(LOC_DRAW_RESULT_INLINE, times=draw_times, deck_name=target_deck_str,
                                               result=draw_result)
 
+        def handle_img(match):
+            key = match.group(1)
+            file_path_relative = os.path.join(source.path, key)
+            file_path_absolute = os.path.join(os.path.join(DATA_PATH, DRAW_DATA_PATH), key)
+            file_path_local_img = os.path.join(LOCAL_IMG_PATH, key)
+            if os.path.exists(file_path_relative):
+                return bot_utils.cq_code.get_cq_image(file_path_relative)
+            elif os.path.exists(file_path_absolute):
+                return bot_utils.cq_code.get_cq_image(file_path_absolute)
+            elif os.path.exists(file_path_local_img):
+                return bot_utils.cq_code.get_cq_image(file_path_local_img)
+            else:
+                dice_log(f"[DeckImage] 找不到图片 {file_path_relative}")
+                return key
+
         result = self.content.strip()
         result = re.sub(r"ROLL\((.{1,30}?)\)", handle_roll, result)
         result = re.sub(r"DRAW\((.{1,30}?),\s*(.{1,30}?)\)", handle_draw, result)
+        result = re.sub(r"IMG\(([^ $\s]{1,50}?\.[A-Za-z]{1,10}?)\)", handle_img, result)
         if self.final_type == 2:
             raise ForceFinal(result + "\n" + loc_helper.format_loc_text(LOC_DRAW_FIN_ALL))
         return result
@@ -136,10 +155,11 @@ class DeckItem:
 class Deck:
     """牌库"""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, path: str):
         self.name = name
         self.items: List[DeckItem] = []
         self.weight_sum: int = 0
+        self.path = path
 
     def add_item(self, item: DeckItem):
         self.items.append(item)
@@ -168,7 +188,7 @@ class Deck:
                 weight_sum_cur -= item_selected.weight
 
             try:
-                content = item_selected.get_result(decks, loc_helper, ignore)
+                content = item_selected.get_result(self, decks, loc_helper, ignore)
             except ForceFinal as e:
                 if times > 1:
                     feedback += loc_helper.format_loc_text(LOC_DRAW_MULTI, time=t+1, content=e.info + "\n")
@@ -212,7 +232,7 @@ class DeckCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_DRAW_ERR_NO_DECK, "Cannot find deck {deck_name}", "找不到想要抽取的牌库")
         bot.loc_helper.register_loc_text(LOC_DRAW_ERR_VAGUE_DECK, "Possible decks: {deck_list}", "找到多个可能的牌库")
 
-        bot.cfg_helper.register_config(CFG_DECK_DATA_PATH, "./DeckData", "牌库指令的数据来源, .代表Data文件夹")
+        bot.cfg_helper.register_config(CFG_DECK_DATA_PATH, f"./{DRAW_DATA_PATH}", "牌库指令的数据来源, .代表Data文件夹")
 
     def delay_init(self) -> List[str]:
         # 从本地文件中读取资料
@@ -226,7 +246,7 @@ class DeckCommand(UserCommandBase):
         for deck in self.deck_dict.values():
             for item in deck.items:
                 try:
-                    item.get_result(self.deck_dict.values(), self.bot.loc_helper, False)
+                    item.get_result(deck, self.deck_dict.values(), self.bot.loc_helper, False)
                 except ForceFinal:
                     pass
                 except ValueError as e:
@@ -300,7 +320,7 @@ class DeckCommand(UserCommandBase):
             for sheet_name in data_dict.keys():
                 sheet_data = data_dict[sheet_name]
                 # 生成Deck
-                deck = Deck(sheet_name)
+                deck = Deck(sheet_name, path)
                 # 逐行生成DeckItem
                 item_num = len(sheet_data[DECK_ITEM_FIELD_CONTENT])
                 for item_index in range(item_num):

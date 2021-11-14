@@ -28,9 +28,9 @@ class LocalizationText:
             if os.path.exists(file_path):
                 return bot_utils.cq_code.get_cq_image(file_path)
             else:
-                dice_log(f"[Local Image] Cannot find file: {file_path}")
-                return key
+                dice_log(f"[LocalImage] 找不到图片 {file_path}")
+                return match.group(0)
 
         loc_text = random.choice(self.loc_texts) if self.loc_texts else ""
-        loc_text = re.sub(r"\$(.{1,20}?)\$", replace_image_code, loc_text)
+        loc_text = re.sub(r"\$([^ $\s]{1,50}?\.[A-Za-z]{1,10}?)\$", replace_image_code, loc_text)
         return loc_text
