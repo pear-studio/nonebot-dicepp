@@ -146,7 +146,7 @@ class DeckItem:
         result = self.content.strip()
         result = re.sub(r"ROLL\((.{1,30}?)\)", handle_roll, result)
         result = re.sub(r"DRAW\((.{1,30}?),\s*(.{1,30}?)\)", handle_draw, result)
-        result = re.sub(r"IMG\(([^ $\s]{1,50}?\.[A-Za-z]{1,10}?)\)", handle_img, result)
+        result = re.sub(r"IMG\((.{1,50}?\.[A-Za-z]{1,10}?)\)", handle_img, result)
         if self.final_type == 2:
             raise ForceFinal(result + "\n" + loc_helper.format_loc_text(LOC_DRAW_FIN_ALL))
         return result
@@ -379,6 +379,8 @@ class DeckCommand(UserCommandBase):
                     for inner_path in inner_paths:
                         inner_path = os.path.join(path, inner_path)
                         self.load_data_from_path(inner_path, error_info)
+                except NotADirectoryError:
+                    pass
                 except FileNotFoundError as e:  # 文件夹不存在
                     error_info.append(f"读取{path}时遇到错误: {e}")
             else:  # 创建空文件夹
