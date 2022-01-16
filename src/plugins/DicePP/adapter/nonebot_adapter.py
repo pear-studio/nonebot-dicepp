@@ -6,11 +6,11 @@ from typing import List, Dict, Optional
 import nonebot
 from nonebot import on_message, on_notice, on_request
 from nonebot.rule import Rule
-from nonebot.adapters.cqhttp.event import MessageEvent, PrivateMessageEvent, GroupMessageEvent
-from nonebot.adapters.cqhttp.event import NoticeEvent, GroupIncreaseNoticeEvent, FriendAddNoticeEvent
-from nonebot.adapters.cqhttp.event import RequestEvent, FriendRequestEvent, GroupRequestEvent
-from nonebot.adapters.cqhttp.bot import Bot as NoneBot
-from nonebot.adapters.cqhttp import Message as CQMessage
+from nonebot.adapters.onebot.v11.event import MessageEvent, PrivateMessageEvent, GroupMessageEvent
+from nonebot.adapters.onebot.v11.event import NoticeEvent, GroupIncreaseNoticeEvent, FriendAddNoticeEvent
+from nonebot.adapters.onebot.v11.event import RequestEvent, FriendRequestEvent, GroupRequestEvent
+from nonebot.adapters.onebot.v11.bot import Bot as NoneBot
+from nonebot.adapters.onebot.v11 import Message as CQMessage
 
 from bot_core import Bot as DicePPBot
 from bot_core import MessageMetaData, MessageSender

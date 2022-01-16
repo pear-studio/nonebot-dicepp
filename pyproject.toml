@@ -1,20 +1,18 @@
 [tool.poetry]
 name = "DicePP"
-version = "1.0.0 Beta1"
+version = "1.0.0 Beta2"
 description = "DicePP"
 authors = ["Pear"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.8"
-nonebot2 = "^2.0.0.a1"
-nb-cli = "^0.4.2"
-openpyxl = "^3.0.7"
-rsa = "^4.7.2"
-nonebot-adapter-cqhttp = "^2.0.0-alpha.13"
-
-[tool.poetry.dev-dependencies]
-nonebot-test = "^0.1.0"
+nonebot2 = "^2.0.0b1"
+nb-cli = "^0.6.4"
+openpyxl = "^3.0.9"
+rsa = "^4.8"
+nonebot-adapter-cqhttp = "^2.0.0b1"
+gitpython = "3.1.26"
 
 [nonebot.plugins]
 plugins = []
