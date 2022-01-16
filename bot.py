@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import os
+import sys
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBot_V11_Adapter
+
+# Fix import path problem in server
+dir_path = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, dir_path)
 
 # Custom your logger
 # 
