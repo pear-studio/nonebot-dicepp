@@ -10,8 +10,11 @@ from bot_core import Bot
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
 from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
+import localization
 
 LOC_DND_RES = "dnd_result"
+
+CFG_ROLL_DND_ENABLE = "roll_dnd_enable"
 
 MAX_DND_TIMES = 10
 MAX_DND_RESULT_LEN = 50
@@ -27,6 +30,7 @@ class UtilsDNDCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(LOC_DND_RES, "{name} DND Result {reason}:\n{result}", ".dnd返回的内容 name为用户昵称, reason为原因")
+        bot.cfg_helper.register_config(CFG_ROLL_DND_ENABLE, "1", "DND指令开关")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".dnd")
@@ -43,6 +47,12 @@ class UtilsDNDCommand(UserCommandBase):
 
     def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
+        # 判断功能开关
+        try:
+            assert (int(self.bot.cfg_helper.get_config(CFG_ROLL_DND_ENABLE)[0]) != 0)
+        except AssertionError:
+            feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func=self.readable_name)
+            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析语句
         times: int
         reason: str

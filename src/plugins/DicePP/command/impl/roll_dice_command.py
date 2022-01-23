@@ -6,6 +6,7 @@ from command.dicepp_command import UserCommandBase, custom_user_command, Message
 from command import BotCommandBase
 from command.bot_command import PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
 from command.impl import try_use_point
+import localization
 
 from roll_dice import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, RollDiceError
 
@@ -28,6 +29,8 @@ LOC_ROLL_D20_16_18 = "roll_d20_16_18"
 LOC_ROLL_D20_19 = "roll_d20_19"
 LOC_ROLL_EXP = "roll_exp"
 
+CFG_ROLL_ENABLE = "roll_enable"
+CFG_ROLL_HIDE_ENABLE = "roll_hide_enable"
 CFG_ROLL_EXP_COST = "roll_exp_cost"
 
 MULTI_ROLL_LIMIT = 10  # 多轮掷骰上限次数
@@ -90,7 +93,9 @@ class RollDiceCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_ROLL_D20_19, "", "唯一d20的骰值等于19的反馈, 替换{d20_state}")
         bot.loc_helper.register_loc_text(LOC_ROLL_EXP, "Expectation of {expression} is:\n{expectation}", "计算掷骰表达式期望时的回复")
 
-        bot.cfg_helper.register_config(CFG_ROLL_EXP_COST, "10", "计算掷骰表达式期望所花费的点数")
+        bot.cfg_helper.register_config(CFG_ROLL_ENABLE, "1", "掷骰指令开关")
+        bot.cfg_helper.register_config(CFG_ROLL_HIDE_ENABLE, "1", "暗骰指令开关(暗骰会发送私聊信息, 可能增加风控风险)")
+        bot.cfg_helper.register_config(CFG_ROLL_EXP_COST, "10", "计算掷骰表达式期望(.rexp)所花费的点数")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".r")
@@ -98,6 +103,13 @@ class RollDiceCommand(UserCommandBase):
         return should_proc, should_pass, None
 
     def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+        # 判断功能开关
+        try:
+            assert (int(self.bot.cfg_helper.get_config(CFG_ROLL_ENABLE)[0]) != 0)
+        except AssertionError:
+            feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func=self.readable_name)
+            port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
+            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析掷骰语句
         msg_str = msg_str[2:].strip()
         is_hidden = False
@@ -115,6 +127,13 @@ class RollDiceCommand(UserCommandBase):
         msg_str = msg_str.strip()
         if not msg_str:
             msg_str = 'd'
+        # 判断暗骰开关
+        try:
+            assert (not is_hidden or int(self.bot.cfg_helper.get_config(CFG_ROLL_HIDE_ENABLE)[0]) != 0)
+        except AssertionError:
+            feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func="暗骰指令")
+            port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
+            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         exp_str: str
         reason_str: str

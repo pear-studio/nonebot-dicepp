@@ -13,10 +13,7 @@ from command.dicepp_command import UserCommandBase, custom_user_command, Message
 from command.bot_command import BotCommandBase, MessagePort, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
 from bot_utils.localdata import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from logger import dice_log
-
-# LOC_NICKNAME_SET = "nickname_set"
-
-CFG_QUERY_DATA_PATH = "query_data_path"
+import localization
 
 LOC_QUERY_RESULT = "query_result"
 LOC_QUERY_SINGLE_RESULT = "query_single_result"
@@ -27,6 +24,9 @@ LOC_QUERY_MULTI_RESULT_PAGE_UNDERFLOW = "query_multi_result_page_underflow"
 LOC_QUERY_MULTI_RESULT_PAGE_OVERFLOW = "query_multi_result_page_overflow"
 LOC_QUERY_NO_RESULT = "query_no_result"
 LOC_QUERY_KEY_NUM_EXCEED = "query_key_num_exceed"
+
+CFG_QUERY_ENABLE = "query_enable"
+CFG_QUERY_DATA_PATH = "query_data_path"
 
 QUERY_ITEM_FIELD_KEY = "Key"
 QUERY_ITEM_FIELD_SYN = "Synonym"
@@ -128,6 +128,7 @@ class QueryCommand(UserCommandBase):
         reg_loc(LOC_QUERY_KEY_NUM_EXCEED, "Maximum keyword num is {key_num}",
                 "用户查询时使用过多关键字时的提示 {key_num}为关键字数量上限")
 
+        bot.cfg_helper.register_config(CFG_QUERY_ENABLE, "1", "查询指令开关")
         bot.cfg_helper.register_config(CFG_QUERY_DATA_PATH, "./QueryData", "查询指令的数据来源, .代表Data文件夹")
 
     def delay_init(self) -> List[str]:
@@ -188,6 +189,13 @@ class QueryCommand(UserCommandBase):
         arg_str: str = hint[1]
         feedback: str
         show_mode = 0 if meta.group_id else 1
+
+        # 判断功能开关
+        try:
+            assert (int(self.bot.cfg_helper.get_config(CFG_QUERY_ENABLE)[0]) != 0)
+        except AssertionError:
+            feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func=self.readable_name)
+            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         # 处理指令
         if not arg_str and (mode == "query" or mode == "search"):

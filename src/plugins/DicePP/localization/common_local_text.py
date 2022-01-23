@@ -17,3 +17,7 @@ COMMON_LOCAL_COMMENT[LOC_LOGIN_NOTICE] = "机器人登录时向Master发送的�
 LOC_DAILY_UPDATE = "daily_update"
 COMMON_LOCAL_TEXT[LOC_DAILY_UPDATE] = "Daily update complete"
 COMMON_LOCAL_COMMENT[LOC_DAILY_UPDATE] = "每日更新时发送的语句, 若为$则不提示每日更新"
+
+LOC_FUNC_DISABLE = "func_disable"
+COMMON_LOCAL_TEXT[LOC_FUNC_DISABLE] = "Function {func} is disabled by master"
+COMMON_LOCAL_COMMENT[LOC_FUNC_DISABLE] = "某一功能被关闭时发送给用户的提示词, {func}为功能名"

@@ -13,6 +13,7 @@ from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessage
 import bot_utils
 from bot_utils.localdata import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from bot_utils.string import match_substring
+import localization
 from localization import LocalizationHelper
 from roll_dice import preprocess_roll_exp, is_roll_exp, exec_roll_exp
 from logger import dice_log
@@ -28,6 +29,7 @@ LOC_DRAW_ERR_TIME = "draw_error_time"
 LOC_DRAW_ERR_NO_DECK = "draw_error_no_deck"
 LOC_DRAW_ERR_VAGUE_DECK = "draw_error_vague_deck"
 
+CFG_DECK_ENABLE = "deck_enable"
 CFG_DECK_DATA_PATH = "deck_data_path"
 DRAW_DATA_PATH = "DeckData"
 
@@ -232,6 +234,7 @@ class DeckCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_DRAW_ERR_NO_DECK, "Cannot find deck {deck_name}", "找不到想要抽取的牌库")
         bot.loc_helper.register_loc_text(LOC_DRAW_ERR_VAGUE_DECK, "Possible decks: {deck_list}", "找到多个可能的牌库")
 
+        bot.cfg_helper.register_config(CFG_DECK_ENABLE, "1", "抽卡指令开关")
         bot.cfg_helper.register_config(CFG_DECK_DATA_PATH, f"./{DRAW_DATA_PATH}", "牌库指令的数据来源, .代表Data文件夹")
 
     def delay_init(self) -> List[str]:
@@ -261,6 +264,12 @@ class DeckCommand(UserCommandBase):
 
     def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
+        # 判断功能开关
+        try:
+            assert (int(self.bot.cfg_helper.get_config(CFG_DECK_ENABLE)[0]) != 0)
+        except AssertionError:
+            feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func=self.readable_name)
+            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析语句
         arg_str = hint
         feedback: str = ""
