@@ -207,8 +207,9 @@ class RollDiceCommand(UserCommandBase):
                 feedback = self.format_loc(LOC_ROLL_RESULT_HIDE_REASON, **loc_args)
             elif not reason_str:
                 feedback = self.format_loc(LOC_ROLL_RESULT_HIDE, **loc_args)
-            group_feedback: str = self.format_loc(LOC_ROLL_RESULT_HIDE_GROUP, nickname=nickname)
-            commands.append(BotSendMsgCommand(self.bot.account, group_feedback, [GroupMessagePort(meta.group_id)]))
+            if meta.group_id:
+                group_feedback: str = self.format_loc(LOC_ROLL_RESULT_HIDE_GROUP, nickname=nickname)
+                commands.append(BotSendMsgCommand(self.bot.account, group_feedback, [GroupMessagePort(meta.group_id)]))
         elif not is_hidden:
             if reason_str:
                 feedback = self.format_loc(LOC_ROLL_RESULT_REASON, **loc_args)

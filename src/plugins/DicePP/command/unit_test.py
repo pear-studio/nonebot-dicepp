@@ -123,6 +123,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".r2#d20 Attack Twice")
         await self.__vg_msg(".r(1+1)d6", checker=lambda s: "表达式D6格式不正确" in s)
         await self.__vg_msg(".rh", checker=lambda s: "|Group: group|" in s and "|Private: user|" in s)
+        await self.__vp_msg(".rh", checker=lambda s: "|Group: group|" not in s and "|Private: user|" in s)
         await self.__vg_msg(".rh d20 原因", checker=lambda s: "测试用户's hidden roll result for 原因 is 1D20=" in s and
                                                             "测试用户 process a hidden rolling" in s)
         await self.__vg_msg(".rsd20+5", checker=lambda s: "1D20+5=" in s and s.count("=") == 1)

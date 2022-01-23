@@ -102,7 +102,7 @@ class ConfigHelper:
                 continue
             comment: str = self.all_configs[key].comment  # 沿用原来的注释, 不用文件里的
             self.all_configs[key] = ConfigItem(key, comment=comment)
-            for text in [str(cell.value) for cell in row[1:] if cell.value]:
+            for text in [str(cell.value) for cell in row[1:] if (cell.value is not None)]:
                 self.all_configs[key].add(text)
         workbook.close()
         logger.dice_log(f"[BotConfig] [Load] 成功读取配置文件 {self.data_path.replace(DATA_PATH, '~')}")
