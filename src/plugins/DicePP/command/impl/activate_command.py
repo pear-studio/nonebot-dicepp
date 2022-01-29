@@ -7,7 +7,7 @@ from typing import List, Tuple, Any, Literal
 import bot_config
 from bot_utils.time import get_current_date_str
 from bot_core import Bot
-from data_manager import custom_data_chunk, DataChunkBase
+from data_manager import custom_data_chunk, DataChunkBase, DataManagerError
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
 from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessagePort, \
@@ -17,6 +17,8 @@ LOC_BOT_SHOW = "bot_show"
 LOC_BOT_ON = "bot_on"
 LOC_BOT_OFF = "bot_off"
 LOC_BOT_DISMISS = "bot_dismiss"
+
+CFG_BOT_DEF_ENABLE = "bot_default_enable"
 
 DC_ACTIVATE = "activate"
 
@@ -29,8 +31,8 @@ class _(DataChunkBase):
         super().__init__()
 
 
-def get_default_activate_data() -> List:
-    activate_data = [True, get_current_date_str()]
+def get_default_activate_data(default_enable: bool) -> List:
+    activate_data = [default_enable, get_current_date_str()]
     # 是否开启, 最后更改的时间
     return activate_data
 
@@ -49,10 +51,19 @@ class ActivateCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_BOT_OFF, "See you, I'm off", ".bot off时回应的语句")
         bot.loc_helper.register_loc_text(LOC_BOT_DISMISS, "Good bye!", ".dismiss时回应的语句")
 
+        bot.cfg_helper.register_config(CFG_BOT_DEF_ENABLE, "1", "新加入群聊时是否默认开启(.bot on)")
+
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         if meta.group_id:
-            activate_data = self.bot.data_manager.get_data(DC_ACTIVATE, [meta.group_id],
-                                                           default_gen=get_default_activate_data)
+            try:
+                activate_data = self.bot.data_manager.get_data(DC_ACTIVATE, [meta.group_id])
+            except DataManagerError:
+                try:
+                    default_enable: bool = bool(int(self.bot.cfg_helper.get_config(CFG_BOT_DEF_ENABLE)[0]))
+                except (IndexError, ValueError):
+                    default_enable = True
+                activate_data = self.bot.data_manager.get_data(DC_ACTIVATE, [meta.group_id],
+                                                               default_gen=lambda: get_default_activate_data(default_enable))
         else:
             activate_data = None
         should_pass: bool = False
@@ -88,12 +99,11 @@ class ActivateCommand(UserCommandBase):
             bot_show = bot_show + "\n" if bot_show else ""
             feedback = f"{bot_show}{BOT_SHOW_APPEND}"
         elif mode == "on":
-            activate_data = get_default_activate_data()
+            activate_data = get_default_activate_data(True)
             self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
             feedback = self.format_loc(LOC_BOT_ON)
         elif mode == "off":
-            activate_data = get_default_activate_data()
-            activate_data[0] = False
+            activate_data = get_default_activate_data(False)
             self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
             feedback = self.format_loc(LOC_BOT_OFF)
         else:  # mode == "dismiss":

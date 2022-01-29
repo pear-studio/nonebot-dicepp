@@ -307,15 +307,22 @@ class Bot:
         elif isinstance(data, GroupIncreaseNoticeData):
             data: GroupIncreaseNoticeData = data
             if data.user_id != self.account:
-                from command.impl import DC_WELCOME, LOC_WELCOME_DEFAULT
-                from command import GroupMessagePort, BotSendMsgCommand
+                from command.impl import DC_ACTIVATE
                 try:
-                    feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id])
+                    activate = self.data_manager.get_data(DC_ACTIVATE, [data.group_id])[0]
                 except DataManagerError:
-                    feedback = self.loc_helper.format_loc_text(LOC_WELCOME_DEFAULT)
+                    activate = False
 
-                if feedback:
-                    bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(data.group_id)])]
+                if activate:
+                    from command.impl import DC_WELCOME, LOC_WELCOME_DEFAULT
+                    from command import GroupMessagePort, BotSendMsgCommand
+                    try:
+                        feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id])
+                    except DataManagerError:
+                        feedback = self.loc_helper.format_loc_text(LOC_WELCOME_DEFAULT)
+
+                    if feedback:
+                        bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(data.group_id)])]
 
         if self.proxy:
             for command in bot_commands:

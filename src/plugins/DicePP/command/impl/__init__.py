@@ -4,7 +4,7 @@ from .utils_common_command import WelcomeCommand, DC_WELCOME, LOC_WELCOME_DEFAUL
 from .utils_master_command import MasterCommand
 from .hub_command import HubCommand
 from .variable_command import VariableCommand
-from .activate_command import ActivateCommand
+from .activate_command import ActivateCommand, DC_ACTIVATE
 from .nickname_command import NicknameCommand
 from .help_command import HelpCommand
 from .roll_dice_command import RollDiceCommand
