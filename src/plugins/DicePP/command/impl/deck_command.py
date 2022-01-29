@@ -335,7 +335,7 @@ class DeckCommand(UserCommandBase):
                 for item_index in range(item_num):
                     content = sheet_data[DECK_ITEM_FIELD_CONTENT][item_index]
                     if not content:
-                        dice_log(f"表格{sheet_name}第{item_index + 2}行缺少content, 该条目未加载")
+                        # dice_log(f"表格{wb.path}/{sheet_name}第{item_index + 2}行缺少content, 该条目未加载")
                         continue
 
                     weight = sheet_data[DECK_ITEM_FIELD_WEIGHT][item_index]

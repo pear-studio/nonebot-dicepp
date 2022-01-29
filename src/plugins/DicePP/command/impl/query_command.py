@@ -407,7 +407,7 @@ class QueryCommand(UserCommandBase):
                     item_tag: List[str] = [tag.strip() for tag in item_tag if tag.strip()]
 
                     if not main_key:
-                        dice_log(f"表格{wb.path}/{sheet_name}第{item_index+2}行缺少key, 该条目未加载")
+                        # dice_log(f"表格{wb.path}/{sheet_name}第{item_index+2}行缺少key, 该条目未加载")
                         continue
                     if not item_content:
                         error_info.append(f"表格{wb.path}/{sheet_name}第{item_index+2}行缺少content, 该条目未加载")
