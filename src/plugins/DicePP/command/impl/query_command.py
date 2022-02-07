@@ -316,7 +316,7 @@ class QueryCommand(UserCommandBase):
                                cat=item_cat, syn=item_syn)
 
     def format_multiple_items_feedback(self, items: List[QueryItem]):
-        feedback = ""
+        multi_results = ""
         for index, item in enumerate(items):
             item_keyword = item.key[0]
             item_desc = item.desc
@@ -325,8 +325,8 @@ class QueryCommand(UserCommandBase):
             item_syn = " 同义词: " + get_syn_string(item.key[1:]) if item.key[1:] else ""
             item_info = self.format_loc(LOC_QUERY_MULTI_RESULT_ITEM, keyword=item_keyword, description=item_desc,
                                         tag=item_tag, cat=item_cat, syn=item_syn)
-            feedback += f"{index}. {item_info}\n"
-        feedback = feedback.strip()
+            multi_results += f"{index}. {item_info}\n"
+        feedback = self.format_loc(LOC_QUERY_MULTI_RESULT, multi_results=multi_results.strip())
         return feedback
 
     @staticmethod
