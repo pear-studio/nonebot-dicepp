@@ -150,20 +150,11 @@ class InitiativeCommand(UserCommandBase):
                 else:
                     name_dict[n] = roll_res
 
-            # 获取init data
-            init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id],
-                                                             default_gen=lambda: get_default_init_data(meta.group_id))
-            feedback = ""
-            for name, roll_res in name_dict.items():
-                try:
-                    add_initiative_entity(init_data, name, owner_id, roll_res.get_val())
-                    feedback += self.format_loc(LOC_INIT_ROLL, name=name,
-                                                init_result=roll_res.get_complete_result()) + "\n"
-                except InitiativeError as e:
-                    feedback += self.format_loc(LOC_INIT_ERROR, error_info=e.info) + "\n"
+            result_dict: Dict[str, Tuple[int, str]]
+            result_dict = dict([(name, (res.get_val(), res.get_complete_result())) for name, res in name_dict.items()])
 
-            feedback = feedback.strip()
-            self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
+            feedback = self.add_initiative_entities(result_dict, owner_id, meta.group_id)
+
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         elif mode == "inspect":  # 查看先攻信息
@@ -173,12 +164,11 @@ class InitiativeCommand(UserCommandBase):
                 feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             # 尝试获取生命值信息
-            hp_dict = {}
-            try:
-                from command.impl import DC_CHAR_HP, HPInfo
-                hp_dict: Dict[str, HPInfo] = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id])
-            except (ImportError, DataManagerError):
-                pass
+            from command.impl import DC_CHAR_HP, DC_CHAR_DND
+            from character.dnd5e import HPInfo, DNDCharInfo
+            hp_dict: Dict[str, HPInfo] = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id], default_val={})
+            char_dict: Dict[str, DNDCharInfo] = self.bot.data_manager.get_data(DC_CHAR_DND, [meta.group_id], default_val={})
+            hp_dict.update(dict([(user_id, char_info.hp_info) for user_id, char_info in char_dict.items()]))
             init_info = ""
             init_data[DCK_ENTITY] = sorted(init_data[DCK_ENTITY], key=lambda x: -x.init)
             for index, entity in enumerate(init_data[DCK_ENTITY]):
@@ -202,7 +192,8 @@ class InitiativeCommand(UserCommandBase):
             # 尝试删除临时生命值信息
             feedback = ""
             try:
-                from command.impl import DC_CHAR_HP, HPInfo
+                from command.impl import DC_CHAR_HP
+                from character.dnd5e import HPInfo
                 init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
                 for entity in init_data[DCK_ENTITY]:
                     entity: InitEntity = entity
@@ -306,3 +297,31 @@ class InitiativeCommand(UserCommandBase):
 
     def get_description(self) -> str:
         return ".ri 投掷先攻 .init 操作先攻列表"
+
+    def add_initiative_entities(self, result_dict: Dict[str, Tuple[int, str]], owner_id: str, group_id: str) -> str:
+        """
+
+        Args:
+            result_dict: 需要加入先攻列表的信息, key为先攻条目名称, val为二元组, val[0]代表先攻数值, val[1]代表掷骰表达式结果
+            owner_id: 为空代表无主的NPC, 不为空代表PC账号
+            group_id: 目标群号
+
+        Returns:
+            feedback: 操作执行成功或失败的提示
+        """
+        # 获取init data
+        init_data: dict = self.bot.data_manager.get_data(DC_INIT, [group_id],
+                                                         default_gen=lambda: get_default_init_data(group_id))
+
+        feedback = ""
+        for name, roll_res in result_dict.items():
+            try:
+                add_initiative_entity(init_data, name, owner_id, roll_res[0])
+                feedback += self.format_loc(LOC_INIT_ROLL, name=name,
+                                            init_result=roll_res[1]) + "\n"
+            except InitiativeError as e:
+                feedback += self.format_loc(LOC_INIT_ERROR, error_info=e.info) + "\n"
+
+        feedback = feedback.strip()
+        self.bot.data_manager.set_data(DC_INIT, [group_id], init_data)
+        return feedback

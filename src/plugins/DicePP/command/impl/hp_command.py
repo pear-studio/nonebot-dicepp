@@ -7,16 +7,15 @@ import json
 import re
 
 from bot_core import Bot
-from bot_core import NICKNAME_ERROR
 from data_manager import custom_data_chunk, DataChunkBase, DataManagerError
-from data_manager import JsonObject, custom_json_object
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
 from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
 from bot_utils.string import match_substring
-from bot_utils.data import yield_deduplicate
 from initiative import DC_INIT, DCK_ENTITY, InitEntity
 from roll_dice import exec_roll_exp, RollDiceError, RollResult
+from command.impl import DC_CHAR_DND
+from character.dnd5e import DNDCharInfo, HPInfo
 
 LOC_HP_INFO = "hp_info"
 LOC_HP_INFO_MISS = "hp_info_miss"
@@ -26,7 +25,7 @@ LOC_HP_MOD = "hp_mod"
 LOC_HP_MOD_ERR = "hp_mod_error"
 LOC_HP_DEL = "hp_delete"
 
-# 增加自定义DataChunk
+# 增加自定义DataChunk, 只存放NPC生命值信息, 玩家生命值信息存储在 DC_CHAR_DND
 DC_CHAR_HP = "char_hp"
 
 
@@ -34,84 +33,6 @@ DC_CHAR_HP = "char_hp"
 class _(DataChunkBase):
     def __init__(self):
         super().__init__()
-
-
-@custom_json_object
-class HPInfo(JsonObject):
-    """
-    HP信息
-    """
-
-    def serialize(self) -> str:
-        json_dict = self.__dict__
-        return json.dumps(json_dict)
-
-    def deserialize(self, json_str: str) -> None:
-        json_dict: dict = json.loads(json_str)
-        for key, value in json_dict.items():
-            if key in self.__dict__:
-                self.__setattr__(key, value)
-
-    def __init__(self):
-        self.hp_cur = 0
-        self.hp_max = 0
-        self.hp_temp = 0
-        self.is_alive = True
-
-    def initialize(self, hp_cur: int, hp_max: int = 0, hp_temp: int = 0):
-        self.hp_cur = hp_cur
-        self.hp_max = hp_max
-        self.hp_temp = hp_temp
-
-    def is_record_normal(self) -> bool:
-        """当前是否正常记录生命值 (拥有hp, 而不是单纯记录受损hp)"""
-        return self.hp_cur > 0 or (self.hp_cur == 0 and not self.is_alive)
-
-    def is_record_damage(self) -> bool:
-        """当前是否是记录受损生命值的情况"""
-        return not self.is_record_normal()
-
-    def take_damage(self, value: int):
-        # 临时生命值
-        if self.hp_temp > 0:
-            if self.hp_temp >= value:
-                self.hp_temp -= value
-                return
-            else:
-                value -= self.hp_temp
-                self.hp_temp = 0
-        # 生命值
-        if self.is_alive:
-            if self.hp_cur > 0:
-                if self.hp_cur > value:
-                    self.hp_cur -= value
-                else:
-                    self.hp_cur = 0
-                    self.is_alive = False
-            elif self.hp_cur <= 0:  # hp_cur如果小于等于0且is_alive==True说明当前记录的是受损生命值
-                self.hp_cur -= value
-
-    def heal(self, value: int):
-        if self.is_record_normal():
-            if self.hp_max == 0:  # 没有设置生命值上限
-                self.hp_cur += value
-            else:
-                self.hp_cur = min(self.hp_max, self.hp_cur + value)
-        else:  # 记录受损生命值的情况
-            self.hp_cur = min(0, self.hp_cur + value)
-        self.is_alive = True
-
-    def get_info(self) -> str:
-        hp_info: str = ""
-        hp_temp_info = f" ({self.hp_temp})" if self.hp_temp != 0 else ""
-        if self.is_record_normal():
-            hp_max_info = f"/{self.hp_max}" if self.hp_max != 0 else ""
-            hp_info = f"HP:{self.hp_cur}{hp_max_info}{hp_temp_info}"
-            if not self.is_alive:
-                hp_info += " 昏迷"
-        else:
-            hp_info = f"损失HP:{-self.hp_cur}{hp_temp_info}"
-        return hp_info
 
 
 @custom_user_command(readable_name="生命值指令", priority=DPP_COMMAND_PRIORITY_DEFAULT, group_only=True)
@@ -145,66 +66,60 @@ class HPCommand(UserCommandBase):
             target: List[str] = [meta.group_id, meta.user_id]  # 目标是自己
             nickname = self.bot.get_nickname(meta.user_id, meta.group_id)
             try:
-                hp_info = self.bot.data_manager.get_data(DC_CHAR_HP, target)
+                char_info: DNDCharInfo = self.bot.data_manager.get_data(DC_CHAR_DND, target)
+                hp_info = char_info.hp_info
                 feedback = self.format_loc(LOC_HP_INFO, name=nickname, hp_info=hp_info.get_info())
             except DataManagerError:
                 feedback = self.format_loc(LOC_HP_INFO_MISS, name=nickname)
         elif arg_str.startswith("list"):  # 查看当前群聊的所有生命值信息
             try:
+                char_info_dict: Dict[str, DNDCharInfo] = self.bot.data_manager.get_data(DC_CHAR_DND, [meta.group_id])
+            except DataManagerError:
+                char_info_dict = {}
+            try:
                 hp_info_dict: Dict[str, HPInfo] = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id])
-                assert hp_info_dict
+            except DataManagerError:
+                hp_info_dict = {}
+            if char_info_dict or hp_info_dict:
                 feedback = ""
+                for char_id, char_info in char_info_dict.items():
+                    nickname = self.bot.get_nickname(char_id, meta.group_id)
+                    feedback += f"{nickname} {char_info.hp_info.get_info()}\n"
                 for name, hp_info in hp_info_dict.items():
-                    name_poss = self.bot.get_nickname(name, meta.group_id)
-                    if name_poss != NICKNAME_ERROR:  # 是玩家
-                        feedback += f"{name_poss} {hp_info.get_info()}\n"
-                    else:
-                        feedback += f"{name} {hp_info.get_info()}\n"
+                    feedback += f"{name} {hp_info.get_info()}\n"
                 feedback = feedback.strip()
-            except (DataManagerError, AssertionError):  # 没有任何生命值信息
+            else:  # 没有任何生命值信息
                 feedback = self.format_loc(LOC_HP_INFO_NONE)
         elif arg_str.startswith("del"):  # 删除某人生命值
             arg_str = arg_str[3:].strip()
-            target: List[str] = [meta.group_id, meta.user_id]  # 默认目标是自己
-            target_id_name_dict: Dict[str, str] = {meta.user_id: self.bot.get_nickname(meta.user_id, meta.group_id)}
+            target: Tuple[str, List[str]] = (DC_CHAR_DND, [meta.group_id, meta.user_id])  # 默认目标是自己
             if arg_str:
                 # 查找已存在的生命值信息
                 target_intent = arg_str
-                exist_list: List[str]
-                target_poss: List[str]
-                try:
-                    exist_list = list(self.bot.data_manager.get_keys(DC_CHAR_HP, [meta.group_id]))
-                except DataManagerError:
-                    exist_list = []
-                for name_or_id in exist_list:
-                    name = self.bot.get_nickname(name_or_id, meta.group_id)
-                    if name == NICKNAME_ERROR:
-                        target_id_name_dict[name_or_id] = name_or_id
-                    else:
-                        target_id_name_dict[name_or_id] = name
-                target_poss = match_substring(target_intent, target_id_name_dict.values())
-                if len(target_poss) == 1:
-                    for key, value in target_id_name_dict.items():
-                        if value == target_poss[0]:
-                            target[-1] = key
-                            break
-                elif len(target_poss) == 0:
+                source_key, target_id = self.search_target(target_intent, meta.group_id)
+                if not source_key:
                     feedback = self.format_loc(LOC_HP_INFO_MISS, name=target_intent)
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-                else:  # len(target_poss) > 1
+                elif source_key == "multiple":
+                    target_poss = target_id.split("/")
                     feedback = self.format_loc(LOC_HP_INFO_MULTI, name_list=target_poss)
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+                target: Tuple[str, List[str]] = (source_key, [meta.group_id, target_id])
+
             try:
-                self.bot.data_manager.delete_data(DC_CHAR_HP, target)
-            except DataManagerError:  # 此时只有可能是自己的先攻信息不存在, 忽略这个错误
+                self.bot.data_manager.delete_data(target[0], target[1])
+            except DataManagerError:
                 pass
-            name = target_id_name_dict[target[-1]]
+            if target[0] == DC_CHAR_DND:
+                name = self.bot.get_nickname(target[1][1], meta.group_id)
+            else:
+                name = target[1][1]
             feedback = self.format_loc(LOC_HP_DEL, name=name)
 
         else:  # 调整生命值
             # 判断操作类型
             cmd_type: Literal["+", "-", "="] = "="
-            max_len = 2**20
+            max_len = 2 ** 20
             cmd_index_eq = arg_str.find("=") if arg_str.find("=") != -1 else max_len
             cmd_index_add = arg_str.find("+") if arg_str.find("+") != -1 else max_len
             cmd_index_sub = arg_str.find("-") if arg_str.find("-") != -1 else max_len
@@ -220,8 +135,7 @@ class HPCommand(UserCommandBase):
                 cmd_type = "-"
 
             # 查找指定的对象
-            target_list: List[List[str]] = []
-            target_id_name_dict: Dict[str, str] = {meta.user_id: self.bot.get_nickname(meta.user_id, meta.group_id)}
+            target_list: List[Tuple[str, List[str]]] = []
             if cmd_index == 0:  # 给定了类型但没有指定对象
                 arg_str = arg_str[1:].strip()
             if cmd_index > 0:  # 给定类型并指定其他对象
@@ -230,27 +144,25 @@ class HPCommand(UserCommandBase):
 
                 for target_intent in target_intent_list:
                     target_intent = target_intent.strip()
-                    target_id = self.search_target(target_intent, meta.group_id, target_id_name_dict)
-                    if target_id:
-                        target_list.append([meta.group_id, target_id])
+                    source_key, target_id = self.search_target(target_intent, meta.group_id)
+                    if source_key in [DC_CHAR_DND, DC_CHAR_HP]:
+                        target_list.append((source_key, [meta.group_id, target_id]))
                     else:  # 提示错误信息
-                        target_poss = match_substring(target_intent, target_id_name_dict.values())
-                        target_poss = list(yield_deduplicate(target_poss))
-                        if len(target_poss) > 1:
+                        if source_key == "multiple":
+                            target_poss = target_id.split("/")
                             feedback = self.format_loc(LOC_HP_INFO_MULTI, name_list=target_poss)
                             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-                        else:  # len(target_poss) == 0
+                        else:  # not source_key
                             feedback = self.format_loc(LOC_HP_INFO_MISS, name=target_intent)
                             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
             if not target_list:
-                target_list = [[meta.group_id, meta.user_id]]  # 默认目标是自己
+                target_list = [(DC_CHAR_DND, [meta.group_id, meta.user_id])]  # 默认目标是自己的角色卡信息
             # 计算调整值
             # 处理临时生命值
             temp_pattern = r"\((.*?)\)$"
             temp_match = re.search(temp_pattern, arg_str)
             hp_temp_mod_result: Optional[RollResult] = None
-            hp_temp_mod_val: int = 0
             if temp_match:
                 try:
                     hp_temp_mod_result = exec_roll_exp(temp_match.group(1))
@@ -258,7 +170,6 @@ class HPCommand(UserCommandBase):
                     feedback = self.format_loc(LOC_HP_MOD_ERR, error=e.info)
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                 arg_str = arg_str[:temp_match.span()[0]].strip()
-                hp_temp_mod_val = hp_temp_mod_result.get_val()
 
             if not arg_str and not temp_match:
                 feedback = self.format_loc(LOC_HP_MOD_ERR, error="没有给定调整值")
@@ -266,34 +177,35 @@ class HPCommand(UserCommandBase):
 
             # 处理当前和最大生命值
             hp_cur_mod_result: Optional[RollResult] = None
-            hp_cur_mod_val: int = 0
             hp_max_mod_result: Optional[RollResult] = None
-            hp_max_mod_val: int = 0
             if arg_str:
                 arg_list = arg_str.split("/", 1)
                 try:
                     if len(arg_list) == 2:
                         hp_cur_mod_result = exec_roll_exp(arg_list[0])
-                        hp_cur_mod_val = hp_cur_mod_result.get_val()
                         hp_max_mod_result = exec_roll_exp(arg_list[1])
-                        hp_max_mod_val = hp_max_mod_result.get_val()
                     else:
                         hp_cur_mod_result = exec_roll_exp(arg_str)
-                        hp_cur_mod_val = hp_cur_mod_result.get_val()
                 except RollDiceError as e:
                     feedback = self.format_loc(LOC_HP_MOD_ERR, error=e.info)
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
             # 应用调整值
             feedback = ""
-            for target in target_list:
-                mod_info: str = self.modify_hp(target, cmd_type,
-                                               hp_cur_mod_result, hp_cur_mod_val,
-                                               hp_max_mod_result, hp_max_mod_val,
-                                               hp_temp_mod_result, hp_temp_mod_val,
-                                               short_feedback=(len(target_list) > 1))
+            for source_key, target in target_list:
+                assert source_key in (DC_CHAR_DND, DC_CHAR_HP)
+                if source_key == DC_CHAR_DND:
+                    char_info = self.bot.data_manager.get_data(DC_CHAR_DND, target, default_gen=DNDCharInfo, get_ref=True)
+                    hp_info: HPInfo = char_info.hp_info
+                else:
+                    hp_info: HPInfo = self.bot.data_manager.get_data(DC_CHAR_HP, target, default_gen=HPInfo, get_ref=True)
+                mod_info: str = hp_info.process_roll_result(cmd_type, hp_cur_mod_result, hp_max_mod_result, hp_temp_mod_result,
+                                                            short_feedback=(len(target_list) > 1))
 
-                name = target_id_name_dict[target[-1]]
+                if source_key == DC_CHAR_DND:
+                    name = self.bot.get_nickname(target[1], meta.group_id)
+                else:
+                    name = target[1]
                 feedback += self.format_loc(LOC_HP_MOD, name=name, hp_mod=mod_info) + "\n"
             feedback = feedback.strip()
 
@@ -329,110 +241,91 @@ class HPCommand(UserCommandBase):
     def get_description(self) -> str:
         return ".hp 记录生命值"  # help指令中返回的内容
 
-    def search_target(self, target_intent: str, group_id: str, target_id_name_dict: dict):
+    def search_target(self, target_intent: str, group_id: str) -> Tuple[str, str]:
         """
-        从生命值信息和先攻列表中查询, 如果找到结果返回账号(对于PC)或名称(对于NPC), 没有找到则返回空字符串
-        target_id_name_dict是一个引用
+        从角色卡信息, 生命值信息和先攻列表中查询是否有符合target_intent, 如果找到结果返回字符串元组(DC, PC账号/NPC名称), 没有找到则返回元组("", "")
+        DC可以为
+        * DC_CHAR_DND (从角色卡信息或先攻列表中找到, 元组第二位为pc账号)
+        * DC_CHAR_HP (从生命值信息或先攻列表中找到, 元组第二位为npc名称)
+        * "multiple" (多个模糊的结果, 此时元组第二位为以/分割的pc或npc名称)
+        匹配优先级为 完全匹配角色卡信息>完全匹配生命值信息>完全匹配先攻列表>部分匹配角色卡信息>部分匹配生命值信息>部分匹配先攻列表
         """
+        MULTI_SOURCE = "multiple"
+        source = ""
         target_id = ""
-        # 优先查找当前已经存在的生命值信息
-        exist_list: List[str]
-        target_poss: List[str]
+        target_id_name_dict: Dict[str, str] = {}
+        # 查找角色卡信息
         try:
-            exist_list = list(self.bot.data_manager.get_keys(DC_CHAR_HP, [group_id]))
+            for char_id in self.bot.data_manager.get_keys(DC_CHAR_DND, [group_id]):
+                target_id_name_dict[char_id] = self.bot.get_nickname(char_id, group_id)
         except DataManagerError:
-            exist_list = []
-        for name_or_id in exist_list:
-            name = self.bot.get_nickname(name_or_id, group_id)
-            if name == NICKNAME_ERROR:
-                target_id_name_dict[name_or_id] = name_or_id
-            else:
-                target_id_name_dict[name_or_id] = name
+            pass
         target_poss = match_substring(target_intent, target_id_name_dict.values())
-        target_poss = list(yield_deduplicate(target_poss))
         if len(target_poss) == 1:
+            source = DC_CHAR_DND
             for key, value in target_id_name_dict.items():
                 if value == target_poss[0]:
                     target_id = key
+                    if value == target_intent:  # 完全匹配
+                        return source, target_id
                     break
-        # 再从先攻列表里查找
-        if not target_id:
-            try:
-                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [group_id])
-                for entity in init_data[DCK_ENTITY]:
-                    entity: InitEntity = entity
-                    if entity.owner:
-                        target_id_name_dict[entity.owner] = entity.name
-                    else:
-                        target_id_name_dict[entity.name] = entity.name
-            except DataManagerError:
-                pass
-            target_poss = match_substring(target_intent, target_id_name_dict.values())
-            target_poss = list(yield_deduplicate(target_poss))
-            if len(target_poss) == 1:
-                for key, value in target_id_name_dict.items():
-                    if value == target_poss[0]:
-                        target_id = key
-                        break
-        return target_id
-
-    def modify_hp(self, target: List[str], cmd_type: Literal["=", "+", "-"] = 0,
-                  hp_cur_mod_result: Optional[RollResult] = None, hp_cur_mod_val: int = 0,
-                  hp_max_mod_result: Optional[RollResult] = None, hp_max_mod_val: int = 0,
-                  hp_temp_mod_result: Optional[RollResult] = None, hp_temp_mod_val: int = 0,
-                  short_feedback=False):
-        """target必须是一个有效的地址, 否则将抛出异常"""
-        hp_info: HPInfo = self.bot.data_manager.get_data(DC_CHAR_HP, target, default_val=HPInfo())
-        mod_info = ""
-        if cmd_type == "=":  # 设置生命值
-            if hp_cur_mod_result:
-                hp_info.hp_cur = hp_cur_mod_val
-                mod_info = f"HP={hp_cur_mod_result.get_result()}"
-            if hp_max_mod_result:
-                hp_info.hp_max = hp_max_mod_val
-                hp_info.hp_cur = min(hp_info.hp_cur, hp_info.hp_max)
-                mod_info = f"HP={hp_cur_mod_result.get_result()}/{hp_max_mod_result.get_result()}"
-            if hp_temp_mod_result:
-                hp_info.hp_temp = hp_temp_mod_val
-                if "HP=" in mod_info:
-                    mod_info += f" ({hp_temp_mod_result.get_result()})"
+        elif len(target_poss) > 1:  # 模糊的结果
+            source = MULTI_SOURCE
+            target_id = "/".join(target_poss)
+            return source, target_id
+        # 查找当前已经存在的生命值信息
+        try:
+            npc_set = set(self.bot.data_manager.get_keys(DC_CHAR_HP, [group_id]))
+        except DataManagerError:
+            npc_set = {}
+        target_poss = match_substring(target_intent, npc_set)
+        if len(target_poss) == 1:
+            for npc_id in npc_set:
+                if npc_id == target_poss[0]:
+                    if not target_id:  # 之前没有匹配结果
+                        source = DC_CHAR_HP
+                        target_id = npc_id
+                    if npc_id == target_intent:  # 完全匹配
+                        source = DC_CHAR_HP
+                        return source, npc_id
+                    break
+        elif len(target_poss) > 1:  # 模糊的结果
+            source = MULTI_SOURCE
+            target_id = "/".join(target_poss)
+            return source, target_id
+        # 查找先攻列表
+        target_id_name_dict = {}
+        pc_set = set()
+        try:
+            init_data: dict = self.bot.data_manager.get_data(DC_INIT, [group_id])
+            for entity in init_data[DCK_ENTITY]:
+                entity: InitEntity = entity
+                if entity.owner:
+                    target_id_name_dict[entity.owner] = entity.name
+                    pc_set.add(entity.owner)
                 else:
-                    mod_info = f"临时HP={hp_temp_mod_result.get_result()}"
-            mod_info += f"\n当前{hp_info.get_info()}"
-        elif cmd_type == "+":  # 增加生命值
-            hp_info_str_prev = hp_info.get_info()
-            if hp_max_mod_result:  # 先结算生命值上限
-                hp_info.hp_max += hp_max_mod_val
-                mod_info += f"最大HP增加{hp_max_mod_result.get_result()}, "
-            if hp_cur_mod_result:
-                hp_info.heal(hp_cur_mod_val)
-                mod_info += f"当前HP增加{hp_cur_mod_result.get_result()}"
-            if hp_temp_mod_result:
-                hp_info.hp_temp += hp_temp_mod_val
-                if mod_info:
-                    mod_info += ", "
-                mod_info += f"临时HP增加{hp_temp_mod_result.get_result()}"
-            mod_info += f"\n{hp_info_str_prev} -> {hp_info.get_info()}"
-        else:  # cmd_type == "-"  扣除生命值
-            hp_info_str_prev = hp_info.get_info()
-            if hp_temp_mod_result:  # 先结算临时生命值
-                hp_info.hp_temp = max(0, hp_info.hp_temp - hp_temp_mod_val)
-                mod_info += f"临时HP减少{hp_temp_mod_result.get_result()}"
-            if hp_max_mod_result:  # 先结算生命值上限
-                hp_info.hp_max -= hp_max_mod_val
-                if mod_info:
-                    mod_info += ", "
-                mod_info += f"最大HP减少{hp_max_mod_result.get_result()}"
-                hp_info.hp_cur = min(hp_info.hp_cur, hp_info.hp_max)
-            if hp_cur_mod_result:
-                hp_info.take_damage(hp_cur_mod_val)
-                if mod_info:
-                    mod_info += ", "
-                mod_info += f"当前HP减少{hp_cur_mod_result.get_result()}"
-            mod_info += f"\n{hp_info_str_prev} -> {hp_info.get_info()}"
-
-        self.bot.data_manager.set_data(DC_CHAR_HP, target, hp_info)
-        mod_info = mod_info.strip()
-        if short_feedback:
-            mod_info = mod_info.replace("\n", "; ")
-        return mod_info
+                    target_id_name_dict[entity.name] = entity.name
+        except DataManagerError:
+            pass
+        target_poss = match_substring(target_intent, target_id_name_dict.values())
+        if len(target_poss) == 1:
+            for key, value in target_id_name_dict.items():
+                if value == target_poss[0]:
+                    if not target_id:  # 之前没有匹配结果
+                        if key in pc_set:
+                            source = DC_CHAR_DND
+                        else:
+                            source = DC_CHAR_HP
+                        target_id = key
+                    if value == target_intent:
+                        if key in pc_set:
+                            source = DC_CHAR_DND
+                        else:
+                            source = DC_CHAR_HP
+                        return source, key
+                    break
+        elif len(target_poss) > 1:  # 模糊的结果
+            source = MULTI_SOURCE
+            target_id = "/".join(target_poss)
+            return source, target_id
+        return source, target_id

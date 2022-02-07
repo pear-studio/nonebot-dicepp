@@ -384,9 +384,11 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".hp +1", checker=lambda s: "当前HP增加1\nHP:0/20 昏迷 -> HP:1/20" in s)
         await self.__vg_msg(".hp +1", user_id="123456", checker=lambda s: "当前HP增加1\n损失HP:0 -> 损失HP:0" in s)
         await self.__vg_msg(".hp list", checker=lambda s: "测试用户 HP:1/20\n测试用户 损失HP:0" in s)
-        await self.__vg_msg(".hp 测试用户+1", user_id="123456", checker=lambda s: "当前HP增加1\n损失HP:0 -> 损失HP:0" in s)
+        await self.__vg_msg(".nn 法师", user_id="123456", checker=lambda s: "Set your nickname as 法师" in s)
+        await self.__vg_msg(".hp list", checker=lambda s: "测试用户 HP:1/20\n法师 损失HP:0" in s)
+        await self.__vg_msg(".hp 测试用户+1", user_id="123456", checker=lambda s: "当前HP增加1\nHP:1/20 -> HP:2/20" in s)
         await self.__vg_msg(".nn 战士", user_id="654321", checker=lambda s: "Set your nickname as 战士" in s)
-        await self.__vg_msg(".hp 测试用户+100", user_id="654321", checker=lambda s: "当前HP增加100\nHP:1/20 -> HP:20/20" in s)
+        await self.__vg_msg(".hp 测试用户+100", user_id="654321", checker=lambda s: "当前HP增加100\nHP:2/20 -> HP:20/20" in s)
         await self.__vg_msg(".hp +10/20", checker=lambda s: "最大HP增加20, 当前HP增加10\nHP:20/20 -> HP:30/40" in s)
         await self.__vg_msg(".hp +40/20 (10)", checker=lambda s: "最大HP增加20, 当前HP增加40, 临时HP增加10\nHP:30/40 -> HP:60/60 (10)" in s)
         await self.__vg_msg(".hp -10 (15)", checker=lambda s: "临时HP减少15, 当前HP减少10\nHP:60/60 (10) -> HP:50/60" in s)
@@ -404,7 +406,49 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".hp a-20", checker=lambda s: "哥布林a: 当前HP减少20\n损失HP:0 (10) -> 损失HP:10" in s)
         await self.__vg_msg(".hp a-4d6+2", checker=lambda s: "哥布林a: 当前HP减少" in s and "损失HP:10 -> 损失HP:" in s)
         await self.__vg_msg(".hp a;b;c-4d6", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 2)
-        await self.__vg_msg(".hp list", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 3 and "测试用户 损失HP:0" in s)
+        await self.__vg_msg(".hp list", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 3 and "法师 损失HP:0" in s)
+
+    async def test_6_char(self):
+        await self.__vg_msg(".角色卡", checker=lambda s: "Cannot find your character" in s)
+        await self.__vg_msg(".角色卡模板", checker=lambda s: "$等级$" in s and "$生命值$" in s)
+        char_temp = """
+                        $姓名$ 伊丽莎白
+                        $等级$ 4
+                        $生命值$ 20/30(5)
+                        $生命骰$ 3/4 D8
+                        $属性$ 10/15/12/13/8/11
+                        $熟练$ 体操/2*隐匿/敏捷豁免/敏捷攻击
+                        $额外加值$ 敏捷攻击:+1d4/魅力攻击:优势/豁免:+2/攻击:+1
+                    """
+        await self.__vg_msg(f".角色卡记录\n{char_temp}", checker=lambda s: "Already set your character" in s)
+        await self.__vg_msg(".角色卡", checker=lambda s: "$等级$ 4" in s and "$生命值$ 20/30 (5)" in s)
+        await self.__vg_msg(".状态", checker=lambda s: "HP:20/30 (5)" in s and "生命骰:3/4 D8" in s)
+        await self.__vg_msg(".力量检定", checker=lambda s: "伊丽莎白 throw 力量检定" in s and "无熟练加值 力量调整值:0" in s and "1D20=" in s)
+        await self.__vg_msg(".敏捷检定", checker=lambda s: "伊丽莎白 throw 敏捷检定" in s and "无熟练加值 敏捷调整值:2" in s and "1D20+2=" in s)
+        await self.__vg_msg(".体操检定", checker=lambda s: "throw 体操检定" in s and "熟练加值:2 敏捷调整值:2" in s and "1D20+2+2=" in s)
+        await self.__vg_msg(".隐匿检定", checker=lambda s: "throw 隐匿检定" in s and "熟练加值:2*2 敏捷调整值:2" in s and "1D20+4+2=" in s)
+        await self.__vg_msg(".躲藏检定", checker=lambda s: "throw 躲藏检定" in s and "熟练加值:2*2 敏捷调整值:2" in s and "1D20+4+2=" in s)
+        await self.__vg_msg(".洞悉检定", checker=lambda s: "throw 洞悉检定" in s and "无熟练加值 感知调整值:-1" in s and "1D20-1=" in s)
+        await self.__vg_msg(".感知豁免", checker=lambda s: "throw 感知豁免检定" in s and "无熟练加值 感知调整值:-1 额外加值:+2" in s and "1D20-1+2=" in s)
+        await self.__vg_msg(".敏捷攻击", checker=lambda s: "throw 敏捷攻击检定" in s and "熟练加值:2 敏捷调整值:2 额外加值:+1d4+1" in s and "1D20+2+2+1D4+1=" in s)
+        await self.__vg_msg(".力量攻击", checker=lambda s: "throw 力量攻击检定" in s and "熟练加值:2 力量调整值:0 额外加值:+1" in s and "1D20+2+1=" in s)
+        await self.__vg_msg(".2#敏捷攻击", checker=lambda s: "throw 2次敏捷攻击检定" in s and "额外加值:+1d4+1" in s and s.count("1D20+2+2+1D4+1=") == 2)
+        await self.__vg_msg(".魅力攻击", checker=lambda s: "throw 魅力攻击检定" in s and "熟练加值:2 魅力调整值:0 额外加值:+1 自带优势" in s and "2D20K1+2+1=" in s)
+
+        await self.__vg_msg(".init", checker=lambda s: "伊丽莎白 先攻:" not in s)
+        await self.__vg_msg(".先攻检定", checker=lambda s: "throw 先攻检定" in s and "无熟练加值 敏捷调整值:2" in s and "initiative result is 1D20+2" in s)
+        await self.__vg_msg(".init", checker=lambda s: "伊丽莎白 先攻:" in s and "HP:20/30 (5)" in s)
+
+        await self.__vg_msg(".hp", checker=lambda s: "伊丽莎白: HP:20/30 (5)" in s)
+        await self.__vg_msg(".hp-8", checker=lambda s: "伊丽莎白: 当前HP减少8\nHP:20/30 (5) -> HP:17/30" in s)
+        await self.__vg_msg(".生命骰", checker=lambda s: "伊丽莎白使用1颗D8生命骰, 体质调整值为1, 回复" in s and "HP:17/30 -> HP:" in s)
+        await self.__vg_msg(".2#生命骰", checker=lambda s: "伊丽莎白使用2颗D8生命骰, 体质调整值为1, 回复" in s and "HP:17/30" not in s)
+        await self.__vg_msg(".10#生命骰", checker=lambda s: "伊丽莎白生命骰数量不足, 还有0颗生命骰" in s)
+
+        await self.__vg_msg(".长休", checker=lambda s: "伊丽莎白进行了一次长休\n生命值回复至上限(30)\n回复2个生命骰, 当前拥有2/4个D8生命骰" in s)
+
+        await self.__vg_msg(".角色卡清除", checker=lambda s: "Already delete your character" in s)
+        await self.__vg_msg(".角色卡", checker=lambda s: "Cannot find your character" in s)
 
 
 if __name__ == '__main__':
