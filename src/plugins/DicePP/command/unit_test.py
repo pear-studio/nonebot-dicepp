@@ -4,9 +4,9 @@ import os
 import asyncio
 from typing import Callable
 
-from bot_core import Bot, MessageMetaData, MessageSender
-from bot_core import NoticeData, GroupIncreaseNoticeData, FriendAddNoticeData
-from bot_config import ConfigItem, CFG_MASTER
+from ..bot_core import Bot, MessageMetaData, MessageSender
+from ..bot_core import NoticeData, GroupIncreaseNoticeData, FriendAddNoticeData
+from ..bot_config import ConfigItem, CFG_MASTER
 
 
 class MyTestCase(IsolatedAsyncioTestCase):
@@ -111,7 +111,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg("HI", group_id="test_group_a", checker=lambda s: "Hello" in s or "G'Day" in s)
         await self.__vg_msg("hi", group_id="test_group_b", checker=lambda s: "Hello" in s or "G'Day" in s)
         await self.__vg_msg("HI123", group_id="test_group_c", checker=lambda s: "Hello" not in s and "G'Day" not in s)
-        await self.__vg_msg("HI", group_id="test_group_a", checker=lambda s: "Hello" not in s and "G'Day" not in s)  # 频繁自定义
+        await self.__vg_msg("HI", group_id="test_group_a",
+                            checker=lambda s: "Hello" not in s and "G'Day" not in s)  # 频繁自定义
 
     async def test_1_roll_dice(self):
         # Normal - Group
@@ -145,7 +146,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".bot on", group_id="group_activate", to_me=True, checker=lambda s: "G'Day, I'm on" in s)
         await self.__vg_msg(".r", group_id="group_activate", checker=lambda s: not not s)
         await self.__vg_msg(".bot off", group_id="group_activate", checker=lambda s: not s)
-        await self.__vg_msg(".bot off", group_id="group_activate", to_me=True, checker=lambda s: "See you, I'm off" in s)
+        await self.__vg_msg(".bot off", group_id="group_activate", to_me=True,
+                            checker=lambda s: "See you, I'm off" in s)
         await self.__vg_msg(".r", group_id="group_activate", checker=lambda s: not s)
         await self.__vg_msg(".r", checker=lambda s: not not s)
         await self.__vg_msg(".bot on", group_id="group_activate", to_me=True, checker=lambda s: "G'Day, I'm on" in s)
@@ -188,9 +190,11 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".define 掷骰指令宏 .r", checker=lambda s: "Define 掷骰指令宏 as .r, args are: []" in s)
         await self.__vg_msg("掷骰指令宏", checker=lambda s: "roll result is" in s)
         await self.__vg_msg(".define", checker=lambda s: "1. Keywords: 掷骰指令宏 Args: [] -> .r" in s)
-        await self.__vg_msg(".define 参数指令宏(A,B,C) .A B C", checker=lambda s: "Define 参数指令宏 as .{a} {b} {c}, args are: ['a', 'b', 'c']" in s)
+        await self.__vg_msg(".define 参数指令宏(A,B,C) .A B C",
+                            checker=lambda s: "Define 参数指令宏 as .{a} {b} {c}, args are: ['a', 'b', 'c']" in s)
         await self.__vg_msg("参数指令宏:r:d4:原因", checker=lambda s: "roll result for 原因 is 1D4" in s)
-        await self.__vg_msg(".define", checker=lambda s: "2. Keywords: 参数指令宏 Args: ['a', 'b', 'c'] -> .{a} {b} {c}" in s)
+        await self.__vg_msg(".define",
+                            checker=lambda s: "2. Keywords: 参数指令宏 Args: ['a', 'b', 'c'] -> .{a} {b} {c}" in s)
         await self.__vg_msg(".define del 参数指令宏", checker=lambda s: "Delete macro: 参数指令宏" in s)
         await self.__vg_msg("参数指令宏:r:d4:原因", checker=lambda s: not s)
         await self.__vg_msg(".define", checker=lambda s: "2" not in s)
@@ -215,7 +219,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".set 生命骰-1d20", checker=lambda s: "set variable 生命骰 as" in s)
         await self.__vg_msg(".get 战斗如潮", checker=lambda s: "战斗如潮 = 1" in s)
         await self.__vg_msg(".get", checker=lambda s: "All Variables:\n战斗如潮=1; 生命骰=" in s)
-        await self.__vg_msg(".get ABC", checker=lambda s: "Error when process var: abc不存在, 当前可用变量: ['战斗如潮', '生命骰']" in s)
+        await self.__vg_msg(".get ABC",
+                            checker=lambda s: "Error when process var: abc不存在, 当前可用变量: ['战斗如潮', '生命骰']" in s)
         await self.__vg_msg(".set ABC", checker=lambda s: "Error when process var: 至少包含['=', '+', '-']其中之一" in s)
         await self.__vg_msg(".set ABC=1", checker=lambda s: "set variable abc as 1" in s)
         await self.__vg_msg(".set 生命骰=10000000", checker=lambda s: "set variable 生命骰 as 10000000" in s)
@@ -283,13 +288,17 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".q TEST_KEY", checker=lambda s: "TEST_KEY: \nCONTENT_3" in s and "目录: TEST_CAT_3" in s)
         await self.__vg_msg(".q TEST_KEY_REPEAT", checker=lambda s: ("0.TEST_KEY_REPEAT, 1.TEST_KEY_REPEAT" in s))
         await self.__vp_msg(".q TEST_KEY_REPEAT",
-                            checker=lambda s: ("0. TEST_KEY_REPEAT: TEST_DESC_1" in s and " #Tag1A #Tag1B #Tag1C Space 目录: TEST_CAT_1" in s
-                                               and "1. TEST_KEY_REPEAT: TEST_DESC_2 目录: T" in s))
+                            checker=lambda s: (
+                                    "0. TEST_KEY_REPEAT: TEST_DESC_1" in s and " #Tag1A #Tag1B #Tag1C Space 目录: TEST_CAT_1" in s
+                                    and "1. TEST_KEY_REPEAT: TEST_DESC_2 目录: T" in s))
         await self.__vg_msg(".q TEST_KEY_MULT_A", checker=lambda s: ("0.TEST_KEY_MULT_A, 1.TEST_KEY_MULT_A" in s))
-        await self.__vp_msg(".q TEST_KEY_MULT_A", checker=lambda s: ("0. TEST_KEY_MULT_A: CONTENT_4..." in s and " #OTHER_TAG 目录: OTHER_CAT" in s))
-        await self.__vg_msg(".q TEST_KEY_MULT_B", checker=lambda s: ("TEST_KEY_MULT_B: \nCONTENT_5" in s and "#" not in s))
+        await self.__vp_msg(".q TEST_KEY_MULT_A", checker=lambda s: (
+                "0. TEST_KEY_MULT_A: CONTENT_4..." in s and " #OTHER_TAG 目录: OTHER_CAT" in s))
+        await self.__vg_msg(".q TEST_KEY_MULT_B",
+                            checker=lambda s: ("TEST_KEY_MULT_B: \nCONTENT_5" in s and "#" not in s))
         await self.__vg_msg(".q TEST/MULT", checker=lambda s: "0." in s and "4." in s)
-        await self.__vp_msg(".q TEST/MULT", checker=lambda s: "4. " in s and "CONTENT_7..." in s and " OTHER_DESC #" in s)
+        await self.__vp_msg(".q TEST/MULT",
+                            checker=lambda s: "4. " in s and "CONTENT_7..." in s and " OTHER_DESC #" in s)
         await self.__vg_msg(".q SYN_1A", checker=lambda s: "TEST_KEY_REPEAT" in s and "CONTENT_1" in s)
         await self.__vg_msg("-", checker=lambda s: "This is the first page!" not in s)
         await self.__vg_msg(".q PAGE_TEST", checker=lambda s: "27." in s and "0." in s and "PAGE_TEST_28" in s)
@@ -316,12 +325,17 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".draw 2D4+2#Deck_A", checker=lambda s: "Result 4: CA" in s)
         await self.__vg_msg(".draw Deck_B", checker=lambda s: "Draw 1 times from Deck_B" in s)
         await self.__vg_msg(".draw 8#Deck_B", checker=lambda s: "8 times" in s and "Result 5:" in s and "empty" in s)
-        await self.__vg_msg(".draw 5#Deck_B", checker=lambda s: "C1" in s and "C2" in s and "C3" in s and "C4" in s and "C5" in s, test_times=20)
-        await self.__vg_msg(".draw 5#Deck_B", checker=lambda s: "C1" in s and "C2" in s and "C3" in s and "C4" in s and "C5" in s, test_times=20)
+        await self.__vg_msg(".draw 5#Deck_B",
+                            checker=lambda s: "C1" in s and "C2" in s and "C3" in s and "C4" in s and "C5" in s,
+                            test_times=20)
+        await self.__vg_msg(".draw 5#Deck_B",
+                            checker=lambda s: "C1" in s and "C2" in s and "C3" in s and "C4" in s and "C5" in s,
+                            test_times=20)
         await self.__vg_msg(".draw 5#Deck_C", checker=lambda s: "Finalize draw!" in s and s.count("\n") == 2)
         await self.__vg_msg(".draw 5#Deck_D", checker=lambda s: s.count("Finalize draw!") == 5 and s.count("\n") == 5)
         await self.__vg_msg(".draw 5#Deck_E", checker=lambda s: "Finalize draw! (All)" in s and s.count("\n") == 2)
-        await self.__vg_msg(".draw 5#Deck_F", checker=lambda s: s.count("Finalize draw! (All)") == 1 and s.count("\n") == 2)
+        await self.__vg_msg(".draw 5#Deck_F",
+                            checker=lambda s: s.count("Finalize draw! (All)") == 1 and s.count("\n") == 2)
         await self.__vg_msg(".draw 5#Deck_G", checker=lambda s: "Result 1: 1D4=" in s and "Result 5: 1D4=" in s)
         await self.__vg_msg(".draw deck_z", checker=lambda s: "Draw 1 times from Deck_Z:\nC1" in s)
 
@@ -338,15 +352,18 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__v_notice(gi_notice_A, checker=lambda s: "Welcome!" in s)
         await self.__vg_msg(".welcome", checker=lambda s: "Welcoming word has been reset" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "Welcome!" in s)
-        await self.__vg_msg(".welcome ABC", group_id="test_group_a", checker=lambda s: "Welcoming word is \"ABC\" now" in s)
+        await self.__vg_msg(".welcome ABC", group_id="test_group_a",
+                            checker=lambda s: "Welcoming word is \"ABC\" now" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "ABC" in s)
         await self.__v_notice(gi_notice_B, checker=lambda s: "Welcome!" in s)
-        await self.__vg_msg(".welcome " + "*" * 999, group_id="test_group_a", checker=lambda s: "Welcoming word is illegal: 欢迎词长度大于100" in s)
+        await self.__vg_msg(".welcome " + "*" * 999, group_id="test_group_a",
+                            checker=lambda s: "Welcoming word is illegal: 欢迎词长度大于100" in s)
         await self.__vg_msg(".welcome", checker=lambda s: "Welcoming word has been reset" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "ABC" in s)
         await self.__vg_msg(".welcome", group_id="test_group_a", checker=lambda s: "Welcoming word has been reset" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: not s)
-        await self.__vg_msg(".welcome default", group_id="test_group_a", checker=lambda s: "Welcoming word is \"Welcome!\" now" in s)
+        await self.__vg_msg(".welcome default", group_id="test_group_a",
+                            checker=lambda s: "Welcoming word is \"Welcome!\" now" in s)
         await self.__v_notice(gi_notice_A, checker=lambda s: "Welcome!" in s)
 
     async def test_5_master(self):
@@ -390,7 +407,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".nn 战士", user_id="654321", checker=lambda s: "Set your nickname as 战士" in s)
         await self.__vg_msg(".hp 测试用户+100", user_id="654321", checker=lambda s: "当前HP增加100\nHP:2/20 -> HP:20/20" in s)
         await self.__vg_msg(".hp +10/20", checker=lambda s: "最大HP增加20, 当前HP增加10\nHP:20/20 -> HP:30/40" in s)
-        await self.__vg_msg(".hp +40/20 (10)", checker=lambda s: "最大HP增加20, 当前HP增加40, 临时HP增加10\nHP:30/40 -> HP:60/60 (10)" in s)
+        await self.__vg_msg(".hp +40/20 (10)",
+                            checker=lambda s: "最大HP增加20, 当前HP增加40, 临时HP增加10\nHP:30/40 -> HP:60/60 (10)" in s)
         await self.__vg_msg(".hp -10 (15)", checker=lambda s: "临时HP减少15, 当前HP减少10\nHP:60/60 (10) -> HP:50/60" in s)
         await self.__vg_msg(".hp -0/20", checker=lambda s: "最大HP减少20, 当前HP减少0\nHP:50/60 -> HP:40/40" in s)
         await self.__vg_msg(".hp -4d6抗性", checker=lambda s: "当前HP减少" in s)
@@ -406,7 +424,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".hp a-20", checker=lambda s: "哥布林a: 当前HP减少20\n损失HP:0 (10) -> 损失HP:10" in s)
         await self.__vg_msg(".hp a-4d6+2", checker=lambda s: "哥布林a: 当前HP减少" in s and "损失HP:10 -> 损失HP:" in s)
         await self.__vg_msg(".hp a;b;c-4d6", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 2)
-        await self.__vg_msg(".hp list", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 3 and "法师 损失HP:0" in s)
+        await self.__vg_msg(".hp list",
+                            checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 3 and "法师 损失HP:0" in s)
 
     async def test_6_char(self):
         await self.__vg_msg(".角色卡", checker=lambda s: "Cannot find your character" in s)
@@ -424,19 +443,28 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".角色卡", checker=lambda s: "$等级$ 4" in s and "$生命值$ 20/30 (5)" in s)
         await self.__vg_msg(".状态", checker=lambda s: "HP:20/30 (5)" in s and "生命骰:3/4 D8" in s)
         await self.__vg_msg(".力量检定", checker=lambda s: "伊丽莎白 throw 力量检定" in s and "无熟练加值 力量调整值:0" in s and "1D20=" in s)
-        await self.__vg_msg(".敏捷检定", checker=lambda s: "伊丽莎白 throw 敏捷检定" in s and "无熟练加值 敏捷调整值:2" in s and "1D20+2=" in s)
+        await self.__vg_msg(".敏捷检定",
+                            checker=lambda s: "伊丽莎白 throw 敏捷检定" in s and "无熟练加值 敏捷调整值:2" in s and "1D20+2=" in s)
         await self.__vg_msg(".体操检定", checker=lambda s: "throw 体操检定" in s and "熟练加值:2 敏捷调整值:2" in s and "1D20+2+2=" in s)
-        await self.__vg_msg(".隐匿检定", checker=lambda s: "throw 隐匿检定" in s and "熟练加值:2*2 敏捷调整值:2" in s and "1D20+4+2=" in s)
-        await self.__vg_msg(".躲藏检定", checker=lambda s: "throw 躲藏检定" in s and "熟练加值:2*2 敏捷调整值:2" in s and "1D20+4+2=" in s)
+        await self.__vg_msg(".隐匿检定",
+                            checker=lambda s: "throw 隐匿检定" in s and "熟练加值:2*2 敏捷调整值:2" in s and "1D20+4+2=" in s)
+        await self.__vg_msg(".躲藏检定",
+                            checker=lambda s: "throw 躲藏检定" in s and "熟练加值:2*2 敏捷调整值:2" in s and "1D20+4+2=" in s)
         await self.__vg_msg(".洞悉检定", checker=lambda s: "throw 洞悉检定" in s and "无熟练加值 感知调整值:-1" in s and "1D20-1=" in s)
-        await self.__vg_msg(".感知豁免", checker=lambda s: "throw 感知豁免检定" in s and "无熟练加值 感知调整值:-1 额外加值:+2" in s and "1D20-1+2=" in s)
-        await self.__vg_msg(".敏捷攻击", checker=lambda s: "throw 敏捷攻击检定" in s and "熟练加值:2 敏捷调整值:2 额外加值:+1d4+1" in s and "1D20+2+2+1D4+1=" in s)
-        await self.__vg_msg(".力量攻击", checker=lambda s: "throw 力量攻击检定" in s and "熟练加值:2 力量调整值:0 额外加值:+1" in s and "1D20+2+1=" in s)
-        await self.__vg_msg(".2#敏捷攻击", checker=lambda s: "throw 2次敏捷攻击检定" in s and "额外加值:+1d4+1" in s and s.count("1D20+2+2+1D4+1=") == 2)
-        await self.__vg_msg(".魅力攻击", checker=lambda s: "throw 魅力攻击检定" in s and "熟练加值:2 魅力调整值:0 额外加值:+1 自带优势" in s and "2D20K1+2+1=" in s)
+        await self.__vg_msg(".感知豁免", checker=lambda
+            s: "throw 感知豁免检定" in s and "无熟练加值 感知调整值:-1 额外加值:+2" in s and "1D20-1+2=" in s)
+        await self.__vg_msg(".敏捷攻击", checker=lambda
+            s: "throw 敏捷攻击检定" in s and "熟练加值:2 敏捷调整值:2 额外加值:+1d4+1" in s and "1D20+2+2+1D4+1=" in s)
+        await self.__vg_msg(".力量攻击", checker=lambda
+            s: "throw 力量攻击检定" in s and "熟练加值:2 力量调整值:0 额外加值:+1" in s and "1D20+2+1=" in s)
+        await self.__vg_msg(".2#敏捷攻击", checker=lambda s: "throw 2次敏捷攻击检定" in s and "额外加值:+1d4+1" in s and s.count(
+            "1D20+2+2+1D4+1=") == 2)
+        await self.__vg_msg(".魅力攻击", checker=lambda
+            s: "throw 魅力攻击检定" in s and "熟练加值:2 魅力调整值:0 额外加值:+1 自带优势" in s and "2D20K1+2+1=" in s)
 
         await self.__vg_msg(".init", checker=lambda s: "伊丽莎白 先攻:" not in s)
-        await self.__vg_msg(".先攻检定", checker=lambda s: "throw 先攻检定" in s and "无熟练加值 敏捷调整值:2" in s and "initiative result is 1D20+2" in s)
+        await self.__vg_msg(".先攻检定", checker=lambda
+            s: "throw 先攻检定" in s and "无熟练加值 敏捷调整值:2" in s and "initiative result is 1D20+2" in s)
         await self.__vg_msg(".init", checker=lambda s: "伊丽莎白 先攻:" in s and "HP:20/30 (5)" in s)
 
         await self.__vg_msg(".hp", checker=lambda s: "伊丽莎白: HP:20/30 (5)" in s)
@@ -449,6 +477,9 @@ class MyTestCase(IsolatedAsyncioTestCase):
 
         await self.__vg_msg(".角色卡清除", checker=lambda s: "Already delete your character" in s)
         await self.__vg_msg(".角色卡", checker=lambda s: "Cannot find your character" in s)
+
+    async def test_7_jrrp(self):
+        await self.__vg_msg(".jrrp", checker=lambda s: "伊丽莎白's today lucky number is:" in s)
 
 
 if __name__ == '__main__':
