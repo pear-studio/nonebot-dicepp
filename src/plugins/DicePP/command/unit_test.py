@@ -450,6 +450,9 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".角色卡清除", checker=lambda s: "Already delete your character" in s)
         await self.__vg_msg(".角色卡", checker=lambda s: "Cannot find your character" in s)
 
+    async def test_6_jrrp(self):
+        await self.__vg_msg(".jrrp", checker=lambda s: "Today's lucky number is:?" in s)
+
 
 if __name__ == '__main__':
     async def main():

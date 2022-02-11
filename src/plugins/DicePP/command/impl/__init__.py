@@ -20,3 +20,4 @@ from .utils_dnd_command import UtilsDNDCommand
 from .query_command import QueryCommand
 from .deck_command import DeckCommand
 from .chat_command import ChatCommand
+from .jrrp_command import JrrpCommand
