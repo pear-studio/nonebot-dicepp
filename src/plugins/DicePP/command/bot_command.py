@@ -72,6 +72,20 @@ class BotSendMsgCommand(BotCommandBase):
         return s
 
 
+class BotDelayCommand(BotCommandBase):
+    """
+    延迟执行后面的操作
+    """
+
+    def __init__(self, bot_id: str, seconds: float):
+        self.bot_id = bot_id
+        self.seconds = seconds
+
+    def __str__(self):
+        s = f"Bot \033[0;37m{self.bot_id}\033[0m delay \033[0;33m{self.seconds}\033[0m seconds"
+        return s
+
+
 class BotLeaveGroupCommand(BotCommandBase):
     """
     退出群

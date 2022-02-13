@@ -1,4 +1,5 @@
 import abc
+import html
 from typing import List, Tuple, Dict, Type, Any
 
 from command.command_config import *
@@ -13,6 +14,7 @@ def preprocess_msg(msg_str: str) -> str:
     """
     msg_str = to_english_str(msg_str)  # 转换中文标点
     msg_str = msg_str.lower().strip()  # 转换小写, 去掉前后空格
+    msg_str = html.unescape(msg_str)   # html实体转义: &#36; -> $
     return msg_str
 
 

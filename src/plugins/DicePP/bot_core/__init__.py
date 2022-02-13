@@ -1,5 +1,7 @@
 from bot_core.common import DC_META, DC_USER_DATA, DC_GROUP_DATA, DC_NICKNAME, DC_MACRO, DC_VARIABLE
-from bot_core.common import DCP_META_ONLINE_PERIOD, DCP_META_ONLINE_LAST
+from bot_core.common import DCP_META_ONLINE, DCP_META_ONLINE_PERIOD, DCP_META_ONLINE_LAST
+from bot_core.common import DCP_META_MSG, DCP_META_MSG_TOTAL_NUM, DCP_META_MSG_TODAY_NUM, DCP_META_MSG_LAST_NUM
+from bot_core.common import DCP_META_CMD, DCP_META_CMD_TOTAL_NUM, DCP_META_CMD_TODAY_NUM, DCP_META_CMD_LAST_NUM
 from bot_core.common import NICKNAME_ERROR
 
 from bot_core.message import MessageMetaData, MessageSender

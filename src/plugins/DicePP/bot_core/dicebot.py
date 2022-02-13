@@ -11,13 +11,14 @@ from bot_core import BotMacro, MACRO_PARSE_LIMIT
 from bot_core import BotVariable
 from bot_core import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE
 from bot_core import DCP_META_ONLINE_PERIOD, DCP_META_ONLINE_LAST
+from bot_core import DCP_META_CMD_TOTAL_NUM, DCP_META_CMD_TODAY_NUM, DCP_META_CMD_LAST_NUM
+from bot_core import DCP_META_MSG_TOTAL_NUM, DCP_META_MSG_TODAY_NUM, DCP_META_MSG_LAST_NUM
 from bot_core import NICKNAME_ERROR
 from data_manager import DataManager, DataManagerError
 import localization
 from localization import LocalizationHelper
 from bot_config import ConfigHelper, CFG_COMMAND_SPLIT
 from logger import dice_log, get_exception_info
-from dice_hub import HubManager
 
 
 # noinspection PyBroadException
@@ -29,13 +30,14 @@ class Bot:
             account: QQ账号
         """
         import command  # Command中可能会定义新的DataChunk和local text等, 所以要在之前import
+        from dice_hub import HubManager
         from adapter import ClientProxy
         self.account: str = account
         self.proxy: Optional[ClientProxy] = None
         self.data_path = os.path.join(bot_config.BOT_DATA_PATH, account)
 
         self.data_manager = DataManager(self.data_path)
-        self.hub_manager = HubManager(self.account)
+        self.hub_manager = HubManager(self)
         self.loc_helper = LocalizationHelper(bot_config.CONFIG_PATH, self.account)
         self.cfg_helper = ConfigHelper(bot_config.CONFIG_PATH, self.account)
 
@@ -101,6 +103,13 @@ class Bot:
                     feedback = self.loc_helper.format_loc_text(LOC_DAILY_UPDATE)
                     if feedback and feedback != "$":
                         await self.send_msg_to_master(feedback)
+                    # 清空今日统计
+                    meta_msg_last = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
+                    meta_cmd_last = self.data_manager.get_data(DC_META, DCP_META_CMD_TODAY_NUM, default_val=0)
+                    self.data_manager.set_data(DC_META, DCP_META_MSG_LAST_NUM, meta_msg_last)
+                    self.data_manager.set_data(DC_META, DCP_META_CMD_LAST_NUM, meta_cmd_last)
+                    self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, 0)
+                    self.data_manager.set_data(DC_META, DCP_META_CMD_TODAY_NUM, 0)
                 # 更新最后在线时间
                 cur_online_str = bot_utils.time.get_current_date_str()
                 online_period[-1][-1] = cur_online_str
@@ -207,6 +216,12 @@ class Bot:
 
         bot_commands: List[BotCommandBase] = []
 
+        # 统计收到的消息数量
+        meta_msg_total_num = self.data_manager.get_data(DC_META, DCP_META_MSG_TOTAL_NUM, default_val=0)
+        meta_msg_today_num = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
+        self.data_manager.set_data(DC_META, DCP_META_MSG_TOTAL_NUM, meta_msg_total_num+1)
+        self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, meta_msg_today_num+1)
+
         # 处理宏
         macro_list: List[BotMacro]
         try:
@@ -274,9 +289,14 @@ class Bot:
             if invalid_command_count == len(bot_commands):  # 全都是SendMsg则合并
                 bot_commands = list(send_msg_command_merged.values())
 
-        if self.proxy:
-            for command in bot_commands:
-                await self.proxy.process_bot_command(command)
+        if self.proxy and bot_commands:
+            # 统计处理的指令数目
+            meta_cmd_total_num = self.data_manager.get_data(DC_META, DCP_META_CMD_TOTAL_NUM, default_val=0)
+            meta_cmd_today_num = self.data_manager.get_data(DC_META, DCP_META_CMD_TODAY_NUM, default_val=0)
+            self.data_manager.set_data(DC_META, DCP_META_CMD_TOTAL_NUM, meta_cmd_total_num + 1)
+            self.data_manager.set_data(DC_META, DCP_META_CMD_TODAY_NUM, meta_cmd_today_num + 1)
+            # 处理指令
+            await self.proxy.process_bot_command_list(bot_commands)
         return bot_commands
 
     def process_request(self, data: RequestData) -> Optional[bool]:
@@ -284,7 +304,7 @@ class Bot:
         if isinstance(data, FriendRequestData):
             from bot_config import CFG_FRIEND_TOKEN
             passwords: List[str] = self.cfg_helper.get_config(CFG_FRIEND_TOKEN)
-            passwords = [password.strip() for password in passwords]
+            passwords = [password.strip() for password in passwords if password.strip()]
             comment: str = data.comment.strip()
             return not passwords or comment in passwords
         elif isinstance(data, JoinGroupRequestData):

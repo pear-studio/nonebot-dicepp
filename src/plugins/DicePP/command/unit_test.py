@@ -2,7 +2,7 @@ import unittest
 from unittest.async_case import IsolatedAsyncioTestCase
 import os
 import asyncio
-from typing import Callable
+from typing import Callable, List
 
 from bot_core import Bot, MessageMetaData, MessageSender
 from bot_core import NoticeData, GroupIncreaseNoticeData, FriendAddNoticeData
@@ -29,6 +29,10 @@ class MyTestCase(IsolatedAsyncioTestCase):
             async def process_bot_command(self, command: BotCommandBase):
                 if not self.mute:
                     print(f"Process Command: {command}")
+
+            async def process_bot_command_list(self, command_list: List[BotCommandBase]):
+                for command in command_list:
+                    await self.process_bot_command(command)
 
         cls.test_proxy = TestProxy()
         cls.test_bot.set_client_proxy(cls.test_proxy)
@@ -449,6 +453,12 @@ class MyTestCase(IsolatedAsyncioTestCase):
 
         await self.__vg_msg(".角色卡清除", checker=lambda s: "Already delete your character" in s)
         await self.__vg_msg(".角色卡", checker=lambda s: "Cannot find your character" in s)
+
+    async def test_7_hub(self):
+        test_card = "dicehub%%$card%%test_bot-S-未定义-S-test_master-S-Ver 1.1.0 (220207)"
+        await self.__vp_msg(".hub connect 1234", user_id="test_master", checker=lambda s: test_card in s)
+        test_card = test_card.replace("test_bot", "12345678")
+        await self.__vp_msg(test_card, user_id="12345678", checker=lambda s: "A new member 测试用户(12345678) connect to hub" in s)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,7 @@
 NoneBot API https://v2.nonebot.dev/api/plugin.html
 """
 from typing import List, Dict, Optional
+import asyncio
 
 import nonebot
 from nonebot import on_message, on_notice, on_request
@@ -16,7 +17,7 @@ from bot_core import Bot as DicePPBot
 from bot_core import MessageMetaData, MessageSender
 from bot_core import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from bot_core import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
-from command import BotCommandBase, BotSendMsgCommand, BotLeaveGroupCommand
+from command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand
 from logger import dice_log
 
 from adapter.client_proxy import ClientProxy
@@ -42,8 +43,17 @@ class NoneBotClientProxy(ClientProxy):
                     await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
         elif isinstance(command, BotLeaveGroupCommand):
             await self.bot.set_group_leave(group_id=int(command.target_group_id))
+        elif isinstance(command, BotDelayCommand):
+            await asyncio.sleep(command.seconds)
         else:
             raise NotImplementedError("未定义的BotCommand类型")
+
+    async def process_bot_command_list(self, command_list: List[BotCommandBase]):
+        if len(command_list) > 1:
+            log_str = "\n".join([str(command) for command in command_list])
+            dice_log(f"[Proxy Bot Command List]\n[{log_str}]")
+        for command in command_list:
+            await self.process_bot_command(command)
 
 
 @command_matcher.handle()
@@ -51,13 +61,19 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
     cq_message = event.get_message()
     plain_msg = cq_message.extract_plain_text()
     raw_msg = str(cq_message)
-    dice_log(f"[Proxy Message] {raw_msg}")
 
     # 构建Meta信息
     group_id: str = ""
     user_id: str = str(event.get_user_id())
-    if type(event) is GroupMessageEvent:
+    if isinstance(event, GroupMessageEvent):
         group_id = str(event.group_id)
+
+    log_str = f"[Proxy Message] Bot \033[0;37m{bot.self_id}\033[0m receive message \033[0;33m{raw_msg}\033[0m from "
+    if group_id:
+        log_str += f"\033[0;34m|Group: {group_id} User: {user_id}|\033[0m"
+    else:
+        log_str += f"\033[0;35m|Private: {user_id}|\033[0m"
+    dice_log()
 
     sender = MessageSender(user_id, event.sender.nickname)
     sender.sex, sender.age, sender.card = event.sender.sex, event.sender.age, event.sender.card

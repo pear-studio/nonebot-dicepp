@@ -1,8 +1,17 @@
 from data_manager import custom_data_chunk, DataChunkBase
 
 DC_META = "meta"
-DCP_META_ONLINE_LAST = ["online", "last"]
-DCP_META_ONLINE_PERIOD = ["online", "period"]
+DCP_META_ONLINE = ["online"]
+DCP_META_ONLINE_LAST = DCP_META_ONLINE + ["last"]
+DCP_META_ONLINE_PERIOD = DCP_META_ONLINE + ["period"]
+DCP_META_MSG = ["message"]
+DCP_META_MSG_TOTAL_NUM = DCP_META_MSG + ["total_num"]
+DCP_META_MSG_TODAY_NUM = DCP_META_MSG + ["today_num"]
+DCP_META_MSG_LAST_NUM = DCP_META_MSG + ["last_num"]
+DCP_META_CMD = ["command"]
+DCP_META_CMD_TOTAL_NUM = DCP_META_CMD + ["total_num"]
+DCP_META_CMD_TODAY_NUM = DCP_META_CMD + ["today_num"]
+DCP_META_CMD_LAST_NUM = DCP_META_CMD + ["last_num"]
 
 DC_MACRO = "macro"
 DC_VARIABLE = "variable"

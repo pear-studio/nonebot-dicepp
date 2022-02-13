@@ -15,11 +15,10 @@ DATA_PATH = os.path.join(PROJECT_PATH, 'Data')
 
 BOT_DATA_PATH = os.path.join(DATA_PATH, 'Bot')
 CONFIG_PATH = os.path.join(DATA_PATH, 'Config')
-KEY_PATH = os.path.join(DATA_PATH, 'Key')
 LOCAL_IMG_PATH = os.path.join(CONFIG_PATH, 'LocalImage')
 
 
-ALL_LOCAL_DIR_PATH = [DATA_PATH, BOT_DATA_PATH, KEY_PATH, CONFIG_PATH, LOCAL_IMG_PATH]
+ALL_LOCAL_DIR_PATH = [DATA_PATH, BOT_DATA_PATH, CONFIG_PATH, LOCAL_IMG_PATH]
 
 for dirPath in ALL_LOCAL_DIR_PATH:
     if not os.path.exists(dirPath):
