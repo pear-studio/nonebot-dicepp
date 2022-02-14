@@ -460,6 +460,9 @@ class MyTestCase(IsolatedAsyncioTestCase):
         test_card = test_card.replace("test_bot", "12345678")
         await self.__vp_msg(test_card, user_id="12345678", checker=lambda s: "A new member 测试用户(12345678) connect to hub" in s)
 
+    async def test_8_jrrp(self):
+        await self.__vg_msg(".jrrp", checker=lambda s: "伊丽莎白's today lucky number is:" in s)
+
 
 if __name__ == '__main__':
     async def main():
