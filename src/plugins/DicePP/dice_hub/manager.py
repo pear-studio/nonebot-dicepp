@@ -2,6 +2,7 @@ from typing import Dict, List, Tuple, Optional
 import datetime
 import json
 import random
+import math
 
 from bot_core import Bot
 from bot_core import DC_META
@@ -22,7 +23,10 @@ SYNC_INTERVAL_MIN = 3600 * 6  # 发送同步信息的最短间隔, 单位秒
 SYNC_FAIL_MAX = 3  # 能容忍的最长同步失败次数
 UPDATE_INVALID_TIME = 3600 * 24 * 7  # 若上次更新时间晚于该间隔, 则清除该记录
 
-SYNC_KEY_FRIEND_TOKEN = "friend_token"
+SYNC_KEY_NAME = "name"
+SYNC_KEY_MASTER = "master"
+SYNC_KEY_VERSION = "ver"
+SYNC_KEY_FRIEND_TOKEN = "friend_t"
 SYNC_KEY_ONLINE_FIRST = "ol_first"
 SYNC_KEY_ONLINE_RATE = "ol_rate"
 SYNC_KEY_MSG_TOTAL = "msg_total"
@@ -36,6 +40,9 @@ SYNC_CONFIRM_TYPE_REQ_CARD = "$req_card"
 
 def standardize_sync_info(sync_info_new: Dict) -> Dict:
     sync_info_std = {
+        SYNC_KEY_NAME: sync_info_new.get(SYNC_KEY_NAME, "NONE"),
+        SYNC_KEY_MASTER: sync_info_new.get(SYNC_KEY_MASTER, "NONE"),
+        SYNC_KEY_VERSION: sync_info_new.get(SYNC_KEY_VERSION, "NONE"),
         SYNC_KEY_FRIEND_TOKEN: sync_info_new.get(SYNC_KEY_FRIEND_TOKEN, []),
         SYNC_KEY_ONLINE_FIRST: sync_info_new.get(SYNC_KEY_ONLINE_FIRST, get_current_date_str()),
         SYNC_KEY_ONLINE_RATE: sync_info_new.get(SYNC_KEY_ONLINE_RATE, 0),
@@ -61,8 +68,14 @@ class HubManager:
         return friend_info
 
     def get_sync_info(self) -> Dict:
+        try:
+            self_name = self.bot.cfg_helper.get_config(CFG_HUB_NAME)[0]
+            assert self_name
+        except (IndexError, AssertionError):
+            self_name = CONST_UNDEFINED_NAME
+
         current_time = get_current_date_raw()
-        online_period = self.bot.data_manager.get_data(DC_META, DCP_META_ONLINE_PERIOD, default_val=0)
+        online_period = self.bot.data_manager.get_data(DC_META, DCP_META_ONLINE_PERIOD, default_val=[])
         try:
             first_time = online_period[0][0]
         except IndexError:
@@ -77,11 +90,15 @@ class HubManager:
                 continue
             if start_time < current_time - one_week:  # 只统计一周内的记录
                 start_time = current_time - one_week
-            online_time_in_week += (end_time - start_time).seconds
-        online_rate = int(online_time_in_week / total_time_in_week * 100)
+            online_time_in_week += (end_time - start_time).total_seconds()
+
+        online_rate = int(math.ceil(online_time_in_week / total_time_in_week * 100))
         passwords: List[str] = self.bot.cfg_helper.get_config(CFG_FRIEND_TOKEN)
         passwords = [password.strip() for password in passwords if password.strip()]
         sync_info = {
+            SYNC_KEY_NAME: self_name,
+            SYNC_KEY_MASTER: self.bot.get_master_ids()[0],
+            SYNC_KEY_VERSION: BOT_VERSION,
             SYNC_KEY_FRIEND_TOKEN: passwords,
             SYNC_KEY_ONLINE_FIRST: first_time,
             SYNC_KEY_ONLINE_RATE: online_rate,
@@ -149,7 +166,8 @@ class HubManager:
         remote_sync_list = [(remote_id, str_to_datetime(friend_info.sync_time), friend_info.sync_fail_times)
                             for remote_id, friend_info in friend_dict.items() if friend_info.distance == 0]
         # 同步间隔 = 最小同步间隔 * (失败次数+1)^2
-        remote_sync_list = [(x[0], x[1]) for x in remote_sync_list if current_time - x[1] > (datetime.timedelta(seconds=SYNC_INTERVAL_MIN) * ((x[2]+1)**2))]
+        remote_sync_list = [(x[0], x[1]) for x in remote_sync_list if
+                            current_time - x[1] > (datetime.timedelta(seconds=SYNC_INTERVAL_MIN) * ((x[2]+1)**2))]
         remote_sync_list = sorted(remote_sync_list, key=lambda x: x[1])[:max_num]
         if not remote_sync_list:
             return remote_list, sync_data
@@ -157,6 +175,7 @@ class HubManager:
         # 得到同步信息
         sync_info = self.get_sync_info()
         sync_data = json.dumps(sync_info)
+        sync_data = sync_data.replace(" ", "")
 
         # 增加远端同步的失败次数(将在对方确认后重置为0)
         for remote_id in remote_list:
@@ -174,6 +193,9 @@ class HubManager:
         friend_info.distance = 0
         sync_info_std = standardize_sync_info(json.loads(sync_data))
         friend_info.sync_info = sync_info_std
+        friend_info.name = friend_info.sync_info[SYNC_KEY_NAME]
+        friend_info.master = friend_info.sync_info[SYNC_KEY_MASTER]
+        friend_info.version = friend_info.sync_info[SYNC_KEY_VERSION]
         self.bot.data_manager.set_data(DC_HUB, [DCK_HUB_FRIEND, remote_id], friend_info)
         # 将自己所知的远端列表返回
         friend_dict: Dict[str, HubFriendInfo] = self.bot.data_manager.get_data(DC_HUB, [DCK_HUB_FRIEND], default_val={})
@@ -241,7 +263,6 @@ class HubManager:
             friend_info.distance = min(friend_info_prev.distance, friend_info.distance)
         except DataManagerError:
             pass
-        print("process_reroute_info", reroute_info, friend_info.id)
         self.bot.data_manager.set_data(DC_HUB, [DCK_HUB_FRIEND, friend_info.id], friend_info)
 
     def generate_list_info(self, is_full: bool) -> str:
@@ -256,13 +277,13 @@ class HubManager:
             last_update_time = int(last_update_time.seconds // 3600)
             online_rate = friend_info.sync_info.get(SYNC_KEY_ONLINE_RATE, 0)
             cur_info = f"{friend_info.name} 账号:{friend_info.id} Master:{friend_info.master} {friend_token} 版本:{friend_info.version} " \
-                       f"稳定性:{online_rate} 上次同步:{last_update_time}小时前"
+                       f"稳定性:{online_rate} 上次同步:{last_update_time}h前"
             if is_full:
                 dist = friend_info.distance
                 if dist == 0:
                     last_sync_time = current_time - str_to_datetime(friend_info.sync_time)
                     last_sync_time = int(last_sync_time.seconds // 3600)
-                    last_sync_info = f" 上次推送:{last_sync_time}小时前 失败次数:{friend_info.sync_fail_times}"
+                    last_sync_info = f" 上次推送:{last_sync_time}h前 失败次数:{friend_info.sync_fail_times}"
                 else:
                     last_sync_info = ""
                 online_first = friend_info.sync_info.get(SYNC_KEY_ONLINE_FIRST, get_current_date_str())
@@ -271,6 +292,6 @@ class HubManager:
                 msg_last = friend_info.sync_info.get(SYNC_KEY_MSG_LAST, 0)
                 cmd_total = friend_info.sync_info.get(SYNC_KEY_CMD_TOTAL, 0)
                 cmd_last = friend_info.sync_info.get(SYNC_KEY_CMD_LAST, 0)
-                cur_info += f"距离:{dist}{last_sync_info} 处理消息:{msg_last}({msg_total}) 处理指令:{cmd_last}({cmd_total}) 首次启动:{online_first}天前"
+                cur_info += f" 距离:{dist}{last_sync_info} 处理消息:{msg_last}({msg_total}) 处理指令:{cmd_last}({cmd_total}) 首次启动:{online_first}天前"
             list_info.append(cur_info)
         return "\n".join(list_info)

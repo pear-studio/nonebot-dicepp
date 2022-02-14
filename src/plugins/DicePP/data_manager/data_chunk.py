@@ -10,6 +10,7 @@ from bot_utils.time import get_current_date_str
 
 DC_VERSION_LATEST = "1.0"  # 格式版本
 
+
 class DataChunkBase(metaclass=abc.ABCMeta):
     """
     DataChunk是一次读取/更新文件的最小单位, 每个DataChunk子类都对应一个同名的持久化json文件

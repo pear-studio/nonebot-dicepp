@@ -245,6 +245,7 @@ class DataManager:
         for dataChunk in self.__dataChunks.values():
             if not dataChunk.dirty:  # 没有被修改过则不需要更新
                 continue
+            dataChunk.dirty = False
             dc_name = dataChunk.get_identifier()
             dataChunk.hash_code = hash(dataChunk)
             json_path = os.path.join(self.dataPath, f"{dc_name}.json")
@@ -256,6 +257,7 @@ class DataManager:
                 await update_json_async(dataChunk.to_json(), json_path_tmp)
             except JSONDecodeError as e:
                 logger.dice_log(f"[SaveData] 序列化过程中出现错误: {e.msg}")
+                dataChunk.dirty = True
                 continue
             # 删除正式文件
             try:
@@ -263,12 +265,14 @@ class DataManager:
                     os.remove(json_path)
             except OSError as e:
                 logger.dice_log(f"[SaveData] 无法删除文件{json_path_readable}: {e.args}")
+                dataChunk.dirty = True
                 continue
             # 重命名临时文件
             try:
                 os.rename(json_path_tmp, json_path)
             except OSError as e:
                 logger.dice_log(f"[SaveData] 无法重命名文件{json_path_tmp_readable} -> {json_path_readable} 原因: {e.args}")
+                dataChunk.dirty = True
                 continue
 
     def save_data(self):

@@ -455,7 +455,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".角色卡", checker=lambda s: "Cannot find your character" in s)
 
     async def test_7_hub(self):
-        test_card = "dicehub%%$card%%test_bot-S-未定义-S-test_master-S-Ver 1.1.0 (220207)"
+        test_card = "dicehub%%$card%%test_bot-S-未定义-S-test_master-S-"
         await self.__vp_msg(".hub connect 1234", user_id="test_master", checker=lambda s: test_card in s)
         test_card = test_card.replace("test_bot", "12345678")
         await self.__vp_msg(test_card, user_id="12345678", checker=lambda s: "A new member 测试用户(12345678) connect to hub" in s)
