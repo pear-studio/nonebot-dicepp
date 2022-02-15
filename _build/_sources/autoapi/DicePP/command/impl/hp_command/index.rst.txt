@@ -1,0 +1,114 @@
+:py:mod:`DicePP.command.impl.hp_command`
+========================================
+
+.. py:module:: DicePP.command.impl.hp_command
+
+.. autoapi-nested-parse::
+
+   hp指令
+
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.hp_command._
+   DicePP.command.impl.hp_command.HPCommand
+
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.hp_command.LOC_HP_INFO
+   DicePP.command.impl.hp_command.LOC_HP_INFO_MISS
+   DicePP.command.impl.hp_command.LOC_HP_INFO_MULTI
+   DicePP.command.impl.hp_command.LOC_HP_INFO_NONE
+   DicePP.command.impl.hp_command.LOC_HP_MOD
+   DicePP.command.impl.hp_command.LOC_HP_MOD_ERR
+   DicePP.command.impl.hp_command.LOC_HP_DEL
+   DicePP.command.impl.hp_command.DC_CHAR_HP
+
+
+.. py:data:: LOC_HP_INFO
+   :annotation: = hp_info
+
+   
+
+.. py:data:: LOC_HP_INFO_MISS
+   :annotation: = hp_info_miss
+
+   
+
+.. py:data:: LOC_HP_INFO_MULTI
+   :annotation: = hp_info_multi
+
+   
+
+.. py:data:: LOC_HP_INFO_NONE
+   :annotation: = hp_info_none
+
+   
+
+.. py:data:: LOC_HP_MOD
+   :annotation: = hp_mod
+
+   
+
+.. py:data:: LOC_HP_MOD_ERR
+   :annotation: = hp_mod_error
+
+   
+
+.. py:data:: LOC_HP_DEL
+   :annotation: = hp_delete
+
+   
+
+.. py:data:: DC_CHAR_HP
+   :annotation: = char_hp
+
+   
+
+.. py:class:: _
+
+   Bases: :py:obj:`data_manager.DataChunkBase`
+
+
+.. py:class:: HPCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   调整和记录生命值的指令, 以.hp开头
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: search_target(self, target_intent: str, group_id: str) -> Tuple[str, str]
+
+      从角色卡信息, 生命值信息和先攻列表中查询是否有符合target_intent, 如果找到结果返回字符串元组(DC, PC账号/NPC名称), 没有找到则返回元组("", "")
+      DC可以为
+      * DC_CHAR_DND (从角色卡信息或先攻列表中找到, 元组第二位为pc账号)
+      * DC_CHAR_HP (从生命值信息或先攻列表中找到, 元组第二位为npc名称)
+      * "multiple" (多个模糊的结果, 此时元组第二位为以/分割的pc或npc名称)
+      匹配优先级为 完全匹配角色卡信息>完全匹配生命值信息>完全匹配先攻列表>部分匹配角色卡信息>部分匹配生命值信息>部分匹配先攻列表
+
+
+

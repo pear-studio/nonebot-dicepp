@@ -1,0 +1,50 @@
+:py:mod:`DicePP.bot_core.notice`
+================================
+
+.. py:module:: DicePP.bot_core.notice
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_core.notice.NoticeData
+   DicePP.bot_core.notice.GroupIncreaseNoticeData
+   DicePP.bot_core.notice.FriendAddNoticeData
+
+
+
+
+.. py:class:: NoticeData
+
+   通知信息
+
+
+.. py:class:: GroupIncreaseNoticeData(user_id, group_id, operator_id)
+
+   Bases: :py:obj:`NoticeData`
+
+   群成员增加
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+
+.. py:class:: FriendAddNoticeData(user_id)
+
+   Bases: :py:obj:`NoticeData`
+
+   好友添加
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+

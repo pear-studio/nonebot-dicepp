@@ -1,0 +1,32 @@
+:py:mod:`DicePP.bot_config.config_item`
+=======================================
+
+.. py:module:: DicePP.bot_config.config_item
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_config.config_item.ConfigItem
+
+
+
+
+.. py:class:: ConfigItem(key: str, default_content: str = '', comment: str = '')
+
+   .. py:method:: add(self, text: str) -> None
+
+      为当前配置增加一个参数, 调用get可以返回所有参数
+
+
+   .. py:method:: get(self) -> List[str]
+
+      返回一个可选择的本地化字符串, 若没有可用的本地化字符串, 返回空字符串
+
+
+

@@ -1,0 +1,207 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DicePP.data_manager.json_object &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-DicePP.data_manager.json_object">
+<span id="dicepp-data-manager-json-object"></span><h1><a class="reference internal" href="#module-DicePP.data_manager.json_object" title="DicePP.data_manager.json_object"><code class="xref py py-mod docutils literal notranslate"><span class="pre">DicePP.data_manager.json_object</span></code></a><a class="headerlink" href="#module-DicePP.data_manager.json_object" title="永久链接至标题">¶</a></h1>
+<p>继承JsonObject的类可以通过DataManager序列化或反序列</p>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="永久链接至标题">¶</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.data_manager.json_object.JsonObject" title="DicePP.data_manager.json_object.JsonObject"><code class="xref py py-obj docutils literal notranslate"><span class="pre">JsonObject</span></code></a></p></td>
+<td><p>可以存在Json中的Object, 并不代表一定要通过Json反序列化和序列化</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h3>Functions<a class="headerlink" href="#functions" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.data_manager.json_object.custom_json_object" title="DicePP.data_manager.json_object.custom_json_object"><code class="xref py py-obj docutils literal notranslate"><span class="pre">custom_json_object</span></code></a>(cls)</p></td>
+<td><p>类修饰器, 将自定义JsonObject注册到列表中</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="attributes">
+<h3>Attributes<a class="headerlink" href="#attributes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.data_manager.json_object.JSON_OBJECT_PREFIX" title="DicePP.data_manager.json_object.JSON_OBJECT_PREFIX"><code class="xref py py-obj docutils literal notranslate"><span class="pre">JSON_OBJECT_PREFIX</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.data_manager.json_object.ALL_JSON_OBJ_DICT" title="DicePP.data_manager.json_object.ALL_JSON_OBJ_DICT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ALL_JSON_OBJ_DICT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.data_manager.json_object.JSON_OBJECT_PREFIX">
+<span class="sig-prename descclassname"><span class="pre">DicePP.data_manager.json_object.</span></span><span class="sig-name descname"><span class="pre">JSON_OBJECT_PREFIX</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">JSON_OBJ_</span></em><a class="reference internal" href="../../../../_modules/DicePP/data_manager/json_object.html#JSON_OBJECT_PREFIX"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.data_manager.json_object.JSON_OBJECT_PREFIX" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.data_manager.json_object.JsonObject">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.data_manager.json_object.</span></span><span class="sig-name descname"><span class="pre">JsonObject</span></span><a class="reference internal" href="../../../../_modules/DicePP/data_manager/json_object.html#JsonObject"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.data_manager.json_object.JsonObject" title="永久链接至目标">¶</a></dt>
+<dd><p>可以存在Json中的Object, 并不代表一定要通过Json反序列化和序列化
+构造函数不能拥有参数! 原因见construct_from_json</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.data_manager.json_object.JsonObject.to_json">
+<span class="sig-name descname"><span class="pre">to_json</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/data_manager/json_object.html#JsonObject.to_json"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.data_manager.json_object.JsonObject.to_json" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.data_manager.json_object.JsonObject.construct_from_json">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">construct_from_json</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cls</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">json_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#DicePP.data_manager.json_object.JsonObject" title="DicePP.data_manager.json_object.JsonObject"><span class="pre">JsonObject</span></a></span></span><a class="reference internal" href="../../../../_modules/DicePP/data_manager/json_object.html#JsonObject.construct_from_json"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.data_manager.json_object.JsonObject.construct_from_json" title="永久链接至目标">¶</a></dt>
+<dd><p>从一个json字符串中构造一个json object并返回
+Args:</p>
+<blockquote>
+<div><p>json_str: 格式见JsonObject.to_json方法</p>
+</div></blockquote>
+<p>Returns:</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.data_manager.json_object.JsonObject.serialize">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">serialize</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/data_manager/json_object.html#JsonObject.serialize"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.data_manager.json_object.JsonObject.serialize" title="永久链接至目标">¶</a></dt>
+<dd><p>将自身序列化为任意字符串</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.data_manager.json_object.JsonObject.deserialize">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">deserialize</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">json_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">None</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/data_manager/json_object.html#JsonObject.deserialize"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.data_manager.json_object.JsonObject.deserialize" title="永久链接至目标">¶</a></dt>
+<dd><p>通过字符串将自身反序列化</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.data_manager.json_object.ALL_JSON_OBJ_DICT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.data_manager.json_object.</span></span><span class="sig-name descname"><span class="pre">ALL_JSON_OBJ_DICT</span></span><em class="property"><span class="w"> </span><span class="pre">:Dict[str,</span> <span class="pre">Type[JsonObject]]</span></em><a class="reference internal" href="../../../../_modules/DicePP/data_manager/json_object.html#ALL_JSON_OBJ_DICT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.data_manager.json_object.ALL_JSON_OBJ_DICT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.data_manager.json_object.custom_json_object">
+<span class="sig-prename descclassname"><span class="pre">DicePP.data_manager.json_object.</span></span><span class="sig-name descname"><span class="pre">custom_json_object</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cls</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/data_manager/json_object.html#custom_json_object"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.data_manager.json_object.custom_json_object" title="永久链接至目标">¶</a></dt>
+<dd><p>类修饰器, 将自定义JsonObject注册到列表中</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/DicePP/data_manager/json_object/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

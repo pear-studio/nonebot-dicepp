@@ -1,0 +1,222 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DicePP.command.impl.variable_command &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../../" id="documentation_options" src="../../../../../_static/documentation_options.js"></script>
+    <script src="../../../../../_static/jquery.js"></script>
+    <script src="../../../../../_static/underscore.js"></script>
+    <script src="../../../../../_static/doctools.js"></script>
+    <script src="../../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-DicePP.command.impl.variable_command">
+<span id="dicepp-command-impl-variable-command"></span><h1><a class="reference internal" href="#module-DicePP.command.impl.variable_command" title="DicePP.command.impl.variable_command"><code class="xref py py-mod docutils literal notranslate"><span class="pre">DicePP.command.impl.variable_command</span></code></a><a class="headerlink" href="#module-DicePP.command.impl.variable_command" title="永久链接至标题">¶</a></h1>
+<p>变量指令, 如.set</p>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="永久链接至标题">¶</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.variable_command.VariableCommand" title="DicePP.command.impl.variable_command.VariableCommand"><code class="xref py py-obj docutils literal notranslate"><span class="pre">VariableCommand</span></code></a></p></td>
+<td><p>用户自定义变量 包括.set .get .del</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h3>Functions<a class="headerlink" href="#functions" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.variable_command.assert_valid_variable_name" title="DicePP.command.impl.variable_command.assert_valid_variable_name"><code class="xref py py-obj docutils literal notranslate"><span class="pre">assert_valid_variable_name</span></code></a>(name: str)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="attributes">
+<h3>Attributes<a class="headerlink" href="#attributes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.variable_command.LOC_VAR_SET" title="DicePP.command.impl.variable_command.LOC_VAR_SET"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_VAR_SET</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.variable_command.LOC_VAR_GET" title="DicePP.command.impl.variable_command.LOC_VAR_GET"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_VAR_GET</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.variable_command.LOC_VAR_GET_ALL" title="DicePP.command.impl.variable_command.LOC_VAR_GET_ALL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_VAR_GET_ALL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.variable_command.LOC_VAR_DEL" title="DicePP.command.impl.variable_command.LOC_VAR_DEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_VAR_DEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.variable_command.LOC_VAR_ERROR" title="DicePP.command.impl.variable_command.LOC_VAR_ERROR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_VAR_ERROR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.LOC_VAR_SET">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.variable_command.</span></span><span class="sig-name descname"><span class="pre">LOC_VAR_SET</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">var_set</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#LOC_VAR_SET"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.LOC_VAR_SET" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.LOC_VAR_GET">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.variable_command.</span></span><span class="sig-name descname"><span class="pre">LOC_VAR_GET</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">var_get</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#LOC_VAR_GET"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.LOC_VAR_GET" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.LOC_VAR_GET_ALL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.variable_command.</span></span><span class="sig-name descname"><span class="pre">LOC_VAR_GET_ALL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">var_get_all</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#LOC_VAR_GET_ALL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.LOC_VAR_GET_ALL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.LOC_VAR_DEL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.variable_command.</span></span><span class="sig-name descname"><span class="pre">LOC_VAR_DEL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">var_del</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#LOC_VAR_DEL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.LOC_VAR_DEL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.LOC_VAR_ERROR">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.variable_command.</span></span><span class="sig-name descname"><span class="pre">LOC_VAR_ERROR</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">var_error</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#LOC_VAR_ERROR"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.LOC_VAR_ERROR" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.VariableCommand">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.variable_command.</span></span><span class="sig-name descname"><span class="pre">VariableCommand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#VariableCommand"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.VariableCommand" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">command.dicepp_command.UserCommandBase</span></code></p>
+<p>用户自定义变量 包括.set .get .del</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.VariableCommand.can_process_msg">
+<span class="sig-name descname"><span class="pre">can_process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#VariableCommand.can_process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.VariableCommand.can_process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.VariableCommand.process_msg">
+<span class="sig-name descname"><span class="pre">process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hint</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../bot_command/index.html#DicePP.command.bot_command.BotCommandBase" title="DicePP.command.bot_command.BotCommandBase"><span class="pre">command.bot_command.BotCommandBase</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#VariableCommand.process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.VariableCommand.process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.VariableCommand.get_help">
+<span class="sig-name descname"><span class="pre">get_help</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keyword</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#VariableCommand.get_help"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.VariableCommand.get_help" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.VariableCommand.get_description">
+<span class="sig-name descname"><span class="pre">get_description</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#VariableCommand.get_description"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.VariableCommand.get_description" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.command.impl.variable_command.assert_valid_variable_name">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.variable_command.</span></span><span class="sig-name descname"><span class="pre">assert_valid_variable_name</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/variable_command.html#assert_valid_variable_name"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.variable_command.assert_valid_variable_name" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/DicePP/command/impl/variable_command/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,32 @@
+:py:mod:`DicePP.localization.localization_text`
+===============================================
+
+.. py:module:: DicePP.localization.localization_text
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.localization.localization_text.LocalizationText
+
+
+
+
+.. py:class:: LocalizationText(key: str, default_text: str = '', comment: str = '')
+
+   .. py:method:: add(self, text: str) -> None
+
+      增加一个可选择的本地化字符串, 调用get可以随机返回一个可选择的本地化字符串
+
+
+   .. py:method:: get(self) -> str
+
+      返回一个可选择的本地化字符串, 若没有可用的本地化字符串, 返回空字符串
+
+
+

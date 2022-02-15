@@ -1,0 +1,74 @@
+:py:mod:`DicePP.command.impl.utils_dnd_command`
+===============================================
+
+.. py:module:: DicePP.command.impl.utils_dnd_command
+
+.. autoapi-nested-parse::
+
+   简单的DND相关指令
+
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.utils_dnd_command.UtilsDNDCommand
+
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.utils_dnd_command.LOC_DND_RES
+   DicePP.command.impl.utils_dnd_command.CFG_ROLL_DND_ENABLE
+   DicePP.command.impl.utils_dnd_command.MAX_DND_TIMES
+   DicePP.command.impl.utils_dnd_command.MAX_DND_RESULT_LEN
+
+
+.. py:data:: LOC_DND_RES
+   :annotation: = dnd_result
+
+   
+
+.. py:data:: CFG_ROLL_DND_ENABLE
+   :annotation: = roll_dnd_enable
+
+   
+
+.. py:data:: MAX_DND_TIMES
+   :annotation: = 10
+
+   
+
+.. py:data:: MAX_DND_RESULT_LEN
+   :annotation: = 50
+
+   
+
+.. py:class:: UtilsDNDCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .dnd指令, 相当于6#4d6k3, 可以重复投多次, 如.dnd5
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+

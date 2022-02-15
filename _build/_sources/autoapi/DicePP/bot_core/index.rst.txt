@@ -1,0 +1,21 @@
+:py:mod:`DicePP.bot_core`
+=========================
+
+.. py:module:: DicePP.bot_core
+
+
+Submodules
+----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 1
+
+   common/index.rst
+   dicebot/index.rst
+   macro/index.rst
+   message/index.rst
+   notice/index.rst
+   request/index.rst
+   variable/index.rst
+
+

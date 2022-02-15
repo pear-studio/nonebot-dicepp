@@ -1,0 +1,17 @@
+:py:mod:`DicePP.localization`
+=============================
+
+.. py:module:: DicePP.localization
+
+
+Submodules
+----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 1
+
+   common_local_text/index.rst
+   helper/index.rst
+   localization_text/index.rst
+
+

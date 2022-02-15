@@ -1,0 +1,201 @@
+:py:mod:`DicePP.dice_hub.manager`
+=================================
+
+.. py:module:: DicePP.dice_hub.manager
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.dice_hub.manager.HubManager
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.dice_hub.manager.standardize_sync_info
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.dice_hub.manager.CFG_HUB_NAME
+   DicePP.dice_hub.manager.CONST_UNDEFINED_NAME
+   DicePP.dice_hub.manager.MSG_SEP
+   DicePP.dice_hub.manager.SYNC_INTERVAL_MIN
+   DicePP.dice_hub.manager.SYNC_FAIL_MAX
+   DicePP.dice_hub.manager.UPDATE_INVALID_TIME
+   DicePP.dice_hub.manager.SYNC_KEY_NAME
+   DicePP.dice_hub.manager.SYNC_KEY_MASTER
+   DicePP.dice_hub.manager.SYNC_KEY_VERSION
+   DicePP.dice_hub.manager.SYNC_KEY_FRIEND_TOKEN
+   DicePP.dice_hub.manager.SYNC_KEY_ONLINE_FIRST
+   DicePP.dice_hub.manager.SYNC_KEY_ONLINE_RATE
+   DicePP.dice_hub.manager.SYNC_KEY_MSG_TOTAL
+   DicePP.dice_hub.manager.SYNC_KEY_MSG_LAST
+   DicePP.dice_hub.manager.SYNC_KEY_CMD_TOTAL
+   DicePP.dice_hub.manager.SYNC_KEY_CMD_LAST
+   DicePP.dice_hub.manager.SYNC_CONFIRM_TYPE_DONE
+   DicePP.dice_hub.manager.SYNC_CONFIRM_TYPE_REQ_CARD
+
+
+.. py:data:: CFG_HUB_NAME
+   :annotation: = dicehub_name
+
+   
+
+.. py:data:: CONST_UNDEFINED_NAME
+   :annotation: = 未定义
+
+   
+
+.. py:data:: MSG_SEP
+   :annotation: = -S-
+
+   
+
+.. py:data:: SYNC_INTERVAL_MIN
+   
+
+   
+
+.. py:data:: SYNC_FAIL_MAX
+   :annotation: = 3
+
+   
+
+.. py:data:: UPDATE_INVALID_TIME
+   
+
+   
+
+.. py:data:: SYNC_KEY_NAME
+   :annotation: = name
+
+   
+
+.. py:data:: SYNC_KEY_MASTER
+   :annotation: = master
+
+   
+
+.. py:data:: SYNC_KEY_VERSION
+   :annotation: = ver
+
+   
+
+.. py:data:: SYNC_KEY_FRIEND_TOKEN
+   :annotation: = friend_t
+
+   
+
+.. py:data:: SYNC_KEY_ONLINE_FIRST
+   :annotation: = ol_first
+
+   
+
+.. py:data:: SYNC_KEY_ONLINE_RATE
+   :annotation: = ol_rate
+
+   
+
+.. py:data:: SYNC_KEY_MSG_TOTAL
+   :annotation: = msg_total
+
+   
+
+.. py:data:: SYNC_KEY_MSG_LAST
+   :annotation: = msg_last
+
+   
+
+.. py:data:: SYNC_KEY_CMD_TOTAL
+   :annotation: = cmd_total
+
+   
+
+.. py:data:: SYNC_KEY_CMD_LAST
+   :annotation: = cmd_last
+
+   
+
+.. py:data:: SYNC_CONFIRM_TYPE_DONE
+   :annotation: = $sync_done
+
+   
+
+.. py:data:: SYNC_CONFIRM_TYPE_REQ_CARD
+   :annotation: = $req_card
+
+   
+
+.. py:function:: standardize_sync_info(sync_info_new: Dict) -> Dict
+
+
+.. py:class:: HubManager(bot: bot_core.Bot)
+
+   .. py:method:: get_friend_info(self, remote_id: str) -> Optional[dice_hub.data.HubFriendInfo]
+
+
+   .. py:method:: get_sync_info(self) -> Dict
+
+
+   .. py:method:: self_validate(self)
+
+
+   .. py:method:: generate_card(self) -> str
+
+      生成个人名片
+
+
+   .. py:method:: record_card(self, card: str)
+
+      读取对方名片, 失败抛出AssertionError
+
+
+   .. py:method:: fetch_sync_data(self, max_num: int = 10) -> Tuple[List[str], str]
+
+      返回需要向远端同步的远端列表与同步信息
+
+
+   .. py:method:: process_sync_data(self, remote_id: str, sync_data: str) -> Tuple[str, str]
+
+      处理远端向自己发送的消息, 返回确认类型与消息
+
+
+   .. py:method:: process_confirm_data(self, remote_id: str, confirm_type: str, confirm_msg: str) -> List[str]
+
+      接收对方的确认消息, 并处理对方同步的远端列表, 返回想要获取消息的远端列表
+
+
+   .. py:method:: generate_reroute_info(self, remote_id: str) -> str
+
+      Args:
+          remote_id: 需要转发的远端id
+
+      Returns:
+          reroute_info: 需要转发的远端信息, 没有则为空字符串
+
+
+   .. py:method:: process_reroute_info(self, reroute_info: str)
+
+      处理收到的转发信息
+
+
+   .. py:method:: generate_list_info(self, is_full: bool) -> str
+
+      生成当前所有远端列表的消息并返回
+
+
+

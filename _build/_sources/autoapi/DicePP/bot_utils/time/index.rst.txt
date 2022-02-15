@@ -1,0 +1,75 @@
+:py:mod:`DicePP.bot_utils.time`
+===============================
+
+.. py:module:: DicePP.bot_utils.time
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_utils.time.get_current_date_str
+   DicePP.bot_utils.time.get_current_date_raw
+   DicePP.bot_utils.time.str_to_datetime
+   DicePP.bot_utils.time.datetime_to_str
+   DicePP.bot_utils.time.datetime_to_str_day
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_utils.time.china_tz
+   DicePP.bot_utils.time.DATE_STR_FORMAT
+   DicePP.bot_utils.time.DATE_STR_FORMAT_DAY
+
+
+.. py:data:: china_tz
+   
+
+   
+
+.. py:data:: DATE_STR_FORMAT
+   :annotation: = %Y_%m_%d_%H_%M_%S
+
+   
+
+.. py:data:: DATE_STR_FORMAT_DAY
+   :annotation: = %Y_%m_%d
+
+   
+
+.. py:function:: get_current_date_str() -> str
+
+   返回以字符串表示的当前北京时间
+
+
+.. py:function:: get_current_date_raw() -> datetime
+
+   返回datetime格式的当前北京时间
+   Returns:
+
+
+
+.. py:function:: str_to_datetime(input_str: str) -> datetime
+
+   将字符串表示的时间转换为datetime格式, 字符串格式由DATE_STR_FORMAT定义, 默认是%Y_%m_%d_%H_%M_%S
+
+
+.. py:function:: datetime_to_str(input_datetime: datetime) -> str
+
+   将datetime转换为字符串, 字符串格式由DATE_STR_FORMAT定义, 默认是%Y_%m_%d_%H_%M_%S
+
+
+.. py:function:: datetime_to_str_day(input_datetime: datetime) -> str
+
+   将datetime转换为字符串, 字符串格式由DATE_STR_FORMAT_DAY定义, 默认是%Y_%m_%d
+
+

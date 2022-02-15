@@ -1,0 +1,268 @@
+:py:mod:`DicePP.command.impl.utils_common_command`
+==================================================
+
+.. py:module:: DicePP.command.impl.utils_common_command
+
+.. autoapi-nested-parse::
+
+   一些通用指令, 比如.define, .welcome, .point
+
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.utils_common_command.MacroCommand
+   DicePP.command.impl.utils_common_command._
+   DicePP.command.impl.utils_common_command.WelcomeCommand
+   DicePP.command.impl.utils_common_command._
+   DicePP.command.impl.utils_common_command.PointCommand
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.utils_common_command.try_use_point
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.utils_common_command.LOC_DEFINE_SUCCESS
+   DicePP.command.impl.utils_common_command.LOC_DEFINE_FAIL
+   DicePP.command.impl.utils_common_command.LOC_DEFINE_LIST
+   DicePP.command.impl.utils_common_command.LOC_DEFINE_INFO
+   DicePP.command.impl.utils_common_command.LOC_DEFINE_DEL
+   DicePP.command.impl.utils_common_command.CFG_DEFINE_LEN_MAX
+   DicePP.command.impl.utils_common_command.CFG_DEFINE_NUM_MAX
+   DicePP.command.impl.utils_common_command.LOC_WELCOME_DEFAULT
+   DicePP.command.impl.utils_common_command.LOC_WELCOME_SET
+   DicePP.command.impl.utils_common_command.LOC_WELCOME_RESET
+   DicePP.command.impl.utils_common_command.LOC_WELCOME_ILLEGAL
+   DicePP.command.impl.utils_common_command.DC_WELCOME
+   DicePP.command.impl.utils_common_command.WELCOME_MAX_LENGTH
+   DicePP.command.impl.utils_common_command.LOC_POINT_SHOW
+   DicePP.command.impl.utils_common_command.LOC_POINT_LACK
+   DicePP.command.impl.utils_common_command.LOC_POINT_CHECK
+   DicePP.command.impl.utils_common_command.LOC_POINT_EDIT
+   DicePP.command.impl.utils_common_command.LOC_POINT_EDIT_ERROR
+   DicePP.command.impl.utils_common_command.CFG_POINT_INIT
+   DicePP.command.impl.utils_common_command.CFG_POINT_ADD
+   DicePP.command.impl.utils_common_command.CFG_POINT_MAX
+   DicePP.command.impl.utils_common_command.CFG_POINT_LIMIT
+   DicePP.command.impl.utils_common_command.DC_POINT
+   DicePP.command.impl.utils_common_command.DCK_POINT_CUR
+   DicePP.command.impl.utils_common_command.DCK_POINT_TODAY
+
+
+.. py:data:: LOC_DEFINE_SUCCESS
+   :annotation: = define_success
+
+   
+
+.. py:data:: LOC_DEFINE_FAIL
+   :annotation: = define_fail
+
+   
+
+.. py:data:: LOC_DEFINE_LIST
+   :annotation: = define_list
+
+   
+
+.. py:data:: LOC_DEFINE_INFO
+   :annotation: = define_info
+
+   
+
+.. py:data:: LOC_DEFINE_DEL
+   :annotation: = define_delete
+
+   
+
+.. py:data:: CFG_DEFINE_LEN_MAX
+   :annotation: = define_length_max
+
+   
+
+.. py:data:: CFG_DEFINE_NUM_MAX
+   :annotation: = define_number_max
+
+   
+
+.. py:class:: MacroCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   定义和查看宏指令, 关键字为define
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:data:: LOC_WELCOME_DEFAULT
+   :annotation: = welcome_default
+
+   
+
+.. py:data:: LOC_WELCOME_SET
+   :annotation: = welcome_set
+
+   
+
+.. py:data:: LOC_WELCOME_RESET
+   :annotation: = welcome_reset
+
+   
+
+.. py:data:: LOC_WELCOME_ILLEGAL
+   :annotation: = welcome_illegal
+
+   
+
+.. py:data:: DC_WELCOME
+   :annotation: = welcome
+
+   
+
+.. py:data:: WELCOME_MAX_LENGTH
+   :annotation: = 100
+
+   
+
+.. py:class:: _
+
+   Bases: :py:obj:`data_manager.DataChunkBase`
+
+
+.. py:class:: WelcomeCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .welcome 欢迎词指令
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:data:: LOC_POINT_SHOW
+   :annotation: = point_show
+
+   
+
+.. py:data:: LOC_POINT_LACK
+   :annotation: = point_lack
+
+   
+
+.. py:data:: LOC_POINT_CHECK
+   :annotation: = point_check
+
+   
+
+.. py:data:: LOC_POINT_EDIT
+   :annotation: = point_edit
+
+   
+
+.. py:data:: LOC_POINT_EDIT_ERROR
+   :annotation: = point_edit_error
+
+   
+
+.. py:data:: CFG_POINT_INIT
+   :annotation: = point_init
+
+   
+
+.. py:data:: CFG_POINT_ADD
+   :annotation: = point_add
+
+   
+
+.. py:data:: CFG_POINT_MAX
+   :annotation: = point_max
+
+   
+
+.. py:data:: CFG_POINT_LIMIT
+   :annotation: = point_limit
+
+   
+
+.. py:data:: DC_POINT
+   :annotation: = point
+
+   
+
+.. py:data:: DCK_POINT_CUR
+   :annotation: = current
+
+   
+
+.. py:data:: DCK_POINT_TODAY
+   :annotation: = today
+
+   
+
+.. py:class:: _
+
+   Bases: :py:obj:`data_manager.DataChunkBase`
+
+
+.. py:class:: PointCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .point 和.m point指令
+
+   .. py:method:: tick_daily(self) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:function:: try_use_point(bot: bot_core.Bot, user_id: str, point: int) -> str
+
+   尝试为user_id扣除点数, 点数不足返回失败原因, 扣除成功返回空字符串
+
+

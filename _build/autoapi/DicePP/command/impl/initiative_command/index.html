@@ -1,0 +1,247 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DicePP.command.impl.initiative_command &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../../" id="documentation_options" src="../../../../../_static/documentation_options.js"></script>
+    <script src="../../../../../_static/jquery.js"></script>
+    <script src="../../../../../_static/underscore.js"></script>
+    <script src="../../../../../_static/doctools.js"></script>
+    <script src="../../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-DicePP.command.impl.initiative_command">
+<span id="dicepp-command-impl-initiative-command"></span><h1><a class="reference internal" href="#module-DicePP.command.impl.initiative_command" title="DicePP.command.impl.initiative_command"><code class="xref py py-mod docutils literal notranslate"><span class="pre">DicePP.command.impl.initiative_command</span></code></a><a class="headerlink" href="#module-DicePP.command.impl.initiative_command" title="永久链接至标题">¶</a></h1>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="永久链接至标题">¶</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.InitiativeCommand" title="DicePP.command.impl.initiative_command.InitiativeCommand"><code class="xref py py-obj docutils literal notranslate"><span class="pre">InitiativeCommand</span></code></a></p></td>
+<td><p>先攻指令, 以.init开头</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="attributes">
+<h3>Attributes<a class="headerlink" href="#attributes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_ROLL" title="DicePP.command.impl.initiative_command.LOC_INIT_ROLL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_ROLL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_INFO" title="DicePP.command.impl.initiative_command.LOC_INIT_INFO"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_INFO</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_INFO_NOT_EXIST" title="DicePP.command.impl.initiative_command.LOC_INIT_INFO_NOT_EXIST"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_INFO_NOT_EXIST</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_ENTITY_NOT_FOUND" title="DicePP.command.impl.initiative_command.LOC_INIT_ENTITY_NOT_FOUND"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_ENTITY_NOT_FOUND</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_ENTITY_VAGUE" title="DicePP.command.impl.initiative_command.LOC_INIT_ENTITY_VAGUE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_ENTITY_VAGUE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_INFO_CLR" title="DicePP.command.impl.initiative_command.LOC_INIT_INFO_CLR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_INFO_CLR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_INFO_DEL" title="DicePP.command.impl.initiative_command.LOC_INIT_INFO_DEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_INFO_DEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_UNKNOWN" title="DicePP.command.impl.initiative_command.LOC_INIT_UNKNOWN"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_UNKNOWN</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.initiative_command.LOC_INIT_ERROR" title="DicePP.command.impl.initiative_command.LOC_INIT_ERROR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_INIT_ERROR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_ROLL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_ROLL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_roll</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_ROLL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_ROLL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_INFO">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_INFO</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_info</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_INFO"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_INFO" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_INFO_NOT_EXIST">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_INFO_NOT_EXIST</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_info_not_exist</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_INFO_NOT_EXIST"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_INFO_NOT_EXIST" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_ENTITY_NOT_FOUND">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_ENTITY_NOT_FOUND</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_entity_not_found</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_ENTITY_NOT_FOUND"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_ENTITY_NOT_FOUND" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_ENTITY_VAGUE">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_ENTITY_VAGUE</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_entity_vague</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_ENTITY_VAGUE"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_ENTITY_VAGUE" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_INFO_CLR">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_INFO_CLR</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_info_clear</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_INFO_CLR"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_INFO_CLR" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_INFO_DEL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_INFO_DEL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_info_delete</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_INFO_DEL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_INFO_DEL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_UNKNOWN">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_UNKNOWN</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_unknown_command</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_UNKNOWN"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_UNKNOWN" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.LOC_INIT_ERROR">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">LOC_INIT_ERROR</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">initiative_error</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#LOC_INIT_ERROR"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.LOC_INIT_ERROR" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.InitiativeCommand">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.initiative_command.</span></span><span class="sig-name descname"><span class="pre">InitiativeCommand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#InitiativeCommand"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.InitiativeCommand" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">command.dicepp_command.UserCommandBase</span></code></p>
+<p>先攻指令, 以.init开头</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.InitiativeCommand.can_process_msg">
+<span class="sig-name descname"><span class="pre">can_process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#InitiativeCommand.can_process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.InitiativeCommand.can_process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.InitiativeCommand.process_msg">
+<span class="sig-name descname"><span class="pre">process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hint</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../bot_command/index.html#DicePP.command.bot_command.BotCommandBase" title="DicePP.command.bot_command.BotCommandBase"><span class="pre">command.bot_command.BotCommandBase</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#InitiativeCommand.process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.InitiativeCommand.process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.InitiativeCommand.get_help">
+<span class="sig-name descname"><span class="pre">get_help</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keyword</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#InitiativeCommand.get_help"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.InitiativeCommand.get_help" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.InitiativeCommand.get_description">
+<span class="sig-name descname"><span class="pre">get_description</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#InitiativeCommand.get_description"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.InitiativeCommand.get_description" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.initiative_command.InitiativeCommand.add_initiative_entities">
+<span class="sig-name descname"><span class="pre">add_initiative_entities</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">result_dict</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">owner_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">group_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/initiative_command.html#InitiativeCommand.add_initiative_entities"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.initiative_command.InitiativeCommand.add_initiative_entities" title="永久链接至目标">¶</a></dt>
+<dd><dl class="simple">
+<dt>Args:</dt><dd><p>result_dict: 需要加入先攻列表的信息, key为先攻条目名称, val为二元组, val[0]代表先攻数值, val[1]代表掷骰表达式结果
+owner_id: 为空代表无主的NPC, 不为空代表PC账号
+group_id: 目标群号</p>
+</dd>
+<dt>Returns:</dt><dd><p>feedback: 操作执行成功或失败的提示</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/DicePP/command/impl/initiative_command/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

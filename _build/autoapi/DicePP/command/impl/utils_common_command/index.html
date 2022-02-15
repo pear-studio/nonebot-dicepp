@@ -1,0 +1,466 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DicePP.command.impl.utils_common_command &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../../" id="documentation_options" src="../../../../../_static/documentation_options.js"></script>
+    <script src="../../../../../_static/jquery.js"></script>
+    <script src="../../../../../_static/underscore.js"></script>
+    <script src="../../../../../_static/doctools.js"></script>
+    <script src="../../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-DicePP.command.impl.utils_common_command">
+<span id="dicepp-command-impl-utils-common-command"></span><h1><a class="reference internal" href="#module-DicePP.command.impl.utils_common_command" title="DicePP.command.impl.utils_common_command"><code class="xref py py-mod docutils literal notranslate"><span class="pre">DicePP.command.impl.utils_common_command</span></code></a><a class="headerlink" href="#module-DicePP.command.impl.utils_common_command" title="永久链接至标题">¶</a></h1>
+<p>一些通用指令, 比如.define, .welcome, .point</p>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="永久链接至标题">¶</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.MacroCommand" title="DicePP.command.impl.utils_common_command.MacroCommand"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MacroCommand</span></code></a></p></td>
+<td><p>定义和查看宏指令, 关键字为define</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#id0" title="DicePP.command.impl.utils_common_command._"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.WelcomeCommand" title="DicePP.command.impl.utils_common_command.WelcomeCommand"><code class="xref py py-obj docutils literal notranslate"><span class="pre">WelcomeCommand</span></code></a></p></td>
+<td><p>.welcome 欢迎词指令</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#id0" title="DicePP.command.impl.utils_common_command._"><code class="xref py py-obj docutils literal notranslate"><span class="pre">_</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.PointCommand" title="DicePP.command.impl.utils_common_command.PointCommand"><code class="xref py py-obj docutils literal notranslate"><span class="pre">PointCommand</span></code></a></p></td>
+<td><p>.point 和.m point指令</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h3>Functions<a class="headerlink" href="#functions" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.try_use_point" title="DicePP.command.impl.utils_common_command.try_use_point"><code class="xref py py-obj docutils literal notranslate"><span class="pre">try_use_point</span></code></a>(bot: bot_core.Bot, user_id: str, point: int) → str</p></td>
+<td><p>尝试为user_id扣除点数, 点数不足返回失败原因, 扣除成功返回空字符串</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="attributes">
+<h3>Attributes<a class="headerlink" href="#attributes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_SUCCESS" title="DicePP.command.impl.utils_common_command.LOC_DEFINE_SUCCESS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_DEFINE_SUCCESS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_FAIL" title="DicePP.command.impl.utils_common_command.LOC_DEFINE_FAIL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_DEFINE_FAIL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_LIST" title="DicePP.command.impl.utils_common_command.LOC_DEFINE_LIST"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_DEFINE_LIST</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_INFO" title="DicePP.command.impl.utils_common_command.LOC_DEFINE_INFO"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_DEFINE_INFO</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_DEL" title="DicePP.command.impl.utils_common_command.LOC_DEFINE_DEL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_DEFINE_DEL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.CFG_DEFINE_LEN_MAX" title="DicePP.command.impl.utils_common_command.CFG_DEFINE_LEN_MAX"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_DEFINE_LEN_MAX</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.CFG_DEFINE_NUM_MAX" title="DicePP.command.impl.utils_common_command.CFG_DEFINE_NUM_MAX"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_DEFINE_NUM_MAX</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_WELCOME_DEFAULT" title="DicePP.command.impl.utils_common_command.LOC_WELCOME_DEFAULT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_WELCOME_DEFAULT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_WELCOME_SET" title="DicePP.command.impl.utils_common_command.LOC_WELCOME_SET"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_WELCOME_SET</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_WELCOME_RESET" title="DicePP.command.impl.utils_common_command.LOC_WELCOME_RESET"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_WELCOME_RESET</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_WELCOME_ILLEGAL" title="DicePP.command.impl.utils_common_command.LOC_WELCOME_ILLEGAL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_WELCOME_ILLEGAL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.DC_WELCOME" title="DicePP.command.impl.utils_common_command.DC_WELCOME"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DC_WELCOME</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.WELCOME_MAX_LENGTH" title="DicePP.command.impl.utils_common_command.WELCOME_MAX_LENGTH"><code class="xref py py-obj docutils literal notranslate"><span class="pre">WELCOME_MAX_LENGTH</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_POINT_SHOW" title="DicePP.command.impl.utils_common_command.LOC_POINT_SHOW"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_POINT_SHOW</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_POINT_LACK" title="DicePP.command.impl.utils_common_command.LOC_POINT_LACK"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_POINT_LACK</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_POINT_CHECK" title="DicePP.command.impl.utils_common_command.LOC_POINT_CHECK"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_POINT_CHECK</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_POINT_EDIT" title="DicePP.command.impl.utils_common_command.LOC_POINT_EDIT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_POINT_EDIT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.LOC_POINT_EDIT_ERROR" title="DicePP.command.impl.utils_common_command.LOC_POINT_EDIT_ERROR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_POINT_EDIT_ERROR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.CFG_POINT_INIT" title="DicePP.command.impl.utils_common_command.CFG_POINT_INIT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_POINT_INIT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.CFG_POINT_ADD" title="DicePP.command.impl.utils_common_command.CFG_POINT_ADD"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_POINT_ADD</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.CFG_POINT_MAX" title="DicePP.command.impl.utils_common_command.CFG_POINT_MAX"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_POINT_MAX</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.CFG_POINT_LIMIT" title="DicePP.command.impl.utils_common_command.CFG_POINT_LIMIT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_POINT_LIMIT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.DC_POINT" title="DicePP.command.impl.utils_common_command.DC_POINT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DC_POINT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.DCK_POINT_CUR" title="DicePP.command.impl.utils_common_command.DCK_POINT_CUR"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DCK_POINT_CUR</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.utils_common_command.DCK_POINT_TODAY" title="DicePP.command.impl.utils_common_command.DCK_POINT_TODAY"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DCK_POINT_TODAY</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_DEFINE_SUCCESS">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_DEFINE_SUCCESS</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">define_success</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_DEFINE_SUCCESS"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_SUCCESS" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_DEFINE_FAIL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_DEFINE_FAIL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">define_fail</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_DEFINE_FAIL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_FAIL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_DEFINE_LIST">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_DEFINE_LIST</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">define_list</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_DEFINE_LIST"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_LIST" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_DEFINE_INFO">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_DEFINE_INFO</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">define_info</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_DEFINE_INFO"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_INFO" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_DEFINE_DEL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_DEFINE_DEL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">define_delete</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_DEFINE_DEL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_DEFINE_DEL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.CFG_DEFINE_LEN_MAX">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">CFG_DEFINE_LEN_MAX</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">define_length_max</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#CFG_DEFINE_LEN_MAX"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.CFG_DEFINE_LEN_MAX" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.CFG_DEFINE_NUM_MAX">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">CFG_DEFINE_NUM_MAX</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">define_number_max</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#CFG_DEFINE_NUM_MAX"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.CFG_DEFINE_NUM_MAX" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.MacroCommand">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">MacroCommand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#MacroCommand"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.MacroCommand" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">command.dicepp_command.UserCommandBase</span></code></p>
+<p>定义和查看宏指令, 关键字为define</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.MacroCommand.can_process_msg">
+<span class="sig-name descname"><span class="pre">can_process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#MacroCommand.can_process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.MacroCommand.can_process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.MacroCommand.process_msg">
+<span class="sig-name descname"><span class="pre">process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hint</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../bot_command/index.html#DicePP.command.bot_command.BotCommandBase" title="DicePP.command.bot_command.BotCommandBase"><span class="pre">command.bot_command.BotCommandBase</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#MacroCommand.process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.MacroCommand.process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.MacroCommand.get_help">
+<span class="sig-name descname"><span class="pre">get_help</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keyword</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#MacroCommand.get_help"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.MacroCommand.get_help" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.MacroCommand.get_description">
+<span class="sig-name descname"><span class="pre">get_description</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#MacroCommand.get_description"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.MacroCommand.get_description" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_WELCOME_DEFAULT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_WELCOME_DEFAULT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">welcome_default</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_WELCOME_DEFAULT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_WELCOME_DEFAULT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_WELCOME_SET">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_WELCOME_SET</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">welcome_set</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_WELCOME_SET"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_WELCOME_SET" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_WELCOME_RESET">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_WELCOME_RESET</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">welcome_reset</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_WELCOME_RESET"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_WELCOME_RESET" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_WELCOME_ILLEGAL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_WELCOME_ILLEGAL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">welcome_illegal</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_WELCOME_ILLEGAL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_WELCOME_ILLEGAL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.DC_WELCOME">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">DC_WELCOME</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">welcome</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#DC_WELCOME"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.DC_WELCOME" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.WELCOME_MAX_LENGTH">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">WELCOME_MAX_LENGTH</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">100</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#WELCOME_MAX_LENGTH"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.WELCOME_MAX_LENGTH" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command._">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">_</span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#_"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command._" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">data_manager.DataChunkBase</span></code></p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.WelcomeCommand">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">WelcomeCommand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#WelcomeCommand"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.WelcomeCommand" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">command.dicepp_command.UserCommandBase</span></code></p>
+<p>.welcome 欢迎词指令</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.WelcomeCommand.can_process_msg">
+<span class="sig-name descname"><span class="pre">can_process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#WelcomeCommand.can_process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.WelcomeCommand.can_process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.WelcomeCommand.process_msg">
+<span class="sig-name descname"><span class="pre">process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hint</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../bot_command/index.html#DicePP.command.bot_command.BotCommandBase" title="DicePP.command.bot_command.BotCommandBase"><span class="pre">command.bot_command.BotCommandBase</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#WelcomeCommand.process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.WelcomeCommand.process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.WelcomeCommand.get_help">
+<span class="sig-name descname"><span class="pre">get_help</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keyword</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#WelcomeCommand.get_help"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.WelcomeCommand.get_help" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.WelcomeCommand.get_description">
+<span class="sig-name descname"><span class="pre">get_description</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#WelcomeCommand.get_description"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.WelcomeCommand.get_description" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_POINT_SHOW">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_POINT_SHOW</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_show</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_POINT_SHOW"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_POINT_SHOW" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_POINT_LACK">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_POINT_LACK</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_lack</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_POINT_LACK"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_POINT_LACK" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_POINT_CHECK">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_POINT_CHECK</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_check</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_POINT_CHECK"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_POINT_CHECK" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_POINT_EDIT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_POINT_EDIT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_edit</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_POINT_EDIT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_POINT_EDIT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.LOC_POINT_EDIT_ERROR">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">LOC_POINT_EDIT_ERROR</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_edit_error</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#LOC_POINT_EDIT_ERROR"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.LOC_POINT_EDIT_ERROR" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.CFG_POINT_INIT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">CFG_POINT_INIT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_init</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#CFG_POINT_INIT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.CFG_POINT_INIT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.CFG_POINT_ADD">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">CFG_POINT_ADD</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_add</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#CFG_POINT_ADD"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.CFG_POINT_ADD" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.CFG_POINT_MAX">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">CFG_POINT_MAX</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_max</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#CFG_POINT_MAX"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.CFG_POINT_MAX" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.CFG_POINT_LIMIT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">CFG_POINT_LIMIT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point_limit</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#CFG_POINT_LIMIT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.CFG_POINT_LIMIT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.DC_POINT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">DC_POINT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">point</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#DC_POINT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.DC_POINT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.DCK_POINT_CUR">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">DCK_POINT_CUR</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">current</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#DCK_POINT_CUR"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.DCK_POINT_CUR" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.DCK_POINT_TODAY">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">DCK_POINT_TODAY</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">today</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#DCK_POINT_TODAY"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.DCK_POINT_TODAY" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="id0">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">_</span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#_"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#id0" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">data_manager.DataChunkBase</span></code></p>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.PointCommand">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">PointCommand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#PointCommand"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.PointCommand" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">command.dicepp_command.UserCommandBase</span></code></p>
+<p>.point 和.m point指令</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.PointCommand.tick_daily">
+<span class="sig-name descname"><span class="pre">tick_daily</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../bot_command/index.html#DicePP.command.bot_command.BotCommandBase" title="DicePP.command.bot_command.BotCommandBase"><span class="pre">command.bot_command.BotCommandBase</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#PointCommand.tick_daily"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.PointCommand.tick_daily" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.PointCommand.can_process_msg">
+<span class="sig-name descname"><span class="pre">can_process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#PointCommand.can_process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.PointCommand.can_process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.PointCommand.process_msg">
+<span class="sig-name descname"><span class="pre">process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hint</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="../../bot_command/index.html#DicePP.command.bot_command.BotCommandBase" title="DicePP.command.bot_command.BotCommandBase"><span class="pre">command.bot_command.BotCommandBase</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#PointCommand.process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.PointCommand.process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.PointCommand.get_help">
+<span class="sig-name descname"><span class="pre">get_help</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keyword</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#PointCommand.get_help"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.PointCommand.get_help" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.PointCommand.get_description">
+<span class="sig-name descname"><span class="pre">get_description</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#PointCommand.get_description"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.PointCommand.get_description" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.command.impl.utils_common_command.try_use_point">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.utils_common_command.</span></span><span class="sig-name descname"><span class="pre">try_use_point</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">user_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">point</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/utils_common_command.html#try_use_point"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.utils_common_command.try_use_point" title="永久链接至目标">¶</a></dt>
+<dd><p>尝试为user_id扣除点数, 点数不足返回失败原因, 扣除成功返回空字符串</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/DicePP/command/impl/utils_common_command/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

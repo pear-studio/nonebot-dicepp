@@ -1,0 +1,422 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DicePP.command.impl.roll_dice_command &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../../" id="documentation_options" src="../../../../../_static/documentation_options.js"></script>
+    <script src="../../../../../_static/jquery.js"></script>
+    <script src="../../../../../_static/underscore.js"></script>
+    <script src="../../../../../_static/doctools.js"></script>
+    <script src="../../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-DicePP.command.impl.roll_dice_command">
+<span id="dicepp-command-impl-roll-dice-command"></span><h1><a class="reference internal" href="#module-DicePP.command.impl.roll_dice_command" title="DicePP.command.impl.roll_dice_command"><code class="xref py py-mod docutils literal notranslate"><span class="pre">DicePP.command.impl.roll_dice_command</span></code></a><a class="headerlink" href="#module-DicePP.command.impl.roll_dice_command" title="永久链接至标题">¶</a></h1>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="永久链接至标题">¶</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.RollDiceCommand" title="DicePP.command.impl.roll_dice_command.RollDiceCommand"><code class="xref py py-obj docutils literal notranslate"><span class="pre">RollDiceCommand</span></code></a></p></td>
+<td><p>掷骰相关的指令, 以.r开头</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h3>Functions<a class="headerlink" href="#functions" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.get_roll_exp_result" title="DicePP.command.impl.roll_dice_command.get_roll_exp_result"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_roll_exp_result</span></code></a>(expression: roll_dice.RollExpression) → str</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.get_d20_state_loc_text" title="DicePP.command.impl.roll_dice_command.get_d20_state_loc_text"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_d20_state_loc_text</span></code></a>(bot: bot_core.Bot, res_list: List[roll_dice.RollResult])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.record_roll_data" title="DicePP.command.impl.roll_dice_command.record_roll_data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">record_roll_data</span></code></a>(bot: bot_core.Bot, meta: command.dicepp_command.MessageMetaData, res_list: List[roll_dice.RollResult])</p></td>
+<td><p>统计掷骰数据</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="attributes">
+<h3>Attributes<a class="headerlink" href="#attributes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_RESULT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_REASON" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_REASON"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_RESULT_REASON</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_RESULT_HIDE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_REASON" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_REASON"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_RESULT_HIDE_REASON</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_GROUP" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_GROUP"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_RESULT_HIDE_GROUP</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_MULTI" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_MULTI"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_RESULT_MULTI</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_BS</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_BF</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_MULTI" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_MULTI"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_MULTI</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS_SHORT" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS_SHORT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_BS_SHORT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF_SHORT" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF_SHORT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_BF_SHORT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_2" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_2"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_2</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_3_5" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_3_5"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_3_5</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_6_10" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_6_10"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_6_10</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_11_15" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_11_15"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_11_15</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_16_18" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_16_18"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_16_18</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_19" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_19"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_D20_19</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_EXP" title="DicePP.command.impl.roll_dice_command.LOC_ROLL_EXP"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOC_ROLL_EXP</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.CFG_ROLL_ENABLE" title="DicePP.command.impl.roll_dice_command.CFG_ROLL_ENABLE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_ROLL_ENABLE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.CFG_ROLL_HIDE_ENABLE" title="DicePP.command.impl.roll_dice_command.CFG_ROLL_HIDE_ENABLE"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_ROLL_HIDE_ENABLE</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.CFG_ROLL_EXP_COST" title="DicePP.command.impl.roll_dice_command.CFG_ROLL_EXP_COST"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CFG_ROLL_EXP_COST</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.MULTI_ROLL_LIMIT" title="DicePP.command.impl.roll_dice_command.MULTI_ROLL_LIMIT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">MULTI_ROLL_LIMIT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.DCP_USER_DATA_ROLL_A_UID" title="DicePP.command.impl.roll_dice_command.DCP_USER_DATA_ROLL_A_UID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DCP_USER_DATA_ROLL_A_UID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.DCP_GROUP_DATA_ROLL_A_GID" title="DicePP.command.impl.roll_dice_command.DCP_GROUP_DATA_ROLL_A_GID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DCP_GROUP_DATA_ROLL_A_GID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.DCP_ROLL_TIME_A_ID_ROLL" title="DicePP.command.impl.roll_dice_command.DCP_ROLL_TIME_A_ID_ROLL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DCP_ROLL_TIME_A_ID_ROLL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.DCP_ROLL_D20_A_ID_ROLL" title="DicePP.command.impl.roll_dice_command.DCP_ROLL_D20_A_ID_ROLL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DCP_ROLL_D20_A_ID_ROLL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.DCK_ROLL_TODAY" title="DicePP.command.impl.roll_dice_command.DCK_ROLL_TODAY"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DCK_ROLL_TODAY</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.command.impl.roll_dice_command.DCK_ROLL_TOTAL" title="DicePP.command.impl.roll_dice_command.DCK_ROLL_TOTAL"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DCK_ROLL_TOTAL</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_RESULT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_result</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_RESULT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_REASON">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_RESULT_REASON</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_result_reason</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_RESULT_REASON"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_REASON" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_RESULT_HIDE</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_result_hide</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_RESULT_HIDE"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_REASON">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_RESULT_HIDE_REASON</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_result_hide_reason</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_RESULT_HIDE_REASON"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_REASON" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_GROUP">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_RESULT_HIDE_GROUP</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_result_hide_group</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_RESULT_HIDE_GROUP"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_GROUP" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_MULTI">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_RESULT_MULTI</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_result_multi</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_RESULT_MULTI"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_MULTI" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_BS</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_success</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_BS"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_BF</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_failure</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_BF"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_MULTI">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_MULTI</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_multiple</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_MULTI"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_MULTI" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS_SHORT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_BS_SHORT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_success_short</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_BS_SHORT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS_SHORT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF_SHORT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_BF_SHORT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_failure_short</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_BF_SHORT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF_SHORT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_2">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_2</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_2</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_2"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_2" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_3_5">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_3_5</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_3_5</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_3_5"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_3_5" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_6_10">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_6_10</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_6_10</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_6_10"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_6_10" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_11_15">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_11_15</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_11_15</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_11_15"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_11_15" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_16_18">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_16_18</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_16_18</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_16_18"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_16_18" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_19">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_D20_19</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_d20_19</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_D20_19"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_19" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.LOC_ROLL_EXP">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">LOC_ROLL_EXP</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_exp</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#LOC_ROLL_EXP"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.LOC_ROLL_EXP" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.CFG_ROLL_ENABLE">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">CFG_ROLL_ENABLE</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_enable</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#CFG_ROLL_ENABLE"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.CFG_ROLL_ENABLE" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.CFG_ROLL_HIDE_ENABLE">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">CFG_ROLL_HIDE_ENABLE</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_hide_enable</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#CFG_ROLL_HIDE_ENABLE"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.CFG_ROLL_HIDE_ENABLE" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.CFG_ROLL_EXP_COST">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">CFG_ROLL_EXP_COST</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">roll_exp_cost</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#CFG_ROLL_EXP_COST"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.CFG_ROLL_EXP_COST" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.MULTI_ROLL_LIMIT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">MULTI_ROLL_LIMIT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">10</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#MULTI_ROLL_LIMIT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.MULTI_ROLL_LIMIT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.DCP_USER_DATA_ROLL_A_UID">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">DCP_USER_DATA_ROLL_A_UID</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">['roll']</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#DCP_USER_DATA_ROLL_A_UID"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.DCP_USER_DATA_ROLL_A_UID" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.DCP_GROUP_DATA_ROLL_A_GID">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">DCP_GROUP_DATA_ROLL_A_GID</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">['roll']</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#DCP_GROUP_DATA_ROLL_A_GID"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.DCP_GROUP_DATA_ROLL_A_GID" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.DCP_ROLL_TIME_A_ID_ROLL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">DCP_ROLL_TIME_A_ID_ROLL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">['time']</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#DCP_ROLL_TIME_A_ID_ROLL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.DCP_ROLL_TIME_A_ID_ROLL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.DCP_ROLL_D20_A_ID_ROLL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">DCP_ROLL_D20_A_ID_ROLL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">['d20']</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#DCP_ROLL_D20_A_ID_ROLL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.DCP_ROLL_D20_A_ID_ROLL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.DCK_ROLL_TODAY">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">DCK_ROLL_TODAY</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">today</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#DCK_ROLL_TODAY"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.DCK_ROLL_TODAY" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.DCK_ROLL_TOTAL">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">DCK_ROLL_TOTAL</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">total</span></em><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#DCK_ROLL_TOTAL"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.DCK_ROLL_TOTAL" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.RollDiceCommand">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">RollDiceCommand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#RollDiceCommand"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.RollDiceCommand" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">command.dicepp_command.UserCommandBase</span></code></p>
+<p>掷骰相关的指令, 以.r开头</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.RollDiceCommand.can_process_msg">
+<span class="sig-name descname"><span class="pre">can_process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">bool</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#RollDiceCommand.can_process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.RollDiceCommand.can_process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.RollDiceCommand.process_msg">
+<span class="sig-name descname"><span class="pre">process_msg</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hint</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Any</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">command.BotCommandBase</span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#RollDiceCommand.process_msg"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.RollDiceCommand.process_msg" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.RollDiceCommand.get_help">
+<span class="sig-name descname"><span class="pre">get_help</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">keyword</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#RollDiceCommand.get_help"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.RollDiceCommand.get_help" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.RollDiceCommand.get_description">
+<span class="sig-name descname"><span class="pre">get_description</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#RollDiceCommand.get_description"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.RollDiceCommand.get_description" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.get_roll_exp_result">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">get_roll_exp_result</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">expression</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">roll_dice.RollExpression</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#get_roll_exp_result"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.get_roll_exp_result" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.get_d20_state_loc_text">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">get_d20_state_loc_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">res_list</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">roll_dice.RollResult</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#get_d20_state_loc_text"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.get_d20_state_loc_text" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.command.impl.roll_dice_command.record_roll_data">
+<span class="sig-prename descclassname"><span class="pre">DicePP.command.impl.roll_dice_command.</span></span><span class="sig-name descname"><span class="pre">record_roll_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bot_core.Bot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">meta</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.dicepp_command.MessageMetaData</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">res_list</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">roll_dice.RollResult</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../../_modules/DicePP/command/impl/roll_dice_command.html#record_roll_data"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.command.impl.roll_dice_command.record_roll_data" title="永久链接至目标">¶</a></dt>
+<dd><p>统计掷骰数据</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../../_sources/autoapi/DicePP/command/impl/roll_dice_command/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

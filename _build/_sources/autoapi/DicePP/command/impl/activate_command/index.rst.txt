@@ -1,0 +1,109 @@
+:py:mod:`DicePP.command.impl.activate_command`
+==============================================
+
+.. py:module:: DicePP.command.impl.activate_command
+
+.. autoapi-nested-parse::
+
+   bot [on/off], dismiss
+
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.activate_command._
+   DicePP.command.impl.activate_command.ActivateCommand
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.activate_command.get_default_activate_data
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.activate_command.LOC_BOT_SHOW
+   DicePP.command.impl.activate_command.LOC_BOT_ON
+   DicePP.command.impl.activate_command.LOC_BOT_OFF
+   DicePP.command.impl.activate_command.LOC_BOT_DISMISS
+   DicePP.command.impl.activate_command.CFG_BOT_DEF_ENABLE
+   DicePP.command.impl.activate_command.DC_ACTIVATE
+   DicePP.command.impl.activate_command.BOT_SHOW_APPEND
+
+
+.. py:data:: LOC_BOT_SHOW
+   :annotation: = bot_show
+
+   
+
+.. py:data:: LOC_BOT_ON
+   :annotation: = bot_on
+
+   
+
+.. py:data:: LOC_BOT_OFF
+   :annotation: = bot_off
+
+   
+
+.. py:data:: LOC_BOT_DISMISS
+   :annotation: = bot_dismiss
+
+   
+
+.. py:data:: CFG_BOT_DEF_ENABLE
+   :annotation: = bot_default_enable
+
+   
+
+.. py:data:: DC_ACTIVATE
+   :annotation: = activate
+
+   
+
+.. py:data:: BOT_SHOW_APPEND
+   
+
+   
+
+.. py:class:: _
+
+   Bases: :py:obj:`data_manager.DataChunkBase`
+
+
+.. py:function:: get_default_activate_data(default_enable: bool) -> List
+
+
+.. py:class:: ActivateCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   bot [on/off], dismiss指令
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+

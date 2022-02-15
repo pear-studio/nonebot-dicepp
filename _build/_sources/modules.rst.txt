@@ -1,0 +1,7 @@
+nonebot-dicepp
+==============
+
+.. toctree::
+   :maxdepth: 4
+
+   bot

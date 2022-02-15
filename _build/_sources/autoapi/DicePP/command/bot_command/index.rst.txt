@@ -1,0 +1,99 @@
+:py:mod:`DicePP.command.bot_command`
+====================================
+
+.. py:module:: DicePP.command.bot_command
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.bot_command.MessagePort
+   DicePP.command.bot_command.PrivateMessagePort
+   DicePP.command.bot_command.GroupMessagePort
+   DicePP.command.bot_command.BotCommandBase
+   DicePP.command.bot_command.BotSendMsgCommand
+   DicePP.command.bot_command.BotDelayCommand
+   DicePP.command.bot_command.BotLeaveGroupCommand
+
+
+
+
+.. py:class:: MessagePort(group_id: str, user_id: str)
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+   .. py:method:: __eq__(self, other)
+
+      Return self==value.
+
+
+   .. py:method:: __hash__(self)
+
+      Return hash(self).
+
+
+
+.. py:class:: PrivateMessagePort(user_id: str)
+
+   Bases: :py:obj:`MessagePort`
+
+
+.. py:class:: GroupMessagePort(group_id: str)
+
+   Bases: :py:obj:`MessagePort`
+
+
+.. py:class:: BotCommandBase
+
+   所有机器人指令的基类, 包括发送消息, 退群等等
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+
+.. py:class:: BotSendMsgCommand(bot_id: str, msg: str, targets: List[MessagePort])
+
+   Bases: :py:obj:`BotCommandBase`
+
+   发送聊天消息
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+
+.. py:class:: BotDelayCommand(bot_id: str, seconds: float)
+
+   Bases: :py:obj:`BotCommandBase`
+
+   延迟执行后面的操作
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+
+.. py:class:: BotLeaveGroupCommand(bot_id: str, target_group_id: str)
+
+   Bases: :py:obj:`BotCommandBase`
+
+   退出群
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+

@@ -1,0 +1,36 @@
+:py:mod:`DicePP.bot_utils.string`
+=================================
+
+.. py:module:: DicePP.bot_utils.string
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_utils.string.to_english_str
+   DicePP.bot_utils.string.match_substring
+
+
+
+.. py:function:: to_english_str(input_str: str) -> str
+
+   将字符串中的中文符号转为英文
+
+
+.. py:function:: match_substring(substring: str, str_list: Iterable[str]) -> List[str]
+
+   在一个字符串列表中找到所有包含输入字符串的字符串并返回
+   Args:
+       substring: 目标字符串
+       str_list: 待匹配字符串列表
+
+   Returns:
+       res_list: 所有匹配成功的字符串
+
+
