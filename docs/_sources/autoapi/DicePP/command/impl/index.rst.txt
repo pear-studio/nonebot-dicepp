@@ -1,0 +1,602 @@
+:py:mod:`DicePP.command.impl`
+=============================
+
+.. py:module:: DicePP.command.impl
+
+
+Submodules
+----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 1
+
+   _command_template/index.rst
+   activate_command/index.rst
+   character_dnd_command/index.rst
+   chat_command/index.rst
+   deck_command/index.rst
+   help_command/index.rst
+   hp_command/index.rst
+   hub_command/index.rst
+   initiative_command/index.rst
+   jrrp_command/index.rst
+   nickname_command/index.rst
+   query_command/index.rst
+   roll_dice_command/index.rst
+   utils_common_command/index.rst
+   utils_dnd_command/index.rst
+   utils_master_command/index.rst
+   variable_command/index.rst
+
+
+Package Contents
+----------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.MacroCommand
+   DicePP.command.impl.PointCommand
+   DicePP.command.impl.WelcomeCommand
+   DicePP.command.impl.MasterCommand
+   DicePP.command.impl.HubCommand
+   DicePP.command.impl.VariableCommand
+   DicePP.command.impl.ActivateCommand
+   DicePP.command.impl.NicknameCommand
+   DicePP.command.impl.HelpCommand
+   DicePP.command.impl.RollDiceCommand
+   DicePP.command.impl.CharacterDNDCommand
+   DicePP.command.impl.HPCommand
+   DicePP.command.impl.InitiativeCommand
+   DicePP.command.impl.UtilsDNDCommand
+   DicePP.command.impl.QueryCommand
+   DicePP.command.impl.DeckCommand
+   DicePP.command.impl.ChatCommand
+   DicePP.command.impl.JrrpCommand
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.try_use_point
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.DC_POINT
+   DicePP.command.impl.DC_WELCOME
+   DicePP.command.impl.LOC_WELCOME_DEFAULT
+   DicePP.command.impl.DC_ACTIVATE
+   DicePP.command.impl.DCP_USER_DATA_ROLL_A_UID
+   DicePP.command.impl.DCP_GROUP_DATA_ROLL_A_GID
+   DicePP.command.impl.DCP_ROLL_D20_A_ID_ROLL
+   DicePP.command.impl.DCP_ROLL_TIME_A_ID_ROLL
+   DicePP.command.impl.DCK_ROLL_TODAY
+   DicePP.command.impl.DCK_ROLL_TOTAL
+   DicePP.command.impl.DC_CHAR_DND
+   DicePP.command.impl.DC_CHAR_HP
+
+
+.. py:class:: MacroCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   定义和查看宏指令, 关键字为define
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:class:: PointCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .point 和.m point指令
+
+   .. py:method:: tick_daily(self) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:data:: DC_POINT
+   :annotation: = point
+
+   
+
+.. py:function:: try_use_point(bot: bot_core.Bot, user_id: str, point: int) -> str
+
+   尝试为user_id扣除点数, 点数不足返回失败原因, 扣除成功返回空字符串
+
+
+.. py:class:: WelcomeCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .welcome 欢迎词指令
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:data:: DC_WELCOME
+   :annotation: = welcome
+
+   
+
+.. py:data:: LOC_WELCOME_DEFAULT
+   :annotation: = welcome_default
+
+   
+
+.. py:class:: MasterCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   Master指令
+   包括: reboot, send
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:class:: HubCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   控制不同机器人之间的交互
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: tick(self) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: process_slice_head(self, remote_id: str, msg_str: str)
+
+
+   .. py:method:: process_slice_body(self, remote_id: str, msg_str: str, meta: command.dicepp_command.MessageMetaData)
+
+
+   .. py:method:: finalize_slice_msg(self, remote_id: str, m_hash: str, meta: command.dicepp_command.MessageMetaData)
+
+
+   .. py:method:: self_validate(self)
+
+
+   .. py:method:: process_hub_msg(self, command_type: str, command_info: str, meta: command.dicepp_command.MessageMetaData) -> List[command.bot_command.BotCommandBase]
+
+
+
+.. py:class:: VariableCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   用户自定义变量 包括.set .get .del
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:class:: ActivateCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   bot [on/off], dismiss指令
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:data:: DC_ACTIVATE
+   :annotation: = activate
+
+   
+
+.. py:class:: NicknameCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   更改用户自定义昵称的指令, 以.nn开头
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: is_legal_nickname(cls, nickname: str) -> bool
+      :classmethod:
+
+      检查一个昵称是否合法
+      Args:
+          nickname: 要检查的昵称
+
+      Returns:
+
+
+
+
+.. py:class:: HelpCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   查询帮助的指令, 以.help开头
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:class:: RollDiceCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   掷骰相关的指令, 以.r开头
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:data:: DCP_USER_DATA_ROLL_A_UID
+   :annotation: = ['roll']
+
+   
+
+.. py:data:: DCP_GROUP_DATA_ROLL_A_GID
+   :annotation: = ['roll']
+
+   
+
+.. py:data:: DCP_ROLL_D20_A_ID_ROLL
+   :annotation: = ['d20']
+
+   
+
+.. py:data:: DCP_ROLL_TIME_A_ID_ROLL
+   :annotation: = ['time']
+
+   
+
+.. py:data:: DCK_ROLL_TODAY
+   :annotation: = today
+
+   
+
+.. py:data:: DCK_ROLL_TOTAL
+   :annotation: = total
+
+   
+
+.. py:class:: CharacterDNDCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   DND角色卡指令
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:data:: DC_CHAR_DND
+   :annotation: = character_dnd
+
+   
+
+.. py:class:: HPCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   调整和记录生命值的指令, 以.hp开头
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: search_target(self, target_intent: str, group_id: str) -> Tuple[str, str]
+
+      从角色卡信息, 生命值信息和先攻列表中查询是否有符合target_intent, 如果找到结果返回字符串元组(DC, PC账号/NPC名称), 没有找到则返回元组("", "")
+      DC可以为
+      * DC_CHAR_DND (从角色卡信息或先攻列表中找到, 元组第二位为pc账号)
+      * DC_CHAR_HP (从生命值信息或先攻列表中找到, 元组第二位为npc名称)
+      * "multiple" (多个模糊的结果, 此时元组第二位为以/分割的pc或npc名称)
+      匹配优先级为 完全匹配角色卡信息>完全匹配生命值信息>完全匹配先攻列表>部分匹配角色卡信息>部分匹配生命值信息>部分匹配先攻列表
+
+
+
+.. py:data:: DC_CHAR_HP
+   :annotation: = char_hp
+
+   
+
+.. py:class:: InitiativeCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   先攻指令, 以.init开头
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: add_initiative_entities(self, result_dict: Dict[str, Tuple[int, str]], owner_id: str, group_id: str) -> str
+
+      Args:
+          result_dict: 需要加入先攻列表的信息, key为先攻条目名称, val为二元组, val[0]代表先攻数值, val[1]代表掷骰表达式结果
+          owner_id: 为空代表无主的NPC, 不为空代表PC账号
+          group_id: 目标群号
+
+      Returns:
+          feedback: 操作执行成功或失败的提示
+
+
+
+.. py:class:: UtilsDNDCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .dnd指令, 相当于6#4d6k3, 可以重复投多次, 如.dnd5
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:class:: QueryCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   查询资料库的指令, 以.查询或.q开头
+
+   .. py:method:: delay_init(self) -> List[str]
+
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: query_info(self, query_key: str, port: command.bot_command.MessagePort, search_mode: int, show_mode: int = 0) -> str
+
+      查询信息, 返回输出给用户的字符串, 若给出选项将会记录信息以便响应用户之后的快速查询.
+      search_mode != 0则使用模糊查找
+
+
+   .. py:method:: search_item(self, query_key_list: List[str], search_mode: int) -> List[int]
+
+
+   .. py:method:: format_single_item_feedback(self, item: QueryItem) -> str
+
+
+   .. py:method:: format_multiple_items_feedback(self, items: List[QueryItem])
+
+
+   .. py:method:: format_multiple_items_simple_feedback(items: List[QueryItem])
+      :staticmethod:
+
+
+   .. py:method:: flip_page(self, record: QueryRecord, next_page: bool) -> Tuple[str, int]
+
+
+   .. py:method:: clean_records(self)
+
+      清理过期的查询指令
+
+
+   .. py:method:: load_data_from_path(self, path: str, error_info: List[str]) -> None
+
+      从指定文件或目录读取信息
+
+
+   .. py:method:: get_state(self) -> str
+
+
+
+.. py:class:: DeckCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .draw 指令, 从牌库中抽取
+
+   .. py:method:: delay_init(self) -> List[str]
+
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: load_data_from_path(self, path: str, error_info: List[str]) -> None
+
+      从指定文件或目录读取信息
+
+
+   .. py:method:: get_state(self) -> str
+
+
+
+.. py:class:: ChatCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   自定义对话指令
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: get_interval(self) -> int
+
+
+   .. py:method:: get_interval_delta(self) -> datetime.timedelta
+
+
+
+.. py:class:: JrrpCommand(bot: bot_core.dicebot.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+

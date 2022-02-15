@@ -1,0 +1,44 @@
+:py:mod:`DicePP.roll_dice.roll_config`
+======================================
+
+.. py:module:: DicePP.roll_dice.roll_config
+
+
+Module Contents
+---------------
+
+.. py:data:: DICE_TYPE_DEFAULT
+   :annotation: = 20
+
+   
+
+.. py:data:: DICE_NUM_MAX
+   :annotation: = 100
+
+   
+
+.. py:data:: DICE_TYPE_MAX
+   :annotation: = 1000
+
+   
+
+.. py:data:: DICE_CONSTANT_MIN
+   
+
+   
+
+.. py:data:: DICE_CONSTANT_MAX
+   :annotation: = 1000
+
+   
+
+.. py:data:: PARSE_RECURSION_DEPTH_MAX
+   :annotation: = 100
+
+   
+
+.. py:data:: EXPLODE_LIMIT
+   :annotation: = 10
+
+   
+

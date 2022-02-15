@@ -1,0 +1,217 @@
+:py:mod:`DicePP.command.impl.deck_command`
+==========================================
+
+.. py:module:: DicePP.command.impl.deck_command
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.deck_command.DeckItem
+   DicePP.command.impl.deck_command.Deck
+   DicePP.command.impl.deck_command.DeckCommand
+
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.deck_command.LOC_DRAW_RESULT
+   DicePP.command.impl.deck_command.LOC_DRAW_RESULT_INLINE
+   DicePP.command.impl.deck_command.LOC_DRAW_SINGLE
+   DicePP.command.impl.deck_command.LOC_DRAW_MULTI
+   DicePP.command.impl.deck_command.LOC_DRAW_FIN_ALL
+   DicePP.command.impl.deck_command.LOC_DRAW_FIN_INNER
+   DicePP.command.impl.deck_command.LOC_DRAW_ERR_EMPTY_DECK
+   DicePP.command.impl.deck_command.LOC_DRAW_ERR_TIME
+   DicePP.command.impl.deck_command.LOC_DRAW_ERR_NO_DECK
+   DicePP.command.impl.deck_command.LOC_DRAW_ERR_VAGUE_DECK
+   DicePP.command.impl.deck_command.CFG_DECK_ENABLE
+   DicePP.command.impl.deck_command.CFG_DECK_DATA_PATH
+   DicePP.command.impl.deck_command.DRAW_DATA_PATH
+   DicePP.command.impl.deck_command.DRAW_LIMIT
+   DicePP.command.impl.deck_command.HLDL_DRAW_LIMIT
+   DicePP.command.impl.deck_command.DECK_ITEM_FIELD_CONTENT
+   DicePP.command.impl.deck_command.DECK_ITEM_FIELD_WEIGHT
+   DicePP.command.impl.deck_command.DECK_ITEM_FIELD_REDRAW
+   DicePP.command.impl.deck_command.DECK_ITEM_FIELD_FINAL
+   DicePP.command.impl.deck_command.DECK_ITEM_FIELD
+   DicePP.command.impl.deck_command.DECK_ITEM_FIELD_COMMENT
+
+
+.. py:data:: LOC_DRAW_RESULT
+   :annotation: = draw_result
+
+   
+
+.. py:data:: LOC_DRAW_RESULT_INLINE
+   :annotation: = draw_result_inline
+
+   
+
+.. py:data:: LOC_DRAW_SINGLE
+   :annotation: = draw_single
+
+   
+
+.. py:data:: LOC_DRAW_MULTI
+   :annotation: = draw_multi
+
+   
+
+.. py:data:: LOC_DRAW_FIN_ALL
+   :annotation: = draw_finalize_all
+
+   
+
+.. py:data:: LOC_DRAW_FIN_INNER
+   :annotation: = draw_finalize_inner
+
+   
+
+.. py:data:: LOC_DRAW_ERR_EMPTY_DECK
+   :annotation: = draw_error_empty_deck
+
+   
+
+.. py:data:: LOC_DRAW_ERR_TIME
+   :annotation: = draw_error_time
+
+   
+
+.. py:data:: LOC_DRAW_ERR_NO_DECK
+   :annotation: = draw_error_no_deck
+
+   
+
+.. py:data:: LOC_DRAW_ERR_VAGUE_DECK
+   :annotation: = draw_error_vague_deck
+
+   
+
+.. py:data:: CFG_DECK_ENABLE
+   :annotation: = deck_enable
+
+   
+
+.. py:data:: CFG_DECK_DATA_PATH
+   :annotation: = deck_data_path
+
+   
+
+.. py:data:: DRAW_DATA_PATH
+   :annotation: = DeckData
+
+   
+
+.. py:data:: DRAW_LIMIT
+   :annotation: = 10
+
+   
+
+.. py:data:: HLDL_DRAW_LIMIT
+   :annotation: = 50
+
+   
+
+.. py:data:: DECK_ITEM_FIELD_CONTENT
+   :annotation: = Content
+
+   
+
+.. py:data:: DECK_ITEM_FIELD_WEIGHT
+   :annotation: = Weight
+
+   
+
+.. py:data:: DECK_ITEM_FIELD_REDRAW
+   :annotation: = Redraw
+
+   
+
+.. py:data:: DECK_ITEM_FIELD_FINAL
+   :annotation: = Finalize
+
+   
+
+.. py:data:: DECK_ITEM_FIELD
+   
+
+   
+
+.. py:data:: DECK_ITEM_FIELD_COMMENT
+   
+
+   
+
+.. py:exception:: ForceFinal(info: str)
+
+   Bases: :py:obj:`Exception`
+
+   强制终止所有抽取
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+
+.. py:class:: DeckItem(content: str, weight: int = 1, redraw: bool = True, final_type: int = False)
+
+   牌库中的一个元素
+
+   .. py:method:: get_result(self, source: Deck, decks: Iterable[Deck], loc_helper: localization.LocalizationHelper, ignore: bool = True) -> str
+
+      处理高级抽卡语言
+
+
+
+.. py:class:: Deck(name: str, path: str)
+
+   牌库
+
+   .. py:method:: add_item(self, item: DeckItem)
+
+
+   .. py:method:: draw(self, times: int, decks: Iterable[Deck], loc_helper: localization.LocalizationHelper, ignore: bool = True) -> str
+
+
+
+.. py:class:: DeckCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   .draw 指令, 从牌库中抽取
+
+   .. py:method:: delay_init(self) -> List[str]
+
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: load_data_from_path(self, path: str, error_info: List[str]) -> None
+
+      从指定文件或目录读取信息
+
+
+   .. py:method:: get_state(self) -> str
+
+
+

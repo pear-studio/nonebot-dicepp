@@ -1,0 +1,420 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DicePP.roll_dice.expression &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css" />
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>DicePP.roll_dice.expression 源代码</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">abc</span>
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">import</span> <span class="nn">roll_dice.roll_config</span> <span class="k">as</span> <span class="nn">roll_config</span>
+<span class="kn">from</span> <span class="nn">bot_utils.string</span> <span class="kn">import</span> <span class="n">to_english_str</span>
+<span class="kn">from</span> <span class="nn">roll_dice.modifier</span> <span class="kn">import</span> <span class="n">RollExpModifier</span><span class="p">,</span> <span class="n">ROLL_MODIFIERS_DICT</span>
+<span class="kn">from</span> <span class="nn">roll_dice.connector</span> <span class="kn">import</span> <span class="n">RollExpConnector</span><span class="p">,</span> <span class="n">ROLL_CONNECTORS_DICT</span>
+<span class="kn">from</span> <span class="nn">roll_dice.roll_utils</span> <span class="kn">import</span> <span class="n">RollDiceError</span><span class="p">,</span> <span class="n">roll_a_dice</span><span class="p">,</span> <span class="n">match_outer_parentheses</span>
+<span class="kn">from</span> <span class="nn">roll_dice.result</span> <span class="kn">import</span> <span class="n">RollResult</span>
+
+
+<span class="c1"># from config_roll import DICE_TYPE_DEFAULT</span>
+
+
+<div class="viewcode-block" id="RollExpression"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpression">[文档]</a><span class="k">class</span> <span class="nc">RollExpression</span><span class="p">(</span><span class="n">metaclass</span><span class="o">=</span><span class="n">abc</span><span class="o">.</span><span class="n">ABCMeta</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    投骰表达式基类</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="nd">@abc</span><span class="o">.</span><span class="n">abstractmethod</span>
+<div class="viewcode-block" id="RollExpression.get_result"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpression.get_result">[文档]</a>    <span class="k">def</span> <span class="nf">get_result</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RollResult</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            返回该掷骰表达式执行的结果</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">()</span></div></div>
+
+
+<div class="viewcode-block" id="RollExpressionXDY"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpressionXDY">[文档]</a><span class="k">class</span> <span class="nc">RollExpressionXDY</span><span class="p">(</span><span class="n">RollExpression</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    基础表达式之一, 代表X个Y面骰</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">xdy_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            xdy_str: 满足正则表达式&quot;^[+-]?([1-9][0-9]*)?D([1-9][0-9]*)?$&quot;</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># 不需要调用父类初始化函数</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">positive</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span>  <span class="c1"># 结果是正还是负</span>
+        <span class="k">if</span> <span class="n">xdy_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">]:</span>
+            <span class="n">notation</span><span class="p">,</span> <span class="n">xdy_str</span> <span class="o">=</span> <span class="n">xdy_str</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">xdy_str</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">positive</span> <span class="o">=</span> <span class="mi">1</span> <span class="k">if</span> <span class="n">notation</span> <span class="o">==</span> <span class="s2">&quot;+&quot;</span> <span class="k">else</span> <span class="o">-</span><span class="mi">1</span>
+
+        <span class="n">d_index</span> <span class="o">=</span> <span class="n">xdy_str</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="s2">&quot;D&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">d_index</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;解析表达式时出现错误 ERROR CODE: 100 Info: </span><span class="si">{</span><span class="n">xdy_str</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">num_str</span><span class="p">,</span> <span class="n">type_str</span> <span class="o">=</span> <span class="n">xdy_str</span><span class="p">[:</span><span class="n">d_index</span><span class="p">],</span> <span class="n">xdy_str</span><span class="p">[</span><span class="n">d_index</span><span class="o">+</span><span class="mi">1</span><span class="p">:]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">dice_num</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">num_str</span><span class="p">)</span> <span class="k">if</span> <span class="n">num_str</span> <span class="k">else</span> <span class="mi">1</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dice_type</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">type_str</span><span class="p">)</span> <span class="k">if</span> <span class="n">type_str</span> <span class="k">else</span> <span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_TYPE_DEFAULT</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dice_num</span> <span class="o">&gt;</span> <span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_NUM_MAX</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;骰子数量不能大于</span><span class="si">{</span><span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_NUM_MAX</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dice_type</span> <span class="o">&gt;</span> <span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_TYPE_MAX</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;骰子面数不能大于</span><span class="si">{</span><span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_TYPE_MAX</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="RollExpressionXDY.get_result"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpressionXDY.get_result">[文档]</a>    <span class="k">def</span> <span class="nf">get_result</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RollResult</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        随机生成结果</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">res</span><span class="p">:</span> <span class="n">RollResult</span> <span class="o">=</span> <span class="n">RollResult</span><span class="p">()</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">val_list</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">positive</span> <span class="o">*</span> <span class="n">roll_a_dice</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dice_type</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">dice_num</span><span class="p">)]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">positive</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">res</span><span class="o">.</span><span class="n">info</span> <span class="o">=</span> <span class="s2">&quot;+&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">val_list</span><span class="p">])</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">res</span><span class="o">.</span><span class="n">info</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="nb">str</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">res</span><span class="o">.</span><span class="n">val_list</span><span class="p">])</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">info</span><span class="si">}</span><span class="s2">)&quot;</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">dice_type</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">exp</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="s1">&#39;-&#39;</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">positive</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="k">else</span> <span class="s1">&#39;&#39;</span><span class="si">}{</span><span class="bp">self</span><span class="o">.</span><span class="n">dice_num</span><span class="si">}</span><span class="s2">D</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">dice_type</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dice_type</span> <span class="o">==</span> <span class="mi">20</span><span class="p">:</span>  <span class="c1"># 识别大成功与大失败</span>
+            <span class="n">res</span><span class="o">.</span><span class="n">d20_num</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">dice_num</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">dice_num</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="n">res</span><span class="o">.</span><span class="n">d20_state</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">val_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">res</span></div></div>
+
+
+<div class="viewcode-block" id="RollExpressionInt"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpressionInt">[文档]</a><span class="k">class</span> <span class="nc">RollExpressionInt</span><span class="p">(</span><span class="n">RollExpression</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    基础表达式之一, 代表一个整数</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+        <span class="c1"># 不需要调用父类初始化函数</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">val</span> <span class="o">=</span> <span class="n">val</span>
+
+        <span class="k">if</span> <span class="n">val</span> <span class="o">&lt;</span> <span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_CONSTANT_MIN</span> <span class="ow">or</span> <span class="n">val</span> <span class="o">&gt;</span> <span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_CONSTANT_MAX</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;常量大小必须在</span><span class="si">{</span><span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_CONSTANT_MIN</span><span class="si">}</span><span class="s2">至</span><span class="si">{</span><span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_CONSTANT_MAX</span><span class="si">}</span><span class="s2">之间&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="RollExpressionInt.get_result"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpressionInt.get_result">[文档]</a>    <span class="k">def</span> <span class="nf">get_result</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RollResult</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        返回之前定义的固定值</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">RollResult</span><span class="p">()</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">val_list</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">val</span><span class="p">]</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">info</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">val</span><span class="p">)</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">exp</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">info</span>
+        <span class="k">return</span> <span class="n">res</span></div></div>
+
+
+<div class="viewcode-block" id="RollExpressionComplex"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpressionComplex">[文档]</a><span class="k">class</span> <span class="nc">RollExpressionComplex</span><span class="p">(</span><span class="n">RollExpression</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    一个复杂表达式, 包含多个表达式, 修饰符, 连接符</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__exp_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="n">RollExpConnector</span><span class="p">,</span> <span class="n">RollExpression</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__mod_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">RollExpModifier</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+<div class="viewcode-block" id="RollExpressionComplex.append_exp"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpressionComplex.append_exp">[文档]</a>    <span class="k">def</span> <span class="nf">append_exp</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">con</span><span class="p">:</span> <span class="n">RollExpConnector</span><span class="p">,</span> <span class="n">exp</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        添加一个掷骰表达式结果</span>
+<span class="sd">        Args:</span>
+<span class="sd">            exp: Type[RollResult]</span>
+<span class="sd">            con: Type[RollConnection]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="nb">issubclass</span><span class="p">(</span><span class="nb">type</span><span class="p">(</span><span class="n">exp</span><span class="p">),</span> <span class="n">RollExpression</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;参数类型应为</span><span class="si">{</span><span class="n">RollExpression</span><span class="si">}</span><span class="s2">, 当前为</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">exp</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__exp_list</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">con</span><span class="p">,</span> <span class="n">exp</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="RollExpressionComplex.append_modifier"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpressionComplex.append_modifier">[文档]</a>    <span class="k">def</span> <span class="nf">append_modifier</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_mod</span><span class="p">:</span> <span class="n">RollExpModifier</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        添加一个掷骰修饰器</span>
+<span class="sd">        Args:</span>
+<span class="sd">            new_mod: Type[RollModifier]</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__mod_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_mod</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="RollExpressionComplex.get_result"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.RollExpressionComplex.get_result">[文档]</a>    <span class="k">def</span> <span class="nf">get_result</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RollResult</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        从上至下递归地得到RollInfo</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">RollResult</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">con</span><span class="p">,</span> <span class="n">exp</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">__exp_list</span><span class="p">:</span>  <span class="c1"># 用连接符合并结果</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">con</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">res</span><span class="p">,</span> <span class="n">exp</span><span class="o">.</span><span class="n">get_result</span><span class="p">())</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">__exp_list</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># 连接符只有一个则应该保留信息</span>
+            <span class="n">res</span><span class="o">.</span><span class="n">type</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">__exp_list</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">get_result</span><span class="p">()</span><span class="o">.</span><span class="n">type</span>
+        <span class="k">for</span> <span class="n">mod</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">__mod_list</span><span class="p">:</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">mod</span><span class="o">.</span><span class="n">modify</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">info</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">info</span> <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;+&quot;</span> <span class="k">else</span> <span class="n">res</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">info</span><span class="si">}</span><span class="s2">)&quot;</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">exp</span> <span class="o">=</span> <span class="n">res</span><span class="o">.</span><span class="n">exp</span> <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">exp</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;+&quot;</span> <span class="k">else</span> <span class="n">res</span><span class="o">.</span><span class="n">exp</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+        <span class="n">res</span><span class="o">.</span><span class="n">exp</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">exp</span><span class="si">}</span><span class="s2">)&quot;</span>
+        <span class="k">return</span> <span class="n">res</span></div></div>
+
+
+<div class="viewcode-block" id="parse_roll_exp"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.parse_roll_exp">[文档]</a><span class="k">def</span> <span class="nf">parse_roll_exp</span><span class="p">(</span><span class="n">input_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">depth</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RollExpression</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    解析掷骰表达式字符串</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_str: 掷骰表达式字符串, 格式说明:</span>
+<span class="sd">                        所有的字母都是大写; 不含空格和中文字符;</span>
+<span class="sd">                        不包含#(重复掷骰在函数外通过多次调用返回的RollExpression处理);</span>
+<span class="sd">        depth: 递归深度, 默认为0</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        roll_exp: 解析后的表达式</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># print(&quot;parse: &quot;, input_str)</span>
+    <span class="k">if</span> <span class="n">depth</span> <span class="o">&gt;</span> <span class="n">roll_config</span><span class="o">.</span><span class="n">PARSE_RECURSION_DEPTH_MAX</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="s2">&quot;超出最大解析深度&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">input_str</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="s2">&quot;表达式不能为空&quot;</span><span class="p">)</span>
+    <span class="c1"># 去掉最外层的括号</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="k">while</span> <span class="n">input_str</span> <span class="ow">and</span> <span class="n">match_outer_parentheses</span><span class="p">(</span><span class="n">input_str</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">input_str</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">input_str</span> <span class="o">=</span> <span class="n">input_str</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">input_str</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="s2">&quot;表达式含有空括号&quot;</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="s2">&quot;表达式含有不完整括号&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 先处理首个连接符, 若不是+或者-, 则默认为+</span>
+    <span class="k">if</span> <span class="n">input_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">):</span>
+        <span class="n">input_str</span> <span class="o">=</span> <span class="s2">&quot;+&quot;</span> <span class="o">+</span> <span class="n">input_str</span>
+
+    <span class="c1"># 递归终点之一: 是单个int</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">val</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">input_str</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">RollExpressionInt</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+        <span class="k">pass</span>
+    <span class="c1"># 递归终点之一: 形如(+/-)XDY, 不包含其他修饰符和连接符</span>
+    <span class="n">xdy_re</span> <span class="o">=</span> <span class="s2">&quot;([1-9][0-9]*)?D([1-9][0-9]*)?&quot;</span>
+    <span class="n">xdy_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="s2">&quot;[+-]&quot;</span><span class="o">+</span><span class="n">xdy_re</span><span class="o">+</span><span class="s2">&quot;$&quot;</span><span class="p">,</span> <span class="n">input_str</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">xdy_match</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">RollExpressionXDY</span><span class="p">(</span><span class="n">input_str</span><span class="p">)</span>
+
+    <span class="c1"># 其他情况都要用复杂表达式处理</span>
+    <span class="n">exp</span> <span class="o">=</span> <span class="n">RollExpressionComplex</span><span class="p">()</span>
+    <span class="n">cur_str</span> <span class="o">=</span> <span class="n">input_str</span>
+    <span class="n">next_con</span> <span class="o">=</span> <span class="n">ROLL_CONNECTORS_DICT</span><span class="p">[</span><span class="n">cur_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]]()</span>
+    <span class="n">cur_str</span> <span class="o">=</span> <span class="n">cur_str</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+
+    <span class="n">cur_con</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">RollExpConnector</span><span class="p">]</span>
+    <span class="n">next_con</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">RollExpConnector</span><span class="p">]</span>
+
+    <span class="c1"># 除开首个连接符以外一个连接符都没有的情况, 就是一个表达式+零个/多个修饰符</span>
+    <span class="n">has_con</span> <span class="o">=</span> <span class="nb">any</span><span class="p">((</span><span class="n">s</span> <span class="ow">in</span> <span class="n">cur_str</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">ROLL_CONNECTORS_DICT</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">has_con</span><span class="p">:</span>
+        <span class="n">prev_str</span> <span class="o">=</span> <span class="n">cur_str</span>
+        <span class="n">has_mod</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">while</span> <span class="n">has_mod</span><span class="p">:</span>
+            <span class="n">has_mod</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="k">for</span> <span class="n">mod_re</span> <span class="ow">in</span> <span class="n">ROLL_MODIFIERS_DICT</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+                <span class="n">mod_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="n">mod_re</span><span class="p">,</span> <span class="n">cur_str</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">mod_match</span><span class="p">:</span>
+                    <span class="n">m_span</span> <span class="o">=</span> <span class="n">mod_match</span><span class="o">.</span><span class="n">span</span><span class="p">()</span>
+                    <span class="n">mod_str</span><span class="p">,</span> <span class="n">cur_str</span> <span class="o">=</span> <span class="n">cur_str</span><span class="p">[</span><span class="n">m_span</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span><span class="n">m_span</span><span class="p">[</span><span class="mi">1</span><span class="p">]],</span> <span class="n">cur_str</span><span class="p">[:</span><span class="n">m_span</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="o">+</span> <span class="n">cur_str</span><span class="p">[</span><span class="n">m_span</span><span class="p">[</span><span class="mi">1</span><span class="p">]:]</span>
+                    <span class="n">exp</span><span class="o">.</span><span class="n">append_modifier</span><span class="p">(</span><span class="n">ROLL_MODIFIERS_DICT</span><span class="p">[</span><span class="n">mod_re</span><span class="p">](</span><span class="n">mod_str</span><span class="p">))</span>
+                    <span class="n">has_mod</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="k">break</span>
+        <span class="k">if</span> <span class="n">prev_str</span> <span class="o">==</span> <span class="n">cur_str</span><span class="p">:</span>  <span class="c1"># 解析一圈都没变化, 说明格式不对, 开始死循环了</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;表达式</span><span class="si">{</span><span class="n">cur_str</span><span class="si">}</span><span class="s2">格式不正确&quot;</span><span class="p">)</span>
+        <span class="n">core_exp</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">cur_str</span><span class="p">,</span> <span class="n">depth</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># 解析剩下的部分</span>
+        <span class="n">exp</span><span class="o">.</span><span class="n">append_exp</span><span class="p">(</span><span class="n">next_con</span><span class="p">,</span> <span class="n">core_exp</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">exp</span>
+
+    <span class="c1"># 处理连接符, 字符串应当是 连接符+子表达式+连接符+子表示式...</span>
+    <span class="c1"># 循环处理当前表达式和下一个连接符</span>
+    <span class="n">cur_exp</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">RollExpression</span><span class="p">]</span>
+    <span class="c1"># print(&quot;complex&quot;, cur_str)</span>
+    <span class="n">left_str</span> <span class="o">=</span> <span class="n">cur_str</span>
+    <span class="k">while</span> <span class="n">left_str</span><span class="p">:</span>
+        <span class="c1"># print(cur_str, &quot;in loop&quot;, left_str)</span>
+        <span class="n">cur_con</span><span class="p">,</span> <span class="n">next_con</span> <span class="o">=</span> <span class="n">next_con</span><span class="p">,</span> <span class="kc">None</span>  <span class="c1"># 当前的连接符和下一个连接符</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">par_match</span> <span class="o">=</span> <span class="n">match_outer_parentheses</span><span class="p">(</span><span class="n">left_str</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="s2">&quot;含有不完整的括号&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">par_match</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>  <span class="c1"># 有括号则递归处理括号</span>
+            <span class="n">par_str</span><span class="p">,</span> <span class="n">left_str</span> <span class="o">=</span> <span class="n">left_str</span><span class="p">[:</span><span class="n">par_match</span><span class="o">+</span><span class="mi">1</span><span class="p">],</span> <span class="n">left_str</span><span class="p">[</span><span class="n">par_match</span><span class="o">+</span><span class="mi">1</span><span class="p">:]</span>
+            <span class="n">cur_exp</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">par_str</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">depth</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+            <span class="c1"># 查找连接符</span>
+            <span class="k">if</span> <span class="n">left_str</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">cur_symbol</span> <span class="ow">in</span> <span class="n">ROLL_CONNECTORS_DICT</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+                    <span class="k">if</span> <span class="n">left_str</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="n">cur_symbol</span><span class="p">)]</span> <span class="o">==</span> <span class="n">cur_symbol</span><span class="p">:</span>
+                        <span class="n">next_con</span> <span class="o">=</span> <span class="n">ROLL_CONNECTORS_DICT</span><span class="p">[</span><span class="n">cur_symbol</span><span class="p">]()</span>
+                        <span class="n">left_str</span> <span class="o">=</span> <span class="n">left_str</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">cur_symbol</span><span class="p">):]</span>
+                        <span class="k">break</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">next_con</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;表达式</span><span class="si">{</span><span class="n">left_str</span><span class="si">}</span><span class="s2">格式不正确&quot;</span><span class="p">)</span>
+            <span class="n">exp</span><span class="o">.</span><span class="n">append_exp</span><span class="p">(</span><span class="n">cur_con</span><span class="p">,</span> <span class="n">cur_exp</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># 没有括号则暴力匹配连接符来找到最左侧的表达式和下一个连接符</span>
+            <span class="n">next_con_str_index</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span>
+            <span class="n">next_symbol</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="c1"># python的dict自从3.5以后默认是有序的</span>
+            <span class="k">for</span> <span class="n">cur_symbol</span> <span class="ow">in</span> <span class="n">ROLL_CONNECTORS_DICT</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>
+                <span class="n">cur_index</span> <span class="o">=</span> <span class="n">left_str</span><span class="o">.</span><span class="n">rfind</span><span class="p">(</span><span class="n">cur_symbol</span><span class="p">)</span>
+                <span class="c1"># 早注册symbol的优先于晚注册symbol的</span>
+                <span class="k">if</span> <span class="n">cur_index</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+                    <span class="n">next_con_str_index</span><span class="p">,</span> <span class="n">next_symbol</span> <span class="o">=</span> <span class="n">cur_index</span><span class="p">,</span> <span class="n">cur_symbol</span>
+                    <span class="k">break</span>
+            <span class="c1"># print(left_str, next_con_str_index, next_symbol)</span>
+            <span class="k">if</span> <span class="n">next_symbol</span><span class="p">:</span>  <span class="c1"># 如果有下一个连接符</span>
+                <span class="c1"># print(cur_con.symbol, left_str[:next_con_str_index], next_symbol, left_str[next_con_str_index+1:])</span>
+                <span class="n">cur_exp</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">left_str</span><span class="p">[:</span><span class="n">next_con_str_index</span><span class="p">],</span> <span class="n">depth</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+                <span class="n">exp</span><span class="o">.</span><span class="n">append_exp</span><span class="p">(</span><span class="n">cur_con</span><span class="p">,</span> <span class="n">cur_exp</span><span class="p">)</span>
+                <span class="n">next_con</span> <span class="o">=</span> <span class="n">ROLL_CONNECTORS_DICT</span><span class="p">[</span><span class="n">next_symbol</span><span class="p">]()</span>
+                <span class="n">next_exp</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">left_str</span><span class="p">[</span><span class="n">next_con_str_index</span><span class="o">+</span><span class="mi">1</span><span class="p">:],</span> <span class="n">depth</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+                <span class="n">exp</span><span class="o">.</span><span class="n">append_exp</span><span class="p">(</span><span class="n">next_con</span><span class="p">,</span> <span class="n">next_exp</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">cur_exp</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">left_str</span><span class="p">,</span> <span class="n">depth</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+                <span class="n">exp</span><span class="o">.</span><span class="n">append_exp</span><span class="p">(</span><span class="n">cur_con</span><span class="p">,</span> <span class="n">cur_exp</span><span class="p">)</span>
+            <span class="k">break</span>
+
+        <span class="k">if</span> <span class="n">next_con</span> <span class="ow">and</span> <span class="n">left_str</span> <span class="o">==</span> <span class="s2">&quot;&quot;</span><span class="p">:</span>  <span class="c1"># 如果存在下一个连接符但表达式为空, 肯定有问题</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;连接符</span><span class="si">{</span><span class="n">next_con</span><span class="o">.</span><span class="n">symbol</span><span class="si">}</span><span class="s2">后为空表达式!&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">exp</span></div>
+
+
+<div class="viewcode-block" id="preprocess_roll_exp"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.preprocess_roll_exp">[文档]</a><span class="k">def</span> <span class="nf">preprocess_roll_exp</span><span class="p">(</span><span class="n">input_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    预处理掷骰表达式</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">output_str</span> <span class="o">=</span> <span class="n">input_str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="c1"># output_str = re.sub(r&quot;\s&quot;, &quot;&quot;, output_str)  # 去除空格和换行</span>
+    <span class="n">output_str</span> <span class="o">=</span> <span class="n">output_str</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span>
+    <span class="n">output_str</span> <span class="o">=</span> <span class="n">to_english_str</span><span class="p">(</span><span class="n">output_str</span><span class="p">)</span>
+    <span class="n">output_str</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(^|[^0-9])(D[0-9]*优势)&quot;</span><span class="p">,</span>
+                        <span class="k">lambda</span> <span class="n">match</span><span class="p">:</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;2&quot;</span> <span class="o">+</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;K1&quot;</span><span class="p">,</span>
+                        <span class="n">output_str</span><span class="p">)</span>
+    <span class="n">output_str</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;(^|[^0-9])(D[0-9]*劣势)&quot;</span><span class="p">,</span>
+                        <span class="k">lambda</span> <span class="n">match</span><span class="p">:</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;2&quot;</span> <span class="o">+</span> <span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;KL1&quot;</span><span class="p">,</span>
+                        <span class="n">output_str</span><span class="p">)</span>
+    <span class="n">output_str</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(.+)抗性$&quot;</span><span class="p">,</span>
+                        <span class="k">lambda</span> <span class="n">match</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="si">}</span><span class="s2">)/2&quot;</span><span class="p">,</span>
+                        <span class="n">output_str</span><span class="p">)</span>
+    <span class="n">output_str</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^(.+)易伤$&quot;</span><span class="p">,</span>
+                        <span class="k">lambda</span> <span class="n">match</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="si">}</span><span class="s2">)*2&quot;</span><span class="p">,</span>
+                        <span class="n">output_str</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">output_str</span></div>
+
+
+<div class="viewcode-block" id="exec_roll_exp"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.exec_roll_exp">[文档]</a><span class="k">def</span> <span class="nf">exec_roll_exp</span><span class="p">(</span><span class="n">input_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">RollResult</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    根据输入执行一次掷骰表达式并返回结果</span>
+<span class="sd">    若需要重复执行多次同一掷骰表达式, 应当直接调用preprocess_roll_exp和parse_roll_exp并重复get_result</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">exp_str</span> <span class="o">=</span> <span class="n">preprocess_roll_exp</span><span class="p">(</span><span class="n">input_str</span><span class="p">)</span>
+    <span class="n">exp</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">exp_str</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">exp</span><span class="o">.</span><span class="n">get_result</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="is_roll_exp"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/expression/index.html#DicePP.roll_dice.expression.is_roll_exp">[文档]</a><span class="k">def</span> <span class="nf">is_roll_exp</span><span class="p">(</span><span class="n">input_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    如果输入一个合法的掷骰表达式, 返回True, 否则返回False</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">preprocess_roll_exp</span><span class="p">(</span><span class="n">input_str</span><span class="p">))</span>
+    <span class="k">except</span> <span class="n">RollDiceError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="kc">True</span></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../autoapi/index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">模块代码</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

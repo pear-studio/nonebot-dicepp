@@ -1,0 +1,296 @@
+:py:mod:`DicePP.command.impl.query_command`
+===========================================
+
+.. py:module:: DicePP.command.impl.query_command
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.query_command.QueryItem
+   DicePP.command.impl.query_command.QuerySource
+   DicePP.command.impl.query_command.QueryRecord
+   DicePP.command.impl.query_command.QueryCommand
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.query_command.get_query_uuid
+   DicePP.command.impl.query_command.get_tag_string
+   DicePP.command.impl.query_command.get_syn_string
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.query_command.LOC_QUERY_RESULT
+   DicePP.command.impl.query_command.LOC_QUERY_SINGLE_RESULT
+   DicePP.command.impl.query_command.LOC_QUERY_MULTI_RESULT
+   DicePP.command.impl.query_command.LOC_QUERY_MULTI_RESULT_ITEM
+   DicePP.command.impl.query_command.LOC_QUERY_MULTI_RESULT_PAGE
+   DicePP.command.impl.query_command.LOC_QUERY_MULTI_RESULT_PAGE_UNDERFLOW
+   DicePP.command.impl.query_command.LOC_QUERY_MULTI_RESULT_PAGE_OVERFLOW
+   DicePP.command.impl.query_command.LOC_QUERY_NO_RESULT
+   DicePP.command.impl.query_command.LOC_QUERY_KEY_NUM_EXCEED
+   DicePP.command.impl.query_command.CFG_QUERY_ENABLE
+   DicePP.command.impl.query_command.CFG_QUERY_DATA_PATH
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD_KEY
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD_SYN
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD_CONTENT
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD_DESC
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD_CAT
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD_TAG
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD_COMMENT
+   DicePP.command.impl.query_command.QUERY_ITEM_FIELD_DESC_DEFAULT_LEN
+   DicePP.command.impl.query_command.MAX_QUERY_KEY_NUM
+   DicePP.command.impl.query_command.MAX_QUERY_CANDIDATE_NUM
+   DicePP.command.impl.query_command.MAX_QUERY_CANDIDATE_SIMPLE_NUM
+   DicePP.command.impl.query_command.RECORD_RESPONSE_TIME
+   DicePP.command.impl.query_command.RECORD_CLEAN_FREQ
+   DicePP.command.impl.query_command.QUERY_UUID_SET
+   DicePP.command.impl.query_command.QUERY_UUID_MIN
+   DicePP.command.impl.query_command.QUERY_UUID_MAX
+
+
+.. py:data:: LOC_QUERY_RESULT
+   :annotation: = query_result
+
+   
+
+.. py:data:: LOC_QUERY_SINGLE_RESULT
+   :annotation: = query_single_result
+
+   
+
+.. py:data:: LOC_QUERY_MULTI_RESULT
+   :annotation: = query_multi_result
+
+   
+
+.. py:data:: LOC_QUERY_MULTI_RESULT_ITEM
+   :annotation: = query_multi_result_item
+
+   
+
+.. py:data:: LOC_QUERY_MULTI_RESULT_PAGE
+   :annotation: = query_multi_result_page
+
+   
+
+.. py:data:: LOC_QUERY_MULTI_RESULT_PAGE_UNDERFLOW
+   :annotation: = query_multi_result_page_underflow
+
+   
+
+.. py:data:: LOC_QUERY_MULTI_RESULT_PAGE_OVERFLOW
+   :annotation: = query_multi_result_page_overflow
+
+   
+
+.. py:data:: LOC_QUERY_NO_RESULT
+   :annotation: = query_no_result
+
+   
+
+.. py:data:: LOC_QUERY_KEY_NUM_EXCEED
+   :annotation: = query_key_num_exceed
+
+   
+
+.. py:data:: CFG_QUERY_ENABLE
+   :annotation: = query_enable
+
+   
+
+.. py:data:: CFG_QUERY_DATA_PATH
+   :annotation: = query_data_path
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD_KEY
+   :annotation: = Key
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD_SYN
+   :annotation: = Synonym
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD_CONTENT
+   :annotation: = Content
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD_DESC
+   :annotation: = Description
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD_CAT
+   :annotation: = Catalogue
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD_TAG
+   :annotation: = Tag
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD
+   
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD_COMMENT
+   
+
+   
+
+.. py:data:: QUERY_ITEM_FIELD_DESC_DEFAULT_LEN
+   :annotation: = 20
+
+   
+
+.. py:data:: MAX_QUERY_KEY_NUM
+   :annotation: = 5
+
+   
+
+.. py:data:: MAX_QUERY_CANDIDATE_NUM
+   :annotation: = 10
+
+   
+
+.. py:data:: MAX_QUERY_CANDIDATE_SIMPLE_NUM
+   :annotation: = 30
+
+   
+
+.. py:data:: RECORD_RESPONSE_TIME
+   :annotation: = 60
+
+   
+
+.. py:data:: RECORD_CLEAN_FREQ
+   :annotation: = 50
+
+   
+
+.. py:class:: QueryItem(uuid: int, key: Tuple[str], content: str, desc: str, catalogue: str, tag: List[str], src_file_uuid: int, src_file_index: int)
+
+   .. py:method:: __repr__(self)
+
+      Return repr(self).
+
+
+
+.. py:class:: QuerySource(uuid: int, path: str, sheet: str)
+
+   .. py:method:: __repr__(self)
+
+      Return repr(self).
+
+
+
+.. py:class:: QueryRecord(uuid_list: List[int], time: datetime.datetime)
+
+
+.. py:class:: QueryCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   查询资料库的指令, 以.查询或.q开头
+
+   .. py:method:: delay_init(self) -> List[str]
+
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: query_info(self, query_key: str, port: command.bot_command.MessagePort, search_mode: int, show_mode: int = 0) -> str
+
+      查询信息, 返回输出给用户的字符串, 若给出选项将会记录信息以便响应用户之后的快速查询.
+      search_mode != 0则使用模糊查找
+
+
+   .. py:method:: search_item(self, query_key_list: List[str], search_mode: int) -> List[int]
+
+
+   .. py:method:: format_single_item_feedback(self, item: QueryItem) -> str
+
+
+   .. py:method:: format_multiple_items_feedback(self, items: List[QueryItem])
+
+
+   .. py:method:: format_multiple_items_simple_feedback(items: List[QueryItem])
+      :staticmethod:
+
+
+   .. py:method:: flip_page(self, record: QueryRecord, next_page: bool) -> Tuple[str, int]
+
+
+   .. py:method:: clean_records(self)
+
+      清理过期的查询指令
+
+
+   .. py:method:: load_data_from_path(self, path: str, error_info: List[str]) -> None
+
+      从指定文件或目录读取信息
+
+
+   .. py:method:: get_state(self) -> str
+
+
+
+.. py:data:: QUERY_UUID_SET
+   :annotation: :Set[int]
+
+   
+
+.. py:data:: QUERY_UUID_MIN
+   :annotation: :int
+
+   
+
+.. py:data:: QUERY_UUID_MAX
+   :annotation: :int
+
+   
+
+.. py:function:: get_query_uuid() -> int
+
+
+.. py:function:: get_tag_string(tags: Iterable[str])
+
+   获得标签字符串, 输入["a", "b"], 返回"#a #b" 
+
+
+.. py:function:: get_syn_string(synonym: Iterable[str])
+
+   获得同义词字符串, ["a", "b"], 返回"a, b" 
+
+

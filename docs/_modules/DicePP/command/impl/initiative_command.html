@@ -1,0 +1,430 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DicePP.command.impl.initiative_command &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>DicePP.command.impl.initiative_command 源代码</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Any</span>
+
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">Bot</span>
+<span class="kn">from</span> <span class="nn">command.command_config</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">command.dicepp_command</span> <span class="kn">import</span> <span class="n">UserCommandBase</span><span class="p">,</span> <span class="n">custom_user_command</span><span class="p">,</span> <span class="n">MessageMetaData</span>
+<span class="kn">from</span> <span class="nn">command.bot_command</span> <span class="kn">import</span> <span class="n">BotCommandBase</span>
+<span class="kn">from</span> <span class="nn">data_manager</span> <span class="kn">import</span> <span class="n">DataManagerError</span>
+<span class="kn">from</span> <span class="nn">roll_dice</span> <span class="kn">import</span> <span class="n">RollResult</span><span class="p">,</span> <span class="n">RollExpression</span><span class="p">,</span> <span class="n">preprocess_roll_exp</span><span class="p">,</span> <span class="n">parse_roll_exp</span><span class="p">,</span> <span class="n">RollDiceError</span><span class="p">,</span> \
+    <span class="n">is_roll_exp</span>
+<span class="kn">from</span> <span class="nn">initiative</span> <span class="kn">import</span> <span class="n">DC_INIT</span><span class="p">,</span> <span class="n">DCK_ENTITY</span><span class="p">,</span> <span class="n">DCK_MOD_TIME</span><span class="p">,</span> <span class="n">get_default_init_data</span><span class="p">,</span> <span class="n">add_initiative_entity</span><span class="p">,</span> <span class="n">del_initiative_entity</span>
+<span class="kn">from</span> <span class="nn">initiative</span> <span class="kn">import</span> <span class="n">InitEntity</span><span class="p">,</span> <span class="n">InitiativeError</span>
+<span class="kn">from</span> <span class="nn">bot_utils.string</span> <span class="kn">import</span> <span class="n">match_substring</span>
+
+<div class="viewcode-block" id="LOC_INIT_ROLL"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_ROLL">[文档]</a><span class="n">LOC_INIT_ROLL</span> <span class="o">=</span> <span class="s2">&quot;initiative_roll&quot;</span></div>
+<div class="viewcode-block" id="LOC_INIT_INFO"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_INFO">[文档]</a><span class="n">LOC_INIT_INFO</span> <span class="o">=</span> <span class="s2">&quot;initiative_info&quot;</span></div>
+<div class="viewcode-block" id="LOC_INIT_INFO_NOT_EXIST"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_INFO_NOT_EXIST">[文档]</a><span class="n">LOC_INIT_INFO_NOT_EXIST</span> <span class="o">=</span> <span class="s2">&quot;initiative_info_not_exist&quot;</span></div>
+<div class="viewcode-block" id="LOC_INIT_ENTITY_NOT_FOUND"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_ENTITY_NOT_FOUND">[文档]</a><span class="n">LOC_INIT_ENTITY_NOT_FOUND</span> <span class="o">=</span> <span class="s2">&quot;initiative_entity_not_found&quot;</span></div>
+<div class="viewcode-block" id="LOC_INIT_ENTITY_VAGUE"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_ENTITY_VAGUE">[文档]</a><span class="n">LOC_INIT_ENTITY_VAGUE</span> <span class="o">=</span> <span class="s2">&quot;initiative_entity_vague&quot;</span></div>
+<div class="viewcode-block" id="LOC_INIT_INFO_CLR"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_INFO_CLR">[文档]</a><span class="n">LOC_INIT_INFO_CLR</span> <span class="o">=</span> <span class="s2">&quot;initiative_info_clear&quot;</span></div>
+<div class="viewcode-block" id="LOC_INIT_INFO_DEL"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_INFO_DEL">[文档]</a><span class="n">LOC_INIT_INFO_DEL</span> <span class="o">=</span> <span class="s2">&quot;initiative_info_delete&quot;</span></div>
+<div class="viewcode-block" id="LOC_INIT_UNKNOWN"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_UNKNOWN">[文档]</a><span class="n">LOC_INIT_UNKNOWN</span> <span class="o">=</span> <span class="s2">&quot;initiative_unknown_command&quot;</span></div>
+<div class="viewcode-block" id="LOC_INIT_ERROR"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.LOC_INIT_ERROR">[文档]</a><span class="n">LOC_INIT_ERROR</span> <span class="o">=</span> <span class="s2">&quot;initiative_error&quot;</span></div>
+
+
+<span class="nd">@custom_user_command</span><span class="p">(</span><span class="n">readable_name</span><span class="o">=</span><span class="s2">&quot;先攻指令&quot;</span><span class="p">,</span>
+                     <span class="n">priority</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span>  <span class="c1"># 要比掷骰命令前, 否则.r会覆盖.ri</span>
+                     <span class="n">group_only</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                     <span class="n">flag</span><span class="o">=</span><span class="n">DPP_COMMAND_FLAG_DEFAULT</span><span class="p">,</span>
+                     <span class="n">cluster</span><span class="o">=</span><span class="n">DPP_COMMAND_CLUSTER_DEFAULT</span><span class="p">)</span>
+<div class="viewcode-block" id="InitiativeCommand"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.InitiativeCommand">[文档]</a><span class="k">class</span> <span class="nc">InitiativeCommand</span><span class="p">(</span><span class="n">UserCommandBase</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    先攻指令, 以.init开头</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bot</span><span class="p">:</span> <span class="n">Bot</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">bot</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_ROLL</span><span class="p">,</span>
+                                         <span class="s2">&quot;</span><span class="si">{name}</span><span class="s2">&#39;s initiative result is </span><span class="si">{init_result}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.ri返回的语句 </span><span class="si">{name}</span><span class="s2">:昵称; </span><span class="si">{init_result}</span><span class="s2">:先攻掷骰结果&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_INFO</span><span class="p">,</span>
+                                         <span class="s2">&quot;initiative info: </span><span class="se">\n</span><span class="si">{init_info}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.init返回的语句 </span><span class="si">{init_info}</span><span class="s2">: 先攻列表信息&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_INFO_NOT_EXIST</span><span class="p">,</span>
+                                         <span class="s2">&quot;Cannot find initiative info&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;输入.init但没有设置过先攻时返回的语句&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_INFO_CLR</span><span class="p">,</span>
+                                         <span class="s2">&quot;Already delete initiative info&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.init clr返回的语句&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_ENTITY_NOT_FOUND</span><span class="p">,</span>
+                                         <span class="s2">&quot;initiative entity </span><span class="si">{name}</span><span class="s2"> not exist&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;使用.init del删除不存在的条目时返回&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_ENTITY_VAGUE</span><span class="p">,</span>
+                                         <span class="s2">&quot;Input entity name </span><span class="si">{name}</span><span class="s2"> is vague, possible </span><span class="si">{name_list}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;使用.init del删除的条目存在歧义 </span><span class="si">{name_list}</span><span class="s2">:所有匹配的结果&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_INFO_DEL</span><span class="p">,</span>
+                                         <span class="s2">&quot;Already delete initiative entity </span><span class="si">{entity_list}</span><span class="s2"> from list&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.init del返回的语句&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_UNKNOWN</span><span class="p">,</span>
+                                         <span class="s2">&quot;Your sub-command </span><span class="si">{invalid_command}</span><span class="s2"> is unclear,&quot;</span> <span class="o">+</span>
+                                         <span class="s2">&quot; available sub-commands are </span><span class="si">{sub_command_list}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.init 后面跟的子指令无效, </span><span class="si">{invalid_command}</span><span class="s2">:用户输入的指令;&quot;</span> <span class="o">+</span>
+                                         <span class="s2">&quot; </span><span class="si">{sub_command_list}</span><span class="s2">:当前所有可用的子指令&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_INIT_ERROR</span><span class="p">,</span>
+                                         <span class="s2">&quot;Error occurs when performing initiative command. </span><span class="si">{error_info}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;处理.init或.ri指令时出现问题 </span><span class="si">{error_info}</span><span class="s2">:错误信息&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="InitiativeCommand.can_process_msg"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.InitiativeCommand.can_process_msg">[文档]</a>    <span class="k">def</span> <span class="nf">can_process_msg</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+        <span class="n">should_proc</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">msg_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;.ri&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">msg_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;.init&quot;</span><span class="p">)</span>
+        <span class="n">should_pass</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">should_proc</span><span class="p">,</span> <span class="n">should_pass</span><span class="p">,</span> <span class="kc">None</span></div>
+
+<div class="viewcode-block" id="InitiativeCommand.process_msg"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.InitiativeCommand.process_msg">[文档]</a>    <span class="k">def</span> <span class="nf">process_msg</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">,</span> <span class="n">hint</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">BotCommandBase</span><span class="p">]:</span>
+        <span class="c1"># 回复端口</span>
+        <span class="kn">from</span> <span class="nn">command.bot_command</span> <span class="kn">import</span> <span class="n">PrivateMessagePort</span><span class="p">,</span> <span class="n">GroupMessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+        <span class="n">port</span> <span class="o">=</span> <span class="n">GroupMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span> <span class="k">if</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span> <span class="k">else</span> <span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+
+        <span class="c1"># 解析语句</span>
+        <span class="n">mode</span><span class="p">:</span> <span class="nb">str</span>
+        <span class="k">if</span> <span class="n">msg_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;.ri&quot;</span><span class="p">):</span>
+            <span class="n">mode</span> <span class="o">=</span> <span class="s2">&quot;roll&quot;</span>
+            <span class="n">arg_str</span> <span class="o">=</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">msg_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;.init&quot;</span><span class="p">):</span>
+            <span class="n">arg_str</span> <span class="o">=</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">5</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">arg_str</span><span class="p">:</span>
+                <span class="n">mode</span> <span class="o">=</span> <span class="s2">&quot;inspect&quot;</span>
+                <span class="n">arg_str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="k">elif</span> <span class="n">arg_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;clr&quot;</span><span class="p">):</span>
+                <span class="n">mode</span> <span class="o">=</span> <span class="s2">&quot;clear&quot;</span>
+                <span class="n">arg_str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="k">elif</span> <span class="n">arg_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;del&quot;</span><span class="p">):</span>
+                <span class="n">mode</span> <span class="o">=</span> <span class="s2">&quot;delete&quot;</span>
+                <span class="n">arg_str</span> <span class="o">=</span> <span class="n">arg_str</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_UNKNOWN</span><span class="p">,</span> <span class="n">invalid_command</span><span class="o">=</span><span class="n">arg_str</span><span class="p">,</span>
+                                           <span class="n">sub_command_list</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;clr&quot;</span><span class="p">,</span> <span class="s2">&quot;del&quot;</span><span class="p">])</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[</span>
+                <span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="s2">&quot;Undefined error occur during process initiative command&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+        <span class="n">feedback</span><span class="p">:</span> <span class="nb">str</span>
+
+        <span class="c1"># 处理指令</span>
+        <span class="k">if</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;roll&quot;</span><span class="p">:</span>  <span class="c1"># 创造先攻条目</span>
+            <span class="c1"># 分割条目名称与掷骰表达式</span>
+            <span class="n">exp_str</span><span class="p">:</span> <span class="nb">str</span>
+            <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="k">if</span> <span class="s2">&quot; &quot;</span> <span class="ow">in</span> <span class="n">arg_str</span><span class="p">:</span>  <span class="c1"># 类似.ri+1 地精 这样的用法</span>
+                <span class="n">arg_str</span><span class="p">,</span> <span class="n">name</span> <span class="o">=</span> <span class="n">arg_str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="n">name</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">arg_str</span><span class="p">:</span>  <span class="c1"># 类似.ri 这样的用法</span>
+                <span class="n">exp_str</span> <span class="o">=</span> <span class="s2">&quot;d20&quot;</span>
+            <span class="k">elif</span> <span class="n">is_roll_exp</span><span class="p">(</span><span class="n">arg_str</span><span class="p">)</span> <span class="ow">and</span> <span class="n">arg_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;+&quot;</span> <span class="ow">and</span> <span class="n">arg_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;-&quot;</span><span class="p">:</span>  <span class="c1"># 类似.ri15 的用法</span>
+                <span class="n">exp_str</span> <span class="o">=</span> <span class="n">arg_str</span>
+            <span class="k">elif</span> <span class="n">is_roll_exp</span><span class="p">(</span><span class="s2">&quot;d20&quot;</span><span class="o">+</span><span class="n">arg_str</span><span class="p">):</span>  <span class="c1"># 类似.ri优势 或 .ri+1 的用法</span>
+                <span class="n">exp_str</span> <span class="o">=</span> <span class="s2">&quot;d20&quot;</span><span class="o">+</span><span class="n">arg_str</span>
+            <span class="k">elif</span> <span class="ow">not</span> <span class="n">name</span><span class="p">:</span>  <span class="c1"># 类似.ri 强盗 这样的用法</span>
+                <span class="n">exp_str</span><span class="p">,</span> <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;d20&quot;</span><span class="p">,</span> <span class="n">arg_str</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="s2">&quot;掷骰表达式无效&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+
+            <span class="c1"># 得到先攻结果</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">roll_exp</span><span class="p">:</span> <span class="n">RollExpression</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">preprocess_roll_exp</span><span class="p">(</span><span class="n">exp_str</span><span class="p">))</span>
+            <span class="k">except</span> <span class="n">RollDiceError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>  <span class="c1"># 无效的掷骰表达式</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">e</span><span class="o">.</span><span class="n">info</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+
+            <span class="c1"># 如果没有设置名称, 说明用自己的昵称, 否则是NPC</span>
+            <span class="n">owner_id</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span><span class="p">:</span>
+                <span class="n">name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">get_nickname</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span>
+                <span class="n">owner_id</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">user_id</span>
+
+            <span class="c1"># 处理复数先攻</span>
+            <span class="n">name_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">RollResult</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">n</span> <span class="ow">in</span> <span class="n">name</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">):</span>  <span class="c1"># 对于 .ri 地精/大地精 这种情况</span>
+                <span class="n">n</span> <span class="o">=</span> <span class="n">n</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                <span class="n">roll_res</span> <span class="o">=</span> <span class="n">roll_exp</span><span class="o">.</span><span class="n">get_result</span><span class="p">()</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">n</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="k">if</span> <span class="s2">&quot;#&quot;</span> <span class="ow">in</span> <span class="n">n</span><span class="p">:</span>  <span class="c1"># 对于 .ri 3#地精 这种情况</span>
+                    <span class="n">num</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="n">n</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;#&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">num</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">num</span><span class="p">)</span>
+                        <span class="k">assert</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="n">num</span> <span class="o">&lt;=</span> <span class="mi">10</span>
+                    <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">AssertionError</span><span class="p">):</span>
+                        <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">num</span><span class="si">}</span><span class="s2">不是一个有效的数字 (1&lt;=num&lt;=10)&quot;</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+                    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num</span><span class="p">):</span>
+                        <span class="n">name_dict</span><span class="p">[</span><span class="n">n</span> <span class="o">+</span> <span class="nb">chr</span><span class="p">(</span><span class="nb">ord</span><span class="p">(</span><span class="s2">&quot;a&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="n">i</span><span class="p">)]</span> <span class="o">=</span> <span class="n">roll_res</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">name_dict</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">=</span> <span class="n">roll_res</span>
+
+            <span class="n">result_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span>
+            <span class="n">result_dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">([(</span><span class="n">name</span><span class="p">,</span> <span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">get_val</span><span class="p">(),</span> <span class="n">res</span><span class="o">.</span><span class="n">get_complete_result</span><span class="p">()))</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">name_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()])</span>
+
+            <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">add_initiative_entities</span><span class="p">(</span><span class="n">result_dict</span><span class="p">,</span> <span class="n">owner_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span>
+
+            <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+
+        <span class="k">elif</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;inspect&quot;</span><span class="p">:</span>  <span class="c1"># 查看先攻信息</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">init_data</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_INIT</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+            <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_INFO_NOT_EXIST</span><span class="p">)</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+            <span class="c1"># 尝试获取生命值信息</span>
+            <span class="kn">from</span> <span class="nn">command.impl</span> <span class="kn">import</span> <span class="n">DC_CHAR_HP</span><span class="p">,</span> <span class="n">DC_CHAR_DND</span>
+            <span class="kn">from</span> <span class="nn">character.dnd5e</span> <span class="kn">import</span> <span class="n">HPInfo</span><span class="p">,</span> <span class="n">DNDCharInfo</span>
+            <span class="n">hp_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">HPInfo</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_CHAR_HP</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">],</span> <span class="n">default_val</span><span class="o">=</span><span class="p">{})</span>
+            <span class="n">char_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">DNDCharInfo</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_CHAR_DND</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">],</span> <span class="n">default_val</span><span class="o">=</span><span class="p">{})</span>
+            <span class="n">hp_dict</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="nb">dict</span><span class="p">([(</span><span class="n">user_id</span><span class="p">,</span> <span class="n">char_info</span><span class="o">.</span><span class="n">hp_info</span><span class="p">)</span> <span class="k">for</span> <span class="n">user_id</span><span class="p">,</span> <span class="n">char_info</span> <span class="ow">in</span> <span class="n">char_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()]))</span>
+            <span class="n">init_info</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="n">init_data</span><span class="p">[</span><span class="n">DCK_ENTITY</span><span class="p">]</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">init_data</span><span class="p">[</span><span class="n">DCK_ENTITY</span><span class="p">],</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="o">-</span><span class="n">x</span><span class="o">.</span><span class="n">init</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">entity</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">init_data</span><span class="p">[</span><span class="n">DCK_ENTITY</span><span class="p">]):</span>
+                <span class="n">entity</span><span class="p">:</span> <span class="n">InitEntity</span> <span class="o">=</span> <span class="n">entity</span>
+                <span class="c1"># 生命值信息</span>
+                <span class="n">entity_hp_info</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+                <span class="k">if</span> <span class="n">entity</span><span class="o">.</span><span class="n">owner</span><span class="p">:</span>  <span class="c1"># 更新玩家姓名</span>
+                    <span class="n">entity</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">get_nickname</span><span class="p">(</span><span class="n">entity</span><span class="o">.</span><span class="n">owner</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">entity</span><span class="o">.</span><span class="n">owner</span> <span class="ow">and</span> <span class="n">entity</span><span class="o">.</span><span class="n">owner</span> <span class="ow">in</span> <span class="n">hp_dict</span><span class="p">:</span>  <span class="c1"># 玩家HP信息</span>
+                    <span class="n">entity_hp_info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">hp_dict</span><span class="p">[</span><span class="n">entity</span><span class="o">.</span><span class="n">owner</span><span class="p">]</span><span class="o">.</span><span class="n">get_info</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">entity</span><span class="o">.</span><span class="n">owner</span> <span class="ow">and</span> <span class="n">entity</span><span class="o">.</span><span class="n">name</span> <span class="ow">in</span> <span class="n">hp_dict</span><span class="p">:</span>  <span class="c1"># NPC信息</span>
+                    <span class="n">entity_hp_info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">hp_dict</span><span class="p">[</span><span class="n">entity</span><span class="o">.</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">get_info</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="n">init_info</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">entity</span><span class="o">.</span><span class="n">get_info</span><span class="p">()</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">entity_hp_info</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="n">init_info</span> <span class="o">=</span> <span class="n">init_info</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>  <span class="c1"># 去掉末尾的换行</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_INFO</span><span class="p">,</span> <span class="n">init_info</span><span class="o">=</span><span class="n">init_info</span><span class="p">)</span>
+            <span class="c1"># 更新生命值信息</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_INIT</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">],</span> <span class="n">init_data</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+
+        <span class="k">elif</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;clear&quot;</span><span class="p">:</span>  <span class="c1"># 清除所有先攻信息</span>
+            <span class="c1"># 尝试删除临时生命值信息</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="kn">from</span> <span class="nn">command.impl</span> <span class="kn">import</span> <span class="n">DC_CHAR_HP</span>
+                <span class="kn">from</span> <span class="nn">character.dnd5e</span> <span class="kn">import</span> <span class="n">HPInfo</span>
+                <span class="n">init_data</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_INIT</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+                <span class="k">for</span> <span class="n">entity</span> <span class="ow">in</span> <span class="n">init_data</span><span class="p">[</span><span class="n">DCK_ENTITY</span><span class="p">]:</span>
+                    <span class="n">entity</span><span class="p">:</span> <span class="n">InitEntity</span> <span class="o">=</span> <span class="n">entity</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">entity</span><span class="o">.</span><span class="n">owner</span><span class="p">:</span>
+                        <span class="k">try</span><span class="p">:</span>
+                            <span class="n">hp_info</span><span class="p">:</span> <span class="n">HPInfo</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_CHAR_HP</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">entity</span><span class="o">.</span><span class="n">name</span><span class="p">])</span>
+                            <span class="k">assert</span> <span class="n">hp_info</span><span class="o">.</span><span class="n">hp_max</span> <span class="o">==</span> <span class="mi">0</span>  <span class="c1"># 不清除已经设置了最大生命值的生命值信息</span>
+                            <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">delete_data</span><span class="p">(</span><span class="n">DC_CHAR_HP</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">entity</span><span class="o">.</span><span class="n">name</span><span class="p">])</span>
+                        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>  <span class="c1"># 没有设置生命值信息</span>
+                            <span class="k">pass</span>
+                        <span class="k">except</span> <span class="ne">AssertionError</span><span class="p">:</span>  <span class="c1"># 已经设置最大生命值</span>
+                            <span class="k">if</span> <span class="ow">not</span> <span class="n">feedback</span><span class="p">:</span>
+                                <span class="n">feedback</span> <span class="o">=</span> <span class="s2">&quot;注意: 没有清除已设置最大生命值的 &quot;</span>
+                            <span class="n">feedback</span> <span class="o">+=</span> <span class="n">entity</span><span class="o">.</span><span class="n">name</span> <span class="o">+</span> <span class="s2">&quot; &quot;</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="n">DataManagerError</span><span class="p">):</span>  <span class="c1"># 没有生命值模块或没有先攻信息</span>
+                <span class="k">pass</span>
+            <span class="k">if</span> <span class="n">feedback</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="n">feedback</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">+</span> <span class="s2">&quot;的生命值信息</span><span class="se">\n</span><span class="s2">&quot;</span>
+
+            <span class="c1"># 尝试删除先攻信息</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">delete_data</span><span class="p">(</span><span class="n">DC_INIT</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+                <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_INFO_CLR</span><span class="p">)</span>
+            <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>  <span class="c1"># 数据不存在</span>
+                <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_INFO_NOT_EXIST</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+
+        <span class="k">elif</span> <span class="n">mode</span> <span class="o">==</span> <span class="s2">&quot;delete&quot;</span><span class="p">:</span>  <span class="c1"># 删除先攻条目</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">init_data</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_INIT</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+            <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_INFO_NOT_EXIST</span><span class="p">)</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="c1"># 在列表中搜索名字, 结果加入到name_list_valid</span>
+            <span class="n">name_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">name</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">arg_str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">)]</span>  <span class="c1"># 类似.init del A/B/C 这样的用法</span>
+            <span class="n">name_list_valid</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">entity_name_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">entity</span><span class="o">.</span><span class="n">name</span> <span class="k">for</span> <span class="n">entity</span> <span class="ow">in</span> <span class="n">init_data</span><span class="p">[</span><span class="n">DCK_ENTITY</span><span class="p">]]</span>
+            <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">name_list</span><span class="p">:</span>
+                <span class="n">match_num</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">([</span><span class="n">e_name</span> <span class="o">==</span> <span class="n">name</span> <span class="k">for</span> <span class="n">e_name</span> <span class="ow">in</span> <span class="n">entity_name_list</span><span class="p">])</span>  <span class="c1"># O(N*M)暴力搜索</span>
+                <span class="k">if</span> <span class="n">match_num</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># 正好有一个同名条目</span>
+                    <span class="n">name_list_valid</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="n">match_num</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># 没有同名条目, 进入模糊搜索</span>
+                    <span class="n">possible_res</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">match_substring</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">entity_name_list</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">possible_res</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># 还是没有结果, 提示用户</span>
+                        <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_ENTITY_NOT_FOUND</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
+                    <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">possible_res</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># 多个可能的结果, 提示用户</span>
+                        <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_ENTITY_VAGUE</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">name_list</span><span class="o">=</span><span class="n">possible_res</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
+                    <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">possible_res</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                        <span class="n">name_list_valid</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">possible_res</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="k">elif</span> <span class="n">match_num</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># 多于一个同名条目, 按设计是不可能出现的, 需要排查原因</span>
+                    <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_ERROR</span><span class="p">,</span> <span class="n">error_info</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;列表中存在同名条目</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">, 联系开发者&quot;</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="c1"># 删除</span>
+            <span class="k">if</span> <span class="n">name_list_valid</span><span class="p">:</span>
+                <span class="n">name_list_deleted</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="k">for</span> <span class="n">v_name</span> <span class="ow">in</span> <span class="n">name_list_valid</span><span class="p">:</span>
+                    <span class="c1"># 删除生命值信息</span>
+                    <span class="n">index</span> <span class="o">=</span> <span class="kc">None</span>
+                    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">entity</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">init_data</span><span class="p">[</span><span class="n">DCK_ENTITY</span><span class="p">]):</span>
+                        <span class="k">if</span> <span class="n">entity</span><span class="o">.</span><span class="n">name</span> <span class="o">==</span> <span class="n">v_name</span><span class="p">:</span>
+                            <span class="n">index</span> <span class="o">=</span> <span class="n">i</span>
+                            <span class="k">break</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">init_data</span><span class="p">[</span><span class="n">DCK_ENTITY</span><span class="p">][</span><span class="n">index</span><span class="p">]</span><span class="o">.</span><span class="n">owner</span><span class="p">:</span>
+                        <span class="k">try</span><span class="p">:</span>
+                            <span class="kn">from</span> <span class="nn">command.impl</span> <span class="kn">import</span> <span class="n">DC_CHAR_HP</span>
+                            <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">delete_data</span><span class="p">(</span><span class="n">DC_CHAR_HP</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">v_name</span><span class="p">])</span>
+                        <span class="k">except</span> <span class="p">(</span><span class="ne">ImportError</span><span class="p">,</span> <span class="n">DataManagerError</span><span class="p">):</span>  <span class="c1"># 没有设置生命值信息</span>
+                            <span class="k">pass</span>
+                    <span class="c1"># 删除先攻信息</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">del_initiative_entity</span><span class="p">(</span><span class="n">init_data</span><span class="p">,</span> <span class="n">v_name</span><span class="p">)</span>
+                        <span class="n">name_list_deleted</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">v_name</span><span class="p">)</span>
+                    <span class="k">except</span> <span class="n">InitiativeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                        <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_ERROR</span><span class="p">,</span> <span class="n">error_info</span><span class="o">=</span><span class="n">e</span><span class="o">.</span><span class="n">info</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
+                <span class="k">if</span> <span class="n">name_list_deleted</span><span class="p">:</span>
+                    <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_INFO_DEL</span><span class="p">,</span> <span class="n">entity_list</span><span class="o">=</span><span class="n">name_list_deleted</span><span class="p">)</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="n">feedback</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_INIT</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">],</span> <span class="n">init_data</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span></div>
+
+<div class="viewcode-block" id="InitiativeCommand.get_help"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.InitiativeCommand.get_help">[文档]</a>    <span class="k">def</span> <span class="nf">get_help</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">keyword</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">keyword</span> <span class="o">==</span> <span class="s2">&quot;init&quot;</span><span class="p">:</span>
+            <span class="n">help_str</span> <span class="o">=</span> <span class="s2">&quot;显示先攻列表：.init ([可选指令]) [可选指令]:clr 清空先攻列表 del 删除指定先攻条目</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;del指令支持部分匹配</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;hp信息也会在先攻列表上显示</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;示例:</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.init //查看先攻列表</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.init clr //清空先攻列表</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.init del 地精 //在先攻列表中删除地精.init del 地精a/地精b/地精c //在先攻列表中删除地精abc&quot;</span>
+            <span class="k">return</span> <span class="n">help_str</span>
+        <span class="k">if</span> <span class="n">keyword</span> <span class="o">==</span> <span class="s2">&quot;ri&quot;</span><span class="p">:</span>
+            <span class="n">help_str</span> <span class="o">=</span> <span class="s2">&quot;加入先攻(群聊限定)：.ri([优劣势][加值]) ([名称][/(投骰表达式#)名称/...])</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;示例:</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.ri优势+1 //以昵称加入先攻列表</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.ri20 地精 //将地精以固定先攻20加入先攻列表</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.ri+2 地精/灵活地精+1/笨拙地精-1 //将3个地精分别加入先攻列表</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.ri-2 2#食人魔僵尸/1d4#兽人僵尸 //将2个食人魔僵尸(a,b)以相同的先攻加入先攻列表,&quot;</span> \
+                       <span class="s2">&quot; 将1d4个兽人僵尸(a~d)以相同的先攻加入先攻列表&quot;</span>
+            <span class="k">return</span> <span class="n">help_str</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span></div>
+
+<div class="viewcode-block" id="InitiativeCommand.get_description"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.InitiativeCommand.get_description">[文档]</a>    <span class="k">def</span> <span class="nf">get_description</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;.ri 投掷先攻 .init 操作先攻列表&quot;</span></div>
+
+<div class="viewcode-block" id="InitiativeCommand.add_initiative_entities"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/initiative_command/index.html#DicePP.command.impl.InitiativeCommand.add_initiative_entities">[文档]</a>    <span class="k">def</span> <span class="nf">add_initiative_entities</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">str</span><span class="p">]],</span> <span class="n">owner_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">group_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            result_dict: 需要加入先攻列表的信息, key为先攻条目名称, val为二元组, val[0]代表先攻数值, val[1]代表掷骰表达式结果</span>
+<span class="sd">            owner_id: 为空代表无主的NPC, 不为空代表PC账号</span>
+<span class="sd">            group_id: 目标群号</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            feedback: 操作执行成功或失败的提示</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># 获取init data</span>
+        <span class="n">init_data</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_INIT</span><span class="p">,</span> <span class="p">[</span><span class="n">group_id</span><span class="p">],</span>
+                                                         <span class="n">default_gen</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">get_default_init_data</span><span class="p">(</span><span class="n">group_id</span><span class="p">))</span>
+
+        <span class="n">feedback</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">roll_res</span> <span class="ow">in</span> <span class="n">result_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">add_initiative_entity</span><span class="p">(</span><span class="n">init_data</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">owner_id</span><span class="p">,</span> <span class="n">roll_res</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+                <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_ROLL</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span>
+                                            <span class="n">init_result</span><span class="o">=</span><span class="n">roll_res</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="k">except</span> <span class="n">InitiativeError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_INIT_ERROR</span><span class="p">,</span> <span class="n">error_info</span><span class="o">=</span><span class="n">e</span><span class="o">.</span><span class="n">info</span><span class="p">)</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span>
+
+        <span class="n">feedback</span> <span class="o">=</span> <span class="n">feedback</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_INIT</span><span class="p">,</span> <span class="p">[</span><span class="n">group_id</span><span class="p">],</span> <span class="n">init_data</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">feedback</span></div></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../autoapi/index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">模块代码</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

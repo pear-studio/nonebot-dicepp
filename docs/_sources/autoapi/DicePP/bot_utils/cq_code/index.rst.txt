@@ -1,0 +1,22 @@
+:py:mod:`DicePP.bot_utils.cq_code`
+==================================
+
+.. py:module:: DicePP.bot_utils.cq_code
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_utils.cq_code.get_cq_image
+
+
+
+.. py:function:: get_cq_image(image_abs_path: str)
+
+

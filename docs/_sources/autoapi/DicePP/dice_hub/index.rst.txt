@@ -1,0 +1,17 @@
+:py:mod:`DicePP.dice_hub`
+=========================
+
+.. py:module:: DicePP.dice_hub
+
+
+Submodules
+----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 1
+
+   data/index.rst
+   encrypt/index.rst
+   manager/index.rst
+
+

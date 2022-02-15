@@ -1,0 +1,273 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DicePP.command.impl.variable_command &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>DicePP.command.impl.variable_command 源代码</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">变量指令, 如.set</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">re</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">Bot</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="n">BotVariable</span>
+<span class="kn">from</span> <span class="nn">data_manager</span> <span class="kn">import</span> <span class="n">DataManagerError</span>
+<span class="kn">from</span> <span class="nn">command.command_config</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">command.dicepp_command</span> <span class="kn">import</span> <span class="n">UserCommandBase</span><span class="p">,</span> <span class="n">custom_user_command</span><span class="p">,</span> <span class="n">MessageMetaData</span>
+<span class="kn">from</span> <span class="nn">command.bot_command</span> <span class="kn">import</span> <span class="n">BotCommandBase</span><span class="p">,</span> <span class="n">PrivateMessagePort</span><span class="p">,</span> <span class="n">GroupMessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+
+<span class="kn">from</span> <span class="nn">roll_dice</span> <span class="kn">import</span> <span class="n">exec_roll_exp</span><span class="p">,</span> <span class="n">RollDiceError</span>
+
+<div class="viewcode-block" id="LOC_VAR_SET"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.LOC_VAR_SET">[文档]</a><span class="n">LOC_VAR_SET</span> <span class="o">=</span> <span class="s2">&quot;var_set&quot;</span></div>
+<div class="viewcode-block" id="LOC_VAR_GET"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.LOC_VAR_GET">[文档]</a><span class="n">LOC_VAR_GET</span> <span class="o">=</span> <span class="s2">&quot;var_get&quot;</span></div>
+<div class="viewcode-block" id="LOC_VAR_GET_ALL"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.LOC_VAR_GET_ALL">[文档]</a><span class="n">LOC_VAR_GET_ALL</span> <span class="o">=</span> <span class="s2">&quot;var_get_all&quot;</span></div>
+<div class="viewcode-block" id="LOC_VAR_DEL"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.LOC_VAR_DEL">[文档]</a><span class="n">LOC_VAR_DEL</span> <span class="o">=</span> <span class="s2">&quot;var_del&quot;</span></div>
+<div class="viewcode-block" id="LOC_VAR_ERROR"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.LOC_VAR_ERROR">[文档]</a><span class="n">LOC_VAR_ERROR</span> <span class="o">=</span> <span class="s2">&quot;var_error&quot;</span></div>
+
+<span class="c1"># CFG_TEMP = &quot;template_config&quot;</span>
+
+
+<span class="nd">@custom_user_command</span><span class="p">(</span><span class="n">readable_name</span><span class="o">=</span><span class="s2">&quot;变量指令&quot;</span><span class="p">,</span> <span class="n">priority</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">group_only</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># priority要大于搜索, 否则set会被s覆盖</span>
+<div class="viewcode-block" id="VariableCommand"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.VariableCommand">[文档]</a><span class="k">class</span> <span class="nc">VariableCommand</span><span class="p">(</span><span class="n">UserCommandBase</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    用户自定义变量 包括.set .get .del</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bot</span><span class="p">:</span> <span class="n">Bot</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">bot</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_VAR_SET</span><span class="p">,</span> <span class="s2">&quot;set variable </span><span class="si">{name}</span><span class="s2"> as </span><span class="si">{val}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;设置变量, name为变量名, val为数值&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_VAR_GET</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">{name}</span><span class="s2"> = </span><span class="si">{val}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;获取变量, name为变量名, val为数值&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_VAR_GET_ALL</span><span class="p">,</span> <span class="s2">&quot;All Variables:</span><span class="se">\n</span><span class="si">{info}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;获取所有变量, info为逐条变量信息&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_VAR_DEL</span><span class="p">,</span> <span class="s2">&quot;Delete variable: </span><span class="si">{name}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;删除所有变量, name为变量名&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_VAR_ERROR</span><span class="p">,</span> <span class="s2">&quot;Error when process var: </span><span class="si">{error}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;error为处理变量时发生的错误&quot;</span><span class="p">)</span>
+
+        <span class="c1"># bot.cfg_helper.register_config(CFG_TEMP, &quot;内容&quot;, &quot;注释&quot;)</span>
+
+<div class="viewcode-block" id="VariableCommand.can_process_msg"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.VariableCommand.can_process_msg">[文档]</a>    <span class="k">def</span> <span class="nf">can_process_msg</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+        <span class="n">should_proc</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">should_pass</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">for</span> <span class="n">cmd_type</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;set&quot;</span><span class="p">,</span> <span class="s2">&quot;get&quot;</span><span class="p">,</span> <span class="s2">&quot;del&quot;</span><span class="p">]:</span>
+            <span class="k">if</span> <span class="n">msg_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;.</span><span class="si">{</span><span class="n">cmd_type</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">):</span>
+                <span class="n">should_proc</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">return</span> <span class="n">should_proc</span><span class="p">,</span> <span class="n">should_pass</span><span class="p">,</span> <span class="p">(</span><span class="n">cmd_type</span><span class="p">,</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">4</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">should_proc</span><span class="p">,</span> <span class="n">should_pass</span><span class="p">,</span> <span class="kc">None</span></div>
+
+<div class="viewcode-block" id="VariableCommand.process_msg"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.VariableCommand.process_msg">[文档]</a>    <span class="k">def</span> <span class="nf">process_msg</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">,</span> <span class="n">hint</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">BotCommandBase</span><span class="p">]:</span>
+        <span class="n">port</span> <span class="o">=</span> <span class="n">GroupMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span> <span class="k">if</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span> <span class="k">else</span> <span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+        <span class="c1"># 解析语句</span>
+        <span class="n">cmd_type</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;set&quot;</span><span class="p">,</span> <span class="s2">&quot;get&quot;</span><span class="p">,</span> <span class="s2">&quot;del&quot;</span><span class="p">]</span>
+        <span class="n">arg_str</span><span class="p">:</span> <span class="nb">str</span>
+        <span class="n">cmd_type</span><span class="p">,</span> <span class="n">arg_str</span> <span class="o">=</span> <span class="n">hint</span>
+        <span class="n">feedback</span><span class="p">:</span> <span class="nb">str</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">cur_var_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_keys</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="n">cur_var_list</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">if</span> <span class="n">cmd_type</span> <span class="o">==</span> <span class="s2">&quot;set&quot;</span><span class="p">:</span>
+            <span class="c1"># 判断操作类型</span>
+            <span class="n">set_type_list</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;=&quot;</span><span class="p">,</span> <span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">]</span>
+            <span class="n">set_type</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;=&quot;</span><span class="p">,</span> <span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">]]</span>
+            <span class="c1"># 此处any为Literal[&quot;=&quot;, &quot;+&quot;, &quot;-&quot;]</span>
+            <span class="n">set_info_tmp</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">any</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[(</span><span class="n">s_type</span><span class="p">,</span> <span class="n">arg_str</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">s_type</span><span class="p">))</span> <span class="k">for</span> <span class="n">s_type</span> <span class="ow">in</span> <span class="n">set_type_list</span> <span class="k">if</span> <span class="n">arg_str</span><span class="o">.</span><span class="n">find</span><span class="p">(</span><span class="n">s_type</span><span class="p">)</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">set_info_tmp</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_ERROR</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;至少包含</span><span class="si">{</span><span class="n">set_type_list</span><span class="si">}</span><span class="s2">其中之一&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+            <span class="n">set_info_tmp</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="n">set_type</span> <span class="o">=</span> <span class="n">set_info_tmp</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">split_index</span> <span class="o">=</span> <span class="n">set_info_tmp</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">var_name</span><span class="p">,</span> <span class="n">var_val_str</span> <span class="o">=</span> <span class="n">arg_str</span><span class="p">[:</span><span class="n">split_index</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span> <span class="n">arg_str</span><span class="p">[</span><span class="n">split_index</span><span class="o">+</span><span class="mi">1</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="c1"># 验证变量名</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">assert_valid_variable_name</span><span class="p">(</span><span class="n">var_name</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_ERROR</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">var_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">args</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+            <span class="c1"># 获取修改值</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">var_val</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">var_val_str</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">var_val</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">exec_roll_exp</span><span class="p">(</span><span class="n">var_val_str</span><span class="p">)</span><span class="o">.</span><span class="n">get_val</span><span class="p">()</span>
+                <span class="k">except</span> <span class="n">RollDiceError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>   <span class="c1"># ToDo 支持依赖其他变量</span>
+                    <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_ERROR</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">var_val_str</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">info</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+            <span class="k">if</span> <span class="n">set_type</span> <span class="o">==</span> <span class="s2">&quot;=&quot;</span><span class="p">:</span>
+                <span class="n">bot_var</span> <span class="o">=</span> <span class="n">BotVariable</span><span class="p">()</span>
+                <span class="n">bot_var</span><span class="o">.</span><span class="n">initialize</span><span class="p">(</span><span class="n">var_name</span><span class="p">,</span> <span class="n">var_val</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">var_name</span><span class="p">],</span> <span class="n">bot_var</span><span class="p">)</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_SET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">var_name</span><span class="p">,</span> <span class="n">val</span><span class="o">=</span><span class="n">var_val</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">var_name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cur_var_list</span><span class="p">:</span>
+                    <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_ERROR</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">var_name</span><span class="si">}</span><span class="s2">不存在, 当前可用变量: </span><span class="si">{</span><span class="nb">list</span><span class="p">(</span><span class="n">cur_var_list</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+                <span class="n">bot_var</span><span class="p">:</span> <span class="n">BotVariable</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">var_name</span><span class="p">])</span>
+                <span class="k">if</span> <span class="n">set_type</span> <span class="o">==</span> <span class="s2">&quot;+&quot;</span><span class="p">:</span>
+                    <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_SET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">var_name</span><span class="p">,</span> <span class="n">val</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bot_var</span><span class="o">.</span><span class="n">val</span><span class="si">}</span><span class="s2">+</span><span class="si">{</span><span class="n">var_val</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">bot_var</span><span class="o">.</span><span class="n">val</span><span class="o">+</span><span class="n">var_val</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">bot_var</span><span class="o">.</span><span class="n">val</span> <span class="o">=</span> <span class="n">bot_var</span><span class="o">.</span><span class="n">val</span> <span class="o">+</span> <span class="n">var_val</span>
+                <span class="k">else</span><span class="p">:</span>  <span class="c1"># set_type == &quot;-&quot;</span>
+                    <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_SET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">var_name</span><span class="p">,</span> <span class="n">val</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bot_var</span><span class="o">.</span><span class="n">val</span><span class="si">}</span><span class="s2">-</span><span class="si">{</span><span class="n">var_val</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">bot_var</span><span class="o">.</span><span class="n">val</span><span class="o">-</span><span class="n">var_val</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">bot_var</span><span class="o">.</span><span class="n">val</span> <span class="o">=</span> <span class="n">bot_var</span><span class="o">.</span><span class="n">val</span> <span class="o">-</span> <span class="n">var_val</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">var_name</span><span class="p">],</span> <span class="n">bot_var</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">cmd_type</span> <span class="o">==</span> <span class="s2">&quot;get&quot;</span><span class="p">:</span>
+            <span class="n">var_name</span> <span class="o">=</span> <span class="n">arg_str</span>
+            <span class="k">if</span> <span class="n">var_name</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">var_name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cur_var_list</span><span class="p">:</span>
+                    <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_ERROR</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">var_name</span><span class="si">}</span><span class="s2">不存在, 当前可用变量: </span><span class="si">{</span><span class="nb">list</span><span class="p">(</span><span class="n">cur_var_list</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+                <span class="n">bot_var</span><span class="p">:</span> <span class="n">BotVariable</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">var_name</span><span class="p">])</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_GET</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">var_name</span><span class="p">,</span> <span class="n">val</span><span class="o">=</span><span class="n">bot_var</span><span class="o">.</span><span class="n">val</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">bot_var_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">BotVariable</span><span class="p">]</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">bot_var_dict</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+                <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+                    <span class="n">bot_var_dict</span> <span class="o">=</span> <span class="p">{}</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">bot_var_dict</span><span class="p">:</span>
+                    <span class="n">info</span> <span class="o">=</span> <span class="s2">&quot;暂无任何变量&quot;</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">var_info</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">var</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">=</span><span class="si">{</span><span class="n">var</span><span class="o">.</span><span class="n">val</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">var</span> <span class="ow">in</span> <span class="n">bot_var_dict</span><span class="o">.</span><span class="n">values</span><span class="p">()]</span>
+                    <span class="n">info</span> <span class="o">=</span> <span class="s2">&quot;; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">var_info</span><span class="p">)</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_GET_ALL</span><span class="p">,</span> <span class="n">info</span><span class="o">=</span><span class="n">info</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># cmd_type == &quot;del&quot;</span>
+            <span class="n">var_name</span> <span class="o">=</span> <span class="n">arg_str</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">var_name</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_ERROR</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="s2">&quot;请指定变量名&quot;</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="n">var_name</span> <span class="o">==</span> <span class="s2">&quot;all&quot;</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">delete_data</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_DEL</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">cur_var_list</span><span class="p">))</span>
+            <span class="k">elif</span> <span class="n">var_name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">cur_var_list</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_ERROR</span><span class="p">,</span> <span class="n">error</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">var_name</span><span class="si">}</span><span class="s2">不存在, 当前可用变量: </span><span class="si">{</span><span class="nb">list</span><span class="p">(</span><span class="n">cur_var_list</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">delete_data</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">var_name</span><span class="p">])</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_VAR_DEL</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">var_name</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span></div>
+
+<div class="viewcode-block" id="VariableCommand.get_help"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.VariableCommand.get_help">[文档]</a>    <span class="k">def</span> <span class="nf">get_help</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">keyword</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="n">feedback</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">keyword</span> <span class="o">==</span> <span class="s2">&quot;set&quot;</span><span class="p">:</span>  <span class="c1"># help后的接着的内容</span>
+            <span class="n">feedback</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;.set [变量名] [=/+/-] [数值或掷骰表达式]&quot;</span> \
+                            <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">通过=设置变量后可以对变量进行加减操作, 为每个群独立记录变量&quot;</span> \
+                            <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">变量名不能含有空格或换行&quot;</span> \
+                            <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">可以在语句中通过%变量名%来引用存在的变量&quot;</span>
+        <span class="k">elif</span> <span class="n">keyword</span> <span class="o">==</span> <span class="s2">&quot;get&quot;</span><span class="p">:</span>
+            <span class="n">feedback</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;.get [变量名]&quot;</span> \
+                            <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">查看目标变量名, 不输入变量名则获取所有当前变量&quot;</span>
+        <span class="k">elif</span> <span class="n">keyword</span> <span class="o">==</span> <span class="s2">&quot;del&quot;</span><span class="p">:</span>
+            <span class="n">feedback</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;.del [变量名]&quot;</span> \
+                            <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">删除目标变量名, 若目标变量名为</span><span class="se">\&quot;</span><span class="s2">all</span><span class="se">\&quot;</span><span class="s2">则删除所有变量&quot;</span>
+        <span class="k">return</span> <span class="n">feedback</span></div>
+
+<div class="viewcode-block" id="VariableCommand.get_description"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.VariableCommand.get_description">[文档]</a>    <span class="k">def</span> <span class="nf">get_description</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;.set/get/del 记录和修改变量&quot;</span>  <span class="c1"># help指令中返回的内容</span></div></div>
+
+
+<div class="viewcode-block" id="assert_valid_variable_name"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/variable_command/index.html#DicePP.command.impl.assert_valid_variable_name">[文档]</a><span class="k">def</span> <span class="nf">assert_valid_variable_name</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">name</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;变量名不能为空&quot;</span><span class="p">)</span>
+    <span class="c1"># 变量名中不能包含空格或换行</span>
+    <span class="k">if</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s&quot;</span><span class="p">,</span> <span class="n">name</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;变量名中不能含有空格&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;all&quot;</span><span class="p">]:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;变量名为保留字&quot;</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../autoapi/index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">模块代码</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,32 @@
+:py:mod:`DicePP.adapter.client_proxy`
+=====================================
+
+.. py:module:: DicePP.adapter.client_proxy
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.adapter.client_proxy.ClientProxy
+
+
+
+
+.. py:class:: ClientProxy
+
+   .. py:method:: process_bot_command(self, command: command.BotCommandBase)
+      :abstractmethod:
+      :async:
+
+
+   .. py:method:: process_bot_command_list(self, command_list: List[command.BotCommandBase])
+      :abstractmethod:
+      :async:
+
+
+

@@ -1,0 +1,227 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DicePP.adapter.nonebot_adapter &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-DicePP.adapter.nonebot_adapter">
+<span id="dicepp-adapter-nonebot-adapter"></span><h1><a class="reference internal" href="#module-DicePP.adapter.nonebot_adapter" title="DicePP.adapter.nonebot_adapter"><code class="xref py py-mod docutils literal notranslate"><span class="pre">DicePP.adapter.nonebot_adapter</span></code></a><a class="headerlink" href="#module-DicePP.adapter.nonebot_adapter" title="永久链接至标题">¶</a></h1>
+<p>NoneBot API <a class="reference external" href="https://v2.nonebot.dev/api/plugin.html">https://v2.nonebot.dev/api/plugin.html</a></p>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="永久链接至标题">¶</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.NoneBotClientProxy" title="DicePP.adapter.nonebot_adapter.NoneBotClientProxy"><code class="xref py py-obj docutils literal notranslate"><span class="pre">NoneBotClientProxy</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h3>Functions<a class="headerlink" href="#functions" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.handle_command" title="DicePP.adapter.nonebot_adapter.handle_command"><code class="xref py py-obj docutils literal notranslate"><span class="pre">handle_command</span></code></a>(bot: nonebot.adapters.onebot.v11.bot.Bot, event: nonebot.adapters.onebot.v11.event.MessageEvent)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.handle_notice" title="DicePP.adapter.nonebot_adapter.handle_notice"><code class="xref py py-obj docutils literal notranslate"><span class="pre">handle_notice</span></code></a>(bot: nonebot.adapters.onebot.v11.bot.Bot, event: nonebot.adapters.onebot.v11.event.NoticeEvent)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.handle_request" title="DicePP.adapter.nonebot_adapter.handle_request"><code class="xref py py-obj docutils literal notranslate"><span class="pre">handle_request</span></code></a>(bot: nonebot.adapters.onebot.v11.bot.Bot, event: nonebot.adapters.onebot.v11.event.RequestEvent)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="attributes">
+<h3>Attributes<a class="headerlink" href="#attributes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.command_matcher" title="DicePP.adapter.nonebot_adapter.command_matcher"><code class="xref py py-obj docutils literal notranslate"><span class="pre">command_matcher</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.notice_matcher" title="DicePP.adapter.nonebot_adapter.notice_matcher"><code class="xref py py-obj docutils literal notranslate"><span class="pre">notice_matcher</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.request_matcher" title="DicePP.adapter.nonebot_adapter.request_matcher"><code class="xref py py-obj docutils literal notranslate"><span class="pre">request_matcher</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.all_bots" title="DicePP.adapter.nonebot_adapter.all_bots"><code class="xref py py-obj docutils literal notranslate"><span class="pre">all_bots</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.adapter.nonebot_adapter.driver" title="DicePP.adapter.nonebot_adapter.driver"><code class="xref py py-obj docutils literal notranslate"><span class="pre">driver</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.command_matcher">
+<span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">command_matcher</span></span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#command_matcher"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.command_matcher" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.notice_matcher">
+<span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">notice_matcher</span></span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#notice_matcher"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.notice_matcher" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.request_matcher">
+<span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">request_matcher</span></span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#request_matcher"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.request_matcher" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.all_bots">
+<span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">all_bots</span></span><em class="property"><span class="w"> </span><span class="pre">:Dict[str,</span> <span class="pre">bot_core.Bot]</span></em><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#all_bots"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.all_bots" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.NoneBotClientProxy">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">NoneBotClientProxy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">nonebot.adapters.onebot.v11.bot.Bot</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#NoneBotClientProxy"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.NoneBotClientProxy" title="永久链接至目标">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-obj docutils literal notranslate"><span class="pre">adapter.client_proxy.ClientProxy</span></code></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.NoneBotClientProxy.process_bot_command">
+<em class="property"><span class="pre">async</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">process_bot_command</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">command</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">command.BotCommandBase</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#NoneBotClientProxy.process_bot_command"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.NoneBotClientProxy.process_bot_command" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.NoneBotClientProxy.process_bot_command_list">
+<em class="property"><span class="pre">async</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">process_bot_command_list</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">command_list</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">command.BotCommandBase</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#NoneBotClientProxy.process_bot_command_list"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.NoneBotClientProxy.process_bot_command_list" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.handle_command">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">handle_command</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">nonebot.adapters.onebot.v11.bot.Bot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">event</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">nonebot.adapters.onebot.v11.event.MessageEvent</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#handle_command"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.handle_command" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.handle_notice">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">handle_notice</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">nonebot.adapters.onebot.v11.bot.Bot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">event</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">nonebot.adapters.onebot.v11.event.NoticeEvent</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#handle_notice"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.handle_notice" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.handle_request">
+<em class="property"><span class="k"><span class="pre">async</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">handle_request</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">bot</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">nonebot.adapters.onebot.v11.bot.Bot</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">event</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">nonebot.adapters.onebot.v11.event.RequestEvent</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#handle_request"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.handle_request" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.adapter.nonebot_adapter.driver">
+<span class="sig-prename descclassname"><span class="pre">DicePP.adapter.nonebot_adapter.</span></span><span class="sig-name descname"><span class="pre">driver</span></span><a class="reference internal" href="../../../../_modules/DicePP/adapter/nonebot_adapter.html#driver"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.adapter.nonebot_adapter.driver" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/DicePP/adapter/nonebot_adapter/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,22 @@
+:py:mod:`DicePP.bot_utils.data`
+===============================
+
+.. py:module:: DicePP.bot_utils.data
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_utils.data.yield_deduplicate
+
+
+
+.. py:function:: yield_deduplicate(items, key=None)
+
+

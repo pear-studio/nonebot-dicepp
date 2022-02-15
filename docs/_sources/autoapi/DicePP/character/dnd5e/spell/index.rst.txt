@@ -1,0 +1,30 @@
+:py:mod:`DicePP.character.dnd5e.spell`
+======================================
+
+.. py:module:: DicePP.character.dnd5e.spell
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.character.dnd5e.spell.SpellInfo
+
+
+
+
+.. py:class:: SpellInfo
+
+   Bases: :py:obj:`data_manager.JsonObject`
+
+   .. py:method:: serialize(self) -> str
+
+
+   .. py:method:: deserialize(self, json_str: str) -> None
+
+
+

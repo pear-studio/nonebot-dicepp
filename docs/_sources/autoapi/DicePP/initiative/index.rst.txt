@@ -1,0 +1,16 @@
+:py:mod:`DicePP.initiative`
+===========================
+
+.. py:module:: DicePP.initiative
+
+
+Submodules
+----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 1
+
+   initiative_entity/index.rst
+   initiative_list/index.rst
+
+

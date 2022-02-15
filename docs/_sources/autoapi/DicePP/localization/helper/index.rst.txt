@@ -1,0 +1,142 @@
+:py:mod:`DicePP.localization.helper`
+====================================
+
+.. py:module:: DicePP.localization.helper
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.localization.helper.LocalizationHelper
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.localization.helper.save_loc_text_to_row
+   DicePP.localization.helper.load_sheet_from_path
+   DicePP.localization.helper.get_sheet_from_path
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.localization.helper.LOCAL_FILE_PATH
+   DicePP.localization.helper.CHAT_FILE_PATH
+   DicePP.localization.helper.DEFAULT_ID
+   DicePP.localization.helper.DEFAULT_CHAT_KEY
+   DicePP.localization.helper.DEFAULT_CHAT_TEXT
+   DicePP.localization.helper.DEFAULT_CHAT_COMMENT
+
+
+.. py:data:: LOCAL_FILE_PATH
+   :annotation: = localization.xlsx
+
+   
+
+.. py:data:: CHAT_FILE_PATH
+   :annotation: = chat.xlsx
+
+   
+
+.. py:data:: DEFAULT_ID
+   :annotation: = Default
+
+   
+
+.. py:data:: DEFAULT_CHAT_KEY
+   :annotation: = ^hi$
+
+   
+
+.. py:data:: DEFAULT_CHAT_TEXT
+   :annotation: = ['Hello', "G'Day"]
+
+   
+
+.. py:data:: DEFAULT_CHAT_COMMENT
+   :annotation: = 可以使用正则表达式匹配, 大小写不敏感; 后面接着想要的回复, 有多个回复则会随机选择一个
+
+   
+
+.. py:class:: LocalizationHelper(data_path: str, identifier: str)
+
+   .. py:method:: load_localization(self)
+
+      用xlsx里的配置覆写之前的本地化配置, 不存在本地文件时直接返回
+
+
+   .. py:method:: save_localization(self)
+
+      注意按多个机器人会读写同一个配置文件, 如果并行可能存在写冲突, 现在单线程异步没问题
+
+
+   .. py:method:: load_chat(self)
+
+      从xlsx中读取自定义对话文件
+
+
+   .. py:method:: save_chat(self)
+
+      注意多个机器人会读写同一个配置文件, 如果并行可能存在写冲突, 现在单线程异步没问题
+
+
+   .. py:method:: register_loc_text(self, key: str, default_text: str, comment: str = '')
+
+      将一个本地化语句注册至Helper中
+      Args:
+          key: 本地化语句的关键字
+          default_text: 本地化语句的默认值
+          comment: 对本地化语句的注释
+
+
+   .. py:method:: get_loc_text(self, key: str) -> localization.localization_text.LocalizationText
+
+      获取本地化语句
+      Args:
+          key: 本地化语句的关键字
+
+
+   .. py:method:: format_loc_text(self, key: str, **kwargs) -> str
+
+      格式化并返回本地化语句
+      Args:
+          key: 本地化语句的关键字
+          **kwargs: 本地化语句需要的参数, 可以传不会用到的参数
+
+
+   .. py:method:: process_chat(self, msg: str, **kwargs) -> str
+
+      Args:
+          msg: 用户输入的语句
+          **kwargs: 目前用不到
+
+      Returns:
+          如果msg能与任意自定义聊天关键字匹配, 返回一个随机回复, 否则返回空字符串
+
+
+
+.. py:function:: save_loc_text_to_row(sheet: openpyxl.worksheet.worksheet, l_text: localization.localization_text.LocalizationText, row: int)
+
+
+.. py:function:: load_sheet_from_path(data_path: str, identifier: str, default_id: str = DEFAULT_ID) -> (openpyxl.Workbook, openpyxl.worksheet.worksheet)
+
+   若指定data_path无效或id无效, 返回None. 若id无效会尝试使用default_id, 一般用来得到读取的sheet
+
+
+.. py:function:: get_sheet_from_path(data_path: str, identifier: str) -> (openpyxl.Workbook, openpyxl.worksheet.worksheet)
+
+   若指定的data_path无效或id无效, 就创建新的workbook或worksheet. 一般用来得到写入的sheet
+
+

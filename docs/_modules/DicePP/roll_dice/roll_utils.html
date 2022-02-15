@@ -1,0 +1,241 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DicePP.roll_dice.roll_utils &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css" />
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>DicePP.roll_dice.roll_utils 源代码</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">掷骰工具</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span> <span class="nn">random</span> <span class="kn">import</span> <span class="n">randint</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span>
+
+
+<div class="viewcode-block" id="RollDiceError"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/roll_utils/index.html#DicePP.roll_dice.roll_utils.RollDiceError">[文档]</a><span class="k">class</span> <span class="nc">RollDiceError</span><span class="p">(</span><span class="ne">Exception</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    因为掷骰产生的异常, 说明操作失败的原因, 应当在上一级捕获</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">info</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">info</span> <span class="o">=</span> <span class="n">info</span>
+
+<div class="viewcode-block" id="RollDiceError.__str__"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/roll_utils/index.html#DicePP.roll_dice.roll_utils.RollDiceError.__str__">[文档]</a>    <span class="k">def</span> <span class="fm">__str__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;[Roll] [Error] </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">info</span><span class="si">}</span><span class="s2">&quot;</span></div></div>
+
+
+<div class="viewcode-block" id="roll_a_dice"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/roll_utils/index.html#DicePP.roll_dice.roll_utils.roll_a_dice">[文档]</a><span class="k">def</span> <span class="nf">roll_a_dice</span><span class="p">(</span><span class="n">dice_type</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    返回一颗dice_type面骰的结果</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">randint</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">dice_type</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="match_outer_parentheses"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/roll_utils/index.html#DicePP.roll_dice.roll_utils.match_outer_parentheses">[文档]</a><span class="k">def</span> <span class="nf">match_outer_parentheses</span><span class="p">(</span><span class="n">input_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    若输入字符串的第一个字符是(, 返回对应的)的索引. 若不存在对应的), 抛出一个ValueError. 若首字母不是(, 返回-1</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">input_str</span> <span class="ow">or</span> <span class="n">input_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="s2">&quot;(&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="o">-</span><span class="mi">1</span>
+    <span class="n">level</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">char</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">input_str</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">char</span> <span class="o">==</span> <span class="s2">&quot;(&quot;</span><span class="p">:</span>
+            <span class="n">level</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="n">char</span> <span class="o">==</span> <span class="s2">&quot;)&quot;</span><span class="p">:</span>
+            <span class="n">level</span> <span class="o">-=</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="n">level</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">index</span>
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Input&#39;s parentheses is incomplete!&quot;</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="remove_redundant_parentheses"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/roll_utils/index.html#DicePP.roll_dice.roll_utils.remove_redundant_parentheses">[文档]</a><span class="k">def</span> <span class="nf">remove_redundant_parentheses</span><span class="p">(</span><span class="n">input_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">readable</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    递归地去掉字符串中一些冗余的括号, 字符串必须不包含空格, 即连接符紧跟着括号</span>
+<span class="sd">    readable为True则会尽可能少的清除括号, readable为False则会在保留数学正确性的情况下清除尽可能多的括号</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">priority_dict</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;+&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="s2">&quot;*&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span> <span class="s2">&quot;/&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">}</span>
+    <span class="n">max_priority</span> <span class="o">=</span> <span class="mi">5</span>
+
+    <span class="k">def</span> <span class="nf">remove_par</span><span class="p">(</span><span class="n">par_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">outer_priority_lhs</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">outer_priority_rhs</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        尝试去掉字符串中冗余的括号</span>
+<span class="sd">        Args:</span>
+<span class="sd">            par_str: 字符串必须以(开头并以)结尾</span>
+<span class="sd">            outer_priority_lhs: 外层左侧连接符的运算优先级</span>
+<span class="sd">            outer_priority_rhs: 外层右侧连接符的运算优先级</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="n">par_str</span> <span class="ow">and</span> <span class="n">par_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;(&quot;</span> <span class="ow">and</span> <span class="n">par_str</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;)&quot;</span>
+        <span class="k">except</span> <span class="ne">AssertionError</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">RollDiceError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;去除冗余括号算法错误! 信息: </span><span class="si">{</span><span class="n">par_str</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">outer_priority_lhs</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">outer_priority_rhs</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="c1"># 找到内部所有的括号, 不包括最外层的</span>
+        <span class="n">inner_par_info_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># 每一个括号表达式的左索引和右索引, 按左索引从小到大排列, 左右不重叠</span>
+        <span class="n">par_index_lhs</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="k">while</span> <span class="n">par_index_lhs</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">par_str</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">:</span>  <span class="c1"># 从左往右扫描</span>
+            <span class="k">if</span> <span class="n">par_str</span><span class="p">[</span><span class="n">par_index_lhs</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;(&quot;</span><span class="p">:</span>
+                <span class="n">par_index_rhs</span> <span class="o">=</span> <span class="n">par_index_lhs</span> <span class="o">+</span> <span class="n">match_outer_parentheses</span><span class="p">(</span><span class="n">par_str</span><span class="p">[</span><span class="n">par_index_lhs</span><span class="p">:])</span>
+                <span class="n">inner_par_info_list</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">par_index_lhs</span><span class="p">,</span> <span class="n">par_index_rhs</span><span class="p">))</span>
+                <span class="n">par_index_lhs</span> <span class="o">=</span> <span class="n">par_index_rhs</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">par_index_lhs</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="c1"># 找到内部所有的运算符, 不包括内部括号内的</span>
+        <span class="n">inner_operators</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># 每一个运算符的索引和运算优先级, 按索引从小到大排列</span>
+        <span class="k">for</span> <span class="n">operator</span><span class="p">,</span> <span class="n">priority</span> <span class="ow">in</span> <span class="n">priority_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">left</span> <span class="o">=</span> <span class="mi">1</span>
+                <span class="k">while</span> <span class="n">left</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">par_str</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">:</span>
+                    <span class="n">index</span> <span class="o">=</span> <span class="n">par_str</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">operator</span><span class="p">,</span> <span class="n">left</span><span class="p">)</span>
+                    <span class="n">is_valid</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="k">for</span> <span class="n">par_info</span> <span class="ow">in</span> <span class="n">inner_par_info_list</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">par_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="n">index</span> <span class="o">&lt;</span> <span class="n">par_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
+                            <span class="n">is_valid</span> <span class="o">=</span> <span class="kc">False</span>
+                            <span class="n">left</span> <span class="o">=</span> <span class="n">par_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">+</span><span class="mi">1</span>
+                            <span class="k">break</span>
+                    <span class="k">if</span> <span class="n">is_valid</span><span class="p">:</span>
+                        <span class="n">inner_operators</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">index</span><span class="p">,</span> <span class="n">priority</span><span class="p">))</span>
+                        <span class="n">left</span> <span class="o">=</span> <span class="n">index</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+                <span class="k">pass</span>
+        <span class="n">inner_operators</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">inner_operators</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="c1"># print(par_str, inner_par_info_list, inner_operators, outer_priority_rhs, outer_priority_lhs)</span>
+        <span class="c1"># 递归剔除内部括号</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">inner_par_info_list</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">inner_operators</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># 内部没有运算符, 直接递归剔除[1:-1]</span>
+                <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">inner_par_info_list</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">inner_par_info_list</span><span class="p">)</span>
+                <span class="n">output_str</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">remove_par</span><span class="p">(</span><span class="n">par_str</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">outer_priority_lhs</span><span class="p">,</span> <span class="n">outer_priority_rhs</span><span class="p">)</span><span class="si">}</span><span class="s2">)&quot;</span>
+            <span class="k">else</span><span class="p">:</span>  <span class="c1"># 内部有运算符, 尝试剔除内部的括号</span>
+                <span class="n">output_list</span> <span class="o">=</span> <span class="p">[]</span>
+                <span class="n">priority_lhs</span><span class="p">,</span> <span class="n">priority_rhs</span> <span class="o">=</span> <span class="n">outer_priority_lhs</span><span class="p">,</span> <span class="n">inner_operators</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>  <span class="c1"># 当前处理的括号的左侧优先级和右侧优先级</span>
+                <span class="n">operator_index</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="n">left</span><span class="p">,</span> <span class="n">right</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">inner_operators</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># 左右侧运算符的索引</span>
+                <span class="k">for</span> <span class="n">par_info</span> <span class="ow">in</span> <span class="n">inner_par_info_list</span><span class="p">:</span>
+                    <span class="k">while</span> <span class="n">right</span> <span class="o">&lt;</span> <span class="n">par_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>  <span class="c1"># 找到最右侧的运算符</span>
+                        <span class="k">if</span> <span class="n">operator_index</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">inner_operators</span><span class="p">):</span>
+                            <span class="n">right</span> <span class="o">=</span> <span class="n">inner_operators</span><span class="p">[</span><span class="n">operator_index</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+                            <span class="n">priority_lhs</span><span class="p">,</span> <span class="n">priority_rhs</span> <span class="o">=</span> <span class="n">priority_rhs</span><span class="p">,</span> <span class="n">inner_operators</span><span class="p">[</span><span class="n">operator_index</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+                            <span class="n">operator_index</span> <span class="o">+=</span> <span class="mi">1</span>
+                        <span class="k">else</span><span class="p">:</span>
+                            <span class="n">right</span> <span class="o">=</span> <span class="n">par_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">+</span><span class="mi">1</span>
+                            <span class="n">priority_lhs</span><span class="p">,</span> <span class="n">priority_rhs</span> <span class="o">=</span> <span class="n">priority_rhs</span><span class="p">,</span> <span class="n">outer_priority_rhs</span>
+                    <span class="n">output_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">par_str</span><span class="p">[</span><span class="n">left</span><span class="p">:</span><span class="n">par_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]])</span>
+                    <span class="k">if</span> <span class="n">readable</span><span class="p">:</span>  <span class="c1"># 为了可读性, 不需要去掉所有没有数学意义的括号, 所以把记录优先级相关的去掉了而是直接用最高优先级跳过后面的检查</span>
+                        <span class="n">output_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">remove_par</span><span class="p">(</span><span class="n">par_str</span><span class="p">[</span><span class="n">par_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span><span class="n">par_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">+</span><span class="mi">1</span><span class="p">],</span> <span class="n">max_priority</span><span class="p">,</span> <span class="n">max_priority</span><span class="p">))</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">output_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">remove_par</span><span class="p">(</span><span class="n">par_str</span><span class="p">[</span><span class="n">par_info</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span><span class="n">par_info</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">],</span> <span class="n">priority_lhs</span><span class="p">,</span> <span class="n">priority_rhs</span><span class="p">))</span>
+                    <span class="n">left</span> <span class="o">=</span> <span class="n">right</span>
+
+                <span class="n">output_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">par_str</span><span class="p">[</span><span class="n">left</span><span class="p">:])</span>
+                <span class="c1"># print(&quot;output_list&quot;, output_list)</span>
+                <span class="n">output_str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_list</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">output_str</span> <span class="o">=</span> <span class="n">par_str</span>
+
+        <span class="c1"># 判断自己最外部的括号能不能被剔除</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">inner_operators</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># 内部没有运算符, 则可以去掉括号</span>
+            <span class="n">can_remove_outer</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">can_remove_outer</span> <span class="o">=</span> <span class="p">(</span><span class="n">outer_priority_lhs</span> <span class="o">&lt;=</span> <span class="n">inner_operators</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+                                <span class="ow">and</span> <span class="n">outer_priority_rhs</span> <span class="o">&lt;=</span> <span class="n">inner_operators</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span>
+        <span class="c1"># print(par_str, output_str, can_remove_outer)</span>
+        <span class="k">if</span> <span class="n">can_remove_outer</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">output_str</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">output_str</span>
+
+    <span class="k">return</span> <span class="n">remove_par</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;(</span><span class="si">{</span><span class="n">input_str</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../autoapi/index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">模块代码</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

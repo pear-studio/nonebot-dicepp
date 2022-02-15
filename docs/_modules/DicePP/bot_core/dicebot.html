@@ -1,0 +1,514 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DicePP.bot_core.dicebot &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css" />
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>DicePP.bot_core.dicebot 源代码</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">asyncio</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Dict</span>
+
+<span class="kn">import</span> <span class="nn">bot_config</span>
+<span class="kn">import</span> <span class="nn">bot_utils</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">MessageMetaData</span><span class="p">,</span> <span class="n">NoticeData</span><span class="p">,</span> <span class="n">RequestData</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">FriendRequestData</span><span class="p">,</span> <span class="n">JoinGroupRequestData</span><span class="p">,</span> <span class="n">InviteGroupRequestData</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">FriendAddNoticeData</span><span class="p">,</span> <span class="n">GroupIncreaseNoticeData</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">BotMacro</span><span class="p">,</span> <span class="n">MACRO_PARSE_LIMIT</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">BotVariable</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">DC_META</span><span class="p">,</span> <span class="n">DC_NICKNAME</span><span class="p">,</span> <span class="n">DC_MACRO</span><span class="p">,</span> <span class="n">DC_VARIABLE</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">DCP_META_ONLINE_PERIOD</span><span class="p">,</span> <span class="n">DCP_META_ONLINE_LAST</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">DCP_META_CMD_TOTAL_NUM</span><span class="p">,</span> <span class="n">DCP_META_CMD_TODAY_NUM</span><span class="p">,</span> <span class="n">DCP_META_CMD_LAST_NUM</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">DCP_META_MSG_TOTAL_NUM</span><span class="p">,</span> <span class="n">DCP_META_MSG_TODAY_NUM</span><span class="p">,</span> <span class="n">DCP_META_MSG_LAST_NUM</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">NICKNAME_ERROR</span>
+<span class="kn">from</span> <span class="nn">data_manager</span> <span class="kn">import</span> <span class="n">DataManager</span><span class="p">,</span> <span class="n">DataManagerError</span>
+<span class="kn">import</span> <span class="nn">localization</span>
+<span class="kn">from</span> <span class="nn">localization</span> <span class="kn">import</span> <span class="n">LocalizationHelper</span>
+<span class="kn">from</span> <span class="nn">bot_config</span> <span class="kn">import</span> <span class="n">ConfigHelper</span><span class="p">,</span> <span class="n">CFG_COMMAND_SPLIT</span>
+<span class="kn">from</span> <span class="nn">logger</span> <span class="kn">import</span> <span class="n">dice_log</span><span class="p">,</span> <span class="n">get_exception_info</span>
+
+
+<span class="c1"># noinspection PyBroadException</span>
+<div class="viewcode-block" id="Bot"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot">[文档]</a><span class="k">class</span> <span class="nc">Bot</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">account</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        实例化机器人</span>
+<span class="sd">        Args:</span>
+<span class="sd">            account: QQ账号</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">command</span>  <span class="c1"># Command中可能会定义新的DataChunk和local text等, 所以要在之前import</span>
+        <span class="kn">from</span> <span class="nn">dice_hub</span> <span class="kn">import</span> <span class="n">HubManager</span>
+        <span class="kn">from</span> <span class="nn">adapter</span> <span class="kn">import</span> <span class="n">ClientProxy</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">account</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">ClientProxy</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">bot_config</span><span class="o">.</span><span class="n">BOT_DATA_PATH</span><span class="p">,</span> <span class="n">account</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span> <span class="o">=</span> <span class="n">DataManager</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data_path</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">hub_manager</span> <span class="o">=</span> <span class="n">HubManager</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span> <span class="o">=</span> <span class="n">LocalizationHelper</span><span class="p">(</span><span class="n">bot_config</span><span class="o">.</span><span class="n">CONFIG_PATH</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span> <span class="o">=</span> <span class="n">ConfigHelper</span><span class="p">(</span><span class="n">bot_config</span><span class="o">.</span><span class="n">CONFIG_PATH</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">command_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">command</span><span class="o">.</span><span class="n">UserCommandBase</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">tick_task</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">start_up</span><span class="p">()</span>
+
+<div class="viewcode-block" id="Bot.set_client_proxy"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.set_client_proxy">[文档]</a>    <span class="k">def</span> <span class="nf">set_client_proxy</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">proxy</span><span class="p">):</span>
+        <span class="kn">from</span> <span class="nn">adapter</span> <span class="kn">import</span> <span class="n">ClientProxy</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">proxy</span><span class="p">,</span> <span class="n">ClientProxy</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span> <span class="o">=</span> <span class="n">proxy</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;Incorrect Client Proxy!&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Bot.start_up"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.start_up">[文档]</a>    <span class="k">def</span> <span class="nf">start_up</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_command</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">load_localization</span><span class="p">()</span>  <span class="c1"># 要在注册完命令后再读取本地化文件</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">save_localization</span><span class="p">()</span>  <span class="c1"># 更新本地文件</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">load_chat</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">save_chat</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">load_config</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">save_config</span><span class="p">()</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tick_task</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tick_loop</span><span class="p">())</span>
+        <span class="k">except</span> <span class="ne">RuntimeError</span><span class="p">:</span>  <span class="c1"># 在Debug中</span>
+            <span class="k">pass</span></div>
+
+<div class="viewcode-block" id="Bot.tick_loop"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.tick_loop">[文档]</a>    <span class="k">async</span> <span class="k">def</span> <span class="nf">tick_loop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">BotCommandBase</span>
+        <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+        <span class="n">loop_time_prev</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+        <span class="n">init_online_str</span> <span class="o">=</span> <span class="n">bot_utils</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">get_current_date_str</span><span class="p">()</span>
+        <span class="n">online_period</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_ONLINE_PERIOD</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="p">[])</span>
+        <span class="n">online_period</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">init_online_str</span><span class="p">,</span> <span class="n">init_online_str</span><span class="p">])</span>
+
+        <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
+            <span class="n">bot_commands</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BotCommandBase</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="c1"># tick</span>
+            <span class="k">for</span> <span class="n">command</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">command_dict</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">bot_commands</span> <span class="o">+=</span> <span class="n">command</span><span class="o">.</span><span class="n">tick</span><span class="p">()</span>
+                <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                    <span class="n">dice_log</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">handle_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tick: </span><span class="si">{</span><span class="n">command</span><span class="o">.</span><span class="n">readable_name</span><span class="si">}</span><span class="s2"> CODE110&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>
+
+            <span class="k">if</span> <span class="n">loop</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">loop_time_prev</span> <span class="o">&gt;</span> <span class="mi">300</span><span class="p">:</span>  <span class="c1"># 五分钟执行一次</span>
+                <span class="c1"># tick_daily</span>
+                <span class="n">last_online_str</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_ONLINE_LAST</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="n">init_online_str</span><span class="p">)</span>
+                <span class="n">last_online_day_str</span> <span class="o">=</span> <span class="n">bot_utils</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">datetime_to_str_day</span><span class="p">(</span><span class="n">bot_utils</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">str_to_datetime</span><span class="p">(</span><span class="n">last_online_str</span><span class="p">))</span>
+                <span class="n">cur_online_day_str</span> <span class="o">=</span> <span class="n">bot_utils</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">datetime_to_str_day</span><span class="p">(</span><span class="n">bot_utils</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">get_current_date_raw</span><span class="p">())</span>
+                <span class="k">if</span> <span class="n">cur_online_day_str</span> <span class="o">!=</span> <span class="n">last_online_day_str</span><span class="p">:</span>  <span class="c1"># 最后在线时间和当前时间不是同一天</span>
+                    <span class="k">for</span> <span class="n">command</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">command_dict</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+                        <span class="k">try</span><span class="p">:</span>
+                            <span class="n">bot_commands</span> <span class="o">+=</span> <span class="n">command</span><span class="o">.</span><span class="n">tick_daily</span><span class="p">()</span>
+                        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                            <span class="n">dice_log</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">handle_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Tick Daily: </span><span class="si">{</span><span class="n">command</span><span class="o">.</span><span class="n">readable_name</span><span class="si">}</span><span class="s2"> CODE111&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]))</span>
+                    <span class="c1"># 给Master发送每日更新通知</span>
+                    <span class="kn">from</span> <span class="nn">localization</span> <span class="kn">import</span> <span class="n">LOC_DAILY_UPDATE</span>
+                    <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_DAILY_UPDATE</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">feedback</span> <span class="ow">and</span> <span class="n">feedback</span> <span class="o">!=</span> <span class="s2">&quot;$&quot;</span><span class="p">:</span>
+                        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">send_msg_to_master</span><span class="p">(</span><span class="n">feedback</span><span class="p">)</span>
+                    <span class="c1"># 清空今日统计</span>
+                    <span class="n">meta_msg_last</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_TODAY_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                    <span class="n">meta_cmd_last</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_TODAY_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_LAST_NUM</span><span class="p">,</span> <span class="n">meta_msg_last</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_LAST_NUM</span><span class="p">,</span> <span class="n">meta_cmd_last</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_TODAY_NUM</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_TODAY_NUM</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="c1"># 更新最后在线时间</span>
+                <span class="n">cur_online_str</span> <span class="o">=</span> <span class="n">bot_utils</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">get_current_date_str</span><span class="p">()</span>
+                <span class="n">online_period</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">cur_online_str</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_ONLINE_LAST</span><span class="p">,</span> <span class="n">cur_online_str</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_ONLINE_PERIOD</span><span class="p">,</span> <span class="n">online_period</span><span class="p">)</span>
+
+                <span class="n">loop_time_prev</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+                <span class="c1"># 保存数据到本地</span>
+                <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">save_data_async</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">command</span> <span class="ow">in</span> <span class="n">bot_commands</span><span class="p">:</span>
+                    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="o">.</span><span class="n">process_bot_command</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+
+            <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Bot.shutdown"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.shutdown">[文档]</a>    <span class="k">def</span> <span class="nf">shutdown</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的&quot;&quot;&quot;</span>
+        <span class="n">asyncio</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">shutdown_async</span><span class="p">())</span></div>
+
+<div class="viewcode-block" id="Bot.shutdown_debug"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.shutdown_debug">[文档]</a>    <span class="k">def</span> <span class="nf">shutdown_debug</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;在载入本地化文本和配置等数据后调用, 必须是同步环境下调用&quot;&quot;&quot;</span>
+        <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">shutdown_async</span><span class="p">())</span></div>
+
+<div class="viewcode-block" id="Bot.shutdown_async"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.shutdown_async">[文档]</a>    <span class="k">async</span> <span class="k">def</span> <span class="nf">shutdown_async</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        shutdown的异步版本</span>
+<span class="sd">        销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">tick_task</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tick_task</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">save_data_async</span><span class="p">()</span></div>
+        <span class="c1"># 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet</span>
+        <span class="c1"># self.loc_helper.save_localization() # 暂时不会在运行时修改, 不需要保存</span>
+        <span class="c1"># self.cfg_helper.save_config() # 暂时不会在运行时修改, 不需要保存</span>
+
+<div class="viewcode-block" id="Bot.reboot"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.reboot">[文档]</a>    <span class="k">def</span> <span class="nf">reboot</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;重启bot&quot;&quot;&quot;</span>
+        <span class="n">asyncio</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">reboot_async</span><span class="p">())</span></div>
+
+<div class="viewcode-block" id="Bot.reboot_async"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.reboot_async">[文档]</a>    <span class="k">async</span> <span class="k">def</span> <span class="nf">reboot_async</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">dice_log</span><span class="p">(</span><span class="s2">&quot;[Bot] [Reboot] 开始重启&quot;</span><span class="p">)</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">shutdown_async</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">start_up</span><span class="p">()</span>
+        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">delay_init_command</span><span class="p">()</span></div>
+
+<div class="viewcode-block" id="Bot.register_command"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.register_command">[文档]</a>    <span class="k">def</span> <span class="nf">register_command</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="kn">import</span> <span class="nn">command</span>
+        <span class="n">command_cls_dict</span> <span class="o">=</span> <span class="n">command</span><span class="o">.</span><span class="n">dicepp_command</span><span class="o">.</span><span class="n">USER_COMMAND_CLS_DICT</span>
+        <span class="n">command_names</span> <span class="o">=</span> <span class="n">command_cls_dict</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+        <span class="n">command_names</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">command_names</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">n</span><span class="p">:</span> <span class="n">command_cls_dict</span><span class="p">[</span><span class="n">n</span><span class="p">]</span><span class="o">.</span><span class="n">priority</span><span class="p">)</span>  <span class="c1"># 按优先级排序</span>
+        <span class="k">for</span> <span class="n">command_name</span> <span class="ow">in</span> <span class="n">command_names</span><span class="p">:</span>
+            <span class="n">command_cls</span> <span class="o">=</span> <span class="n">command_cls_dict</span><span class="p">[</span><span class="n">command_name</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">command_dict</span><span class="p">[</span><span class="n">command_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">command_cls</span><span class="p">(</span><span class="n">bot</span><span class="o">=</span><span class="bp">self</span><span class="p">)</span>  <span class="c1"># 默认的Dict是有序的, 所以之后用values拿到的也是有序的</span></div>
+
+<div class="viewcode-block" id="Bot.delay_init"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.delay_init">[文档]</a>    <span class="k">def</span> <span class="nf">delay_init</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;在载入本地化文本和配置等数据后调用&quot;&quot;&quot;</span>
+        <span class="n">asyncio</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">delay_init_command</span><span class="p">())</span></div>
+
+<div class="viewcode-block" id="Bot.delay_init_debug"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.delay_init_debug">[文档]</a>    <span class="k">def</span> <span class="nf">delay_init_debug</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;在载入本地化文本和配置等数据后调用, 必须是同步环境下调用&quot;&quot;&quot;</span>
+        <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_event_loop</span><span class="p">()</span>
+        <span class="n">loop</span><span class="o">.</span><span class="n">run_until_complete</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">delay_init_command</span><span class="p">())</span></div>
+
+<div class="viewcode-block" id="Bot.delay_init_command"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.delay_init_command">[文档]</a>    <span class="k">async</span> <span class="k">def</span> <span class="nf">delay_init_command</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;在载入本地化文本和配置等数据后调用&quot;&quot;&quot;</span>
+        <span class="n">init_info</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">command</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">command_dict</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">init_info_cur</span> <span class="o">=</span> <span class="n">command</span><span class="o">.</span><span class="n">delay_init</span><span class="p">()</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">init_info_cur</span><span class="p">)):</span>
+                    <span class="n">init_info_cur</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">command</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="n">readable_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">init_info_cur</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="n">init_info</span> <span class="o">+=</span> <span class="n">init_info_cur</span>
+            <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="p">:</span>
+                    <span class="n">bc_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;加载</span><span class="si">{</span><span class="n">command</span><span class="o">.</span><span class="vm">__class__</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">失败&quot;</span><span class="p">)</span>  <span class="c1"># 报错不用中文名</span>
+                    <span class="k">for</span> <span class="n">bc</span> <span class="ow">in</span> <span class="n">bc_list</span><span class="p">:</span>
+                        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="o">.</span><span class="n">process_bot_command</span><span class="p">(</span><span class="n">bc</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="p">:</span>
+            <span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">PrivateMessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+            <span class="kn">from</span> <span class="nn">localization</span> <span class="kn">import</span> <span class="n">LOC_LOGIN_NOTICE</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_LOGIN_NOTICE</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">feedback</span> <span class="ow">and</span> <span class="n">feedback</span> <span class="o">!=</span> <span class="s2">&quot;$&quot;</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">init_info</span><span class="si">}</span><span class="se">\n</span><span class="si">{</span><span class="n">feedback</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="n">dice_log</span><span class="p">(</span><span class="n">feedback</span><span class="p">)</span>
+                <span class="c1"># 给所有Master汇报</span>
+                <span class="kn">from</span> <span class="nn">bot_config</span> <span class="kn">import</span> <span class="n">CFG_MASTER</span>
+                <span class="k">for</span> <span class="n">master</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_MASTER</span><span class="p">):</span>
+                    <span class="n">command</span> <span class="o">=</span> <span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">master</span><span class="p">)])</span>
+                    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="o">.</span><span class="n">process_bot_command</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">dice_log</span><span class="p">(</span><span class="n">init_info</span><span class="p">)</span></div>
+
+    <span class="c1"># noinspection PyBroadException</span>
+<div class="viewcode-block" id="Bot.process_message"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.process_message">[文档]</a>    <span class="k">async</span> <span class="k">def</span> <span class="nf">process_message</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;处理消息&quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">preprocess_msg</span>
+        <span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">MessagePort</span><span class="p">,</span> <span class="n">PrivateMessagePort</span><span class="p">,</span> <span class="n">BotCommandBase</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">update_nickname</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="s2">&quot;origin&quot;</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">nickname</span><span class="p">)</span>
+
+        <span class="n">msg</span> <span class="o">=</span> <span class="n">preprocess_msg</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>  <span class="c1"># 转换中文符号, 转换小写等等</span>
+
+        <span class="n">bot_commands</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BotCommandBase</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># 统计收到的消息数量</span>
+        <span class="n">meta_msg_total_num</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_TOTAL_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">meta_msg_today_num</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_TODAY_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_TOTAL_NUM</span><span class="p">,</span> <span class="n">meta_msg_total_num</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_TODAY_NUM</span><span class="p">,</span> <span class="n">meta_msg_today_num</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># 处理宏</span>
+        <span class="n">macro_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BotMacro</span><span class="p">]</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="ow">not</span> <span class="n">msg</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;.define&quot;</span><span class="p">)</span>
+            <span class="n">macro_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_MACRO</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">],</span> <span class="n">get_ref</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">except</span> <span class="p">(</span><span class="n">DataManagerError</span><span class="p">,</span> <span class="ne">AssertionError</span><span class="p">):</span>
+            <span class="n">macro_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">macro</span> <span class="ow">in</span> <span class="n">macro_list</span><span class="p">:</span>
+            <span class="n">msg</span> <span class="o">=</span> <span class="n">macro</span><span class="o">.</span><span class="n">process</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">MACRO_PARSE_LIMIT</span><span class="p">:</span>
+                <span class="k">break</span>
+
+        <span class="c1"># 处理变量</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">var_name_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_keys</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="n">var_name_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">var_name</span> <span class="ow">in</span> <span class="n">var_name_list</span><span class="p">:</span>
+            <span class="n">key</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;%</span><span class="si">{</span><span class="n">var_name</span><span class="si">}</span><span class="s2">%&quot;</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">msg</span><span class="p">:</span>
+                <span class="n">var</span><span class="p">:</span> <span class="n">BotVariable</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_VARIABLE</span><span class="p">,</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">,</span> <span class="n">var_name</span><span class="p">])</span>
+                <span class="n">msg</span> <span class="o">=</span> <span class="n">msg</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">var</span><span class="o">.</span><span class="n">val</span><span class="p">))</span>
+
+        <span class="c1"># 处理分行指令</span>
+        <span class="n">command_split</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_COMMAND_SPLIT</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">msg_list</span> <span class="o">=</span> <span class="n">msg</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">command_split</span><span class="p">)</span>
+        <span class="n">msg_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">m</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">msg_list</span><span class="p">]</span>
+
+        <span class="n">is_multi_command</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">msg_list</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span>
+        <span class="k">for</span> <span class="n">msg_cur</span> <span class="ow">in</span> <span class="n">msg_list</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">command</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">command_dict</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">should_proc</span><span class="p">,</span> <span class="n">should_pass</span><span class="p">,</span> <span class="n">hint</span> <span class="o">=</span> <span class="n">command</span><span class="o">.</span><span class="n">can_process_msg</span><span class="p">(</span><span class="n">msg_cur</span><span class="p">,</span> <span class="n">meta</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                    <span class="c1"># 发现未处理的错误, 汇报给主Master</span>
+                    <span class="n">should_proc</span><span class="p">,</span> <span class="n">should_pass</span><span class="p">,</span> <span class="n">hint</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">None</span>
+                    <span class="n">info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">msg_list</span><span class="si">}</span><span class="s2">中的</span><span class="si">{</span><span class="n">msg_cur</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">is_multi_command</span> <span class="k">else</span> <span class="n">msg</span>
+                    <span class="n">bot_commands</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;来源:</span><span class="si">{</span><span class="n">info</span><span class="si">}</span><span class="se">\n</span><span class="s2">用户:</span><span class="si">{</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="si">}</span><span class="s2"> 群:</span><span class="si">{</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="si">}</span><span class="s2"> CODE100&quot;</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">should_proc</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">command</span><span class="o">.</span><span class="n">group_only</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">:</span>
+                        <span class="c1"># 在非群聊中企图执行群聊指令, 回复一条提示</span>
+                        <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">localization</span><span class="o">.</span><span class="n">LOC_GROUP_ONLY_NOTICE</span><span class="p">)</span>
+                        <span class="n">bot_commands</span> <span class="o">+=</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">)])]</span>
+                    <span class="k">else</span><span class="p">:</span>  <span class="c1"># 执行指令</span>
+                        <span class="k">try</span><span class="p">:</span>
+                            <span class="n">bot_commands</span> <span class="o">+=</span> <span class="n">command</span><span class="o">.</span><span class="n">process_msg</span><span class="p">(</span><span class="n">msg_cur</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="n">hint</span><span class="p">)</span>
+                        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+                            <span class="c1"># 发现未处理的错误, 汇报给主Master</span>
+                            <span class="n">info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">msg_list</span><span class="si">}</span><span class="s2">中的</span><span class="si">{</span><span class="n">msg_cur</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">is_multi_command</span> <span class="k">else</span> <span class="n">msg</span>
+                            <span class="n">bot_commands</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">handle_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;来源:</span><span class="si">{</span><span class="n">info</span><span class="si">}</span><span class="se">\n</span><span class="s2">用户:</span><span class="si">{</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="si">}</span><span class="s2"> 群:</span><span class="si">{</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="si">}</span><span class="s2"> CODE101&quot;</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="ow">not</span> <span class="n">should_pass</span><span class="p">:</span>
+                        <span class="k">break</span>
+
+        <span class="k">if</span> <span class="n">is_multi_command</span><span class="p">:</span>  <span class="c1"># 多行指令的话合并port相同的send msg</span>
+            <span class="n">invalid_command_count</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">send_msg_command_merged</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="n">MessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">command</span> <span class="ow">in</span> <span class="n">bot_commands</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">command</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span><span class="p">):</span>
+                    <span class="k">for</span> <span class="n">port</span> <span class="ow">in</span> <span class="n">command</span><span class="o">.</span><span class="n">targets</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">port</span> <span class="ow">in</span> <span class="n">send_msg_command_merged</span><span class="p">:</span>
+                            <span class="n">send_msg_command_merged</span><span class="p">[</span><span class="n">port</span><span class="p">]</span><span class="o">.</span><span class="n">msg</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">command</span><span class="o">.</span><span class="n">msg</span><span class="si">}</span><span class="s2">&quot;</span>
+                        <span class="k">else</span><span class="p">:</span>
+                            <span class="n">send_msg_command_merged</span><span class="p">[</span><span class="n">port</span><span class="p">]</span> <span class="o">=</span> <span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">command</span><span class="o">.</span><span class="n">msg</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])</span>
+                    <span class="n">invalid_command_count</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="n">invalid_command_count</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">bot_commands</span><span class="p">):</span>  <span class="c1"># 全都是SendMsg则合并</span>
+                <span class="n">bot_commands</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">send_msg_command_merged</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span> <span class="ow">and</span> <span class="n">bot_commands</span><span class="p">:</span>
+            <span class="c1"># 统计处理的指令数目</span>
+            <span class="n">meta_cmd_total_num</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_TOTAL_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">meta_cmd_today_num</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_TODAY_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_TOTAL_NUM</span><span class="p">,</span> <span class="n">meta_cmd_total_num</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_TODAY_NUM</span><span class="p">,</span> <span class="n">meta_cmd_today_num</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="c1"># 处理指令</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="o">.</span><span class="n">process_bot_command_list</span><span class="p">(</span><span class="n">bot_commands</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">bot_commands</span></div>
+
+<div class="viewcode-block" id="Bot.process_request"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.process_request">[文档]</a>    <span class="k">def</span> <span class="nf">process_request</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">RequestData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]:</span>
+        <span class="sd">&quot;&quot;&quot;处理请求&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">FriendRequestData</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">bot_config</span> <span class="kn">import</span> <span class="n">CFG_FRIEND_TOKEN</span>
+            <span class="n">passwords</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_FRIEND_TOKEN</span><span class="p">)</span>
+            <span class="n">passwords</span> <span class="o">=</span> <span class="p">[</span><span class="n">password</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">password</span> <span class="ow">in</span> <span class="n">passwords</span> <span class="k">if</span> <span class="n">password</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+            <span class="n">comment</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">comment</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+            <span class="k">return</span> <span class="ow">not</span> <span class="n">passwords</span> <span class="ow">or</span> <span class="n">comment</span> <span class="ow">in</span> <span class="n">passwords</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">JoinGroupRequestData</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">None</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">InviteGroupRequestData</span><span class="p">):</span>
+            <span class="kn">from</span> <span class="nn">bot_config</span> <span class="kn">import</span> <span class="n">CFG_GROUP_INVITE</span>
+            <span class="n">should_allow</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_GROUP_INVITE</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="k">return</span> <span class="n">should_allow</span> <span class="o">==</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="kc">False</span></div>
+
+<div class="viewcode-block" id="Bot.process_notice"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.process_notice">[文档]</a>    <span class="k">async</span> <span class="k">def</span> <span class="nf">process_notice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">NoticeData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;处理提醒&quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">src.plugins.DicePP</span> <span class="kn">import</span> <span class="n">BotCommandBase</span>
+        <span class="n">bot_commands</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BotCommandBase</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">FriendAddNoticeData</span><span class="p">):</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">localization</span><span class="o">.</span><span class="n">LOC_FRIEND_ADD_NOTICE</span><span class="p">)</span>
+            <span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">PrivateMessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+            <span class="n">bot_commands</span> <span class="o">+=</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">user_id</span><span class="p">)])]</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">GroupIncreaseNoticeData</span><span class="p">):</span>
+            <span class="n">data</span><span class="p">:</span> <span class="n">GroupIncreaseNoticeData</span> <span class="o">=</span> <span class="n">data</span>
+            <span class="k">if</span> <span class="n">data</span><span class="o">.</span><span class="n">user_id</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">:</span>
+                <span class="kn">from</span> <span class="nn">command.impl</span> <span class="kn">import</span> <span class="n">DC_ACTIVATE</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">activate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_ACTIVATE</span><span class="p">,</span> <span class="p">[</span><span class="n">data</span><span class="o">.</span><span class="n">group_id</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+                    <span class="n">activate</span> <span class="o">=</span> <span class="kc">False</span>
+
+                <span class="k">if</span> <span class="n">activate</span><span class="p">:</span>
+                    <span class="kn">from</span> <span class="nn">command.impl</span> <span class="kn">import</span> <span class="n">DC_WELCOME</span><span class="p">,</span> <span class="n">LOC_WELCOME_DEFAULT</span>
+                    <span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">GroupMessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_WELCOME</span><span class="p">,</span> <span class="p">[</span><span class="n">data</span><span class="o">.</span><span class="n">group_id</span><span class="p">])</span>
+                    <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+                        <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_WELCOME_DEFAULT</span><span class="p">)</span>
+
+                    <span class="k">if</span> <span class="n">feedback</span><span class="p">:</span>
+                        <span class="n">bot_commands</span> <span class="o">+=</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">GroupMessagePort</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">group_id</span><span class="p">)])]</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">command</span> <span class="ow">in</span> <span class="n">bot_commands</span><span class="p">:</span>
+                <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="o">.</span><span class="n">process_bot_command</span><span class="p">(</span><span class="n">command</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">bot_commands</span></div>
+
+<div class="viewcode-block" id="Bot.handle_exception"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.handle_exception">[文档]</a>    <span class="k">def</span> <span class="nf">handle_exception</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">info</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;在捕获异常后的Except语句中调用&quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">PrivateMessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+        <span class="n">exception_info</span> <span class="o">=</span> <span class="n">get_exception_info</span><span class="p">()</span>
+        <span class="n">exception_info</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">exception_info</span><span class="p">[</span><span class="o">-</span><span class="mi">8</span><span class="p">:])</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">exception_info</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">8</span> <span class="k">else</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">exception_info</span><span class="p">)</span>
+        <span class="n">additional_info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">info</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">info</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">feedback</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;未处理的错误:</span><span class="se">\n</span><span class="si">{</span><span class="n">exception_info</span><span class="si">}{</span><span class="n">additional_info</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="kn">from</span> <span class="nn">bot_config</span> <span class="kn">import</span> <span class="n">CFG_MASTER</span>
+        <span class="n">master_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_MASTER</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">master_list</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">master_list</span><span class="p">[</span><span class="mi">0</span><span class="p">])])]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span></div>
+
+<div class="viewcode-block" id="Bot.get_master_ids"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.get_master_ids">[文档]</a>    <span class="k">def</span> <span class="nf">get_master_ids</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="kn">from</span> <span class="nn">bot_config</span> <span class="kn">import</span> <span class="n">CFG_MASTER</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_MASTER</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="Bot.send_msg_to_master"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.send_msg_to_master">[文档]</a>    <span class="k">async</span> <span class="k">def</span> <span class="nf">send_msg_to_master</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;发送信息给主Master&quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">PrivateMessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+        <span class="n">master_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_master_ids</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">master_list</span><span class="p">:</span>
+            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">proxy</span><span class="o">.</span><span class="n">process_bot_command</span><span class="p">(</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">msg</span><span class="p">,</span> <span class="p">[</span><span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">master_list</span><span class="p">[</span><span class="mi">0</span><span class="p">])]))</span></div>
+
+<div class="viewcode-block" id="Bot.get_nickname"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.get_nickname">[文档]</a>    <span class="k">def</span> <span class="nf">get_nickname</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">group_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        获取用户昵称</span>
+<span class="sd">        Args:</span>
+<span class="sd">            user_id: 账号</span>
+<span class="sd">            group_id: 群号, 为空代表默认</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">group_id</span><span class="p">:</span>
+            <span class="n">group_id</span> <span class="o">=</span> <span class="s2">&quot;default&quot;</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">nickname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_NICKNAME</span><span class="p">,</span> <span class="p">[</span><span class="n">user_id</span><span class="p">,</span> <span class="n">group_id</span><span class="p">])</span>  <span class="c1"># 使用用户在群内的昵称</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">nickname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_NICKNAME</span><span class="p">,</span> <span class="p">[</span><span class="n">user_id</span><span class="p">,</span> <span class="s2">&quot;default&quot;</span><span class="p">])</span>  <span class="c1"># 使用用户定义的默认昵称</span>
+            <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">nickname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_NICKNAME</span><span class="p">,</span> <span class="p">[</span><span class="n">user_id</span><span class="p">,</span> <span class="s2">&quot;origin&quot;</span><span class="p">])</span>  <span class="c1"># 使用用户本身的用户名</span>
+                <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+                    <span class="n">nickname</span> <span class="o">=</span> <span class="n">NICKNAME_ERROR</span>
+        <span class="k">return</span> <span class="n">nickname</span></div>
+
+<div class="viewcode-block" id="Bot.update_nickname"><a class="viewcode-back" href="../../../autoapi/DicePP/bot_core/dicebot/index.html#DicePP.bot_core.dicebot.Bot.update_nickname">[文档]</a>    <span class="k">def</span> <span class="nf">update_nickname</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">user_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">group_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">nickname</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        更新昵称</span>
+<span class="sd">        Args:</span>
+<span class="sd">            user_id: 账号</span>
+<span class="sd">            group_id: 群号, 为空代表默认昵称, 为origin代表账号本身的名称, origin应该只在process_message时更新</span>
+<span class="sd">            nickname: 昵称</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">group_id</span><span class="p">:</span>
+            <span class="n">group_id</span> <span class="o">=</span> <span class="s2">&quot;default&quot;</span>
+        <span class="n">nickname_prev</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_NICKNAME</span><span class="p">,</span> <span class="p">[</span><span class="n">user_id</span><span class="p">,</span> <span class="n">group_id</span><span class="p">],</span> <span class="n">nickname</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">nickname_prev</span> <span class="o">!=</span> <span class="n">nickname</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_NICKNAME</span><span class="p">,</span> <span class="p">[</span><span class="n">user_id</span><span class="p">,</span> <span class="n">group_id</span><span class="p">],</span> <span class="n">nickname</span><span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../autoapi/index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">模块代码</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

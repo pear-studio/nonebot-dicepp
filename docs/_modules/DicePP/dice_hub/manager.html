@@ -1,0 +1,400 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DicePP.dice_hub.manager &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css" />
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>DicePP.dice_hub.manager 源代码</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Optional</span>
+<span class="kn">import</span> <span class="nn">datetime</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">random</span>
+<span class="kn">import</span> <span class="nn">math</span>
+
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">Bot</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">DC_META</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">DCP_META_ONLINE_PERIOD</span>
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">DCP_META_MSG_TOTAL_NUM</span><span class="p">,</span> <span class="n">DCP_META_MSG_LAST_NUM</span><span class="p">,</span> <span class="n">DCP_META_CMD_TOTAL_NUM</span><span class="p">,</span> <span class="n">DCP_META_CMD_LAST_NUM</span>
+<span class="kn">from</span> <span class="nn">bot_config</span> <span class="kn">import</span> <span class="n">BOT_VERSION</span><span class="p">,</span> <span class="n">CFG_FRIEND_TOKEN</span>
+<span class="kn">from</span> <span class="nn">data_manager</span> <span class="kn">import</span> <span class="n">DataManager</span><span class="p">,</span> <span class="n">DataManagerError</span>
+<span class="kn">from</span> <span class="nn">bot_utils.time</span> <span class="kn">import</span> <span class="n">get_current_date_str</span><span class="p">,</span> <span class="n">get_current_date_raw</span><span class="p">,</span> <span class="n">str_to_datetime</span>
+
+<span class="kn">from</span> <span class="nn">dice_hub.data</span> <span class="kn">import</span> <span class="n">HubFriendInfo</span><span class="p">,</span> <span class="n">DC_HUB</span><span class="p">,</span> <span class="n">DCK_HUB_FRIEND</span>
+
+<div class="viewcode-block" id="CFG_HUB_NAME"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.CFG_HUB_NAME">[文档]</a><span class="n">CFG_HUB_NAME</span> <span class="o">=</span> <span class="s2">&quot;dicehub_name&quot;</span></div>
+<div class="viewcode-block" id="CONST_UNDEFINED_NAME"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.CONST_UNDEFINED_NAME">[文档]</a><span class="n">CONST_UNDEFINED_NAME</span> <span class="o">=</span> <span class="s2">&quot;未定义&quot;</span></div>
+
+<div class="viewcode-block" id="MSG_SEP"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.MSG_SEP">[文档]</a><span class="n">MSG_SEP</span> <span class="o">=</span> <span class="s2">&quot;-S-&quot;</span></div>
+
+<div class="viewcode-block" id="SYNC_INTERVAL_MIN"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_INTERVAL_MIN">[文档]</a><span class="n">SYNC_INTERVAL_MIN</span> <span class="o">=</span> <span class="mi">3600</span> <span class="o">*</span> <span class="mi">6</span>  <span class="c1"># 发送同步信息的最短间隔, 单位秒</span></div>
+<div class="viewcode-block" id="SYNC_FAIL_MAX"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_FAIL_MAX">[文档]</a><span class="n">SYNC_FAIL_MAX</span> <span class="o">=</span> <span class="mi">3</span>  <span class="c1"># 能容忍的最长同步失败次数</span></div>
+<div class="viewcode-block" id="UPDATE_INVALID_TIME"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.UPDATE_INVALID_TIME">[文档]</a><span class="n">UPDATE_INVALID_TIME</span> <span class="o">=</span> <span class="mi">3600</span> <span class="o">*</span> <span class="mi">24</span> <span class="o">*</span> <span class="mi">7</span>  <span class="c1"># 若上次更新时间晚于该间隔, 则清除该记录</span></div>
+
+<div class="viewcode-block" id="SYNC_KEY_NAME"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_NAME">[文档]</a><span class="n">SYNC_KEY_NAME</span> <span class="o">=</span> <span class="s2">&quot;name&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_MASTER"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_MASTER">[文档]</a><span class="n">SYNC_KEY_MASTER</span> <span class="o">=</span> <span class="s2">&quot;master&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_VERSION"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_VERSION">[文档]</a><span class="n">SYNC_KEY_VERSION</span> <span class="o">=</span> <span class="s2">&quot;ver&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_FRIEND_TOKEN"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_FRIEND_TOKEN">[文档]</a><span class="n">SYNC_KEY_FRIEND_TOKEN</span> <span class="o">=</span> <span class="s2">&quot;friend_t&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_ONLINE_FIRST"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_ONLINE_FIRST">[文档]</a><span class="n">SYNC_KEY_ONLINE_FIRST</span> <span class="o">=</span> <span class="s2">&quot;ol_first&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_ONLINE_RATE"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_ONLINE_RATE">[文档]</a><span class="n">SYNC_KEY_ONLINE_RATE</span> <span class="o">=</span> <span class="s2">&quot;ol_rate&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_MSG_TOTAL"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_MSG_TOTAL">[文档]</a><span class="n">SYNC_KEY_MSG_TOTAL</span> <span class="o">=</span> <span class="s2">&quot;msg_total&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_MSG_LAST"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_MSG_LAST">[文档]</a><span class="n">SYNC_KEY_MSG_LAST</span> <span class="o">=</span> <span class="s2">&quot;msg_last&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_CMD_TOTAL"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_CMD_TOTAL">[文档]</a><span class="n">SYNC_KEY_CMD_TOTAL</span> <span class="o">=</span> <span class="s2">&quot;cmd_total&quot;</span></div>
+<div class="viewcode-block" id="SYNC_KEY_CMD_LAST"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_KEY_CMD_LAST">[文档]</a><span class="n">SYNC_KEY_CMD_LAST</span> <span class="o">=</span> <span class="s2">&quot;cmd_last&quot;</span></div>
+
+<div class="viewcode-block" id="SYNC_CONFIRM_TYPE_DONE"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_CONFIRM_TYPE_DONE">[文档]</a><span class="n">SYNC_CONFIRM_TYPE_DONE</span> <span class="o">=</span> <span class="s2">&quot;$sync_done&quot;</span></div>
+<div class="viewcode-block" id="SYNC_CONFIRM_TYPE_REQ_CARD"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.SYNC_CONFIRM_TYPE_REQ_CARD">[文档]</a><span class="n">SYNC_CONFIRM_TYPE_REQ_CARD</span> <span class="o">=</span> <span class="s2">&quot;$req_card&quot;</span></div>
+
+
+<div class="viewcode-block" id="standardize_sync_info"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.standardize_sync_info">[文档]</a><span class="k">def</span> <span class="nf">standardize_sync_info</span><span class="p">(</span><span class="n">sync_info_new</span><span class="p">:</span> <span class="n">Dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">:</span>
+    <span class="n">sync_info_std</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">SYNC_KEY_NAME</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_NAME</span><span class="p">,</span> <span class="s2">&quot;NONE&quot;</span><span class="p">),</span>
+        <span class="n">SYNC_KEY_MASTER</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_MASTER</span><span class="p">,</span> <span class="s2">&quot;NONE&quot;</span><span class="p">),</span>
+        <span class="n">SYNC_KEY_VERSION</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_VERSION</span><span class="p">,</span> <span class="s2">&quot;NONE&quot;</span><span class="p">),</span>
+        <span class="n">SYNC_KEY_FRIEND_TOKEN</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_FRIEND_TOKEN</span><span class="p">,</span> <span class="p">[]),</span>
+        <span class="n">SYNC_KEY_ONLINE_FIRST</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_ONLINE_FIRST</span><span class="p">,</span> <span class="n">get_current_date_str</span><span class="p">()),</span>
+        <span class="n">SYNC_KEY_ONLINE_RATE</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_ONLINE_RATE</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+        <span class="n">SYNC_KEY_MSG_TOTAL</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_MSG_TOTAL</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+        <span class="n">SYNC_KEY_MSG_LAST</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_MSG_LAST</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+        <span class="n">SYNC_KEY_CMD_TOTAL</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_CMD_TOTAL</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+        <span class="n">SYNC_KEY_CMD_LAST</span><span class="p">:</span> <span class="n">sync_info_new</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_CMD_LAST</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">sync_info_std</span></div>
+
+
+<div class="viewcode-block" id="HubManager"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager">[文档]</a><span class="k">class</span> <span class="nc">HubManager</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bot</span><span class="p">:</span> <span class="n">Bot</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">identifier</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">account</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bot</span> <span class="o">=</span> <span class="n">bot</span>
+
+<div class="viewcode-block" id="HubManager.get_friend_info"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.get_friend_info">[文档]</a>    <span class="k">def</span> <span class="nf">get_friend_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">HubFriendInfo</span><span class="p">]:</span>
+        <span class="n">friend_info</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">HubFriendInfo</span><span class="p">]</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">friend_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">])</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="n">friend_info</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">return</span> <span class="n">friend_info</span></div>
+
+<div class="viewcode-block" id="HubManager.get_sync_info"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.get_sync_info">[文档]</a>    <span class="k">def</span> <span class="nf">get_sync_info</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">self_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_HUB_NAME</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">assert</span> <span class="n">self_name</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">IndexError</span><span class="p">,</span> <span class="ne">AssertionError</span><span class="p">):</span>
+            <span class="n">self_name</span> <span class="o">=</span> <span class="n">CONST_UNDEFINED_NAME</span>
+
+        <span class="n">current_time</span> <span class="o">=</span> <span class="n">get_current_date_raw</span><span class="p">()</span>
+        <span class="n">online_period</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_ONLINE_PERIOD</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="p">[])</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">first_time</span> <span class="o">=</span> <span class="n">online_period</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">except</span> <span class="ne">IndexError</span><span class="p">:</span>
+            <span class="n">first_time</span> <span class="o">=</span> <span class="n">get_current_date_str</span><span class="p">()</span>
+        <span class="n">total_time_in_week</span> <span class="o">=</span> <span class="mi">7</span> <span class="o">*</span> <span class="mi">24</span> <span class="o">*</span> <span class="mi">3600</span>
+        <span class="n">one_week</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">total_time_in_week</span><span class="p">)</span>
+        <span class="n">online_time_in_week</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">start_time</span><span class="p">,</span> <span class="n">end_time</span> <span class="ow">in</span> <span class="n">online_period</span><span class="p">:</span>
+            <span class="n">start_time</span> <span class="o">=</span> <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">start_time</span><span class="p">)</span>
+            <span class="n">end_time</span> <span class="o">=</span> <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">end_time</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">end_time</span> <span class="o">&lt;</span> <span class="n">current_time</span> <span class="o">-</span> <span class="n">one_week</span><span class="p">:</span>  <span class="c1"># 忽略一周以前的记录</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">start_time</span> <span class="o">&lt;</span> <span class="n">current_time</span> <span class="o">-</span> <span class="n">one_week</span><span class="p">:</span>  <span class="c1"># 只统计一周内的记录</span>
+                <span class="n">start_time</span> <span class="o">=</span> <span class="n">current_time</span> <span class="o">-</span> <span class="n">one_week</span>
+            <span class="n">online_time_in_week</span> <span class="o">+=</span> <span class="p">(</span><span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">)</span><span class="o">.</span><span class="n">total_seconds</span><span class="p">()</span>
+
+        <span class="n">online_rate</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">ceil</span><span class="p">(</span><span class="n">online_time_in_week</span> <span class="o">/</span> <span class="n">total_time_in_week</span> <span class="o">*</span> <span class="mi">100</span><span class="p">))</span>
+        <span class="n">passwords</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_FRIEND_TOKEN</span><span class="p">)</span>
+        <span class="n">passwords</span> <span class="o">=</span> <span class="p">[</span><span class="n">password</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="k">for</span> <span class="n">password</span> <span class="ow">in</span> <span class="n">passwords</span> <span class="k">if</span> <span class="n">password</span><span class="o">.</span><span class="n">strip</span><span class="p">()]</span>
+        <span class="n">sync_info</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">SYNC_KEY_NAME</span><span class="p">:</span> <span class="n">self_name</span><span class="p">,</span>
+            <span class="n">SYNC_KEY_MASTER</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">get_master_ids</span><span class="p">()[</span><span class="mi">0</span><span class="p">],</span>
+            <span class="n">SYNC_KEY_VERSION</span><span class="p">:</span> <span class="n">BOT_VERSION</span><span class="p">,</span>
+            <span class="n">SYNC_KEY_FRIEND_TOKEN</span><span class="p">:</span> <span class="n">passwords</span><span class="p">,</span>
+            <span class="n">SYNC_KEY_ONLINE_FIRST</span><span class="p">:</span> <span class="n">first_time</span><span class="p">,</span>
+            <span class="n">SYNC_KEY_ONLINE_RATE</span><span class="p">:</span> <span class="n">online_rate</span><span class="p">,</span>
+            <span class="n">SYNC_KEY_MSG_TOTAL</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_TOTAL_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
+            <span class="n">SYNC_KEY_MSG_LAST</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_MSG_LAST_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
+            <span class="n">SYNC_KEY_CMD_TOTAL</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_TOTAL_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
+            <span class="n">SYNC_KEY_CMD_LAST</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_META</span><span class="p">,</span> <span class="n">DCP_META_CMD_LAST_NUM</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="mi">0</span><span class="p">),</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="n">sync_info</span></div>
+
+<div class="viewcode-block" id="HubManager.self_validate"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.self_validate">[文档]</a>    <span class="k">def</span> <span class="nf">self_validate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">friend_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">HubFriendInfo</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">],</span> <span class="n">get_ref</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="c1"># 将失效的信息清除UPDATE_INVALID_TIME</span>
+        <span class="n">current_time</span> <span class="o">=</span> <span class="n">get_current_date_raw</span><span class="p">()</span>
+        <span class="n">invalid_remote_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">remote_id</span> <span class="k">for</span> <span class="n">remote_id</span><span class="p">,</span> <span class="n">friend_info</span> <span class="ow">in</span> <span class="n">friend_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                               <span class="k">if</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_fail_times</span> <span class="o">&gt;</span> <span class="n">SYNC_FAIL_MAX</span> <span class="ow">or</span>
+                               <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">friend_info</span><span class="o">.</span><span class="n">update_time</span><span class="p">)</span> <span class="o">+</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">UPDATE_INVALID_TIME</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">current_time</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">remote_id</span> <span class="ow">in</span> <span class="n">invalid_remote_list</span><span class="p">:</span>
+            <span class="k">del</span> <span class="n">friend_dict</span><span class="p">[</span><span class="n">remote_id</span><span class="p">]</span></div>
+
+<div class="viewcode-block" id="HubManager.generate_card"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.generate_card">[文档]</a>    <span class="k">def</span> <span class="nf">generate_card</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;生成个人名片&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">self_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_HUB_NAME</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">assert</span> <span class="n">self_name</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">IndexError</span><span class="p">,</span> <span class="ne">AssertionError</span><span class="p">):</span>
+            <span class="n">self_name</span> <span class="o">=</span> <span class="n">CONST_UNDEFINED_NAME</span>
+        <span class="n">master_id</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">get_master_ids</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">assert</span> <span class="n">master_id</span><span class="p">,</span> <span class="s2">&quot;找不到有效的Master信息&quot;</span>  <span class="c1"># Master都没填直接assert掉</span>
+
+        <span class="n">info</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">identifier</span><span class="p">,</span> <span class="n">self_name</span><span class="p">,</span> <span class="n">master_id</span><span class="p">,</span> <span class="n">BOT_VERSION</span><span class="p">]</span>
+        <span class="n">card</span> <span class="o">=</span> <span class="n">MSG_SEP</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">info</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">card</span></div>
+
+<div class="viewcode-block" id="HubManager.record_card"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.record_card">[文档]</a>    <span class="k">def</span> <span class="nf">record_card</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">card</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;读取对方名片, 失败抛出AssertionError&quot;&quot;&quot;</span>
+        <span class="n">info</span> <span class="o">=</span> <span class="n">card</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="n">MSG_SEP</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">info</span><span class="p">)</span> <span class="o">==</span> <span class="mi">4</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;名片格式不正确, 消息长度:</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">info</span><span class="p">)</span><span class="si">}</span><span class="s2">, 名片内容:</span><span class="si">{</span><span class="n">MSG_SEP</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">remote_id</span><span class="p">,</span> <span class="n">nickname</span><span class="p">,</span> <span class="n">master</span><span class="p">,</span> <span class="n">version</span> <span class="o">=</span> <span class="n">info</span>
+        <span class="n">friend_info</span><span class="p">:</span> <span class="n">HubFriendInfo</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">friend_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">])</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">nickname</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">master</span> <span class="o">=</span> <span class="n">master</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">version</span> <span class="o">=</span> <span class="n">version</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">update_time</span> <span class="o">=</span> <span class="n">get_current_date_str</span><span class="p">()</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="n">friend_info</span> <span class="o">=</span> <span class="n">HubFriendInfo</span><span class="p">()</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">initialize</span><span class="p">(</span><span class="n">remote_id</span><span class="p">,</span> <span class="n">nickname</span><span class="p">,</span> <span class="n">master</span><span class="p">,</span> <span class="n">version</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">],</span> <span class="n">friend_info</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="HubManager.fetch_sync_data"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.fetch_sync_data">[文档]</a>    <span class="k">def</span> <span class="nf">fetch_sync_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_num</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">str</span><span class="p">]:</span>
+        <span class="sd">&quot;&quot;&quot;返回需要向远端同步的远端列表与同步信息&quot;&quot;&quot;</span>
+        <span class="n">remote_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">sync_data</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">friend_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">HubFriendInfo</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">],</span> <span class="n">get_ref</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">remote_list</span><span class="p">,</span> <span class="n">sync_data</span>
+        <span class="c1"># 找到最久没有同步的远端id列表</span>
+        <span class="n">current_time</span> <span class="o">=</span> <span class="n">get_current_date_raw</span><span class="p">()</span>
+        <span class="n">remote_sync_list</span> <span class="o">=</span> <span class="p">[(</span><span class="n">remote_id</span><span class="p">,</span> <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">friend_info</span><span class="o">.</span><span class="n">sync_time</span><span class="p">),</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_fail_times</span><span class="p">)</span>
+                            <span class="k">for</span> <span class="n">remote_id</span><span class="p">,</span> <span class="n">friend_info</span> <span class="ow">in</span> <span class="n">friend_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">distance</span> <span class="o">==</span> <span class="mi">0</span><span class="p">]</span>
+        <span class="c1"># 同步间隔 = 最小同步间隔 * (失败次数+1)^2</span>
+        <span class="n">remote_sync_list</span> <span class="o">=</span> <span class="p">[(</span><span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">remote_sync_list</span> <span class="k">if</span>
+                            <span class="n">current_time</span> <span class="o">-</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="p">(</span><span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">SYNC_INTERVAL_MIN</span><span class="p">)</span> <span class="o">*</span> <span class="p">((</span><span class="n">x</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span><span class="p">))]</span>
+        <span class="n">remote_sync_list</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">remote_sync_list</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])[:</span><span class="n">max_num</span><span class="p">]</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">remote_sync_list</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">remote_list</span><span class="p">,</span> <span class="n">sync_data</span>
+        <span class="n">remote_list</span> <span class="o">=</span> <span class="p">[</span><span class="n">remote_id</span> <span class="k">for</span> <span class="n">remote_id</span><span class="p">,</span> <span class="n">sync_time</span> <span class="ow">in</span> <span class="n">remote_sync_list</span><span class="p">]</span>
+        <span class="c1"># 得到同步信息</span>
+        <span class="n">sync_info</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_sync_info</span><span class="p">()</span>
+        <span class="n">sync_data</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">sync_info</span><span class="p">)</span>
+        <span class="n">sync_data</span> <span class="o">=</span> <span class="n">sync_data</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 增加远端同步的失败次数(将在对方确认后重置为0)</span>
+        <span class="k">for</span> <span class="n">remote_id</span> <span class="ow">in</span> <span class="n">remote_list</span><span class="p">:</span>
+            <span class="n">friend_dict</span><span class="p">[</span><span class="n">remote_id</span><span class="p">]</span><span class="o">.</span><span class="n">sync_fail_times</span> <span class="o">+=</span> <span class="mi">1</span>
+        <span class="k">return</span> <span class="n">remote_list</span><span class="p">,</span> <span class="n">sync_data</span></div>
+
+<div class="viewcode-block" id="HubManager.process_sync_data"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.process_sync_data">[文档]</a>    <span class="k">def</span> <span class="nf">process_sync_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">sync_data</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+        <span class="sd">&quot;&quot;&quot;处理远端向自己发送的消息, 返回确认类型与消息&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">friend_info</span><span class="p">:</span> <span class="n">HubFriendInfo</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">])</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">SYNC_CONFIRM_TYPE_REQ_CARD</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+        <span class="c1"># 处理同步消息</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">update_time</span> <span class="o">=</span> <span class="n">get_current_date_str</span><span class="p">()</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">distance</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">sync_info_std</span> <span class="o">=</span> <span class="n">standardize_sync_info</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">sync_data</span><span class="p">))</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span> <span class="o">=</span> <span class="n">sync_info_std</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="p">[</span><span class="n">SYNC_KEY_NAME</span><span class="p">]</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">master</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="p">[</span><span class="n">SYNC_KEY_MASTER</span><span class="p">]</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">version</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="p">[</span><span class="n">SYNC_KEY_VERSION</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">],</span> <span class="n">friend_info</span><span class="p">)</span>
+        <span class="c1"># 将自己所知的远端列表返回</span>
+        <span class="n">friend_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">HubFriendInfo</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">],</span> <span class="n">default_val</span><span class="o">=</span><span class="p">{})</span>
+        <span class="n">remote_list</span> <span class="o">=</span> <span class="p">[(</span><span class="n">rid</span><span class="p">,</span> <span class="n">info</span><span class="o">.</span><span class="n">update_time</span><span class="p">)</span> <span class="k">for</span> <span class="n">rid</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">friend_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">rid</span> <span class="o">!=</span> <span class="n">remote_id</span><span class="p">]</span>
+        <span class="n">remote_list</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span><span class="n">remote_list</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">remote_list</span><span class="p">),</span> <span class="mi">20</span><span class="p">))</span>  <span class="c1"># 返回随机的至多20个远端信息</span>
+        <span class="c1"># remote_list = sorted(remote_list, key=lambda x: str_to_datetime(x[1]), reverse=True)[:20]  # 返回最新的20个远端信息</span>
+        <span class="n">remote_dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">remote_list</span><span class="p">)</span>
+        <span class="n">confirm_msg</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">remote_dict</span><span class="p">)</span>
+        <span class="n">confirm_msg</span> <span class="o">=</span> <span class="n">confirm_msg</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">SYNC_CONFIRM_TYPE_DONE</span><span class="p">,</span> <span class="n">confirm_msg</span></div>
+
+<div class="viewcode-block" id="HubManager.process_confirm_data"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.process_confirm_data">[文档]</a>    <span class="k">def</span> <span class="nf">process_confirm_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">confirm_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">confirm_msg</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="sd">&quot;&quot;&quot;接收对方的确认消息, 并处理对方同步的远端列表, 返回想要获取消息的远端列表&quot;&quot;&quot;</span>
+        <span class="k">assert</span> <span class="n">confirm_type</span> <span class="ow">in</span> <span class="p">[</span><span class="n">SYNC_CONFIRM_TYPE_DONE</span><span class="p">]</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">friend_info</span><span class="p">:</span> <span class="n">HubFriendInfo</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">])</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_time</span> <span class="o">=</span> <span class="n">get_current_date_str</span><span class="p">()</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_fail_times</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">],</span> <span class="n">friend_info</span><span class="p">)</span>
+        <span class="c1"># 处理对方回复的远端列表, 返回想要获取消息的远端</span>
+        <span class="n">friend_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">HubFriendInfo</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">])</span>
+        <span class="n">reroute_req_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">remote_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">confirm_msg</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">rid</span><span class="p">,</span> <span class="n">update_time</span> <span class="ow">in</span> <span class="n">remote_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">rid</span> <span class="o">==</span> <span class="n">remote_id</span> <span class="ow">or</span> <span class="n">rid</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">identifier</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">if</span> <span class="n">rid</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">friend_dict</span><span class="o">.</span><span class="n">keys</span><span class="p">():</span>  <span class="c1"># 本地没有储存该远端信息则请求转发</span>
+                <span class="n">reroute_req_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">rid</span><span class="p">)</span>
+                <span class="k">continue</span>
+            <span class="n">update_time</span> <span class="o">=</span> <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">update_time</span><span class="p">)</span>
+            <span class="n">local_info</span> <span class="o">=</span> <span class="n">friend_dict</span><span class="p">[</span><span class="n">rid</span><span class="p">]</span>
+            <span class="n">local_update_time</span> <span class="o">=</span> <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">local_info</span><span class="o">.</span><span class="n">update_time</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">local_update_time</span> <span class="o">&lt;</span> <span class="n">update_time</span> <span class="o">-</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="n">SYNC_INTERVAL_MIN</span><span class="o">*</span><span class="mi">2</span><span class="p">):</span>  <span class="c1"># 本地的更新时间远晚于远端信息则请求转发</span>
+                <span class="n">reroute_req_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">rid</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">reroute_req_list</span></div>
+
+<div class="viewcode-block" id="HubManager.generate_reroute_info"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.generate_reroute_info">[文档]</a>    <span class="k">def</span> <span class="nf">generate_reroute_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">remote_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            remote_id: 需要转发的远端id</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            reroute_info: 需要转发的远端信息, 没有则为空字符串</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">friend_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">HubFriendInfo</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">],</span> <span class="n">default_val</span><span class="o">=</span><span class="p">{})</span>
+        <span class="k">if</span> <span class="n">remote_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">friend_dict</span><span class="p">:</span>
+            <span class="k">return</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">friend_info</span> <span class="o">=</span> <span class="n">friend_dict</span><span class="p">[</span><span class="n">remote_id</span><span class="p">]</span>
+        <span class="n">reroute_info</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">serialize</span><span class="p">()</span>
+        <span class="n">reroute_info</span> <span class="o">=</span> <span class="n">reroute_info</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">reroute_info</span></div>
+
+<div class="viewcode-block" id="HubManager.process_reroute_info"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.process_reroute_info">[文档]</a>    <span class="k">def</span> <span class="nf">process_reroute_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">reroute_info</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="sd">&quot;&quot;&quot;处理收到的转发信息&quot;&quot;&quot;</span>
+        <span class="n">friend_info</span><span class="p">:</span> <span class="n">HubFriendInfo</span> <span class="o">=</span> <span class="n">HubFriendInfo</span><span class="p">()</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">deserialize</span><span class="p">(</span><span class="n">reroute_info</span><span class="p">)</span>
+        <span class="n">friend_info</span><span class="o">.</span><span class="n">distance</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">distance</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">try</span><span class="p">:</span>  <span class="c1"># 尝试复用部分旧信息</span>
+            <span class="n">friend_info_prev</span><span class="p">:</span> <span class="n">HubFriendInfo</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">id</span><span class="p">])</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">init_time</span> <span class="o">=</span> <span class="n">friend_info_prev</span><span class="o">.</span><span class="n">init_time</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_time</span> <span class="o">=</span> <span class="n">friend_info_prev</span><span class="o">.</span><span class="n">sync_time</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_fail_times</span> <span class="o">=</span> <span class="n">friend_info_prev</span><span class="o">.</span><span class="n">sync_fail_times</span>
+            <span class="n">friend_info</span><span class="o">.</span><span class="n">distance</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">friend_info_prev</span><span class="o">.</span><span class="n">distance</span><span class="p">,</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">distance</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">DataManagerError</span><span class="p">:</span>
+            <span class="k">pass</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">,</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">id</span><span class="p">],</span> <span class="n">friend_info</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="HubManager.generate_list_info"><a class="viewcode-back" href="../../../autoapi/DicePP/dice_hub/manager/index.html#DicePP.dice_hub.manager.HubManager.generate_list_info">[文档]</a>    <span class="k">def</span> <span class="nf">generate_list_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">is_full</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="sd">&quot;&quot;&quot;生成当前所有远端列表的消息并返回&quot;&quot;&quot;</span>
+        <span class="n">list_info</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">current_time</span> <span class="o">=</span> <span class="n">get_current_date_raw</span><span class="p">()</span>
+        <span class="n">friend_dict</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">HubFriendInfo</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_HUB</span><span class="p">,</span> <span class="p">[</span><span class="n">DCK_HUB_FRIEND</span><span class="p">],</span> <span class="n">default_val</span><span class="o">=</span><span class="p">{})</span>
+        <span class="k">for</span> <span class="n">remote_id</span><span class="p">,</span> <span class="n">friend_info</span> <span class="ow">in</span> <span class="n">friend_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">friend_token</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_FRIEND_TOKEN</span><span class="p">,</span> <span class="p">[])</span>
+            <span class="n">friend_token</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;好友验证:</span><span class="si">{</span><span class="n">friend_token</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">friend_token</span> <span class="k">else</span> <span class="s2">&quot;无需验证&quot;</span>
+            <span class="n">last_update_time</span> <span class="o">=</span> <span class="n">current_time</span> <span class="o">-</span> <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">friend_info</span><span class="o">.</span><span class="n">update_time</span><span class="p">)</span>
+            <span class="n">last_update_time</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">last_update_time</span><span class="o">.</span><span class="n">seconds</span> <span class="o">//</span> <span class="mi">3600</span><span class="p">)</span>
+            <span class="n">online_rate</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_ONLINE_RATE</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="n">cur_info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">friend_info</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> 账号:</span><span class="si">{</span><span class="n">friend_info</span><span class="o">.</span><span class="n">id</span><span class="si">}</span><span class="s2"> Master:</span><span class="si">{</span><span class="n">friend_info</span><span class="o">.</span><span class="n">master</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">friend_token</span><span class="si">}</span><span class="s2"> 版本:</span><span class="si">{</span><span class="n">friend_info</span><span class="o">.</span><span class="n">version</span><span class="si">}</span><span class="s2"> &quot;</span> \
+                       <span class="sa">f</span><span class="s2">&quot;稳定性:</span><span class="si">{</span><span class="n">online_rate</span><span class="si">}</span><span class="s2"> 上次同步:</span><span class="si">{</span><span class="n">last_update_time</span><span class="si">}</span><span class="s2">h前&quot;</span>
+            <span class="k">if</span> <span class="n">is_full</span><span class="p">:</span>
+                <span class="n">dist</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">distance</span>
+                <span class="k">if</span> <span class="n">dist</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">last_sync_time</span> <span class="o">=</span> <span class="n">current_time</span> <span class="o">-</span> <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">friend_info</span><span class="o">.</span><span class="n">sync_time</span><span class="p">)</span>
+                    <span class="n">last_sync_time</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">last_sync_time</span><span class="o">.</span><span class="n">seconds</span> <span class="o">//</span> <span class="mi">3600</span><span class="p">)</span>
+                    <span class="n">last_sync_info</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot; 上次推送:</span><span class="si">{</span><span class="n">last_sync_time</span><span class="si">}</span><span class="s2">h前 失败次数:</span><span class="si">{</span><span class="n">friend_info</span><span class="o">.</span><span class="n">sync_fail_times</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">last_sync_info</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+                <span class="n">online_first</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_ONLINE_FIRST</span><span class="p">,</span> <span class="n">get_current_date_str</span><span class="p">())</span>
+                <span class="n">online_first</span> <span class="o">=</span> <span class="p">(</span><span class="n">current_time</span> <span class="o">-</span> <span class="n">str_to_datetime</span><span class="p">(</span><span class="n">online_first</span><span class="p">))</span><span class="o">.</span><span class="n">days</span>
+                <span class="n">msg_total</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_MSG_TOTAL</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="n">msg_last</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_MSG_LAST</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="n">cmd_total</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_CMD_TOTAL</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="n">cmd_last</span> <span class="o">=</span> <span class="n">friend_info</span><span class="o">.</span><span class="n">sync_info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SYNC_KEY_CMD_LAST</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="n">cur_info</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot; 距离:</span><span class="si">{</span><span class="n">dist</span><span class="si">}{</span><span class="n">last_sync_info</span><span class="si">}</span><span class="s2"> 处理消息:</span><span class="si">{</span><span class="n">msg_last</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">msg_total</span><span class="si">}</span><span class="s2">) 处理指令:</span><span class="si">{</span><span class="n">cmd_last</span><span class="si">}</span><span class="s2">(</span><span class="si">{</span><span class="n">cmd_total</span><span class="si">}</span><span class="s2">) 首次启动:</span><span class="si">{</span><span class="n">online_first</span><span class="si">}</span><span class="s2">天前&quot;</span>
+            <span class="n">list_info</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cur_info</span><span class="p">)</span>
+        <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">list_info</span><span class="p">)</span></div></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../autoapi/index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">模块代码</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

@@ -1,0 +1,44 @@
+:py:mod:`DicePP.localization.common_local_text`
+===============================================
+
+.. py:module:: DicePP.localization.common_local_text
+
+
+Module Contents
+---------------
+
+.. py:data:: COMMON_LOCAL_TEXT
+   :annotation: :Dict[str, str]
+
+   
+
+.. py:data:: COMMON_LOCAL_COMMENT
+   :annotation: :Dict[str, str]
+
+   
+
+.. py:data:: LOC_GROUP_ONLY_NOTICE
+   :annotation: = group_only_notice
+
+   
+
+.. py:data:: LOC_FRIEND_ADD_NOTICE
+   :annotation: = friend_add_notice
+
+   
+
+.. py:data:: LOC_LOGIN_NOTICE
+   :annotation: = login_notice
+
+   
+
+.. py:data:: LOC_DAILY_UPDATE
+   :annotation: = daily_update
+
+   
+
+.. py:data:: LOC_FUNC_DISABLE
+   :annotation: = func_disable
+
+   
+

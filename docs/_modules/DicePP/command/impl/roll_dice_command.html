@@ -1,0 +1,445 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DicePP.command.impl.roll_dice_command &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>DicePP.command.impl.roll_dice_command 源代码</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Any</span>
+
+<span class="kn">from</span> <span class="nn">bot_core</span> <span class="kn">import</span> <span class="n">Bot</span><span class="p">,</span> <span class="n">DC_USER_DATA</span><span class="p">,</span> <span class="n">DC_GROUP_DATA</span>
+<span class="kn">from</span> <span class="nn">command.command_config</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="nn">command.dicepp_command</span> <span class="kn">import</span> <span class="n">UserCommandBase</span><span class="p">,</span> <span class="n">custom_user_command</span><span class="p">,</span> <span class="n">MessageMetaData</span>
+<span class="kn">from</span> <span class="nn">command</span> <span class="kn">import</span> <span class="n">BotCommandBase</span>
+<span class="kn">from</span> <span class="nn">command.bot_command</span> <span class="kn">import</span> <span class="n">PrivateMessagePort</span><span class="p">,</span> <span class="n">GroupMessagePort</span><span class="p">,</span> <span class="n">BotSendMsgCommand</span>
+<span class="kn">from</span> <span class="nn">command.impl</span> <span class="kn">import</span> <span class="n">try_use_point</span>
+<span class="kn">import</span> <span class="nn">localization</span>
+
+<span class="kn">from</span> <span class="nn">roll_dice</span> <span class="kn">import</span> <span class="n">RollResult</span><span class="p">,</span> <span class="n">RollExpression</span><span class="p">,</span> <span class="n">preprocess_roll_exp</span><span class="p">,</span> <span class="n">parse_roll_exp</span><span class="p">,</span> <span class="n">RollDiceError</span>
+
+<div class="viewcode-block" id="LOC_ROLL_RESULT"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_RESULT">[文档]</a><span class="n">LOC_ROLL_RESULT</span> <span class="o">=</span> <span class="s2">&quot;roll_result&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_RESULT_REASON"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_RESULT_REASON">[文档]</a><span class="n">LOC_ROLL_RESULT_REASON</span> <span class="o">=</span> <span class="s2">&quot;roll_result_reason&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_RESULT_HIDE"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_RESULT_HIDE">[文档]</a><span class="n">LOC_ROLL_RESULT_HIDE</span> <span class="o">=</span> <span class="s2">&quot;roll_result_hide&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_RESULT_HIDE_REASON"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_RESULT_HIDE_REASON">[文档]</a><span class="n">LOC_ROLL_RESULT_HIDE_REASON</span> <span class="o">=</span> <span class="s2">&quot;roll_result_hide_reason&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_RESULT_HIDE_GROUP"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_RESULT_HIDE_GROUP">[文档]</a><span class="n">LOC_ROLL_RESULT_HIDE_GROUP</span> <span class="o">=</span> <span class="s2">&quot;roll_result_hide_group&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_RESULT_MULTI"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_RESULT_MULTI">[文档]</a><span class="n">LOC_ROLL_RESULT_MULTI</span> <span class="o">=</span> <span class="s2">&quot;roll_result_multi&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_BS"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_BS">[文档]</a><span class="n">LOC_ROLL_D20_BS</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_success&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_BF"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_BF">[文档]</a><span class="n">LOC_ROLL_D20_BF</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_failure&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_MULTI"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_MULTI">[文档]</a><span class="n">LOC_ROLL_D20_MULTI</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_multiple&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_BS_SHORT"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_BS_SHORT">[文档]</a><span class="n">LOC_ROLL_D20_BS_SHORT</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_success_short&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_BF_SHORT"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_BF_SHORT">[文档]</a><span class="n">LOC_ROLL_D20_BF_SHORT</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_failure_short&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_2"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_2">[文档]</a><span class="n">LOC_ROLL_D20_2</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_2&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_3_5"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_3_5">[文档]</a><span class="n">LOC_ROLL_D20_3_5</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_3_5&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_6_10"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_6_10">[文档]</a><span class="n">LOC_ROLL_D20_6_10</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_6_10&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_11_15"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_11_15">[文档]</a><span class="n">LOC_ROLL_D20_11_15</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_11_15&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_16_18"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_16_18">[文档]</a><span class="n">LOC_ROLL_D20_16_18</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_16_18&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_D20_19"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_D20_19">[文档]</a><span class="n">LOC_ROLL_D20_19</span> <span class="o">=</span> <span class="s2">&quot;roll_d20_19&quot;</span></div>
+<div class="viewcode-block" id="LOC_ROLL_EXP"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.LOC_ROLL_EXP">[文档]</a><span class="n">LOC_ROLL_EXP</span> <span class="o">=</span> <span class="s2">&quot;roll_exp&quot;</span></div>
+
+<div class="viewcode-block" id="CFG_ROLL_ENABLE"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.CFG_ROLL_ENABLE">[文档]</a><span class="n">CFG_ROLL_ENABLE</span> <span class="o">=</span> <span class="s2">&quot;roll_enable&quot;</span></div>
+<div class="viewcode-block" id="CFG_ROLL_HIDE_ENABLE"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.CFG_ROLL_HIDE_ENABLE">[文档]</a><span class="n">CFG_ROLL_HIDE_ENABLE</span> <span class="o">=</span> <span class="s2">&quot;roll_hide_enable&quot;</span></div>
+<div class="viewcode-block" id="CFG_ROLL_EXP_COST"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.CFG_ROLL_EXP_COST">[文档]</a><span class="n">CFG_ROLL_EXP_COST</span> <span class="o">=</span> <span class="s2">&quot;roll_exp_cost&quot;</span></div>
+
+<div class="viewcode-block" id="MULTI_ROLL_LIMIT"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.MULTI_ROLL_LIMIT">[文档]</a><span class="n">MULTI_ROLL_LIMIT</span> <span class="o">=</span> <span class="mi">10</span>  <span class="c1"># 多轮掷骰上限次数</span></div>
+
+<div class="viewcode-block" id="DCP_USER_DATA_ROLL_A_UID"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.DCP_USER_DATA_ROLL_A_UID">[文档]</a><span class="n">DCP_USER_DATA_ROLL_A_UID</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;roll&quot;</span><span class="p">]</span>  <span class="c1"># 所有用户掷骰相关信息存储路径, 跟在user_id后面</span></div>
+<div class="viewcode-block" id="DCP_GROUP_DATA_ROLL_A_GID"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.DCP_GROUP_DATA_ROLL_A_GID">[文档]</a><span class="n">DCP_GROUP_DATA_ROLL_A_GID</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;roll&quot;</span><span class="p">]</span>  <span class="c1"># 所有群掷骰相关信息存储路径, 跟在group_id后面, 私聊时group_id为private</span></div>
+
+<div class="viewcode-block" id="DCP_ROLL_TIME_A_ID_ROLL"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.DCP_ROLL_TIME_A_ID_ROLL">[文档]</a><span class="n">DCP_ROLL_TIME_A_ID_ROLL</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;time&quot;</span><span class="p">]</span>  <span class="c1"># 掷骰次数信息的相对路径</span></div>
+<div class="viewcode-block" id="DCP_ROLL_D20_A_ID_ROLL"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.DCP_ROLL_D20_A_ID_ROLL">[文档]</a><span class="n">DCP_ROLL_D20_A_ID_ROLL</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;d20&quot;</span><span class="p">]</span>  <span class="c1"># D20信息的相关路径</span></div>
+
+<div class="viewcode-block" id="DCK_ROLL_TODAY"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.DCK_ROLL_TODAY">[文档]</a><span class="n">DCK_ROLL_TODAY</span> <span class="o">=</span> <span class="s2">&quot;today&quot;</span>  <span class="c1"># 获取每日信息的key, 适用范围包括 DCP_ROLL_TIME_A_ID_ROLL 和 DCP_ROLL_D20_A_ID_ROLL</span></div>
+<div class="viewcode-block" id="DCK_ROLL_TOTAL"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.DCK_ROLL_TOTAL">[文档]</a><span class="n">DCK_ROLL_TOTAL</span> <span class="o">=</span> <span class="s2">&quot;total&quot;</span>  <span class="c1"># 获取所有历史信息的key, 适用范围包括 DCP_ROLL_TIME_A_ID_ROLL 和 DCP_ROLL_D20_A_ID_ROLL</span></div>
+
+
+<span class="nd">@custom_user_command</span><span class="p">(</span><span class="n">readable_name</span><span class="o">=</span><span class="s2">&quot;掷骰指令&quot;</span><span class="p">,</span>
+                     <span class="n">priority</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                     <span class="n">group_only</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                     <span class="n">flag</span><span class="o">=</span><span class="n">DPP_COMMAND_FLAG_DEFAULT</span><span class="p">,</span>
+                     <span class="n">cluster</span><span class="o">=</span><span class="n">DPP_COMMAND_CLUSTER_DEFAULT</span><span class="p">)</span>
+<div class="viewcode-block" id="RollDiceCommand"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.RollDiceCommand">[文档]</a><span class="k">class</span> <span class="nc">RollDiceCommand</span><span class="p">(</span><span class="n">UserCommandBase</span><span class="p">):</span>
+    <span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    掷骰相关的指令, 以.r开头</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">bot</span><span class="p">:</span> <span class="n">Bot</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">bot</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT</span><span class="p">,</span>
+                                         <span class="s2">&quot;</span><span class="si">{nickname}</span><span class="s2">&#39;s roll result is </span><span class="si">{roll_result_final}</span><span class="s2"> </span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.r不带原因时返回的语句 </span><span class="si">{nickname}</span><span class="s2">:昵称; </span><span class="si">{roll_result_final}</span><span class="s2">:最终掷骰结果&quot;</span>
+                                         <span class="s2">&quot; </span><span class="si">{d20_state}</span><span class="s2">: 如果骰子中包含唯一d20时返回的语句, 具体内容见下文&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_REASON</span><span class="p">,</span>
+                                         <span class="s2">&quot;</span><span class="si">{nickname}</span><span class="s2">&#39;s roll result for </span><span class="si">{roll_reason}</span><span class="s2"> &quot;</span> <span class="o">+</span>
+                                         <span class="s2">&quot;is </span><span class="si">{roll_result_final}</span><span class="s2"> </span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.r带原因时返回的语句 </span><span class="si">{roll_reason}</span><span class="s2">:原因; 其他关键字见上文同名关键字&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_HIDE</span><span class="p">,</span>
+                                         <span class="s2">&quot;</span><span class="si">{nickname}</span><span class="s2">&#39;s hidden roll result is </span><span class="si">{roll_result_final}</span><span class="s2"> </span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.rh不带原因时返回的语句 关键字见上文同名关键字&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_HIDE_REASON</span><span class="p">,</span>
+                                         <span class="s2">&quot;</span><span class="si">{nickname}</span><span class="s2">&#39;s hidden roll result for </span><span class="si">{roll_reason}</span><span class="s2">&quot;</span> <span class="o">+</span>
+                                         <span class="s2">&quot; is </span><span class="si">{roll_result_final}</span><span class="s2"> </span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;.rh带原因时返回的语句 关键字见上文同名关键字&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_HIDE_GROUP</span><span class="p">,</span>
+                                         <span class="s2">&quot;</span><span class="si">{nickname}</span><span class="s2"> process a hidden rolling&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;执行.rh时在群里的回复&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_MULTI</span><span class="p">,</span>
+                                         <span class="s2">&quot;</span><span class="si">{time}</span><span class="s2">times </span><span class="si">{roll_exp}</span><span class="s2">: [</span><span class="si">{roll_result}</span><span class="s2">]&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;当掷骰表达式中含有#来多次掷骰时, 用这个格式组成上文的</span><span class="si">{roll_result_final}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_BS</span><span class="p">,</span> <span class="s2">&quot;Great, success!&quot;</span><span class="p">,</span> <span class="s2">&quot;唯一d20投出大成功的反馈, 替换</span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_BF</span><span class="p">,</span> <span class="s2">&quot;Wow, failure!&quot;</span><span class="p">,</span> <span class="s2">&quot;唯一d20投出大失败的反馈, 替换</span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_MULTI</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">{time}</span><span class="s2">times </span><span class="si">{short_state}</span><span class="s2">&quot;</span><span class="p">,</span>
+                                         <span class="s2">&quot;多次掷骰时唯一d20投出大成功或大失败的反馈 &quot;</span> <span class="o">+</span>
+                                         <span class="s2">&quot;</span><span class="si">{time}</span><span class="s2">:大成功或大失败的次数; </span><span class="si">{short_state}</span><span class="s2">:大成功或大失败的简短描述&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_BS_SHORT</span><span class="p">,</span> <span class="s2">&quot;Success&quot;</span><span class="p">,</span> <span class="s2">&quot;多次掷骰出现大成功时替换上文中的</span><span class="si">{short_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_BF_SHORT</span><span class="p">,</span> <span class="s2">&quot;Failure&quot;</span><span class="p">,</span> <span class="s2">&quot;多次掷骰出现大失败时替换上文中的</span><span class="si">{short_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_2</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;唯一d20的骰值等于2的反馈, 替换</span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_3_5</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;唯一d20的骰值在3到5之间的反馈, 替换</span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_6_10</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;唯一d20的骰值在6到10之间的反馈, 替换</span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_11_15</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;唯一d20的骰值在11到15之间的反馈, 替换</span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_16_18</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;唯一d20的骰值在16到18之间的反馈, 替换</span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_19</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;唯一d20的骰值等于19的反馈, 替换</span><span class="si">{d20_state}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">register_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_EXP</span><span class="p">,</span> <span class="s2">&quot;Expectation of </span><span class="si">{expression}</span><span class="s2"> is:</span><span class="se">\n</span><span class="si">{expectation}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;计算掷骰表达式期望时的回复&quot;</span><span class="p">)</span>
+
+        <span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">register_config</span><span class="p">(</span><span class="n">CFG_ROLL_ENABLE</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">,</span> <span class="s2">&quot;掷骰指令开关&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">register_config</span><span class="p">(</span><span class="n">CFG_ROLL_HIDE_ENABLE</span><span class="p">,</span> <span class="s2">&quot;1&quot;</span><span class="p">,</span> <span class="s2">&quot;暗骰指令开关(暗骰会发送私聊信息, 可能增加风控风险)&quot;</span><span class="p">)</span>
+        <span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">register_config</span><span class="p">(</span><span class="n">CFG_ROLL_EXP_COST</span><span class="p">,</span> <span class="s2">&quot;10&quot;</span><span class="p">,</span> <span class="s2">&quot;计算掷骰表达式期望(.rexp)所花费的点数&quot;</span><span class="p">)</span>
+
+<div class="viewcode-block" id="RollDiceCommand.can_process_msg"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.RollDiceCommand.can_process_msg">[文档]</a>    <span class="k">def</span> <span class="nf">can_process_msg</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+        <span class="n">should_proc</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">msg_str</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;.r&quot;</span><span class="p">)</span>
+        <span class="n">should_pass</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">should_proc</span><span class="p">,</span> <span class="n">should_pass</span><span class="p">,</span> <span class="kc">None</span></div>
+
+<div class="viewcode-block" id="RollDiceCommand.process_msg"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.RollDiceCommand.process_msg">[文档]</a>    <span class="k">def</span> <span class="nf">process_msg</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">msg_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">,</span> <span class="n">hint</span><span class="p">:</span> <span class="n">Any</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">BotCommandBase</span><span class="p">]:</span>
+        <span class="c1"># 判断功能开关</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_ROLL_ENABLE</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">AssertionError</span><span class="p">:</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">localization</span><span class="o">.</span><span class="n">LOC_FUNC_DISABLE</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">readable_name</span><span class="p">)</span>
+            <span class="n">port</span> <span class="o">=</span> <span class="n">GroupMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span> <span class="k">if</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span> <span class="k">else</span> <span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+        <span class="c1"># 解析掷骰语句</span>
+        <span class="n">msg_str</span> <span class="o">=</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">2</span><span class="p">:]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="n">is_hidden</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">is_show_info</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">compute_exp</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="k">while</span> <span class="n">msg_str</span> <span class="ow">and</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;h&quot;</span><span class="p">,</span> <span class="s2">&quot;s&quot;</span><span class="p">]:</span>
+            <span class="k">if</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;h&quot;</span><span class="p">:</span>  <span class="c1"># 暗骰</span>
+                <span class="n">is_hidden</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="k">if</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;s&quot;</span><span class="p">:</span>  <span class="c1"># 缩略中间结果</span>
+                <span class="n">is_show_info</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">msg_str</span> <span class="o">=</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+        <span class="k">if</span> <span class="n">msg_str</span><span class="p">[:</span><span class="mi">3</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;exp&quot;</span><span class="p">:</span>
+            <span class="n">msg_str</span> <span class="o">=</span> <span class="n">msg_str</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span>
+            <span class="n">compute_exp</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">msg_str</span> <span class="o">=</span> <span class="n">msg_str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">msg_str</span><span class="p">:</span>
+            <span class="n">msg_str</span> <span class="o">=</span> <span class="s1">&#39;d&#39;</span>
+        <span class="c1"># 判断暗骰开关</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="p">(</span><span class="ow">not</span> <span class="n">is_hidden</span> <span class="ow">or</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_ROLL_HIDE_ENABLE</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">AssertionError</span><span class="p">:</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">localization</span><span class="o">.</span><span class="n">LOC_FUNC_DISABLE</span><span class="p">,</span> <span class="n">func</span><span class="o">=</span><span class="s2">&quot;暗骰指令&quot;</span><span class="p">)</span>
+            <span class="n">port</span> <span class="o">=</span> <span class="n">GroupMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span> <span class="k">if</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span> <span class="k">else</span> <span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+
+        <span class="n">exp_str</span><span class="p">:</span> <span class="nb">str</span>
+        <span class="n">reason_str</span><span class="p">:</span> <span class="nb">str</span>
+        <span class="c1"># 分割掷骰原因与掷骰表达式</span>
+        <span class="k">if</span> <span class="s2">&quot; &quot;</span> <span class="ow">in</span> <span class="n">msg_str</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">compute_exp</span><span class="p">:</span>
+            <span class="n">exp_str</span><span class="p">,</span> <span class="n">reason_str</span> <span class="o">=</span> <span class="n">msg_str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">reason_str</span> <span class="o">=</span> <span class="n">reason_str</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">exp_str</span><span class="p">,</span> <span class="n">reason_str</span> <span class="o">=</span> <span class="n">msg_str</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">times</span> <span class="o">=</span> <span class="mi">1</span>  <span class="c1"># 掷骰次数</span>
+        <span class="k">if</span> <span class="s2">&quot;#&quot;</span> <span class="ow">in</span> <span class="n">exp_str</span><span class="p">:</span>
+            <span class="n">time_str</span><span class="p">,</span> <span class="n">exp_str</span> <span class="o">=</span> <span class="n">exp_str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;#&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">times</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">time_str</span><span class="p">)</span>
+                <span class="k">assert</span> <span class="mi">0</span> <span class="o">&lt;</span> <span class="n">times</span> <span class="o">&lt;=</span> <span class="n">MULTI_ROLL_LIMIT</span>
+            <span class="k">except</span> <span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="ne">AssertionError</span><span class="p">):</span>
+                <span class="n">times</span> <span class="o">=</span> <span class="mi">1</span>
+
+        <span class="c1"># 解析表达式并生成结果</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">exp_str</span> <span class="o">=</span> <span class="n">preprocess_roll_exp</span><span class="p">(</span><span class="n">exp_str</span><span class="p">)</span>
+            <span class="n">exp</span><span class="p">:</span> <span class="n">RollExpression</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">exp_str</span><span class="p">)</span>
+            <span class="n">res_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">RollResult</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="n">exp</span><span class="o">.</span><span class="n">get_result</span><span class="p">()</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">times</span><span class="p">)]</span>
+        <span class="k">except</span> <span class="n">RollDiceError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">feedback</span> <span class="o">=</span> <span class="n">e</span><span class="o">.</span><span class="n">info</span>
+            <span class="c1"># 生成机器人回复端口</span>
+            <span class="n">port</span> <span class="o">=</span> <span class="n">GroupMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span> <span class="k">if</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span> <span class="k">else</span> <span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+
+        <span class="c1"># 回复端口</span>
+        <span class="n">port</span> <span class="o">=</span> <span class="n">GroupMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">is_hidden</span> <span class="ow">and</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span> <span class="k">else</span> <span class="n">PrivateMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">compute_exp</span><span class="p">:</span>  <span class="c1"># 计算期望走单独的流程</span>
+            <span class="c1"># 尝试扣除点数</span>
+            <span class="n">cost_point</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">cfg_helper</span><span class="o">.</span><span class="n">get_config</span><span class="p">(</span><span class="n">CFG_ROLL_EXP_COST</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span>
+            <span class="n">res</span> <span class="o">=</span> <span class="n">try_use_point</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">cost_point</span><span class="p">)</span>
+            <span class="c1"># 点数不足</span>
+            <span class="k">if</span> <span class="n">res</span><span class="p">:</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">res</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">exp_result</span> <span class="o">=</span> <span class="n">get_roll_exp_result</span><span class="p">(</span><span class="n">exp</span><span class="p">)</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_ROLL_EXP</span><span class="p">,</span> <span class="n">expression</span><span class="o">=</span><span class="n">exp</span><span class="o">.</span><span class="n">get_result</span><span class="p">()</span><span class="o">.</span><span class="n">get_exp</span><span class="p">(),</span> <span class="n">expectation</span><span class="o">=</span><span class="n">exp_result</span><span class="p">)</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">])]</span>
+
+        <span class="c1"># 得到结果字符串</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">res_list</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">roll_exp</span> <span class="o">=</span> <span class="n">res_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get_exp</span><span class="p">()</span>
+            <span class="n">roll_result</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="p">(</span><span class="s2">&quot;,</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">res</span><span class="o">.</span><span class="n">get_result</span><span class="p">()</span> <span class="k">if</span> <span class="n">is_show_info</span> <span class="k">else</span> <span class="n">res</span><span class="o">.</span><span class="n">get_val</span><span class="p">()</span> <span class="k">for</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">res_list</span><span class="p">]))</span>
+
+            <span class="n">roll_result_final</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_MULTI</span><span class="p">,</span>
+                                                <span class="n">time</span><span class="o">=</span><span class="n">times</span><span class="p">,</span> <span class="n">roll_exp</span><span class="o">=</span><span class="n">roll_exp</span><span class="p">,</span> <span class="n">roll_result</span><span class="o">=</span><span class="n">roll_result</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">is_show_info</span><span class="p">:</span>
+                <span class="n">roll_result_final</span> <span class="o">=</span> <span class="n">res_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get_complete_result</span><span class="p">()</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">roll_result_final</span> <span class="o">=</span> <span class="n">res_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">get_exp_val</span><span class="p">()</span>
+
+        <span class="c1"># 获取其他信息</span>
+        <span class="n">nickname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">get_nickname</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">,</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)</span>
+        <span class="c1"># 大成功和大失败次数</span>
+        <span class="n">d20_state</span> <span class="o">=</span> <span class="n">get_d20_state_loc_text</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="p">,</span> <span class="n">res_list</span><span class="p">)</span>
+
+        <span class="n">loc_args</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;nickname&quot;</span><span class="p">:</span> <span class="n">nickname</span><span class="p">,</span> <span class="s2">&quot;roll_reason&quot;</span><span class="p">:</span> <span class="n">reason_str</span><span class="p">,</span>
+                    <span class="s2">&quot;roll_result_final&quot;</span><span class="p">:</span> <span class="n">roll_result_final</span><span class="p">,</span> <span class="s2">&quot;d20_state&quot;</span><span class="p">:</span> <span class="n">d20_state</span><span class="p">}</span>
+
+        <span class="c1"># 生成最终回复字符串</span>
+        <span class="n">feedback</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">commands</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">BotCommandBase</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="n">is_hidden</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">reason_str</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_HIDE_REASON</span><span class="p">,</span> <span class="o">**</span><span class="n">loc_args</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="ow">not</span> <span class="n">reason_str</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_HIDE</span><span class="p">,</span> <span class="o">**</span><span class="n">loc_args</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">:</span>
+                <span class="n">group_feedback</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_HIDE_GROUP</span><span class="p">,</span> <span class="n">nickname</span><span class="o">=</span><span class="n">nickname</span><span class="p">)</span>
+                <span class="n">commands</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">group_feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">GroupMessagePort</span><span class="p">(</span><span class="n">meta</span><span class="o">.</span><span class="n">group_id</span><span class="p">)]))</span>
+        <span class="k">elif</span> <span class="ow">not</span> <span class="n">is_hidden</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">reason_str</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT_REASON</span><span class="p">,</span> <span class="o">**</span><span class="n">loc_args</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="ow">not</span> <span class="n">reason_str</span><span class="p">:</span>
+                <span class="n">feedback</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">format_loc</span><span class="p">(</span><span class="n">LOC_ROLL_RESULT</span><span class="p">,</span> <span class="o">**</span><span class="n">loc_args</span><span class="p">)</span>
+
+        <span class="c1"># 记录掷骰结果</span>
+        <span class="n">record_roll_data</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="p">,</span> <span class="n">meta</span><span class="p">,</span> <span class="n">res_list</span><span class="p">)</span>
+        <span class="n">commands</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BotSendMsgCommand</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">bot</span><span class="o">.</span><span class="n">account</span><span class="p">,</span> <span class="n">feedback</span><span class="p">,</span> <span class="p">[</span><span class="n">port</span><span class="p">]))</span>
+        <span class="k">return</span> <span class="n">commands</span></div>
+
+<div class="viewcode-block" id="RollDiceCommand.get_help"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.RollDiceCommand.get_help">[文档]</a>    <span class="k">def</span> <span class="nf">get_help</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">keyword</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">keyword</span> <span class="o">==</span> <span class="s2">&quot;r&quot;</span><span class="p">:</span>
+            <span class="n">help_str</span> <span class="o">=</span> <span class="s2">&quot;掷骰：.r[掷骰表达式]([掷骰原因])</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;[掷骰表达式]：([轮数]#)[个数]d面数(优/劣势)(k[取点数最大的骰子数])不带面数时视为掷一个默认的20面骰</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;r后加h即为暗骰</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;示例:</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.rd20+1d4+4</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.r4#d    //投4次d20</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.rd20劣势+4 //带劣势攻击</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.r2#d优势+4 攻击被束缚的地精 //两次有加值的优势攻击</span><span class="se">\n</span><span class="s2">&quot;</span> \
+                       <span class="s2">&quot;.r1d12+2d8+5抗性 //得到减半向下取整的投骰总值&quot;</span>
+            <span class="k">return</span> <span class="n">help_str</span>
+        <span class="k">return</span> <span class="s2">&quot;&quot;</span></div>
+
+<div class="viewcode-block" id="RollDiceCommand.get_description"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.RollDiceCommand.get_description">[文档]</a>    <span class="k">def</span> <span class="nf">get_description</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="s2">&quot;.r 掷骰&quot;</span></div></div>
+
+
+<div class="viewcode-block" id="get_roll_exp_result"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.get_roll_exp_result">[文档]</a><span class="k">def</span> <span class="nf">get_roll_exp_result</span><span class="p">(</span><span class="n">expression</span><span class="p">:</span> <span class="n">RollExpression</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="n">repeat_times</span> <span class="o">=</span> <span class="mi">10000</span>
+    <span class="n">stat_range</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">25</span><span class="p">,</span> <span class="mi">45</span><span class="p">,</span> <span class="mi">55</span><span class="p">,</span> <span class="mi">75</span><span class="p">,</span> <span class="mi">95</span><span class="p">,</span> <span class="mi">99</span><span class="p">]</span>  <span class="c1"># 统计区间, 大于0, 小于100</span>
+    <span class="n">res_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">sorted</span><span class="p">((</span><span class="n">expression</span><span class="o">.</span><span class="n">get_result</span><span class="p">()</span><span class="o">.</span><span class="n">get_val</span><span class="p">()</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">repeat_times</span><span class="p">))))</span>
+    <span class="n">mean</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">res_list</span><span class="p">)</span><span class="o">/</span><span class="n">repeat_times</span>
+    <span class="n">info</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">stat_range_num</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="n">repeat_times</span><span class="o">*</span><span class="n">r</span><span class="o">//</span><span class="mi">100</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">stat_range</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">for</span> <span class="n">num</span> <span class="ow">in</span> <span class="n">stat_range_num</span><span class="p">:</span>
+        <span class="n">info</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">res_list</span><span class="p">[</span><span class="n">num</span><span class="p">])</span>
+    <span class="n">feedback</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">left_range</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="n">index</span><span class="p">,</span> <span class="n">right_range</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">stat_range</span><span class="p">):</span>
+        <span class="n">feedback</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">left_range</span><span class="si">}</span><span class="s2">%~</span><span class="si">{</span><span class="n">right_range</span><span class="si">}</span><span class="s2">% -&gt; [</span><span class="si">{</span><span class="n">info</span><span class="p">[</span><span class="n">index</span><span class="p">]</span><span class="si">}</span><span class="s2">~</span><span class="si">{</span><span class="n">info</span><span class="p">[</span><span class="n">index</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">]</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="n">left_range</span> <span class="o">=</span> <span class="n">right_range</span>
+    <span class="n">feedback</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">stat_range</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">%~100% -&gt; [</span><span class="si">{</span><span class="n">info</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span><span class="si">}</span><span class="s2">~</span><span class="si">{</span><span class="n">info</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">}</span><span class="s2">]</span><span class="se">\n</span><span class="s2">&quot;</span>
+    <span class="n">feedback</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;均值: </span><span class="si">{</span><span class="n">mean</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="n">feedback</span></div>
+
+
+<div class="viewcode-block" id="get_d20_state_loc_text"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.get_d20_state_loc_text">[文档]</a><span class="k">def</span> <span class="nf">get_d20_state_loc_text</span><span class="p">(</span><span class="n">bot</span><span class="p">:</span> <span class="n">Bot</span><span class="p">,</span> <span class="n">res_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">RollResult</span><span class="p">]):</span>
+    <span class="n">d20_state</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+    <span class="n">success_time</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">([</span><span class="n">res</span><span class="o">.</span><span class="n">d20_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">res</span><span class="o">.</span><span class="n">d20_state</span> <span class="o">==</span> <span class="mi">20</span> <span class="k">for</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">res_list</span><span class="p">])</span>
+    <span class="n">failure_time</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">([</span><span class="n">res</span><span class="o">.</span><span class="n">d20_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">res</span><span class="o">.</span><span class="n">d20_state</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">res_list</span><span class="p">])</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">res_list</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="p">(</span><span class="n">success_time</span> <span class="o">+</span> <span class="n">failure_time</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># 掷骰轮数等于1且存在大成功或大失败</span>
+        <span class="k">if</span> <span class="n">success_time</span><span class="p">:</span>
+            <span class="n">d20_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_BS</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">failure_time</span><span class="p">:</span>
+            <span class="n">d20_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_BF</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">res_list</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># 掷骰轮数大于1且存在大成功或大失败</span>
+        <span class="n">success_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_BS_SHORT</span><span class="p">)</span>
+        <span class="n">failure_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_BF_SHORT</span><span class="p">)</span>
+        <span class="n">success_info</span><span class="p">,</span> <span class="n">failure_info</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">success_time</span><span class="p">:</span>
+            <span class="n">success_info</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_MULTI</span><span class="p">,</span>
+                                                          <span class="n">time</span><span class="o">=</span><span class="n">success_time</span><span class="p">,</span> <span class="n">short_state</span><span class="o">=</span><span class="n">success_state</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">failure_time</span><span class="p">:</span>
+            <span class="n">failure_info</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_MULTI</span><span class="p">,</span>
+                                                          <span class="n">time</span><span class="o">=</span><span class="n">failure_time</span><span class="p">,</span> <span class="n">short_state</span><span class="o">=</span><span class="n">failure_state</span><span class="p">)</span>
+        <span class="n">d20_state</span> <span class="o">=</span> <span class="s2">&quot; &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">info</span> <span class="k">for</span> <span class="n">info</span> <span class="ow">in</span> <span class="p">[</span><span class="n">success_info</span><span class="p">,</span> <span class="n">failure_info</span><span class="p">]</span> <span class="k">if</span> <span class="n">info</span><span class="p">])</span>
+    <span class="k">elif</span> <span class="nb">len</span><span class="p">(</span><span class="n">res_list</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">res_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">d20_num</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># 掷骰轮数等于1且不存在大成功或大失败且有唯一D20</span>
+        <span class="n">d20_result</span> <span class="o">=</span> <span class="n">res_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">d20_state</span>
+        <span class="k">if</span> <span class="n">d20_result</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+            <span class="n">d20_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_2</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="mi">3</span> <span class="o">&lt;=</span> <span class="n">d20_result</span> <span class="o">&lt;=</span> <span class="mi">5</span><span class="p">:</span>
+            <span class="n">d20_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_3_5</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="mi">6</span> <span class="o">&lt;=</span> <span class="n">d20_result</span> <span class="o">&lt;=</span> <span class="mi">10</span><span class="p">:</span>
+            <span class="n">d20_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_6_10</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="mi">11</span> <span class="o">&lt;=</span> <span class="n">d20_result</span> <span class="o">&lt;=</span> <span class="mi">15</span><span class="p">:</span>
+            <span class="n">d20_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_11_15</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="mi">16</span> <span class="o">&lt;=</span> <span class="n">d20_result</span> <span class="o">&lt;=</span> <span class="mi">18</span><span class="p">:</span>
+            <span class="n">d20_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_16_18</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">d20_result</span> <span class="o">==</span> <span class="mi">19</span><span class="p">:</span>
+            <span class="n">d20_state</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">loc_helper</span><span class="o">.</span><span class="n">format_loc_text</span><span class="p">(</span><span class="n">LOC_ROLL_D20_19</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">d20_state</span></div>
+
+
+<div class="viewcode-block" id="record_roll_data"><a class="viewcode-back" href="../../../../autoapi/DicePP/command/impl/roll_dice_command/index.html#DicePP.command.impl.record_roll_data">[文档]</a><span class="k">def</span> <span class="nf">record_roll_data</span><span class="p">(</span><span class="n">bot</span><span class="p">:</span> <span class="n">Bot</span><span class="p">,</span> <span class="n">meta</span><span class="p">:</span> <span class="n">MessageMetaData</span><span class="p">,</span> <span class="n">res_list</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">RollResult</span><span class="p">]):</span>
+    <span class="sd">&quot;&quot;&quot;统计掷骰数据&quot;&quot;&quot;</span>
+    <span class="n">roll_times</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">res_list</span><span class="p">)</span>
+    <span class="n">cur_roll_result</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span><span class="nb">sum</span><span class="p">([</span><span class="n">res</span><span class="o">.</span><span class="n">d20_num</span> <span class="o">!=</span> <span class="mi">1</span> <span class="k">for</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">res_list</span><span class="p">])]</span>  <span class="c1"># 第0个元素为非D20数量</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">21</span><span class="p">):</span>
+        <span class="n">cur_roll_result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">sum</span><span class="p">([</span><span class="n">res</span><span class="o">.</span><span class="n">d20_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">res</span><span class="o">.</span><span class="n">d20_state</span> <span class="o">==</span> <span class="n">i</span> <span class="k">for</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">res_list</span><span class="p">]))</span>
+    <span class="c1"># 更新用户数据</span>
+    <span class="n">dcp_user_prefix</span> <span class="o">=</span> <span class="p">[</span><span class="n">meta</span><span class="o">.</span><span class="n">user_id</span><span class="p">]</span> <span class="o">+</span> <span class="n">DCP_USER_DATA_ROLL_A_UID</span>
+    <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_USER_DATA</span><span class="p">,</span> <span class="n">dcp_user_prefix</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="p">{})</span>
+    <span class="c1"># 掷骰次数</span>
+    <span class="n">user_time_data</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_USER_DATA</span><span class="p">,</span>
+                                               <span class="n">dcp_user_prefix</span> <span class="o">+</span> <span class="n">DCP_ROLL_TIME_A_ID_ROLL</span><span class="p">,</span>
+                                               <span class="n">default_val</span><span class="o">=</span><span class="p">{</span><span class="n">DCK_ROLL_TODAY</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="n">DCK_ROLL_TOTAL</span><span class="p">:</span> <span class="mi">0</span><span class="p">})</span>
+    <span class="n">user_time_data</span><span class="p">[</span><span class="n">DCK_ROLL_TODAY</span><span class="p">]</span> <span class="o">+=</span> <span class="n">roll_times</span>
+    <span class="n">user_time_data</span><span class="p">[</span><span class="n">DCK_ROLL_TOTAL</span><span class="p">]</span> <span class="o">+=</span> <span class="n">roll_times</span>
+    <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_USER_DATA</span><span class="p">,</span> <span class="n">dcp_user_prefix</span> <span class="o">+</span> <span class="n">DCP_ROLL_TIME_A_ID_ROLL</span><span class="p">,</span> <span class="n">user_time_data</span><span class="p">)</span>
+    <span class="c1"># D20信息</span>
+    <span class="n">user_d20_data</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_USER_DATA</span><span class="p">,</span>
+                                              <span class="n">dcp_user_prefix</span> <span class="o">+</span> <span class="n">DCP_ROLL_D20_A_ID_ROLL</span><span class="p">,</span>
+                                              <span class="n">default_val</span><span class="o">=</span><span class="p">{</span><span class="n">DCK_ROLL_TODAY</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="mi">21</span><span class="p">,</span> <span class="n">DCK_ROLL_TOTAL</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">*</span><span class="mi">21</span><span class="p">})</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">21</span><span class="p">):</span>
+        <span class="n">user_d20_data</span><span class="p">[</span><span class="n">DCK_ROLL_TODAY</span><span class="p">][</span><span class="n">i</span><span class="p">]</span> <span class="o">+=</span> <span class="n">cur_roll_result</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">user_d20_data</span><span class="p">[</span><span class="n">DCK_ROLL_TOTAL</span><span class="p">][</span><span class="n">i</span><span class="p">]</span> <span class="o">+=</span> <span class="n">cur_roll_result</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_USER_DATA</span><span class="p">,</span> <span class="n">dcp_user_prefix</span> <span class="o">+</span> <span class="n">DCP_ROLL_D20_A_ID_ROLL</span><span class="p">,</span> <span class="n">user_d20_data</span><span class="p">)</span>
+    <span class="c1"># 更新群数据</span>
+    <span class="n">group_id</span> <span class="o">=</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span> <span class="k">if</span> <span class="n">meta</span><span class="o">.</span><span class="n">group_id</span> <span class="k">else</span> <span class="s2">&quot;private&quot;</span>
+    <span class="n">dcp_group_prefix</span> <span class="o">=</span> <span class="p">[</span><span class="n">group_id</span><span class="p">]</span> <span class="o">+</span> <span class="n">DCP_USER_DATA_ROLL_A_UID</span>
+    <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_GROUP_DATA</span><span class="p">,</span> <span class="n">dcp_group_prefix</span><span class="p">,</span> <span class="n">default_val</span><span class="o">=</span><span class="p">{})</span>
+    <span class="c1"># 掷骰次数</span>
+    <span class="n">group_time_data</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_GROUP_DATA</span><span class="p">,</span>
+                                                <span class="n">dcp_user_prefix</span> <span class="o">+</span> <span class="n">DCP_ROLL_TIME_A_ID_ROLL</span><span class="p">,</span>
+                                                <span class="n">default_val</span><span class="o">=</span><span class="p">{</span><span class="n">DCK_ROLL_TODAY</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span> <span class="n">DCK_ROLL_TOTAL</span><span class="p">:</span> <span class="mi">0</span><span class="p">})</span>
+    <span class="n">group_time_data</span><span class="p">[</span><span class="n">DCK_ROLL_TODAY</span><span class="p">]</span> <span class="o">+=</span> <span class="n">roll_times</span>
+    <span class="n">group_time_data</span><span class="p">[</span><span class="n">DCK_ROLL_TOTAL</span><span class="p">]</span> <span class="o">+=</span> <span class="n">roll_times</span>
+    <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_GROUP_DATA</span><span class="p">,</span> <span class="n">dcp_user_prefix</span> <span class="o">+</span> <span class="n">DCP_ROLL_TIME_A_ID_ROLL</span><span class="p">,</span> <span class="n">group_time_data</span><span class="p">)</span>
+    <span class="c1"># D20信息</span>
+    <span class="n">group_d20_data</span> <span class="o">=</span> <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">get_data</span><span class="p">(</span><span class="n">DC_GROUP_DATA</span><span class="p">,</span>
+                                               <span class="n">dcp_group_prefix</span> <span class="o">+</span> <span class="n">DCP_ROLL_D20_A_ID_ROLL</span><span class="p">,</span>
+                                               <span class="n">default_val</span><span class="o">=</span><span class="p">{</span><span class="n">DCK_ROLL_TODAY</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="mi">21</span><span class="p">,</span> <span class="n">DCK_ROLL_TOTAL</span><span class="p">:</span> <span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="mi">21</span><span class="p">})</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">21</span><span class="p">):</span>
+        <span class="n">group_d20_data</span><span class="p">[</span><span class="n">DCK_ROLL_TODAY</span><span class="p">][</span><span class="n">i</span><span class="p">]</span> <span class="o">+=</span> <span class="n">cur_roll_result</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+        <span class="n">group_d20_data</span><span class="p">[</span><span class="n">DCK_ROLL_TOTAL</span><span class="p">][</span><span class="n">i</span><span class="p">]</span> <span class="o">+=</span> <span class="n">cur_roll_result</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="n">bot</span><span class="o">.</span><span class="n">data_manager</span><span class="o">.</span><span class="n">set_data</span><span class="p">(</span><span class="n">DC_GROUP_DATA</span><span class="p">,</span> <span class="n">dcp_group_prefix</span> <span class="o">+</span> <span class="n">DCP_ROLL_D20_A_ID_ROLL</span><span class="p">,</span> <span class="n">group_d20_data</span><span class="p">)</span>
+    <span class="k">return</span></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../autoapi/index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../../index.html">模块代码</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

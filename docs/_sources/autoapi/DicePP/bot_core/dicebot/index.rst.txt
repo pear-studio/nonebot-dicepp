@@ -1,0 +1,125 @@
+:py:mod:`DicePP.bot_core.dicebot`
+=================================
+
+.. py:module:: DicePP.bot_core.dicebot
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_core.dicebot.Bot
+
+
+
+
+.. py:class:: Bot(account: str)
+
+   .. py:method:: set_client_proxy(self, proxy)
+
+
+   .. py:method:: start_up(self)
+
+
+   .. py:method:: tick_loop(self)
+      :async:
+
+
+   .. py:method:: shutdown(self)
+
+      销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的
+
+
+   .. py:method:: shutdown_debug(self)
+
+      在载入本地化文本和配置等数据后调用, 必须是同步环境下调用
+
+
+   .. py:method:: shutdown_async(self)
+      :async:
+
+      shutdown的异步版本
+      销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的
+
+
+   .. py:method:: reboot(self)
+
+      重启bot
+
+
+   .. py:method:: reboot_async(self)
+      :async:
+
+
+   .. py:method:: register_command(self)
+
+
+   .. py:method:: delay_init(self)
+
+      在载入本地化文本和配置等数据后调用
+
+
+   .. py:method:: delay_init_debug(self)
+
+      在载入本地化文本和配置等数据后调用, 必须是同步环境下调用
+
+
+   .. py:method:: delay_init_command(self)
+      :async:
+
+      在载入本地化文本和配置等数据后调用
+
+
+   .. py:method:: process_message(self, msg: str, meta: bot_core.MessageMetaData) -> List
+      :async:
+
+      处理消息
+
+
+   .. py:method:: process_request(self, data: bot_core.RequestData) -> Optional[bool]
+
+      处理请求
+
+
+   .. py:method:: process_notice(self, data: bot_core.NoticeData) -> List
+      :async:
+
+      处理提醒
+
+
+   .. py:method:: handle_exception(self, info: str) -> List
+
+      在捕获异常后的Except语句中调用
+
+
+   .. py:method:: get_master_ids(self) -> List[str]
+
+
+   .. py:method:: send_msg_to_master(self, msg: str) -> None
+      :async:
+
+      发送信息给主Master
+
+
+   .. py:method:: get_nickname(self, user_id: str, group_id: str = '') -> str
+
+      获取用户昵称
+      Args:
+          user_id: 账号
+          group_id: 群号, 为空代表默认
+
+
+   .. py:method:: update_nickname(self, user_id: str, group_id: str = '', nickname: str = '')
+
+      更新昵称
+      Args:
+          user_id: 账号
+          group_id: 群号, 为空代表默认昵称, 为origin代表账号本身的名称, origin应该只在process_message时更新
+          nickname: 昵称
+
+
+

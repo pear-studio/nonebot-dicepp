@@ -1,0 +1,234 @@
+:py:mod:`DicePP.command.impl.roll_dice_command`
+===============================================
+
+.. py:module:: DicePP.command.impl.roll_dice_command
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.roll_dice_command.RollDiceCommand
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.roll_dice_command.get_roll_exp_result
+   DicePP.command.impl.roll_dice_command.get_d20_state_loc_text
+   DicePP.command.impl.roll_dice_command.record_roll_data
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_REASON
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_REASON
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_HIDE_GROUP
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_RESULT_MULTI
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_MULTI
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BS_SHORT
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_BF_SHORT
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_2
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_3_5
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_6_10
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_11_15
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_16_18
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_D20_19
+   DicePP.command.impl.roll_dice_command.LOC_ROLL_EXP
+   DicePP.command.impl.roll_dice_command.CFG_ROLL_ENABLE
+   DicePP.command.impl.roll_dice_command.CFG_ROLL_HIDE_ENABLE
+   DicePP.command.impl.roll_dice_command.CFG_ROLL_EXP_COST
+   DicePP.command.impl.roll_dice_command.MULTI_ROLL_LIMIT
+   DicePP.command.impl.roll_dice_command.DCP_USER_DATA_ROLL_A_UID
+   DicePP.command.impl.roll_dice_command.DCP_GROUP_DATA_ROLL_A_GID
+   DicePP.command.impl.roll_dice_command.DCP_ROLL_TIME_A_ID_ROLL
+   DicePP.command.impl.roll_dice_command.DCP_ROLL_D20_A_ID_ROLL
+   DicePP.command.impl.roll_dice_command.DCK_ROLL_TODAY
+   DicePP.command.impl.roll_dice_command.DCK_ROLL_TOTAL
+
+
+.. py:data:: LOC_ROLL_RESULT
+   :annotation: = roll_result
+
+   
+
+.. py:data:: LOC_ROLL_RESULT_REASON
+   :annotation: = roll_result_reason
+
+   
+
+.. py:data:: LOC_ROLL_RESULT_HIDE
+   :annotation: = roll_result_hide
+
+   
+
+.. py:data:: LOC_ROLL_RESULT_HIDE_REASON
+   :annotation: = roll_result_hide_reason
+
+   
+
+.. py:data:: LOC_ROLL_RESULT_HIDE_GROUP
+   :annotation: = roll_result_hide_group
+
+   
+
+.. py:data:: LOC_ROLL_RESULT_MULTI
+   :annotation: = roll_result_multi
+
+   
+
+.. py:data:: LOC_ROLL_D20_BS
+   :annotation: = roll_d20_success
+
+   
+
+.. py:data:: LOC_ROLL_D20_BF
+   :annotation: = roll_d20_failure
+
+   
+
+.. py:data:: LOC_ROLL_D20_MULTI
+   :annotation: = roll_d20_multiple
+
+   
+
+.. py:data:: LOC_ROLL_D20_BS_SHORT
+   :annotation: = roll_d20_success_short
+
+   
+
+.. py:data:: LOC_ROLL_D20_BF_SHORT
+   :annotation: = roll_d20_failure_short
+
+   
+
+.. py:data:: LOC_ROLL_D20_2
+   :annotation: = roll_d20_2
+
+   
+
+.. py:data:: LOC_ROLL_D20_3_5
+   :annotation: = roll_d20_3_5
+
+   
+
+.. py:data:: LOC_ROLL_D20_6_10
+   :annotation: = roll_d20_6_10
+
+   
+
+.. py:data:: LOC_ROLL_D20_11_15
+   :annotation: = roll_d20_11_15
+
+   
+
+.. py:data:: LOC_ROLL_D20_16_18
+   :annotation: = roll_d20_16_18
+
+   
+
+.. py:data:: LOC_ROLL_D20_19
+   :annotation: = roll_d20_19
+
+   
+
+.. py:data:: LOC_ROLL_EXP
+   :annotation: = roll_exp
+
+   
+
+.. py:data:: CFG_ROLL_ENABLE
+   :annotation: = roll_enable
+
+   
+
+.. py:data:: CFG_ROLL_HIDE_ENABLE
+   :annotation: = roll_hide_enable
+
+   
+
+.. py:data:: CFG_ROLL_EXP_COST
+   :annotation: = roll_exp_cost
+
+   
+
+.. py:data:: MULTI_ROLL_LIMIT
+   :annotation: = 10
+
+   
+
+.. py:data:: DCP_USER_DATA_ROLL_A_UID
+   :annotation: = ['roll']
+
+   
+
+.. py:data:: DCP_GROUP_DATA_ROLL_A_GID
+   :annotation: = ['roll']
+
+   
+
+.. py:data:: DCP_ROLL_TIME_A_ID_ROLL
+   :annotation: = ['time']
+
+   
+
+.. py:data:: DCP_ROLL_D20_A_ID_ROLL
+   :annotation: = ['d20']
+
+   
+
+.. py:data:: DCK_ROLL_TODAY
+   :annotation: = today
+
+   
+
+.. py:data:: DCK_ROLL_TOTAL
+   :annotation: = total
+
+   
+
+.. py:class:: RollDiceCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   掷骰相关的指令, 以.r开头
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+
+.. py:function:: get_roll_exp_result(expression: roll_dice.RollExpression) -> str
+
+
+.. py:function:: get_d20_state_loc_text(bot: bot_core.Bot, res_list: List[roll_dice.RollResult])
+
+
+.. py:function:: record_roll_data(bot: bot_core.Bot, meta: command.dicepp_command.MessageMetaData, res_list: List[roll_dice.RollResult])
+
+   统计掷骰数据
+
+

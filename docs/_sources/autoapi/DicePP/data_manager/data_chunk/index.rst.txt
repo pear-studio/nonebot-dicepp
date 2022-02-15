@@ -1,0 +1,104 @@
+:py:mod:`DicePP.data_manager.data_chunk`
+========================================
+
+.. py:module:: DicePP.data_manager.data_chunk
+
+.. autoapi-nested-parse::
+
+   定义所需要的数据类型, 在DataManager中使用
+   自定义的DataChunk应当和需要它的方法一起定义, 但在此模块内定义也是可行的(不推荐)
+
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.data_manager.data_chunk.DataChunkBase
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.data_manager.data_chunk.custom_data_chunk
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.data_manager.data_chunk.DC_VERSION_LATEST
+   DicePP.data_manager.data_chunk.DATA_CHUNK_TYPES
+
+
+.. py:data:: DC_VERSION_LATEST
+   :annotation: = 1.0
+
+   
+
+.. py:class:: DataChunkBase
+
+   DataChunk是一次读取/更新文件的最小单位, 每个DataChunk子类都对应一个同名的持久化json文件
+   为了方便阅读和管理, 一个DataChunk应当包括某一类功能所需要的全部数据, 也不应包含太多或太少内容
+   不能拥有非基础类型, 自定义类型必须继承自DataManager.JsonObject! 否则无法序列化
+   例子: 保存20000条某类数据, 每条数据200字节, 大概就是4MB
+
+   .. py:attribute:: identifier
+      :annotation: = basic_data
+
+      
+
+   .. py:attribute:: include_json_object
+      :annotation: = False
+
+      
+
+   .. py:method:: get_identifier(cls)
+      :classmethod:
+
+      返回定位符, 由custom_data_chunk修饰符给出
+
+
+   .. py:method:: from_json(cls, json_dict)
+      :classmethod:
+
+      通过json格式的字符串反序列化生成一个实例并返回
+      Args:
+          json_dict: 以json格式字符串生成的字典
+      Returns:
+          obj: 生成的实例
+
+
+   .. py:method:: to_json(self) -> Dict
+
+      将自己的__dict__处理成一个字典并返回
+
+
+   .. py:method:: __hash__(self)
+
+      Return hash(self).
+
+
+
+.. py:data:: DATA_CHUNK_TYPES
+   :annotation: :List[Type[DataChunkBase]] = []
+
+   
+
+.. py:function:: custom_data_chunk(identifier: str, include_json_object=False)
+
+   类修饰器, 将自定义DataChunk注册到列表中
+   Args:
+       identifier: 一个字符串, 作为储存该DataChunk实例的名字, 应当是一个有区分度的名字, 不能含有空格, 也不能含有文件名中的非法字符
+       include_json_object: 是否会含有Json Object类型, 如果为否, 在序列化时不会进行检查
+
+

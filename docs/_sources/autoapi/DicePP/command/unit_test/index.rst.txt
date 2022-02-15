@@ -1,0 +1,197 @@
+:py:mod:`DicePP.command.unit_test`
+==================================
+
+.. py:module:: DicePP.command.unit_test
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.unit_test.MyTestCase
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.unit_test.main
+
+
+
+.. py:class:: MyTestCase(methodName='runTest')
+
+   Bases: :py:obj:`unittest.async_case.IsolatedAsyncioTestCase`
+
+   A class whose instances are single test cases.
+
+   By default, the test code itself should be placed in a method named
+   'runTest'.
+
+   If the fixture may be used for many test cases, create as
+   many test methods as are needed. When instantiating such a TestCase
+   subclass, specify in the constructor arguments the name of the test method
+   that the instance is to execute.
+
+   Test authors should subclass TestCase for their own tests. Construction
+   and deconstruction of the test's environment ('fixture') can be
+   implemented by overriding the 'setUp' and 'tearDown' methods respectively.
+
+   If it is necessary to override the __init__ method, the base class
+   __init__ method must always be called. It is important that subclasses
+   should not change the signature of their __init__ method, since instances
+   of the classes are instantiated automatically by parts of the framework
+   in order to be run.
+
+   When subclassing TestCase, you can set these attributes:
+   * failureException: determines which exception will be raised when
+       the instance's assertion methods fail; test methods raising this
+       exception will be deemed to have 'failed' rather than 'errored'.
+   * longMessage: determines whether long messages (including repr of
+       objects used in assert methods) will be printed on failure in *addition*
+       to any explicit message passed.
+   * maxDiff: sets the maximum length of a diff in failure messages
+       by assert methods using difflib. It is looked up as an instance
+       attribute so can be configured by individual tests if required.
+
+   .. py:attribute:: test_bot
+      
+
+      
+
+   .. py:attribute:: test_proxy
+      
+
+      
+
+   .. py:attribute:: test_index
+      :annotation: = 0
+
+      
+
+   .. py:method:: setUpClass(cls) -> None
+      :classmethod:
+
+      Hook method for setting up class fixture before running tests in the class.
+
+
+   .. py:method:: tearDownClass(cls) -> None
+      :classmethod:
+
+      Hook method for deconstructing the class fixture after running all tests in the class.
+
+
+   .. py:method:: setUp(self) -> None
+
+      Hook method for setting up the test fixture before exercising it.
+
+
+   .. py:method:: __vg_msg(self, msg: str, group_id: str = 'group', user_id: str = 'user', nickname: str = '测试用户', checker: Callable[[str], bool] = lambda s: True, is_show: bool = False, test_times=1, to_me: bool = False)
+      :async:
+
+      Validate Group Message Result
+
+
+   .. py:method:: __vp_msg(self, msg: str, user_id: str = 'user', nickname: str = '测试用户', checker: Callable[[str], bool] = lambda s: True, is_show: bool = False, test_times=1)
+      :async:
+
+      Validate Private Message Result
+
+
+   .. py:method:: __v_notice(self, notice: bot_core.NoticeData, checker: Callable[[str], bool] = lambda s: True, is_show: bool = False, test_times=1)
+      :async:
+
+      Validate Notice Result
+
+
+   .. py:method:: test_0_reboot(self)
+      :async:
+
+
+   .. py:method:: test_1_localization(self)
+      :async:
+
+
+   .. py:method:: test_1_roll_dice(self)
+      :async:
+
+
+   .. py:method:: test_2_activate(self)
+      :async:
+
+
+   .. py:method:: test_2_nickname(self)
+      :async:
+
+
+   .. py:method:: test_2_help(self)
+      :async:
+
+
+   .. py:method:: test_2_multi_command(self)
+      :async:
+
+
+   .. py:method:: test_2_define(self)
+      :async:
+
+
+   .. py:method:: test_2_variable(self)
+      :async:
+
+
+   .. py:method:: test_3_init(self)
+      :async:
+
+
+   .. py:method:: test_3_query(self)
+      :async:
+
+
+   .. py:method:: test_4_deck(self)
+      :async:
+
+
+   .. py:method:: test_4_utils(self)
+      :async:
+
+
+   .. py:method:: test_5_welcome(self)
+      :async:
+
+
+   .. py:method:: test_5_master(self)
+      :async:
+
+
+   .. py:method:: test_5_point(self)
+      :async:
+
+
+   .. py:method:: test_5_hp(self)
+      :async:
+
+
+   .. py:method:: test_6_char(self)
+      :async:
+
+
+   .. py:method:: test_7_hub(self)
+      :async:
+
+
+   .. py:method:: test_8_jrrp(self)
+      :async:
+
+
+
+.. py:function:: main()
+   :async:
+
+

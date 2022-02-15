@@ -1,0 +1,96 @@
+:py:mod:`DicePP.adapter.nonebot_adapter`
+========================================
+
+.. py:module:: DicePP.adapter.nonebot_adapter
+
+.. autoapi-nested-parse::
+
+   NoneBot API https://v2.nonebot.dev/api/plugin.html
+
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.adapter.nonebot_adapter.NoneBotClientProxy
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.adapter.nonebot_adapter.handle_command
+   DicePP.adapter.nonebot_adapter.handle_notice
+   DicePP.adapter.nonebot_adapter.handle_request
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.adapter.nonebot_adapter.command_matcher
+   DicePP.adapter.nonebot_adapter.notice_matcher
+   DicePP.adapter.nonebot_adapter.request_matcher
+   DicePP.adapter.nonebot_adapter.all_bots
+   DicePP.adapter.nonebot_adapter.driver
+
+
+.. py:data:: command_matcher
+   
+
+   
+
+.. py:data:: notice_matcher
+   
+
+   
+
+.. py:data:: request_matcher
+   
+
+   
+
+.. py:data:: all_bots
+   :annotation: :Dict[str, bot_core.Bot]
+
+   
+
+.. py:class:: NoneBotClientProxy(bot: nonebot.adapters.onebot.v11.bot.Bot)
+
+   Bases: :py:obj:`adapter.client_proxy.ClientProxy`
+
+   .. py:method:: process_bot_command(self, command: command.BotCommandBase)
+      :async:
+
+
+   .. py:method:: process_bot_command_list(self, command_list: List[command.BotCommandBase])
+      :async:
+
+
+
+.. py:function:: handle_command(bot: nonebot.adapters.onebot.v11.bot.Bot, event: nonebot.adapters.onebot.v11.event.MessageEvent)
+   :async:
+
+
+.. py:function:: handle_notice(bot: nonebot.adapters.onebot.v11.bot.Bot, event: nonebot.adapters.onebot.v11.event.NoticeEvent)
+   :async:
+
+
+.. py:function:: handle_request(bot: nonebot.adapters.onebot.v11.bot.Bot, event: nonebot.adapters.onebot.v11.event.RequestEvent)
+   :async:
+
+
+.. py:data:: driver
+   
+
+   
+

@@ -1,0 +1,54 @@
+:py:mod:`DicePP.roll_dice.roll_utils`
+=====================================
+
+.. py:module:: DicePP.roll_dice.roll_utils
+
+.. autoapi-nested-parse::
+
+   掷骰工具
+
+
+
+Module Contents
+---------------
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.roll_dice.roll_utils.roll_a_dice
+   DicePP.roll_dice.roll_utils.match_outer_parentheses
+   DicePP.roll_dice.roll_utils.remove_redundant_parentheses
+
+
+
+.. py:exception:: RollDiceError(info: str)
+
+   Bases: :py:obj:`Exception`
+
+   因为掷骰产生的异常, 说明操作失败的原因, 应当在上一级捕获
+
+   .. py:method:: __str__(self)
+
+      Return str(self).
+
+
+
+.. py:function:: roll_a_dice(dice_type: int) -> int
+
+   返回一颗dice_type面骰的结果
+
+
+.. py:function:: match_outer_parentheses(input_str: str) -> int
+
+   若输入字符串的第一个字符是(, 返回对应的)的索引. 若不存在对应的), 抛出一个ValueError. 若首字母不是(, 返回-1
+
+
+.. py:function:: remove_redundant_parentheses(input_str: str, readable: bool = True) -> str
+
+   递归地去掉字符串中一些冗余的括号, 字符串必须不包含空格, 即连接符紧跟着括号
+   readable为True则会尽可能少的清除括号, readable为False则会在保留数学正确性的情况下清除尽可能多的括号
+
+

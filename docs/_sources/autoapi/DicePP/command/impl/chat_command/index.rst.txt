@@ -1,0 +1,86 @@
+:py:mod:`DicePP.command.impl.chat_command`
+==========================================
+
+.. py:module:: DicePP.command.impl.chat_command
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.chat_command._
+   DicePP.command.impl.chat_command.ChatCommand
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.chat_command.get_default_chat_time
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.command.impl.chat_command.CFG_CHAT_INTER
+   DicePP.command.impl.chat_command.DC_CHAT_RECORD
+   DicePP.command.impl.chat_command.DCK_CHAT_TIME
+
+
+.. py:data:: CFG_CHAT_INTER
+   :annotation: = chat_interval
+
+   
+
+.. py:data:: DC_CHAT_RECORD
+   :annotation: = chat_record
+
+   
+
+.. py:data:: DCK_CHAT_TIME
+   :annotation: = time
+
+   
+
+.. py:class:: _
+
+   Bases: :py:obj:`data_manager.DataChunkBase`
+
+
+.. py:function:: get_default_chat_time(interval: int) -> str
+
+
+.. py:class:: ChatCommand(bot: bot_core.Bot)
+
+   Bases: :py:obj:`command.dicepp_command.UserCommandBase`
+
+   自定义对话指令
+
+   .. py:method:: can_process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData) -> Tuple[bool, bool, Any]
+
+
+   .. py:method:: process_msg(self, msg_str: str, meta: command.dicepp_command.MessageMetaData, hint: Any) -> List[command.bot_command.BotCommandBase]
+
+
+   .. py:method:: get_help(self, keyword: str, meta: command.dicepp_command.MessageMetaData) -> str
+
+
+   .. py:method:: get_description(self) -> str
+
+
+   .. py:method:: get_interval(self) -> int
+
+
+   .. py:method:: get_interval_delta(self) -> datetime.timedelta
+
+
+

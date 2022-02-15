@@ -1,0 +1,220 @@
+:py:mod:`DicePP.character.dnd5e.ability`
+========================================
+
+.. py:module:: DicePP.character.dnd5e.ability
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.character.dnd5e.ability.AbilityInfo
+
+
+
+
+Attributes
+~~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.character.dnd5e.ability.CHAR_INFO_KEY_LEVEL
+   DicePP.character.dnd5e.ability.CHAR_INFO_KEY_ABILITY
+   DicePP.character.dnd5e.ability.CHAR_INFO_KEY_PROF
+   DicePP.character.dnd5e.ability.CHAR_INFO_KEY_EXT
+   DicePP.character.dnd5e.ability.ability_list
+   DicePP.character.dnd5e.ability.ability_num
+   DicePP.character.dnd5e.ability.skill_list
+   DicePP.character.dnd5e.ability.skill_num
+   DicePP.character.dnd5e.ability.skill_parent_dict
+   DicePP.character.dnd5e.ability.skill_synonym_dict
+   DicePP.character.dnd5e.ability.saving_list
+   DicePP.character.dnd5e.ability.saving_num
+   DicePP.character.dnd5e.ability.saving_parent_dict
+   DicePP.character.dnd5e.ability.attack_list
+   DicePP.character.dnd5e.ability.attack_num
+   DicePP.character.dnd5e.ability.attack_parent_dict
+   DicePP.character.dnd5e.ability.check_item_list
+   DicePP.character.dnd5e.ability.check_item_num
+   DicePP.character.dnd5e.ability.check_item_index_dict
+   DicePP.character.dnd5e.ability.saving_all_key
+   DicePP.character.dnd5e.ability.attack_all_key
+   DicePP.character.dnd5e.ability.ext_item_list
+   DicePP.character.dnd5e.ability.ext_item_num
+   DicePP.character.dnd5e.ability.ext_item_index_dict
+
+
+.. py:data:: CHAR_INFO_KEY_LEVEL
+   :annotation: = $等级$
+
+   
+
+.. py:data:: CHAR_INFO_KEY_ABILITY
+   :annotation: = $属性$
+
+   
+
+.. py:data:: CHAR_INFO_KEY_PROF
+   :annotation: = $熟练$
+
+   
+
+.. py:data:: CHAR_INFO_KEY_EXT
+   :annotation: = $额外加值$
+
+   
+
+.. py:data:: ability_list
+   :annotation: = ['力量', '敏捷', '体质', '智力', '感知', '魅力']
+
+   
+
+.. py:data:: ability_num
+   
+
+   
+
+.. py:data:: skill_list
+   :annotation: = ['运动', '体操', '巧手', '隐匿', '先攻', '奥秘', '历史', '调查', '自然', '宗教', '驯兽', '洞悉', '医药', '察觉', '求生', '欺瞒',...
+
+   
+
+.. py:data:: skill_num
+   
+
+   
+
+.. py:data:: skill_parent_dict
+   
+
+   
+
+.. py:data:: skill_synonym_dict
+   
+
+   
+
+.. py:data:: saving_list
+   :annotation: = ['力量豁免', '敏捷豁免', '体质豁免', '智力豁免', '感知豁免', '魅力豁免']
+
+   
+
+.. py:data:: saving_num
+   
+
+   
+
+.. py:data:: saving_parent_dict
+   
+
+   
+
+.. py:data:: attack_list
+   :annotation: = ['力量攻击', '敏捷攻击', '体质攻击', '智力攻击', '感知攻击', '魅力攻击']
+
+   
+
+.. py:data:: attack_num
+   
+
+   
+
+.. py:data:: attack_parent_dict
+   
+
+   
+
+.. py:data:: check_item_list
+   
+
+   
+
+.. py:data:: check_item_num
+   
+
+   
+
+.. py:data:: check_item_index_dict
+   
+
+   
+
+.. py:data:: saving_all_key
+   :annotation: = 豁免
+
+   
+
+.. py:data:: attack_all_key
+   :annotation: = 攻击
+
+   
+
+.. py:data:: ext_item_list
+   
+
+   
+
+.. py:data:: ext_item_num
+   
+
+   
+
+.. py:data:: ext_item_index_dict
+   
+
+   
+
+.. py:class:: AbilityInfo
+
+   Bases: :py:obj:`data_manager.JsonObject`
+
+   .. py:method:: serialize(self) -> str
+
+
+   .. py:method:: deserialize(self, json_str: str) -> None
+
+
+   .. py:method:: initialize(self, level_str: str, ability_info_list: List[int], prof_list: List[str], ext_dict: Dict[str, str])
+
+      通过用户输入初始化属性, 初始化失败则抛出AssertionError
+      Args:
+          level_str: 正整数字符串, 代表等级
+          ability_info_list: 长度为6的正整数字符串列表, 代表六项属性
+          prof_list: 长度任意的字符串列表, 代表熟练的检定条目, 如["2*奥秘", "智力豁免"]代表奥秘有双倍熟练加值, 智力豁免拥有单倍熟练加值, 其余检定没有熟练加值
+          ext_dict: key为检定条目, value为对应检定的额外加值
+
+
+   .. py:method:: get_prof_bonus(self) -> int
+
+
+   .. py:method:: get_modifier(self, ability_index: int) -> int
+
+
+   .. py:method:: perform_check(self, check_name: str, advantage: int, mod_str: str) -> Tuple[str, str, int]
+
+      进行技能检定, 失败抛出AssertionError
+      Args:
+          check_name: 必须为skill_dict中的元素, 如: 力量/运动
+          advantage: 该次检定是否具有优势, 1为优势, -1为劣势, =0为无优无劣
+          mod_str: 该次检定的临时加值
+      Returns:
+          hint_str: 提示信息
+          result_str: 检定的计算过程
+          result_val: 检定结果
+
+
+   .. py:method:: get_char_info(self) -> str
+
+      返回可用来组合成初始化角色卡的字符串
+      例子:
+      $等级$ 5
+      $属性$ 10/11/12/15/12
+      $熟练$ 力量/2*隐匿/奥秘
+      $额外加值$ 运动:优势/隐匿:优势+2/游说:-2
+
+
+

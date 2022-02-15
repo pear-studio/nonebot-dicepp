@@ -1,0 +1,125 @@
+:py:mod:`DicePP.roll_dice.expression`
+=====================================
+
+.. py:module:: DicePP.roll_dice.expression
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.roll_dice.expression.RollExpression
+   DicePP.roll_dice.expression.RollExpressionXDY
+   DicePP.roll_dice.expression.RollExpressionInt
+   DicePP.roll_dice.expression.RollExpressionComplex
+
+
+
+Functions
+~~~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.roll_dice.expression.parse_roll_exp
+   DicePP.roll_dice.expression.preprocess_roll_exp
+   DicePP.roll_dice.expression.exec_roll_exp
+   DicePP.roll_dice.expression.is_roll_exp
+
+
+
+.. py:class:: RollExpression
+
+   投骰表达式基类
+
+   .. py:method:: get_result(self) -> roll_dice.result.RollResult
+      :abstractmethod:
+
+      Returns:
+          返回该掷骰表达式执行的结果
+
+
+
+.. py:class:: RollExpressionXDY(xdy_str: str)
+
+   Bases: :py:obj:`RollExpression`
+
+   基础表达式之一, 代表X个Y面骰
+
+   .. py:method:: get_result(self) -> roll_dice.result.RollResult
+
+      随机生成结果
+
+
+
+.. py:class:: RollExpressionInt(val: int)
+
+   Bases: :py:obj:`RollExpression`
+
+   基础表达式之一, 代表一个整数
+
+   .. py:method:: get_result(self) -> roll_dice.result.RollResult
+
+      返回之前定义的固定值
+
+
+
+.. py:class:: RollExpressionComplex
+
+   Bases: :py:obj:`RollExpression`
+
+   一个复杂表达式, 包含多个表达式, 修饰符, 连接符
+
+   .. py:method:: append_exp(self, con: roll_dice.connector.RollExpConnector, exp) -> None
+
+      添加一个掷骰表达式结果
+      Args:
+          exp: Type[RollResult]
+          con: Type[RollConnection]
+
+
+   .. py:method:: append_modifier(self, new_mod: roll_dice.modifier.RollExpModifier) -> None
+
+      添加一个掷骰修饰器
+      Args:
+          new_mod: Type[RollModifier]
+
+
+   .. py:method:: get_result(self) -> roll_dice.result.RollResult
+
+      从上至下递归地得到RollInfo
+
+
+
+.. py:function:: parse_roll_exp(input_str: str, depth: int = 0) -> RollExpression
+
+   解析掷骰表达式字符串
+
+   Args:
+       input_str: 掷骰表达式字符串, 格式说明:
+                       所有的字母都是大写; 不含空格和中文字符;
+                       不包含#(重复掷骰在函数外通过多次调用返回的RollExpression处理);
+       depth: 递归深度, 默认为0
+   Returns:
+       roll_exp: 解析后的表达式
+
+
+.. py:function:: preprocess_roll_exp(input_str: str) -> str
+
+   预处理掷骰表达式
+
+
+.. py:function:: exec_roll_exp(input_str: str) -> roll_dice.result.RollResult
+
+   根据输入执行一次掷骰表达式并返回结果
+   若需要重复执行多次同一掷骰表达式, 应当直接调用preprocess_roll_exp和parse_roll_exp并重复get_result
+
+
+.. py:function:: is_roll_exp(input_str: str) -> bool
+
+   如果输入一个合法的掷骰表达式, 返回True, 否则返回False
+
+

@@ -1,0 +1,15 @@
+:py:mod:`DicePP.character`
+==========================
+
+.. py:module:: DicePP.character
+
+
+Subpackages
+-----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 3
+
+   dnd5e/index.rst
+
+

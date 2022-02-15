@@ -1,0 +1,294 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DicePP.localization.helper &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-DicePP.localization.helper">
+<span id="dicepp-localization-helper"></span><h1><a class="reference internal" href="#module-DicePP.localization.helper" title="DicePP.localization.helper"><code class="xref py py-mod docutils literal notranslate"><span class="pre">DicePP.localization.helper</span></code></a><a class="headerlink" href="#module-DicePP.localization.helper" title="永久链接至标题">¶</a></h1>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="永久链接至标题">¶</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.localization.helper.LocalizationHelper" title="DicePP.localization.helper.LocalizationHelper"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LocalizationHelper</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="functions">
+<h3>Functions<a class="headerlink" href="#functions" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.localization.helper.save_loc_text_to_row" title="DicePP.localization.helper.save_loc_text_to_row"><code class="xref py py-obj docutils literal notranslate"><span class="pre">save_loc_text_to_row</span></code></a>(sheet: openpyxl.worksheet.worksheet, l_text: localization.localization_text.LocalizationText, row: int)</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.localization.helper.load_sheet_from_path" title="DicePP.localization.helper.load_sheet_from_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">load_sheet_from_path</span></code></a>(data_path: str, identifier: str, default_id: str = DEFAULT_ID) → (openpyxl.Workbook, openpyxl.worksheet.worksheet)</p></td>
+<td><p>若指定data_path无效或id无效, 返回None. 若id无效会尝试使用default_id, 一般用来得到读取的sheet</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.localization.helper.get_sheet_from_path" title="DicePP.localization.helper.get_sheet_from_path"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_sheet_from_path</span></code></a>(data_path: str, identifier: str) → (openpyxl.Workbook, openpyxl.worksheet.worksheet)</p></td>
+<td><p>若指定的data_path无效或id无效, 就创建新的workbook或worksheet. 一般用来得到写入的sheet</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="attributes">
+<h3>Attributes<a class="headerlink" href="#attributes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.localization.helper.LOCAL_FILE_PATH" title="DicePP.localization.helper.LOCAL_FILE_PATH"><code class="xref py py-obj docutils literal notranslate"><span class="pre">LOCAL_FILE_PATH</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.localization.helper.CHAT_FILE_PATH" title="DicePP.localization.helper.CHAT_FILE_PATH"><code class="xref py py-obj docutils literal notranslate"><span class="pre">CHAT_FILE_PATH</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.localization.helper.DEFAULT_ID" title="DicePP.localization.helper.DEFAULT_ID"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DEFAULT_ID</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.localization.helper.DEFAULT_CHAT_KEY" title="DicePP.localization.helper.DEFAULT_CHAT_KEY"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DEFAULT_CHAT_KEY</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.localization.helper.DEFAULT_CHAT_TEXT" title="DicePP.localization.helper.DEFAULT_CHAT_TEXT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DEFAULT_CHAT_TEXT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.localization.helper.DEFAULT_CHAT_COMMENT" title="DicePP.localization.helper.DEFAULT_CHAT_COMMENT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DEFAULT_CHAT_COMMENT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LOCAL_FILE_PATH">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">LOCAL_FILE_PATH</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">localization.xlsx</span></em><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LOCAL_FILE_PATH"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LOCAL_FILE_PATH" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.localization.helper.CHAT_FILE_PATH">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">CHAT_FILE_PATH</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">chat.xlsx</span></em><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#CHAT_FILE_PATH"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.CHAT_FILE_PATH" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.localization.helper.DEFAULT_ID">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">DEFAULT_ID</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">Default</span></em><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#DEFAULT_ID"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.DEFAULT_ID" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.localization.helper.DEFAULT_CHAT_KEY">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">DEFAULT_CHAT_KEY</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">^hi$</span></em><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#DEFAULT_CHAT_KEY"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.DEFAULT_CHAT_KEY" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.localization.helper.DEFAULT_CHAT_TEXT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">DEFAULT_CHAT_TEXT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">['Hello',</span> <span class="pre">&quot;G'Day&quot;]</span></em><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#DEFAULT_CHAT_TEXT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.DEFAULT_CHAT_TEXT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.localization.helper.DEFAULT_CHAT_COMMENT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">DEFAULT_CHAT_COMMENT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">可以使用正则表达式匹配,</span> <span class="pre">大小写不敏感;</span> <span class="pre">后面接着想要的回复,</span> <span class="pre">有多个回复则会随机选择一个</span></em><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#DEFAULT_CHAT_COMMENT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.DEFAULT_CHAT_COMMENT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">LocalizationHelper</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">identifier</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper" title="永久链接至目标">¶</a></dt>
+<dd><dl class="py method">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper.load_localization">
+<span class="sig-name descname"><span class="pre">load_localization</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper.load_localization"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper.load_localization" title="永久链接至目标">¶</a></dt>
+<dd><p>用xlsx里的配置覆写之前的本地化配置, 不存在本地文件时直接返回</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper.save_localization">
+<span class="sig-name descname"><span class="pre">save_localization</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper.save_localization"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper.save_localization" title="永久链接至目标">¶</a></dt>
+<dd><p>注意按多个机器人会读写同一个配置文件, 如果并行可能存在写冲突, 现在单线程异步没问题</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper.load_chat">
+<span class="sig-name descname"><span class="pre">load_chat</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper.load_chat"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper.load_chat" title="永久链接至目标">¶</a></dt>
+<dd><p>从xlsx中读取自定义对话文件</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper.save_chat">
+<span class="sig-name descname"><span class="pre">save_chat</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper.save_chat"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper.save_chat" title="永久链接至目标">¶</a></dt>
+<dd><p>注意多个机器人会读写同一个配置文件, 如果并行可能存在写冲突, 现在单线程异步没问题</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper.register_loc_text">
+<span class="sig-name descname"><span class="pre">register_loc_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">default_text</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">comment</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper.register_loc_text"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper.register_loc_text" title="永久链接至目标">¶</a></dt>
+<dd><p>将一个本地化语句注册至Helper中
+Args:</p>
+<blockquote>
+<div><p>key: 本地化语句的关键字
+default_text: 本地化语句的默认值
+comment: 对本地化语句的注释</p>
+</div></blockquote>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper.get_loc_text">
+<span class="sig-name descname"><span class="pre">get_loc_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="../localization_text/index.html#DicePP.localization.localization_text.LocalizationText" title="DicePP.localization.localization_text.LocalizationText"><span class="pre">localization.localization_text.LocalizationText</span></a></span></span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper.get_loc_text"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper.get_loc_text" title="永久链接至目标">¶</a></dt>
+<dd><p>获取本地化语句
+Args:</p>
+<blockquote>
+<div><p>key: 本地化语句的关键字</p>
+</div></blockquote>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper.format_loc_text">
+<span class="sig-name descname"><span class="pre">format_loc_text</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper.format_loc_text"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper.format_loc_text" title="永久链接至目标">¶</a></dt>
+<dd><p>格式化并返回本地化语句
+Args:</p>
+<blockquote>
+<div><p>key: 本地化语句的关键字
+<a href="#id1"><span class="problematic" id="id2">**</span></a>kwargs: 本地化语句需要的参数, 可以传不会用到的参数</p>
+</div></blockquote>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="DicePP.localization.helper.LocalizationHelper.process_chat">
+<span class="sig-name descname"><span class="pre">process_chat</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">self</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">msg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#LocalizationHelper.process_chat"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.LocalizationHelper.process_chat" title="永久链接至目标">¶</a></dt>
+<dd><dl class="simple">
+<dt>Args:</dt><dd><p>msg: 用户输入的语句
+<a href="#id3"><span class="problematic" id="id4">**</span></a>kwargs: 目前用不到</p>
+</dd>
+<dt>Returns:</dt><dd><p>如果msg能与任意自定义聊天关键字匹配, 返回一个随机回复, 否则返回空字符串</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.localization.helper.save_loc_text_to_row">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">save_loc_text_to_row</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sheet</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">openpyxl.worksheet.worksheet</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">l_text</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="../localization_text/index.html#DicePP.localization.localization_text.LocalizationText" title="DicePP.localization.localization_text.LocalizationText"><span class="pre">localization.localization_text.LocalizationText</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">row</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#save_loc_text_to_row"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.save_loc_text_to_row" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.localization.helper.load_sheet_from_path">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">load_sheet_from_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">identifier</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">default_id</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">DEFAULT_ID</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#load_sheet_from_path"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.load_sheet_from_path" title="永久链接至目标">¶</a></dt>
+<dd><p>若指定data_path无效或id无效, 返回None. 若id无效会尝试使用default_id, 一般用来得到读取的sheet</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.localization.helper.get_sheet_from_path">
+<span class="sig-prename descclassname"><span class="pre">DicePP.localization.helper.</span></span><span class="sig-name descname"><span class="pre">get_sheet_from_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">identifier</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../../../_modules/DicePP/localization/helper.html#get_sheet_from_path"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.localization.helper.get_sheet_from_path" title="永久链接至目标">¶</a></dt>
+<dd><p>若指定的data_path无效或id无效, 就创建新的workbook或worksheet. 一般用来得到写入的sheet</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/DicePP/localization/helper/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

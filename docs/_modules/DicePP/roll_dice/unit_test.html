@@ -1,0 +1,295 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DicePP.roll_dice.unit_test &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../_static/graphviz.css" />
+    <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+    <script src="../../../_static/jquery.js"></script>
+    <script src="../../../_static/underscore.js"></script>
+    <script src="../../../_static/doctools.js"></script>
+    <script src="../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>DicePP.roll_dice.unit_test 源代码</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">unittest</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Callable</span>
+
+<span class="kn">import</span> <span class="nn">roll_config</span>
+<span class="kn">from</span> <span class="nn">roll_dice.expression</span> <span class="kn">import</span> <span class="n">parse_roll_exp</span><span class="p">,</span> <span class="n">exec_roll_exp</span><span class="p">,</span> <span class="n">RollExpression</span><span class="p">,</span> <span class="n">preprocess_roll_exp</span>
+<span class="kn">from</span> <span class="nn">roll_dice.roll_utils</span> <span class="kn">import</span> <span class="n">match_outer_parentheses</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">,</span> <span class="n">RollDiceError</span>
+<span class="kn">from</span> <span class="nn">roll_dice</span> <span class="kn">import</span> <span class="n">RollResult</span>
+
+
+<div class="viewcode-block" id="MyTestCase"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/unit_test/index.html#DicePP.roll_dice.unit_test.MyTestCase">[文档]</a><span class="k">class</span> <span class="nc">MyTestCase</span><span class="p">(</span><span class="n">unittest</span><span class="o">.</span><span class="n">TestCase</span><span class="p">):</span>
+<div class="viewcode-block" id="MyTestCase.test_utils"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/unit_test/index.html#DicePP.roll_dice.unit_test.MyTestCase.test_utils">[文档]</a>    <span class="k">def</span> <span class="nf">test_utils</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;()&quot;</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;(ABC)&quot;</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;(A()A)&quot;</span><span class="p">),</span> <span class="mi">5</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;(AA)))&quot;</span><span class="p">),</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;()ABC&quot;</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;(1+2)+1&quot;</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;ABC&quot;</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="n">match_outer_parentheses</span><span class="p">(</span><span class="s2">&quot;ABC()&quot;</span><span class="p">),</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertRaises</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="n">match_outer_parentheses</span><span class="p">,</span> <span class="s2">&quot;(((&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertRaises</span><span class="p">(</span><span class="ne">ValueError</span><span class="p">,</span> <span class="n">match_outer_parentheses</span><span class="p">,</span> <span class="s2">&quot;(A(A(A))&quot;</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;()&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;ABC&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;(ABC)&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;ABC&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;((ABC))&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;1+2&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;(1)+(2)&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;1+2&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;(1+2)&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;(1+2)+2&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;(1+2)+2&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;(1+2)*2&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;(1+2)*2&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;(A+B)*C&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;(A+B)*C&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;(A*B)+C&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;(A*B)+C&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;C*(A+B)&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;C*(A+B)&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;C+(A*B)&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;C+(A*B)&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;A*((A*B)+C)&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;A*((A*B)+C)&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;A+((A*B)+C)&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;A+((A*B)+C)&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;A+((A*B)+C)&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;A+((A*B)+C)&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;A+(A+B)+C&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;A+(A+B)+C&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;A+(A*B)+C&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;A+(A*B)+C&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;A+(A+B)*C&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;A+(A+B)*C&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;A*(A+B)+C&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;A*(A+B)+C&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertEqual</span><span class="p">(</span><span class="s2">&quot;max{max2{+(5+14+5+12)}}&quot;</span><span class="p">,</span> <span class="n">remove_redundant_parentheses</span><span class="p">(</span><span class="s2">&quot;max{max2{+(5+14+5+12)}}&quot;</span><span class="p">))</span></div>
+
+<div class="viewcode-block" id="MyTestCase.__show_exec_res"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/unit_test/index.html#DicePP.roll_dice.unit_test.MyTestCase.__show_exec_res">[文档]</a>    <span class="k">def</span> <span class="nf">__show_exec_res</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exp_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">checker</span><span class="p">:</span> <span class="n">Callable</span><span class="p">[[</span><span class="nb">str</span><span class="p">],</span> <span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+            <span class="n">exec_roll_exp</span><span class="p">(</span><span class="n">exp_str</span><span class="p">)</span>
+        <span class="n">res</span> <span class="o">=</span> <span class="n">exec_roll_exp</span><span class="p">(</span><span class="n">exp_str</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertIsNotNone</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Values: </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">val_list</span><span class="si">}</span><span class="s2"> </span><span class="se">\t</span><span class="s2">Info: </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">get_info</span><span class="p">()</span><span class="si">}</span><span class="s2"> </span><span class="se">\t</span><span class="s2">Type: </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">type</span><span class="si">}</span><span class="s2"> </span><span class="se">\t</span><span class="s2">Expression: </span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">get_exp</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">output</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Final Output: </span><span class="se">\033</span><span class="s2">[0;33m</span><span class="si">{</span><span class="n">res</span><span class="o">.</span><span class="n">get_complete_result</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Origin Exp: </span><span class="se">\033</span><span class="s2">[0;32m</span><span class="si">{</span><span class="n">exp_str</span><span class="si">}</span><span class="s2"> </span><span class="se">\033</span><span class="s2">[0m</span><span class="se">\t</span><span class="si">{</span><span class="n">output</span><span class="si">}</span><span class="s2">&quot;</span>
+
+        <span class="k">if</span> <span class="n">checker</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="n">checker</span><span class="p">(</span><span class="n">res</span><span class="o">.</span><span class="n">get_complete_result</span><span class="p">()),</span> <span class="n">output</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\t\t</span><span class="s2">--- Check Result ---&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">output</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MyTestCase.__show_exception"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/unit_test/index.html#DicePP.roll_dice.unit_test.MyTestCase.__show_exception">[文档]</a>    <span class="k">def</span> <span class="nf">__show_exception</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exp_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertRaises</span><span class="p">(</span><span class="n">RollDiceError</span><span class="p">,</span> <span class="n">exec_roll_exp</span><span class="p">,</span> <span class="n">exp_str</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">exec_roll_exp</span><span class="p">(</span><span class="n">exp_str</span><span class="p">)</span>
+        <span class="k">except</span> <span class="n">RollDiceError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\t\t</span><span class="s2">--- Check Exception ---&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Origin Exp: </span><span class="se">\033</span><span class="s2">[0;35m</span><span class="si">{</span><span class="n">exp_str</span><span class="si">}</span><span class="s2"> </span><span class="se">\t\033</span><span class="s2">[0;33m</span><span class="si">{</span><span class="n">e</span><span class="o">.</span><span class="n">info</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MyTestCase.test_basic_roll"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/unit_test/index.html#DicePP.roll_dice.unit_test.MyTestCase.test_basic_roll">[文档]</a>    <span class="k">def</span> <span class="nf">test_basic_roll</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># 基础情况</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1D20&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;1D20&quot;</span> <span class="ow">and</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="mi">20</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;3D20&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;D&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;1D20&quot;</span> <span class="ow">and</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="mi">20</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1D&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;1D20&quot;</span> <span class="ow">and</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="mi">20</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;D4&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;1D4&quot;</span> <span class="ow">and</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="s2">&quot;1&quot;</span> <span class="o">==</span> <span class="n">s</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;+1D20&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;1D20&quot;</span> <span class="ow">and</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="mi">20</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;-1D20&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;-1D20&quot;</span> <span class="ow">and</span> <span class="o">-</span><span class="mi">20</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># 基础运算</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1D20+1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1D20-1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;3D20*2&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;3D20/2&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1+1D20&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1-1D20&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;2*3D20&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;2/3D20&quot;</span><span class="p">)</span>
+
+        <span class="c1"># connector</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1-1-1&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;-1&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1+1-1&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;1&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1-1+1&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;1&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;5/2+3/2&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;3&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1+2*2&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;5&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1*2+2&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;4&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1-1+1-1&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;0&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1+1-1+1&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 带空格和中文字符情况 (由于判断指令中表达式和掷骰原因的问题去掉了过滤空格的代码)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1d20&quot;</span><span class="p">,</span> <span class="n">checker</span><span class="o">=</span><span class="k">lambda</span> <span class="n">s</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;1D20&quot;</span> <span class="ow">and</span> <span class="mi">1</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">])</span> <span class="o">&lt;=</span> <span class="mi">20</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;d20＋1&quot;</span><span class="p">)</span>
+        <span class="c1"># self.__show_exec_res(&quot; 1 D 2 0 &quot;)</span>
+        <span class="c1"># self.__show_exec_res(&quot;1D20 ＋ 1&quot;)</span>
+
+        <span class="c1"># 带修饰符情况</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;2D20k1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;1D20K2&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;4D20k2kl1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;4D20r&lt;10&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;4D20x&lt;10&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;4D20xo&lt;10&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;4D20r&lt;10x&gt;10&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;4D20x&gt;10r&lt;10&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;D20cs&gt;5&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;10D20cs&gt;10&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;5+10D20cs&gt;10+5&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;10D20kl5cs&gt;10&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 带括号</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;(1+2)&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;(1+2)*2&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;(D20)*2&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;(1+D20)*2&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;((1+D20))*2&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;(D20)&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;(D20)*(D20)&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 优势与劣势</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;D20优势&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;D20劣势+1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;D20劣势+1+D优势&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;2D20优势&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;2D20优势+1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;1+20优势&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 抗性与易伤</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;D20+2抗性&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;5抗性&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exec_res</span><span class="p">(</span><span class="s2">&quot;2D4+D20易伤&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;抗性&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;+抗性&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 非法输入</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;()&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;1D(20)&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;(1)D20&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;1(D)20&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;1+++1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;1+1+&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;+&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;*&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;(D20&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;D20)&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;(D20)+(1&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;((D20)+1))))&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="s2">&quot;(10D20+5)cs&gt;10&quot;</span><span class="p">)</span>
+
+        <span class="c1"># 边界条件</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;1D</span><span class="si">{</span><span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_TYPE_MAX</span> <span class="o">+</span> <span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_NUM_MAX</span> <span class="o">+</span> <span class="mi">1</span><span class="si">}</span><span class="s2">D20&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_CONSTANT_MIN</span> <span class="o">-</span> <span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">__show_exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">roll_config</span><span class="o">.</span><span class="n">DICE_CONSTANT_MAX</span> <span class="o">+</span> <span class="mi">1</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span></div>
+
+<div class="viewcode-block" id="MyTestCase.test_d20_state"><a class="viewcode-back" href="../../../autoapi/DicePP/roll_dice/unit_test/index.html#DicePP.roll_dice.unit_test.MyTestCase.test_d20_state">[文档]</a>    <span class="k">def</span> <span class="nf">test_d20_state</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># 测试大成功或大失败是否可以生效</span>
+        <span class="k">def</span> <span class="nf">repeat_until_checked</span><span class="p">(</span><span class="n">exp_str</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+            <span class="n">exp</span><span class="p">:</span> <span class="n">RollExpression</span> <span class="o">=</span> <span class="n">parse_roll_exp</span><span class="p">(</span><span class="n">preprocess_roll_exp</span><span class="p">(</span><span class="n">exp_str</span><span class="p">))</span>
+            <span class="n">has_succ</span><span class="p">,</span> <span class="n">has_fail</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span> <span class="kc">False</span>
+            <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2000</span><span class="p">):</span>
+                <span class="n">res</span><span class="p">:</span> <span class="n">RollResult</span> <span class="o">=</span> <span class="n">exp</span><span class="o">.</span><span class="n">get_result</span><span class="p">()</span>
+                <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">d20_num</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                    <span class="k">if</span> <span class="n">res</span><span class="o">.</span><span class="n">d20_state</span> <span class="o">==</span> <span class="mi">20</span><span class="p">:</span>
+                        <span class="n">has_succ</span> <span class="o">=</span> <span class="kc">True</span>
+                    <span class="k">elif</span> <span class="n">res</span><span class="o">.</span><span class="n">d20_state</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                        <span class="n">has_fail</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">if</span> <span class="n">has_succ</span> <span class="ow">and</span> <span class="n">has_fail</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="kc">True</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="n">repeat_until_checked</span><span class="p">(</span><span class="s2">&quot;D20&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="n">repeat_until_checked</span><span class="p">(</span><span class="s2">&quot;2D20KL1&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="n">repeat_until_checked</span><span class="p">(</span><span class="s2">&quot;2D20K1&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="n">repeat_until_checked</span><span class="p">(</span><span class="s2">&quot;1D20K3&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="n">repeat_until_checked</span><span class="p">(</span><span class="s2">&quot;1D4+1D20+20&quot;</span><span class="p">))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="ow">not</span> <span class="n">repeat_until_checked</span><span class="p">(</span><span class="s2">&quot;2D20&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="ow">not</span> <span class="n">repeat_until_checked</span><span class="p">(</span><span class="s2">&quot;4D20K3&quot;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">assertTrue</span><span class="p">(</span><span class="ow">not</span> <span class="n">repeat_until_checked</span><span class="p">(</span><span class="s2">&quot;D20+D20&quot;</span><span class="p">))</span></div></div>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s1">&#39;__main__&#39;</span><span class="p">:</span>
+    <span class="n">unittest</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../autoapi/index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../index.html">Documentation overview</a><ul>
+  <li><a href="../../index.html">模块代码</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

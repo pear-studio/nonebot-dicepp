@@ -1,0 +1,28 @@
+:py:mod:`DicePP.bot_core.message`
+=================================
+
+.. py:module:: DicePP.bot_core.message
+
+
+Module Contents
+---------------
+
+Classes
+~~~~~~~
+
+.. autoapisummary::
+
+   DicePP.bot_core.message.MessageSender
+   DicePP.bot_core.message.MessageMetaData
+
+
+
+
+.. py:class:: MessageSender(user_id: str, nickname: str)
+
+
+.. py:class:: MessageMetaData(plain_msg: str, raw_msg: str, sender: MessageSender, group_id: str = '', to_me: bool = False)
+
+   包含了一条消息的元信息
+
+

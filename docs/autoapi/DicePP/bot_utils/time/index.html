@@ -1,0 +1,202 @@
+
+<!DOCTYPE html>
+
+<html lang="zh_CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.17.1: http://docutils.sourceforge.net/" />
+
+    <title>DicePP.bot_utils.time &#8212; demo 0.0.1 文档</title>
+    <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/alabaster.css" />
+    <link rel="stylesheet" type="text/css" href="../../../../_static/graphviz.css" />
+    <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+    <script src="../../../../_static/jquery.js"></script>
+    <script src="../../../../_static/underscore.js"></script>
+    <script src="../../../../_static/doctools.js"></script>
+    <script src="../../../../_static/translations.js"></script>
+    <link rel="index" title="索引" href="../../../../genindex.html" />
+    <link rel="search" title="搜索" href="../../../../search.html" />
+   
+  <link rel="stylesheet" href="../../../../_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="module-DicePP.bot_utils.time">
+<span id="dicepp-bot-utils-time"></span><h1><a class="reference internal" href="#module-DicePP.bot_utils.time" title="DicePP.bot_utils.time"><code class="xref py py-mod docutils literal notranslate"><span class="pre">DicePP.bot_utils.time</span></code></a><a class="headerlink" href="#module-DicePP.bot_utils.time" title="永久链接至标题">¶</a></h1>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="永久链接至标题">¶</a></h2>
+<section id="functions">
+<h3>Functions<a class="headerlink" href="#functions" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.bot_utils.time.get_current_date_str" title="DicePP.bot_utils.time.get_current_date_str"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_current_date_str</span></code></a>() → str</p></td>
+<td><p>返回以字符串表示的当前北京时间</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.bot_utils.time.get_current_date_raw" title="DicePP.bot_utils.time.get_current_date_raw"><code class="xref py py-obj docutils literal notranslate"><span class="pre">get_current_date_raw</span></code></a>() → datetime</p></td>
+<td><p>返回datetime格式的当前北京时间</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.bot_utils.time.str_to_datetime" title="DicePP.bot_utils.time.str_to_datetime"><code class="xref py py-obj docutils literal notranslate"><span class="pre">str_to_datetime</span></code></a>(input_str: str) → datetime</p></td>
+<td><p>将字符串表示的时间转换为datetime格式, 字符串格式由DATE_STR_FORMAT定义, 默认是%Y_%m_%d_%H_%M_%S</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.bot_utils.time.datetime_to_str" title="DicePP.bot_utils.time.datetime_to_str"><code class="xref py py-obj docutils literal notranslate"><span class="pre">datetime_to_str</span></code></a>(input_datetime: datetime) → str</p></td>
+<td><p>将datetime转换为字符串, 字符串格式由DATE_STR_FORMAT定义, 默认是%Y_%m_%d_%H_%M_%S</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.bot_utils.time.datetime_to_str_day" title="DicePP.bot_utils.time.datetime_to_str_day"><code class="xref py py-obj docutils literal notranslate"><span class="pre">datetime_to_str_day</span></code></a>(input_datetime: datetime) → str</p></td>
+<td><p>将datetime转换为字符串, 字符串格式由DATE_STR_FORMAT_DAY定义, 默认是%Y_%m_%d</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="attributes">
+<h3>Attributes<a class="headerlink" href="#attributes" title="永久链接至标题">¶</a></h3>
+<table class="longtable docutils align-default">
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 90%" />
+</colgroup>
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.bot_utils.time.china_tz" title="DicePP.bot_utils.time.china_tz"><code class="xref py py-obj docutils literal notranslate"><span class="pre">china_tz</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#DicePP.bot_utils.time.DATE_STR_FORMAT" title="DicePP.bot_utils.time.DATE_STR_FORMAT"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DATE_STR_FORMAT</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#DicePP.bot_utils.time.DATE_STR_FORMAT_DAY" title="DicePP.bot_utils.time.DATE_STR_FORMAT_DAY"><code class="xref py py-obj docutils literal notranslate"><span class="pre">DATE_STR_FORMAT_DAY</span></code></a></p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.bot_utils.time.china_tz">
+<span class="sig-prename descclassname"><span class="pre">DicePP.bot_utils.time.</span></span><span class="sig-name descname"><span class="pre">china_tz</span></span><a class="reference internal" href="../../../../_modules/DicePP/bot_utils/time.html#china_tz"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.bot_utils.time.china_tz" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.bot_utils.time.DATE_STR_FORMAT">
+<span class="sig-prename descclassname"><span class="pre">DicePP.bot_utils.time.</span></span><span class="sig-name descname"><span class="pre">DATE_STR_FORMAT</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">%Y_%m_%d_%H_%M_%S</span></em><a class="reference internal" href="../../../../_modules/DicePP/bot_utils/time.html#DATE_STR_FORMAT"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.bot_utils.time.DATE_STR_FORMAT" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py data">
+<dt class="sig sig-object py" id="DicePP.bot_utils.time.DATE_STR_FORMAT_DAY">
+<span class="sig-prename descclassname"><span class="pre">DicePP.bot_utils.time.</span></span><span class="sig-name descname"><span class="pre">DATE_STR_FORMAT_DAY</span></span><em class="property"><span class="w"> </span><span class="pre">=</span> <span class="pre">%Y_%m_%d</span></em><a class="reference internal" href="../../../../_modules/DicePP/bot_utils/time.html#DATE_STR_FORMAT_DAY"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.bot_utils.time.DATE_STR_FORMAT_DAY" title="永久链接至目标">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.bot_utils.time.get_current_date_str">
+<span class="sig-prename descclassname"><span class="pre">DicePP.bot_utils.time.</span></span><span class="sig-name descname"><span class="pre">get_current_date_str</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/bot_utils/time.html#get_current_date_str"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.bot_utils.time.get_current_date_str" title="永久链接至目标">¶</a></dt>
+<dd><p>返回以字符串表示的当前北京时间</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.bot_utils.time.get_current_date_raw">
+<span class="sig-prename descclassname"><span class="pre">DicePP.bot_utils.time.</span></span><span class="sig-name descname"><span class="pre">get_current_date_raw</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">datetime</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/bot_utils/time.html#get_current_date_raw"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.bot_utils.time.get_current_date_raw" title="永久链接至目标">¶</a></dt>
+<dd><p>返回datetime格式的当前北京时间
+Returns:</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.bot_utils.time.str_to_datetime">
+<span class="sig-prename descclassname"><span class="pre">DicePP.bot_utils.time.</span></span><span class="sig-name descname"><span class="pre">str_to_datetime</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_str</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">datetime</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/bot_utils/time.html#str_to_datetime"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.bot_utils.time.str_to_datetime" title="永久链接至目标">¶</a></dt>
+<dd><p>将字符串表示的时间转换为datetime格式, 字符串格式由DATE_STR_FORMAT定义, 默认是%Y_%m_%d_%H_%M_%S</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.bot_utils.time.datetime_to_str">
+<span class="sig-prename descclassname"><span class="pre">DicePP.bot_utils.time.</span></span><span class="sig-name descname"><span class="pre">datetime_to_str</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_datetime</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">datetime</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/bot_utils/time.html#datetime_to_str"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.bot_utils.time.datetime_to_str" title="永久链接至目标">¶</a></dt>
+<dd><p>将datetime转换为字符串, 字符串格式由DATE_STR_FORMAT定义, 默认是%Y_%m_%d_%H_%M_%S</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="DicePP.bot_utils.time.datetime_to_str_day">
+<span class="sig-prename descclassname"><span class="pre">DicePP.bot_utils.time.</span></span><span class="sig-name descname"><span class="pre">datetime_to_str_day</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">input_datetime</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">datetime</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">str</span></span></span><a class="reference internal" href="../../../../_modules/DicePP/bot_utils/time.html#datetime_to_str_day"><span class="viewcode-link"><span class="pre">[源代码]</span></span></a><a class="headerlink" href="#DicePP.bot_utils.time.datetime_to_str_day" title="永久链接至目标">¶</a></dt>
+<dd><p>将datetime转换为字符串, 字符串格式由DATE_STR_FORMAT_DAY定义, 默认是%Y_%m_%d</p>
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../../../index.html">demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>导航</h3>
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../index.html">API Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../../../index.html">Documentation overview</a><ul>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">快速搜索</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="转向" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2022, to.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 4.4.0</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="../../../../_sources/autoapi/DicePP/bot_utils/time/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

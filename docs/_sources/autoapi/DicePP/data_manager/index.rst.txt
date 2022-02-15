@@ -1,0 +1,18 @@
+:py:mod:`DicePP.data_manager`
+=============================
+
+.. py:module:: DicePP.data_manager
+
+
+Submodules
+----------
+.. toctree::
+   :titlesonly:
+   :maxdepth: 1
+
+   data_chunk/index.rst
+   json_object/index.rst
+   manager/index.rst
+   unit_test/index.rst
+
+
