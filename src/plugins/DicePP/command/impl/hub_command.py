@@ -30,6 +30,7 @@ CFG_HUB_ENABLE = "dicehub_enable"
 HUB_MSG_LABEL = "dicehub"
 HUB_MSG_SEP = "%%"
 HUB_MSG_TYPE_M_CONNECT = "connect"
+HUB_MSG_TYPE_M_SYNC = "sync"
 HUB_MSG_TYPE_U_INSPECT = "list"
 HUB_MSG_TYPE_MSG = "$msg"
 HUB_MSG_TYPE_SLICE_HEAD = "$slice_head"
@@ -41,7 +42,7 @@ HUB_MSG_TYPE_REQ_REROUTE = "$req_reroute"
 HUB_MSG_TYPE_REQ_CARD = SYNC_CONFIRM_TYPE_REQ_CARD  # "$req_card"
 HUB_MSG_TYPE_SYNC_CONFIRM = SYNC_CONFIRM_TYPE_DONE  # "$sync_done"
 
-HUB_MSG_TYPE_M_LIST = [HUB_MSG_TYPE_M_CONNECT]
+HUB_MSG_TYPE_M_LIST = [HUB_MSG_TYPE_M_CONNECT, HUB_MSG_TYPE_M_SYNC]
 HUB_MSG_TYPE_U_LIST = [HUB_MSG_TYPE_U_INSPECT]
 HUB_MSG_TYPE_LIST = [HUB_MSG_TYPE_MSG,
                      HUB_MSG_TYPE_SLICE_HEAD, HUB_MSG_TYPE_SLICE_BODY,
@@ -52,7 +53,7 @@ HUB_MSG_TYPE_LIST = [HUB_MSG_TYPE_MSG,
 RAND_INTERVAL_MIN = 4
 RAND_INTERVAL_MAX = 10
 
-FORCE_SLICE_LEN = 200  # 超过该长度则强制分片
+FORCE_SLICE_LEN = 2000  # 超过该长度则强制分片
 SLICE_HASH_LEN = 8  # 分片校验哈希的最大长度
 SLICE_INDEX_LEN = 2  # 分片索引的最大长度, 为2则最多有100个分片Body
 SLICE_INDEX_MAX = int("9" * SLICE_INDEX_LEN) + 1
@@ -239,6 +240,22 @@ class HubCommand(UserCommandBase):
                 command_list.append(BotSendMsgCommand(self.bot.account, connect_msg, [PrivateMessagePort(target_id)]))
                 command_list.append(BotDelayCommand(self.bot.account, get_random_delay()))  # 随机等待一段时间降低风险
                 command_list.append(BotSendMsgCommand(self.bot.account, req_card_msg, [PrivateMessagePort(target_id)]))
+            elif command_type == HUB_MSG_TYPE_M_SYNC:
+                try:
+                    max_num = int(command_info)
+                    assert 50 > max_num > 0
+                except (ValueError, AssertionError):
+                    max_num = 10
+                sync_remote_list, sync_info = self.bot.hub_manager.fetch_sync_data(max_num=max_num, force_sync=True)
+                command_list.append(BotSendMsgCommand(self.bot.account, f"开始发起{len(sync_remote_list)}次同步请求, 对象:{sync_remote_list}", [port]))
+                if sync_remote_list and sync_info:
+                    ports = [PrivateMessagePort(remote_id) for remote_id in sync_remote_list]
+                    sync_info = format_hub_msg(HUB_MSG_TYPE_UPDATE, sync_info)
+                    for remote_port in ports:
+                        command_list.append(BotDelayCommand(self.bot.account, get_random_delay()))  # 随机等待一段时间降低风险
+                        command_list.append(BotSendMsgCommand(self.bot.account, sync_info, [remote_port]))
+                command_list.append(BotDelayCommand(self.bot.account, get_random_delay()))  # 随机等待一段时间降低风险
+                command_list.append(BotSendMsgCommand(self.bot.account, f"已完成{len(sync_remote_list)}次同步请求", [port]))
         elif command_type in HUB_MSG_TYPE_U_LIST:
             if command_type == HUB_MSG_TYPE_U_INSPECT:
                 is_full = "-l" in command_info

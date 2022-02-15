@@ -43,7 +43,7 @@ def standardize_sync_info(sync_info_new: Dict) -> Dict:
         SYNC_KEY_NAME: sync_info_new.get(SYNC_KEY_NAME, "NONE"),
         SYNC_KEY_MASTER: sync_info_new.get(SYNC_KEY_MASTER, "NONE"),
         SYNC_KEY_VERSION: sync_info_new.get(SYNC_KEY_VERSION, "NONE"),
-        SYNC_KEY_FRIEND_TOKEN: sync_info_new.get(SYNC_KEY_FRIEND_TOKEN, []),
+        SYNC_KEY_FRIEND_TOKEN: sync_info_new.get(SYNC_KEY_FRIEND_TOKEN, ["NONE"]),
         SYNC_KEY_ONLINE_FIRST: sync_info_new.get(SYNC_KEY_ONLINE_FIRST, get_current_date_str()),
         SYNC_KEY_ONLINE_RATE: sync_info_new.get(SYNC_KEY_ONLINE_RATE, 0),
         SYNC_KEY_MSG_TOTAL: sync_info_new.get(SYNC_KEY_MSG_TOTAL, 0),
@@ -153,7 +153,7 @@ class HubManager:
             friend_info.initialize(remote_id, nickname, master, version)
         self.bot.data_manager.set_data(DC_HUB, [DCK_HUB_FRIEND, remote_id], friend_info)
 
-    def fetch_sync_data(self, max_num: int = 10) -> Tuple[List[str], str]:
+    def fetch_sync_data(self, max_num: int = 10, force_sync: bool = False) -> Tuple[List[str], str]:
         """返回需要向远端同步的远端列表与同步信息"""
         remote_list: List[str] = []
         sync_data: str = ""
@@ -166,8 +166,8 @@ class HubManager:
         remote_sync_list = [(remote_id, str_to_datetime(friend_info.sync_time), friend_info.sync_fail_times)
                             for remote_id, friend_info in friend_dict.items() if friend_info.distance == 0]
         # 同步间隔 = 最小同步间隔 * (失败次数+1)^2
-        remote_sync_list = [(x[0], x[1]) for x in remote_sync_list if
-                            current_time - x[1] > (datetime.timedelta(seconds=SYNC_INTERVAL_MIN) * ((x[2]+1)**2))]
+        remote_sync_list = [(x[0], x[1]) for x in remote_sync_list if force_sync or
+                            current_time - x[1] > (datetime.timedelta(seconds=SYNC_INTERVAL_MIN * (2**max(0, x[2]-1))))]
         remote_sync_list = sorted(remote_sync_list, key=lambda x: x[1])[:max_num]
         if not remote_sync_list:
             return remote_list, sync_data
