@@ -5,7 +5,7 @@ from bot_core.dicebot import Bot
 from command.command_config import *
 from command.dicepp_command import UserCommandBase, custom_user_command, MessageMetaData
 from command.bot_command import BotCommandBase, PrivateMessagePort, GroupMessagePort, BotSendMsgCommand
-from bot_utils import time
+from bot_utils.time import datetime_to_str_day, get_current_date_raw, datetime_to_str
 
 LOC_JRRP = "jrrp"
 
@@ -25,11 +25,12 @@ class JrrpCommand(UserCommandBase):
     def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
-        date_str: str = time.datetime_to_str_day(time.get_current_date_raw())
+        date_str: str = datetime_to_str_day(get_current_date_raw())
         seed_str: str = date_str + meta.user_id  # 拼接形成一个固定的seed
 
         random.seed(seed_str)
         jrrp: str = str(random.randint(1, 100))  # 根据上面的seed获取确定值
+        random.seed(datetime_to_str(get_current_date_raw()))
 
         user_name: str = self.bot.get_nickname(meta.user_id, meta.group_id)
         feedback: str = self.format_loc(LOC_JRRP, name=user_name, jrrp=jrrp)
