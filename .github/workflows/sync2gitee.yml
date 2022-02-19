@@ -3,7 +3,7 @@ name: sync2gitee
 on:
   push:
     branches:
-      - master
+      - manager
 jobs:
   repo-sync:
     env:
@@ -17,7 +17,7 @@ jobs:
           persist-credentials: false
 
       - name: sync github -> gitee
-        uses: Yikun/hub-mirror-action@master
+        uses: Yikun/hub-mirror-action@manager
         if: env.dst_key && env.dst_token && env.gitee_user
         with:
           # 必选，需要同步的 Github 用户（源）

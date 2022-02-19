@@ -1,7 +1,7 @@
 import abc
 from typing import List
 
-from command import BotCommandBase
+from core.command import BotCommandBase
 
 
 class ClientProxy(metaclass=abc.ABCMeta):

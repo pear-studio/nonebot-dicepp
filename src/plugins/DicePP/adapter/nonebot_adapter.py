@@ -13,12 +13,12 @@ from nonebot.adapters.onebot.v11.event import RequestEvent, FriendRequestEvent, 
 from nonebot.adapters.onebot.v11.bot import Bot as NoneBot
 from nonebot.adapters.onebot.v11 import Message as CQMessage
 
-from bot_core import Bot as DicePPBot
-from bot_core import MessageMetaData, MessageSender
-from bot_core import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
-from bot_core import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
-from command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand
-from logger import dice_log
+from core.bot import Bot as DicePPBot
+from core.communication import MessageMetaData, MessageSender
+from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
+from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
+from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand
+from utils.logger import dice_log
 
 from adapter.client_proxy import ClientProxy
 
