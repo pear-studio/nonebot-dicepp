@@ -120,12 +120,6 @@ class InitiativeCommand(UserCommandBase):
             else:
                 return [BotSendMsgCommand(self.bot.account, "掷骰表达式无效", [port])]
 
-            # 得到先攻结果
-            try:
-                roll_exp: RollExpression = parse_roll_exp(preprocess_roll_exp(exp_str))
-            except RollDiceError as e:  # 无效的掷骰表达式
-                return [BotSendMsgCommand(self.bot.account, e.info, [port])]
-
             # 如果没有设置名称, 说明用自己的昵称, 否则是NPC
             owner_id = ""
             if not name:
@@ -136,6 +130,39 @@ class InitiativeCommand(UserCommandBase):
             name_dict: Dict[str, RollResult] = {}
             for n in name.split("/"):  # 对于 .ri 地精/大地精 这种情况
                 n = n.strip()
+
+                final_exp_str = exp_str  # 处理 .ri 地精+1/地精优势这种情况
+                if ("优势" in n and not n.startswith("优势")) or ("劣势" in n and not n.startswith("劣势")):  # 处理额外优劣势
+                    if "优势" in n:
+                        if "d20优势" in final_exp_str:
+                            pass
+                        elif "d20劣势" in final_exp_str:
+                            final_exp_str = final_exp_str.replace("d20劣势", "d20", 1)
+                        elif "d20" in final_exp_str:
+                            final_exp_str = final_exp_str.replace("d20", "d20优势", 1)
+                    elif "劣势" in n:
+                        if "d20劣势" in final_exp_str:
+                            pass
+                        elif "d20优势" in final_exp_str:
+                            final_exp_str = final_exp_str.replace("d20优势", "d20", 1)
+                        elif "d20" in final_exp_str:
+                            final_exp_str = final_exp_str.replace("d20", "d20劣势", 1)
+                    n = n.replace("优势", "")
+                    n = n.replace("劣势", "")
+                # 尝试处理额外加值, 额外加值必须以+/-开头
+                if "+" in n or "-" in n:
+                    add_index = n.find("+") if "+" in n else 2**20
+                    sub_index = n.find("-") if "-" in n else 2**20
+                    split_index = min(add_index, sub_index)
+                    final_exp_str = final_exp_str + n[split_index:]
+                    n = n[:split_index]
+
+                # 得到先攻结果
+                try:
+                    roll_exp: RollExpression = parse_roll_exp(preprocess_roll_exp(final_exp_str))
+                except RollDiceError as e:  # 无效的掷骰表达式
+                    return [BotSendMsgCommand(self.bot.account, e.info, [port])]
+
                 roll_res = roll_exp.get_result()
                 if not n:
                     continue
@@ -312,15 +339,25 @@ class InitiativeCommand(UserCommandBase):
         init_data: dict = self.bot.data_manager.get_data(DC_INIT, [group_id],
                                                          default_gen=lambda: get_default_init_data(group_id))
 
-        feedback = ""
+        # 针对 .ri 3#地精 这种用法简化一下输出(会产生3次一样的roll_res)
+        final_result_dict: Dict[str, Tuple[List[str], int]] = {}
         for name, roll_res in result_dict.items():
-            try:
-                add_initiative_entity(init_data, name, owner_id, roll_res[0])
-                feedback += self.format_loc(LOC_INIT_ROLL, name=name,
-                                            init_result=roll_res[1]) + "\n"
-            except InitiativeError as e:
-                feedback += self.format_loc(LOC_INIT_ERROR, error_info=e.info) + "\n"
+            if roll_res[1] not in final_result_dict:
+                final_result_dict[roll_res[1]] = ([], roll_res[0])
+            final_result_dict[roll_res[1]][0].append(name)
 
-        feedback = feedback.strip()
+        feedback_list = []
+        for roll_res_str, (name_list, roll_val) in final_result_dict.items():
+            is_valid = True
+            for name in name_list:
+                try:
+                    add_initiative_entity(init_data, name, owner_id, roll_val)
+                except InitiativeError as e:
+                    is_valid = False
+                    feedback_list.append(self.format_loc(LOC_INIT_ERROR, error_info=e.info))
+            if is_valid:
+                feedback_list.append(self.format_loc(LOC_INIT_ROLL, name=", ".join(name_list), init_result=roll_res_str))
+
+        feedback = "\n".join(feedback_list)
         self.bot.data_manager.set_data(DC_INIT, [group_id], init_data)
         return feedback

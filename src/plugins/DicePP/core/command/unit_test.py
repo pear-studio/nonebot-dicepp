@@ -133,6 +133,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
                                                             "测试用户 process a hidden rolling" in s)
         await self.__vg_msg(".rsd20+5", checker=lambda s: "1D20+5=" in s and s.count("=") == 1)
         await self.__vg_msg(".rs10D20cs>5", checker=lambda s: "10D20CS>5=" in s and s.count("=") == 1 and "{" not in s)
+        await self.__vg_msg(".rs2#d20+5", checker=lambda s: "1D20+5: [" in s and s.count("=") == 0)
 
         # Normal - Private
         await self.__vp_msg(".r")
@@ -253,6 +254,11 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".init", checker=lambda s: s.count("地精") == 3 and "地精b" not in s and "地精c" not in s)
         await self.__vg_msg(".ri优势 地精", checker=lambda s: "2D20K1=max" in s)
         await self.__vg_msg(".ri优势+3 地精", checker=lambda s: "2D20K1+3=max" in s)
+        await self.__vg_msg(".ri+1 狗头人+1/大狗头人+2", checker=lambda s: "狗头人's initiative result is 1D20+1+1=" in s and
+                                                                    "大狗头人's initiative result is 1D20+1+2=" in s)
+        await self.__vg_msg(".ri+1 狗头人优势", checker=lambda s: "狗头人's initiative result is 2D20K1+1=" in s)
+        await self.__vg_msg(".ri劣势+1 狗头人优势+1/大狗头人", checker=lambda s: "狗头人's initiative result is 1D20+1+1=" in s and
+                                                                      "大狗头人's initiative result is 2D20KL1+1=" in s)
         await self.__vg_msg(".init" + "clr", checker=lambda s: "Already delete initiative info" in s)
         # Exception
         await self.__vg_msg(".ri 100000000000#地精", checker=lambda s: "不是一个有效的数字" in s)
@@ -403,7 +409,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".hp", checker=lambda s: "Cannot find hp info" in s)
         await self.__vg_msg(".hp 巨兽+2", checker=lambda s: "Cannot find hp info for: 巨兽" in s)
 
-        await self.__vg_msg(".ri 3#哥布林", checker=lambda s: "哥布林a's initiative result" in s)
+        await self.__vg_msg(".ri 3#哥布林", checker=lambda s: "哥布林a, 哥布林b, 哥布林c's initiative result is 1D20=" in s)
         await self.__vg_msg(".hp 哥布林a-10", checker=lambda s: "哥布林a: 当前HP减少10\n损失HP:0 -> 损失HP:10" in s)
         await self.__vg_msg(".hp 哥布林a+20", checker=lambda s: "哥布林a: 当前HP增加20\n损失HP:10 -> 损失HP:0" in s)
         await self.__vg_msg(".hp a+(10)", checker=lambda s: "哥布林a: 临时HP增加10\n损失HP:0 -> 损失HP:0 (10)" in s)

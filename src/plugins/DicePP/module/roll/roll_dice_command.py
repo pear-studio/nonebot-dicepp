@@ -182,7 +182,7 @@ class RollDiceCommand(UserCommandBase):
         # 得到结果字符串
         if len(res_list) > 1:
             roll_exp = res_list[0].get_exp()
-            roll_result = "\n" + (",\n".join([res.get_result() if is_show_info else res.get_val() for res in res_list]))
+            roll_result = "\n" + (",\n".join([res.get_result() if is_show_info else str(res.get_val()) for res in res_list]))
 
             roll_result_final = self.format_loc(LOC_ROLL_RESULT_MULTI,
                                                 time=times, roll_exp=roll_exp, roll_result=roll_result)
