@@ -25,7 +25,7 @@ SYNC_FAIL_MAX = 3  # 能容忍的最长同步失败次数
 UPDATE_INVALID_TIME = 3600 * 24 * 7  # 若上次更新时间晚于该间隔, 则清除该记录
 
 SYNC_KEY_NAME = "name"
-SYNC_KEY_MASTER = "manager"
+SYNC_KEY_MASTER = "master"
 SYNC_KEY_VERSION = "ver"
 SYNC_KEY_FRIEND_TOKEN = "friend_t"
 SYNC_KEY_ONLINE_FIRST = "ol_first"
