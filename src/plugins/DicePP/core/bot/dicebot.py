@@ -155,8 +155,11 @@ class Bot:
     async def reboot_async(self):
         dice_log("[Bot] [Reboot] 开始重启")
         await self.shutdown_async()
-        self.start_up()
-        await self.delay_init_command()
+        import sys
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+        # self.start_up()
+        # await self.delay_init_command()
 
     def register_command(self):
         from core.command.user_cmd import USER_COMMAND_CLS_DICT

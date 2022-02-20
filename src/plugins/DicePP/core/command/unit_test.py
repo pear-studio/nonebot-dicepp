@@ -104,8 +104,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         if is_show:
             print(info_str)
 
-    async def test_0_reboot(self):
-        await self.test_bot.reboot_async()
+    # async def test_0_reboot(self):
+    #     await self.test_bot.reboot_async()
 
     async def test_1_localization(self):
         self.test_bot.loc_helper.save_localization()
@@ -365,7 +365,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
 
     async def test_5_master(self):
         await self.__vg_msg(".m reboot", checker=lambda s: not s)
-        await self.__vg_msg(".m reboot", user_id="test_master", checker=lambda s: "Reboot Complete" in s)
+        # await self.__vg_msg(".m reboot", user_id="test_master", checker=lambda s: "Reboot Complete" in s)
         await self.__vg_msg(".m send", checker=lambda s: not s)
         await self.__vg_msg(".m send", user_id="test_master", checker=lambda s: "非法输入" in s)
         await self.__vg_msg(".m send user:1234:ABC", user_id="test_master",
