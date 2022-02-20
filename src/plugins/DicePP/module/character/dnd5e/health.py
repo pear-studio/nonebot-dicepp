@@ -167,6 +167,8 @@ class HPInfo(JsonObject):
         if cmd_type == "=":  # 设置生命值
             self.is_init = True
             if hp_cur_mod_result:
+                if self.is_record_normal():
+                    self.is_alive = hp_cur_mod_result.get_val() > 0
                 self.hp_cur = hp_cur_mod_result.get_val()
                 mod_info = f"HP={hp_cur_mod_result.get_result()}"
             if hp_max_mod_result:

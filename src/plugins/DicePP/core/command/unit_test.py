@@ -408,6 +408,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".hp -10 (15)", checker=lambda s: "临时HP减少15, 当前HP减少10\nHP:60/60 (10) -> HP:50/60" in s)
         await self.__vg_msg(".hp -0/20", checker=lambda s: "最大HP减少20, 当前HP减少0\nHP:50/60 -> HP:40/40" in s)
         await self.__vg_msg(".hp -4d6抗性", checker=lambda s: "当前HP减少" in s)
+        await self.__vg_msg(".hp =0", checker=lambda s: "测试用户: HP=0\n当前HP:0/40 昏迷" in s)
+        await self.__vg_msg(".hp =10", checker=lambda s: "测试用户: HP=10\n当前HP:10/40" in s and "昏迷" not in s)
 
         await self.__vg_msg(".hp del", checker=lambda s: "Delete hp info for 测试用户" in s)
         await self.__vg_msg(".hp", checker=lambda s: "Cannot find hp info" in s)
@@ -421,6 +423,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".hp a-4d6+2", checker=lambda s: "哥布林a: 当前HP减少" in s and "损失HP:10 -> 损失HP:" in s)
         await self.__vg_msg(".hp a;b;c-4d6", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 2)
         await self.__vg_msg(".hp list", checker=lambda s: s.count("哥布林") == 3 and s.count("\n") == 3 and "法师 损失HP:0" in s)
+        await self.__vg_msg(".hp a=0", checker=lambda s: "哥布林a: HP=0" in s and "昏迷" not in s)
+        await self.__vg_msg(".init clr")
 
     async def test_6_char(self):
         await self.__vg_msg(".角色卡", checker=lambda s: "Cannot find your character" in s)
