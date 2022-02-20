@@ -337,6 +337,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".draw 5#Deck_E", checker=lambda s: "Finalize draw! (All)" in s and s.count("\n") == 2)
         await self.__vg_msg(".draw 5#Deck_F", checker=lambda s: s.count("Finalize draw! (All)") == 1 and s.count("\n") == 2)
         await self.__vg_msg(".draw 5#Deck_G", checker=lambda s: "Result 1: 1D4=" in s and "Result 5: 1D4=" in s)
+        await self.__vg_msg(".draw -1#Deck_G", checker=lambda s: "The draw time -1 is invalid!" in s and "Draw -1 times from Deck_G:" not in s)
+        await self.__vg_msg(".draw #Deck_G", checker=lambda s: "The draw time  is invalid!" in s and "times from Deck_G:" not in s)
         await self.__vg_msg(".draw deck_z", checker=lambda s: "Draw 1 times from Deck_Z:\nC1" in s)
 
     async def test_4_utils(self):

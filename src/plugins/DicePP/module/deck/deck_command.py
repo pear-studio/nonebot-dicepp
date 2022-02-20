@@ -281,12 +281,14 @@ class DeckCommand(UserCommandBase):
             times, deck_name = args[0], args[1]
             times = preprocess_roll_exp(times)
             if not is_roll_exp(times):
-                feedback += self.format_loc(LOC_DRAW_ERR_TIME, times=times) + "\n"
+                feedback += self.format_loc(LOC_DRAW_ERR_TIME, times=times)
+                return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             else:
                 roll_res = exec_roll_exp(times)
                 times = roll_res.get_val()
                 if times <= 0 or times > DRAW_LIMIT:
-                    feedback += self.format_loc(LOC_DRAW_ERR_TIME, times=times) + "\n"
+                    feedback += self.format_loc(LOC_DRAW_ERR_TIME, times=times)
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         target_deck = None
         if deck_name in self.deck_dict.keys():
