@@ -119,15 +119,16 @@ class MyTestCase(IsolatedAsyncioTestCase):
 
     async def test_1_roll_dice(self):
         # Normal - Group
-        await self.__vg_msg(".r")
-        await self.__vg_msg(".rd")
-        await self.__vg_msg(".rd20")
+        await self.__vg_msg(".r", checker=lambda s: "测试用户's roll result is 1D20=" in s)
+        await self.__vg_msg(".rd", checker=lambda s: "测试用户's roll result is 1D20=" in s)
+        await self.__vg_msg(".rd20", checker=lambda s: "测试用户's roll result is 1D20=" in s)
         await self.__vg_msg(".r2#d20")
         await self.__vg_msg(".r2#d20+1")
-        await self.__vg_msg(".rd20 Attack")
+        await self.__vg_msg(".rd20 Attack", checker=lambda s: "测试用户's roll result for attack is 1D20=" in s)
         await self.__vg_msg(".r2#d20 Attack Twice")
         await self.__vg_msg(".r(1+1)d6", checker=lambda s: "测试用户's roll result for d6 is 1+1=2" in s)  # maybe fix later
         await self.__vg_msg(".rd8原因", checker=lambda s: "测试用户's roll result for 原因 is 1D8=" in s)
+        await self.__vg_msg(".r原因", checker=lambda s: "测试用户's roll result for 原因 is 1D20=" in s)
         await self.__vg_msg(".rh", checker=lambda s: "|Group: group|" in s and "|Private: user|" in s)
         await self.__vp_msg(".rh", checker=lambda s: "|Group: group|" not in s and "|Private: user|" in s)
         await self.__vg_msg(".rh d20 原因", checker=lambda s: "测试用户's hidden roll result for 原因 is 1D20=" in s and

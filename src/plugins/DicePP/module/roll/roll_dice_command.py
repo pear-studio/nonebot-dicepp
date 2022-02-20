@@ -126,8 +126,6 @@ class RollDiceCommand(UserCommandBase):
             msg_str = msg_str[3:]
             compute_exp = True
         msg_str = msg_str.strip()
-        if not msg_str:
-            msg_str = 'd'
         # 判断暗骰开关
         try:
             assert (not is_hidden or int(self.bot.cfg_helper.get_config(CFG_ROLL_HIDE_ENABLE)[0]) != 0)
@@ -150,8 +148,8 @@ class RollDiceCommand(UserCommandBase):
         # 分割掷骰原因与掷骰表达式
         if len(msg_str) < 100:
             # 某些用户没有用空格将表达式与原因分开的习惯, 为了适配只能采用暴力尝试
-            exp_str = msg_str
-            reason_str = ""
+            exp_str = "d"
+            reason_str = msg_str
             for reason_index in range(len(msg_str), 0, -1):
                 is_valid = True
                 exp_test, reason_test = msg_str[:reason_index].strip(), msg_str[reason_index:].strip()
