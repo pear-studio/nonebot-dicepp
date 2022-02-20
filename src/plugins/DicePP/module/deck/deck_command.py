@@ -2,6 +2,7 @@ from typing import List, Tuple, Any, Iterable, Set, Dict
 import random
 import re
 import os
+from pathlib import Path
 import openpyxl
 
 from core.bot import Bot
@@ -132,17 +133,17 @@ class DeckItem:
 
         def handle_img(match):
             key = match.group(1)
-            file_path_relative = os.path.join(source.path, key)
-            file_path_absolute = os.path.join(os.path.join(DATA_PATH, DRAW_DATA_PATH), key)
-            file_path_local_img = os.path.join(LOCAL_IMG_PATH, key)
-            if os.path.exists(file_path_relative):
-                return get_cq_image(file_path_relative)
-            elif os.path.exists(file_path_absolute):
-                return get_cq_image(file_path_absolute)
-            elif os.path.exists(file_path_local_img):
-                return get_cq_image(file_path_local_img)
+            file_path_relative = Path(source.path) / key
+            file_path_absolute = Path(DATA_PATH) / DRAW_DATA_PATH / key
+            file_path_local_img = Path(LOCAL_IMG_PATH) / key
+            if file_path_relative.exists():
+                return get_cq_image(file_path_relative.read_bytes())
+            elif file_path_absolute.exists():
+                return get_cq_image(file_path_absolute.read_bytes())
+            elif file_path_local_img.exists():
+                return get_cq_image(file_path_local_img.read_bytes())
             else:
-                dice_log(f"[DeckImage] 找不到图片 {file_path_relative}")
+                dice_log(f"[DeckImage] 找不到图片 {file_path_relative.resolve()}")
                 return key
 
         result = self.content.strip()

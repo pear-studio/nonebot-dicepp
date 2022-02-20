@@ -126,7 +126,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".r2#d20+1")
         await self.__vg_msg(".rd20 Attack")
         await self.__vg_msg(".r2#d20 Attack Twice")
-        await self.__vg_msg(".r(1+1)d6", checker=lambda s: "表达式D6格式不正确" in s)
+        await self.__vg_msg(".r(1+1)d6", checker=lambda s: "测试用户's roll result for d6 is 1+1=2" in s)  # maybe fix later
+        await self.__vg_msg(".rd8原因", checker=lambda s: "测试用户's roll result for 原因 is 1D8=" in s)
         await self.__vg_msg(".rh", checker=lambda s: "|Group: group|" in s and "|Private: user|" in s)
         await self.__vp_msg(".rh", checker=lambda s: "|Group: group|" not in s and "|Private: user|" in s)
         await self.__vg_msg(".rh d20 原因", checker=lambda s: "测试用户's hidden roll result for 原因 is 1D20=" in s and
@@ -235,8 +236,10 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".init", checker=lambda s: "Cannot find initiative info" in s)
         await self.__vg_msg(".ri", checker=lambda s: "伊丽莎白's initiative result is 1D20=" in s)
         await self.__vg_msg(".ri8", checker=lambda s: "伊丽莎白's initiative result is 8" in s)
-        await self.__vg_msg(".ri+1", checker=lambda s: "伊丽莎白's initiative result is 1D20+1" in s)
+        await self.__vg_msg(".ri +1", checker=lambda s: "伊丽莎白's initiative result is 1D20+1" in s)
         await self.__vg_msg(".ri d4+D20 大地精", checker=lambda s: "大地精" in s and "result is 1D4+1D20" in s)
+        await self.__vg_msg(".rid4+D20大地精", checker=lambda s: "大地精" in s and "result is 1D4+1D20" in s)
+        await self.__vg_msg(".ri+1大地精", checker=lambda s: "大地精" in s and "result is 1D20+1=" in s)
         await self.__vg_msg(".init", checker=lambda s: s.count("伊丽莎白") == 1 and "大地精" in s)
         await self.__vg_msg(".init", group_id="group2", checker=lambda s: "Cannot find initiative info" in s)
         await self.__vg_msg(".nn 雷电将军")
@@ -262,7 +265,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".init" + "clr", checker=lambda s: "Already delete initiative info" in s)
         # Exception
         await self.__vg_msg(".ri 100000000000#地精", checker=lambda s: "不是一个有效的数字" in s)
-        await self.__vg_msg(".ri1000000D20 地精", checker=lambda s: "掷骰表达式无效" in s)
+        await self.__vg_msg(".ri1000000D20 地精", checker=lambda s: "骰子数量不能大于100" in s)
         from module.initiative import INIT_LIST_SIZE
         for i in range(INIT_LIST_SIZE):
             await self.__vg_msg(f".ri 地精{i}", checker=lambda s: s.count("地精") == 1)

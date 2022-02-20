@@ -103,23 +103,32 @@ class InitiativeCommand(UserCommandBase):
         # 处理指令
         if mode == "roll":  # 创造先攻条目
             # 分割条目名称与掷骰表达式
-            exp_str: str
+            exp_str: str = arg_str if arg_str else "d20"
             name: str = ""
-            if " " in arg_str:  # 类似.ri+1 地精 这样的用法
-                arg_str, name = arg_str.split(" ", 1)
-                name = name.strip()
-
-            if not arg_str:  # 类似.ri 这样的用法
-                exp_str = "d20"
-            elif is_roll_exp(arg_str) and arg_str[0] != "+" and arg_str[0] != "-":  # 类似.ri15 的用法
-                exp_str = arg_str
-            elif is_roll_exp("d20"+arg_str):  # 类似.ri优势 或 .ri+1 的用法
-                exp_str = "d20"+arg_str
-            elif not name:  # 类似.ri 强盗 这样的用法
-                exp_str, name = "d20", arg_str
-            else:
-                return [BotSendMsgCommand(self.bot.account, "掷骰表达式无效", [port])]
-
+            # 显式给出空格时
+            if " " in arg_str:
+                exp_str, name = arg_str.split(" ", 1)
+                arg_str = exp_str
+            # 为了支持类似 .ri+1强盗 .ri20巢穴动作 的用法, 不使用空格分割姓名与字符串时从后到前暴力测试
+            for name_index in range(len(arg_str), -1, -1):
+                arg_test, name_test = arg_str[:name_index].strip(), arg_str[name_index:].strip()
+                if name_test and name_test[0] in ["#", "/"]:  # 名称不能以这些单词开头
+                    continue
+                if not name_test:
+                    name_test = name
+                if not arg_test:  # 类似.ri 或 .ri强盗 这样的用法
+                    exp_str, name = "d20", name_test
+                    break
+                elif is_roll_exp(arg_test) and arg_test[0] != "+" and arg_test[0] != "-":  # 类似.ri15 或 .ri20巢穴动作 的用法
+                    exp_str, name = arg_test, name_test
+                    break
+                elif is_roll_exp("d20"+arg_test):  # 类似.ri优势 或 .ri+1 的用法
+                    exp_str, name = "d20"+arg_test, name_test
+                    break
+                if name:  # 如果此时name不为空, 说明已经通过空格显式分割了表达式与姓名, 失败则不用继续尝试
+                    break
+                if len(arg_str) - name_index > 100:  # 避免尝试太多次
+                    break
             # 如果没有设置名称, 说明用自己的昵称, 否则是NPC
             owner_id = ""
             if not name:

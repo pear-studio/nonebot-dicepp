@@ -1,4 +1,5 @@
 import abc
+import re
 from typing import List
 
 from core.communication import MessagePort
@@ -23,7 +24,13 @@ class BotSendMsgCommand(BotCommandBase):
         self.targets = targets
 
     def __str__(self):
-        s = f"Bot \033[0;37m{self.bot_id}\033[0m send message \033[0;33m{self.msg}\033[0m to "
+        processed_msg = self.msg
+
+        def handle_base64img(match):  # 如果是base64编码就不要显示了
+            return "[CQ:image,file=base64:...]"
+
+        processed_msg = re.sub(r"\[CQ:image,file=base64:.*]", handle_base64img, processed_msg)
+        s = f"Bot \033[0;37m{self.bot_id}\033[0m send message \033[0;33m{processed_msg}\033[0m to "
         s += '\n\t'.join([str(target) for target in self.targets])
         return s
 

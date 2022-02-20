@@ -1,4 +1,4 @@
-BOT_VERSION = "Ver 1.3.0"
+BOT_VERSION = "Ver 1.3.1"
 
 BOT_DESCRIBE = "DicePP by 梨子"
 

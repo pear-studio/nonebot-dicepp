@@ -136,22 +136,38 @@ class RollDiceCommand(UserCommandBase):
             port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
-        exp_str: str
-        reason_str: str
-        # 分割掷骰原因与掷骰表达式
-        if " " in msg_str and not compute_exp:
-            exp_str, reason_str = msg_str.split(" ", 1)
-            reason_str = reason_str.strip()
-        else:
-            exp_str, reason_str = msg_str, ""
-        times = 1  # 掷骰次数
-        if "#" in exp_str:
-            time_str, exp_str = exp_str.split("#", 1)
+        times = 1  # 重复掷骰次数
+        if "#" in msg_str:
+            time_str, msg_str = msg_str.split("#", 1)
             try:
                 times = int(time_str)
                 assert 0 < times <= MULTI_ROLL_LIMIT
             except (ValueError, AssertionError):
                 times = 1
+
+        exp_str: str
+        reason_str: str
+        # 分割掷骰原因与掷骰表达式
+        if len(msg_str) < 100:
+            # 某些用户没有用空格将表达式与原因分开的习惯, 为了适配只能采用暴力尝试
+            exp_str = msg_str
+            reason_str = ""
+            for reason_index in range(len(msg_str), 0, -1):
+                is_valid = True
+                exp_test, reason_test = msg_str[:reason_index].strip(), msg_str[reason_index:].strip()
+                try:
+                    parse_roll_exp(preprocess_roll_exp(exp_test)).get_result()
+                except RollDiceError:
+                    is_valid = False
+                if is_valid:
+                    exp_str, reason_str = exp_test, reason_test
+                    break
+        else:
+            if " " in msg_str and not compute_exp:
+                exp_str, reason_str = msg_str.split(" ", 1)
+                reason_str = reason_str.strip()
+            else:
+                exp_str, reason_str = msg_str, ""
 
         # 解析表达式并生成结果
         try:

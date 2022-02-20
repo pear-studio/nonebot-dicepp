@@ -1,9 +1,10 @@
-import os
+from pathlib import Path
 import re
 import random
-import utils
+
 from core.config import LOCAL_IMG_PATH
 from utils.logger import dice_log
+from utils.cq_code import get_cq_image
 
 
 class LocalizationText:
@@ -24,9 +25,9 @@ class LocalizationText:
         """
         def replace_image_code(match):
             key = match.group(1)
-            file_path = os.path.join(LOCAL_IMG_PATH, key)
-            if os.path.exists(file_path):
-                return utils.cq_code.get_cq_image(file_path)
+            file_path = Path(LOCAL_IMG_PATH) / key
+            if file_path.exists():
+                return get_cq_image(file_path.read_bytes())
             else:
                 dice_log(f"[LocalImage] 找不到图片 {file_path}")
                 return match.group(0)
