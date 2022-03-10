@@ -1,9 +1,9 @@
 import os
 import asyncio
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Callable, Union
 
 from utils.logger import dice_log, get_exception_info
-from utils.time import str_to_datetime, datetime_to_str, datetime_to_str_day, get_current_date_str, get_current_date_raw
+from utils.time import str_to_datetime, datetime_to_str_day, get_current_date_str, get_current_date_raw
 from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_FRIEND_ADD_NOTICE
 from core.config import ConfigManager, CFG_COMMAND_SPLIT, CFG_MASTER, CFG_FRIEND_TOKEN, CFG_GROUP_INVITE
 from core.config import BOT_DATA_PATH, CONFIG_PATH
@@ -46,6 +46,7 @@ class Bot:
         self.command_dict: Dict[str, command.UserCommandBase] = {}
 
         self.tick_task: Optional[asyncio.Task] = None
+        self.todo_tasks: Dict[Union[Callable, asyncio.Task], Dict] = {}
 
         self.start_up()
 
@@ -71,6 +72,17 @@ class Bot:
         except RuntimeError:  # 在Debug中
             pass
 
+    def register_task(self, task: Callable, is_async: bool = True, timeout: float = 10, timeout_callback: Optional[Callable] = None):
+        """
+        Args:
+            task: 等待执行的任务, 必须没有参数, 必须返回 List[BotCommandBase]
+            is_async: task是否已经是异步函数, 如不是, 将会在其他线程上运行task; 若为同步函数, timeout必须为0
+            timeout: 超时时间, 单位秒, 为0代表不会超时
+            timeout_callback: 超时后调用的回调函数, 必须为同步函数, 同样也应该返回 List[BotCommandBase]
+        """
+        assert is_async or timeout == 0
+        self.todo_tasks[task] = {"init": False, "is_async": is_async, "timeout": timeout, "callback": timeout_callback}
+
     async def tick_loop(self):
         from core.command import BotCommandBase
         loop = asyncio.get_event_loop()
@@ -81,8 +93,9 @@ class Bot:
         online_period.append([init_online_str, init_online_str])
 
         while True:
+            loop_begin_time = loop.time()
             bot_commands: List[BotCommandBase] = []
-            # tick
+            # tick each command
             for command in self.command_dict.values():
                 try:
                     bot_commands += command.tick()
@@ -90,28 +103,11 @@ class Bot:
                     dice_log(str(self.handle_exception(f"Tick: {command.readable_name} CODE110")[0]))
 
             if loop.time() - loop_time_prev > 300:  # 五分钟执行一次
-                # tick_daily
                 last_online_str = self.data_manager.get_data(DC_META, DCP_META_ONLINE_LAST, default_val=init_online_str)
                 last_online_day_str = datetime_to_str_day(str_to_datetime(last_online_str))
                 cur_online_day_str = datetime_to_str_day(get_current_date_raw())
                 if cur_online_day_str != last_online_day_str:  # 最后在线时间和当前时间不是同一天
-                    for command in self.command_dict.values():
-                        try:
-                            bot_commands += command.tick_daily()
-                        except Exception:
-                            dice_log(str(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111")[0]))
-                    # 给Master发送每日更新通知
-                    from core.localization import LOC_DAILY_UPDATE
-                    feedback = self.loc_helper.format_loc_text(LOC_DAILY_UPDATE)
-                    if feedback and feedback != "$":
-                        await self.send_msg_to_master(feedback)
-                    # 清空今日统计
-                    meta_msg_last = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
-                    meta_cmd_last = self.data_manager.get_data(DC_META, DCP_META_CMD_TODAY_NUM, default_val=0)
-                    self.data_manager.set_data(DC_META, DCP_META_MSG_LAST_NUM, meta_msg_last)
-                    self.data_manager.set_data(DC_META, DCP_META_CMD_LAST_NUM, meta_cmd_last)
-                    self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, 0)
-                    self.data_manager.set_data(DC_META, DCP_META_CMD_TODAY_NUM, 0)
+                    await self.tick_daily(bot_commands)
                 # 更新最后在线时间
                 cur_online_str = get_current_date_str()
                 online_period[-1][-1] = cur_online_str
@@ -122,11 +118,79 @@ class Bot:
                 # 保存数据到本地
                 await self.data_manager.save_data_async()
 
+            if self.todo_tasks:
+                free_time = max(loop_begin_time + 1 - loop.time(), 0.25)
+                await self.process_async_task(bot_commands, free_time, loop)
+
             if self.proxy:
                 for command in bot_commands:
                     await self.proxy.process_bot_command(command)
 
-            await asyncio.sleep(1)
+            # 最多每秒执行一次循环
+            free_time = max(loop_begin_time + 1 - loop.time(), 0)
+            await asyncio.sleep(free_time)
+
+    async def process_async_task(self, bot_commands, free_time: float, loop):
+        init_task = [(task, info) for task, info in self.todo_tasks.items() if not info["init"]]
+        for func, info in init_task:
+            func: Callable
+            del self.todo_tasks[func]
+            if not info["is_async"]:
+                dice_log(f"[Async Task] Init Sync: {func.__name__}")
+
+                async def task_wrapper():
+                    future = loop.run_in_executor(None, func)
+                    await future
+                    return future.result()
+
+                task: asyncio.Task = asyncio.create_task(task_wrapper())
+            else:
+                dice_log(f"[Async Task] Init Async: {func.__name__}")
+                task: asyncio.Task = asyncio.create_task(func())
+            info["init"] = True
+            self.todo_tasks[task] = info
+
+        dice_log(f"[Async Task] Try: "
+                 f"{[(task.get_coro().cr_code.co_name, self.todo_tasks[task]['timeout']) for task in self.todo_tasks.keys()]}"
+                 f" for {free_time} s")
+        try:
+            done_tasks, pending_tasks = await asyncio.wait(self.todo_tasks.keys(), timeout=free_time)
+            task: asyncio.Task
+            for task in done_tasks:
+                bot_commands += task.result()
+                del self.todo_tasks[task]
+                dice_log(f"[Async Task] Finish {task.get_coro().cr_code.co_name}")
+            for task in pending_tasks:
+                if self.todo_tasks[task]["timeout"] > 0:
+                    self.todo_tasks[task]["timeout"] -= free_time
+                    if self.todo_tasks[task]["timeout"] < 0:
+                        dice_log(f"[Async Task] Timeout: {task.get_coro().cr_code.co_name}")
+                        if self.todo_tasks[task]["callback"]:
+                            dice_log(f"[Async Task] Timeout callback: {self.todo_tasks[task]['callback'].__name__}")
+                            bot_commands += self.todo_tasks[task]["callback"]()
+                        task.cancel()
+                        del self.todo_tasks[task]
+        except Exception:
+            dice_log(str(self.handle_exception(f"Async Task: CODE112")[0]))
+
+    async def tick_daily(self, bot_commands):
+        for command in self.command_dict.values():
+            try:
+                bot_commands += command.tick_daily()
+            except Exception:
+                dice_log(str(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111")[0]))
+        # 给Master发送每日更新通知
+        from core.localization import LOC_DAILY_UPDATE
+        feedback = self.loc_helper.format_loc_text(LOC_DAILY_UPDATE)
+        if feedback and feedback != "$":
+            await self.send_msg_to_master(feedback)
+        # 清空今日统计
+        meta_msg_last = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
+        meta_cmd_last = self.data_manager.get_data(DC_META, DCP_META_CMD_TODAY_NUM, default_val=0)
+        self.data_manager.set_data(DC_META, DCP_META_MSG_LAST_NUM, meta_msg_last)
+        self.data_manager.set_data(DC_META, DCP_META_CMD_LAST_NUM, meta_cmd_last)
+        self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, 0)
+        self.data_manager.set_data(DC_META, DCP_META_CMD_TODAY_NUM, 0)
 
     def shutdown(self):
         """销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的"""

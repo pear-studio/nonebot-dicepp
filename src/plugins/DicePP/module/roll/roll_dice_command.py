@@ -1,4 +1,5 @@
 from typing import List, Tuple, Any
+import asyncio
 
 from core.bot import Bot
 from core.data import DC_USER_DATA, DC_GROUP_DATA
@@ -28,6 +29,7 @@ LOC_ROLL_D20_6_10 = "roll_d20_6_10"
 LOC_ROLL_D20_11_15 = "roll_d20_11_15"
 LOC_ROLL_D20_16_18 = "roll_d20_16_18"
 LOC_ROLL_D20_19 = "roll_d20_19"
+LOC_ROLL_EXP_START = "roll_exp_start"
 LOC_ROLL_EXP = "roll_exp"
 
 CFG_ROLL_ENABLE = "roll_enable"
@@ -92,6 +94,7 @@ class RollDiceCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_ROLL_D20_11_15, "", "唯一d20的骰值在11到15之间的反馈, 替换{d20_state}")
         bot.loc_helper.register_loc_text(LOC_ROLL_D20_16_18, "", "唯一d20的骰值在16到18之间的反馈, 替换{d20_state}")
         bot.loc_helper.register_loc_text(LOC_ROLL_D20_19, "", "唯一d20的骰值等于19的反馈, 替换{d20_state}")
+        bot.loc_helper.register_loc_text(LOC_ROLL_EXP_START, "Start calculating expectation, please wait ...", "计算掷骰表达式期望时的回复")
         bot.loc_helper.register_loc_text(LOC_ROLL_EXP, "Expectation of {expression} is:\n{expectation}", "计算掷骰表达式期望时的回复")
 
         bot.cfg_helper.register_config(CFG_ROLL_ENABLE, "1", "掷骰指令开关")
@@ -189,8 +192,13 @@ class RollDiceCommand(UserCommandBase):
             if res:
                 return [BotSendMsgCommand(self.bot.account, res, [port])]
             else:
-                exp_result = get_roll_exp_result(exp)
-                feedback = self.format_loc(LOC_ROLL_EXP, expression=exp.get_result().get_exp(), expectation=exp_result)
+                async def roll_exp_task():
+                    exp_result = await get_roll_exp_result(exp)
+                    exp_feedback = self.format_loc(LOC_ROLL_EXP, expression=exp.get_result().get_exp(), expectation=exp_result)
+                    return [BotSendMsgCommand(self.bot.account, exp_feedback, [port])]
+                self.bot.register_task(roll_exp_task, timeout=30, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "计算超时!", [port])])
+
+                feedback = self.format_loc(LOC_ROLL_EXP_START)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         # 得到结果字符串
@@ -254,10 +262,15 @@ class RollDiceCommand(UserCommandBase):
         return ".r 掷骰"
 
 
-def get_roll_exp_result(expression: RollExpression) -> str:
-    repeat_times = 10000
+async def get_roll_exp_result(expression: RollExpression) -> str:
+    repeat_times = 200000
+    break_times = 32
     stat_range = [1, 5, 25, 45, 55, 75, 95, 99]  # 统计区间, 大于0, 小于100
-    res_list: List[int] = list(sorted((expression.get_result().get_val() for _ in range(repeat_times))))
+    res_list: List[int] = []
+    for _ in range(break_times):
+        res_list += list(sorted((expression.get_result().get_val() for _ in range(repeat_times // break_times))))
+        await asyncio.sleep(0)
+    res_list = sorted(res_list)
     mean = sum(res_list)/repeat_times
     info = []
     stat_range_num: List[int] = [0] + [repeat_times*r//100 for r in stat_range] + [-1]
