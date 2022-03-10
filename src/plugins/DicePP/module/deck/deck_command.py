@@ -281,6 +281,8 @@ class DeckCommand(UserCommandBase):
             times, deck_name = args[0], args[1]
             times = preprocess_roll_exp(times)
             if not is_roll_exp(times):
+                if not times:
+                    times = "零"
                 feedback += self.format_loc(LOC_DRAW_ERR_TIME, times=times)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             else:
