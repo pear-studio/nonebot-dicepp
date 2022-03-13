@@ -6,6 +6,7 @@ import re
 from typing import Dict, List, Tuple, Any, Literal, Optional
 from core.bot import Bot, BotVariable
 from core.data import DataManagerError, DC_VARIABLE
+from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
@@ -20,7 +21,8 @@ LOC_VAR_DEL = "var_del"
 LOC_VAR_ERROR = "var_error"
 
 
-@custom_user_command(readable_name="变量指令", priority=0, group_only=True)  # priority要大于搜索, 否则set会被s覆盖
+@custom_user_command(readable_name="变量指令", priority=0,  # priority要大于搜索, 否则set会被s覆盖
+                     flag=DPP_COMMAND_FLAG_MACRO, group_only=True)
 class VariableCommand(UserCommandBase):
     """
     用户自定义变量 包括.set .get .del

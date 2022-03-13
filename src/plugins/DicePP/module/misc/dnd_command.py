@@ -21,7 +21,8 @@ MAX_DND_RESULT_LEN = 50
 
 
 @custom_user_command(readable_name="DND属性指令",
-                     priority=DPP_COMMAND_PRIORITY_DEFAULT)
+                     priority=DPP_COMMAND_PRIORITY_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_FUN | DPP_COMMAND_FLAG_DND)
 class UtilsDNDCommand(UserCommandBase):
     """
     .dnd指令, 相当于6#4d6k3, 可以重复投多次, 如.dnd5

@@ -38,7 +38,8 @@ def get_default_activate_data(default_enable: bool) -> List:
 
 
 @custom_user_command(readable_name="激活指令",
-                     priority=DPP_COMMAND_PRIORITY_USUAL_LOWER_BOUND)  # 要在能屏蔽的所有指令之前响应, 否则拦截不了信息
+                     priority=DPP_COMMAND_PRIORITY_USUAL_LOWER_BOUND,
+                     flag=DPP_COMMAND_FLAG_MANAGE)  # 要在能屏蔽的所有指令之前响应, 否则拦截不了信息
 class ActivateCommand(UserCommandBase):
     """
     bot [on/off], dismiss指令

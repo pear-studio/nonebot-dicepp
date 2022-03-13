@@ -1,3 +1,4 @@
+from core.communication.info import GroupInfo, GroupMemberInfo
 from core.communication.port import MessagePort, PrivateMessagePort, GroupMessagePort
 from core.communication.message import MessageSender, MessageMetaData
 from core.communication.process import preprocess_msg

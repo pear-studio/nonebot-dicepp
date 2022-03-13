@@ -24,7 +24,8 @@ class _(DataChunkBase):
         super().__init__()
 
 
-@custom_user_command(readable_name="欢迎词指令", priority=DPP_COMMAND_PRIORITY_DEFAULT, group_only=True)
+@custom_user_command(readable_name="欢迎词指令", priority=DPP_COMMAND_PRIORITY_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_MANAGE, group_only=True)
 class WelcomeCommand(UserCommandBase):
     """
     .welcome 欢迎词指令

@@ -28,7 +28,8 @@ def get_default_chat_time(interval: int) -> str:
     return datetime_to_str(cur_time)
 
 
-@custom_user_command(readable_name="自定义对话指令", priority=DPP_COMMAND_PRIORITY_TRIVIAL)
+@custom_user_command(readable_name="自定义对话指令", priority=DPP_COMMAND_PRIORITY_TRIVIAL,
+                     flag=DPP_COMMAND_FLAG_FUN | DPP_COMMAND_FLAG_CHAT)
 class ChatCommand(UserCommandBase):
     """
     自定义对话指令

@@ -18,7 +18,8 @@ CFG_DEFINE_LEN_MAX = "define_length_max"
 CFG_DEFINE_NUM_MAX = "define_number_max"
 
 
-@custom_user_command(readable_name="宏指令", priority=DPP_COMMAND_PRIORITY_DEFAULT)
+@custom_user_command(readable_name="宏指令", priority=DPP_COMMAND_PRIORITY_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_MACRO)
 class MacroCommand(UserCommandBase):
     """
     定义和查看宏指令, 关键字为define

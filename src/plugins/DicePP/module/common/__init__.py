@@ -1,5 +1,5 @@
 from .activate_command import ActivateCommand, DC_ACTIVATE
-from .chat_command import ChatCommand
+from .chat_command import ChatCommand, DC_CHAT_RECORD
 from .help_command import HelpCommand
 from .nickname_command import NicknameCommand
 from .point_command import PointCommand, DC_POINT, try_use_point

@@ -51,8 +51,7 @@ DCK_ROLL_TOTAL = "total"  # 获取所有历史信息的key, 适用范围包括 D
 @custom_user_command(readable_name="掷骰指令",
                      priority=0,
                      group_only=False,
-                     flag=DPP_COMMAND_FLAG_DEFAULT,
-                     cluster=DPP_COMMAND_CLUSTER_DEFAULT)
+                     flag=DPP_COMMAND_FLAG_ROLL)
 class RollDiceCommand(UserCommandBase):
     """
     掷骰相关的指令, 以.r开头
@@ -350,15 +349,15 @@ def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollResult]
     bot.data_manager.set_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL, user_d20_data)
     # 更新群数据
     group_id = meta.group_id if meta.group_id else "private"
-    dcp_group_prefix = [group_id] + DCP_USER_DATA_ROLL_A_UID
+    dcp_group_prefix = [group_id] + DCP_GROUP_DATA_ROLL_A_GID
     bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix, default_val={})
     # 掷骰次数
     group_time_data = bot.data_manager.get_data(DC_GROUP_DATA,
-                                                dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL,
+                                                dcp_group_prefix + DCP_ROLL_TIME_A_ID_ROLL,
                                                 default_val={DCK_ROLL_TODAY: 0, DCK_ROLL_TOTAL: 0})
     group_time_data[DCK_ROLL_TODAY] += roll_times
     group_time_data[DCK_ROLL_TOTAL] += roll_times
-    bot.data_manager.set_data(DC_GROUP_DATA, dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL, group_time_data)
+    bot.data_manager.set_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_TIME_A_ID_ROLL, group_time_data)
     # D20信息
     group_d20_data = bot.data_manager.get_data(DC_GROUP_DATA,
                                                dcp_group_prefix + DCP_ROLL_D20_A_ID_ROLL,

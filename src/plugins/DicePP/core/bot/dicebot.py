@@ -1,19 +1,25 @@
 import os
 import asyncio
-from typing import List, Optional, Dict, Callable, Union
+import datetime
+import random
+from typing import List, Optional, Dict, Callable, Union, Set
 
 from utils.logger import dice_log, get_exception_info
 from utils.time import str_to_datetime, datetime_to_str_day, get_current_date_str, get_current_date_raw
-from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_FRIEND_ADD_NOTICE
+from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from core.config import ConfigManager, CFG_COMMAND_SPLIT, CFG_MASTER, CFG_FRIEND_TOKEN, CFG_GROUP_INVITE
+from core.config import CFG_DATA_EXPIRE, CFG_USER_EXPIRE_DAY, CFG_GROUP_EXPIRE_DAY, CFG_GROUP_EXPIRE_WARNING
 from core.config import BOT_DATA_PATH, CONFIG_PATH
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
-from core.data import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE
+from core.communication import GroupInfo
+from core.data import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE, DC_USER_DATA, DC_GROUP_DATA
+from core.data import DCK_TOTAL_NUM, DCK_TODAY_NUM, DCK_LAST_NUM, DCK_LAST_TIME
 from core.data import DCP_META_ONLINE_PERIOD, DCP_META_ONLINE_LAST
 from core.data import DCP_META_CMD_TOTAL_NUM, DCP_META_CMD_TODAY_NUM, DCP_META_CMD_LAST_NUM
 from core.data import DCP_META_MSG_TOTAL_NUM, DCP_META_MSG_TODAY_NUM, DCP_META_MSG_LAST_NUM
+from core.data import DCP_USER_CMD_FLAG_A_UID, DCP_USER_META_A_UID, DCP_GROUP_CMD_FLAG_A_GID, DCP_GROUP_INFO_A_GID, DCP_GROUP_META_A_GID
 from core.data import DataManager, DataManagerError
 
 from core.bot.macro import BotMacro, MACRO_PARSE_LIMIT
@@ -86,7 +92,7 @@ class Bot:
     async def tick_loop(self):
         from core.command import BotCommandBase
         loop = asyncio.get_event_loop()
-        loop_time_prev = loop.time()
+        time_counter = [loop.time()] * 2
 
         init_online_str = get_current_date_str()
         online_period = self.data_manager.get_data(DC_META, DCP_META_ONLINE_PERIOD, default_val=[])
@@ -102,7 +108,8 @@ class Bot:
                 except Exception:
                     dice_log(str(self.handle_exception(f"Tick: {command.readable_name} CODE110")[0]))
 
-            if loop.time() - loop_time_prev > 300:  # 五分钟执行一次
+            if loop_begin_time - time_counter[0] > 60 * 5:  # 5分钟执行一次
+                # 尝试每日更新
                 last_online_str = self.data_manager.get_data(DC_META, DCP_META_ONLINE_LAST, default_val=init_online_str)
                 last_online_day_str = datetime_to_str_day(str_to_datetime(last_online_str))
                 cur_online_day_str = datetime_to_str_day(get_current_date_raw())
@@ -113,10 +120,19 @@ class Bot:
                 online_period[-1][-1] = cur_online_str
                 self.data_manager.set_data(DC_META, DCP_META_ONLINE_LAST, cur_online_str)
                 self.data_manager.set_data(DC_META, DCP_META_ONLINE_PERIOD, online_period)
-
-                loop_time_prev = loop.time()
                 # 保存数据到本地
                 await self.data_manager.save_data_async()
+                # 更新计时器
+                time_counter[0] = loop_begin_time
+
+            if loop_begin_time - time_counter[1] > 3600 * 4:  # 4小时执行一次
+                # 更新群信息
+                async def update_group_info():
+                    await self.update_group_info_all()
+                    return []
+                self.register_task(update_group_info, timeout=3600)
+                # 更新计时器
+                time_counter[1] = loop_begin_time
 
             if self.todo_tasks:
                 free_time = max(loop_begin_time + 1 - loop.time(), 0.25)
@@ -174,6 +190,39 @@ class Bot:
             dice_log(str(self.handle_exception(f"Async Task: CODE112")[0]))
 
     async def tick_daily(self, bot_commands):
+        # 处理Meta统计
+        meta_msg_last = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
+        meta_cmd_last = self.data_manager.get_data(DC_META, DCP_META_CMD_TODAY_NUM, default_val=0)
+        self.data_manager.set_data(DC_META, DCP_META_MSG_LAST_NUM, meta_msg_last)
+        self.data_manager.set_data(DC_META, DCP_META_CMD_LAST_NUM, meta_cmd_last)
+        self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, 0)
+        self.data_manager.set_data(DC_META, DCP_META_CMD_TODAY_NUM, 0)
+        # 处理指令Flag统计
+        from core.command.const import DPP_COMMAND_FLAG_DICT
+
+        def process_cmd_flag_info(cmd_flag_info):
+            for flag in DPP_COMMAND_FLAG_DICT.keys():
+                if flag in cmd_flag_info:
+                    cmd_flag_info[flag][DCK_LAST_TIME] = cmd_flag_info[flag][DCK_TODAY_NUM]
+                    cmd_flag_info[flag][DCK_TODAY_NUM] = 0
+        for user_id in self.data_manager.get_keys(DC_USER_DATA, []):
+            user_cmd_flag_path = [user_id] + DCP_USER_CMD_FLAG_A_UID
+            user_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, user_cmd_flag_path, default_val={}, get_ref=True)
+            process_cmd_flag_info(user_cmd_flag_info)
+
+        for group_id in self.data_manager.get_keys(DC_GROUP_DATA, []):
+            group_cmd_flag_path = [group_id] + DCP_GROUP_CMD_FLAG_A_GID
+            group_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, group_cmd_flag_path, default_val={}, get_ref=True)
+            process_cmd_flag_info(group_cmd_flag_info)
+
+        # 尝试清理过期群聊和过期用户信息
+        async def clear_expired_data():
+            res = await self.clear_expired_data()
+            return res
+
+        self.register_task(clear_expired_data, timeout=3600)
+
+        # 调用每个command的tick_daily方法
         for command in self.command_dict.values():
             try:
                 bot_commands += command.tick_daily()
@@ -184,13 +233,6 @@ class Bot:
         feedback = self.loc_helper.format_loc_text(LOC_DAILY_UPDATE)
         if feedback and feedback != "$":
             await self.send_msg_to_master(feedback)
-        # 清空今日统计
-        meta_msg_last = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
-        meta_cmd_last = self.data_manager.get_data(DC_META, DCP_META_CMD_TODAY_NUM, default_val=0)
-        self.data_manager.set_data(DC_META, DCP_META_MSG_LAST_NUM, meta_msg_last)
-        self.data_manager.set_data(DC_META, DCP_META_CMD_LAST_NUM, meta_cmd_last)
-        self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, 0)
-        self.data_manager.set_data(DC_META, DCP_META_CMD_TODAY_NUM, 0)
 
     def shutdown(self):
         """销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的"""
@@ -316,31 +358,61 @@ class Bot:
         command_split: str = self.cfg_helper.get_config(CFG_COMMAND_SPLIT)[0]
         msg_list = msg.split(command_split)
         msg_list = [m.strip() for m in msg_list]
-
         is_multi_command = len(msg_list) > 1
+
+        # 遍历所有指令, 尝试处理消息
         for msg_cur in msg_list:
             for command in self.command_dict.values():
+                # 判断是否能处理该条指令
                 try:
                     should_proc, should_pass, hint = command.can_process_msg(msg_cur, meta)
                 except Exception:
                     # 发现未处理的错误, 汇报给主Master
                     should_proc, should_pass, hint = False, False, None
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
-                    bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} 群:{meta.group_id} CODE100")
-                if should_proc:
-                    if command.group_only and not meta.group_id:
-                        # 在非群聊中企图执行群聊指令, 回复一条提示
-                        feedback = self.loc_helper.format_loc_text(LOC_GROUP_ONLY_NOTICE)
-                        bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
-                    else:  # 执行指令
-                        try:
-                            bot_commands += command.process_msg(msg_cur, meta, hint)
-                        except Exception:
-                            # 发现未处理的错误, 汇报给主Master
-                            info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
-                            bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} 群:{meta.group_id} CODE101")
-                    if not should_pass:
-                        break
+                    group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"
+                    bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info} CODE100")
+                if not should_proc:
+                    continue
+                # 在非群聊中企图执行群聊指令, 回复一条提示
+                if command.group_only and not meta.group_id:
+                    feedback = self.loc_helper.format_loc_text(LOC_GROUP_ONLY_NOTICE)
+                    bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
+                    break
+                # 执行指令
+                try:
+                    bot_commands += command.process_msg(msg_cur, meta, hint)
+                except Exception:
+                    # 发现未处理的错误, 汇报给主Master
+                    info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
+                    group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"
+                    bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info} CODE101")
+
+                cur_date = get_current_date_str()
+                # 统计处理的指令情况
+                from core.command.const import DPP_COMMAND_FLAG_DICT
+                if command.flag:
+                    def stat_cmd_flag(cmd_flag_info):
+                        for flag in DPP_COMMAND_FLAG_DICT.keys():
+                            if flag & command.flag:
+                                if flag not in cmd_flag_info:
+                                    cmd_flag_info[flag] = {DCK_TOTAL_NUM: 1, DCK_TODAY_NUM: 1, DCK_LAST_NUM: 0, DCK_LAST_TIME: cur_date}
+                                else:
+                                    cmd_flag_info[flag][DCK_TOTAL_NUM] += 1
+                                    cmd_flag_info[flag][DCK_TODAY_NUM] += 1
+                                    cmd_flag_info[flag][DCK_LAST_TIME] = cur_date
+                    # 统计用户信息
+                    user_cmd_flag_path = [meta.user_id] + DCP_USER_CMD_FLAG_A_UID
+                    user_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, user_cmd_flag_path, default_val={}, get_ref=True)
+                    stat_cmd_flag(user_cmd_flag_info)
+                    # 统计群信息
+                    if meta.group_id:
+                        group_cmd_flag_path = [meta.group_id] + DCP_GROUP_CMD_FLAG_A_GID
+                        group_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, group_cmd_flag_path, default_val={}, get_ref=True)
+                        stat_cmd_flag(group_cmd_flag_info)
+
+                if not should_pass:  # 已经处理过, 不需要再传递给后面的指令
+                    break
 
         if is_multi_command:  # 多行指令的话合并port相同的send msg
             invalid_command_count = 0
@@ -469,3 +541,147 @@ class Bot:
         nickname_prev = self.data_manager.get_data(DC_NICKNAME, [user_id, group_id], nickname)
         if nickname_prev != nickname:
             self.data_manager.set_data(DC_NICKNAME, [user_id, group_id], nickname)
+
+    async def update_group_info_all(self):
+        if not self.proxy:
+            return
+        group_info_list: List[GroupInfo] = await self.proxy.get_group_list()
+        cur_date_str = get_current_date_str()
+        for info in group_info_list:
+            info_path = [info.group_id] + DCP_GROUP_INFO_A_GID
+            info_dict = {"name": info.group_name, "member_count": info.member_count,
+                         "max_member_count": info.max_member_count, "update": cur_date_str}
+            print(info.group_id, info_dict)
+            self.data_manager.set_data(DC_GROUP_DATA, info_path, info_dict)
+
+    async def clear_expired_data(self) -> List:
+        from core.command.const import DPP_COMMAND_FLAG_DICT
+        from core.command import BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotCommandBase
+        from module.roll import DCP_USER_DATA_ROLL_A_UID, DCP_ROLL_TIME_A_ID_ROLL, DCK_ROLL_TOTAL
+        from module.common import DC_POINT, DC_WELCOME, DC_ACTIVATE, DC_CHAT_RECORD
+        from module.character.dnd5e import DC_CHAR_DND, DC_CHAR_HP
+        from module.initiative import DC_INIT
+
+        cur_date = get_current_date_raw()
+        try:
+            is_data_expire = bool(int(self.cfg_helper.get_config(CFG_DATA_EXPIRE)[0]))
+            user_expire_day = int(self.cfg_helper.get_config(CFG_USER_EXPIRE_DAY)[0])
+            group_expire_day = int(self.cfg_helper.get_config(CFG_GROUP_EXPIRE_DAY)[0])
+            group_expire_time = int(self.cfg_helper.get_config(CFG_GROUP_EXPIRE_WARNING)[0])
+            group_expire_warn = self.loc_helper.format_loc_text(LOC_GROUP_EXPIRE_WARNING)
+        except ValueError:
+            is_data_expire = False
+            user_expire_day = 30
+            group_expire_day = 7
+            group_expire_time = 1
+            group_expire_warn = "Anyone needs me?"
+        if not is_data_expire:
+            return []
+        result_commands: List[BotCommandBase] = []
+        index = 0
+
+        # 清理过期用户信息
+        all_user_id: Set[str] = set(self.data_manager.get_keys(DC_USER_DATA, []))
+        all_user_id.union(set(self.data_manager.get_keys(DC_NICKNAME, [])))
+        invalid_user_id = []
+        for user_id in all_user_id:
+            # meta_path = [user_id] + DCP_USER_META_A_UID
+            # meta_info = self.data_manager.get_data(DC_USER_DATA, meta_path, default_val={})
+            is_valid = False
+            # 掷骰次数超过一定次数的用户不会被清理
+            try:
+                roll_time_path = [user_id] + DCP_USER_DATA_ROLL_A_UID + DCP_ROLL_TIME_A_ID_ROLL + [DCK_ROLL_TOTAL]
+                roll_time = self.data_manager.get_data(DC_USER_DATA, roll_time_path)
+                if roll_time > 200:
+                    is_valid = True
+            except DataManagerError:
+                pass
+            # 过去一段时间内使用过指令的用户不会被清理
+            try:
+                cmd_flag_path = [user_id] + DCP_USER_CMD_FLAG_A_UID
+                cmd_flag_info: Dict = self.data_manager.get_data(DC_USER_DATA, cmd_flag_path)
+                for flag in DPP_COMMAND_FLAG_DICT:
+                    if flag not in cmd_flag_info:
+                        continue
+                    flag_date = str_to_datetime(cmd_flag_info[flag][DCK_LAST_TIME])
+                    if cur_date - flag_date < datetime.timedelta(days=user_expire_day):
+                        is_valid = True
+                        break
+            except DataManagerError:
+                pass
+            if not is_valid:
+                invalid_user_id.append(user_id)
+            index += 1
+            if index % 500 == 0:
+                await asyncio.sleep(0)
+        for user_id in invalid_user_id:
+            self.data_manager.delete_data(DC_USER_DATA, [user_id])
+            self.data_manager.delete_data(DC_NICKNAME, [user_id])
+            self.data_manager.delete_data(DC_MACRO, [user_id])
+            self.data_manager.delete_data(DC_VARIABLE, [user_id])
+            self.data_manager.delete_data(DC_POINT, [user_id])
+            self.data_manager.delete_data(DC_CHAT_RECORD, [user_id])
+
+        # 清理过期群聊消息
+        all_group_id: Set[str] = set(self.data_manager.get_keys(DC_GROUP_DATA, []))
+        invalid_group_id = []
+        warning_group_id = []
+        for group_id in all_group_id:
+            is_valid = False
+            # 过去一段时间内使用过指令的群不会被清理
+            try:
+                cmd_flag_path = [group_id] + DCP_GROUP_CMD_FLAG_A_GID
+                cmd_flag_info: Dict = self.data_manager.get_data(DC_GROUP_DATA, cmd_flag_path)
+                for flag in DPP_COMMAND_FLAG_DICT:
+                    if flag not in cmd_flag_info:
+                        continue
+                    flag_date = str_to_datetime(cmd_flag_info[flag][DCK_LAST_TIME])
+                    if cur_date - flag_date < datetime.timedelta(days=group_expire_day):
+                        is_valid = True
+                        break
+            except DataManagerError:
+                pass
+            # 还没有到达警告次数上限的群不会被清理
+            meta_path = [group_id] + DCP_GROUP_META_A_GID
+            meta_info: Dict = self.data_manager.get_data(DC_GROUP_DATA, meta_path, default_val={})
+            if not is_valid and meta_info.get("warn_time", 0) < group_expire_time:
+                is_valid = True
+                meta_info["warn_time"] = meta_info.get("warn_time", 0) + 1
+                self.data_manager.set_data(DC_GROUP_DATA, meta_path, meta_info)
+                try:  # 只对拥有Info的群发送警告消息 (没有说明已经不在该群了)
+                    info_path = [group_id] + DCP_GROUP_INFO_A_GID
+                    self.data_manager.get_data(DC_GROUP_DATA, info_path)
+                    result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
+                    result_commands.append(BotSendMsgCommand(self.account, group_expire_warn, [GroupMessagePort(group_id)]))
+                    warning_group_id.append(group_id)
+                except DataManagerError:
+                    pass
+            if group_id in all_user_id:  # 有一部分用户被当做群聊记录了, 直接清理掉
+                is_valid = False
+            if not is_valid:
+                invalid_group_id.append(group_id)
+            index += 1
+            if index % 500 == 0:
+                await asyncio.sleep(0)
+        for group_id in invalid_group_id:
+            # 有一部分用户被当做群聊记录了, 不需要执行退群指令
+            if group_id not in all_user_id:
+                result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
+                result_commands.append(BotLeaveGroupCommand(self.account, group_id))
+            self.data_manager.delete_data(DC_GROUP_DATA, [group_id])
+            self.data_manager.delete_data(DC_WELCOME, [group_id])
+            self.data_manager.delete_data(DC_ACTIVATE, [group_id])
+            self.data_manager.delete_data(DC_CHAR_DND, [group_id])
+            self.data_manager.delete_data(DC_CHAR_HP, [group_id])
+            self.data_manager.delete_data(DC_INIT, [group_id])
+
+        # 给Master汇报清理情况
+        if self.get_master_ids():
+            master_id = self.get_master_ids()[0]
+            result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
+            feedback = f"检查{len(all_user_id)}个用户数据, {len(all_group_id)}个群聊数据.\n" \
+                       f"清理{len(invalid_user_id)}个失效用户, {len(invalid_group_id)}个失效群聊.\n" \
+                       f"对{len(warning_group_id)}个即将失效的群聊发送提示消息."
+            result_commands.append(BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_id)]))
+        result_commands = list(reversed(result_commands))
+        return result_commands

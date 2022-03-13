@@ -36,7 +36,8 @@ class _(DataChunkBase):
         super().__init__()
 
 
-@custom_user_command(readable_name="DND5E角色卡", priority=DPP_COMMAND_PRIORITY_DEFAULT+10, group_only=True)
+@custom_user_command(readable_name="DND5E角色卡", priority=DPP_COMMAND_PRIORITY_DEFAULT+10,
+                     flag=DPP_COMMAND_FLAG_CHAR | DPP_COMMAND_FLAG_DND, group_only=True)
 class CharacterDNDCommand(UserCommandBase):
     """
     DND角色卡指令

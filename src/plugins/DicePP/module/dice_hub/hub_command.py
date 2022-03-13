@@ -168,7 +168,8 @@ def get_random_delay() -> float:
     return RAND_INTERVAL_MIN * k + RAND_INTERVAL_MAX * (1 - k)
 
 
-@custom_user_command(readable_name="Hub指令", priority=DPP_COMMAND_PRIORITY_DEFAULT)
+@custom_user_command(readable_name="Hub指令", priority=DPP_COMMAND_PRIORITY_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_HUB)
 class HubCommand(UserCommandBase):
     """
     控制不同机器人之间的交互

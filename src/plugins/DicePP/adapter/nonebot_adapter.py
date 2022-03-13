@@ -14,7 +14,7 @@ from nonebot.adapters.onebot.v11.bot import Bot as NoneBot
 from nonebot.adapters.onebot.v11 import Message as CQMessage
 
 from core.bot import Bot as DicePPBot
-from core.communication import MessageMetaData, MessageSender
+from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, GroupInfo
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand
@@ -27,6 +27,23 @@ notice_matcher = on_notice()
 request_matcher = on_request()
 
 all_bots: Dict[str, DicePPBot] = {}
+
+
+def convert_group_info(nb_group_info: Dict) -> GroupInfo:
+    res = GroupInfo(group_id=str(nb_group_info["group_id"]))
+    res.group_name = nb_group_info["group_name"]
+    res.member_count = nb_group_info["member_count"]
+    res.max_member_count = nb_group_info["max_member_count"]
+    return res
+
+
+def convert_group_member_info(nb_group_member_info: Dict) -> GroupMemberInfo:
+    res = GroupMemberInfo(group_id=str(nb_group_member_info["group_id"]), user_id=str(nb_group_member_info["user_id"]))
+    res.nickname = nb_group_member_info["nickname"]
+    res.card = nb_group_member_info["card"]
+    res.role = nb_group_member_info["role"]
+    res.title = nb_group_member_info["title"]
+    return res
 
 
 class NoneBotClientProxy(ClientProxy):
@@ -42,7 +59,10 @@ class NoneBotClientProxy(ClientProxy):
                 else:
                     await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
         elif isinstance(command, BotLeaveGroupCommand):
-            await self.bot.set_group_leave(group_id=int(command.target_group_id))
+            try:
+                await self.bot.set_group_leave(group_id=int(command.target_group_id))
+            except:
+                pass
         elif isinstance(command, BotDelayCommand):
             await asyncio.sleep(command.seconds)
         else:
@@ -54,6 +74,22 @@ class NoneBotClientProxy(ClientProxy):
             dice_log(f"[Proxy Bot Command List]\n[{log_str}]")
         for command in command_list:
             await self.process_bot_command(command)
+
+    async def get_group_list(self) -> List[GroupInfo]:
+        group_info_list: List[Dict] = await self.bot.get_group_list()
+        return [convert_group_info(info) for info in group_info_list]
+
+    async def get_group_info(self, group_id: str) -> GroupInfo:
+        group_info: Dict = await self.bot.get_group_info(group_id=int(group_id))
+        return convert_group_info(group_info)
+
+    async def get_group_member_list(self, group_id: str) -> List[GroupMemberInfo]:
+        group_member_list: List[Dict] = await self.bot.get_group_member_list(group_id=int(group_id))
+        return [convert_group_member_info(info) for info in group_member_list]
+
+    async def get_group_member_info(self, group_id: str, user_id: str) -> GroupMemberInfo:
+        group_member_info: Dict = await self.bot.get_group_member_info(group_id=int(group_id), user_id=int(user_id))
+        return convert_group_member_info(group_member_info)
 
 
 @command_matcher.handle()

@@ -29,3 +29,22 @@ DEFAULT_CONFIG_COMMENT[CFG_AGREEMENT] = "使用协议"
 CFG_COMMAND_SPLIT = "command_split"  # \\ 来分割多条指令
 DEFAULT_CONFIG[CFG_COMMAND_SPLIT] = "\\\\"
 DEFAULT_CONFIG_COMMENT[CFG_COMMAND_SPLIT] = "分割多条指令的关键字, 默认为 \\\\"
+
+CFG_DATA_EXPIRE = "data_expire"
+DEFAULT_CONFIG[CFG_DATA_EXPIRE] = "0"
+DEFAULT_CONFIG_COMMENT[CFG_DATA_EXPIRE] = "是否定期清除过期数据与退出群聊, 0为不清理, 1为清理"
+
+CFG_USER_EXPIRE_DAY = "user_expire_day"
+DEFAULT_CONFIG[CFG_USER_EXPIRE_DAY] = "60"
+DEFAULT_CONFIG_COMMENT[CFG_USER_EXPIRE_DAY] = "用户在多少天内没有使用过指令则清除相关数据"
+
+CFG_GROUP_EXPIRE_DAY = "group_expire_day"
+DEFAULT_CONFIG[CFG_GROUP_EXPIRE_DAY] = "14"
+DEFAULT_CONFIG_COMMENT[CFG_GROUP_EXPIRE_DAY] = "群聊在多少天内没有使用过指令则清除相关数据并退群"
+
+CFG_GROUP_EXPIRE_WARNING = "group_expire_warning_time"
+DEFAULT_CONFIG[CFG_GROUP_EXPIRE_WARNING] = "1"
+DEFAULT_CONFIG_COMMENT[CFG_GROUP_EXPIRE_WARNING] = f"清除相关数据并退群之前进行几次警告, 如{CFG_GROUP_EXPIRE_DAY}为14, {CFG_GROUP_EXPIRE_WARNING}为2, " \
+                                                   f"则14天内群内没有人使用指令就会在第15天提示1次, 第16天提示1次然后退群. (提示词在localization中配置)"
+
+

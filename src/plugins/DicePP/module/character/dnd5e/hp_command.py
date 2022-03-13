@@ -34,7 +34,8 @@ class _(DataChunkBase):
         super().__init__()
 
 
-@custom_user_command(readable_name="生命值指令", priority=DPP_COMMAND_PRIORITY_DEFAULT, group_only=True)
+@custom_user_command(readable_name="生命值指令", priority=DPP_COMMAND_PRIORITY_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_CHAR | DPP_COMMAND_FLAG_DND | DPP_COMMAND_FLAG_BATTLE, group_only=True)
 class HPCommand(UserCommandBase):
     """
     调整和记录生命值的指令, 以.hp开头

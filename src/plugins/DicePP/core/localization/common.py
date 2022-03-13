@@ -22,3 +22,7 @@ COMMON_LOCAL_COMMENT[LOC_DAILY_UPDATE] = "每日更新时发送的语句, 若为
 LOC_FUNC_DISABLE = "func_disable"
 COMMON_LOCAL_TEXT[LOC_FUNC_DISABLE] = "Function {func} is disabled by manager"
 COMMON_LOCAL_COMMENT[LOC_FUNC_DISABLE] = "某一功能被关闭时发送给用户的提示词, {func}为功能名"
+
+LOC_GROUP_EXPIRE_WARNING = "group_expire_warning"
+COMMON_LOCAL_TEXT[LOC_GROUP_EXPIRE_WARNING] = "Anyone needs me?"
+COMMON_LOCAL_COMMENT[LOC_GROUP_EXPIRE_WARNING] = "群聊过期前发送的提示"

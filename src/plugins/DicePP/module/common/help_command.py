@@ -25,7 +25,7 @@ HELP_INFO_DEFAULT = "@骰娘 .bot on/off 开启或关闭骰娘\n" \
 
 @custom_user_command(readable_name="帮助指令",
                      priority=0,
-                     flag=DPP_COMMAND_FLAG_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_HELP,
                      cluster=DPP_COMMAND_CLUSTER_DEFAULT)
 class HelpCommand(UserCommandBase):
     """

@@ -16,7 +16,8 @@ LOC_SEND_MASTER = "master_send_to_master"
 LOC_SEND_TARGET = "master_send_to_target"
 
 
-@custom_user_command(readable_name="Master指令", priority=DPP_COMMAND_PRIORITY_MASTER)
+@custom_user_command(readable_name="Master指令", priority=DPP_COMMAND_PRIORITY_MASTER,
+                     flag=DPP_COMMAND_FLAG_MANAGE)
 class MasterCommand(UserCommandBase):
     """
     Master指令

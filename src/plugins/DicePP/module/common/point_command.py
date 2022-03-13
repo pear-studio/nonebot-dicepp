@@ -32,7 +32,8 @@ class _(DataChunkBase):
         super().__init__()
 
 
-@custom_user_command(readable_name="点数指令", priority=DPP_COMMAND_PRIORITY_DEFAULT)
+@custom_user_command(readable_name="点数指令", priority=DPP_COMMAND_PRIORITY_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_INFO)
 class PointCommand(UserCommandBase):
     """
     .point 和.m point指令

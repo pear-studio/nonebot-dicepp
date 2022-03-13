@@ -11,7 +11,8 @@ from utils.time import datetime_to_str_day, get_current_date_raw, datetime_to_st
 LOC_JRRP = "jrrp"
 
 
-@custom_user_command(readable_name="今日人品", priority=DPP_COMMAND_PRIORITY_DEFAULT)
+@custom_user_command(readable_name="今日人品", priority=DPP_COMMAND_PRIORITY_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_FUN)
 class JrrpCommand(UserCommandBase):
 
     def __init__(self, bot: Bot):

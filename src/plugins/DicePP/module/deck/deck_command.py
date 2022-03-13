@@ -210,7 +210,8 @@ class Deck:
         return feedback.strip()
 
 
-@custom_user_command(readable_name="抽卡指令", priority=DPP_COMMAND_PRIORITY_DEFAULT)
+@custom_user_command(readable_name="抽卡指令", priority=DPP_COMMAND_PRIORITY_DEFAULT,
+                     flag=DPP_COMMAND_FLAG_DRAW)
 class DeckCommand(UserCommandBase):
     """
     .draw 指令, 从牌库中抽取

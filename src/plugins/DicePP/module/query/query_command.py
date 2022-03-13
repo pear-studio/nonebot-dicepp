@@ -96,8 +96,7 @@ class QueryRecord:
 @custom_user_command(readable_name="查询指令",
                      priority=2,
                      group_only=False,
-                     flag=DPP_COMMAND_FLAG_DEFAULT,
-                     cluster=DPP_COMMAND_CLUSTER_DEFAULT)
+                     flag=DPP_COMMAND_FLAG_QUERY)
 class QueryCommand(UserCommandBase):
     """
     查询资料库的指令, 以.查询或.q开头

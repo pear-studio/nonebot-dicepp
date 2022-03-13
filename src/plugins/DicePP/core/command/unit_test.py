@@ -9,6 +9,7 @@ from core.command import BotCommandBase
 from core.communication import MessageMetaData, MessageSender, NoticeData, GroupIncreaseNoticeData
 from core.config import ConfigItem, CFG_MASTER
 from adapter import ClientProxy
+from src.plugins.DicePP import GroupMemberInfo, GroupInfo
 
 
 class MyTestCase(IsolatedAsyncioTestCase):
@@ -33,6 +34,18 @@ class MyTestCase(IsolatedAsyncioTestCase):
             async def process_bot_command_list(self, command_list: List[BotCommandBase]):
                 for command in command_list:
                     await self.process_bot_command(command)
+
+            async def get_group_list(self) -> List[GroupInfo]:
+                return []
+
+            async def get_group_info(self, group_id: str) -> GroupInfo:
+                return GroupInfo("DumbId")
+
+            async def get_group_member_list(self, group_id: str) -> List[GroupMemberInfo]:
+                return []
+
+            async def get_group_member_info(self, group_id: str, user_id: str) -> GroupMemberInfo:
+                return GroupMemberInfo("DumbId", "DumbId")
 
         cls.test_proxy = TestProxy()
         cls.test_bot.set_client_proxy(cls.test_proxy)
