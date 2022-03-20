@@ -3,6 +3,7 @@ NoneBot API https://v2.nonebot.dev/api/plugin.html
 """
 from typing import List, Dict, Optional
 import asyncio
+from fastapi import FastAPI
 
 import nonebot
 from nonebot import on_message, on_notice, on_request
@@ -21,6 +22,11 @@ from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, Bot
 from utils.logger import dice_log
 
 from adapter.client_proxy import ClientProxy
+
+from module.fastapi import dpp_api
+
+app: FastAPI = nonebot.get_app()
+app.mount("/dpp", dpp_api)
 
 command_matcher = on_message()
 notice_matcher = on_notice()
