@@ -101,42 +101,45 @@ class Bot:
         while True:
             loop_begin_time = loop.time()
             bot_commands: List[BotCommandBase] = []
-            # tick each command
-            for command in self.command_dict.values():
-                try:
-                    bot_commands += command.tick()
-                except Exception:
-                    dice_log(str(self.handle_exception(f"Tick: {command.readable_name} CODE110")[0]))
+            try:
+                # tick each command
+                for command in self.command_dict.values():
+                    try:
+                        bot_commands += command.tick()
+                    except Exception:
+                        dice_log(str(self.handle_exception(f"Tick: {command.readable_name} CODE110")[0]))
 
-            if loop_begin_time - time_counter[0] > 60 * 5:  # 5分钟执行一次
-                # 尝试每日更新
-                last_online_str = self.data_manager.get_data(DC_META, DCP_META_ONLINE_LAST, default_val=init_online_str)
-                last_online_day_str = datetime_to_str_day(str_to_datetime(last_online_str))
-                cur_online_day_str = datetime_to_str_day(get_current_date_raw())
-                if cur_online_day_str != last_online_day_str:  # 最后在线时间和当前时间不是同一天
-                    await self.tick_daily(bot_commands)
-                # 更新最后在线时间
-                cur_online_str = get_current_date_str()
-                online_period[-1][-1] = cur_online_str
-                self.data_manager.set_data(DC_META, DCP_META_ONLINE_LAST, cur_online_str)
-                self.data_manager.set_data(DC_META, DCP_META_ONLINE_PERIOD, online_period)
-                # 保存数据到本地
-                await self.data_manager.save_data_async()
-                # 更新计时器
-                time_counter[0] = loop_begin_time
+                if loop_begin_time - time_counter[0] > 60 * 5:  # 5分钟执行一次
+                    # 尝试每日更新
+                    last_online_str = self.data_manager.get_data(DC_META, DCP_META_ONLINE_LAST, default_val=init_online_str)
+                    last_online_day_str = datetime_to_str_day(str_to_datetime(last_online_str))
+                    cur_online_day_str = datetime_to_str_day(get_current_date_raw())
+                    if cur_online_day_str != last_online_day_str:  # 最后在线时间和当前时间不是同一天
+                        await self.tick_daily(bot_commands)
+                    # 更新最后在线时间
+                    cur_online_str = get_current_date_str()
+                    online_period[-1][-1] = cur_online_str
+                    self.data_manager.set_data(DC_META, DCP_META_ONLINE_LAST, cur_online_str)
+                    self.data_manager.set_data(DC_META, DCP_META_ONLINE_PERIOD, online_period)
+                    # 保存数据到本地
+                    await self.data_manager.save_data_async()
+                    # 更新计时器
+                    time_counter[0] = loop_begin_time
 
-            if loop_begin_time - time_counter[1] > 3600 * 4:  # 4小时执行一次
-                # 更新群信息
-                async def update_group_info():
-                    await self.update_group_info_all()
-                    return []
-                self.register_task(update_group_info, timeout=3600)
-                # 更新计时器
-                time_counter[1] = loop_begin_time
+                if loop_begin_time - time_counter[1] > 3600 * 4:  # 4小时执行一次
+                    # 更新群信息
+                    async def update_group_info():
+                        await self.update_group_info_all()
+                        return []
+                    self.register_task(update_group_info, timeout=3600)
+                    # 更新计时器
+                    time_counter[1] = loop_begin_time
 
-            if self.todo_tasks:
-                free_time = max(loop_begin_time + 1 - loop.time(), 0.25)
-                await self.process_async_task(bot_commands, free_time, loop)
+                if self.todo_tasks:
+                    free_time = max(loop_begin_time + 1 - loop.time(), 0.25)
+                    await self.process_async_task(bot_commands, free_time, loop)
+            except Exception:
+                bot_commands += self.handle_exception(f"Tick Loop: CODE113")
 
             if self.proxy:
                 for command in bot_commands:
@@ -542,17 +545,17 @@ class Bot:
         if nickname_prev != nickname:
             self.data_manager.set_data(DC_NICKNAME, [user_id, group_id], nickname)
 
-    async def update_group_info_all(self):
+    async def update_group_info_all(self) -> List[GroupInfo]:
         if not self.proxy:
-            return
+            return []
         group_info_list: List[GroupInfo] = await self.proxy.get_group_list()
         cur_date_str = get_current_date_str()
         for info in group_info_list:
             info_path = [info.group_id] + DCP_GROUP_INFO_A_GID
             info_dict = {"name": info.group_name, "member_count": info.member_count,
                          "max_member_count": info.max_member_count, "update": cur_date_str}
-            print(info.group_id, info_dict)
             self.data_manager.set_data(DC_GROUP_DATA, info_path, info_dict)
+        return group_info_list
 
     async def clear_expired_data(self) -> List:
         from core.command.const import DPP_COMMAND_FLAG_DICT

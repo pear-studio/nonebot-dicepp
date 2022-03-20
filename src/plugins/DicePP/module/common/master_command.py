@@ -68,6 +68,17 @@ class MasterCommand(UserCommandBase):
                     feedback = "目标必须为user或group"
             else:
                 feedback = f"非法输入\n使用方法: {self.get_help('m send', meta)}"
+        elif arg_str == "update":
+            async def async_task():
+                update_group_result = await self.bot.update_group_info_all()
+                update_feedback = f"已更新{len(update_group_result)}条群信息:"
+                update_group_result = list(sorted(update_group_result, key=lambda x: -x.member_count))[:50]
+                for group_info in update_group_result:
+                    update_feedback += f"\n{group_info.group_name}({group_info.group_id}): 群成员{group_info.member_count}/{group_info.max_member_count}"
+                return [BotSendMsgCommand(self.bot.account, update_feedback, [port])]
+
+            self.bot.register_task(async_task, timeout=60, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "更新超时!", [port])])
+            feedback = "更新开始..."
         else:
             feedback = self.get_help("m", meta)
 
@@ -80,7 +91,7 @@ class MasterCommand(UserCommandBase):
                    ".m send 命令骰娘发送信息"
         if keyword.startswith("m"):
             if keyword.endswith("reboot"):
-                return "该指令只是保存后重新加载一遍本地文件, 不能替代重启DicePP等操作"
+                return "该指令将重启DicePP进程"
             elif keyword.endswith("send"):
                 return ".m send [user/group]:[账号/群号]:[消息内容]"
         return ""
