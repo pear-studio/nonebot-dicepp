@@ -176,7 +176,10 @@ class Bot:
             done_tasks, pending_tasks = await asyncio.wait(self.todo_tasks.keys(), timeout=free_time)
             task: asyncio.Task
             for task in done_tasks:
-                bot_commands += task.result()
+                try:
+                    bot_commands += task.result()
+                except Exception:
+                    dice_log(str(self.handle_exception(f"Async Task: CODE114")[0]))
                 del self.todo_tasks[task]
                 dice_log(f"[Async Task] Finish {task.get_coro().cr_code.co_name}")
             for task in pending_tasks:
@@ -206,7 +209,7 @@ class Bot:
         def process_cmd_flag_info(cmd_flag_info):
             for flag in DPP_COMMAND_FLAG_DICT.keys():
                 if flag in cmd_flag_info:
-                    cmd_flag_info[flag][DCK_LAST_TIME] = cmd_flag_info[flag][DCK_TODAY_NUM]
+                    cmd_flag_info[flag][DCK_LAST_NUM] = cmd_flag_info[flag][DCK_TODAY_NUM]
                     cmd_flag_info[flag][DCK_TODAY_NUM] = 0
         for user_id in self.data_manager.get_keys(DC_USER_DATA, []):
             user_cmd_flag_path = [user_id] + DCP_USER_CMD_FLAG_A_UID
@@ -606,6 +609,9 @@ class Bot:
                 for flag in DPP_COMMAND_FLAG_DICT:
                     if flag not in cmd_flag_info:
                         continue
+                    if type(cmd_flag_info[flag][DCK_LAST_TIME]) is int:  # 因为之前的一个笔误, 导致有一些日期被写成了int 过几个月再把这段处理去掉吧 (22/03/29)
+                        cmd_flag_info[flag][DCK_LAST_TIME] = get_current_date_str()
+                        self.data_manager.set_data(DC_USER_DATA, cmd_flag_path, cmd_flag_info)
                     flag_date = str_to_datetime(cmd_flag_info[flag][DCK_LAST_TIME])
                     if cur_date - flag_date < datetime.timedelta(days=user_expire_day):
                         is_valid = True
@@ -638,6 +644,9 @@ class Bot:
                 for flag in DPP_COMMAND_FLAG_DICT:
                     if flag not in cmd_flag_info:
                         continue
+                    if type(cmd_flag_info[flag][DCK_LAST_TIME]) is int:  # 因为之前的一个笔误, 导致有一些日期被写成了int 过几个月再把这段处理去掉吧 (22/03/29)
+                        cmd_flag_info[flag][DCK_LAST_TIME] = get_current_date_str()
+                        self.data_manager.set_data(DC_GROUP_DATA, cmd_flag_path, cmd_flag_info)
                     flag_date = str_to_datetime(cmd_flag_info[flag][DCK_LAST_TIME])
                     if cur_date - flag_date < datetime.timedelta(days=group_expire_day):
                         is_valid = True
