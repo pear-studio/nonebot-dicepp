@@ -414,7 +414,7 @@ class Bot:
                     # 统计群信息
                     if meta.group_id:
                         group_cmd_flag_path = [meta.group_id] + DCP_GROUP_CMD_FLAG_A_GID
-                        group_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, group_cmd_flag_path, default_val={}, get_ref=True)
+                        group_cmd_flag_info = self.data_manager.get_data(DC_GROUP_DATA, group_cmd_flag_path, default_val={}, get_ref=True)
                         stat_cmd_flag(group_cmd_flag_info)
 
                 if not should_pass:  # 已经处理过, 不需要再传递给后面的指令
