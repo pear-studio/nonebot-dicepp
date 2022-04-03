@@ -20,7 +20,8 @@ from core.data import DCK_TOTAL_NUM, DCK_TODAY_NUM, DCK_LAST_NUM, DCK_LAST_TIME
 from core.data import DCP_META_ONLINE_PERIOD, DCP_META_ONLINE_LAST
 from core.data import DCP_META_CMD_TOTAL_NUM, DCP_META_CMD_TODAY_NUM, DCP_META_CMD_LAST_NUM
 from core.data import DCP_META_MSG_TOTAL_NUM, DCP_META_MSG_TODAY_NUM, DCP_META_MSG_LAST_NUM
-from core.data import DCP_USER_CMD_FLAG_A_UID, DCP_USER_META_A_UID, DCP_GROUP_CMD_FLAG_A_GID, DCP_GROUP_INFO_A_GID, DCP_GROUP_META_A_GID
+from core.data import DCP_USER_CMD_FLAG_A_UID, DCP_GROUP_CMD_FLAG_A_GID, DCP_GROUP_INFO_A_GID, DCP_GROUP_META_A_GID,\
+    DCP_USER_MSG_A_UID, DCP_GROUP_MSG_A_GID
 from core.data import DataManager, DataManagerError
 
 from core.bot.macro import BotMacro, MACRO_PARSE_LIMIT
@@ -216,11 +217,19 @@ class Bot:
             user_cmd_flag_path = [user_id] + DCP_USER_CMD_FLAG_A_UID
             user_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, user_cmd_flag_path, default_val={}, get_ref=True)
             process_cmd_flag_info(user_cmd_flag_info)
+            user_msg_path = [user_id] + DCP_USER_MSG_A_UID
+            user_msg_today_num = self.data_manager.get_data(DC_USER_DATA, user_msg_path + [DCK_TODAY_NUM], default_val=0)
+            self.data_manager.set_data(DC_USER_DATA, user_msg_path + [DCK_LAST_NUM], user_msg_today_num)
+            self.data_manager.set_data(DC_USER_DATA, user_msg_path + [DCK_TODAY_NUM], 0)
 
         for group_id in self.data_manager.get_keys(DC_GROUP_DATA, []):
             group_cmd_flag_path = [group_id] + DCP_GROUP_CMD_FLAG_A_GID
             group_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, group_cmd_flag_path, default_val={}, get_ref=True)
             process_cmd_flag_info(group_cmd_flag_info)
+            group_msg_path = [group_id] + DCP_GROUP_MSG_A_GID
+            group_msg_today_num = self.data_manager.get_data(DC_GROUP_DATA, group_msg_path + [DCK_TODAY_NUM], default_val=0)
+            self.data_manager.set_data(DC_USER_DATA, group_msg_path + [DCK_LAST_NUM], group_msg_today_num)
+            self.data_manager.set_data(DC_USER_DATA, group_msg_path + [DCK_TODAY_NUM], 0)
 
         # 尝试清理过期群聊和过期用户信息
         async def clear_expired_data():
@@ -337,6 +346,14 @@ class Bot:
         meta_msg_today_num = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
         self.data_manager.set_data(DC_META, DCP_META_MSG_TOTAL_NUM, meta_msg_total_num+1)
         self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, meta_msg_today_num+1)
+        if meta.group_id:
+            group_msg_path = [meta.group_id] + DCP_GROUP_MSG_A_GID
+            group_msg_info: Dict[str, int] = self.data_manager.get_data(DC_GROUP_DATA, group_msg_path, default_val={}, get_ref=True)
+            group_msg_info[DCK_TODAY_NUM] = group_msg_info.get(DCK_TODAY_NUM, 0) + 1
+            group_msg_info[DCK_TOTAL_NUM] = group_msg_info.get(DCK_TOTAL_NUM, 0) + 1
+        user_msg_info: Dict[str, int] = self.data_manager.get_data(DC_USER_DATA, [meta.user_id] + DCP_USER_MSG_A_UID, default_val={}, get_ref=True)
+        user_msg_info[DCK_TODAY_NUM] = user_msg_info.get(DCK_TODAY_NUM, 0) + 1
+        user_msg_info[DCK_TOTAL_NUM] = user_msg_info.get(DCK_TOTAL_NUM, 0) + 1
 
         # 处理宏
         macro_list: List[BotMacro]

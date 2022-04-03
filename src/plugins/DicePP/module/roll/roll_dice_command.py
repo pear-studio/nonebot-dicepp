@@ -331,7 +331,6 @@ def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollResult]
         cur_roll_result.append(sum([res.d20_num == 1 and res.d20_state == i for res in res_list]))
     # 更新用户数据
     dcp_user_prefix = [meta.user_id] + DCP_USER_DATA_ROLL_A_UID
-    bot.data_manager.get_data(DC_USER_DATA, dcp_user_prefix, default_val={})
     # 掷骰次数
     user_time_data = bot.data_manager.get_data(DC_USER_DATA,
                                                dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL,
@@ -348,9 +347,9 @@ def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollResult]
         user_d20_data[DCK_ROLL_TOTAL][i] += cur_roll_result[i]
     bot.data_manager.set_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL, user_d20_data)
     # 更新群数据
-    group_id = meta.group_id if meta.group_id else "private"
-    dcp_group_prefix = [group_id] + DCP_GROUP_DATA_ROLL_A_GID
-    bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix, default_val={})
+    if not meta.group_id:
+        return
+    dcp_group_prefix = [meta.group_id] + DCP_GROUP_DATA_ROLL_A_GID
     # 掷骰次数
     group_time_data = bot.data_manager.get_data(DC_GROUP_DATA,
                                                 dcp_group_prefix + DCP_ROLL_TIME_A_ID_ROLL,

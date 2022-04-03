@@ -1,5 +1,4 @@
 import module.common
-import module.misc
 
 import module.roll
 import module.query
@@ -10,3 +9,4 @@ import module.character
 import module.initiative
 
 import module.fastapi
+import module.misc

@@ -501,6 +501,13 @@ class MyTestCase(IsolatedAsyncioTestCase):
     async def test_8_jrrp(self):
         await self.__vg_msg(".jrrp", checker=lambda s: "测试用户's today lucky number is:" in s)
 
+    async def test_8_stat(self):
+        await self.__vg_msg(".统计", checker=lambda s: "今日收到信息:" in s and "今日指令记录:" in s and "今日掷骰次数:" in s)
+        await self.__vg_msg(".统计群聊", checker=lambda s: "今日收到信息:" in s and "今日指令记录:" in s)
+        await self.__vg_msg(".统计所有用户", checker=lambda s: "权限不足" in s)
+        await self.__vg_msg(".统计所有用户", user_id="test_master", checker=lambda s: "权限不足" not in s and "今日收到信息:" in s and "今日指令记录:" in s)
+        await self.__vg_msg(".统计所有群聊", user_id="test_master", checker=lambda s: "权限不足" not in s and "条群组信息" in s)
+
 
 if __name__ == '__main__':
     async def main():
