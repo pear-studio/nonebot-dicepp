@@ -354,6 +354,14 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".draw #Deck_G", checker=lambda s: "The draw time 零 is invalid!" in s and "times from Deck_G:" not in s)
         await self.__vg_msg(".draw deck_z", checker=lambda s: "Draw 1 times from Deck_Z:\nC1" in s)
 
+    async def test_4_rand_gen(self):
+        await self.__vg_msg(".随机", checker=lambda s: "These are available generator: " in s and "姓名" in s)
+        await self.__vg_msg(".随机男性姓名")
+        await self.__vg_msg(".随机精灵姓名", checker=lambda s: "·" in s)
+        await self.__vg_msg(".随机10#姓名", checker=lambda s: "#9 " in s)
+        await self.__vg_msg(".随机角色生平", checker=lambda s: "女性" in s or "男性" in s)
+        await self.__vg_msg(".随机今日笑话")
+
     async def test_4_utils(self):
         await self.__vg_msg(".dnd", checker=lambda s: "DND Result" in s and s.count("\n") == 1)
         await self.__vg_msg(".dnd3", checker=lambda s: "DND Result" in s and s.count("\n") == 3)
