@@ -25,8 +25,11 @@ from adapter.client_proxy import ClientProxy
 
 from module.fastapi import dpp_api
 
-app: FastAPI = nonebot.get_app()
-app.mount("/dpp", dpp_api)
+try:
+    app: FastAPI = nonebot.get_app()
+    app.mount("/dpp", dpp_api)
+except ValueError:
+    dice_log("DPP API is not amounted because NoneBot has not been initialized")
 
 command_matcher = on_message()
 notice_matcher = on_notice()
