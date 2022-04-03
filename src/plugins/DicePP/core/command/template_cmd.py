@@ -6,6 +6,7 @@ from typing import List, Tuple, Any
 
 from core.bot import Bot
 # from core.data import DataChunkBase, custom_data_chunk
+# from core.command.const import *
 from core.command import UserCommandBase  # , custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
