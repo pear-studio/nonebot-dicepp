@@ -8,7 +8,8 @@ from utils.logger import dice_log, get_exception_info
 from utils.time import str_to_datetime, datetime_to_str_day, get_current_date_str, get_current_date_raw
 from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from core.config import ConfigManager, CFG_COMMAND_SPLIT, CFG_MASTER, CFG_FRIEND_TOKEN, CFG_GROUP_INVITE
-from core.config import CFG_DATA_EXPIRE, CFG_USER_EXPIRE_DAY, CFG_GROUP_EXPIRE_DAY, CFG_GROUP_EXPIRE_WARNING
+from core.config import CFG_DATA_EXPIRE, CFG_USER_EXPIRE_DAY, CFG_GROUP_EXPIRE_DAY, CFG_GROUP_EXPIRE_WARNING,\
+    CFG_WHITE_LIST_GROUP, CFG_WHITE_LIST_USER, preprocess_white_list
 from core.config import BOT_DATA_PATH, CONFIG_PATH
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
@@ -576,24 +577,24 @@ class Bot:
             group_expire_time = int(self.cfg_helper.get_config(CFG_GROUP_EXPIRE_WARNING)[0])
             group_expire_warn = self.loc_helper.format_loc_text(LOC_GROUP_EXPIRE_WARNING)
         except ValueError:
-            is_data_expire = False
-            user_expire_day = 30
-            group_expire_day = 7
-            group_expire_time = 1
-            group_expire_warn = "Anyone needs me?"
+            return self.handle_exception(f"自动清理信息")
         if not is_data_expire:
             return []
         result_commands: List[BotCommandBase] = []
         index = 0
+
+        white_list_group: List[str] = preprocess_white_list(self.cfg_helper.get_config(CFG_WHITE_LIST_GROUP))
+        white_list_user: List[str] = preprocess_white_list(self.cfg_helper.get_config(CFG_WHITE_LIST_USER))
 
         # 清理过期用户信息
         all_user_id: Set[str] = set(self.data_manager.get_keys(DC_USER_DATA, []))
         all_user_id.union(set(self.data_manager.get_keys(DC_NICKNAME, [])))
         invalid_user_id = []
         for user_id in all_user_id:
-            # meta_path = [user_id] + DCP_USER_META_A_UID
-            # meta_info = self.data_manager.get_data(DC_USER_DATA, meta_path, default_val={})
             is_valid = False
+            # 白名单中的用户不会被清理
+            if user_id in white_list_user:
+                continue
             # 掷骰次数超过一定次数的用户不会被清理
             try:
                 roll_time_path = [user_id] + DCP_USER_DATA_ROLL_A_UID + DCP_ROLL_TIME_A_ID_ROLL + [DCK_ROLL_TOTAL]
@@ -637,6 +638,9 @@ class Bot:
         warning_group_id = []
         for group_id in all_group_id:
             is_valid = False
+            # 白名单中的群聊不会被清理
+            if group_id in white_list_group:
+                continue
             # 过去一段时间内使用过指令的群不会被清理
             try:
                 cmd_flag_path = [group_id] + DCP_GROUP_CMD_FLAG_A_GID

@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, List
 
 from core.config.declare import BOT_AGREEMENT
 
@@ -47,4 +47,19 @@ DEFAULT_CONFIG[CFG_GROUP_EXPIRE_WARNING] = "1"
 DEFAULT_CONFIG_COMMENT[CFG_GROUP_EXPIRE_WARNING] = f"清除相关数据并退群之前进行几次警告, 如{CFG_GROUP_EXPIRE_DAY}为14, {CFG_GROUP_EXPIRE_WARNING}为2, " \
                                                    f"则14天内群内没有人使用指令就会在第15天提示1次, 第16天提示1次然后退群. (提示词在localization中配置)"
 
+CFG_WHITE_LIST_GROUP = "white_list_group"
+DEFAULT_CONFIG[CFG_WHITE_LIST_GROUP] = ""
+DEFAULT_CONFIG_COMMENT[CFG_WHITE_LIST_GROUP] = f"可填多个单元格, 或用;在同一个单元格分隔不同的群号, 列表中的群不会被自动清除信息或退群"
 
+CFG_WHITE_LIST_USER = "white_list_user"
+DEFAULT_CONFIG[CFG_WHITE_LIST_USER] = ""
+DEFAULT_CONFIG_COMMENT[CFG_WHITE_LIST_USER] = f"可填多个单元格, 或用;在同一个单元格分隔不同的账号, 列表中的账号不会被自动清除信息"
+
+
+def preprocess_white_list(raw_list: List[str]) -> List[str]:
+    result_list: List[str] = []
+    for raw_str in raw_list:
+        for item in raw_str.split(";"):
+            if item.strip():
+                result_list.append(item.strip())
+    return result_list
