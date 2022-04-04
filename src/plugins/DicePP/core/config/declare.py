@@ -12,4 +12,5 @@ BOT_AGREEMENT = "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议�
                 "8.本协议内容可能改动，请注意查看最新协议。\n" \
                 "9.本服务最终解释权归服务提供方所有。"
 
-BOT_GIT_LINK = "https://github.com/pear-studio/nonebot-dicepp"
+BOT_GIT_LINK = "DicePP说明手册: https://docs.qq.com/doc/DV3hFWUx6VG1MUnhp\n" \
+               "源码: https://github.com/pear-studio/nonebot-dicepp"

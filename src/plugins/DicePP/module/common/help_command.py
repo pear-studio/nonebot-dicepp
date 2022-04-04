@@ -19,7 +19,7 @@ HELP_INFO_DEFAULT = "@骰娘 .bot on/off 开启或关闭骰娘\n" \
                     ".help链接 查看源码地址\n" \
                     ".help协议 查看使用协议\n" \
                     ".help更新 查看最近更新内容\n" \
-                    "DicePP说明手册: https://docs.qq.com/doc/DV1ZueVVmZkV2dWpI\n" \
+                    "DicePP说明手册: https://docs.qq.com/doc/DV3hFWUx6VG1MUnhp\n" \
                     "欢迎加入交流群:861919492 伊丽莎白粉丝群或联系开发者:821480843 梨子报告bug和提出意见~"
 
 
