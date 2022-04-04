@@ -136,7 +136,7 @@ class StatisticsCommand(UserCommandBase):
                     except DataManagerError:
                         msg_info = {}
                     group_info[1] += ((msg_info.get(DCK_TODAY_NUM, 0) + msg_info.get(DCK_LAST_NUM, 0)) // 1000) << 32  # 最大优先级
-                    group_info[2] += f"信息:[{msg_info.get(DCK_TODAY_NUM, 0)}, {msg_info.get(DCK_LAST_NUM, 0)}, {msg_info.get(DCK_TOTAL_NUM)}] "
+                    group_info[2] += f"信息:[{msg_info.get(DCK_TODAY_NUM, 0)}, {msg_info.get(DCK_LAST_NUM, 0)}, {msg_info.get(DCK_TOTAL_NUM, 0)}] "
                     # 统计指令使用情况
                     try:
                         cmd_flag_info: Dict = self.bot.data_manager.get_data(DC_GROUP_DATA, [meta.group_id] + DCP_GROUP_CMD_FLAG_A_GID)
@@ -174,6 +174,8 @@ def stat_cmd_info(cmd_flag_info) -> str:
     total_info_list, today_info_list = [], []
     for flag, name in DPP_COMMAND_FLAG_DICT.items():
         if flag not in cmd_flag_info:
+            continue
+        if flag & DPP_COMMAND_FLAG_SET_HIDE_IN_STAT:
             continue
         total_num, today_num = cmd_flag_info[flag][DCK_TOTAL_NUM], cmd_flag_info[flag][DCK_TODAY_NUM]
         if total_num:

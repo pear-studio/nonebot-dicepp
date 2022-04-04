@@ -405,8 +405,10 @@ class Bot:
                     bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
                     break
                 # 执行指令
+                res_commands = []
                 try:
-                    bot_commands += command.process_msg(msg_cur, meta, hint)
+                    res_commands = command.process_msg(msg_cur, meta, hint)
+                    bot_commands += res_commands
                 except Exception:
                     # 发现未处理的错误, 汇报给主Master
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
@@ -416,7 +418,7 @@ class Bot:
                 cur_date = get_current_date_str()
                 # 统计处理的指令情况
                 from core.command.const import DPP_COMMAND_FLAG_DICT
-                if command.flag:
+                if command.flag and res_commands:
                     def stat_cmd_flag(cmd_flag_info):
                         for flag in DPP_COMMAND_FLAG_DICT.keys():
                             if flag & command.flag:
