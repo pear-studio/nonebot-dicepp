@@ -79,6 +79,13 @@ class MasterCommand(UserCommandBase):
 
             self.bot.register_task(async_task, timeout=60, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "更新超时!", [port])])
             feedback = "更新开始..."
+        elif arg_str == "clean":
+            async def clear_expired_data():
+                res = await self.bot.clear_expired_data()
+                return res
+
+            self.bot.register_task(clear_expired_data, timeout=3600)
+            feedback = "清理开始..."
         else:
             feedback = self.get_help("m", meta)
 

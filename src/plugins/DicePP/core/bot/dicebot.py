@@ -47,6 +47,7 @@ class Bot:
         self.data_path = os.path.join(BOT_DATA_PATH, account)
 
         self.data_manager = DataManager(self.data_path)
+        self.fix_data()
         self.hub_manager = HubManager(self)
         self.loc_helper = LocalizationManager(CONFIG_PATH, self.account)
         self.cfg_helper = ConfigManager(CONFIG_PATH, self.account)
@@ -578,6 +579,46 @@ class Bot:
             self.data_manager.set_data(DC_GROUP_DATA, info_path, info_dict)
         return group_info_list
 
+    def fix_data(self):
+        from core.command.const import DPP_COMMAND_FLAG_DICT
+        all_user_id: Set[str] = set(self.data_manager.get_keys(DC_USER_DATA, []))
+        for user_id in all_user_id:
+            try:
+                cmd_flag_path = [user_id] + DCP_USER_CMD_FLAG_A_UID
+                cmd_flag_info: Dict = self.data_manager.get_data(DC_USER_DATA, cmd_flag_path)
+                flag_str_list = list(cmd_flag_info.keys())
+                for flag_str in flag_str_list:
+                    cmd_flag_info[int(flag_str)] = cmd_flag_info[flag_str]
+                    del cmd_flag_info[flag_str]
+                    assert int(flag_str) in DPP_COMMAND_FLAG_DICT
+                for flag in DPP_COMMAND_FLAG_DICT:
+                    if flag not in cmd_flag_info:
+                        continue
+                    if type(cmd_flag_info[flag][DCK_LAST_TIME]) is int:  # 因为之前的一个笔误, 导致有一些日期被写成了int 过几个月再把这段处理去掉吧 (22/03/29)
+                        cmd_flag_info[flag][DCK_LAST_TIME] = get_current_date_str()
+
+                self.data_manager.set_data(DC_USER_DATA, cmd_flag_path, cmd_flag_info)
+            except DataManagerError:
+                pass
+        all_group_id: Set[str] = set(self.data_manager.get_keys(DC_GROUP_DATA, []))
+        for group_id in all_group_id:
+            try:
+                cmd_flag_path = [group_id] + DCP_GROUP_CMD_FLAG_A_GID
+                cmd_flag_info: Dict = self.data_manager.get_data(DC_GROUP_DATA, cmd_flag_path)
+                flag_str_list = list(cmd_flag_info.keys())
+                for flag_str in flag_str_list:
+                    cmd_flag_info[int(flag_str)] = cmd_flag_info[flag_str]
+                    del cmd_flag_info[flag_str]
+                    assert int(flag_str) in DPP_COMMAND_FLAG_DICT
+                for flag in DPP_COMMAND_FLAG_DICT:
+                    if flag not in cmd_flag_info:
+                        continue
+                    if type(cmd_flag_info[flag][DCK_LAST_TIME]) is int:  # 因为之前的一个笔误, 导致有一些日期被写成了int 过几个月再把这段处理去掉吧 (22/03/29)
+                        cmd_flag_info[flag][DCK_LAST_TIME] = get_current_date_str()
+                self.data_manager.set_data(DC_GROUP_DATA, cmd_flag_path, cmd_flag_info)
+            except DataManagerError:
+                pass
+
     async def clear_expired_data(self) -> List:
         from core.command.const import DPP_COMMAND_FLAG_DICT
         from core.command import BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotCommandBase
@@ -605,7 +646,7 @@ class Bot:
 
         # 清理过期用户信息
         all_user_id: Set[str] = set(self.data_manager.get_keys(DC_USER_DATA, []))
-        all_user_id.union(set(self.data_manager.get_keys(DC_NICKNAME, [])))
+        # all_user_id.union(set(self.data_manager.get_keys(DC_NICKNAME, [])))
         invalid_user_id = []
         for user_id in all_user_id:
             is_valid = False
@@ -627,9 +668,6 @@ class Bot:
                 for flag in DPP_COMMAND_FLAG_DICT:
                     if flag not in cmd_flag_info:
                         continue
-                    if type(cmd_flag_info[flag][DCK_LAST_TIME]) is int:  # 因为之前的一个笔误, 导致有一些日期被写成了int 过几个月再把这段处理去掉吧 (22/03/29)
-                        cmd_flag_info[flag][DCK_LAST_TIME] = get_current_date_str()
-                        self.data_manager.set_data(DC_USER_DATA, cmd_flag_path, cmd_flag_info)
                     flag_date = str_to_datetime(cmd_flag_info[flag][DCK_LAST_TIME])
                     if cur_date - flag_date < datetime.timedelta(days=user_expire_day):
                         is_valid = True
@@ -665,9 +703,6 @@ class Bot:
                 for flag in DPP_COMMAND_FLAG_DICT:
                     if flag not in cmd_flag_info:
                         continue
-                    if type(cmd_flag_info[flag][DCK_LAST_TIME]) is int:  # 因为之前的一个笔误, 导致有一些日期被写成了int 过几个月再把这段处理去掉吧 (22/03/29)
-                        cmd_flag_info[flag][DCK_LAST_TIME] = get_current_date_str()
-                        self.data_manager.set_data(DC_GROUP_DATA, cmd_flag_path, cmd_flag_info)
                     flag_date = str_to_datetime(cmd_flag_info[flag][DCK_LAST_TIME])
                     if cur_date - flag_date < datetime.timedelta(days=group_expire_day):
                         is_valid = True
@@ -689,31 +724,29 @@ class Bot:
                     warning_group_id.append(group_id)
                 except DataManagerError:
                     pass
-            if group_id in all_user_id:  # 有一部分用户被当做群聊记录了, 直接清理掉
-                is_valid = False
             if not is_valid:
                 invalid_group_id.append(group_id)
             index += 1
             if index % 500 == 0:
                 await asyncio.sleep(0)
         for group_id in invalid_group_id:
-            # 有一部分用户被当做群聊记录了, 不需要执行退群指令
-            if group_id not in all_user_id:
-                result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
-                result_commands.append(BotLeaveGroupCommand(self.account, group_id))
-            self.data_manager.delete_data(DC_GROUP_DATA, [group_id])
-            self.data_manager.delete_data(DC_WELCOME, [group_id])
-            self.data_manager.delete_data(DC_ACTIVATE, [group_id])
-            self.data_manager.delete_data(DC_CHAR_DND, [group_id])
-            self.data_manager.delete_data(DC_CHAR_HP, [group_id])
-            self.data_manager.delete_data(DC_INIT, [group_id])
+            result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
+            temp_warning = "[测试]该群聊已被标记为无效群聊, 尝试使用掷骰指令以清除此标记和提醒(目前没有实际作用, 被误标记了也不用担心)"
+            result_commands.append(BotSendMsgCommand(self.account, temp_warning, [GroupMessagePort(group_id)]))
+            # result_commands.append(BotLeaveGroupCommand(self.account, group_id))
+            # self.data_manager.delete_data(DC_GROUP_DATA, [group_id])
+            # self.data_manager.delete_data(DC_WELCOME, [group_id])
+            # self.data_manager.delete_data(DC_ACTIVATE, [group_id])
+            # self.data_manager.delete_data(DC_CHAR_DND, [group_id])
+            # self.data_manager.delete_data(DC_CHAR_HP, [group_id])
+            # self.data_manager.delete_data(DC_INIT, [group_id])
 
         # 给Master汇报清理情况
         if self.get_master_ids():
             master_id = self.get_master_ids()[0]
             result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
             feedback = f"检查{len(all_user_id)}个用户数据, {len(all_group_id)}个群聊数据.\n" \
-                       f"清理{len(invalid_user_id)}个失效用户, {len(invalid_group_id)}个失效群聊.\n" \
+                       f"清理{len(invalid_user_id)}个失效用户, {len(invalid_group_id)}个失效群聊({invalid_group_id}).\n" \
                        f"对{len(warning_group_id)}个即将失效的群聊发送提示消息."
             result_commands.append(BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_id)]))
         result_commands = list(reversed(result_commands))
