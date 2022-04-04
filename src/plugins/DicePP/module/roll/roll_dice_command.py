@@ -2,7 +2,7 @@ from typing import List, Tuple, Any
 import asyncio
 
 from core.bot import Bot
-from core.data import DC_USER_DATA, DC_GROUP_DATA
+from core.data import DC_USER_DATA, DC_GROUP_DATA, DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -259,6 +259,38 @@ class RollDiceCommand(UserCommandBase):
 
     def get_description(self) -> str:
         return ".r 掷骰"
+
+    def tick_daily(self) -> List[BotCommandBase]:
+        # 清除今日统计
+        # 更新用户数据
+        for user_id in self.bot.data_manager.get_keys(DC_USER_DATA, []):
+            dcp_user_prefix = [user_id] + DCP_USER_DATA_ROLL_A_UID
+            # 掷骰次数
+            try:
+                user_time_data = self.bot.data_manager.get_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL, get_ref=True)
+                user_time_data[DCK_ROLL_TODAY] = 0
+            except DataManagerError:
+                pass
+            try:
+                user_time_data = self.bot.data_manager.get_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL, get_ref=True)
+                user_time_data[DCK_ROLL_TODAY] = [0] * 21
+            except DataManagerError:
+                pass
+        # 更新群聊数据
+        for group_id in self.bot.data_manager.get_keys(DC_GROUP_DATA, []):
+            dcp_group_prefix = [group_id] + DCP_GROUP_DATA_ROLL_A_GID
+            # 掷骰次数
+            try:
+                user_time_data = self.bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_TIME_A_ID_ROLL, get_ref=True)
+                user_time_data[DCK_ROLL_TODAY] = 0
+            except DataManagerError:
+                pass
+            try:
+                user_time_data = self.bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_D20_A_ID_ROLL, get_ref=True)
+                user_time_data[DCK_ROLL_TODAY] = [0] * 21
+            except DataManagerError:
+                pass
+        return []
 
 
 async def get_roll_exp_result(expression: RollExpression) -> str:
