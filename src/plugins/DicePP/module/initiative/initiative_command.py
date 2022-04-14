@@ -8,8 +8,7 @@ from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from module.roll import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, RollDiceError, is_roll_exp
 
-from module.initiative.initiative_list import DC_INIT, DCK_ENTITY,\
-    get_default_init_data, add_initiative_entity, del_initiative_entity, InitiativeError
+from module.initiative.initiative_list import DC_INIT, InitList, InitiativeError
 from module.initiative.initiative_entity import InitEntity
 from utils.string import match_substring
 
@@ -195,7 +194,7 @@ class InitiativeCommand(UserCommandBase):
 
         elif mode == "inspect":  # 查看先攻信息
             try:
-                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
+                init_list: InitList = self.bot.data_manager.get_data(DC_INIT, [meta.group_id], get_ref=True)
             except DataManagerError:
                 feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -205,8 +204,7 @@ class InitiativeCommand(UserCommandBase):
             char_dict: Dict[str, DNDCharInfo] = self.bot.data_manager.get_data(DC_CHAR_DND, [meta.group_id], default_val={})
             hp_dict.update(dict([(user_id, char_info.hp_info) for user_id, char_info in char_dict.items()]))
             init_info = ""
-            init_data[DCK_ENTITY] = sorted(init_data[DCK_ENTITY], key=lambda x: -x.init)
-            for index, entity in enumerate(init_data[DCK_ENTITY]):
+            for index, entity in enumerate(init_list.entities):
                 entity: InitEntity = entity
                 # 生命值信息
                 entity_hp_info: str = ""
@@ -219,8 +217,6 @@ class InitiativeCommand(UserCommandBase):
                 init_info += f"{index + 1}.{entity.get_info()} {entity_hp_info}\n"
             init_info = init_info.strip()  # 去掉末尾的换行
             feedback = self.format_loc(LOC_INIT_INFO, init_info=init_info)
-            # 更新生命值信息
-            self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         elif mode == "clear":  # 清除所有先攻信息
@@ -228,9 +224,8 @@ class InitiativeCommand(UserCommandBase):
             feedback = ""
             try:
                 from module.character.dnd5e import DC_CHAR_HP, HPInfo
-                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
-                for entity in init_data[DCK_ENTITY]:
-                    entity: InitEntity = entity
+                init_list: InitList = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
+                for entity in init_list.entities:
                     if not entity.owner:
                         try:
                             hp_info: HPInfo = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id, entity.name])
@@ -257,7 +252,7 @@ class InitiativeCommand(UserCommandBase):
 
         elif mode == "delete":  # 删除先攻条目
             try:
-                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
+                init_list: InitList = self.bot.data_manager.get_data(DC_INIT, [meta.group_id], get_ref=True)
             except DataManagerError:
                 feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -265,7 +260,7 @@ class InitiativeCommand(UserCommandBase):
             # 在列表中搜索名字, 结果加入到name_list_valid
             name_list: List[str] = [name.strip() for name in arg_str.split("/")]  # 类似.init del A/B/C 这样的用法
             name_list_valid: List[str] = []
-            entity_name_list = [entity.name for entity in init_data[DCK_ENTITY]]
+            entity_name_list = [entity.name for entity in init_list.entities]
             for name in name_list:
                 match_num = sum([e_name == name for e_name in entity_name_list])  # O(N*M)暴力搜索
                 if match_num == 1:  # 正好有一个同名条目
@@ -286,11 +281,11 @@ class InitiativeCommand(UserCommandBase):
                 for v_name in name_list_valid:
                     # 删除生命值信息
                     index = None
-                    for i, entity in enumerate(init_data[DCK_ENTITY]):
+                    for i, entity in enumerate(init_list.entities):
                         if entity.name == v_name:
                             index = i
                             break
-                    if not init_data[DCK_ENTITY][index].owner:
+                    if not init_list.entities[index].owner:
                         try:
                             from module.character.dnd5e import DC_CHAR_HP
                             self.bot.data_manager.delete_data(DC_CHAR_HP, [meta.group_id, v_name])
@@ -298,14 +293,13 @@ class InitiativeCommand(UserCommandBase):
                             pass
                     # 删除先攻信息
                     try:
-                        del_initiative_entity(init_data, v_name)
+                        init_list.del_entity(v_name)
                         name_list_deleted.append(v_name)
                     except InitiativeError as e:
                         feedback += self.format_loc(LOC_INIT_ERROR, error_info=e.info) + "\n"
                 if name_list_deleted:
                     feedback += self.format_loc(LOC_INIT_INFO_DEL, entity_list=name_list_deleted)
             feedback = feedback.strip()
-            self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
@@ -343,9 +337,8 @@ class InitiativeCommand(UserCommandBase):
         Returns:
             feedback: 操作执行成功或失败的提示
         """
-        # 获取init data
-        init_data: dict = self.bot.data_manager.get_data(DC_INIT, [group_id],
-                                                         default_gen=lambda: get_default_init_data(group_id))
+        # 获取先攻列表
+        init_list: InitList = self.bot.data_manager.get_data(DC_INIT, [group_id], default_gen=InitList, get_ref=True)
 
         # 针对 .ri 3#地精 这种用法简化一下输出(会产生3次一样的roll_res)
         final_result_dict: Dict[str, Tuple[List[str], int]] = {}
@@ -359,7 +352,7 @@ class InitiativeCommand(UserCommandBase):
             is_valid = True
             for name in name_list:
                 try:
-                    add_initiative_entity(init_data, name, owner_id, roll_val)
+                    init_list.add_entity(name, owner_id, roll_val)
                 except InitiativeError as e:
                     is_valid = False
                     feedback_list.append(self.format_loc(LOC_INIT_ERROR, error_info=e.info))
@@ -367,5 +360,4 @@ class InitiativeCommand(UserCommandBase):
                 feedback_list.append(self.format_loc(LOC_INIT_ROLL, name=", ".join(name_list), init_result=roll_res_str))
 
         feedback = "\n".join(feedback_list)
-        self.bot.data_manager.set_data(DC_INIT, [group_id], init_data)
         return feedback

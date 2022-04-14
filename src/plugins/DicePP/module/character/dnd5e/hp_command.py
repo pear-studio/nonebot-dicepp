@@ -297,9 +297,9 @@ class HPCommand(UserCommandBase):
         target_id_name_dict = {}
         pc_set = set()
         try:
-            from module.initiative import DC_INIT, DCK_ENTITY, InitEntity
-            init_data: dict = self.bot.data_manager.get_data(DC_INIT, [group_id])
-            for entity in init_data[DCK_ENTITY]:
+            from module.initiative import DC_INIT, InitList, InitEntity
+            init_list: InitList = self.bot.data_manager.get_data(DC_INIT, [group_id])
+            for entity in init_list.entities:
                 entity: InitEntity = entity
                 if entity.owner:
                     target_id_name_dict[entity.owner] = entity.name

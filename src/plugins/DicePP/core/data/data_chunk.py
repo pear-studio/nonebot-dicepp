@@ -40,7 +40,7 @@ class DataChunkBase(metaclass=abc.ABCMeta):
         return cls.identifier
 
     @classmethod
-    def from_json(cls, json_dict):
+    def from_json(cls, json_dict: dict):
         """
         通过json格式的字符串反序列化生成一个实例并返回
         Args:
@@ -79,9 +79,15 @@ class DataChunkBase(metaclass=abc.ABCMeta):
                     del node[index]
 
         obj = cls()
-        obj.__dict__ = json_dict
+        for k, v in json_dict.items():
+            obj.__setattr__(k, v)
         if cls.include_json_object:
             deserialize_json_object_in_node(obj.root)
+        try:
+            obj.introspect()
+        except AssertionError:
+            dice_log(f"[DataManager] [Introspect] Invalidate {obj.identifier}")
+            obj = cls()
 
         return obj
 
@@ -114,6 +120,9 @@ class DataChunkBase(metaclass=abc.ABCMeta):
     def __hash__(self):
         target_str = self.version_base + self.update_time + str(self.root)
         return hash(target_str)
+
+    def introspect(self) -> None:
+        pass
 
 
 DATA_CHUNK_TYPES: List[Type[DataChunkBase]] = []  # 记录所有DataChunk的子类, 不需要手动修改, 应当通过修饰器CustomDC增加
