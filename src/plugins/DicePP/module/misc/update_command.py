@@ -15,7 +15,7 @@ dpp_path = os.path.abspath(".")
 # DicePP Source
 dpp_github_path = "https://github.com/pear-studio/nonebot-dicepp.git"
 dpp_gitee_path = "https://gitee.com/pear_studio/nonebot-dicepp.git"
-update_source = 'gitee'  # 更新源
+update_source = "gitee"  # 更新源
 
 
 @custom_user_command(readable_name="升级检查", priority=DPP_COMMAND_PRIORITY_DEFAULT)
@@ -34,25 +34,30 @@ class UpdateCommand(UserCommandBase):
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
         arg_str = hint
-        TextArea: str = ''
+        TextArea: str = ""
 
-        if update_source.lower() == "github":
-            gitrepo = GitRepository(dpp_path, dpp_github_path, update_source)
+        if update_source == "github":
+            git_path = dpp_github_path
         elif update_source.lower() == "gitee":
-            gitrepo = GitRepository(dpp_path, dpp_gitee_path, update_source)
+            git_path = dpp_gitee_path
         else:
-            raise "初始化失败,请检查您的配置项是否正确。"
+            feedback = "初始化Git仓库失败, 请检查您的配置项是否正确"
+            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+        try:
+            gitrepo = GitRepository(dpp_path, git_path, update_source)
+        except AssertionError:
+            raise NotImplementedError()  # ToDo
 
         if arg_str.lower() == "merge":
             TextArea1 = gitrepo.update()
             feedback: str = self.format_loc(LOC_UPDATE, TextArea=TextArea)
             feedback2: str = self.format_loc(LOC_UPDATE, TextArea=TextArea1)
             return [BotSendMsgCommand(self.bot.account, feedback2, [port]), BotSendMsgCommand(self.bot.account, feedback, [port])]
-        elif arg_str.lower() == 'resourcecode':
+        elif arg_str.lower() == "resourcecode":
             TextArea = gitrepo.refresh()
             feedback: str = self.format_loc(LOC_UPDATE, TextArea=TextArea)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-        elif arg_str.lower() == 'stopcheckupdate':
+        elif arg_str.lower() == "stopcheckupdate":
             global DAILY_CHECK
             DAILY_CHECK = False
         elif arg_str.lower() is None or arg_str.lower() == "":
@@ -60,19 +65,25 @@ class UpdateCommand(UserCommandBase):
             feedback: str = self.format_loc(LOC_UPDATE, TextArea=TextArea)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
-    def tick_daily(self):
+    def tick_daily(self) -> List[BotCommandBase]:
         global DAILY_CHECK
         if not DAILY_CHECK:
-            return 0
-        if update_source.lower() == "github":
-            gitrepo = GitRepository(dpp_path, dpp_github_path, update_source)
+            return []
+
+        if update_source == "github":
+            git_path = dpp_github_path
         elif update_source.lower() == "gitee":
-            gitrepo = GitRepository(dpp_path, dpp_gitee_path, update_source)
+            git_path = dpp_gitee_path
         else:
-            raise "初始化失败,请检查您的配置项是否正确。"
+            raise AssertionError(f"无效的配置:{update_source}")
+        try:
+            gitrepo = GitRepository(dpp_path, git_path, update_source)
+        except AssertionError:
+            raise NotImplementedError()  # ToDo
         TextArea = gitrepo.get_update()
         feedback: str = self.format_loc(LOC_UPDATE, TextArea=TextArea)
-        return Bot.send_msg_to_master(feedback)
+        self.bot.send_msg_to_master(feedback)
+        return []
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "update":  # help后的接着的内容
