@@ -113,12 +113,12 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
     if isinstance(event, GroupMessageEvent):
         group_id = str(event.group_id)
 
-    log_str = f"[Proxy Message] Bot \033[0;37m{bot.self_id}\033[0m receive message \033[0;33m{raw_msg}\033[0m from "
-    if group_id:
-        log_str += f"\033[0;34m|Group: {group_id} User: {user_id}|\033[0m"
-    else:
-        log_str += f"\033[0;35m|Private: {user_id}|\033[0m"
-    dice_log()
+    # log_str = f"[Proxy Message] Bot \033[0;37m{bot.self_id}\033[0m receive message \033[0;33m{raw_msg}\033[0m from "
+    # if group_id:
+    #     log_str += f"\033[0;34m|Group: {group_id} User: {user_id}|\033[0m"
+    # else:
+    #     log_str += f"\033[0;35m|Private: {user_id}|\033[0m"
+    # dice_log(log_str)
 
     sender = MessageSender(user_id, event.sender.nickname)
     sender.sex, sender.age, sender.card = event.sender.sex, event.sender.age, event.sender.card

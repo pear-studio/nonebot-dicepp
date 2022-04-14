@@ -86,6 +86,14 @@ class MasterCommand(UserCommandBase):
 
             self.bot.register_task(clear_expired_data, timeout=3600)
             feedback = "清理开始..."
+        elif arg_str == "debug-tick":
+            feedback = f"异步任务状态: {self.bot.tick_task.get_name()} Done:{self.bot.tick_task.done()} Cancelled:{self.bot.tick_task.cancelled()}\n" \
+                       f"{self.bot.tick_task}"
+        elif arg_str == "redo-tick":
+            import asyncio
+            self.bot.tick_task = asyncio.create_task(self.bot.tick_loop())
+            self.bot.todo_tasks = {}
+            feedback = "Redo tick finish!"
         else:
             feedback = self.get_help("m", meta)
 

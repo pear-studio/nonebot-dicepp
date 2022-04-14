@@ -63,7 +63,10 @@ class StatisticsCommand(UserCommandBase):
                 roll_d20_path = [meta.user_id] + DCP_USER_DATA_ROLL_A_UID + DCP_ROLL_D20_A_ID_ROLL
                 d20_data: Dict[str, List[int]] = self.bot.data_manager.get_data(DC_USER_DATA, roll_d20_path)
                 today_info = f"今日掷骰次数:{roll_time_data[DCK_ROLL_TODAY]} D20统计:{d20_data[DCK_ROLL_TODAY][1:]}"
-                d20_avg = sum([(i+1)*num for i, num in enumerate(d20_data[DCK_ROLL_TODAY][1:])]) / sum(d20_data[DCK_ROLL_TODAY][1:])
+                if sum(d20_data[DCK_ROLL_TODAY][1:]) == 0:
+                    d20_avg = 0
+                else:
+                    d20_avg = sum([(i+1)*num for i, num in enumerate(d20_data[DCK_ROLL_TODAY][1:])]) / sum(d20_data[DCK_ROLL_TODAY][1:])
                 today_info += " 平均值: {:.3f}".format(d20_avg)
                 total_info = f"总计掷骰次数:{roll_time_data[DCK_ROLL_TOTAL]} D20统计:{d20_data[DCK_ROLL_TOTAL][1:]}"
                 d20_avg = sum([(i+1)*num for i, num in enumerate(d20_data[DCK_ROLL_TOTAL][1:])]) / sum(d20_data[DCK_ROLL_TOTAL][1:])
