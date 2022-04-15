@@ -141,12 +141,12 @@ class Bot:
                 if self.todo_tasks:
                     free_time = max(loop_begin_time + 1 - loop.time(), 0.25)
                     await self.process_async_task(bot_commands, free_time, loop)
+
+                if self.proxy:
+                    for command in bot_commands:
+                        await self.proxy.process_bot_command(command)
             except Exception:
                 bot_commands += self.handle_exception(f"Tick Loop: CODE113")
-
-            if self.proxy:
-                for command in bot_commands:
-                    await self.proxy.process_bot_command(command)
 
             # 最多每秒执行一次循环
             free_time = max(loop_begin_time + 1 - loop.time(), 0)

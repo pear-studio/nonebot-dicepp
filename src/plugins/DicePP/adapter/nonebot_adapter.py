@@ -13,6 +13,7 @@ from nonebot.adapters.onebot.v11.event import NoticeEvent, GroupIncreaseNoticeEv
 from nonebot.adapters.onebot.v11.event import RequestEvent, FriendRequestEvent, GroupRequestEvent
 from nonebot.adapters.onebot.v11.bot import Bot as NoneBot
 from nonebot.adapters.onebot.v11 import Message as CQMessage
+from nonebot.adapters.onebot.v11 import ActionFailed
 
 from core.bot import Bot as DicePPBot
 from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, GroupInfo
@@ -59,23 +60,26 @@ class NoneBotClientProxy(ClientProxy):
     def __init__(self, bot: NoneBot):
         self.bot = bot
 
+    # noinspection PyBroadException
     async def process_bot_command(self, command: BotCommandBase):
-        dice_log(f"[Proxy Bot Command] {command}")
-        if isinstance(command, BotSendMsgCommand):
-            for target in command.targets:
-                if target.group_id:
-                    await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
-                else:
-                    await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
-        elif isinstance(command, BotLeaveGroupCommand):
-            try:
+        dice_log(f"[OneBot] [BotCommand] {command}")
+        try:
+            if isinstance(command, BotSendMsgCommand):
+                for target in command.targets:
+                    if target.group_id:
+                        await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
+                    else:
+                        await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
+            elif isinstance(command, BotLeaveGroupCommand):
                 await self.bot.set_group_leave(group_id=int(command.target_group_id))
-            except:
-                pass
-        elif isinstance(command, BotDelayCommand):
-            await asyncio.sleep(command.seconds)
-        else:
-            raise NotImplementedError("未定义的BotCommand类型")
+            elif isinstance(command, BotDelayCommand):
+                await asyncio.sleep(command.seconds)
+            else:
+                raise NotImplementedError("未定义的BotCommand类型")
+        except ActionFailed as e:
+            dice_log(f"[OneBot] [ActionFailed] {e}")
+        except Exception as e:
+            dice_log(f"[OneBot] [UnknownException] {e}")
 
     async def process_bot_command_list(self, command_list: List[BotCommandBase]):
         if len(command_list) > 1:
@@ -171,9 +175,12 @@ async def handle_request(bot: NoneBot, event: RequestEvent):
         elif (approve is not None) and (not approve):
             await event.reject(bot)
 
+
 # 全局Driver
 try:
     driver = nonebot.get_driver()
+
+
     # 在Bot连接时调用
 
     @driver.on_bot_connect
