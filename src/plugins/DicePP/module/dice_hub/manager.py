@@ -5,10 +5,9 @@ import random
 import math
 
 from core.bot import Bot
-from core.data import DC_META
-from core.data import DCP_META_ONLINE_PERIOD
-from core.data import DCP_META_MSG_TOTAL_NUM, DCP_META_MSG_LAST_NUM, DCP_META_CMD_TOTAL_NUM, DCP_META_CMD_LAST_NUM
+from core.data import DC_META, DCK_META_STAT
 from core.data import DataManagerError
+from core.statistics import MetaStatInfo
 from core.config import BOT_VERSION, CFG_FRIEND_TOKEN
 
 from utils.time import get_current_date_str, get_current_date_raw, str_to_datetime
@@ -76,15 +75,15 @@ class HubManager:
             self_name = CONST_UNDEFINED_NAME
 
         current_time = get_current_date_raw()
-        online_period = self.bot.data_manager.get_data(DC_META, DCP_META_ONLINE_PERIOD, default_val=[])
+        meta_stat: MetaStatInfo = self.bot.data_manager.get_data(DC_META, [DCK_META_STAT])
         try:
-            first_time = online_period[0][0]
+            first_time = meta_stat.online_period[0][0]
         except IndexError:
             first_time = get_current_date_str()
         total_time_in_week = 7 * 24 * 3600
         one_week = datetime.timedelta(seconds=total_time_in_week)
         online_time_in_week = 0
-        for start_time, end_time in online_period:
+        for start_time, end_time in meta_stat.online_period:
             start_time = str_to_datetime(start_time)
             end_time = str_to_datetime(end_time)
             if end_time < current_time - one_week:  # 忽略一周以前的记录
@@ -96,6 +95,7 @@ class HubManager:
         online_rate = int(math.ceil(online_time_in_week / total_time_in_week * 100))
         passwords: List[str] = self.bot.cfg_helper.get_config(CFG_FRIEND_TOKEN)
         passwords = [password.strip() for password in passwords if password.strip()]
+        cmd_stats = meta_stat.cmd.flag_dict.values()
         sync_info = {
             SYNC_KEY_NAME: self_name,
             SYNC_KEY_MASTER: self.bot.get_master_ids()[0],
@@ -103,10 +103,10 @@ class HubManager:
             SYNC_KEY_FRIEND_TOKEN: passwords,
             SYNC_KEY_ONLINE_FIRST: first_time,
             SYNC_KEY_ONLINE_RATE: online_rate,
-            SYNC_KEY_MSG_TOTAL: self.bot.data_manager.get_data(DC_META, DCP_META_MSG_TOTAL_NUM, default_val=0),
-            SYNC_KEY_MSG_LAST: self.bot.data_manager.get_data(DC_META, DCP_META_MSG_LAST_NUM, default_val=0),
-            SYNC_KEY_CMD_TOTAL: self.bot.data_manager.get_data(DC_META, DCP_META_CMD_TOTAL_NUM, default_val=0),
-            SYNC_KEY_CMD_LAST: self.bot.data_manager.get_data(DC_META, DCP_META_CMD_LAST_NUM, default_val=0),
+            SYNC_KEY_MSG_TOTAL: meta_stat.msg.total_val,
+            SYNC_KEY_MSG_LAST: meta_stat.msg.last_day_val,
+            SYNC_KEY_CMD_TOTAL: sum([elem.total_val for elem in cmd_stats]),
+            SYNC_KEY_CMD_LAST: sum([elem.last_day_val for elem in cmd_stats]),
         }
         return sync_info
 

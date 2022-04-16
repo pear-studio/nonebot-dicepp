@@ -2,7 +2,8 @@ from typing import List, Tuple, Any
 import asyncio
 
 from core.bot import Bot
-from core.data import DC_USER_DATA, DC_GROUP_DATA, DataManagerError
+from core.data import DC_USER_DATA, DC_GROUP_DATA, DCK_USER_STAT, DCK_GROUP_STAT, DataManagerError
+from core.statistics import UserStatInfo, GroupStatInfo
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -37,15 +38,6 @@ CFG_ROLL_HIDE_ENABLE = "roll_hide_enable"
 CFG_ROLL_EXP_COST = "roll_exp_cost"
 
 MULTI_ROLL_LIMIT = 10  # 多轮掷骰上限次数
-
-DCP_USER_DATA_ROLL_A_UID = ["roll"]  # 所有用户掷骰相关信息存储路径, 跟在user_id后面
-DCP_GROUP_DATA_ROLL_A_GID = ["roll"]  # 所有群掷骰相关信息存储路径, 跟在group_id后面, 私聊时group_id为private
-
-DCP_ROLL_TIME_A_ID_ROLL = ["time"]  # 掷骰次数信息的相对路径
-DCP_ROLL_D20_A_ID_ROLL = ["d20"]  # D20信息的相关路径
-
-DCK_ROLL_TODAY = "today"  # 获取每日信息的key, 适用范围包括 DCP_ROLL_TIME_A_ID_ROLL 和 DCP_ROLL_D20_A_ID_ROLL
-DCK_ROLL_TOTAL = "total"  # 获取所有历史信息的key, 适用范围包括 DCP_ROLL_TIME_A_ID_ROLL 和 DCP_ROLL_D20_A_ID_ROLL
 
 
 @custom_user_command(readable_name="掷骰指令",
@@ -260,38 +252,6 @@ class RollDiceCommand(UserCommandBase):
     def get_description(self) -> str:
         return ".r 掷骰"
 
-    def tick_daily(self) -> List[BotCommandBase]:
-        # 清除今日统计
-        # 更新用户数据
-        for user_id in self.bot.data_manager.get_keys(DC_USER_DATA, []):
-            dcp_user_prefix = [user_id] + DCP_USER_DATA_ROLL_A_UID
-            # 掷骰次数
-            try:
-                user_time_data = self.bot.data_manager.get_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL, get_ref=True)
-                user_time_data[DCK_ROLL_TODAY] = 0
-            except DataManagerError:
-                pass
-            try:
-                user_time_data = self.bot.data_manager.get_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL, get_ref=True)
-                user_time_data[DCK_ROLL_TODAY] = [0] * 21
-            except DataManagerError:
-                pass
-        # 更新群聊数据
-        for group_id in self.bot.data_manager.get_keys(DC_GROUP_DATA, []):
-            dcp_group_prefix = [group_id] + DCP_GROUP_DATA_ROLL_A_GID
-            # 掷骰次数
-            try:
-                user_time_data = self.bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_TIME_A_ID_ROLL, get_ref=True)
-                user_time_data[DCK_ROLL_TODAY] = 0
-            except DataManagerError:
-                pass
-            try:
-                user_time_data = self.bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_D20_A_ID_ROLL, get_ref=True)
-                user_time_data[DCK_ROLL_TODAY] = [0] * 21
-            except DataManagerError:
-                pass
-        return []
-
 
 async def get_roll_exp_result(expression: RollExpression) -> str:
     repeat_times = 200000
@@ -358,43 +318,16 @@ def get_d20_state_loc_text(bot: Bot, res_list: List[RollResult]):
 def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollResult]):
     """统计掷骰数据"""
     roll_times = len(res_list)
-    cur_roll_result: List[int] = [sum([res.d20_num != 1 for res in res_list])]  # 第0个元素为非D20数量
-    for i in range(1, 21):
-        cur_roll_result.append(sum([res.d20_num == 1 and res.d20_state == i for res in res_list]))
     # 更新用户数据
-    dcp_user_prefix = [meta.user_id] + DCP_USER_DATA_ROLL_A_UID
-    # 掷骰次数
-    user_time_data = bot.data_manager.get_data(DC_USER_DATA,
-                                               dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL,
-                                               default_val={DCK_ROLL_TODAY: 0, DCK_ROLL_TOTAL: 0})
-    user_time_data[DCK_ROLL_TODAY] += roll_times
-    user_time_data[DCK_ROLL_TOTAL] += roll_times
-    bot.data_manager.set_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL, user_time_data)
-    # D20信息
-    user_d20_data = bot.data_manager.get_data(DC_USER_DATA,
-                                              dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL,
-                                              default_val={DCK_ROLL_TODAY: [0]*21, DCK_ROLL_TOTAL: [0]*21})
-    for i in range(1, 21):
-        user_d20_data[DCK_ROLL_TODAY][i] += cur_roll_result[i]
-        user_d20_data[DCK_ROLL_TOTAL][i] += cur_roll_result[i]
-    bot.data_manager.set_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL, user_d20_data)
+    user_stat: UserStatInfo = bot.data_manager.get_data(DC_USER_DATA, [meta.user_id, DCK_USER_STAT], get_ref=True)
+    user_stat.roll.times.inc(roll_times)
+    for res in (res for res in res_list if res.d20_num == 1):
+        user_stat.roll.d20.record(res.d20_state)
     # 更新群数据
     if not meta.group_id:
         return
-    dcp_group_prefix = [meta.group_id] + DCP_GROUP_DATA_ROLL_A_GID
-    # 掷骰次数
-    group_time_data = bot.data_manager.get_data(DC_GROUP_DATA,
-                                                dcp_group_prefix + DCP_ROLL_TIME_A_ID_ROLL,
-                                                default_val={DCK_ROLL_TODAY: 0, DCK_ROLL_TOTAL: 0})
-    group_time_data[DCK_ROLL_TODAY] += roll_times
-    group_time_data[DCK_ROLL_TOTAL] += roll_times
-    bot.data_manager.set_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_TIME_A_ID_ROLL, group_time_data)
-    # D20信息
-    group_d20_data = bot.data_manager.get_data(DC_GROUP_DATA,
-                                               dcp_group_prefix + DCP_ROLL_D20_A_ID_ROLL,
-                                               default_val={DCK_ROLL_TODAY: [0] * 21, DCK_ROLL_TOTAL: [0] * 21})
-    for i in range(1, 21):
-        group_d20_data[DCK_ROLL_TODAY][i] += cur_roll_result[i]
-        group_d20_data[DCK_ROLL_TOTAL][i] += cur_roll_result[i]
-    bot.data_manager.set_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_D20_A_ID_ROLL, group_d20_data)
+    group_stat: GroupStatInfo = bot.data_manager.get_data(DC_GROUP_DATA, [meta.group_id, DCK_GROUP_STAT], get_ref=True)
+    group_stat.roll.times.inc(roll_times)
+    for res in (res for res in res_list if res.d20_num == 1):
+        group_stat.roll.d20.record(res.d20_state)
     return

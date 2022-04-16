@@ -5,7 +5,7 @@ import random
 from typing import List, Optional, Dict, Callable, Union, Set
 
 from utils.logger import dice_log, get_exception_info
-from utils.time import str_to_datetime, datetime_to_str_day, get_current_date_str, get_current_date_raw
+from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
 from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from core.config import ConfigManager, CFG_COMMAND_SPLIT, CFG_MASTER, CFG_FRIEND_TOKEN, CFG_GROUP_INVITE
 from core.config import CFG_DATA_EXPIRE, CFG_USER_EXPIRE_DAY, CFG_GROUP_EXPIRE_DAY, CFG_GROUP_EXPIRE_WARNING,\
@@ -15,14 +15,10 @@ from core.communication import MessageMetaData, MessagePort, PrivateMessagePort,
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import GroupInfo
-from core.data import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE, DC_USER_DATA, DC_GROUP_DATA
-from core.data import DCK_TOTAL_NUM, DCK_TODAY_NUM, DCK_LAST_NUM, DCK_LAST_TIME
-from core.data import DCP_META_ONLINE_PERIOD, DCP_META_ONLINE_LAST
-from core.data import DCP_META_CMD_TOTAL_NUM, DCP_META_CMD_TODAY_NUM, DCP_META_CMD_LAST_NUM
-from core.data import DCP_META_MSG_TOTAL_NUM, DCP_META_MSG_TODAY_NUM, DCP_META_MSG_LAST_NUM
-from core.data import DCP_USER_CMD_FLAG_A_UID, DCP_GROUP_CMD_FLAG_A_GID, DCP_GROUP_INFO_A_GID, DCP_GROUP_META_A_GID,\
-    DCP_USER_MSG_A_UID, DCP_GROUP_MSG_A_GID
+from core.data import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE, DC_USER_DATA, DC_GROUP_DATA,\
+    DCK_META_STAT, DCK_USER_STAT, DCK_GROUP_STAT
 from core.data import DataManager, DataManagerError
+from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo
 
 from core.bot.macro import BotMacro, MACRO_PARSE_LIMIT
 from core.bot.variable import BotVariable
@@ -97,9 +93,8 @@ class Bot:
         loop = asyncio.get_event_loop()
         time_counter = [loop.time()] * 2
 
-        init_online_str = get_current_date_str()
-        online_period = self.data_manager.get_data(DC_META, DCP_META_ONLINE_PERIOD, default_val=[])
-        online_period.append([init_online_str, init_online_str])
+        meta_stat: MetaStatInfo = self.data_manager.get_data(DC_META, [DCK_META_STAT], default_gen=MetaStatInfo)
+        meta_stat.update(is_first_time=True)
 
         while True:
             loop_begin_time = loop.time()
@@ -113,17 +108,9 @@ class Bot:
                         dice_log(str(self.handle_exception(f"Tick: {command.readable_name} CODE110")[0]))
 
                 if loop_begin_time - time_counter[0] > 60 * 5:  # 5分钟执行一次
-                    # 尝试每日更新
-                    last_online_str = self.data_manager.get_data(DC_META, DCP_META_ONLINE_LAST, default_val=init_online_str)
-                    last_online_day_str = datetime_to_str_day(str_to_datetime(last_online_str))
-                    cur_online_day_str = datetime_to_str_day(get_current_date_raw())
-                    if cur_online_day_str != last_online_day_str:  # 最后在线时间和当前时间不是同一天
+                    # 更新在线时间并尝试每日更新
+                    if meta_stat.update():
                         await self.tick_daily(bot_commands)
-                    # 更新最后在线时间
-                    cur_online_str = get_current_date_str()
-                    online_period[-1][-1] = cur_online_str
-                    self.data_manager.set_data(DC_META, DCP_META_ONLINE_LAST, cur_online_str)
-                    self.data_manager.set_data(DC_META, DCP_META_ONLINE_PERIOD, online_period)
                     # 保存数据到本地
                     await self.data_manager.save_data_async()
                     # 更新计时器
@@ -199,38 +186,20 @@ class Bot:
             dice_log(str(self.handle_exception(f"Async Task: CODE112")[0]))
 
     async def tick_daily(self, bot_commands):
-        # 处理Meta统计
-        meta_msg_last = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
-        meta_cmd_last = self.data_manager.get_data(DC_META, DCP_META_CMD_TODAY_NUM, default_val=0)
-        self.data_manager.set_data(DC_META, DCP_META_MSG_LAST_NUM, meta_msg_last)
-        self.data_manager.set_data(DC_META, DCP_META_CMD_LAST_NUM, meta_cmd_last)
-        self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, 0)
-        self.data_manager.set_data(DC_META, DCP_META_CMD_TODAY_NUM, 0)
-        # 处理指令Flag统计
-        from core.command.const import DPP_COMMAND_FLAG_DICT
-
-        def process_cmd_flag_info(cmd_flag_info):
-            for flag in DPP_COMMAND_FLAG_DICT.keys():
-                if flag in cmd_flag_info:
-                    cmd_flag_info[flag][DCK_LAST_NUM] = cmd_flag_info[flag][DCK_TODAY_NUM]
-                    cmd_flag_info[flag][DCK_TODAY_NUM] = 0
+        # 更新用户统计
         for user_id in self.data_manager.get_keys(DC_USER_DATA, []):
-            user_cmd_flag_path = [user_id] + DCP_USER_CMD_FLAG_A_UID
-            user_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, user_cmd_flag_path, default_val={}, get_ref=True)
-            process_cmd_flag_info(user_cmd_flag_info)
-            user_msg_path = [user_id] + DCP_USER_MSG_A_UID
-            user_msg_today_num = self.data_manager.get_data(DC_USER_DATA, user_msg_path + [DCK_TODAY_NUM], default_val=0)
-            self.data_manager.set_data(DC_USER_DATA, user_msg_path + [DCK_LAST_NUM], user_msg_today_num)
-            self.data_manager.set_data(DC_USER_DATA, user_msg_path + [DCK_TODAY_NUM], 0)
-
+            try:
+                user_stat: UserStatInfo = self.data_manager.get_data(DC_USER_DATA, [user_id, DCK_USER_STAT], get_ref=True)
+            except DataManagerError:
+                continue
+            user_stat.daily_update()
+        # 更新群聊统计
         for group_id in self.data_manager.get_keys(DC_GROUP_DATA, []):
-            group_cmd_flag_path = [group_id] + DCP_GROUP_CMD_FLAG_A_GID
-            group_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, group_cmd_flag_path, default_val={}, get_ref=True)
-            process_cmd_flag_info(group_cmd_flag_info)
-            group_msg_path = [group_id] + DCP_GROUP_MSG_A_GID
-            group_msg_today_num = self.data_manager.get_data(DC_GROUP_DATA, group_msg_path + [DCK_TODAY_NUM], default_val=0)
-            self.data_manager.set_data(DC_USER_DATA, group_msg_path + [DCK_LAST_NUM], group_msg_today_num)
-            self.data_manager.set_data(DC_USER_DATA, group_msg_path + [DCK_TODAY_NUM], 0)
+            try:
+                group_stat: GroupStatInfo = self.data_manager.get_data(DC_USER_DATA, [group_id, DCK_GROUP_STAT], get_ref=True)
+            except DataManagerError:
+                continue
+            group_stat.daily_update()
 
         # 尝试清理过期群聊和过期用户信息
         async def clear_expired_data():
@@ -342,19 +311,18 @@ class Bot:
 
         bot_commands: List[BotCommandBase] = []
 
-        # 统计收到的消息数量
-        meta_msg_total_num = self.data_manager.get_data(DC_META, DCP_META_MSG_TOTAL_NUM, default_val=0)
-        meta_msg_today_num = self.data_manager.get_data(DC_META, DCP_META_MSG_TODAY_NUM, default_val=0)
-        self.data_manager.set_data(DC_META, DCP_META_MSG_TOTAL_NUM, meta_msg_total_num+1)
-        self.data_manager.set_data(DC_META, DCP_META_MSG_TODAY_NUM, meta_msg_today_num+1)
+        # 统计信息
+        meta_stat: MetaStatInfo = self.data_manager.get_data(DC_META, [DCK_META_STAT], default_gen=MetaStatInfo, get_ref=True)
+        user_stat: UserStatInfo = self.data_manager.get_data(DC_USER_DATA, [meta.user_id, DCK_USER_STAT], default_gen=UserStatInfo, get_ref=True)
         if meta.group_id:
-            group_msg_path = [meta.group_id] + DCP_GROUP_MSG_A_GID
-            group_msg_info: Dict[str, int] = self.data_manager.get_data(DC_GROUP_DATA, group_msg_path, default_val={}, get_ref=True)
-            group_msg_info[DCK_TODAY_NUM] = group_msg_info.get(DCK_TODAY_NUM, 0) + 1
-            group_msg_info[DCK_TOTAL_NUM] = group_msg_info.get(DCK_TOTAL_NUM, 0) + 1
-        user_msg_info: Dict[str, int] = self.data_manager.get_data(DC_USER_DATA, [meta.user_id] + DCP_USER_MSG_A_UID, default_val={}, get_ref=True)
-        user_msg_info[DCK_TODAY_NUM] = user_msg_info.get(DCK_TODAY_NUM, 0) + 1
-        user_msg_info[DCK_TOTAL_NUM] = user_msg_info.get(DCK_TOTAL_NUM, 0) + 1
+            group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [meta.group_id, DCK_GROUP_STAT],
+                                                                   default_gen=GroupStatInfo, get_ref=True)
+        else:
+            group_stat = GroupStatInfo()
+        # 统计收到的消息数量
+        meta_stat.msg.inc()
+        group_stat.msg.inc()
+        user_stat.msg.inc()
 
         # 处理宏
         macro_list: List[BotMacro]
@@ -415,28 +383,11 @@ class Bot:
                     group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"
                     bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info} CODE101")
 
-                cur_date = get_current_date_str()
                 # 统计处理的指令情况
-                from core.command.const import DPP_COMMAND_FLAG_DICT
                 if command.flag and res_commands:
-                    def stat_cmd_flag(cmd_flag_info):
-                        for flag in DPP_COMMAND_FLAG_DICT.keys():
-                            if flag & command.flag:
-                                if flag not in cmd_flag_info:
-                                    cmd_flag_info[flag] = {DCK_TOTAL_NUM: 1, DCK_TODAY_NUM: 1, DCK_LAST_NUM: 0, DCK_LAST_TIME: cur_date}
-                                else:
-                                    cmd_flag_info[flag][DCK_TOTAL_NUM] += 1
-                                    cmd_flag_info[flag][DCK_TODAY_NUM] += 1
-                                    cmd_flag_info[flag][DCK_LAST_TIME] = cur_date
-                    # 统计用户信息
-                    user_cmd_flag_path = [meta.user_id] + DCP_USER_CMD_FLAG_A_UID
-                    user_cmd_flag_info = self.data_manager.get_data(DC_USER_DATA, user_cmd_flag_path, default_val={}, get_ref=True)
-                    stat_cmd_flag(user_cmd_flag_info)
-                    # 统计群信息
-                    if meta.group_id:
-                        group_cmd_flag_path = [meta.group_id] + DCP_GROUP_CMD_FLAG_A_GID
-                        group_cmd_flag_info = self.data_manager.get_data(DC_GROUP_DATA, group_cmd_flag_path, default_val={}, get_ref=True)
-                        stat_cmd_flag(group_cmd_flag_info)
+                    meta_stat.cmd.record(command)
+                    user_stat.cmd.record(command)
+                    group_stat.cmd.record(command)
 
                 if not should_pass:  # 已经处理过, 不需要再传递给后面的指令
                     break
@@ -456,11 +407,6 @@ class Bot:
                 bot_commands = list(send_msg_command_merged.values())
 
         if self.proxy and bot_commands:
-            # 统计处理的指令数目
-            meta_cmd_total_num = self.data_manager.get_data(DC_META, DCP_META_CMD_TOTAL_NUM, default_val=0)
-            meta_cmd_today_num = self.data_manager.get_data(DC_META, DCP_META_CMD_TODAY_NUM, default_val=0)
-            self.data_manager.set_data(DC_META, DCP_META_CMD_TOTAL_NUM, meta_cmd_total_num + 1)
-            self.data_manager.set_data(DC_META, DCP_META_CMD_TODAY_NUM, meta_cmd_today_num + 1)
             # 处理指令
             await self.proxy.process_bot_command_list(bot_commands)
         return bot_commands
@@ -573,58 +519,25 @@ class Bot:
         if not self.proxy:
             return []
         group_info_list: List[GroupInfo] = await self.proxy.get_group_list()
-        cur_date_str = get_current_date_str()
+        all_group_id = set(self.data_manager.get_keys(DC_GROUP_DATA, []))
+        valid_group_id = set((info.group_id for info in group_info_list))
         for info in group_info_list:
-            info_path = [info.group_id] + DCP_GROUP_INFO_A_GID
-            info_dict = {"name": info.group_name, "member_count": info.member_count,
-                         "max_member_count": info.max_member_count, "update": cur_date_str}
-            self.data_manager.set_data(DC_GROUP_DATA, info_path, info_dict)
+            group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [info.group_id, DCK_GROUP_STAT],
+                                                                   default_gen=GroupStatInfo, get_ref=True)
+            group_stat.meta.update(info.group_name, info.member_count, info.max_member_count)
+        for group_id in all_group_id.difference(valid_group_id):
+            group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [group_id, DCK_GROUP_STAT],
+                                                                   default_gen=GroupStatInfo, get_ref=True)
+            group_stat.meta.member_count = -1
+            group_stat.meta.max_member = -1
+
         return group_info_list
 
     def fix_data(self):
-        from core.command.const import DPP_COMMAND_FLAG_DICT
-        all_user_id: Set[str] = set(self.data_manager.get_keys(DC_USER_DATA, []))
-        for user_id in all_user_id:
-            try:
-                cmd_flag_path = [user_id] + DCP_USER_CMD_FLAG_A_UID
-                cmd_flag_info: Dict = self.data_manager.get_data(DC_USER_DATA, cmd_flag_path)
-                flag_str_list = list(cmd_flag_info.keys())
-                for flag_str in flag_str_list:
-                    cmd_flag_info[int(flag_str)] = cmd_flag_info[flag_str]
-                    del cmd_flag_info[flag_str]
-                    assert int(flag_str) in DPP_COMMAND_FLAG_DICT
-                for flag in DPP_COMMAND_FLAG_DICT:
-                    if flag not in cmd_flag_info:
-                        continue
-                    if type(cmd_flag_info[flag][DCK_LAST_TIME]) is int:  # 因为之前的一个笔误, 导致有一些日期被写成了int 过几个月再把这段处理去掉吧 (22/03/29)
-                        cmd_flag_info[flag][DCK_LAST_TIME] = get_current_date_str()
-
-                self.data_manager.set_data(DC_USER_DATA, cmd_flag_path, cmd_flag_info)
-            except DataManagerError:
-                pass
-        all_group_id: Set[str] = set(self.data_manager.get_keys(DC_GROUP_DATA, []))
-        for group_id in all_group_id:
-            try:
-                cmd_flag_path = [group_id] + DCP_GROUP_CMD_FLAG_A_GID
-                cmd_flag_info: Dict = self.data_manager.get_data(DC_GROUP_DATA, cmd_flag_path)
-                flag_str_list = list(cmd_flag_info.keys())
-                for flag_str in flag_str_list:
-                    cmd_flag_info[int(flag_str)] = cmd_flag_info[flag_str]
-                    del cmd_flag_info[flag_str]
-                    assert int(flag_str) in DPP_COMMAND_FLAG_DICT
-                for flag in DPP_COMMAND_FLAG_DICT:
-                    if flag not in cmd_flag_info:
-                        continue
-                    if type(cmd_flag_info[flag][DCK_LAST_TIME]) is int:  # 因为之前的一个笔误, 导致有一些日期被写成了int 过几个月再把这段处理去掉吧 (22/03/29)
-                        cmd_flag_info[flag][DCK_LAST_TIME] = get_current_date_str()
-                self.data_manager.set_data(DC_GROUP_DATA, cmd_flag_path, cmd_flag_info)
-            except DataManagerError:
-                pass
+        pass
 
     async def clear_expired_data(self) -> List:
-        from core.command.const import DPP_COMMAND_FLAG_DICT
         from core.command import BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotCommandBase
-        from module.roll import DCP_USER_DATA_ROLL_A_UID, DCP_ROLL_TIME_A_ID_ROLL, DCK_ROLL_TOTAL
         from module.common import DC_POINT, DC_WELCOME, DC_ACTIVATE, DC_CHAT_RECORD
         from module.character.dnd5e import DC_CHAR_DND, DC_CHAR_HP
         from module.initiative import DC_INIT
@@ -655,27 +568,21 @@ class Bot:
             # 白名单中的用户不会被清理
             if user_id in white_list_user:
                 continue
+            try:
+                user_stat: UserStatInfo = self.data_manager.get_data(DC_USER_DATA, [user_id, DCK_USER_STAT])
+            except DataManagerError:
+                invalid_user_id.append(user_id)
+                continue
             # 掷骰次数超过一定次数的用户不会被清理
-            try:
-                roll_time_path = [user_id] + DCP_USER_DATA_ROLL_A_UID + DCP_ROLL_TIME_A_ID_ROLL + [DCK_ROLL_TOTAL]
-                roll_time = self.data_manager.get_data(DC_USER_DATA, roll_time_path)
-                if roll_time > 200:
-                    is_valid = True
-            except DataManagerError:
-                pass
+            if user_stat.roll.times.total_val > 200:
+                is_valid = True
             # 过去一段时间内使用过指令的用户不会被清理
-            try:
-                cmd_flag_path = [user_id] + DCP_USER_CMD_FLAG_A_UID
-                cmd_flag_info: Dict = self.data_manager.get_data(DC_USER_DATA, cmd_flag_path)
-                for flag in DPP_COMMAND_FLAG_DICT:
-                    if flag not in cmd_flag_info:
-                        continue
-                    flag_date = str_to_datetime(cmd_flag_info[flag][DCK_LAST_TIME])
-                    if cur_date - flag_date < datetime.timedelta(days=user_expire_day):
-                        is_valid = True
-                        break
-            except DataManagerError:
-                pass
+            for flag in user_stat.cmd.flag_dict.keys():
+                flag_date = int_to_datetime(user_stat.cmd.flag_dict[flag].update_time)
+                if cur_date - flag_date < datetime.timedelta(days=user_expire_day):
+                    is_valid = True
+                    break
+
             if not is_valid:
                 invalid_user_id.append(user_id)
             index += 1
@@ -698,34 +605,25 @@ class Bot:
             # 白名单中的群聊不会被清理
             if group_id in white_list_group:
                 continue
-            # 过去一段时间内使用过指令的群不会被清理
             try:
-                cmd_flag_path = [group_id] + DCP_GROUP_CMD_FLAG_A_GID
-                cmd_flag_info: Dict = self.data_manager.get_data(DC_GROUP_DATA, cmd_flag_path)
-                for flag in DPP_COMMAND_FLAG_DICT:
-                    if flag not in cmd_flag_info:
-                        continue
-                    flag_date = str_to_datetime(cmd_flag_info[flag][DCK_LAST_TIME])
-                    if cur_date - flag_date < datetime.timedelta(days=group_expire_day):
-                        is_valid = True
-                        break
+                group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [group_id, DCK_GROUP_STAT], get_ref=True)
             except DataManagerError:
-                pass
-            # 还没有到达警告次数上限的群不会被清理
-            meta_path = [group_id] + DCP_GROUP_META_A_GID
-            meta_info: Dict = self.data_manager.get_data(DC_GROUP_DATA, meta_path, default_val={})
-            if not is_valid and meta_info.get("warn_time", 0) < group_expire_time:
+                invalid_group_id.append(group_id)
+                continue
+            # 过去一段时间内使用过指令的群不会被清理
+            for flag in group_stat.cmd.flag_dict.keys():
+                flag_date = int_to_datetime(group_stat.cmd.flag_dict[flag].update_time)
+                if cur_date - flag_date < datetime.timedelta(days=group_expire_day):
+                    is_valid = True
+                    break
+            # 对还没有到达警告次数上限的群进行警告, 不会进行清理
+            if not is_valid and group_stat.meta.warn_time < group_expire_time:
                 is_valid = True
-                meta_info["warn_time"] = meta_info.get("warn_time", 0) + 1
-                self.data_manager.set_data(DC_GROUP_DATA, meta_path, meta_info)
-                try:  # 只对拥有Info的群发送警告消息 (没有说明已经不在该群了)
-                    info_path = [group_id] + DCP_GROUP_INFO_A_GID
-                    self.data_manager.get_data(DC_GROUP_DATA, info_path)
+                group_stat.meta.warn_time += 1
+                if group_stat.meta.member_count > 0:  # 只对拥有群成员的群发送警告消息, 没有说明已经不在该群了
                     result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
                     result_commands.append(BotSendMsgCommand(self.account, group_expire_warn, [GroupMessagePort(group_id)]))
                     warning_group_id.append(group_id)
-                except DataManagerError:
-                    pass
             if not is_valid:
                 invalid_group_id.append(group_id)
             index += 1
@@ -733,7 +631,7 @@ class Bot:
                 await asyncio.sleep(0)
         for group_id in invalid_group_id:
             result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
-            temp_warning = "[测试]该群聊已被标记为无效群聊, 尝试使用掷骰指令以清除此标记和提醒(目前没有实际作用, 被误标记了也不用担心)"
+            temp_warning = "[测试] 该群聊被标记为无效群聊, 尝试使用掷骰指令以清除此标记和提醒"
             result_commands.append(BotSendMsgCommand(self.account, temp_warning, [GroupMessagePort(group_id)]))
             # result_commands.append(BotLeaveGroupCommand(self.account, group_id))
             # self.data_manager.delete_data(DC_GROUP_DATA, [group_id])
