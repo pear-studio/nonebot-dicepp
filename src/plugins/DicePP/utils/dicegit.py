@@ -1,9 +1,12 @@
+from git import InvalidGitRepositoryError, NoSuchPathError, GitCommandError
+
+import utils
 from utils.logger import dice_log
+
+IS_NEWEST = False
 
 
 def is_network_error(err_str: str) -> bool:
-    # if "Could not resolve host" in err_str:
-    #     print(self.TextDict["ResolveHostException"])
     return "errno 10054" in err_str or "Timed out" in err_str or "Could not resolve host" in err_str
 
 
@@ -33,41 +36,79 @@ class GitRepository(object):
         assert git.GIT_OK, "Git不可用..."
         self.local_path = local_path
         self.repo_url = repo_url
-        self.TextDict = {"CheckDone": "检测到新版本,更新内容如下：",
-                         "ManualFetchDone": "已为您下载最新版本更新.",
-                         "NetworkException": "网络连接异常，请确认没有开启VPN或代理服务，并再次重试。",
-                         "SourceCodeChanged": "检测到DicePP源码被修改。若需恢复，请键入.update resource-code",
-                         "ResolveHostException": "解析IP地址失败，请尝试修改host文件。",
-                         "UpdateDone": "更新完成!",
-                         "IsNewest": "已是最新",
-                         "SourceCodeRefresh": "所有代码更新已清除。", }
-        self.repo = git.Repo(self.local_path)
-        self.update_source = "gitee"
+        self.update_source = update_source
+        self.repo = self.get_git_repo()
 
     def is_dirty_check(self) -> str:
         if self.repo.is_dirty() and self.repo.head.name == "HEAD" and self.repo.remote().name == "origin":
-            return self.TextDict["SourceCodeChanged"]
+            return "检测到dicepp源码被修改。若需清除该修改，请键入 .update 初始化 以清除其它更改。"
 
     def update(self):
-        master = self.repo.heads.master
-        other = self.repo.create_head("other", "head")
-        other.checkout()
-        self.repo.remote().fetch()
-        master.checkout()
-        self.repo.index.merge_tree(other)
-        self.repo.merge_base()
-        other.delete(self.repo, other)
-        return self.TextDict["UpdateDone"]
+        global IS_NEWEST
+        if IS_NEWEST:
+            return "已是最新。"
+        try:
+            master = self.repo.heads.master
+        except Exception as e:
+            return e
+        try:
+            other = self.repo.create_head("other", "head")
+        except Exception as e:
+            return e
+        try:
+            other.checkout()
+        except git.exc.CheckoutError as e:
+            return e
+        try:
+            self.repo.remote().fetch()
+        except ValueError as e:
+            return e
+        except GitCommandError as e:
+            if e.stderr and is_network_error(e.stderr):
+                return "网络连接异常, 请确认没有开启VPN或代理服务, 并再次重试"
+            return e
+        try:
+            master.checkout()
+        except git.exc.CheckoutError as e:
+            return e
+        try:
+            self.repo.index.merge_tree(other)
+        except GitCommandError as e:
+            return e
+        try:
+            other.delete(self.repo, other)
+        except Exception as e:
+            utils.logger.dice_log(e)
+            return "更新失败：", e
+        return "更新完成，请输入.m reboot重启bot以应用更新。"
 
     def get_update(self):
-        c = self.repo.git.log("master..origin/master", "-1", "--pretty={format:%H,%s}")
+        global IS_NEWEST
+        try:
+            c = self.repo.git.log("master..origin/master", "-1", "--pretty={format:%H,%s}")
+        except Exception as e:
+            return "检查更新失败。原因:", e
         if c:
-            return self.TextDict["CheckDone"], c
-        return self.TextDict["IsNewest"]
+            IS_NEWEST = False
+            return "检测到更新，内容如下", c
+        IS_NEWEST = True
+        return "已是最新。"
 
     def refresh(self):
-        self.repo.git.refresh()
-        return self.TextDict["SourceCodeRefresh"]
+        try:
+            self.repo.git.refresh()
+        except Exception as e:
+            return "初始化代码失败：", e
+        return "已成功初始化dicepp代码。"
+
+    def get_git_repo(self):
+        try:
+            git_repo = git.Repo(self.local_path)
+        except InvalidGitRepositoryError as e:
+            return "git仓库初始化失败", e
+        except NoSuchPathError as e:
+            return "git仓库初始化失败", e
+        return git_repo
 
 
 if __name__ == "__main__":
