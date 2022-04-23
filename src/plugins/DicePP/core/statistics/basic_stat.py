@@ -62,6 +62,8 @@ class UserCommandStatInfo:
         return "&".join(flag_list)
 
     def deserialize(self, input_str: str) -> None:
+        if not input_str.strip():
+            return
         flag_list = input_str.split("&")
         for flag_info in flag_list:
             flag_str, elem_str = flag_info.split("|", maxsplit=1)
