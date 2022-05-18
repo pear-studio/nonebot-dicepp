@@ -1,6 +1,7 @@
 from typing import Union
 from git import InvalidGitRepositoryError, NoSuchPathError, GitCommandError, Repo
 from utils.logger import dice_log
+from urllib.parse import quote
 
 IS_NEWEST = False
 
@@ -60,7 +61,7 @@ class GitRepository:
 
     def get_update(self) -> str:
         try:
-            c: str = self.repo.git.log("master..origin/master", "-1", "--pretty=hash:%H,更新内容:%s")
+            c: str = self.repo.git.log("master..origin/master", "-1", "--pretty=hash:%H\n更新内容:%s")
         except Exception as e:
             return "检查更新失败. 原因: \n" + str(e)
         if c:
