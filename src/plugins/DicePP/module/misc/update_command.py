@@ -82,17 +82,8 @@ class UpdateCommand(UserCommandBase):
         elif not arg_str:
             feedback: str = self.bot.register_task(self.update)
         else:
-            feedback = "请输入.help update查看指令说明"
+            feedback: str = "请输入.help update查看指令说明"
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-
-    def get_update(self) -> List[BotSendMsgCommand]:
-        return [BotSendMsgCommand(self.bot.account, self.git_repo.get_update(), [PrivateMessagePort(self.master_list[0])])]
-
-    def update(self):
-        return [BotSendMsgCommand(self.bot.account, self.git_repo.update(), [PrivateMessagePort(self.master_list[0])])]
-
-    def refresh(self):
-        return [BotSendMsgCommand(self.bot.account, self.git_repo.refresh(), [PrivateMessagePort(self.master_list[0])])]
 
     def tick_daily(self) -> List[BotCommandBase]:
         if self.bot.cfg_helper.get_config(CFG_DAILY_CHECK) == 0:
@@ -102,18 +93,31 @@ class UpdateCommand(UserCommandBase):
         elif self.update_source.lower() == "gitee":
             git_path = dpp_gitee_path
         else:
-            return [BotSendMsgCommand(self.bot.account, "初始化Git仓库失败, 请检查您的配置项是否正确。", [PrivateMessagePort(self.master_list[0])])]
+            feedback: str = "初始化Git仓库失败, 请检查您的配置项是否正确。"
+            return [BotSendMsgCommand(self.bot.account, feedback, [PrivateMessagePort(self.master_list[0])])]
         try:
-            gitrepo = GitRepository(BOT_ROOT_PATH, git_path, self.update_source)
+            self.git_repo = GitRepository(BOT_ROOT_PATH, git_path, self.update_source)
         except AssertionError:
             raise NotImplementedError("未能成功初始化git仓库。")
-        feedback: str = gitrepo.get_update()
-        feedback1: str = gitrepo.is_dirty_check()
+        feedback: str = self.bot.register_task(self.update)
+        feedback1: str = self.bot.register_task(self.is_dirty_check)
         if not feedback1:
             return [BotSendMsgCommand(self.bot.account, feedback, [PrivateMessagePort(self.master_list[0])])]
         else:
             return [BotSendMsgCommand(self.bot.account, feedback, [PrivateMessagePort(self.master_list[0])]),
                     BotSendMsgCommand(self.bot.account, feedback1, [PrivateMessagePort(self.master_list[0])])]
+
+    def get_update(self) -> List[BotCommandBase]:
+        return [BotSendMsgCommand(self.bot.account, self.git_repo.get_update(), [PrivateMessagePort(self.master_list[0])])]
+
+    def update(self) -> List[BotCommandBase]:
+        return [BotSendMsgCommand(self.bot.account, self.git_repo.update(), [PrivateMessagePort(self.master_list[0])])]
+
+    def refresh(self) -> List[BotCommandBase]:
+        return [BotSendMsgCommand(self.bot.account, self.git_repo.refresh(), [PrivateMessagePort(self.master_list[0])])]
+
+    def is_dirty_check(self) -> List[BotCommandBase]:
+        return [BotSendMsgCommand(self.bot.account, self.git_repo.is_dirty_check(), [PrivateMessagePort(self.master_list[0])])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "update":  # help后的接着的内容

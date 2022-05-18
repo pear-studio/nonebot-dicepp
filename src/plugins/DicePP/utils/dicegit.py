@@ -60,7 +60,7 @@ class GitRepository:
 
     def get_update(self) -> str:
         try:
-            c = self.repo.git.log("master..origin/master", "-1", "--pretty={hash:%H,%s}")
+            c: str = self.repo.git.log("master..origin/master", "-1", "--pretty=hash:%H,更新内容:%s")
         except Exception as e:
             return "检查更新失败. 原因: \n" + str(e)
         if c:
@@ -82,4 +82,3 @@ class GitRepository:
         except NoSuchPathError as e:
             return "git仓库初始化失败, 原因如下: \n" + str(e)
         return git_repo
-
