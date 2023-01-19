@@ -32,7 +32,7 @@ try:
 except ValueError:
     dice_log("DPP API is not amounted because NoneBot has not been initialized")
 
-command_matcher = on_message()
+command_matcher = on_message(block=False)
 notice_matcher = on_notice()
 request_matcher = on_request()
 
