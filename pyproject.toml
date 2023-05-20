@@ -1,11 +1,11 @@
 [tool.poetry]
 name = "DicePP"
-version = "1.0.0 Beta2"
+version = "1.0.0"
 description = "DicePP"
 authors = ["Pear"]
 readme = "README.md"
 
-[tool.poetry.dependencies]
+[tool.nonebot]
 python = "^3.8"
 nonebot2 = "^2.0.0b1"
 nb-cli = "^0.6.4"
