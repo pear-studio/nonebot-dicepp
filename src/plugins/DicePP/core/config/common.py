@@ -63,3 +63,20 @@ def preprocess_white_list(raw_list: List[str]) -> List[str]:
             if item.strip():
                 result_list.append(item.strip())
     return result_list
+
+# 内存监控配置
+CFG_MEMORY_MONITOR_ENABLE = "memory_monitor_enable"
+DEFAULT_CONFIG[CFG_MEMORY_MONITOR_ENABLE] = "0"
+DEFAULT_CONFIG_COMMENT[CFG_MEMORY_MONITOR_ENABLE] = "是否开启内存监控, 0为关闭, 1为开启"
+
+CFG_MEMORY_WARN_PERCENT = "memory_warn_percent"
+DEFAULT_CONFIG[CFG_MEMORY_WARN_PERCENT] = "80"
+DEFAULT_CONFIG_COMMENT[CFG_MEMORY_WARN_PERCENT] = "内存使用率警告阈值 (百分比), 达到后给Master发送警告"
+
+CFG_MEMORY_RESTART_PERCENT = "memory_restart_percent"
+DEFAULT_CONFIG[CFG_MEMORY_RESTART_PERCENT] = "90"
+DEFAULT_CONFIG_COMMENT[CFG_MEMORY_RESTART_PERCENT] = "内存使用率重启阈值 (百分比), 达到后自动重启机器人"
+
+CFG_MEMORY_RESTART_MB = "memory_restart_mb"
+DEFAULT_CONFIG[CFG_MEMORY_RESTART_MB] = "2048"
+DEFAULT_CONFIG_COMMENT[CFG_MEMORY_RESTART_MB] = "内存绝对上限 (MB), 达到后自动重启机器人 (即使百分比未达阈值)"

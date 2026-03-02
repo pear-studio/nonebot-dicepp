@@ -13,6 +13,7 @@ from core.communication import MessageMetaData, PrivateMessagePort, GroupMessage
 from core import localization
 
 LOC_DND_RES = "dnd_result"
+LOC_DND_RES_NOREASON = "dnd_result_noreason"
 
 CFG_ROLL_DND_ENABLE = "roll_dnd_enable"
 
@@ -30,7 +31,8 @@ class UtilsDNDCommand(UserCommandBase):
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
-        bot.loc_helper.register_loc_text(LOC_DND_RES, "{name} DND Result {reason}:\n{result}", ".dnd返回的内容 name为用户昵称, reason为原因")
+        bot.loc_helper.register_loc_text(LOC_DND_RES, "{name} DND人物作成——{reason}:\n{result}", ".dnd返回的内容 name为用户昵称, reason为原因")
+        bot.loc_helper.register_loc_text(LOC_DND_RES_NOREASON, "{name} DND人物作成:\n{result}", ".dnd返回的内容（无原因） name为用户昵称")
         bot.cfg_helper.register_config(CFG_ROLL_DND_ENABLE, "1", "DND指令开关")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
@@ -48,12 +50,12 @@ class UtilsDNDCommand(UserCommandBase):
 
     def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        # 判断功能开关
-        try:
-            assert (int(self.bot.cfg_helper.get_config(CFG_ROLL_DND_ENABLE)[0]) != 0)
-        except AssertionError:
-            feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func=self.readable_name)
-            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+        # 判断功能开关（有群内config作为代替）
+        #try:
+            #assert (int(self.bot.cfg_helper.get_config(CFG_ROLL_DND_ENABLE)[0]) != 0)
+        #except AssertionError:
+            #feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func=self.readable_name)
+            #return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析语句
         times: int
         reason: str
@@ -65,12 +67,14 @@ class UtilsDNDCommand(UserCommandBase):
             for _ in range(6):
                 attr_result.append(sum(list(sorted([random.randint(1, 6) for _ in range(4)], key=lambda x: -x))[:3]))
             attr_result_str = str(list(sorted(attr_result, key=lambda x: -x)))
-            dnd_result.append(f"{attr_result_str} = {sum(attr_result)}")
-        dnd_result = "\n".join(dnd_result)
+            dnd_result.append(f"{sum(attr_result)} : {attr_result_str}")
+        result = "\n".join(dnd_result)
 
         user_name = self.bot.get_nickname(meta.user_id, meta.group_id)
-        feedback: str = self.format_loc(LOC_DND_RES, name=user_name, reason=reason, result=dnd_result)
-
+        if reason:
+            feedback: str = self.format_loc(LOC_DND_RES, name=user_name, reason=reason, result=result)
+        else:
+            feedback: str = self.format_loc(LOC_DND_RES_NOREASON, name=user_name, result=result)
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:

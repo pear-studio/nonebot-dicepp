@@ -100,7 +100,6 @@ class StatisticsCommand(UserCommandBase):
                     cmd_score = stat_cmd_score(group_stat.cmd, group_stat.msg.last_day_val, group_stat.msg.total_val)
                     group_info[1] += cmd_score << 16  # 次大优先级
                     group_info[2] += f"评分:{cmd_score}"
-
                     group_info_list.append(group_info)
                 group_info_list = sorted(group_info_list, key=lambda x: -x[1])
                 feedback += f"共{len(group_info_list)}条群组信息:\n"

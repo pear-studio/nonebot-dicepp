@@ -1,5 +1,6 @@
 import html
 
+from zhconv import convert
 from utils.string import to_english_str
 
 
@@ -10,4 +11,5 @@ def preprocess_msg(msg_str: str) -> str:
     msg_str = to_english_str(msg_str)  # 转换中文标点
     msg_str = msg_str.lower().strip()  # 转换小写, 去掉前后空格
     msg_str = html.unescape(msg_str)   # html实体转义: &#36; -> $
+    msg_str = convert(msg_str, 'zh-cn')# 转换简体处理
     return msg_str

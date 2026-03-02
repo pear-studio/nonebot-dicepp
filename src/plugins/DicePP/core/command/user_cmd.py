@@ -14,9 +14,11 @@ class UserCommandBase(metaclass=abc.ABCMeta):
     """
     readable_name: str = "未命名指令"
     priority: int = DPP_COMMAND_PRIORITY_DEFAULT
-    group_only: bool = False
     flag: int = DPP_COMMAND_FLAG_DEFAULT
     cluster: int = DPP_COMMAND_CLUSTER_DEFAULT
+    
+    group_only: bool = False
+    permission_require: int = 0
 
     def __init__(self, bot: Bot):
         """
@@ -93,7 +95,8 @@ def custom_user_command(readable_name: str,
                         priority: int = DPP_COMMAND_PRIORITY_DEFAULT,
                         group_only: bool = False,
                         flag: int = DPP_COMMAND_FLAG_DEFAULT,
-                        cluster: int = DPP_COMMAND_CLUSTER_DEFAULT):
+                        cluster: int = DPP_COMMAND_CLUSTER_DEFAULT,
+                        permission_require: int = 0):
     """
     装饰Command类, 给自定义的Command附加一些参数
     Args:
@@ -102,6 +105,7 @@ def custom_user_command(readable_name: str,
         group_only: 是否只能在群内使用, 如果为True且在私聊中捕获了对应消息, 则会返回提示
         flag: 标志位, 标志着指令的类型是DND指令, 娱乐指令等等, 主要用于profiler
         cluster: 所属的命令群组, 被用来开关某一组功能
+        permission_require: 所需权限，默认为谁都能用
     """
 
     def custom_inner(cls):
@@ -115,6 +119,7 @@ def custom_user_command(readable_name: str,
         cls.group_only = group_only
         cls.flag = flag
         cls.cluster = cluster
+        cls.permission_require = permission_require
         USER_COMMAND_CLS_DICT[cls.__name__] = cls
         return cls
 

@@ -21,6 +21,7 @@ from module.roll import preprocess_roll_exp, is_roll_exp, exec_roll_exp
 
 LOC_DRAW_RESULT = "draw_result"
 LOC_DRAW_RESULT_INLINE = "draw_result_inline"
+LOC_DRAW_RESULT_DESIGN = "draw_result_design"
 LOC_DRAW_SINGLE = "draw_single"
 LOC_DRAW_MULTI = "draw_multi"
 LOC_DRAW_FIN_ALL = "draw_finalize_all"
@@ -128,8 +129,8 @@ class DeckItem:
                 else:
                     raise ValueError(f"{target_deck_str} in {match.group()} is an invalid deck!")
             draw_result = target_deck.draw(draw_times, decks, loc_helper, ignore).replace("\n", " ")  # 嵌套抽取不需要换行
-            return loc_helper.format_loc_text(LOC_DRAW_RESULT_INLINE, times=draw_times, deck_name=target_deck_str,
-                                              result=draw_result)
+            #draw_result = loc_helper.format_loc_text(LOC_DRAW_RESULT_DESIGN,result=draw_result)
+            return loc_helper.format_loc_text(LOC_DRAW_RESULT_INLINE, times=draw_times, deck_name=target_deck_str,result=draw_result)
 
         def handle_img(match):
             key = match.group(1)
@@ -147,9 +148,12 @@ class DeckItem:
                 return key
 
         result = self.content.strip()
-        result = re.sub(r"ROLL\((.{1,30}?)\)", handle_roll, result)
-        result = re.sub(r"DRAW\((.{1,30}?),\s*(.{1,30}?)\)", handle_draw, result)
-        result = re.sub(r"IMG\((.{1,50}?\.[A-Za-z]{1,10}?)\)", handle_img, result)
+        if "ROLL" in result or "DRAW" in result or "IMG" in result:
+            result = re.sub(r"ROLL\((.{1,30}?)\)", handle_roll, result)
+            result = re.sub(r"DRAW\((.{1,30}?),\s*(.{1,30}?)\)", handle_draw, result)
+            result = re.sub(r"IMG\((.{1,50}?\.[A-Za-z]{1,10}?)\)", handle_img, result)
+        else:
+            result = loc_helper.format_loc_text(LOC_DRAW_RESULT_DESIGN,result=result)
         if self.final_type == 2:
             raise ForceFinal(result + "\n" + loc_helper.format_loc_text(LOC_DRAW_FIN_ALL))
         return result
@@ -158,11 +162,12 @@ class DeckItem:
 class Deck:
     """牌库"""
 
-    def __init__(self, name: str, path: str):
+    def __init__(self, name: str, path: str, hidden:bool = False):
         self.name = name
         self.items: List[DeckItem] = []
         self.weight_sum: int = 0
         self.path = path
+        self.hidden = hidden
 
     def add_item(self, item: DeckItem):
         self.items.append(item)
@@ -224,10 +229,11 @@ class DeckCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_DRAW_RESULT, "Draw {times} times from {deck_name}:\n{result}",
                                          f"抽卡回复, times为次数, deck_name为牌库名, result由{LOC_DRAW_SINGLE}和{LOC_DRAW_MULTI}定义")
         bot.loc_helper.register_loc_text(LOC_DRAW_RESULT_INLINE, "[Draw {times} times from {deck_name}:{result}]",
-                                         f"嵌套抽卡内容, times为次数, deck_name为牌库名, "
+                                         f"嵌套抽卡内容（可能自我嵌套）, times为次数, deck_name为牌库名, "
                                          f"result由{LOC_DRAW_SINGLE}和{LOC_DRAW_MULTI}定义")
-        bot.loc_helper.register_loc_text(LOC_DRAW_SINGLE, "{content}", "只抽一次时的回复的内容")
-        bot.loc_helper.register_loc_text(LOC_DRAW_MULTI, "Result {time}: {content}", "抽取多次时单条内容, time为当前次数")
+        bot.loc_helper.register_loc_text(LOC_DRAW_RESULT_DESIGN, "{result}","每次抽卡的最终结果的显示文本（不可能自我嵌套） result为结果原文, ")
+        bot.loc_helper.register_loc_text(LOC_DRAW_SINGLE, "{content}", "只抽一次时的回复的内容（可能自我嵌套）")
+        bot.loc_helper.register_loc_text(LOC_DRAW_MULTI, "Result {time}: {content}", "抽取多次时单条内容（可能自我嵌套）, time为当前次数")
         bot.loc_helper.register_loc_text(LOC_DRAW_FIN_ALL, "Finalize draw! (All)", "抽到的内容使得所有抽取提前终止")
         bot.loc_helper.register_loc_text(LOC_DRAW_FIN_INNER, "Finalize draw! (Inner)", "抽到的内容使得内层抽取提前终止")
         bot.loc_helper.register_loc_text(LOC_DRAW_ERR_EMPTY_DECK, "Current decks is empty!", "牌库被抽光了(都是不放回的)")
@@ -260,7 +266,7 @@ class DeckCommand(UserCommandBase):
         return init_info
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".draw")
+        should_proc: bool = msg_str.startswith(".draw") or msg_str.startswith(".deck")
         should_pass: bool = False
         return should_proc, should_pass, msg_str[5:].strip()
 
@@ -297,7 +303,12 @@ class DeckCommand(UserCommandBase):
         if deck_name in self.deck_dict.keys():
             target_deck = self.deck_dict[deck_name]
         else:
-            poss_deck_names = match_substring(deck_name, self.deck_dict.keys())
+            poss_deck_names:List = []
+            for key in self.deck_dict.keys():
+                if not self.deck_dict[key].hidden:
+                    if deck_name in key:
+                        poss_deck_names.append(key)
+            #poss_deck_names = match_substring(deck_name, self.deck_dict.keys())
             if len(poss_deck_names) == 0:
                 feedback += self.format_loc(LOC_DRAW_ERR_NO_DECK, deck_name=deck_name) + "\n"
             elif len(poss_deck_names) > 1:
@@ -318,7 +329,7 @@ class DeckCommand(UserCommandBase):
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
-        if keyword == "draw":  # help后的接着的内容
+        if keyword == "draw" or keyword == "抽卡":  # help后的接着的内容
             feedback: str = ".draw [次数#, 可选][牌库名]" \
                             "示例: .draw 4#万象无常牌"
             return feedback
@@ -371,6 +382,12 @@ class DeckCommand(UserCommandBase):
 
                 # 记录到self字典中
                 if deck.items:
+                    if "#" in deck.name:  #隐藏的子Deck使用的HIDE前缀
+                        args = deck.name.split("#")
+                        deck.name = args[1]
+                        if args[0] == "HIDE":
+                            deck.hidden = True
+                    
                     deck_name = preprocess_msg(deck.name)  # 预处理一下名字, 防止输入的大小写被预处理后无法匹配
                     self.deck_dict[deck_name] = deck
 
@@ -404,7 +421,7 @@ class DeckCommand(UserCommandBase):
     def get_state(self) -> str:
         feedback: str
         if self.deck_dict:
-            feedback = f"已加载{len(self.deck_dict)}个牌库: {[deck.name for deck in self.deck_dict.values()]}"
+            feedback = f"已载入{len(self.deck_dict)}个卡组!"
         else:
             feedback = f"尚未加载任何牌库"
         return feedback

@@ -58,3 +58,41 @@ def custom_json_object(cls):
     assert cls.__name__ not in ALL_JSON_OBJ_DICT
     ALL_JSON_OBJ_DICT[cls.__name__] = cls
     return cls
+
+
+def construct_from_dict(obj: dict) -> 'JsonObject':
+    """
+    尝试从一个普通 dict 推断并构造合适的 JsonObject 实例。
+    使用启发式匹配：对所有已注册 JsonObject 类实例化并比较属性名的匹配数量，
+    选择匹配度最高（且至少匹配 1 个属性）的类来构造实例。
+    如果无法匹配则返回 None。
+    """
+    if not isinstance(obj, dict) or not obj:
+        return None
+    best_cls = None
+    best_score = 0
+    keys = set(obj.keys())
+    for cls_name, cls in ALL_JSON_OBJ_DICT.items():
+        try:
+            sample = cls()
+        except Exception:
+            continue
+        attrs = set(sample.__dict__.keys())
+        # score: number of overlapping attribute names
+        score = len(attrs & keys)
+        if score > best_score:
+            best_score = score
+            best_cls = cls
+    if best_score == 0 or best_cls is None:
+        return None
+    try:
+        inst = best_cls()
+        # shallow set attributes present in dict
+        for k, v in obj.items():
+            try:
+                setattr(inst, k, v)
+            except Exception:
+                pass
+        return inst
+    except Exception:
+        return None

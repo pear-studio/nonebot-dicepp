@@ -20,8 +20,8 @@ CHAT_FILE_PATH = "chat.xlsx"
 
 DEFAULT_ID = "Default"
 
-DEFAULT_CHAT_KEY = "^hi$"
-DEFAULT_CHAT_TEXT = ["Hello", "G'Day"]
+DEFAULT_CHAT_KEY = "^你好$"
+DEFAULT_CHAT_TEXT = ["你好啊", "你好呀"]
 DEFAULT_CHAT_COMMENT = "可以使用正则表达式匹配, 大小写不敏感; 后面接着想要的回复, 有多个回复则会随机选择一个"
 
 
@@ -86,13 +86,13 @@ class LocalizationManager:
             key = preprocess_msg(key)  # 对key做一下预处理, 因为匹配的目标是预处理过后的
             comment: str = row[0].comment  # 沿用文件里的注释
             self.all_chat_texts[key] = LocalizationText(key, comment=comment)
-            for text in [str(cell.value) for cell in row[1:] if cell.value and cell.value.strip()]:
+            for text in [str(cell.value) for cell in row[1:] if cell.value and str(cell.value).strip()]:
                 self.all_chat_texts[key].add(text)
 
         has_chat: bool = (len(self.all_chat_texts) != 0)
         if not has_chat:
             add_default_chat()
-        dice_log(f"[Local] [ChatLoad] 成功读取本地化文件 {self.chat_data_path.replace(ROOT_DATA_PATH, '~')}")
+        dice_log(f"[Local] [ChatLoad] 成功读取自定义对话文件 {self.chat_data_path.replace(ROOT_DATA_PATH, '~')}")
         workbook.close()
 
     def save_chat(self):

@@ -1,18 +1,21 @@
 [tool.poetry]
 name = "DicePP"
-version = "1.0.0"
+version = "1.0.0 Beta2"
 description = "DicePP"
 authors = ["Pear"]
 readme = "README.md"
 
-[tool.nonebot]
+[tool.poetry.dependencies]
 python = "^3.8"
+aiohttp = "^4.0.2"
 nonebot2 = "^2.0.0b1"
 nb-cli = "^0.6.4"
 openpyxl = "^3.0.9"
 rsa = "^4.8"
 nonebot-adapter-cqhttp = "^2.0.0b1"
 gitpython = "3.1.26"
+python-docx = "^0.8.11"
+lxml = "^4.9.2"
 
 [nonebot.plugins]
 plugins = []
@@ -26,3 +29,7 @@ build-backend = "poetry.masonry.api"
 name = "tsinghua"
 default = true
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+[tool.nonebot]
+plugins = []
+plugin_dirs = ["src/plugins"]

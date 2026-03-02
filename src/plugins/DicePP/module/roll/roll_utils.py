@@ -2,8 +2,11 @@
 掷骰工具
 """
 
-from random import randint
 from typing import List, Tuple
+
+from random import randint
+
+from .karma_runtime import get_runtime
 
 
 class RollDiceError(Exception):
@@ -21,6 +24,9 @@ def roll_a_dice(dice_type: int) -> int:
     """
     返回一颗dice_type面骰的结果
     """
+    runtime = get_runtime()
+    if runtime is not None:
+        return runtime.roll(dice_type)
     return randint(1, dice_type)
 
 
@@ -39,6 +45,17 @@ def match_outer_parentheses(input_str: str) -> int:
         if level == 0:
             return index
     raise ValueError("Input's parentheses is incomplete!")
+
+
+def clear_border_parentheses(input_str: str) -> bool:
+    """
+    删除输入字符串的首尾多余括号. 若不存在对应的), 抛出一个ValueError.
+    """
+    while input_str and match_outer_parentheses(input_str) == len(input_str)-1:
+        input_str = input_str[1:-1]
+    if input_str.count("(") != input_str.count(")"):
+        raise ValueError("Input's parentheses is incomplete!")
+    return input_str
 
 
 def remove_redundant_parentheses(input_str: str, readable: bool = True) -> str:

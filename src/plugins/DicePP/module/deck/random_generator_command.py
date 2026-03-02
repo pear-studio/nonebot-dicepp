@@ -7,7 +7,7 @@ from pathlib import Path
 import openpyxl
 
 from core.bot import Bot
-from core.config import DATA_PATH
+from core.config import DATA_PATH,CFG_MASTER, CFG_ADMIN
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -71,6 +71,7 @@ class RandomGeneratorCommand(UserCommandBase):
 
     def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
+        admin = (meta.user_id in self.bot.cfg_helper.get_config(CFG_MASTER)) or (meta.user_id in self.bot.cfg_helper.get_config(CFG_ADMIN))
         # 判断功能开关
         try:
             assert (int(self.bot.cfg_helper.get_config(CFG_RAND_GEN_ENABLE)[0]) != 0)
@@ -121,11 +122,11 @@ class RandomGeneratorCommand(UserCommandBase):
                 context.group = meta.group_id
                 context.daily_limit_dict = self.daily_limit_dict.get(meta.user_id, {})
                 if time == 1:
-                    feedback = target_source.gen_result(context)
+                    feedback = target_source.gen_result(context,admin)
                 else:
                     feedback = ""
                     for t in range(time):
-                        feedback += f"#{t+1} {target_source.gen_result(context)}\n"
+                        feedback += f"#{t+1} {target_source.gen_result(context,admin)}\n"
                         context.flag_set = set()
                     feedback = feedback.strip()
                 self.daily_limit_dict[meta.user_id] = context.daily_limit_dict

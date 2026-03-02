@@ -180,6 +180,33 @@ class DataManager:
             parent_node = cur_node
 
         return cur_node
+    
+    def delete_data_all(self, path: List[str], force_delete: bool = False, ignore_miss: bool = True):
+        """
+        从DataManager中删除全部某路径的数据, 若该数据不存在且ignore_miss为False, 则会抛出异常
+        如果path为空列表会清除该dataChunk的所有数据, 仅当force_delete为True时生效, 否则抛出异常
+        Args:
+            path(Tuple[str]): 路径节点
+            force_delete(bool): 是否允许删除所有数据
+            ignore_miss(bool): 想删除的数据不存在时是否抛出异常
+        """
+        if not path:
+            if force_delete:
+                # 清空所有数据块
+                for _name, _chunk in self.__dataChunks.items():
+                    if issubclass(type(_chunk), DataChunkBase):
+                        _chunk.root = {}
+                return None
+            else:
+                raise DataManagerError(f"[DeleteData] 尝试非安全地删除所有数据!")
+
+        for target, data_chunk in self.__dataChunks.items():
+            if issubclass(type(data_chunk), DataChunkBase):
+                try:
+                    self.delete_data(target, path, ignore_miss=ignore_miss)
+                except DataManagerError:
+                    if not ignore_miss:
+                        raise
 
     def get_keys(self, target: str, path: List[str]):
         """类似get_data, 但是不会返回数据的拷贝, 而是返回当前path的所有key, 当前path不存在或不是dict则抛出异常"""

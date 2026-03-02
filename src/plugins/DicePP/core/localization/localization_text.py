@@ -34,4 +34,5 @@ class LocalizationText:
 
         loc_text = random.choice(self.loc_texts) if self.loc_texts else ""
         loc_text = re.sub(r"IMG\((.{1,50}?\.[A-Za-z]{1,10}?)\)", replace_image_code, loc_text)
+        loc_text = re.sub(r"图片\((.{1,50}?\.[A-Za-z]{1,10}?)\)", replace_image_code, loc_text)
         return loc_text

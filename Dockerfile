@@ -1,9 +1,8 @@
-FROM tiangolo/uvicorn-gunicorn-fastapi:python3.8
-
-RUN python3 -m pip config set global.index-url https://mirrors.aliyun.com/pypi/simple
-
-RUN python3 -m pip install poetry && poetry config virtualenvs.create false --local
-
-COPY ./pyproject.toml ./poetry.lock* /app/
-
-RUN poetry install --no-root --no-dev
+FROM python:3.8-slim
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+COPY . .
+CMD ["python", "bot.py"]

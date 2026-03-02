@@ -1,6 +1,6 @@
-BOT_VERSION = "Ver 1.4.1"
+BOT_VERSION = "Ver 2.0β"
 
-BOT_DESCRIBE = "DicePP by 梨子"
+BOT_DESCRIBE = "DicePP by 梨子 & 调零 & 云朵松饼糖"
 
 BOT_AGREEMENT = "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议视为同意并承诺遵守此协议，否则请移除骰娘。\n" \
                 "2.不允许禁言骰娘或刷屏掷骰等对骰娘的不友善行为，这些行为将会提高骰娘被制裁的风险。开关骰娘响应请使用.bot on/off。\n" \

@@ -3,13 +3,14 @@ from pathlib import Path
 from enum import Enum
 from datetime import datetime
 import random
+import math
 from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.cell.cell import Cell
 from openpyxl.comments import Comment
 
 from core.config import DATA_PATH
 from module.roll import is_roll_exp, exec_roll_exp
-from utils.time import get_current_date_raw, datetime_to_str_day
+from utils.time import get_current_date_raw, datetime_to_str_day, datetime_to_str_week, datetime_to_str_month
 from utils.cq_code import get_cq_image
 from utils.localdata import read_xlsx
 
@@ -22,17 +23,22 @@ RAND_SOURCE_FIELD_LIMIT_DAILY = "每日上限"
 RAND_SOURCE_FIELD_FORMAT = "格式化"
 RAND_SOURCE_FIELD_FORMAT_FUNC = "格式化函数"
 
+RT_KEY_MONTHLY = "月份"
+RT_KEY_WEEKLY = "周"
 RT_KEY_DAILY = "日期"
 RT_KEY_USER = "个人"
 RT_KEY_GROUP = "群组"
-RT_KEY_LIST = [RT_KEY_DAILY, RT_KEY_USER, RT_KEY_GROUP]
+RT_KEY_LIST = [RT_KEY_MONTHLY, RT_KEY_WEEKLY, RT_KEY_DAILY, RT_KEY_USER, RT_KEY_GROUP]
 
 RAND_SOURCE_FIELD_DEFAULT_COMMENT: Dict[str, Tuple[str, str]] = {
     RAND_SOURCE_FIELD_NAME: ("", "用户将通过类似.随机[生成器名称] 的方法使用该生成器, 如不可见则不会出现在生成器列表中展示给用户, 但依然可以通过指令使用."
                                  " 不填则为匿名生成器, 不可通过用户指令调用."),
     RAND_SOURCE_FIELD_VISIBLE: ("0", "1为对用户可见, 0为对用户隐藏(即只会通过其他随机生成器间接使用)"),
     RAND_SOURCE_FIELD_GLOBAL_PATH: ("", "不填则没有全局路径, 填入则代表使用该全局路径标识该生成器, 之后可在其他生成器中访问. 不能和其他全局路径重复."),
-    RAND_SOURCE_FIELD_RAND_TYPE: ("", f"不填则使用默认随机方法, 填'{RT_KEY_DAILY}'代表每一天生成的随机内容都是一样的,"
+    RAND_SOURCE_FIELD_RAND_TYPE: ("", f"不填则使用默认随机方法, "
+                                      f" 填'{RT_KEY_MONTHLY}'代表每个月生成的随机内容都是一样的,"
+                                      f" 填'{RT_KEY_WEEKLY}'代表每周生成的随机内容都是一样的,"
+                                      f" 填'{RT_KEY_DAILY}'代表每天生成的随机内容都是一样的,"
                                       f" 填'{RT_KEY_USER}'代表根据个人账号决定结果,"
                                       f" 填'{RT_KEY_GROUP}'代表根据群聊号码决定结果,"
                                       " 填任意掷骰表达式则使用该掷骰表达式的结果从每个组别中根据从左往右的权重抽取结果. "
@@ -145,7 +151,7 @@ class RandomItem:
                 assert sheet_name in wb.sheetnames, f"工作表{sheet_name}不存在"
                 ws: Worksheet = wb[sheet_name]
                 for col in ws.iter_cols(values_only=True):
-                    self.auxiliary_data += [value.strip() for value in col if value and value.strip()]
+                    self.auxiliary_data += [str(value).strip() for value in col if str(value) and str(value).strip()]
                 wb.close()
         elif self.source.startswith("/"):
             # [GlobalSource]
@@ -162,13 +168,13 @@ class RandomItem:
             assert self.next_gen_path in global_source_dict
             self.next_gen = global_source_dict[self.next_gen_path]
 
-    def gen_result(self, context: RandomGenerateContext) -> str:
+    def gen_result(self, context: RandomGenerateContext,admin: bool = False) -> str:
         result: str
         assert self.auxiliary_data
 
         if self.source_type == RandomSourceType.GlobalSource:
             target_source: RandomDataSource = self.auxiliary_data
-            result = target_source.gen_result(context)
+            result = target_source.gen_result(context,admin)
         elif self.source_type == RandomSourceType.Directory:
             file_info_list: List[List[Tuple[SourceFileType, Path]]] = self.auxiliary_data
             result_info: List[Tuple[SourceFileType, Path]] = random.choice(file_info_list)
@@ -192,7 +198,7 @@ class RandomItem:
 
         next_result: str = ""
         if self.next_gen and self.format:
-            next_result = self.next_gen.gen_result(context)
+            next_result = self.next_gen.gen_result(context,admin)
         if self.format:
             result = self.format.format(_=result, __=next_result)
         return result
@@ -435,7 +441,7 @@ class RandomDataSource:
             except AssertionError as e:
                 raise AssertionError(f"{self.name}:{item.name}:{e.args}")
 
-    def gen_result(self, context: RandomGenerateContext) -> str:
+    def gen_result(self, context: RandomGenerateContext, admin: bool = False) -> str:
         # 记录上层随机数种子与(可能)生成新的随机数种子
         prev_seed = context.random_seed
         if not context.random_seed and self.random_seed_flag != 0:
@@ -459,17 +465,17 @@ class RandomDataSource:
         # 统计限制次数
         if self.limit_single > 0:
             limit_key = self.name + self.global_path
-            if context.limit_dict.get(limit_key, 0) >= self.limit_single:
+            if not admin and context.limit_dict.get(limit_key, 0) >= self.limit_single:
                 return "[超出单次限制]"
             context.limit_dict[limit_key] = context.limit_dict.get(limit_key, 0) + 1
         if self.limit_daily > 0:
             limit_key = self.name + self.global_path
-            if context.daily_limit_dict.get(limit_key, 0) >= self.limit_daily:
+            if not admin and context.daily_limit_dict.get(limit_key, 0) >= self.limit_daily:
                 return "[超出每日限制]"
             context.daily_limit_dict[limit_key] = context.daily_limit_dict.get(limit_key, 0) + 1
 
         # 生成结果
-        final_result_list: List[Tuple[RandomItem, str]] = [(item, item.gen_result(context)) for item in used_item]
+        final_result_list: List[Tuple[RandomItem, str]] = [(item, item.gen_result(context,admin)) for item in used_item]
 
         # 格式化结果
         if self.format:
@@ -501,6 +507,10 @@ class RandomDataSource:
 
 def gen_new_seed(random_seed_flag: int, context: RandomGenerateContext) -> str:
     new_seed = ""
+    if flag_include(random_seed_flag, RT_KEY_MONTHLY):
+        new_seed += datetime_to_str_month(context.time)
+    if flag_include(random_seed_flag, RT_KEY_WEEKLY):
+        new_seed += datetime_to_str_week(context.time)
     if flag_include(random_seed_flag, RT_KEY_DAILY):
         new_seed += datetime_to_str_day(context.time)
     if flag_include(random_seed_flag, RT_KEY_USER):

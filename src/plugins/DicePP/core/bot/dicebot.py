@@ -3,13 +3,15 @@ import asyncio
 import datetime
 import random
 from typing import List, Optional, Dict, Callable, Union, Set
+from random import choice
 
 from utils.logger import dice_log, get_exception_info
 from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
-from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
+from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from core.config import ConfigManager, CFG_COMMAND_SPLIT, CFG_MASTER, CFG_FRIEND_TOKEN, CFG_GROUP_INVITE
 from core.config import CFG_DATA_EXPIRE, CFG_USER_EXPIRE_DAY, CFG_GROUP_EXPIRE_DAY, CFG_GROUP_EXPIRE_WARNING,\
-    CFG_WHITE_LIST_GROUP, CFG_WHITE_LIST_USER, preprocess_white_list
+    CFG_WHITE_LIST_GROUP, CFG_WHITE_LIST_USER, CFG_ADMIN, CFG_MASTER, preprocess_white_list
+from core.config import CFG_MEMORY_MONITOR_ENABLE, CFG_MEMORY_WARN_PERCENT, CFG_MEMORY_RESTART_PERCENT, CFG_MEMORY_RESTART_MB
 from core.config import BOT_DATA_PATH, CONFIG_PATH
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
@@ -22,6 +24,18 @@ from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo
 
 from core.bot.macro import BotMacro, MACRO_PARSE_LIMIT
 from core.bot.variable import BotVariable
+import shutil
+
+# 日志清理相关常量
+LOGS_SUBDIR = "logs"
+LOG_RETENTION_SECONDS = 24 * 3600  # 24小时
+
+# 内存监控
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
 
 NICKNAME_ERROR = "UNDEF_NAME"
 
@@ -113,6 +127,8 @@ class Bot:
                         await self.tick_daily(bot_commands)
                     # 保存数据到本地
                     await self.data_manager.save_data_async()
+                    # 内存监控检查
+                    await self._check_memory_and_handle()
                     # 更新计时器
                     time_counter[0] = loop_begin_time
 
@@ -185,6 +201,63 @@ class Bot:
         except Exception:
             dice_log(str(self.handle_exception(f"Async Task: CODE112")[0]))
 
+    async def _check_memory_and_handle(self) -> None:
+        """内存监控：检查内存使用情况，必要时发送警告或触发重启"""
+        if not PSUTIL_AVAILABLE:
+            return
+        try:
+            enable = int(self.cfg_helper.get_config(CFG_MEMORY_MONITOR_ENABLE)[0])
+            if not enable:
+                return
+        except Exception:
+            return
+
+        status = self.get_memory_status()
+        if not status:
+            return
+
+        rss_mb = status["rss_mb"]
+        percent = status["percent"]
+        
+        try:
+            warn_pct = int(self.cfg_helper.get_config(CFG_MEMORY_WARN_PERCENT)[0])
+            restart_pct = int(self.cfg_helper.get_config(CFG_MEMORY_RESTART_PERCENT)[0])
+            restart_mb = int(self.cfg_helper.get_config(CFG_MEMORY_RESTART_MB)[0])
+        except Exception:
+            warn_pct, restart_pct, restart_mb = 80, 90, 2048
+
+        if percent >= restart_pct or rss_mb >= restart_mb:
+            msg = f"⚠️ 内存超限，正在自动重启\n当前: {rss_mb:.0f}MB ({percent:.1f}%)\n阈值: {restart_pct}% 或 {restart_mb}MB"
+            dice_log(f"[MemoryMonitor] 内存超限，触发自动重启: {rss_mb:.0f}MB ({percent:.1f}%)")
+            await self.send_msg_to_master(msg)
+            await asyncio.sleep(2)
+            self.reboot()
+        elif percent >= warn_pct:
+            msg = f"⚠️ 内存使用较高\n当前: {rss_mb:.0f}MB ({percent:.1f}%)\n警告阈值: {warn_pct}%\n建议关注运行状态"
+            dice_log(f"[MemoryMonitor] 内存警告: {rss_mb:.0f}MB ({percent:.1f}%)")
+            # 避免频繁警告，这里只记录日志，Master消息由用户手动查询
+            # await self.send_msg_to_master(msg)
+
+    def get_memory_status(self) -> Optional[Dict]:
+        """获取当前内存使用状态，返回 None 表示无法获取"""
+        if not PSUTIL_AVAILABLE:
+            return None
+        try:
+            process = psutil.Process()
+            mem_info = process.memory_info()
+            rss_mb = mem_info.rss / (1024 * 1024)
+            vm = psutil.virtual_memory()
+            total_mb = vm.total / (1024 * 1024)
+            percent = (rss_mb / total_mb) * 100
+            return {
+                "rss_mb": rss_mb,
+                "total_mb": total_mb,
+                "percent": percent,
+                "system_percent": vm.percent,
+            }
+        except Exception:
+            return None
+
     async def tick_daily(self, bot_commands):
         # 更新用户统计
         for user_id in self.data_manager.get_keys(DC_USER_DATA, []):
@@ -220,6 +293,26 @@ class Bot:
         if feedback and feedback != "$":
             await self.send_msg_to_master(feedback)
 
+        # 日志文件自动清理 (超过24小时的log文件删除)
+        try:
+            logs_dir = os.path.join(self.data_path, LOGS_SUBDIR)
+            if os.path.isdir(logs_dir):
+                now_ts = get_current_date_raw()
+                for fname in os.listdir(logs_dir):
+                    fpath = os.path.join(logs_dir, fname)
+                    try:
+                        stat = os.stat(fpath)
+                        # 使用修改时间判断
+                        if now_ts - stat.st_mtime > LOG_RETENTION_SECONDS:
+                            if os.path.isfile(fpath):
+                                os.remove(fpath)
+                            elif os.path.isdir(fpath):
+                                shutil.rmtree(fpath, ignore_errors=True)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def shutdown(self):
         """销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的"""
         asyncio.create_task(self.shutdown_async())
@@ -248,8 +341,41 @@ class Bot:
         dice_log("[Bot] [Reboot] 开始重启")
         await self.shutdown_async()
         import sys
+        import platform
+        
         python = sys.executable
-        os.execl(python, python, *sys.argv)
+        cwd = os.getcwd()
+        
+        # 记录重启信息用于调试
+        dice_log(f"[Bot] [Reboot] Python: {python}")
+        dice_log(f"[Bot] [Reboot] Args: {sys.argv}")
+        dice_log(f"[Bot] [Reboot] CWD: {cwd}")
+        
+        if platform.system() == "Windows":
+            # Windows: 使用 subprocess 启动新进程，然后退出当前进程
+            import subprocess
+            dice_log("[Bot] [Reboot] Windows 模式：启动新进程后退出")
+            try:
+                # 保留环境变量（包括虚拟环境的 PATH）
+                env = os.environ.copy()
+                subprocess.Popen(
+                    [python] + sys.argv,
+                    cwd=cwd,
+                    env=env,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                )
+            except Exception as e:
+                dice_log(f"[Bot] [Reboot] 启动新进程失败: {e}")
+                # 回退到简单方式
+                subprocess.Popen([python] + sys.argv, cwd=cwd)
+            await asyncio.sleep(1)
+            os._exit(0)
+        else:
+            # Linux/macOS: 使用 os.execl 替换当前进程
+            dice_log("[Bot] [Reboot] Unix 模式：execl 替换进程")
+            # 切换到原始工作目录
+            os.chdir(cwd)
+            os.execl(python, python, *sys.argv)
         # self.start_up()
         # await self.delay_init_command()
 
@@ -289,21 +415,42 @@ class Bot:
         if self.proxy:
             from core.command import BotSendMsgCommand
             from core.localization import LOC_LOGIN_NOTICE
+            from module.common.master_command import DC_CTRL
+            
+            # 检查是否开启了静默模式
+            is_silent = self.data_manager.get_data(DC_CTRL, ["silent_startup"], False)
+            
             feedback = self.loc_helper.format_loc_text(LOC_LOGIN_NOTICE)
             if feedback and feedback != "$":
-                feedback = f"{init_info}\n{feedback}"
+                feedback_prefix = ""
+                for i in range(len(init_info)):
+                    if init_info[i] and init_info[i] != "$":
+                        feedback_prefix += init_info[i]+"\n"
+                feedback = f"{feedback_prefix}\n{feedback}"
                 dice_log(feedback)
-                # 给所有Master汇报
-                for master in self.cfg_helper.get_config(CFG_MASTER):
-                    command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
-                    await self.proxy.process_bot_command(command)
+                
+                # 如果开启了静默模式，跳过发送通知
+                if is_silent:
+                    dice_log("[Bot] 静默模式已开启，跳过发送启动通知")
+                else:
+                    # 给上次reboot的Admin或Master汇报
+                    rebooter = self.data_manager.get_data(DC_CTRL, ["rebooter"], "")
+                    if rebooter != "":
+                        self.data_manager.set_data(DC_CTRL, ["rebooter"], "")
+                        command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(rebooter)])
+                        await self.proxy.process_bot_command(command)
+                    # 如果不存在reboot者，则给所有Master汇报
+                    else :
+                        for master in self.cfg_helper.get_config(CFG_MASTER):
+                            command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
+                            await self.proxy.process_bot_command(command)
             else:
                 dice_log(init_info)
 
     # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:
         """处理消息"""
-        from core.command import BotCommandBase, BotSendMsgCommand
+        from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 
         self.update_nickname(meta.user_id, "origin", meta.nickname)
 
@@ -314,9 +461,23 @@ class Bot:
         # 统计信息
         meta_stat: MetaStatInfo = self.data_manager.get_data(DC_META, [DCK_META_STAT], default_gen=MetaStatInfo, get_ref=True)
         user_stat: UserStatInfo = self.data_manager.get_data(DC_USER_DATA, [meta.user_id, DCK_USER_STAT], default_gen=UserStatInfo, get_ref=True)
+        # 修改meta的permission参数
+        # 4:骰主 3:骰管理 2:群主 1:群管理 0:普通人 -1:黑名单
+        if meta.user_id in self.cfg_helper.get_config(CFG_MASTER):
+            meta.permission = 4
+        elif meta.user_id in self.cfg_helper.get_config(CFG_ADMIN):
+            meta.permission = 3
+        else:
+            if meta.sender.role is not None:
+                if meta.sender.role == "owner": # 群主 权限2
+                    meta.permission = 2
+                elif meta.sender.role == "admin": # 群管理 权限1
+                    meta.permission = 1
+                else: #elif meta.sender.role == "member": # 群员，或普通人
+                    meta.permission = 0
+        # 群内资料同步
         if meta.group_id:
-            group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [meta.group_id, DCK_GROUP_STAT],
-                                                                   default_gen=GroupStatInfo, get_ref=True)
+            group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [meta.group_id, DCK_GROUP_STAT], default_gen=GroupStatInfo, get_ref=True)
         else:
             group_stat = GroupStatInfo()
         # 统计收到的消息数量
@@ -364,13 +525,18 @@ class Bot:
                     should_proc, should_pass, hint = False, False, None
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
                     group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"
-                    bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info} CODE100")
+                    bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info}出错位置:{command.readable_name}\n错误代码：CODE100")
                 if not should_proc:
                     continue
                 # 在非群聊中企图执行群聊指令, 回复一条提示
                 if command.group_only and not meta.group_id:
                     feedback = self.loc_helper.format_loc_text(LOC_GROUP_ONLY_NOTICE)
                     bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
+                    break
+                # 无权限者/权限不足者企图使用一条需要权限的指令, 回复一条提示
+                if meta.permission < command.permission_require:
+                    feedback = self.loc_helper.format_loc_text(LOC_PERMISSION_DENIED_NOTICE)
+                    bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)])]
                     break
                 # 执行指令
                 res_commands = []
@@ -419,7 +585,8 @@ class Bot:
             comment: str = data.comment.strip()
             return not passwords or comment in passwords
         elif isinstance(data, JoinGroupRequestData):
-            return None
+            should_allow: int = int(self.cfg_helper.get_config(CFG_GROUP_INVITE)[0])
+            return should_allow == 1
         elif isinstance(data, InviteGroupRequestData):
             should_allow: int = int(self.cfg_helper.get_config(CFG_GROUP_INVITE)[0])
             return should_allow == 1
@@ -438,18 +605,17 @@ class Bot:
             data: GroupIncreaseNoticeData = data
             if data.user_id != self.account:
                 try:
-                    activate = self.data_manager.get_data(DC_ACTIVATE, [data.group_id])[0]
+                    activate = self.data_manager.get_data(DC_ACTIVATE, [data.group_id],default_val="已激活")[0]
                 except DataManagerError:
                     activate = False
 
                 if activate:
-                    try:
-                        feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id])
-                    except DataManagerError:
-                        feedback = self.loc_helper.format_loc_text(LOC_WELCOME_DEFAULT)
+                    feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id],default_val="")
 
-                    if feedback:
-                        bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(data.group_id)])]
+                    if not feedback:
+                        feedback = self.loc_helper.format_loc_text(LOC_WELCOME_DEFAULT)
+                    
+                    bot_commands += [BotSendMsgCommand(self.account, choice(feedback.split("|")), [GroupMessagePort(data.group_id)])]
 
         if self.proxy:
             for command in bot_commands:
@@ -582,19 +748,12 @@ class Bot:
                 if cur_date - flag_date < datetime.timedelta(days=user_expire_day):
                     is_valid = True
                     break
-
             if not is_valid:
                 invalid_user_id.append(user_id)
             index += 1
             if index % 500 == 0:
                 await asyncio.sleep(0)
-        for user_id in invalid_user_id:
-            self.data_manager.delete_data(DC_USER_DATA, [user_id])
-            self.data_manager.delete_data(DC_NICKNAME, [user_id])
-            self.data_manager.delete_data(DC_MACRO, [user_id])
-            self.data_manager.delete_data(DC_VARIABLE, [user_id])
-            self.data_manager.delete_data(DC_POINT, [user_id])
-            self.data_manager.delete_data(DC_CHAT_RECORD, [user_id])
+        self.data_manager.delete_data_all([user_id for user_id in invalid_user_id])
 
         # 清理过期群聊消息
         all_group_id: Set[str] = set(self.data_manager.get_keys(DC_GROUP_DATA, []))
@@ -631,15 +790,10 @@ class Bot:
                 await asyncio.sleep(0)
         for group_id in invalid_group_id:
             result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
-            temp_warning = "[测试] 该群聊被标记为无效群聊, 尝试使用掷骰指令以清除此标记和提醒"
-            result_commands.append(BotSendMsgCommand(self.account, temp_warning, [GroupMessagePort(group_id)]))
-            # result_commands.append(BotLeaveGroupCommand(self.account, group_id))
-            # self.data_manager.delete_data(DC_GROUP_DATA, [group_id])
-            # self.data_manager.delete_data(DC_WELCOME, [group_id])
-            # self.data_manager.delete_data(DC_ACTIVATE, [group_id])
-            # self.data_manager.delete_data(DC_CHAR_DND, [group_id])
-            # self.data_manager.delete_data(DC_CHAR_HP, [group_id])
-            # self.data_manager.delete_data(DC_INIT, [group_id])
+            # temp_warning = "[测试]该群聊已被标记为无效群聊, 尝试使用掷骰指令以清除此标记和提醒(目前没有实际作用, 被误标记了也不用担心)"
+            # result_commands.append(BotSendMsgCommand(self.account, temp_warning, [GroupMessagePort(group_id)]))
+            result_commands.append(BotLeaveGroupCommand(self.account, group_id))
+            self.data_manager.delete_data_all([group_id])
 
         # 给Master汇报清理情况
         if self.get_master_ids():
@@ -648,6 +802,7 @@ class Bot:
             feedback = f"检查{len(all_user_id)}个用户数据, {len(all_group_id)}个群聊数据.\n" \
                        f"清理{len(invalid_user_id)}个失效用户, {len(invalid_group_id)}个失效群聊({invalid_group_id}).\n" \
                        f"对{len(warning_group_id)}个即将失效的群聊发送提示消息."
-            result_commands.append(BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_id)]))
+            # 太长了别发给master了
+            # result_commands.append(BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_id)]))
         result_commands = list(reversed(result_commands))
         return result_commands

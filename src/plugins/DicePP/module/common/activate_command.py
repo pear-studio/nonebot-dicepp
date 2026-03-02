@@ -10,6 +10,7 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotLeaveGroupCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from core.localization import LOC_PERMISSION_DENIED_NOTICE
 from core.config import BOT_DESCRIBE, BOT_VERSION
 from utils.time import get_current_date_str
 
@@ -48,9 +49,9 @@ class ActivateCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(LOC_BOT_SHOW, "", ".bot时回应的语句")
-        bot.loc_helper.register_loc_text(LOC_BOT_ON, "G'Day, I'm on", ".bot on时回应的语句")
-        bot.loc_helper.register_loc_text(LOC_BOT_OFF, "See you, I'm off", ".bot off时回应的语句")
-        bot.loc_helper.register_loc_text(LOC_BOT_DISMISS, "Good bye!", ".dismiss时回应的语句")
+        bot.loc_helper.register_loc_text(LOC_BOT_ON, "DicePP现已开启。", ".bot on时回应的语句（需要群管理/骰管理）")
+        bot.loc_helper.register_loc_text(LOC_BOT_OFF, "DicePP现已关闭。", ".bot off时回应的语句（需要群管理/骰管理）")
+        bot.loc_helper.register_loc_text(LOC_BOT_DISMISS, "再见啦。", ".dismiss时回应的语句")
 
         bot.cfg_helper.register_config(CFG_BOT_DEF_ENABLE, "1", "新加入群聊时是否默认开启(.bot on)")
 
@@ -63,23 +64,23 @@ class ActivateCommand(UserCommandBase):
                     default_enable: bool = bool(int(self.bot.cfg_helper.get_config(CFG_BOT_DEF_ENABLE)[0]))
                 except (IndexError, ValueError):
                     default_enable = True
-                activate_data = self.bot.data_manager.get_data(DC_ACTIVATE, [meta.group_id],
-                                                               default_gen=lambda: get_default_activate_data(default_enable))
+                activate_data = self.bot.data_manager.get_data(DC_ACTIVATE, [meta.group_id], default_gen=lambda: get_default_activate_data(default_enable))
         else:
             activate_data = None
         should_pass: bool = False
+        at_other = meta.raw_msg.startswith("[CQ:at,qq=") and not meta.to_me
         # 下列情况允许处理: 私聊, 被at, 处于开启状态
         if not meta.group_id or meta.to_me or activate_data[0]:
             should_pass = True
         # 下列情况不允许处理: 群聊且在开头at其他人而不是自己
-        if meta.group_id and meta.raw_msg.startswith("[CQ:at,qq=") and not meta.to_me:
+        if meta.group_id and at_other:
             should_pass = False
 
         if msg_str.startswith(".bot"):
             arg_str = msg_str[4:].strip()
             if meta.to_me and meta.group_id and (arg_str == "on" or arg_str == "off"):
                 return True, should_pass, arg_str
-            if not arg_str:
+            if not arg_str and not at_other:
                 return True, should_pass, "show"
         elif meta.to_me and meta.group_id and msg_str == ".dismiss":
             return True, should_pass, "dismiss"
@@ -99,20 +100,25 @@ class ActivateCommand(UserCommandBase):
             bot_show = self.format_loc(LOC_BOT_SHOW)
             bot_show = bot_show + "\n" if bot_show else ""
             feedback = f"{bot_show}{BOT_SHOW_APPEND}"
-        elif mode == "on":
-            activate_data = get_default_activate_data(True)
-            self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
-            feedback = self.format_loc(LOC_BOT_ON)
-        elif mode == "off":
-            activate_data = get_default_activate_data(False)
-            self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
-            feedback = self.format_loc(LOC_BOT_OFF)
-        else:  # mode == "dismiss":
-            feedback = self.format_loc(LOC_BOT_DISMISS)
-            bot_commands.append(BotLeaveGroupCommand(self.bot.account, meta.group_id))
+        else:
+            if meta.permission < 0: # 其他指令需要至少1级权限（群管理/骰管理）才能执行
+                feedback = self.bot.loc_helper.format_loc_text(LOC_PERMISSION_DENIED_NOTICE)
+            elif mode == "on": # 开启骰娘
+                activate_data = get_default_activate_data(True)
+                self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
+                feedback = self.format_loc(LOC_BOT_ON)
+            elif mode == "off": # 关闭骰娘
+                activate_data = get_default_activate_data(False)
+                self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
+                feedback = self.format_loc(LOC_BOT_OFF)
+            else:  # mode == "dismiss":
+                feedback = self.format_loc(LOC_BOT_DISMISS)
+                bot_commands.append(BotSendMsgCommand(self.bot.account, feedback, [port]))
+                bot_commands.append(BotLeaveGroupCommand(self.bot.account, meta.group_id))
+                return bot_commands  # 需要先发消息再退出
 
         bot_commands.append(BotSendMsgCommand(self.bot.account, feedback, [port]))
-        return list(reversed(bot_commands))  # 需要先发消息再退出
+        return bot_commands
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "bot":  # help后的接着的内容

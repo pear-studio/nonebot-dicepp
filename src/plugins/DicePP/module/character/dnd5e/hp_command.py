@@ -14,7 +14,7 @@ from core.communication import MessageMetaData, PrivateMessagePort, GroupMessage
 
 from utils.string import match_substring
 from module.roll import exec_roll_exp, RollDiceError, RollResult
-from module.character.dnd5e import DC_CHAR_DND, DNDCharInfo, HPInfo
+from module.character.dnd5e import DNDCharInfo, HPInfo
 
 LOC_HP_INFO = "hp_info"
 LOC_HP_INFO_MISS = "hp_info_miss"
@@ -25,6 +25,7 @@ LOC_HP_MOD_ERR = "hp_mod_error"
 LOC_HP_DEL = "hp_delete"
 
 # 增加自定义DataChunk, 只存放NPC生命值信息, 玩家生命值信息存储在 DC_CHAR_DND
+DC_CHAR_DND = "character_dnd"
 DC_CHAR_HP = "char_hp"
 
 
@@ -68,6 +69,23 @@ class HPCommand(UserCommandBase):
             try:
                 char_info: DNDCharInfo = self.bot.data_manager.get_data(DC_CHAR_DND, target)
                 hp_info = char_info.hp_info
+                # Defensive: ensure hp_info is an HPInfo instance
+                if not isinstance(hp_info, HPInfo):
+                    try:
+                        if isinstance(hp_info, dict):
+                            new_hp = HPInfo()
+                            new_hp.deserialize(json.dumps(hp_info))
+                            hp_info = new_hp
+                        else:
+                            # fallback: coerce to string and set as hp_cur when possible
+                            new_hp = HPInfo()
+                            try:
+                                new_hp.hp_cur = int(str(hp_info))
+                                hp_info = new_hp
+                            except Exception:
+                                hp_info = new_hp
+                    except Exception:
+                        hp_info = HPInfo()
                 feedback = self.format_loc(LOC_HP_INFO, name=nickname, hp_info=hp_info.get_info())
             except DataManagerError:
                 feedback = self.format_loc(LOC_HP_INFO_MISS, name=nickname)
@@ -84,13 +102,34 @@ class HPCommand(UserCommandBase):
                 feedback = ""
                 for char_id, char_info in char_info_dict.items():
                     nickname = self.bot.get_nickname(char_id, meta.group_id)
-                    feedback += f"{nickname} {char_info.hp_info.get_info()}\n"
+                    hp_info = getattr(char_info, 'hp_info', None)
+                    if not isinstance(hp_info, HPInfo):
+                        try:
+                            if isinstance(hp_info, dict):
+                                tmp = HPInfo()
+                                tmp.deserialize(json.dumps(hp_info))
+                                hp_info = tmp
+                            else:
+                                hp_info = HPInfo()
+                        except Exception:
+                            hp_info = HPInfo()
+                    feedback += f"{nickname} {hp_info.get_info()}\n"
                 for name, hp_info in hp_info_dict.items():
+                    if not isinstance(hp_info, HPInfo):
+                        try:
+                            if isinstance(hp_info, dict):
+                                tmp = HPInfo()
+                                tmp.deserialize(json.dumps(hp_info))
+                                hp_info = tmp
+                            else:
+                                hp_info = HPInfo()
+                        except Exception:
+                            hp_info = HPInfo()
                     feedback += f"{name} {hp_info.get_info()}\n"
                 feedback = feedback.strip()
             else:  # 没有任何生命值信息
                 feedback = self.format_loc(LOC_HP_INFO_NONE)
-        elif arg_str.startswith("del"):  # 删除某人生命值
+        elif arg_str.startswith("del") or arg_str.startswith("clr"):  # 删除某人生命值
             arg_str = arg_str[3:].strip()
             target: Tuple[str, List[str]] = (DC_CHAR_DND, [meta.group_id, meta.user_id])  # 默认目标是自己
             if arg_str:
@@ -196,9 +235,29 @@ class HPCommand(UserCommandBase):
                 assert source_key in (DC_CHAR_DND, DC_CHAR_HP)
                 if source_key == DC_CHAR_DND:
                     char_info = self.bot.data_manager.get_data(DC_CHAR_DND, target, default_gen=DNDCharInfo, get_ref=True)
-                    hp_info: HPInfo = char_info.hp_info
+                    hp_info: HPInfo = getattr(char_info, 'hp_info', None)
+                    if not isinstance(hp_info, HPInfo):
+                        try:
+                            if isinstance(hp_info, dict):
+                                tmp = HPInfo()
+                                tmp.deserialize(json.dumps(hp_info))
+                                hp_info = tmp
+                            else:
+                                hp_info = HPInfo()
+                        except Exception:
+                            hp_info = HPInfo()
                 else:
                     hp_info: HPInfo = self.bot.data_manager.get_data(DC_CHAR_HP, target, default_gen=HPInfo, get_ref=True)
+                    if not isinstance(hp_info, HPInfo):
+                        try:
+                            if isinstance(hp_info, dict):
+                                tmp = HPInfo()
+                                tmp.deserialize(json.dumps(hp_info))
+                                hp_info = tmp
+                            else:
+                                hp_info = HPInfo()
+                        except Exception:
+                            hp_info = HPInfo()
                 mod_info: str = hp_info.process_roll_result(cmd_type, hp_cur_mod_result, hp_max_mod_result, hp_temp_mod_result,
                                                             short_feedback=(len(target_list) > 1))
 
@@ -299,13 +358,29 @@ class HPCommand(UserCommandBase):
         try:
             from module.initiative import DC_INIT, InitList, InitEntity
             init_list: InitList = self.bot.data_manager.get_data(DC_INIT, [group_id])
-            for entity in init_list.entities:
-                entity: InitEntity = entity
-                if entity.owner:
-                    target_id_name_dict[entity.owner] = entity.name
-                    pc_set.add(entity.owner)
+            # iterate defensively: entries may be InitEntity, dict or plain string
+            for entity in getattr(init_list, 'entities', []):
+                if isinstance(entity, InitEntity):
+                    if entity.owner:
+                        target_id_name_dict[entity.owner] = entity.name
+                        pc_set.add(entity.owner)
+                    else:
+                        target_id_name_dict[entity.name] = entity.name
+                elif isinstance(entity, dict):
+                    name = entity.get('name') or ''
+                    owner = entity.get('owner') or ''
+                    if owner:
+                        target_id_name_dict[owner] = name
+                        pc_set.add(owner)
+                    else:
+                        target_id_name_dict[name] = name
                 else:
-                    target_id_name_dict[entity.name] = entity.name
+                    # fallback: treat as name string
+                    try:
+                        name = str(entity)
+                    except Exception:
+                        name = ''
+                    target_id_name_dict[name] = name
         except DataManagerError:
             pass
         target_poss = match_substring(target_intent, target_id_name_dict.values())

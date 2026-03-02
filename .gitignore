@@ -1,4 +1,3 @@
-
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
 
@@ -148,6 +147,7 @@ dmypy.json
 
 # DicePP
 src/plugins/DicePP/Data/
+src/plugins/DicePP/module/misc/log_command.py
 
 # Poetry
 poetry.lock

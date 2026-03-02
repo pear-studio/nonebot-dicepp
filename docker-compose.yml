@@ -1,15 +1,14 @@
-version: "2"
+version: "3"
+
 services:
-  # 其他配置参考 https://hub.docker.com/r/tiangolo/uvicorn-gunicorn-fastapi/
-  nonebot:
-    container_name: dicepp
+  bot:
     build: .
-    volumes:
-      - "/etc/localtime:/etc/localtime:ro"
-      - "./:/app/"
-    # ports:
-    #   - "8080:8080" # 映射端口到宿主机 宿主机端口:容器端口
+    container_name: dicepp_nonebot_bot
+    restart: always
+    ports:
+      - "8080:8080" # 将容器的 8080 端口映射到主机的 8080 端口
     env_file:
+      - .env # 加载 .env 文件中的环境变量
       - ".env.linux" # fastapi 使用的环境变量文件
     environment:
       - ENVIRONMENT=linux # 配置 nonebot 运行环境，此项会被 .env 文件覆盖
@@ -17,12 +16,8 @@ services:
       - SECRET # 通过 SECRET=xxx nb up -d 传递密钥
       - ACCESS_TOKEN # 通过 ACCESS_TOKEN=xxx nb up -d 传递密钥
       - MAX_WORKERS=1 # 如果你有多个QQ，且存在 self_id 指定，多个 worker 会导致无法找到其他 websocket 连接
-    logging:
-      driver: json-file
-      options:
-        max-size: "200k"
-        max-file: "10"
-networks:
-  default:
-    external:
-      name: dice-net
+    volumes:
+      # 挂载整个项目目录，实现代码热更新
+      - .:/app
+      # 将插件的数据目录挂载到宿主机，实现数据持久化
+      - ./src/plugins/DicePP/data:/app/src/plugins/DicePP/data # <--- 新增的挂载点

@@ -4,12 +4,59 @@
 """
 import abc
 import copy
+import hashlib
 from typing import List, Type, Dict, Any
+import json
 
 from utils.time import get_current_date_str
 from utils.logger import dice_log
 
 from core.data.json_object import JsonObject, JSON_OBJECT_PREFIX
+
+
+def _update_hasher(hasher: "hashlib._Hash", value: Any) -> None:
+    """Recursively feed values into the hasher without materialising huge strings."""
+    if isinstance(value, JsonObject):
+        hasher.update(b"J")
+        hasher.update(value.to_json().encode("utf-8", "surrogatepass"))
+        return
+    if isinstance(value, dict):
+        hasher.update(b"{")
+        for key in sorted(value.keys(), key=lambda k: repr(k)):
+            _update_hasher(hasher, key)
+            hasher.update(b":")
+            _update_hasher(hasher, value[key])
+        hasher.update(b"}")
+        return
+    if isinstance(value, (list, tuple)):
+        hasher.update(b"[")
+        for item in value:
+            _update_hasher(hasher, item)
+        hasher.update(b"]")
+        return
+    if isinstance(value, set):
+        hasher.update(b"<")
+        for item in sorted(value, key=lambda k: repr(k)):
+            _update_hasher(hasher, item)
+        hasher.update(b">")
+        return
+    if value is None:
+        hasher.update(b"N")
+        return
+    if isinstance(value, bool):
+        hasher.update(b"B")
+        hasher.update(b"1" if value else b"0")
+        return
+    if isinstance(value, (int, float)):
+        hasher.update(b"F" if isinstance(value, float) else b"I")
+        hasher.update(repr(value).encode("utf-8"))
+        return
+    if isinstance(value, bytes):
+        hasher.update(b"Y")
+        hasher.update(value)
+        return
+    hasher.update(b"S")
+    hasher.update(str(value).encode("utf-8", "surrogatepass"))
 
 DC_VERSION_LATEST = "1.0"  # 格式版本
 
@@ -51,31 +98,106 @@ class DataChunkBase(metaclass=abc.ABCMeta):
 
         # noinspection PyBroadException
         def deserialize_json_object_in_node(node: Any) -> None:
+            """
+            递归地将节点中的 JsonObject 字符串或可推断的 dict 转换为 JsonObject 实例。
+            - 处理字符串形式的 JsonObject（以 JSON_OBJECT_PREFIX 开头）
+            - 处理字符串形式的裸 JSON（如 '{...}'），尝试 json.loads 后再推断
+            - 处理已经是 dict 的旧格式，使用 construct_from_dict 做启发式匹配
+            """
             if isinstance(node, dict):
                 invalid_key = []
-                for key, value in node.items():
-                    if isinstance(value, dict) or isinstance(value, list):
+                for key, value in list(node.items()):
+                    # Recurse into nested containers first
+                    if isinstance(value, (dict, list)):
                         deserialize_json_object_in_node(value)
-                    elif isinstance(value, str) and value.find(JSON_OBJECT_PREFIX) == 0:  # 反序列化JsonObject
+                        continue
+
+                    # Case A: explicit JsonObject encoded with prefix
+                    if isinstance(value, str) and value.find(JSON_OBJECT_PREFIX) == 0:
                         try:
                             node[key] = JsonObject.construct_from_json(value)
+                            continue
                         except Exception as e:
                             dice_log(f"[DataManager] [Load] 从字典中加载{key}: {value}时出现错误 {e}")
                             invalid_key.append(key)
+                            continue
+
+                    # Case B: string that looks like JSON (old formats)
+                    if isinstance(value, str) and value and value[0] in ('{', '['):
+                        try:
+                            parsed = json.loads(value)
+                        except Exception:
+                            parsed = None
+                        if isinstance(parsed, dict):
+                            # try to construct JsonObject from dict
+                            try:
+                                obj = JsonObject.construct_from_dict(parsed)
+                                if obj is not None:
+                                    node[key] = obj
+                                    continue
+                                else:
+                                    # if not a JsonObject, keep parsed dict
+                                    node[key] = parsed
+                                    continue
+                            except Exception as e:
+                                dice_log(f"[DataManager] [Load] 解析字符串JSON为对象时出错 {e}")
+
+                    # Case C: dict in place of JsonObject (older dumps)
+                    if isinstance(value, dict):
+                        try:
+                            obj = JsonObject.construct_from_dict(value)
+                            if obj is not None:
+                                node[key] = obj
+                                continue
+                        except Exception as e:
+                            dice_log(f"[DataManager] [Load] 从字典构造 JsonObject 时出错 {e}")
+
                 for key in invalid_key:
                     del node[key]
+
             elif isinstance(node, list):
                 invalid_index = []
-                for index, value in enumerate(node):
-                    if isinstance(value, dict) or isinstance(value, list):
+                for index, value in enumerate(list(node)):
+                    if isinstance(value, (dict, list)):
                         deserialize_json_object_in_node(value)
-                    elif isinstance(value, str) and value.find(JSON_OBJECT_PREFIX) == 0:  # 处理Json Object
+                        continue
+
+                    if isinstance(value, str) and value.find(JSON_OBJECT_PREFIX) == 0:
                         try:
                             node[index] = JsonObject.construct_from_json(value)
+                            continue
                         except Exception as e:
                             dice_log(f"[DataManager] [Load] 从列表中加载{index}: {value}时出现错误 {e}")
                             invalid_index.append(index)
-                for index in reversed(invalid_index):  # 从后往前删除
+                            continue
+
+                    if isinstance(value, str) and value and value[0] in ('{', '['):
+                        try:
+                            parsed = json.loads(value)
+                        except Exception:
+                            parsed = None
+                        if isinstance(parsed, dict):
+                            try:
+                                obj = JsonObject.construct_from_dict(parsed)
+                                if obj is not None:
+                                    node[index] = obj
+                                    continue
+                                else:
+                                    node[index] = parsed
+                                    continue
+                            except Exception as e:
+                                dice_log(f"[DataManager] [Load] 解析列表中字符串JSON为对象时出错 {e}")
+
+                    if isinstance(value, dict):
+                        try:
+                            obj = JsonObject.construct_from_dict(value)
+                            if obj is not None:
+                                node[index] = obj
+                                continue
+                        except Exception as e:
+                            dice_log(f"[DataManager] [Load] 从列表中构造 JsonObject 时出错 {e}")
+
+                for index in reversed(invalid_index):
                     del node[index]
 
         obj = cls()
@@ -118,8 +240,13 @@ class DataChunkBase(metaclass=abc.ABCMeta):
             return self.__dict__
 
     def __hash__(self):
-        target_str = self.version_base + self.update_time + str(self.root)
-        return hash(target_str)
+        hasher = hashlib.blake2b(digest_size=16)
+        hasher.update(str(self.version_base).encode("utf-8", "surrogatepass"))
+        hasher.update(b"|")
+        hasher.update(str(self.update_time).encode("utf-8", "surrogatepass"))
+        hasher.update(b"|")
+        _update_hasher(hasher, self.root)
+        return int.from_bytes(hasher.digest(), "big", signed=False)
 
     def introspect(self) -> None:
         pass
