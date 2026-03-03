@@ -13,9 +13,10 @@ DicePP 是一个基于 NoneBot2 的 TRPG 骰娘机器人。NoneBot2 是一个现
 | 场景 | 工具 | 说明 |
 |------|------|------|
 | Python | Python 3.9+ | NoneBot2 需要 Python 3.9 及以上版本 |
-| Windows 本地开发/运行 | [uv](https://github.com/astral-sh/uv) | 替代 pip+venv，一键隔离环境 |
+| Windows 本地开发/运行 | [uv](https://github.com/astral.sh/uv) | 替代 pip+venv，一键隔离环境 |
 | Linux 服务器部署 | Docker + Docker Compose | 完全容器化，无需手动配 Python |
 | QQ 客户端 | QQNT + LLOneBot | 新版 QQ 机器人客户端方案，使用 OneBot11 协议 |
+| LLOneBot 部署 | QQNT (本地) 或 Docker (服务器) | 可在本地 Windows 运行或服务器 Docker 部署 |
 
 ---
 
@@ -111,6 +112,8 @@ Running on http://127.0.0.1:8080
 
 适用于生产服务器，完全容器化，无需在服务器上安装 Python。
 
+> **注意**：Linux 服务器建议使用 **Docker Engine**，macOS 使用 **OrbStack**（不要使用 Docker Desktop）。
+
 #### 前置：安装 Docker
 
 ```bash
@@ -126,16 +129,63 @@ docker --version && docker compose version
 
 ---
 
-#### 第 1 步：克隆项目
+#### 第 1 步：创建 Docker 网络
 
 ```bash
-git clone https://github.com/pear-studio/nonebot-dicepp.git
-cd nonebot-dicepp
+docker network create dice-net
 ```
 
-#### 第 2 步：配置环境变量
+---
+
+#### 第 2 步：部署 LLOneBot（Docker）
+
+> LLOneBot 支持通过 Docker 部署，提供 WebUI 界面进行配置。
 
 ```bash
+# 下载一键安装脚本
+curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/LLOneBot/LuckyLilliaBot/refs/heads/main/script/install-llbot-docker.sh -o llbot-docker.sh
+chmod u+x ./llbot-docker.sh
+./llbot-docker.sh
+```
+
+安装过程中需要配置：
+
+1. **配置方式选择**：选择"现在配置"（1）可一次性完成所有配置
+2. **WebUI 密码**：设置 WebUI 访问密码（必填）
+3. **WebUI 端口**：默认 3080
+4. **协议选择**：启用 OneBot11（反向 WebSocket）
+5. **反向 WebSocket 配置**：
+   - 添加连接到 DicePP 的地址：`ws://dicepp:8080/onebot/v11/ws`
+   - 设置 Token（需与 DicePP 配置一致）
+
+启动 LLOneBot：
+
+```bash
+docker compose up -d
+```
+
+确认启动成功：
+
+```bash
+docker compose logs -f
+```
+
+---
+
+#### 第 3 步：登录 QQ
+
+根据日志提示扫码登录，或访问 WebUI `http://localhost:3080` 登录。
+
+---
+
+#### 第 4 步：部署 DicePP
+
+```bash
+# 克隆项目
+git clone https://github.com/pear-studio/nonebot-dicepp.git
+cd nonebot-dicepp
+
+# 配置环境变量
 cp .env.linux .env
 ```
 
@@ -144,13 +194,27 @@ cp .env.linux .env
 ```env
 HOST=0.0.0.0
 PORT=8080
-# ACCESS_TOKEN=your_token   # 可选：访问令牌
+# ACCESS_TOKEN=your_token   # 与 LLOneBot 配置的 Token 一致
 ```
 
-#### 第 3 步：构建并启动 DicePP
+> **注意**：需要在 `docker-compose.yml` 中添加网络配置，使其与 LLOneBot 通信：
+
+```yaml
+services:
+  bot:
+    # ... 其他配置
+    networks:
+      - dice-net
+
+networks:
+  dice-net:
+    external: true
+```
+
+启动 DicePP：
 
 ```bash
-docker compose up --build -d
+docker compose up --build -d bot
 ```
 
 确认启动成功：
@@ -160,16 +224,14 @@ docker compose logs -f bot
 # 看到 "Running on http://0.0.0.0:8080" 即表示正常
 ```
 
-#### 第 4 步：配置 QQNT（Linux）
+---
 
-Linux 服务器部署需要在本地运行 QQNT 并配置 LLOneBot 连接到服务器：
+#### 第 5 步：确认连接
 
-1. 在本地 Windows 机器安装 QQNT
-2. 配置 LLOneBot 反向 WebSocket 地址指向服务器：
-   ```
-   ws://服务器IP:8080/onebot/v11/ws
-   ```
-3. 确保服务器 8080 端口已开放
+确保：
+1. LLOneBot 容器已启动并登录 QQ
+2. DicePP 容器已启动
+3. LLOneBot 的反向 WebSocket 已连接到 DicePP
 
 ---
 
@@ -354,5 +416,6 @@ docker compose build --no-cache
 
 - [NoneBot2 文档](https://v2.nonebot.dev/)
 - [LLOneBot 文档](https://github.com/LLOneBot/LLOneBot)
+- [LuckyLilliaBot (LLOneBot Docker)](https://github.com/LLOneBot/LuckyLilliaBot)
 - [uv 文档](https://docs.astral.sh/uv/)
 - [DicePP 项目](https://github.com/pear-studio/nonebot-dicepp)
