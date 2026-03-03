@@ -473,7 +473,7 @@ def _append_record_to_db(group_id: str, log_id: str, log_entry: Dict[str, Any], 
             try:
                 # 取 filters 快照，便于后续导出/查看
                 filters = log_entry.get(LOG_KEY_UPLOAD)  # dummy to satisfy type checker
-            except Exception:
+            except (AttributeError, KeyError):
                 filters = None
             finally:
                 # 重置，真实 filters 从调用方 payload 中难以直接传入，这里尽量填充已有字段
@@ -501,7 +501,7 @@ def _append_record_to_db(group_id: str, log_id: str, log_entry: Dict[str, Any], 
                 conn.commit()
             finally:
                 conn.close()
-        except Exception as e:
+        except (OSError, RuntimeError, sqlite3.Error) as e:
             dice_log(f"[LogDB] upsert before insert error: {e}")
 
     # 2) 写入记录
@@ -522,7 +522,7 @@ def _append_record_to_db(group_id: str, log_id: str, log_entry: Dict[str, Any], 
                 conn.commit()
             finally:
                 conn.close()
-        except Exception as e:
+        except (OSError, RuntimeError, sqlite3.Error) as e:
             dice_log(f"[LogDB] insert_record error: {e}")
 
     # 3) 内存：只维护统计与颜色映射
@@ -542,7 +542,7 @@ def _trim_records_if_needed(bot: Bot, entry: Dict[str, Any]) -> None:
     try:
         cfg_val = bot.cfg_helper.get_config(CFG_LOG_MAX_RECORDS)[0]
         limit = int(str(cfg_val).strip())
-    except Exception:
+    except (ValueError, TypeError):
         limit = LOG_MAX_RECORDS_DEFAULT
     # 强制收敛至安全上限，确保 DataManager 深拷贝时不会携带过多记录。
     if LOG_IN_MEMORY_SAFE_LIMIT > 0:
@@ -665,7 +665,7 @@ def append_log_record(bot: Bot, group_id: str, user_id: str, nickname: str, cont
             message_id,
             is_bot=True,
         )
-    except Exception:
+    except (AttributeError, TypeError, KeyError):
         pass
 
 
@@ -835,7 +835,7 @@ class _Reminder:
             begin_dt = str_to_datetime(begin_at)
             last_dt = str_to_datetime(last_warn_at)
             now_dt = str_to_datetime(now)
-        except Exception:
+        except (ValueError, TypeError):
             return False
         if begin_dt is None or last_dt is None or now_dt is None:
             return False
@@ -895,7 +895,7 @@ def record_incoming_message(bot: Bot,
         if entry.get(LOG_KEY_RECORDING) and _Reminder.should_notify_hour(begin_at, last_warn, now_time):
             try:
                 hours = int((str_to_datetime(now_time) - str_to_datetime(begin_at)).total_seconds() // 3600)
-            except Exception:
+            except (ValueError, TypeError, ArithmeticError):
                 hours = 1
             commands.append(BotSendMsgCommand(
                 bot.account,
@@ -1447,7 +1447,7 @@ class LogCommand(UserCommandBase):
                 combined = records_db + records_payload
                 combined.sort(key=lambda r: str_to_datetime(r.get('time', _now_str())) or _now_str())
                 records = combined
-            except Exception:
+            except (TypeError, AttributeError):
                 records = records_db + records_payload
         elif records_db:
             records = records_db
@@ -1569,11 +1569,11 @@ class LogCommand(UserCommandBase):
     def _get_upload_settings(self) -> Dict[str, Any]:
         try:
             enabled = self.bot.cfg_helper.get_config(CFG_LOG_UPLOAD_ENABLE)[0]
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             enabled = "1"
         try:
             endpoint = self.bot.cfg_helper.get_config(CFG_LOG_UPLOAD_ENDPOINT)[0]
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             endpoint = UPLOAD_ENDPOINT_DEFAULT
         try:
             token = self.bot.cfg_helper.get_config(CFG_LOG_UPLOAD_TOKEN)[0]
@@ -1607,7 +1607,7 @@ class LogCommand(UserCommandBase):
                 combined = records_db + records_payload
                 combined.sort(key=lambda r: str_to_datetime(r.get('time', _now_str())) or _now_str())
                 records = combined
-            except Exception:
+            except (TypeError, AttributeError):
                 records = records_db + records_payload
         elif records_db:
             records = records_db
@@ -1626,7 +1626,7 @@ class LogCommand(UserCommandBase):
             nickname = record.get("nickname", user_id or "?")
             try:
                 timestamp = int(str_to_datetime(record.get("time", _now_str())).timestamp())
-            except Exception:
+            except (ValueError, TypeError, AttributeError, ArithmeticError):
                 timestamp = int(time.time())
             content = record.get("content", "")
             is_bot_msg = record.get(LOG_KEY_SOURCE) == "bot"
@@ -1676,7 +1676,7 @@ class LogCommand(UserCommandBase):
         }
         try:
             masters = self.bot.cfg_helper.get_config(CFG_MASTER)
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             masters = []
         uploader_id = None
         for mid in masters:
@@ -1696,11 +1696,11 @@ class LogCommand(UserCommandBase):
             headers['Authorization'] = f"Bearer {settings['token']}"
         try:
             response = requests.put(settings['endpoint'], data=form, files=files, headers=headers, timeout=15)
-        except Exception as exc:
+        except (OSError, requests.RequestException, TimeoutError) as exc:
             return {"success": False, "message": f"云端上传失败：{exc}"}
         try:
             resp_json = response.json()
-        except Exception:
+        except (ValueError, AttributeError):
             resp_json = {}
         if response.ok and isinstance(resp_json, dict) and resp_json.get('url'):
             return {
@@ -1730,7 +1730,7 @@ class LogCommand(UserCommandBase):
             for lid, ent in logs.items():
                 if ent is entry:
                     return lid
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             pass
         # 兜底：无法定位则退回名称
         return entry.get(LOG_KEY_NAME, "unknown")
@@ -1750,10 +1750,10 @@ def delete_log_record_by_message_id(bot: Bot, group_id: str, message_id: str) ->
                 conn.commit()
             finally:
                 conn.close()
-    except Exception as e:
+    except (OSError, sqlite3.Error, RuntimeError) as e:
         try:
             dice_log(f"[LogDB] delete by message_id error: {e}")
-        except Exception:
+        except (AttributeError, TypeError):
             pass
 
 

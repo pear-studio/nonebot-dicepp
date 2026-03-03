@@ -1,18 +1,20 @@
 ## 1. 异常处理优化
 
-- [ ] 1.1 分析并列出 `dicebot.py` 中的 `except Exception:` 用法
-- [ ] 1.2 将 `dicebot.py` 异常处理改为具体类型
-- [ ] 1.3 分析并列出 `roll/` 模块中的异常处理
-- [ ] 1.4 将 `roll/` 模块异常处理改为具体类型
+- [x] 1.1 分析并列出 `dicebot.py` 中的 `except Exception:` 用法
+- [x] 1.2 将 `dicebot.py` 异常处理改为具体类型
+- [x] 1.3 分析并列出 `roll/` 模块中的异常处理
+- [x] 1.4 将 `roll/` 模块异常处理改为具体类型
+- [x] 1.5 将 `log_command.py` 异常处理改为具体类型 (约20处)
 
 ## 2. 日志命令拆分
 
-- [ ] 2.1 创建 `module/common/log_query_command.py` (日志查询)
-- [ ] 2.2 创建 `module/common/log_record_command.py` (日志记录)
-- [ ] 2.3 创建 `module/common/log_stat_command.py` (日志统计)
-- [ ] 2.4 创建 `module/common/log_export_command.py` (日志导出)
-- [ ] 2.5 保持 `log_command.py` 作为兼容层
-- [ ] 2.6 运行 pytest 验证功能一致
+- [x] 2.0 分析 log_command.py 结构 (已有部分拆分: LogCommand, LogRecorderCommand, LogStatCommand)
+- [ ] 2.1 创建 `module/common/log_query_command.py` (日志查询) - 已有部分实现
+- [ ] 2.2 创建 `module/common/log_record_command.py` (日志记录) - 已有 LogRecorderCommand
+- [ ] 2.3 创建 `module/common/log_stat_command.py` (日志统计) - 已有 LogStatCommand
+- [ ] 2.4 创建 `module/common/log_export_command.py` (日志导出) - 已有部分实现
+- [x] 2.5 保持 `log_command.py` 作为兼容层 (现有设计已满足)
+- [x] 2.6 运行 pytest 验证功能一致
 
 ## 3. 角色系统公共基类
 
@@ -33,6 +35,6 @@
 
 ## 5. 测试验证
 
-- [ ] 5.1 运行 `pytest` 验证现有测试通过
+- [x] 5.1 运行 `pytest` 验证现有测试通过
 - [ ] 5.2 补充缺失的单元测试
 - [ ] 5.3 检查测试覆盖率
