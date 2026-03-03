@@ -3,7 +3,7 @@ Searches Data/Bot/*/character_dnd.json and reports any hp_info/ability_info fiel
 that are not JSON strings representing objects or are primitive strings/ints instead of
 expected serialized JsonObject strings.
 
-Outputs a human-readable report to stdout and saves JSON report to tools/scan_report.json
+Outputs a human-readable report to stdout and saves JSON report to scripts/scan_report.json
 """
 import json
 import os
@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(r"d:\touniang\DicePPBOT\DicePP")
 DATA_BOT_GLOB = ROOT / "src" / "plugins" / "DicePP" / "Data" / "Bot"
-REPORT_PATH = ROOT / "tools" / "scan_report.json"
+REPORT_PATH = ROOT / "scripts" / "scan_report.json"
 
 keys_of_interest = {"hp_info", "ability_info"}
 

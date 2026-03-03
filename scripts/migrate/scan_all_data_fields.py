@@ -2,14 +2,14 @@
 Searches all JSON files under Data/Bot and reports any occurrences of keys of interest
 (hp_info, ability_info, etc.) where the stored value is not a serialized JSON-object string.
 
-Saves report to tools/scan_all_report.json
+Saves report to scripts/scan_all_report.json
 """
 import json
 from pathlib import Path
 
 ROOT = Path(r"d:\touniang\DicePPBOT\DicePP")
 DATA_ROOT = ROOT / "src" / "plugins" / "DicePP" / "Data" / "Bot"
-REPORT_PATH = ROOT / "tools" / "scan_all_report.json"
+REPORT_PATH = ROOT / "scripts" / "scan_all_report.json"
 
 KEYS = {"hp_info", "ability_info", "hp", "hp_info_str"}
 

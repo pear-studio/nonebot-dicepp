@@ -75,7 +75,7 @@ docker-compose.yml SHALL 提供完整的部署配置。
 - **THEN** SHALL 挂载 Data 目录以持久化用户数据
 
 ### Requirement: DEPLOY.md 部署文档
-tools/docs/DEPLOY.md SHALL 提供详细的生产环境部署指南。
+docs/DEPLOY.md SHALL 提供详细的生产环境部署指南。
 
 #### Scenario: 包含服务器要求
 - **WHEN** 查看 DEPLOY.md

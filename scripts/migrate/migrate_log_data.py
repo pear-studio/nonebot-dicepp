@@ -7,7 +7,7 @@ DicePP 日志数据内存清理脚本
 
 操作说明：
 1. 确保机器人已停止运行
-2. 运行此脚本: python tools/migrate_log_data.py
+2. 运行此脚本: python scripts/migrate/migrate_log_data.py
 3. 脚本会自动扫描 Data/Bot 目录下所有账号的日志数据
 4. 清理完成后重启机器人
 """

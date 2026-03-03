@@ -145,7 +145,7 @@ bot.call_api()
 - 提供 Docker 镜像作为开箱即用方案
 
 ### R4: 部署脚本兼容性
-**风险**: `tools/deploy/` 下的脚本可能需要更新
+**风险**: `scripts/deploy/` 下的脚本可能需要更新
 **缓解**:
 - 检查并更新所有部署脚本
 - 更新 nb-cli 命令语法（如有变化）
@@ -167,7 +167,7 @@ bot.call_api()
 1. 创建 `.env.example` 模板
 2. 更新 `README.md` 安装指南
 3. 更新 `Dockerfile` 基础镜像
-4. 更新 `tools/docs/DEPLOY.md`
+4. 更新 `docs/DEPLOY.md`
 
 ### Phase 4: 发布
 1. 更新版本号（1.0.0 Beta2 → 2.0.0）

@@ -26,7 +26,7 @@
 - 更新 `README.md`，添加完整的安装和部署指南
 - 更新 `Dockerfile` 基础镜像版本（Python 3.10 → 3.12）
 - 更新 `docker-compose.yml` 配置
-- 完善 `tools/docs/DEPLOY.md` 部署文档
+- 完善 `docs/DEPLOY.md` 部署文档
 
 ## Capabilities
 

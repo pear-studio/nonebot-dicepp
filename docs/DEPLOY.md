@@ -217,7 +217,7 @@ uv run pytest --cov=src/plugins/DicePP --cov-report=term-missing
 ```bash
 # Docker
 docker compose logs -f bot
-bash tools/deploy/linux/logs.sh
+bash scripts/deploy/linux/logs.sh
 ```
 
 ### 重启服务
@@ -225,7 +225,7 @@ bash tools/deploy/linux/logs.sh
 ```bash
 # Docker
 docker compose restart bot
-bash tools/deploy/linux/restart.sh
+bash scripts/deploy/linux/restart.sh
 ```
 
 ### 更新代码并重启
@@ -263,14 +263,15 @@ nonebot-dicepp/
 │   ├── core/                 # 核心框架
 │   ├── module/               # 功能模块
 │   └── data/                 # 运行时数据（不提交 Git）
-└── tools/
-    ├── dev/
-    │   ├── install.bat       # Windows：一键初始化环境
-    │   ├── run.bat           # Windows：启动 Bot
-    │   └── test.bat          # Windows：运行测试
-    ├── deploy/linux/         # Linux 运维脚本
-    ├── templates/            # 配置模板
-    └── docs/                 # 本文档所在处
+├── scripts/
+│   ├── dev/
+│   │   ├── install.bat       # Windows：一键初始化环境
+│   │   ├── run.bat           # Windows：启动 Bot
+│   │   └── test.bat          # Windows：运行测试
+│   ├── deploy/linux/         # Linux 运维脚本
+│   ├── migrate/              # 数据迁移脚本
+│   └── templates/            # 配置模板
+└── docs/                    # 部署文档
 ```
 
 ---
