@@ -12,7 +12,7 @@ echo.
 echo 使用 nb-cli 启动机器人...
 echo.
 
-call pip install -r requirements.txt
+call pip install .
 
 nb run
 

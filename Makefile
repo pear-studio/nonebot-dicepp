@@ -8,9 +8,10 @@
 # ── 环境安装 ─────────────────────────────────────────────────────────────────
 install:
 	uv venv .venv
-	uv pip install -r requirements.txt --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+	uv pip install . --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
-install-dev: install
+install-dev:
+	uv venv .venv
 	uv pip install ".[dev]" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # ── 测试 ─────────────────────────────────────────────────────────────────────

@@ -4,9 +4,9 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple
 
 WORKDIR /DicePP
 
-COPY ./requirements.txt /DicePP/requirements.txt
+COPY ./pyproject.toml /DicePP/pyproject.toml
 
-RUN pip install --no-cache-dir --upgrade -r /DicePP/requirements.txt
+RUN pip install --no-cache-dir --upgrade .
 
 COPY ./ /DicePP
 

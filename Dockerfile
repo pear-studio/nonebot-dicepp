@@ -7,12 +7,12 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 WORKDIR /app
 
 # 先只拷贝依赖声明文件，利用 Docker 层缓存
-COPY pyproject.toml requirements.txt ./
+COPY pyproject.toml ./
 
 # 使用 uv 安装生产依赖到 /app/.venv，离线不污染系统 Python
 RUN uv venv .venv && \
     uv pip install --python .venv/bin/python \
-        -r requirements.txt \
+        . \
         --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # ── 运行阶段：精简镜像 ────────────────────────────────────────────────────────

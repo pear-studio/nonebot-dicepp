@@ -10,7 +10,7 @@ cd /d "%PROJECT_DIR%"
 echo ===== 安装 DicePP 依赖 =====
 echo.
 
-pip install -r requirements.txt
+pip install .
 
 echo.
 echo ===== 依赖安装完成 =====

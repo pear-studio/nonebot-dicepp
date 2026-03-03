@@ -256,8 +256,7 @@ nonebot-dicepp/
 ├── bot.py                    # 主入口
 ├── Dockerfile                # 多阶段构建（uv 安装依赖，精简运行镜像）
 ├── docker-compose.yml        # 容器编排
-├── pyproject.toml            # 统一依赖声明（uv / pip / poetry 兼容）
-├── requirements.txt          # 备用依赖列表
+├── pyproject.toml            # 统一依赖声明（uv / pip 兼容）
 ├── Makefile                  # Linux/Mac 快捷命令
 ├── .env                      # 环境变量（不提交 Git）
 ├── src/plugins/DicePP/

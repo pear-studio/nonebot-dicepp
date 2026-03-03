@@ -19,17 +19,6 @@
 
 ## 安装
 
-### 使用 pip
-
-```bash
-# 克隆项目
-git clone https://github.com/your-repo/nonebot-dicepp.git
-cd nonebot-dicepp
-
-# 安装依赖
-pip install -r requirements.txt
-```
-
 ### 使用 uv（推荐）
 
 ```bash
@@ -38,7 +27,19 @@ git clone https://github.com/your-repo/nonebot-dicepp.git
 cd nonebot-dicepp
 
 # 安装依赖
-uv sync
+uv venv .venv
+uv pip install .
+```
+
+### 使用 pip
+
+```bash
+# 克隆项目
+git clone https://github.com/your-repo/nonebot-dicepp.git
+cd nonebot-dicepp
+
+# 安装依赖
+pip install .
 ```
 
 ## 配置
