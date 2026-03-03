@@ -394,7 +394,10 @@ class Bot:
 
     def delay_init_debug(self):
         """在载入本地化文本和配置等数据后调用, 必须是同步环境下调用"""
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
         loop.run_until_complete(self.delay_init_command())
 
     async def delay_init_command(self):
