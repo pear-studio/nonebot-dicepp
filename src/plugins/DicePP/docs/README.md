@@ -4,6 +4,7 @@
 
 ## 文档目录
 
+- [功能列表](./feature_list.md) - 机器人所有功能汇总
 - [架构总览](./architecture.md) - 项目整体架构介绍
 - [命令模式](./command_pattern.md) - 命令系统的设计与实现
 - [命令示例：以掷骰为例](./example_roll.md) - 以 `.r` 掷骰命令为例详解
