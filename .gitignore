@@ -108,8 +108,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
-# .env  # For Nonebot env
+# .env  # 注意：NoneBot 的 .env 配置文件需要追踪，所以不忽略
 .venv
 env/
 venv/
@@ -150,13 +149,5 @@ dmypy.json
 src/plugins/DicePP/Data/
 src/plugins/DicePP/module/misc/log_command.py
 
-# Poetry
-poetry.lock
-poetry.toml
-
-# uv
+# uv lock 文件（可选是否追踪，这里选择不追踪）
 uv.lock
-
-# Test artifacts
-htmlcov/
-.coverage

@@ -1,36 +1,8 @@
-[tool.poetry]
-name = "DicePP"
-version = "2.0.0"
-description = "DicePP"
-authors = ["Pear"]
-readme = "README.md"
-
-[tool.poetry.dependencies]
-python = ">=3.10"
-aiohttp = "^3.9"
-nonebot2 = "^2.4.0"
-nb-cli = "^1.4.0"
-openpyxl = "^3.0.9"
-rsa = "^4.8"
-nonebot-adapter-onebot = "^2.4.0"
-gitpython = "3.1.40"
-python-docx = "^0.8.11"
-lxml = "^4.9.2"
-uvicorn = {version = ">=0.24.0", extras = ["standard"]}
-fastapi = ">=0.100.0"
-zhconv = "^1.4.3"
-psutil = ">=5.9.0"
-
-[tool.poetry.group.dev.dependencies]
-pytest = ">=7.4"
-pytest-asyncio = ">=0.23"
-pytest-cov = ">=4.1"
-
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-# ── uv / pip 兼容的依赖声明（与 Poetry 并列，供 uv sync 使用）──────────────
+# ── 依赖声明（供 uv sync / pip install 使用）──────────────────────────────────
 [project]
 name = "dicepp"
 version = "2.0.0"
@@ -84,8 +56,3 @@ markers = [
     "log: Tests for logging system",
 ]
 
-# ── 镜像源（Poetry 使用）────────────────────────────────────────────────────
-[[tool.poetry.source]]
-name = "tsinghua"
-default = true
-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
