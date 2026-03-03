@@ -1,20 +1,43 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+# Project context
+context: |
+  Tech stack: Python 3.8+, NoneBot2, asyncio, SQLite
+  Project: DicePP - 跑团掷骰机器人 (TRPG Dice Bot)
+  
+  Key modules:
+  - core/: Bot 核心框架（命令处理、数据持久化、配置管理）
+  - module/roll/: 骰子系统（表达式解析、业力骰子）
+  - module/common/: 通用功能（日志、模式切换、群配置）
+  - module/character/: 角色卡系统（COC、DnD5e）
+  
+  Testing:
+  - pytest + pytest-asyncio
+  - 现有测试使用 unittest.IsolatedAsyncioTestCase
+  - 新测试使用 pytest 风格 + fixture
+  
+  Data storage:
+  - JSON 文件（大部分配置和数据）
+  - SQLite（日志模块 log_db.py）
+  
+  Conventions:
+  - 命令以 "." 开头，如 .r、.log、.mode
+  - 使用中文用户界面
+  - 支持 COC（D100）和 DnD（D20）两种主要模式
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+# Per-artifact rules
+rules:
+  proposal:
+    - 必须包含"背景"、"目标"、"非目标"、"成功标准"章节
+    - 简洁描述问题和解决方案，不超过 500 字
+  design:
+    - 包含代码示例和数据结构定义
+    - 说明风险点和缓解措施
+  specs:
+    - 每个规格使用 SPEC-PX-XXX 格式编号（P=Phase, X=序号）
+    - 包含可验证的测试用例
+    - 明确输入、输出和边界条件
+  tasks:
+    - 任务粒度 ≤ 2 小时
+    - 使用 checkbox 格式 (- [ ])
+    - 按执行顺序排列

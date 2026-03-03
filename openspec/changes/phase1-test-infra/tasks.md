@@ -1,29 +1,34 @@
 # Phase 1: 任务清单
 
 ## T1.1 添加测试依赖
-- [ ] 在 `pyproject.toml` 中添加 `pytest >= 7.4`、`pytest-asyncio >= 0.23`、`pytest-cov >= 4.1`
-- [ ] 同步更新 `requirements.txt`（如使用）
+- [x] 在 `pyproject.toml` 的 `[tool.poetry.group.dev.dependencies]` 中添加：
+  - `pytest = ">=7.4"`
+  - `pytest-asyncio = ">=0.23"`
+  - `pytest-cov = ">=4.1"`
+- [x] 在 `[project.optional-dependencies]` 中同步添加 dev 依赖
 
 ## T1.2 配置 pytest
-- [ ] 在 `pyproject.toml` 中添加 `[tool.pytest.ini_options]` 节
+- [x] 在 `pyproject.toml` 添加 `[tool.pytest.ini_options]` 节
   - `asyncio_mode = "auto"`
   - `testpaths = ["src/plugins/DicePP"]`
   - `python_files = ["unit_test.py"]`
   - `python_classes = ["MyTestCase"]`
+- [ ] 补充 `python_files` 以支持新测试命名 `["unit_test.py", "test_*.py", "*_test.py"]`
+- [ ] 补充 `python_classes` 以支持新测试类 `["MyTestCase", "Test*"]`
+- [ ] 补充 `python_functions = ["test*"]`
+- [ ] 补充 `addopts = "--tb=short"`
 
-## T1.3 创建 conftest.py
-- [ ] 在工程根目录创建空 `conftest.py`
-- [ ] 在 `src/plugins/DicePP/` 创建 `conftest.py`，注入 `sys.path`
+## T1.3 解决模块路径
+- [x] 在工程根目录创建 `conftest.py`，添加 `sys.path.insert(0, str(src_path))`
+- [ ] 在 `src/plugins/DicePP/conftest.py` 中添加 `sys.path.insert(0, dicepp_path)`
 
 ## T1.4 配置覆盖率
 - [ ] 在工程根目录创建 `.coveragerc`
-- [ ] 配置 source、omit、exclude_lines
+- [ ] 配置 `[run].source`、`[run].omit`、`[report].show_missing`
 
-## T1.5 验证现有测试
-- [ ] 运行 `pytest src/plugins/DicePP/module/roll/unit_test.py`，确认通过
-- [ ] 运行 `pytest src/plugins/DicePP/core/data/unit_test.py`，确认通过
-- [ ] 运行 `pytest src/plugins/DicePP/core/command/unit_test.py`，确认通过
-- [ ] 运行 `pytest --cov`，确认覆盖率报告生成
+## T1.5 文档更新
+- [ ] 在 README.md 添加"开发者-运行测试"章节
 
-## T1.6 文档更新
-- [ ] 在 `README.md` 中添加"开发者-运行测试"章节，说明命令
+## T1.6 验证
+- [ ] 执行 `pytest` 验证测试发现
+- [ ] 执行 `pytest --cov` 验证覆盖率收集
