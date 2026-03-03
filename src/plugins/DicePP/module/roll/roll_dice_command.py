@@ -254,7 +254,7 @@ class RollDiceCommand(UserCommandBase):
             karma_manager = None
             try:
                 karma_manager = get_karma_manager(self.bot)
-            except Exception as exc:  # noqa: B902
+            except (AttributeError, TypeError, ValueError) as exc:
                 dice_log(f"[KarmaDice] 获取管理器失败: {exc}")
             if karma_manager:
                 user_token = meta.user_id or "_anon_"
@@ -262,7 +262,7 @@ class RollDiceCommand(UserCommandBase):
                     with karma_manager.activate(meta.group_id, user_token) as active:
                         karma_enabled = active
                         res_list: List[RollResult] = [exp.get_result() for _ in range(times)]
-                except Exception as exc:  # noqa: B902
+                except (AttributeError, TypeError, RuntimeError) as exc:
                     dice_log(f"[KarmaDice] 激活失败，回退普通掷骰: {exc}")
                     karma_enabled = False
                     res_list = [exp.get_result() for _ in range(times)]

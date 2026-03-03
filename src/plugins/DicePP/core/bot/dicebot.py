@@ -118,7 +118,7 @@ class Bot:
                 for command in self.command_dict.values():
                     try:
                         bot_commands += command.tick()
-                    except Exception:
+                    except (AttributeError, TypeError, KeyError, RuntimeError):
                         dice_log(str(self.handle_exception(f"Tick: {command.readable_name} CODE110")[0]))
 
                 if loop_begin_time - time_counter[0] > 60 * 5:  # 5分钟执行一次
@@ -148,7 +148,7 @@ class Bot:
                 if self.proxy:
                     for command in bot_commands:
                         await self.proxy.process_bot_command(command)
-            except Exception:
+            except (AttributeError, TypeError, KeyError, RuntimeError):
                 bot_commands += self.handle_exception(f"Tick Loop: CODE113")
 
             # 最多每秒执行一次循环
@@ -184,7 +184,7 @@ class Bot:
             for task in done_tasks:
                 try:
                     bot_commands += task.result()
-                except Exception:
+                except (AttributeError, TypeError, RuntimeError):
                     dice_log(str(self.handle_exception(f"Async Task: CODE114")[0]))
                 del self.todo_tasks[task]
                 dice_log(f"[Async Task] Finish {task.get_coro().cr_code.co_name}")
@@ -198,7 +198,7 @@ class Bot:
                             bot_commands += self.todo_tasks[task]["callback"]()
                         task.cancel()
                         del self.todo_tasks[task]
-        except Exception:
+        except (AttributeError, TypeError, KeyError, RuntimeError):
             dice_log(str(self.handle_exception(f"Async Task: CODE112")[0]))
 
     async def _check_memory_and_handle(self) -> None:
@@ -209,7 +209,7 @@ class Bot:
             enable = int(self.cfg_helper.get_config(CFG_MEMORY_MONITOR_ENABLE)[0])
             if not enable:
                 return
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             return
 
         status = self.get_memory_status()
@@ -223,7 +223,7 @@ class Bot:
             warn_pct = int(self.cfg_helper.get_config(CFG_MEMORY_WARN_PERCENT)[0])
             restart_pct = int(self.cfg_helper.get_config(CFG_MEMORY_RESTART_PERCENT)[0])
             restart_mb = int(self.cfg_helper.get_config(CFG_MEMORY_RESTART_MB)[0])
-        except Exception:
+        except (ValueError, TypeError, KeyError):
             warn_pct, restart_pct, restart_mb = 80, 90, 2048
 
         if percent >= restart_pct or rss_mb >= restart_mb:
@@ -255,7 +255,7 @@ class Bot:
                 "percent": percent,
                 "system_percent": vm.percent,
             }
-        except Exception:
+        except (AttributeError, TypeError, KeyError):
             return None
 
     async def tick_daily(self, bot_commands):
@@ -285,7 +285,7 @@ class Bot:
         for command in self.command_dict.values():
             try:
                 bot_commands += command.tick_daily()
-            except Exception:
+            except (AttributeError, TypeError, KeyError, RuntimeError):
                 dice_log(str(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111")[0]))
         # 给Master发送每日更新通知
         from core.localization import LOC_DAILY_UPDATE
@@ -308,9 +308,9 @@ class Bot:
                                 os.remove(fpath)
                             elif os.path.isdir(fpath):
                                 shutil.rmtree(fpath, ignore_errors=True)
-                    except Exception:
+                    except (OSError, PermissionError):
                         pass
-        except Exception:
+        except (OSError, PermissionError):
             pass
 
     def shutdown(self):
@@ -364,7 +364,7 @@ class Bot:
                     env=env,
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 )
-            except Exception as e:
+            except (OSError, RuntimeError) as e:
                 dice_log(f"[Bot] [Reboot] 启动新进程失败: {e}")
                 # 回退到简单方式
                 subprocess.Popen([python] + sys.argv, cwd=cwd)
@@ -409,7 +409,7 @@ class Bot:
                 for i in range(len(init_info_cur)):
                     init_info_cur[i] = f"{command.__class__.readable_name}: {init_info_cur[i]}"
                 init_info += init_info_cur
-            except Exception:
+            except (AttributeError, TypeError, RuntimeError):
                 if self.proxy:
                     bc_list = self.handle_exception(f"加载{command.__class__.__name__}失败")  # 报错不用中文名
                     for bc in bc_list:
@@ -523,7 +523,7 @@ class Bot:
                 # 判断是否能处理该条指令
                 try:
                     should_proc, should_pass, hint = command.can_process_msg(msg_cur, meta)
-                except Exception:
+                except (AttributeError, TypeError, ValueError):
                     # 发现未处理的错误, 汇报给主Master
                     should_proc, should_pass, hint = False, False, None
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
@@ -546,7 +546,7 @@ class Bot:
                 try:
                     res_commands = command.process_msg(msg_cur, meta, hint)
                     bot_commands += res_commands
-                except Exception:
+                except (AttributeError, TypeError, ValueError, RuntimeError):
                     # 发现未处理的错误, 汇报给主Master
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
                     group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"

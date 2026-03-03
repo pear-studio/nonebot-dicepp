@@ -184,7 +184,7 @@ class KarmaDiceCommand(UserCommandBase):
         port = GroupMessagePort(meta.group_id)
         try:
             manager = get_karma_manager(self.bot)
-        except Exception as exc:  # noqa: B902
+        except (AttributeError, TypeError, ValueError) as exc:
             dice_log(f"[KarmaDice] 获取管理器失败: {exc}")
             feedback = "业力骰子功能初始化失败，请联系管理员检查日志。"
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -215,14 +215,14 @@ class KarmaDiceCommand(UserCommandBase):
                         feedback += "\n" + self.format_loc(LOC_KARMA_INTRO)
                 else:
                     feedback = self.format_loc(LOC_KARMA_ALREADY_ON)
-            except Exception as exc:  # noqa: B902
+            except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
                 dice_log(f"[KarmaDice] 启用失败: {exc}")
                 feedback = "业力骰子开启失败，请检查日志。"
         elif action == "off":
             try:
                 changed = manager.disable(meta.group_id)
                 feedback = self.format_loc(LOC_KARMA_OFF if changed else LOC_KARMA_ALREADY_OFF)
-            except Exception as exc:
+            except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
                 dice_log(f"[KarmaDice] 关闭失败: {exc}")
                 feedback = "业力骰子关闭失败，请检查日志。"
         elif action == "status":
@@ -273,7 +273,7 @@ class KarmaDiceCommand(UserCommandBase):
                             user_count=status["group_user_count"],
                             count=status["group_user_count"],
                         )
-            except Exception as exc:  # noqa: B902
+            except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
                 dice_log(f"[KarmaDice] 查询状态失败: {exc}")
                 feedback = "业力骰子状态查询失败，请检查日志。"
         elif action == "help":
@@ -288,7 +288,7 @@ class KarmaDiceCommand(UserCommandBase):
                     try:
                         manager.set_custom_params(meta.group_id, target, window)
                         feedback = self.format_loc(LOC_KARMA_SET_OK, target=target, window=window)
-                    except Exception as exc:  # noqa: B902
+                    except (AttributeError, TypeError, KeyError, ValueError, RuntimeError) as exc:
                         dice_log(f"[KarmaDice] 设置参数失败: {exc}")
                         feedback = "业力骰子参数更新失败，请检查日志。"
                 except ValueError:
@@ -309,7 +309,7 @@ class KarmaDiceCommand(UserCommandBase):
                         feedback = self.format_loc(LOC_KARMA_MODE_OK, mode=display)
                         if not changed:
                             feedback += "（已在当前模式）"
-                    except Exception as exc:  # noqa: B902
+                    except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
                         dice_log(f"[KarmaDice] 切换模式失败: {exc}")
                         feedback = "业力模式切换失败，请检查日志。"
         elif action == "engine":
@@ -328,7 +328,7 @@ class KarmaDiceCommand(UserCommandBase):
                         feedback = self.format_loc(LOC_KARMA_ENGINE_OK, engine=display)
                         if not changed:
                             feedback += "（已在当前引擎）"
-                    except Exception as exc:  # noqa: B902
+                    except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
                         dice_log(f"[KarmaDice] 切换引擎失败: {exc}")
                         feedback = "业力引擎切换失败，请检查日志。"
         elif action == "reset":
@@ -339,7 +339,7 @@ class KarmaDiceCommand(UserCommandBase):
                 else:
                     manager.reset_history(meta.group_id)
                     feedback = self.format_loc(LOC_KARMA_RESET_OK)
-            except Exception as exc:  # noqa: B902
+            except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
                 dice_log(f"[KarmaDice] 重置历史失败: {exc}")
                 feedback = "业力历史清空失败，请检查日志。"
         else:
