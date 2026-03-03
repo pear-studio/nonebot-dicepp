@@ -22,6 +22,10 @@ dependencies = [
     "fastapi>=0.100.0",
     "zhconv>=1.4.3",
     "psutil>=5.9.0",
+    "requests>=2.28.0,<2.32.0",
+    "urllib3>=1.21.1,<2.0.0,!=1.25.0,!=1.25.1",
+    "charset-normalizer>=3.0.0,<3.4.0",
+    "chardet>=3.0.2,<6.0.0",
 ]
 
 [project.optional-dependencies]
@@ -31,16 +35,26 @@ dev = [
     "pytest-cov>=4.1",
 ]
 
+[tool.uv]
+dependency-metadata = []
+
 # ── nonebot 配置 ────────────────────────────────────────────────────────────
 [nonebot.plugins]
 plugins = []
 plugin_dirs = ["src/plugins"]
 
 [tool.nonebot]
-plugins = []
 plugin_dirs = ["src/plugins"]
 
 # ── pytest 配置 ─────────────────────────────────────────────────────────────
+builtin_plugins = []
+
+[tool.nonebot.plugins]
+"@local" = []
+
+
+[tool.nonebot.adapters]
+"@local" = []
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["src/plugins/DicePP"]
