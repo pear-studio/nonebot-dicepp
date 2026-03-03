@@ -1,6 +1,8 @@
 # DicePP 部署指南
 
-DicePP 是一个基于 NoneBot2 的 TRPG 骰娘机器人，需要配合 go-cqhttp 使用。
+DicePP 是一个基于 NoneBot2 的 TRPG 骰娘机器人。NoneBot2 是一个现代、跨平台、可扩展的 Python 聊天机器人框架，基于 Python 类型注解和异步优先特性开发。
+
+部署 DicePP 需要配合 QQNT（新版 QQ）与 LLOneBot 使用：LLOneBot 作为协议转换层，将 QQ 的消息转换为标准的 OneBot11 协议，与 DicePP 进行通信。
 
 > **核心原则**：无论开发、测试还是部署，项目均通过 `uv`（本地）或 `Docker`（服务器）管理 Python 环境，**不依赖系统中已安装的任何 Python 环境**。
 
@@ -10,9 +12,10 @@ DicePP 是一个基于 NoneBot2 的 TRPG 骰娘机器人，需要配合 go-cqhtt
 
 | 场景 | 工具 | 说明 |
 |------|------|------|
+| Python | Python 3.9+ | NoneBot2 需要 Python 3.9 及以上版本 |
 | Windows 本地开发/运行 | [uv](https://github.com/astral-sh/uv) | 替代 pip+venv，一键隔离环境 |
 | Linux 服务器部署 | Docker + Docker Compose | 完全容器化，无需手动配 Python |
-| go-cqhttp | go-cqhttp | QQ 机器人客户端，两种场景均需要 |
+| QQ 客户端 | QQNT + LLOneBot | 新版 QQ 机器人客户端方案，使用 OneBot11 协议 |
 
 ---
 
@@ -57,39 +60,50 @@ tools\dev\install.bat
 
 > 所有包仅安装在 `.venv/` 内，**不影响系统 Python**。
 
-#### 第 3 步：配置 go-cqhttp
+#### 第 3 步：准备 QQNT 与 LLOneBot
 
-1. 从 [go-cqhttp Releases](https://github.com/Mrs4s/go-cqhttp/releases) 下载 Windows 版本
-2. 解压到项目根目录的 `go-cqhttp\` 文件夹
-3. 复制配置模板：
-   ```bat
-   copy tools\templates\config.gocqhttp.yml go-cqhttp\config.yml
+> LLOneBot（又称 LLBot）是一个基于 NTQQ 的 QQ 机器人框架，它作为中间层负责与 QQ 客户端通信，并将消息转换为标准协议格式（OneBot11），供机器人框架使用。
+
+1. 下载并安装新版 QQ（QQNT）版本
+2. 安装 LLOneBot 插件（用于接收 QQ 消息并转发给 DicePP）
+
+> LLOneBot 支持 OneBot11、Milky、Satori 等协议，DicePP 通过 OneBot11 协议与其通信。
+
+#### 第 4 步：配置 LLOneBot
+
+1. 登录机器人 QQ 账号
+2. 打开设置界面，找到 LLOneBot 设置
+3. 勾选**启用反向 WebSocket 协议**
+4. 添加新的反向 WebSocket 地址：
    ```
-4. 编辑 `go-cqhttp\config.yml`，将 `uin` 改为机器人的 QQ 号，确认 WebSocket 地址为：
-   ```yaml
-   servers:
-     - ws-reverse:
-         universal: ws://127.0.0.1:8080/onebot/v11/ws
+   ws://127.0.0.1:8080/onebot/v11/ws
    ```
 
-#### 第 4 步：启动 go-cqhttp
+#### 第 5 步骤：启动 DicePP
 
-```bat
-cd go-cqhttp
-go-cqhttp.exe
-```
-
-首次运行会弹出二维码，使用绑定 QQ 扫码登录，成功后保持此窗口运行。
-
-#### 第 5 步：启动 DicePP
-
-新开一个终端窗口，在项目根目录执行：
+在项目根目录执行：
 
 ```bat
 tools\dev\run.bat
 ```
 
 等价命令：`uv run python bot.py`
+
+当看到类似以下输出时，表示 DicePP 启动成功：
+```
+成功读取本地化文件
+...
+Running on http://127.0.0.1:8080
+```
+
+#### 第 6 步：确认连接
+
+确保：
+1. QQNT 已登录机器人账号
+2. LLOneBot 反向 WebSocket 已正确配置
+3. DicePP 已启动
+
+保持 QQNT 和 DicePP 两个窗口运行，骰娘即可正常工作。
 
 ---
 
@@ -130,29 +144,10 @@ cp .env.linux .env
 ```env
 HOST=0.0.0.0
 PORT=8080
-# SECRET=your_secret        # 可选：go-cqhttp 通信密钥
 # ACCESS_TOKEN=your_token   # 可选：访问令牌
 ```
 
-#### 第 3 步：配置 go-cqhttp
-
-```bash
-mkdir -p go-cqhttp
-cp tools/templates/config.gocqhttp.yml go-cqhttp/config.yml
-```
-
-编辑 `go-cqhttp/config.yml`，关键字段：
-
-```yaml
-account:
-  uin: 123456789   # ← 改为机器人 QQ 号
-
-servers:
-  - ws-reverse:
-      universal: ws://dicepp_nonebot_bot:8080/onebot/v11/ws  # ← 指向容器名
-```
-
-#### 第 4 步：构建并启动 DicePP
+#### 第 3 步：构建并启动 DicePP
 
 ```bash
 docker compose up --build -d
@@ -165,13 +160,16 @@ docker compose logs -f bot
 # 看到 "Running on http://0.0.0.0:8080" 即表示正常
 ```
 
-#### 第 5 步：启动 go-cqhttp
+#### 第 4 步：配置 QQNT（Linux）
 
-```bash
-cp tools/templates/docker-compose.gocqhttp.yml go-cqhttp/docker-compose.yml
-cd go-cqhttp && docker compose up -d
-# 首次需扫码：docker compose logs -f 查看二维码
-```
+Linux 服务器部署需要在本地运行 QQNT 并配置 LLOneBot 连接到服务器：
+
+1. 在本地 Windows 机器安装 QQNT
+2. 配置 LLOneBot 反向 WebSocket 地址指向服务器：
+   ```
+   ws://服务器IP:8080/onebot/v11/ws
+   ```
+3. 确保服务器 8080 端口已开放
 
 ---
 
@@ -207,7 +205,6 @@ uv run pytest --cov=src/plugins/DicePP --cov-report=term-missing
 |--------|------|--------|
 | HOST | 监听地址 | 0.0.0.0 |
 | PORT | 监听端口 | 8080 |
-| SECRET | go-cqhttp 通信密钥 | - |
 | ACCESS_TOKEN | 访问令牌 | - |
 | MAX_WORKERS | 异步 Worker 数量 | 1 |
 
@@ -267,32 +264,31 @@ nonebot-dicepp/
 │   ├── core/                 # 核心框架
 │   ├── module/               # 功能模块
 │   └── data/                 # 运行时数据（不提交 Git）
-├── tools/
-│   ├── dev/
-│   │   ├── install.bat       # Windows：一键初始化环境
-│   │   ├── run.bat           # Windows：启动 Bot
-│   │   └── test.bat          # Windows：运行测试
-│   ├── deploy/linux/         # Linux 运维脚本
-│   ├── templates/            # 配置模板
-│   └── docs/                 # 本文档所在处
-└── go-cqhttp/                # go-cqhttp 目录（需手动创建）
+└── tools/
+    ├── dev/
+    │   ├── install.bat       # Windows：一键初始化环境
+    │   ├── run.bat           # Windows：启动 Bot
+    │   └── test.bat          # Windows：运行测试
+    ├── deploy/linux/         # Linux 运维脚本
+    ├── templates/            # 配置模板
+    └── docs/                 # 本文档所在处
 ```
 
 ---
 
 ## 故障排除
 
-### Bot 无法连接 go-cqhttp
+### Bot 无法连接 LLOneBot
 
-1. 检查 `go-cqhttp/config.yml` 中 WebSocket 地址是否正确
-2. Docker 部署时确认两个容器在同一网络（`docker network ls`）
+1. 检查 LLOneBot 中反向 WebSocket 地址是否正确
+2. Docker 部署时确认端口 8080 已开放
 3. 检查防火墙是否放行 8080 端口
 
-### go-cqhttp 扫码登录失败
+### LLOneBot 连接失败
 
-1. 确保该 QQ 可正常登录网页版
-2. 尝试切换为密码登录方式
-3. 删除 `go-cqhttp/session.token` 后重试
+1. 确保 DicePP 已启动
+2. 检查 WebSocket 地址是否填写正确（应为 `ws://127.0.0.1:8080/onebot/v11/ws`）
+3. 确保没有其他程序占用 8080 端口
 
 ### 依赖安装失败（Windows）
 
@@ -310,6 +306,6 @@ docker compose build --no-cache
 ## 相关链接
 
 - [NoneBot2 文档](https://v2.nonebot.dev/)
-- [go-cqhttp](https://github.com/Mrs4s/go-cqhttp)
+- [LLOneBot 文档](https://github.com/LLOneBot/LLOneBot)
 - [uv 文档](https://docs.astral.sh/uv/)
 - [DicePP 项目](https://github.com/pear-studio/nonebot-dicepp)
