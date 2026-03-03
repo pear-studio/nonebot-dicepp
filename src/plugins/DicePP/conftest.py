@@ -11,6 +11,7 @@ if str(dicepp_path) not in sys.path:
 from core.bot import Bot
 from core.config import ConfigItem, CFG_MASTER
 from core.command import BotCommandBase
+from core.communication import MessageMetaData, MessageSender
 from adapter import ClientProxy
 from src.plugins.DicePP import GroupMemberInfo, GroupInfo
 
@@ -94,3 +95,26 @@ def fresh_bot():
             for name in dirs:
                 os.rmdir(os.path.join(root, name))
         os.rmdir(test_path)
+
+
+def make_group_meta(msg: str, user_id: str = "user", nickname: str = "测试用户",
+                    group_id: str = "group", to_me: bool = False) -> MessageMetaData:
+    """创建群消息元数据"""
+    return MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id, to_me)
+
+
+def make_private_meta(msg: str, user_id: str = "user", nickname: str = "测试用户") -> MessageMetaData:
+    """创建私聊消息元数据"""
+    return MessageMetaData(msg, msg, MessageSender(user_id, nickname), "", True)
+
+
+async def send_and_check(bot: Bot, msg: str, meta: MessageMetaData,
+                         checker: Callable[[str], bool] = lambda s: True,
+                         target_checker: Optional[Callable[[List[Any]], bool]] = None) -> List[BotCommandBase]:
+    """发送消息并验证结果，返回命令列表"""
+    bot_commands = await bot.process_message(msg, meta)
+    result = "\n".join([str(command) for command in bot_commands])
+    assert checker(result), f"Check failed for: {result}"
+    if target_checker:
+        assert target_checker(bot_commands), f"Target check failed for: {bot_commands}"
+    return bot_commands
