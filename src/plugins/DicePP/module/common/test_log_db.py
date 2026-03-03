@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime
 from typing import Dict, Any
 
-import log_db
+from module.common import log_db
 
 
 class TestLogDb(unittest.TestCase):

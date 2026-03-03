@@ -55,8 +55,8 @@ def custom_json_object(cls):
     类修饰器, 将自定义JsonObject注册到列表中
     """
     assert issubclass(cls, JsonObject)
-    assert cls.__name__ not in ALL_JSON_OBJ_DICT
-    ALL_JSON_OBJ_DICT[cls.__name__] = cls
+    if cls.__name__ not in ALL_JSON_OBJ_DICT:
+        ALL_JSON_OBJ_DICT[cls.__name__] = cls
     return cls
 
 

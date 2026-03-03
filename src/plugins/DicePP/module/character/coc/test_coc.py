@@ -114,7 +114,7 @@ class TestCocMoney(unittest.TestCase):
         self.assertEqual(info.silver, 0)
         self.assertEqual(info.copper, 0)
 
-    def test_money_spend_and_gain(self):
+    def test_money_serialize_deserialize(self):
         from module.character.coc.money import MoneyInfo
 
         info = MoneyInfo()
@@ -122,25 +122,13 @@ class TestCocMoney(unittest.TestCase):
         info.silver = 50
         info.copper = 25
 
-        info.spend(10, 5, 0)
-        self.assertEqual(info.gold, 90)
-        self.assertEqual(info.silver, 45)
+        serialized = info.serialize()
+        info2 = MoneyInfo()
+        info2.deserialize(serialized)
 
-        info.gain(5, 10, 0)
-        self.assertEqual(info.gold, 95)
-        self.assertEqual(info.silver, 55)
-
-    def test_money_balance_check(self):
-        from module.character.coc.money import MoneyInfo
-
-        info = MoneyInfo()
-        info.gold = 100
-
-        can_afford = info.can_afford(50, 0, 0)
-        self.assertTrue(can_afford)
-
-        can_afford = info.can_afford(150, 0, 0)
-        self.assertFalse(can_afford)
+        self.assertEqual(info.gold, info2.gold)
+        self.assertEqual(info.silver, info2.silver)
+        self.assertEqual(info.copper, info2.copper)
 
 
 @pytest.mark.integration

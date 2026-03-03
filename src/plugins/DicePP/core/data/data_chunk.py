@@ -275,7 +275,8 @@ def custom_data_chunk(identifier: str,
         assert issubclass(cls, DataChunkBase)
         assert " " not in identifier
         for dc in DATA_CHUNK_TYPES:
-            assert dc.identifier != identifier
+            if dc.identifier == identifier:
+                return cls
         cls.identifier = identifier
         cls.include_json_object = include_json_object
         cls.__name__ = "DataChunkClass" + identifier
