@@ -1,23 +1,40 @@
-version: "3"
+version: "3.9"
 
 services:
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime        # 仅使用精简的运行阶段镜像
+    image: dicepp:latest
     container_name: dicepp_nonebot_bot
-    restart: always
+    restart: unless-stopped
     ports:
-      - "8080:8080" # 将容器的 8080 端口映射到主机的 8080 端口
+      - "8080:8080"
     env_file:
-      - .env # 加载 .env 文件中的环境变量
-      - ".env.linux" # fastapi 使用的环境变量文件
+      - .env
+      - .env.linux
     environment:
-      - ENVIRONMENT=linux # 配置 nonebot 运行环境，此项会被 .env 文件覆盖
-      - APP_MODULE=bot:app # 配置 asgi 入口
-      - SECRET # 通过 SECRET=xxx nb up -d 传递密钥
-      - ACCESS_TOKEN # 通过 ACCESS_TOKEN=xxx nb up -d 传递密钥
-      - MAX_WORKERS=1 # 如果你有多个QQ，且存在 self_id 指定，多个 worker 会导致无法找到其他 websocket 连接
+      - ENVIRONMENT=linux
+      - APP_MODULE=bot:app
+      - SECRET
+      - ACCESS_TOKEN
+      - MAX_WORKERS=1
     volumes:
-      # 挂载整个项目目录，实现代码热更新
-      - .:/app
-      # 将插件的数据目录挂载到宿主机，实现数据持久化
-      - ./src/plugins/DicePP/data:/app/src/plugins/DicePP/data # <--- 新增的挂载点
+      # 持久化插件数据（用户数据、数据库等）
+      - dicepp_data:/app/src/plugins/DicePP/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import psutil; exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  dicepp_data:
+    name: dicepp_data

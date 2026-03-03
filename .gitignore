@@ -152,3 +152,10 @@ src/plugins/DicePP/module/misc/log_command.py
 # Poetry
 poetry.lock
 poetry.toml
+
+# uv
+uv.lock
+
+# Test artifacts
+htmlcov/
+.coverage

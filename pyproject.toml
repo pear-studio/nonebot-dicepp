@@ -7,7 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.8"
-aiohttp = "^4.0.2"
+aiohttp = "^3.8"
 nonebot2 = "^2.0.0b1"
 nb-cli = "^0.6.4"
 openpyxl = "^3.0.9"
@@ -16,20 +16,67 @@ nonebot-adapter-cqhttp = "^2.0.0b1"
 gitpython = "3.1.26"
 python-docx = "^0.8.11"
 lxml = "^4.9.2"
+uvicorn = {version = ">=0.15", extras = ["standard"]}
+fastapi = ">=0.68.0"
+zhconv = "^1.4.3"
+psutil = ">=5.9.0"
 
-[nonebot.plugins]
-plugins = []
-plugin_dirs = ["src/plugins"]
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.4"
+pytest-asyncio = ">=0.23"
+pytest-cov = ">=4.1"
 
 [build-system]
 requires = ["poetry>=0.12"]
 build-backend = "poetry.masonry.api"
 
-[[tool.poetry.source]]
-name = "tsinghua"
-default = true
-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# ── uv / pip 兼容的依赖声明（与 Poetry 并列，供 uv sync 使用）──────────────
+[project]
+name = "dicepp"
+version = "1.0.0b2"
+description = "DicePP NoneBot2 Plugin"
+requires-python = ">=3.8"
+dependencies = [
+    "aiohttp>=3.8",
+    "nonebot2>=2.0.0b1",
+    "nb-cli>=0.6.4",
+    "nonebot-adapter-onebot>=2.0.0b1",
+    "openpyxl>=3.0.9",
+    "rsa>=4.8",
+    "gitpython==3.1.26",
+    "python-docx>=0.8.11",
+    "lxml>=4.9.2",
+    "uvicorn[standard]>=0.15",
+    "fastapi>=0.68.0",
+    "zhconv>=1.4.3",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.1",
+]
+
+# ── nonebot 配置 ────────────────────────────────────────────────────────────
+[nonebot.plugins]
+plugins = []
+plugin_dirs = ["src/plugins"]
 
 [tool.nonebot]
 plugins = []
 plugin_dirs = ["src/plugins"]
+
+# ── pytest 配置 ─────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["src/plugins/DicePP"]
+python_files = ["unit_test.py"]
+python_classes = ["MyTestCase"]
+
+# ── 镜像源（Poetry 使用）────────────────────────────────────────────────────
+[[tool.poetry.source]]
+name = "tsinghua"
+default = true
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
