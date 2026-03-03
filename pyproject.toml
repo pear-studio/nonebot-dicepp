@@ -72,8 +72,10 @@ plugin_dirs = ["src/plugins"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["src/plugins/DicePP"]
-python_files = ["unit_test.py"]
-python_classes = ["MyTestCase"]
+python_files = ["unit_test.py", "test_*.py", "*_test.py"]
+python_classes = ["MyTestCase", "Test*"]
+python_functions = ["test*"]
+addopts = "--tb=short"
 
 # ── 镜像源（Poetry 使用）────────────────────────────────────────────────────
 [[tool.poetry.source]]
