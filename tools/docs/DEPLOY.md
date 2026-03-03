@@ -276,6 +276,53 @@ nonebot-dicepp/
 
 ---
 
+## 反向代理配置
+
+如果需要通过域名访问 DicePP 或启用 HTTPS，可以配置 Nginx 或 Caddy 反向代理。
+
+### Nginx 配置示例
+
+```nginx
+server {
+    listen 80;
+    server_name dicepp.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # WebSocket 支持
+    location /onebot/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 86400;
+    }
+}
+```
+
+### Caddy 配置示例
+
+```caddyfile
+dicepp.example.com {
+    reverse_proxy /onebot/* 127.0.0.1:8080
+    reverse_proxy /dpp/* 127.0.0.1:8080
+}
+```
+
+---
+
 ## 故障排除
 
 ### Bot 无法连接 LLOneBot

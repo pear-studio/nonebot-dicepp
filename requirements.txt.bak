@@ -1,0 +1,15 @@
+wheel
+nonebot2>=2.0.0b1
+uvicorn[standard]
+nb-cli==0.6.4
+nonebot-adapter-onebot==2.0.0b1
+fastapi>=0.68.0
+openpyxl==3.0.9
+rsa==4.8
+gitpython==3.1.26
+python-docx==0.8.11
+zhconv==1.4.3
+psutil>=5.9.0
+pytest>=7.4
+pytest-asyncio>=0.23
+pytest-cov>=4.1

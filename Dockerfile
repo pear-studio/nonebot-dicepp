@@ -1,5 +1,5 @@
 # ── 构建阶段：安装依赖 ────────────────────────────────────────────────────────
-FROM python:3.10-slim AS builder
+FROM python:3.12-slim AS builder
 
 # 安装 uv（Rust 实现的极速包管理器）
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -16,7 +16,7 @@ RUN uv venv .venv && \
         --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 # ── 运行阶段：精简镜像 ────────────────────────────────────────────────────────
-FROM python:3.10-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
