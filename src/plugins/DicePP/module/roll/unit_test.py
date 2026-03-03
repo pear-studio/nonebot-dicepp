@@ -1,12 +1,14 @@
 import unittest
 from typing import Callable
 
+import pytest
 import roll_config
 from module.roll.expression import parse_roll_exp, exec_roll_exp, RollExpression, preprocess_roll_exp
 from module.roll.roll_utils import match_outer_parentheses, remove_redundant_parentheses, RollDiceError
 from module.roll.result import RollResult
 
 
+@pytest.mark.unit
 class MyTestCase(unittest.TestCase):
     def test_utils(self):
         self.assertEqual(match_outer_parentheses("()"), 1)

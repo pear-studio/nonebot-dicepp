@@ -1,6 +1,7 @@
 import unittest
 import os
 
+import pytest
 from core.data.manager import DataManager, DataManagerError
 from core.data.data_chunk import DataChunkBase, custom_data_chunk
 from core.data.json_object import JsonObject, custom_json_object
@@ -8,6 +9,7 @@ from core.data.json_object import JsonObject, custom_json_object
 test_path = os.path.join(os.path.dirname(__file__), 'test_data')
 
 
+@pytest.mark.unit
 class MyTestCase(unittest.TestCase):
     test_index = -1
 

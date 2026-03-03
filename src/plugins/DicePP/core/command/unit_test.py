@@ -1,8 +1,9 @@
 import unittest
+import pytest
 from unittest.async_case import IsolatedAsyncioTestCase
 import os
 import asyncio
-from typing import Callable, List
+from typing import Callable, List, Any, Optional
 
 from core.bot import Bot
 from core.command import BotCommandBase
@@ -12,6 +13,7 @@ from adapter import ClientProxy
 from src.plugins.DicePP import GroupMemberInfo, GroupInfo
 
 
+@pytest.mark.integration
 class MyTestCase(IsolatedAsyncioTestCase):
     test_bot = None
     test_proxy = None
@@ -76,10 +78,9 @@ class MyTestCase(IsolatedAsyncioTestCase):
     async def __vg_msg(self, msg: str,
                        group_id: str = "group", user_id: str = "user", nickname: str = "测试用户",
                        checker: Callable[[str], bool] = lambda s: True, is_show: bool = False,
-                       test_times=1, to_me: bool = False):
+                       test_times=1, to_me: bool = False,
+                       target_checker: Optional[Callable[[List[Any]], bool]] = None):
         """Validate Group Message Result"""
-        # group_id += f"_in_test{self.test_index}"
-        # user_id += f"_in_test{self.test_index}"
         meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id, to_me)
         info_str = ""
         for t in range(test_times):
@@ -87,14 +88,16 @@ class MyTestCase(IsolatedAsyncioTestCase):
             result = "\n".join([str(command) for command in bot_commands])
             info_str = f"\033[0;32m{msg}\033[0m -> {result}"
             self.assertTrue(checker(result), f"Info:\n{info_str}")
+            if target_checker:
+                self.assertTrue(target_checker(bot_commands), f"Target checker failed for: {bot_commands}")
         if is_show:
             print(info_str)
 
     async def __vp_msg(self, msg: str, user_id: str = "user", nickname: str = "测试用户",
                        checker: Callable[[str], bool] = lambda s: True, is_show: bool = False,
-                       test_times=1):
+                       test_times=1,
+                       target_checker: Optional[Callable[[List[Any]], bool]] = None):
         """Validate Private Message Result"""
-        # user_id += f"_in_test{self.test_index}"
         meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), "", True)
         info_str = ""
         for t in range(test_times):
@@ -102,11 +105,14 @@ class MyTestCase(IsolatedAsyncioTestCase):
             result = "\n".join([str(command) for command in bot_commands])
             info_str = f"\033[0;32m{msg}\033[0m -> {result}"
             self.assertTrue(checker(result), f"Info:\n{info_str}")
+            if target_checker:
+                self.assertTrue(target_checker(bot_commands), f"Target checker failed for: {bot_commands}")
         if is_show:
             print(info_str)
 
     async def __v_notice(self, notice: NoticeData, checker: Callable[[str], bool] = lambda s: True,
-                         is_show: bool = False, test_times=1):
+                         is_show: bool = False, test_times=1,
+                         target_checker: Optional[Callable[[List[Any]], bool]] = None):
         """Validate Notice Result"""
         info_str = ""
         for t in range(test_times):
@@ -114,6 +120,8 @@ class MyTestCase(IsolatedAsyncioTestCase):
             result = "\n".join([str(command) for command in bot_commands])
             info_str = f"\033[0;32m{notice}\033[0m -> {result}"
             self.assertTrue(checker(result), f"Info:\n{info_str}")
+            if target_checker:
+                self.assertTrue(target_checker(bot_commands), f"Target checker failed for: {bot_commands}")
         if is_show:
             print(info_str)
 
@@ -146,6 +154,10 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vp_msg(".rh", checker=lambda s: "|Group: group|" not in s and "|Private: user|" in s)
         await self.__vg_msg(".rh d20 原因", checker=lambda s: "测试用户's hidden roll result for 原因 is 1D20=" in s and
                                                             "测试用户 process a hidden rolling" in s)
+        await self.__vg_msg(".rh", group_id="test_group_hidden", user_id="test_user_hidden",
+                            target_checker=lambda cmds: len(cmds) >= 2 and
+                                any("test_group_hidden" in str(c) for c in cmds) and
+                                any("test_user_hidden" in str(c) for c in cmds))
         await self.__vg_msg(".rsd20+5", checker=lambda s: "1D20+5=" in s and s.count("=") == 1)
         await self.__vg_msg(".rs10D20cs>5", checker=lambda s: "10D20CS>5=" in s and s.count("=") == 1 and "{" not in s)
         await self.__vg_msg(".rs2#d20+5", checker=lambda s: "1D20+5: [" in s and s.count("=") == 0)

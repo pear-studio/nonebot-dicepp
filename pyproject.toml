@@ -76,6 +76,13 @@ python_files = ["unit_test.py", "test_*.py", "*_test.py"]
 python_classes = ["MyTestCase", "Test*"]
 python_functions = ["test*"]
 addopts = "--tb=short"
+markers = [
+    "unit: Unit tests for individual modules",
+    "integration: Integration tests for command flow",
+    "slow: Tests that take a long time to run",
+    "karma: Tests for karma system",
+    "log: Tests for logging system",
+]
 
 # ── 镜像源（Poetry 使用）────────────────────────────────────────────────────
 [[tool.poetry.source]]
