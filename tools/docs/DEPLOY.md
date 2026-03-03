@@ -1,116 +1,197 @@
 # DicePP 部署指南
 
-DicePP 是一个基于 NoneBot2 的 DND 骰娘机器人，需要配合 go-cqhttp 使用。
+DicePP 是一个基于 NoneBot2 的 TRPG 骰娘机器人，需要配合 go-cqhttp 使用。
+
+> **核心原则**：无论开发、测试还是部署，项目均通过 `uv`（本地）或 `Docker`（服务器）管理 Python 环境，**不依赖系统中已安装的任何 Python 环境**。
+
+---
 
 ## 环境要求
 
-- Python 3.8+
-- Docker (Linux 部署)
-- go-cqhttp (QQ 机器人客户端)
+| 场景 | 工具 | 说明 |
+|------|------|------|
+| Windows 本地开发/运行 | [uv](https://github.com/astral-sh/uv) | 替代 pip+venv，一键隔离环境 |
+| Linux 服务器部署 | Docker + Docker Compose | 完全容器化，无需手动配 Python |
+| go-cqhttp | go-cqhttp | QQ 机器人客户端，两种场景均需要 |
 
 ---
 
 ## 部署方式
 
-### 方式一：Windows 直接运行
+### 方式一：Windows 本地运行（开发 / 测试）
 
-适用于本地测试或不需要 Docker 的环境。
+适用于本地开发和调试，所有依赖隔离在项目目录下的 `.venv/` 中。
 
-#### 1. 安装依赖
+#### 前置：安装 uv（仅需一次）
 
-```bash
-pip install -r requirements.txt
+在 **PowerShell** 中执行：
+
+```powershell
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-或运行提供的脚本：
-```batch
-.\tools\deploy\windows\install_deps.bat
-```
+安装完成后**重启终端**，验证：
 
-#### 2. 配置 go-cqhttp
-
-1. 从 [go-cqhttp releases](https://github.com/Mrs4s/go-cqhttp/releases) 下载 Windows 版本
-2. 将压缩包内容解压到项目根目录的 `go-cqhttp` 文件夹
-3. 复制 `tools\templates\config.gocqhttp.yml` 为 `go-cqhttp\config.yml`
-4. 编辑 `config.yml`，修改 `uin` 为你的 QQ 号
-
-#### 3. 启动 go-cqhttp
-
-运行 go-cqhttp，首次会弹出二维码，使用需要绑定的 QQ 扫描登录。
-
-#### 4. 启动 DicePP
-
-```batch
-python bot.py
-```
-
-或使用提供的脚本：
-```batch
-.\tools\deploy\windows\start.bat
+```bat
+uv --version
 ```
 
 ---
 
-### 方式二：Docker 部署 (Linux)
+#### 第 1 步：克隆项目
 
-适用于服务器环境。
-
-#### 1. 安装 Docker
-
-```bash
-# 安装 Docker
-curl -fsSL https://get.docker.com | bash
-
-# 安装 Docker Compose
-apt-get install docker-compose
+```bat
+git clone https://github.com/pear-studio/nonebot-dicepp.git
+cd nonebot-dicepp
 ```
 
-#### 2. 配置环境变量
+#### 第 2 步：初始化虚拟环境并安装依赖
 
-复制 `.env.linux` 为 `.env` 并根据需要修改配置：
+```bat
+tools\dev\install.bat
+```
+
+该脚本会自动：
+- 在项目根目录创建 `.venv/` 虚拟环境
+- 从清华镜像安装所有运行时依赖和测试依赖
+
+> 所有包仅安装在 `.venv/` 内，**不影响系统 Python**。
+
+#### 第 3 步：配置 go-cqhttp
+
+1. 从 [go-cqhttp Releases](https://github.com/Mrs4s/go-cqhttp/releases) 下载 Windows 版本
+2. 解压到项目根目录的 `go-cqhttp\` 文件夹
+3. 复制配置模板：
+   ```bat
+   copy tools\templates\config.gocqhttp.yml go-cqhttp\config.yml
+   ```
+4. 编辑 `go-cqhttp\config.yml`，将 `uin` 改为机器人的 QQ 号，确认 WebSocket 地址为：
+   ```yaml
+   servers:
+     - ws-reverse:
+         universal: ws://127.0.0.1:8080/onebot/v11/ws
+   ```
+
+#### 第 4 步：启动 go-cqhttp
+
+```bat
+cd go-cqhttp
+go-cqhttp.exe
+```
+
+首次运行会弹出二维码，使用绑定 QQ 扫码登录，成功后保持此窗口运行。
+
+#### 第 5 步：启动 DicePP
+
+新开一个终端窗口，在项目根目录执行：
+
+```bat
+tools\dev\run.bat
+```
+
+等价命令：`uv run python bot.py`
+
+---
+
+### 方式二：Linux 服务器部署（Docker）
+
+适用于生产服务器，完全容器化，无需在服务器上安装 Python。
+
+#### 前置：安装 Docker
+
+```bash
+# 安装 Docker Engine
+curl -fsSL https://get.docker.com | bash
+
+# 将当前用户加入 docker 组（免 sudo）
+sudo usermod -aG docker $USER && newgrp docker
+
+# 验证
+docker --version && docker compose version
+```
+
+---
+
+#### 第 1 步：克隆项目
+
+```bash
+git clone https://github.com/pear-studio/nonebot-dicepp.git
+cd nonebot-dicepp
+```
+
+#### 第 2 步：配置环境变量
+
+```bash
+cp .env.linux .env
+```
+
+按需编辑 `.env`：
 
 ```env
 HOST=0.0.0.0
 PORT=8080
+# SECRET=your_secret        # 可选：go-cqhttp 通信密钥
+# ACCESS_TOKEN=your_token   # 可选：访问令牌
 ```
 
-#### 3. 配置 go-cqhttp
-
-1. 下载 go-cqhttp Linux 版本到 `go-cqhttp` 文件夹
-2. 复制 `tools\templates\config.gocqhttp.yml` 为 `go-cqhttp/config.yml`
-3. 编辑 `config.yml`，修改 `uin` 为你的 QQ 号
-
-#### 4. 创建 Docker 网络
+#### 第 3 步：配置 go-cqhttp
 
 ```bash
-docker network create dice-net
+mkdir -p go-cqhttp
+cp tools/templates/config.gocqhttp.yml go-cqhttp/config.yml
 ```
 
-#### 5. 启动服务
+编辑 `go-cqhttp/config.yml`，关键字段：
 
-```bash
-# 启动 DicePP
-docker-compose up --build -d
+```yaml
+account:
+  uin: 123456789   # ← 改为机器人 QQ 号
 
-# 或使用提供的脚本
-bash tools/deploy/linux/start.sh
+servers:
+  - ws-reverse:
+      universal: ws://dicepp_nonebot_bot:8080/onebot/v11/ws  # ← 指向容器名
 ```
 
-#### 6. 启动 go-cqhttp
+#### 第 4 步：构建并启动 DicePP
 
 ```bash
-cd go-cqhttp
-docker-compose up -d
+docker compose up --build -d
+```
+
+确认启动成功：
+
+```bash
+docker compose logs -f bot
+# 看到 "Running on http://0.0.0.0:8080" 即表示正常
+```
+
+#### 第 5 步：启动 go-cqhttp
+
+```bash
+cp tools/templates/docker-compose.gocqhttp.yml go-cqhttp/docker-compose.yml
+cd go-cqhttp && docker compose up -d
+# 首次需扫码：docker compose logs -f 查看二维码
+```
+
+---
+
+## 运行测试（Windows）
+
+```bat
+tools\dev\test.bat
+
+REM 带覆盖率报告：
+uv run pytest --cov=src/plugins/DicePP --cov-report=term-missing
 ```
 
 ---
 
 ## 配置说明
 
-### 配置文件位置
+### 运行时配置文件位置
 
-- **Linux**: `src/plugins/DicePP/data/`
-- **Windows**: 启动后会自动创建
+- **Linux（Docker）**: volume `dicepp_data` → 容器内 `/app/src/plugins/DicePP/data/`
+- **Windows（本地）**: 项目目录 `src/plugins/DicePP/data/`（首次启动自动创建）
 
 ### 主要配置项
 
@@ -120,48 +201,53 @@ docker-compose up -d
 | SUPER_USERS | 超级用户 QQ 号列表 |
 | NICKNAME | 机器人昵称 |
 
-### 环境变量
+### 环境变量（`.env`）
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | HOST | 监听地址 | 0.0.0.0 |
 | PORT | 监听端口 | 8080 |
-| SECRET | API 密钥 | - |
+| SECRET | go-cqhttp 通信密钥 | - |
 | ACCESS_TOKEN | 访问令牌 | - |
+| MAX_WORKERS | 异步 Worker 数量 | 1 |
 
 ---
 
-## 常用操作
+## 常用操作速查
 
 ### 查看日志
 
-**Linux (Docker)**:
 ```bash
-docker logs dicepp_nonebot_bot
-# 或使用脚本
+# Docker
+docker compose logs -f bot
 bash tools/deploy/linux/logs.sh
 ```
 
-**Windows**:
-直接在终端查看输出
-
 ### 重启服务
 
-**Linux**:
 ```bash
-docker-compose restart
-# 或使用脚本
+# Docker
+docker compose restart bot
 bash tools/deploy/linux/restart.sh
 ```
 
-**Windows**:
-停止并重新运行 `start.bat`
-
-### 更新代码
+### 更新代码并重启
 
 ```bash
 git pull
-docker-compose restart
+docker compose up --build -d
+```
+
+### 停止服务
+
+```bash
+docker compose down
+```
+
+### 查看数据持久化位置（Docker）
+
+```bash
+docker volume inspect dicepp_data
 ```
 
 ---
@@ -170,44 +256,54 @@ docker-compose restart
 
 ```
 nonebot-dicepp/
-├── bot.py                 # 主入口文件
-├── Dockerfile             # Docker 镜像配置
-├── docker-compose.yml     # Docker Compose 配置
-├── requirements.txt       # Python 依赖
-├── .env                   # 环境变量配置
-├── src/
-│   └── plugins/
-│       └── DicePP/
-│           ├── core/      # 核心模块
-│           ├── module/    # 功能模块
-│           └── data/      # 数据目录
+├── bot.py                    # 主入口
+├── Dockerfile                # 多阶段构建（uv 安装依赖，精简运行镜像）
+├── docker-compose.yml        # 容器编排
+├── pyproject.toml            # 统一依赖声明（uv / pip / poetry 兼容）
+├── requirements.txt          # 备用依赖列表
+├── Makefile                  # Linux/Mac 快捷命令
+├── .env                      # 环境变量（不提交 Git）
+├── src/plugins/DicePP/
+│   ├── core/                 # 核心框架
+│   ├── module/               # 功能模块
+│   └── data/                 # 运行时数据（不提交 Git）
 ├── tools/
-│   ├── deploy/
-│   │   ├── linux/        # Linux 部署脚本
-│   │   └── windows/      # Windows 部署脚本
-│   └── templates/        # 配置模板
-└── go-cqhttp/            # go-cqhttp 目录 (需手动创建)
+│   ├── dev/
+│   │   ├── install.bat       # Windows：一键初始化环境
+│   │   ├── run.bat           # Windows：启动 Bot
+│   │   └── test.bat          # Windows：运行测试
+│   ├── deploy/linux/         # Linux 运维脚本
+│   ├── templates/            # 配置模板
+│   └── docs/                 # 本文档所在处
+└── go-cqhttp/                # go-cqhttp 目录（需手动创建）
 ```
 
 ---
 
 ## 故障排除
 
-### 连接失败
+### Bot 无法连接 go-cqhttp
 
-1. 检查 go-cqhttp 配置中的 `universal` 地址是否正确
-2. 确认 Docker 容器网络配置正确
-3. 检查防火墙是否允许相应端口
+1. 检查 `go-cqhttp/config.yml` 中 WebSocket 地址是否正确
+2. Docker 部署时确认两个容器在同一网络（`docker network ls`）
+3. 检查防火墙是否放行 8080 端口
 
-### 扫码登录失败
+### go-cqhttp 扫码登录失败
 
-1. 确保 QQ 可以登录网页版 QQ
-2. 尝试使用密码登录而非扫码
+1. 确保该 QQ 可正常登录网页版
+2. 尝试切换为密码登录方式
+3. 删除 `go-cqhttp/session.token` 后重试
 
-### 权限问题
+### 依赖安装失败（Windows）
 
-1. Linux 下确保数据目录有正确权限
-2. Windows 下以管理员身份运行
+- 确认 `uv` 已正确安装：`uv --version`
+- 若清华镜像超时，去掉 `--index-url` 参数改用官方源
+
+### Docker 构建失败
+
+```bash
+docker compose build --no-cache
+```
 
 ---
 
@@ -215,4 +311,5 @@ nonebot-dicepp/
 
 - [NoneBot2 文档](https://v2.nonebot.dev/)
 - [go-cqhttp](https://github.com/Mrs4s/go-cqhttp)
-- [DicePP 项目](https://gitee.com/pear_studio/nonebot-dicepp)
+- [uv 文档](https://docs.astral.sh/uv/)
+- [DicePP 项目](https://github.com/pear-studio/nonebot-dicepp)
