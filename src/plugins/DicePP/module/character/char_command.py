@@ -13,14 +13,12 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
-from module.character.dnd5e import DNDCharInfo, gen_template_char
+from module.character.dnd5e import DNDCharInfo, gen_template_char, DC_CHAR_DND
 
 LOC_CHAR_SET = "char_set"
 LOC_CHAR_MISS = "char_miss"
 LOC_CHAR_DEL = "char_delete"
 LOC_CHECK_RES = "check_result"
-
-DC_CHAR_DND = "character_dnd"
 
 CMD_TYPE_CHAR = "char"
 CMD_TYPE_STATE = "state"
@@ -29,12 +27,6 @@ CMD_TYPE_SAVING = "check_saving"
 CMD_TYPE_ATTACK = "check_attack"
 CMD_TYPE_HP_DICE = "hp_dice"
 CMD_TYPE_REST_LONG = "rest_long"
-
-
-@custom_data_chunk(identifier=DC_CHAR_DND, include_json_object=True)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
 
 
 @custom_user_command(readable_name="DND5E角色卡", priority=DPP_COMMAND_PRIORITY_DEFAULT+10,
