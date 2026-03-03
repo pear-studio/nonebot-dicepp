@@ -21,10 +21,8 @@
 - [x] 3.4 创建 `character/base/money.py` (从 coc/dnd5e 提取)
 - [x] 3.5 创建 `character/base/spell.py` (从 coc/dnd5e 提取)
 - [x] 3.6 创建 `character/base/character.py` (从 coc/dnd5e 提取)
-- [ ] 3.7 重构 `character/coc/` 继承基类 (可选：修改导入从 base/ 导入)
-- [ ] 3.8 重构 `character/dnd5e/` 继承基类 (可选：修改导入从 base/ 导入)
-
-**注意**: CoC 和 DND5e 的 5 个文件(ability, health, money, spell, character)完全相同，已提取到 `character/base/` 目录。
+- [x] 3.7 重构 `character/coc/` 从 base/ 导入
+- [x] 3.8 重构 `character/dnd5e/` 从 base/ 导入
 
 ## 4. 类型注解完善
 
