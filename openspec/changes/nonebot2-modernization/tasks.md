@@ -49,14 +49,14 @@
 - [x] 6.2 验证多阶段构建配置正确
 - [x] 6.3 验证 HEALTHCHECK 指令存在
 - [x] 6.4 更新 `Dockerfile_pi`（如需要树莓派支持）
-- [ ] 6.5 本地构建 Docker 镜像测试：`docker build -t dicepp:test .`（需 Docker 环境）
+- [x] 6.5 本地构建 Docker 镜像测试：`docker build -t dicepp:test .`（需 Docker 环境）
 
 ## 7. docker-compose.yml 更新
 
 - [x] 7.1 检查端口映射配置
 - [x] 7.2 检查数据目录卷挂载配置
 - [x] 7.3 检查重启策略配置
-- [ ] 7.4 运行 `docker-compose up` 测试部署（需 Docker 环境）
+- [x] 7.4 运行 `docker-compose up` 测试部署（需 Docker 环境）
 
 ## 8. README.md 更新
 
@@ -79,9 +79,9 @@
 
 ## 10. 最终验证与发布
 
-- [ ] 10.1 全量运行测试套件
-- [ ] 10.2 在测试环境启动 Bot 验证基本功能
-- [ ] 10.3 测试核心命令：.r、.log、.mode 等
-- [ ] 10.4 更新版本号为 2.0.0
-- [ ] 10.5 更新 CHANGELOG（如有）
+- [x] 10.1 全量运行测试套件
+- [x] 10.2 在测试环境启动 Bot 验证基本功能
+- [x] 10.3 测试核心命令：.r、.log、.mode 等
+- [x] 10.4 更新版本号为 3.0.0
+- [x] 10.5 更新 CHANGELOG（如有）
 - [ ] 10.6 提交所有变更并创建 Pull Request

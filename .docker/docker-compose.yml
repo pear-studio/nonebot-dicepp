@@ -3,8 +3,8 @@ version: "3.9"
 services:
   bot:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: .docker/Dockerfile
       target: runtime        # 仅使用精简的运行阶段镜像
     image: dicepp:latest
     container_name: dicepp_nonebot_bot

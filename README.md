@@ -137,6 +137,12 @@ pytest src/plugins/DicePP
 
 ## 更新日志
 
-### V2.0.5
+### V3.0.0
+- NoneBot2 现代化升级 (v2.4.0+)
+- 更新依赖版本 (aiohttp ^3.9, fastapi >=0.100.0, uvicorn >=0.24.0)
+- Python 版本要求提升至 >=3.10
+- 配置文件现代化 (.env.example)
+- Docker 部署优化 (python:3.12-slim, 多阶段构建)
+- 更新 README.md 和 DEPLOY.md 部署文档
 - 修复部分 bug
 - 优化 log 代码，新增外部接口

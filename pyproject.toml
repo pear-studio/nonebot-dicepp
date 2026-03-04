@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 # ── 依赖声明（供 uv sync / pip install 使用）──────────────────────────────────
 [project]
 name = "dicepp"
-version = "2.0.0"
+version = "3.0.0"
 description = "DicePP NoneBot2 Plugin"
 requires-python = ">=3.10"
 dependencies = [
