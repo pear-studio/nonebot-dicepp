@@ -16,7 +16,7 @@ from core.localization import LOC_FUNC_DISABLE
 from core.config import DATA_PATH, CFG_MASTER, CFG_ADMIN
 from module.common import DC_GROUPCONFIG
 from module.query import create_empty_sqlite_database, load_data_from_xlsx_to_sqlite
-from utils.localdata import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
+from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.data import yield_deduplicate
 
 LOC_HOMEBREW_LOAD = "homebrew_load"

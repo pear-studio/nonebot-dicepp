@@ -12,7 +12,7 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from utils.localdata import read_xlsx, update_xlsx
+from utils import read_xlsx, update_xlsx
 from utils.string import match_substring
 
 from module.deck.random_generator_data import RandomDataSource, RandomGenerateContext

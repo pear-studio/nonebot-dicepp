@@ -10,7 +10,7 @@ from json import JSONDecodeError
 from typing import Tuple, List, Dict, Any, Optional, Callable
 
 from utils.logger import dice_log
-from utils.localdata import update_json_async, read_json
+from utils import update_json_async, read_json
 
 from core.config import DATA_PATH as ROOT_DATA_PATH
 

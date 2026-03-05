@@ -12,7 +12,7 @@ from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.config import DATA_PATH, LOCAL_IMG_PATH
 from core.localization import LocalizationManager, LOC_FUNC_DISABLE
-from utils.localdata import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
+from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.string import match_substring
 from utils.logger import dice_log
 from utils.cq_code import get_cq_image

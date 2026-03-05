@@ -10,7 +10,7 @@ from core.data import custom_data_chunk, DataChunkBase
 from core.data import JsonObject, custom_json_object
 from utils.time import get_current_date_str
 
-from utils.localdata import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
+from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 #from module.query import QUERY_DATA_FIELD, QUERY_DATA_FIELD_LIST, QUERY_REDIRECT_FIELD, QUERY_REDIRECT_FIELD_LIST
 
 #QIF = QUERY_ITEM_FIELD 太长了还是缩写的好。

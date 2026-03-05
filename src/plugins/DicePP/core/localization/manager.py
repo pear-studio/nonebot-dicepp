@@ -8,7 +8,7 @@ from openpyxl.comments import Comment
 from openpyxl.worksheet import worksheet
 
 from utils.logger import dice_log
-from utils.localdata import read_xlsx
+from utils import read_xlsx
 from core.config import DATA_PATH as ROOT_DATA_PATH
 from core.communication import preprocess_msg
 

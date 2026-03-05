@@ -12,7 +12,7 @@ from core.config import DATA_PATH
 from module.roll import is_roll_exp, exec_roll_exp
 from utils.time import get_current_date_raw, datetime_to_str_day, datetime_to_str_week, datetime_to_str_month
 from utils.cq_code import get_cq_image
-from utils.localdata import read_xlsx
+from utils import read_xlsx
 
 RAND_SOURCE_FIELD_NAME = "生成器名称"
 RAND_SOURCE_FIELD_VISIBLE = "是否可见"

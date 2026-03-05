@@ -5,7 +5,7 @@ import openpyxl
 from openpyxl.comments import Comment
 
 from utils.logger import dice_log
-from utils.localdata import read_xlsx
+from utils import read_xlsx
 
 from core.config.config_item import ConfigItem
 from core.config.basic import DATA_PATH
