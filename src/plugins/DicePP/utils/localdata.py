@@ -1,6 +1,7 @@
 from typing import List, Dict
 import os
 import json
+import aiofiles
 import openpyxl
 from openpyxl.comments import Comment
 
@@ -26,9 +27,12 @@ def update_json(json_dict: dict, path: str) -> None:
 async def update_json_async(json_dict: dict, path: str) -> None:
     """
     异步地将jsonFile保存到path路径中
+
+    使用 aiofiles 实现真正的异步文件写入，避免阻塞事件循环
     """
-    with open(path, "w", encoding='utf-8') as f:
-        json.dump(json_dict, f, ensure_ascii=False)
+    json_str = json.dumps(json_dict, ensure_ascii=False)
+    async with aiofiles.open(path, "w", encoding='utf-8') as f:
+        await f.write(json_str)
 
 
 def read_xlsx(path: str) -> openpyxl.Workbook:

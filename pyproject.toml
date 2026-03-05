@@ -9,6 +9,7 @@ version = "3.0.0"
 description = "DicePP NoneBot2 Plugin"
 requires-python = ">=3.10"
 dependencies = [
+    "aiofiles>=23.0",
     "aiohttp>=3.9",
     "nonebot2>=2.4.0",
     "nb-cli>=1.4.0",
