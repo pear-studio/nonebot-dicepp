@@ -151,3 +151,6 @@ src/plugins/DicePP/module/misc/log_command.py
 
 # uv lock 文件（可选是否追踪，这里选择不追踪）
 uv.lock
+
+# Trae/Agent 配置（符号链接，实际内容在 docs/agent/）
+.trae/
