@@ -1,8 +1,9 @@
 import os
 
 from utils.logger import dice_log
+from utils.frozen import get_app_dir
 
-PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+PROJECT_PATH = get_app_dir()
 
 def _data_dir_score(data_path: str) -> int:
     """

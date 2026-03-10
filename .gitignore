@@ -13,6 +13,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+!scripts/build/
 develop-eggs/
 dist/
 downloads/
@@ -35,7 +36,7 @@ MANIFEST
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
-*.spec
+# *.spec  # 注意：dicepp.spec 需要追踪，所以不忽略 .spec 文件
 
 # Installer logs
 pip-log.txt
