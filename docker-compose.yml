@@ -1,0 +1,38 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dicepp
+    restart: unless-stopped
+    
+    # 网络：使用外部 dice-net 网络与 LLOneBot 通信
+    networks:
+      - dice-net
+    
+    # 端口：内部通信，无需暴露到宿主机
+    # LLOneBot 通过 ws://dicepp:8080/onebot/v11/ws 连接
+    expose:
+      - "8080"
+    
+    # 环境变量
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+    
+    # 数据持久化：整个 Data 目录 bind mount
+    volumes:
+      - ./src/plugins/DicePP/Data:/app/src/plugins/DicePP/Data
+    
+    # 日志配置：自动轮转
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+
+networks:
+  dice-net:
+    external: true

@@ -1,11 +1,21 @@
 #!/bin/bash
+# stop.sh - 停止 DicePP 容器
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/_common.sh"
 
-cd "$PROJECT_DIR"
+PROJECT_ROOT="$(get_project_root)"
 
-echo "正在停止 DicePP 容器..."
-docker-compose down
+echo "===== 停止 DicePP ====="
 
-echo "===== 服务已停止 ====="
+# 检查 Docker 环境
+COMPOSE_CMD=$(check_docker)
+
+cd "$PROJECT_ROOT"
+
+# 停止容器
+step "停止 DicePP 容器..."
+$COMPOSE_CMD down
+
+success "DicePP 已停止"

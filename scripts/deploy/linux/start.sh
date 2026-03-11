@@ -1,22 +1,34 @@
 #!/bin/bash
+# start.sh - 启动 DicePP 容器
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/_common.sh"
 
-echo "===== DicePP 部署脚本 ====="
-echo "项目目录: $PROJECT_DIR"
+PROJECT_ROOT="$(get_project_root)"
 
-cd "$PROJECT_DIR"
+echo "===== 启动 DicePP ====="
 
-if [ ! -f "docker-compose.yml" ]; then
-    echo "错误: 未找到 docker-compose.yml 文件"
+# 检查 Docker 环境
+COMPOSE_CMD=$(check_docker)
+
+cd "$PROJECT_ROOT"
+
+# 检查容器状态
+if is_container_running "dicepp"; then
+    info "DicePP 容器已在运行"
+    exit 0
+fi
+
+# 检查网络
+if ! check_network; then
+    error "dice-net 网络不存在，请先运行 setup.sh"
     exit 1
 fi
 
-echo "正在构建并启动 DicePP 容器..."
-docker-compose up --build -d
+# 启动容器
+step "启动 DicePP 容器..."
+$COMPOSE_CMD up -d
 
-echo ""
-echo "===== 部署完成 ====="
-echo "查看日志: docker logs dicepp_nonebot_bot"
-echo "停止服务: docker-compose down"
+success "DicePP 已启动"
+info "查看日志: make logs"
