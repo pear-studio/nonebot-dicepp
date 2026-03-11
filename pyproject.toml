@@ -47,19 +47,19 @@ plugin_dirs = ["src/plugins"]
 
 [tool.nonebot]
 plugin_dirs = ["src/plugins"]
-
-# ── pytest 配置 ─────────────────────────────────────────────────────────────
 builtin_plugins = []
 
 [tool.nonebot.plugins]
 "@local" = []
 
-
 [tool.nonebot.adapters]
 "@local" = []
+
+# ── pytest 配置 ─────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["src/plugins/DicePP"]
+testpaths = ["tests"]
+pythonpath = ["src"]
 python_files = ["unit_test.py", "test_*.py", "*_test.py"]
 python_classes = ["MyTestCase", "Test*"]
 python_functions = ["test*"]
@@ -72,3 +72,15 @@ markers = [
     "log: Tests for logging system",
 ]
 
+# ── coverage 配置（替代 .coveragerc）─────────────────────────────────────────
+[tool.coverage.run]
+source = ["src/plugins/DicePP"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+show_missing = true
