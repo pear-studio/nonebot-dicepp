@@ -34,9 +34,9 @@ if exist ".trae\skills" (
     echo 已删除 .trae\skills
 )
 
-:: 创建符号链接
-mklink /D ".trae\rules" "docs\agent\rules"
-mklink /D ".trae\skills" "docs\agent\skills"
+:: 创建符号链接（使用绝对路径）
+mklink /D ".trae\rules" "%cd%\docs\agent\rules"
+mklink /D ".trae\skills" "%cd%\docs\agent\skills"
 
 echo.
 echo 符号链接创建完成:
