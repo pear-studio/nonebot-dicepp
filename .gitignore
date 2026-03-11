@@ -155,3 +155,6 @@ uv.lock
 
 # Trae/Agent 配置（符号链接，实际内容在 docs/agent/）
 .trae/
+
+# OpenSpec 变更管理目录
+openspec/
