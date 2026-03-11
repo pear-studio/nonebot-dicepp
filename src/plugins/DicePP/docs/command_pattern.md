@@ -1,5 +1,7 @@
 # 命令模式
 
+> **文档导航**: [首页](./README.md) | [架构总览](./architecture.md) | 命令模式 | [掷骰示例](./example_roll.md) | [指令速查](./command_reference.md)
+
 DicePP 使用经典的命令模式来处理用户交互。
 
 ## 核心抽象
@@ -208,3 +210,12 @@ def tick(self) -> List[BotCommandBase]:
     """每秒执行一次"""
     return []
 ```
+
+---
+
+## 相关文档
+
+- **了解整体架构**: 查看 [架构总览](./architecture.md) 了解系统各组件的关系
+- **完整实现案例**: 查看 [掷骰示例](./example_roll.md) 了解实际命令的完整实现
+- **所有指令列表**: 查看 [指令速查手册](./command_reference.md) 了解所有可用指令
+- **返回**: [文档首页](./README.md)

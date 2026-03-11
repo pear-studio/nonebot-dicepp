@@ -1,123 +1,79 @@
 ---
 name: onboard
-description: Help new developers understand the DicePP project structure and get started with development.
+description: "当你需要了解 DicePP 项目结构、不清楚代码组织方式、或首次在此项目中工作时，调用此技能快速获取项目概览"
 license: MIT
 metadata:
   author: DicePP
-  version: "1.0"
+  version: "1.2"
 ---
 
-Help new developers understand the DicePP project structure and get started with development.
+# DicePP 项目入门引导
 
-**Input**: None required. This skill provides an overview of the project.
+**何时使用此技能**: 
+- 你首次在 DicePP 项目中工作
+- 你需要了解项目整体结构
+- 你不确定某个功能应该放在哪个模块
+- 你需要快速定位关键文件
 
-**Steps**
+---
 
-1. **Project Overview**
+## 项目简介
 
-   DicePP 是一个基于 NoneBot2 的 QQ 骰子机器人插件，主要用于 TRPG（桌面角色扮演游戏）场景。
+DicePP 是基于 NoneBot2 的 QQ 骰子机器人插件，用于 TRPG（桌面角色扮演游戏）。
 
-   **核心功能**:
-   - 掷骰系统 (支持多种骰子表达式)
-   - 查询系统 (DND5E 等规则书资料)
-   - 角色卡管理 (COC/DND)
-   - 先攻管理
-   - 抽卡/随机生成器
-   - 日志记录
+**核心功能**: 掷骰系统、角色卡管理、先攻追踪、规则书查询、抽卡、日志记录
 
-2. **Directory Structure**
+---
 
-   ```
-   nonebot-dicepp/
-   ├── src/plugins/DicePP/   # 主插件代码
-   │   ├── core/             # 核心框架
-   │   ├── module/           # 功能模块
-   │   ├── adapter/          # NoneBot 适配器
-   │   └── utils/            # 工具函数
-   ├── tests/                # 测试文件
-   ├── docs/                 # 文档
-   ├── openspec/             # 变更规范
-   ├── bot.py                # 入口文件
-   └── pyproject.toml        # 项目配置
-   ```
+## 目录结构
 
-3. **Core Framework**
+```
+nonebot-dicepp/
+├── src/plugins/DicePP/   # 主插件代码
+│   ├── core/             # 核心框架 (Bot, Command, Data)
+│   ├── module/           # 功能模块 (roll, character, initiative...)
+│   └── adapter/          # NoneBot 适配器
+├── tests/                # 测试文件
+└── bot.py                # 入口文件
+```
 
-   | 目录 | 说明 |
-   |------|------|
-   | `core/bot.py` | Bot 主类，管理所有命令和数据 |
-   | `core/command/` | 命令基类和装饰器 |
-   | `core/data/` | 数据持久化 (DataManager) |
-   | `core/config/` | 配置管理 (ConfigManager) |
-   | `core/localization/` | 本地化管理 |
-   | `core/communication/` | 消息通信抽象 |
+---
 
-4. **Module System**
+## 详细文档位置
 
-   每个功能模块位于 `module/` 目录下：
+**完整架构文档**: `src/plugins/DicePP/docs/README.md`
 
-   | 模块 | 说明 |
-   |------|------|
-   | `common/` | 通用命令 (help, master, mode 等) |
-   | `roll/` | 掷骰命令 (.r, .rd, .rh 等) |
-   | `query/` | 查询命令 (.查询, .q) |
-   | `deck/` | 抽卡命令 (.draw) |
-   | `character/` | 角色卡 (COC/DND5E) |
-   | `initiative/` | 先攻管理 (.ri, .init) |
+包含:
+- 架构总览 - 核心模块职责与数据流
+- 命令模式 - 如何开发新命令
+- 掷骰示例 - 完整命令实现流程
+- 指令速查 - 所有 36 个用户指令参考
 
-5. **How to Add a New Command**
+**开发规范**: `docs/agent/rules/dicepp.md`
 
-   1. 在合适的模块目录下创建 `xxx_command.py`
-   2. 继承 `UserCommandBase` 类
-   3. 使用 `@custom_user_command` 装饰器
-   4. 实现必要的方法:
-      - `can_process_msg()` - 判断是否处理消息
-      - `process_msg()` - 处理消息并返回回复
-      - `get_help()` - 返回帮助文本
-      - `get_description()` - 返回命令描述
+---
 
-6. **Development Setup**
+## 关键文件速查
 
-   ```powershell
-   # 克隆项目
-   git clone <repo>
-   cd nonebot-dicepp
+| 需求 | 文件位置 |
+|------|----------|
+| Bot 主类 | `src/plugins/DicePP/core/bot.py` |
+| 命令基类 | `src/plugins/DicePP/core/command/user_command.py` |
+| 掷骰命令示例 | `src/plugins/DicePP/module/roll/roll_dice_command.py` |
+| 数据管理 | `src/plugins/DicePP/core/data/manager.py` |
 
-   # 初始化环境并安装依赖
-   uv venv .venv && uv pip install ".[dev]"
+---
 
-   # 配置环境
-   cp .env.example .env
-   # 编辑 .env 填入 QQ 账号等信息
+## 快速开始命令
 
-   # 运行测试
-   uv run pytest -v
+```powershell
+uv venv .venv && uv pip install ".[dev]"  # 安装依赖
+uv run pytest -v                           # 运行测试
+```
 
-   # 启动机器人
-   uv run python bot.py
-   ```
+---
 
-7. **Key Concepts**
+**Further Reading**: 
 
-   **DataChunk**: 数据持久化单元，用于保存用户数据、配置等
-   
-   **LocalizationText**: 本地化文本，支持多语言和自定义回复
-   
-   **MessageMetaData**: 消息元数据，包含发送者、群组等信息
-   
-   **BotCommandBase**: 机器人执行的命令（发送消息、发送文件等）
-
-8. **Useful Files to Read**
-
-   - `src/plugins/DicePP/core/bot.py` - 了解 Bot 生命周期
-   - `src/plugins/DicePP/core/command/user_command.py` - 命令基类
-   - `src/plugins/DicePP/module/roll/roll_dice_command.py` - 掷骰命令示例
-   - `docs/agent/rules/dicepp.md` - 开发规范
-
-**Output**
-
-输出项目概览和入门指南，帮助开发者快速理解项目结构。
-
-**Next Steps**
-
-1. 阅读 `docs/agent/rules/dicepp.md` 了解开发规范
+1. 阅读 `src/plugins/DicePP/docs/README.md` 了解完整架构
+2. 阅读 `docs/agent/rules/dicepp.md` 了解开发规范

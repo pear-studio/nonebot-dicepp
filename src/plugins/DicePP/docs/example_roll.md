@@ -1,5 +1,7 @@
 # 命令示例：以掷骰为例
 
+> **文档导航**: [首页](./README.md) | [架构总览](./architecture.md) | [命令模式](./command_pattern.md) | 掷骰示例 | [指令速查](./command_reference.md)
+
 本文以 `.r` 掷骰命令为例，详细说明命令的实现流程。
 
 ## 文件位置
@@ -254,3 +256,12 @@ def record_roll_data(bot, meta, res_list):
 4. **格式化** → 本地化文本替换
 5. **返回命令** → BotSendMsgCommand
 6. **执行** → 发送回复消息
+
+---
+
+## 相关文档
+
+- **了解整体架构**: 查看 [架构总览](./architecture.md) 了解系统各组件的关系
+- **命令系统详解**: 查看 [命令模式](./command_pattern.md) 了解命令的设计与实现
+- **掷骰指令用法**: 查看 [指令速查手册 - 掷骰指令](./command_reference.md#掷骰指令) 了解掷骰指令的完整语法
+- **返回**: [文档首页](./README.md)
