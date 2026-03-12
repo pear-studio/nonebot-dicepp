@@ -66,7 +66,7 @@ class RollPoolCommand(UserCommandBase):
         should_pass: bool = False
         return should_proc, should_pass, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 解析掷骰语句
         short = False
         if msg_str.startswith(".ws"):

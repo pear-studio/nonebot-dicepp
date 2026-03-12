@@ -28,7 +28,7 @@ class NewTestCommand(UserCommandBase):
             return True, False, ""
         return False, False, ""
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         """返回提示信息，告知用户暂不支持邀请链接"""
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         return [BotSendMsgCommand(self.bot.account, self.format_loc(LOC_JSON_INVITE_UNABLE), [port])]

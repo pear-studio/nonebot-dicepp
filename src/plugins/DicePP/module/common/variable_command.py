@@ -45,7 +45,7 @@ class VariableCommand(UserCommandBase):
                 return should_proc, should_pass, (cmd_type, msg_str[4:].strip())
         return should_proc, should_pass, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
         cmd_type: Literal["set", "get", "del"]

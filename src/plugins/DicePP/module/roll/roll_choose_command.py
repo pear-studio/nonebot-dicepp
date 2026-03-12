@@ -42,7 +42,7 @@ class RollChooseCommand(UserCommandBase):
         should_pass: bool = False
         return should_proc, should_pass, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 解析掷骰语句
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         arg_str = msg_str[2:].strip()

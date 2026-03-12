@@ -40,7 +40,13 @@ class TemplateCommand(UserCommandBase):
         should_pass: bool = False
         return should_proc, should_pass, msg_str[4:].strip()
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+        """
+        处理消息的异步方法
+        
+        迁移说明: 此方法已改为 async def，子类实现时也必须使用 async def。
+        即使方法内部暂时没有 await 调用，也应保持 async def 以便将来添加异步操作。
+        """
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
         arg_str = hint

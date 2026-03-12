@@ -130,7 +130,7 @@ class HubCommand(UserCommandBase):
 
         return should_proc, should_pass, hint
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         from core.config import CFG_MASTER
         if meta.user_id not in self.bot.cfg_helper.get_config(CFG_MASTER):
             return []

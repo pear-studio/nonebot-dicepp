@@ -33,7 +33,7 @@ class JrrpCommand(UserCommandBase):
         should_pass: bool = False
         return should_proc, should_pass, msg_str[5:].strip()
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
         random.seed(datetime_to_str_day(get_current_date_raw() - datetime.timedelta(days=1)) + str(meta.user_id))  # 获取昨日数据与用户id，拼接形成一个固定的seed

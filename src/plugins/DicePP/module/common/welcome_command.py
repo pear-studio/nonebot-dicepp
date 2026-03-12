@@ -60,7 +60,7 @@ class WelcomeCommand(UserCommandBase):
         else:
             return should_proc, should_pass, ""
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
         arg_str = hint

@@ -270,7 +270,7 @@ class DeckCommand(UserCommandBase):
         should_pass: bool = False
         return should_proc, should_pass, msg_str[5:].strip()
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 判断功能开关
         try:

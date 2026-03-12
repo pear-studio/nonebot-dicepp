@@ -180,7 +180,7 @@ class KarmaDiceCommand(UserCommandBase):
             hint["params"] = [hint["params"][0]] + hint["params"][1:] if hint["params"] else []
         return True, False, hint
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id)
         try:
             manager = get_karma_manager(self.bot)
@@ -284,7 +284,8 @@ class KarmaDiceCommand(UserCommandBase):
             else:
                 try:
                     target = int(params[0])
-                    window = int(params[1]) if len(params) > 1 else manager._get_config(meta.group_id).custom_roll_count
+                    config = manager._get_config(meta.group_id)
+                    window = int(params[1]) if len(params) > 1 else config.custom_roll_count
                     try:
                         manager.set_custom_params(meta.group_id, target, window)
                         feedback = self.format_loc(LOC_KARMA_SET_OK, target=target, window=window)

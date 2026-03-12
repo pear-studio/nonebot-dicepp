@@ -46,7 +46,7 @@ class DiceSetCommand(UserCommandBase):
         arg = msg_str[5:].strip()
         return True, should_pass, arg
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         arg: str = hint if hint is not None else ""
 

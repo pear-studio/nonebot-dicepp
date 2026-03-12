@@ -2,6 +2,11 @@ from __future__ import annotations
 
 """
 业力骰子核心管理器，负责配置读取、历史队列维护与掷骰修正逻辑。
+
+注意: 此模块保持使用旧的 data_manager API，因为:
+1. roll_a_dice 是同步函数，被掷骰表达式解析器同步调用
+2. runtime.roll() 必须是同步的
+3. 改变这个架构会影响整个掷骰系统，风险太大
 """
 
 import random
@@ -156,24 +161,35 @@ class _KarmaRuntime(DiceRuntime):
         self._user_id = user_id
 
     def roll(self, dice_type: int) -> int:
+        # 必须是同步的，因为 roll_a_dice 是同步调用
         return self._manager.generate_value(self._group_id, self._user_id, dice_type)
 
 
 class KarmaDiceManager:
-    """业力骰子核心调度器。"""
+    """业力骰子核心调度器。
+    
+    注意: 所有方法都是同步的，使用旧的 data_manager API。
+    这是因为 generate_value 被同步的 roll_a_dice 调用。
+    """
 
     def __init__(self, bot: "Bot"):
         self.bot = bot
         self._state: Dict[str, Dict[str, Dict[int, KarmaState]]] = {}
+        self._config_cache: Dict[str, KarmaConfig] = {}
 
-    # ---------- 配置与状态维护 ----------
+    # ---------- 配置与状态维护 (同步，使用 data_manager) ----------
     def _get_config(self, group_id: str) -> KarmaConfig:
+        if group_id in self._config_cache:
+            return self._config_cache[group_id]
         default_cfg = KarmaConfig().to_dict()
-        raw = self.bot.data_manager.get_data(DC_KARMA, [group_id], default_val=default_cfg, get_ref=True)
-        return KarmaConfig.from_dict(raw)
+        data = self.bot.data_manager.get_data(DC_KARMA, [group_id], default_val=default_cfg)
+        config = KarmaConfig.from_dict(data)
+        self._config_cache[group_id] = config
+        return config
 
     def _save_config(self, group_id: str, config: KarmaConfig) -> None:
         self.bot.data_manager.set_data(DC_KARMA, [group_id], config.to_dict())
+        self._config_cache[group_id] = config
 
     def _get_state(self, group_id: str, user_id: str, dice_type: int) -> KarmaState:
         group_states = self._state.setdefault(group_id, {})
@@ -315,6 +331,7 @@ class KarmaDiceManager:
     # ---------- 运行时控制 ----------
     @contextmanager
     def activate(self, group_id: Optional[str], user_id: Optional[str]):
+        """激活业力骰子运行时上下文（同步上下文管理器）"""
         if not group_id or not user_id or not self.is_enabled(group_id):
             yield False
             return
@@ -326,6 +343,7 @@ class KarmaDiceManager:
             reset_runtime(token)
 
     def generate_value(self, group_id: str, user_id: str, dice_type: int) -> int:
+        """生成业力修正后的骰子值（同步方法，被 runtime.roll 调用）"""
         config = self._get_config(group_id)
         state = self._get_state(group_id, user_id, dice_type)
         target, _ = self._get_effective_params(config)

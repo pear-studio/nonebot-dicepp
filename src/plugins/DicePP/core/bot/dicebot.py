@@ -20,6 +20,7 @@ from core.communication import GroupInfo
 from core.data import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE, DC_USER_DATA, DC_GROUP_DATA,\
     DCK_META_STAT, DCK_USER_STAT, DCK_GROUP_STAT
 from core.data import DataManager, DataManagerError
+from core.data import BotDatabase
 from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo
 
 from core.bot.macro import BotMacro, MACRO_PARSE_LIMIT
@@ -58,6 +59,7 @@ class Bot:
 
         self.data_manager = DataManager(self.data_path)
         self.fix_data()
+        self.db = BotDatabase(self.account)
         self.hub_manager = HubManager(self)
         self.loc_helper = LocalizationManager(CONFIG_PATH, self.account)
         self.cfg_helper = ConfigManager(CONFIG_PATH, self.account)
@@ -326,6 +328,8 @@ class Bot:
         shutdown的异步版本
         销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的
         """
+        await self.db.close()
+
         if self.tick_task:
             self.tick_task.cancel()
         await self.data_manager.save_data_async()
@@ -402,6 +406,8 @@ class Bot:
 
     async def delay_init_command(self):
         """在载入本地化文本和配置等数据后调用"""
+        await self.db.connect()
+
         init_info: List[str] = []
         for command in self.command_dict.values():
             try:
@@ -542,9 +548,11 @@ class Bot:
                     bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)])]
                     break
                 # 执行指令
+                # 注意: process_msg 是异步方法，需要使用 await 调用
+                # 这允许命令内部使用异步数据库操作 (self.bot.db.xxx)
                 res_commands = []
                 try:
-                    res_commands = command.process_msg(msg_cur, meta, hint)
+                    res_commands = await command.process_msg(msg_cur, meta, hint)
                     bot_commands += res_commands
                 except (AttributeError, TypeError, ValueError, RuntimeError):
                     # 发现未处理的错误, 汇报给主Master

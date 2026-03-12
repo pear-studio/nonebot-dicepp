@@ -57,15 +57,30 @@ class UserCommandBase(metaclass=abc.ABCMeta):
         return should_proc, should_pass, None
 
     @abc.abstractmethod
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         """
-        处理信息的函数
+        处理信息的函数 (异步方法)
+        
+        注意: 这是一个异步方法，子类实现时必须使用 async def。
+        这样可以在方法内部使用 await 调用异步数据库操作，例如:
+            karma = await self.bot.db.karma.get(user_id, group_id)
+            await self.bot.db.karma.save(karma)
+        
         Args:
             msg_str: 预处理后的信息字符串
             meta: 消息的元信息, 包括原始信息字符串, 发送者id, bot id等等
             hint: 预处理时给出的提示
         Returns:
             bot_commands: 一个bot commands list, 即bot要进行的操作, 比如回复消息等等
+        
+        迁移指南 (给后续 Agent):
+        ─────────────────────────
+        1. 将方法签名从 `def process_msg(...)` 改为 `async def process_msg(...)`
+        2. 如果方法内部调用了其他异步方法，需要加 await
+        3. 数据库调用示例:
+           - 旧: self.bot.data_manager.get_data(DC_KARMA, [user_id, group_id])
+           - 新: await self.bot.db.karma.get(user_id, group_id)
+        4. 即使方法内部暂时没有 await 调用，也要改成 async def（为将来迁移做准备）
         """
         bot_commands = []
         return bot_commands

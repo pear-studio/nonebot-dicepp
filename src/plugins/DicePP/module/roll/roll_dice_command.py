@@ -105,7 +105,7 @@ class RollDiceCommand(UserCommandBase):
         should_pass: bool = False
         return should_proc, should_pass, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 判断功能开关
         try:
             assert (int(self.bot.cfg_helper.get_config(CFG_ROLL_ENABLE)[0]) != 0)

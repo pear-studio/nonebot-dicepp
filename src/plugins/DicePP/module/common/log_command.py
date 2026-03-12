@@ -964,7 +964,7 @@ class LogCommand(UserCommandBase):
         name = " ".join(args[2:]).strip()
         return True, False, (action.lower(), name)
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         if not meta.group_id:
             return []
         action, param = hint if isinstance(hint, tuple) else (hint, "")
@@ -1776,7 +1776,7 @@ class LogRecorderCommand(UserCommandBase):
             return False, False, None
         return True, True, current_id
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         group_id = meta.group_id
         if not group_id:
             return []
@@ -1814,7 +1814,7 @@ class LogStatCommand(UserCommandBase):
             return True, False, name
         return False, False, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         if not meta.group_id:
             return []
         payload = _load_group_payload(self.bot, meta.group_id)

@@ -1,9 +1,10 @@
-﻿from typing import List, Tuple, Any
+from typing import List, Tuple, Any
 
 import json
 
 from core.bot import Bot
 from core.data import DataManagerError
+from core.data.models import InitList
 from core.command.const import *
 from core.command import UserCommandBase , custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -98,7 +99,7 @@ class BattlerollCommand(UserCommandBase):
                 break
         return should_proc, (not should_proc), (mode,arg_str)
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
         feedbacks: List[str] = []
@@ -107,14 +108,18 @@ class BattlerollCommand(UserCommandBase):
         if mode == "battleroll":
             # 清理先攻
             try:
-                self.bot.data_manager.delete_data(DC_INIT, [meta.group_id])
+                await self.bot.db.initiative.delete(meta.group_id)
                 feedbacks.append(self.format_loc(LOC_BR_NEW))
-            except DataManagerError:
-                feedbacks.append("出错！")
+            except Exception as e:
+                self.bot.logger.error(f"清理先攻失败: {e}", exc_info=True)
+                feedbacks.append(f"出错: {str(e)}")
         elif mode == "turn" or mode == "round":
             try:
-                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
-            except DataManagerError:
+                init_data: InitList = await self.bot.db.initiative.get(meta.group_id)
+                if init_data is None:
+                    raise ValueError("No init data")
+            except Exception as e:
+                self.bot.logger.error(f"获取先攻数据失败: {e}", exc_info=True)
                 feedback = self.format_loc(LOC_BR_NO_INIT)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
@@ -246,16 +251,16 @@ class BattlerollCommand(UserCommandBase):
                 if (prev_round != target_round) or (prev_turn != target_turn) or (prev_turns_in_round != turns_in_round) or name_updated:
                     init_data.round = target_round
                     init_data.turn = target_turn
-                    self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
+                    await self.bot.db.initiative.save(init_data)
                 feedback = self.format_loc(LOC_BR_ROUND, round=str(target_round), turn=str(target_turn), turn_name=display_name)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
             round_changed: bool = (target_round != prev_round)
-            turn_changed: bool = (target_turn != prev_turn)
+            turn_changed: bool = (prev_turn != target_turn)
 
             init_data.round = target_round
             init_data.turn = target_turn
-            self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
+            await self.bot.db.initiative.save(init_data)
 
             if mode == "round":
                 if round_changed:
@@ -279,8 +284,11 @@ class BattlerollCommand(UserCommandBase):
                     feedbacks.append(self.format_loc(LOC_BR_ROUND_SHOW, round=str(target_round), turn=str(target_turn), turn_name=display_name))
         elif mode == "end":
             try:
-                init_data: dict = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
-            except DataManagerError:
+                init_data: InitList = await self.bot.db.initiative.get(meta.group_id)
+                if init_data is None:
+                    raise ValueError("No init data")
+            except Exception as e:
+                self.bot.logger.error(f"获取先攻数据失败: {e}", exc_info=True)
                 return [BotSendMsgCommand(self.bot.account, self.format_loc(LOC_BR_NO_INIT), [port])]
             if not init_data.entities:
                 return [BotSendMsgCommand(self.bot.account, self.format_loc(LOC_BR_NO_INIT), [port])]
@@ -322,7 +330,7 @@ class BattlerollCommand(UserCommandBase):
             init_data.round = round
             init_data.turn = turn
             init_data.first_turn = False
-            self.bot.data_manager.set_data(DC_INIT, [meta.group_id], init_data)
+            await self.bot.db.initiative.save(init_data)
 
         return [BotSendMsgCommand(self.bot.account, "\n".join([feedback.strip() for feedback in feedbacks if feedback != ""]), [port]) ]
 

@@ -91,7 +91,7 @@ class GroupconfigCommand(UserCommandBase):
         hint = (arg_str, show_mode)
         return should_proc, should_pass, hint
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id)
         # 解析语句
         if hint[0] == "":

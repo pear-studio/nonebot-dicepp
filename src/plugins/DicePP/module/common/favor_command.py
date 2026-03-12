@@ -66,7 +66,7 @@ class FavorCommand(UserCommandBase):
                 return True, should_pass, ("mod", msg_str[5:].strip())
         return should_proc, should_pass, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
         cmd_type: Literal["show", "mod"] = hint[0]

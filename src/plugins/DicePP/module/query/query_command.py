@@ -508,7 +508,7 @@ class QueryCommand(UserCommandBase):
         hint = (mode, arg_str, show_mode)
         return should_proc, should_pass, hint
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 检测是否为群内
         if meta.group_id:
             port = GroupMessagePort(meta.group_id)

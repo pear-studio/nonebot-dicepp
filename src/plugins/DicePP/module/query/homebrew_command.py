@@ -114,7 +114,7 @@ class HomebrewCommand(UserCommandBase):
         hint = (mode,arg_str)
         return should_proc, should_pass, hint
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         from module.query.query_database import CONNECTED_QUERY_DATABASES
         port = GroupMessagePort(meta.group_id)
         source_port = meta.group_id

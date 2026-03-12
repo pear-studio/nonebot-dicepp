@@ -87,7 +87,7 @@ class ActivateCommand(UserCommandBase):
 
         return (not should_pass), should_pass, "hold"
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 解析语句
         mode: Literal["show", "on", "off", "dismiss", "hold"] = hint
