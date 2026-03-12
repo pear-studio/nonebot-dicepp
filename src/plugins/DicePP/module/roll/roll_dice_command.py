@@ -410,7 +410,7 @@ class RollDiceCommand(UserCommandBase):
                 feedback = self.format_loc(LOC_ROLL_RESULT, **loc_args)
 
         # 记录掷骰结果
-        record_roll_data(self.bot, meta, res_list)
+        await record_roll_data(self.bot, meta, res_list)
         if karma_enabled:
             feedback = feedback + "*"
             # 将 karma 历史平均值持久化到 DB（仅在业力引擎实际参与掷骰时写入）
@@ -541,23 +541,42 @@ def get_roll_state_loc_text(bot: Bot, res_list: List[RollResult]):
     return roll_stat
 
 
-def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollResult]):
-    """统计掷骰数据"""
+async def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollResult]):
+    """统计掷骰数据 —— 从 SQLite 读取后更新再写回"""
+    from core.data.models import UserStat, GroupStat
+
     roll_times = len(res_list)
-    # 更新用户数据，缺失时使用 default_gen 初始化（避免 DataManagerError）
-    try:
-        user_stat: UserStatInfo = bot.data_manager.get_data(DC_USER_DATA, [meta.user_id, DCK_USER_STAT], get_ref=True)
-    except DataManagerError:
-        # 如果未初始化，创建一个新的 UserStatInfo 存入
-        user_stat: UserStatInfo = bot.data_manager.get_data(DC_USER_DATA, [meta.user_id, DCK_USER_STAT], default_gen=UserStatInfo, get_ref=True)
+
+    # 读取用户 stat
+    _row = await bot.db.user_stat.get(meta.user_id)
+    user_stat = UserStatInfo()
+    if _row and _row.data:
+        try:
+            user_stat.deserialize(_row.data)
+        except Exception:
+            pass
     user_stat.roll.times.inc(roll_times)
     for res in (res for res in res_list if res.d20_num == 1):
         user_stat.roll.d20.record(int(res.val_list[0]))
+    try:
+        await bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=user_stat.serialize()))
+    except Exception as _exc:
+        dice_log(f"[RollStat] 写入用户统计 DB 失败: {_exc}")
+
     # 更新群数据
     if not meta.group_id:
         return
-    group_stat: GroupStatInfo = bot.data_manager.get_data(DC_GROUP_DATA, [meta.group_id, DCK_GROUP_STAT], default_gen=GroupStatInfo, get_ref=True)
+    _grow = await bot.db.group_stat.get(meta.group_id)
+    group_stat = GroupStatInfo()
+    if _grow and _grow.data:
+        try:
+            group_stat.deserialize(_grow.data)
+        except Exception:
+            pass
     group_stat.roll.times.inc(roll_times)
     for res in (res for res in res_list if res.d20_num == 1):
         group_stat.roll.d20.record(int(res.val_list[0]))
-    return
+    try:
+        await bot.db.group_stat.upsert(GroupStat(group_id=meta.group_id, data=group_stat.serialize()))
+    except Exception as _exc:
+        dice_log(f"[RollStat] 写入群统计 DB 失败: {_exc}")

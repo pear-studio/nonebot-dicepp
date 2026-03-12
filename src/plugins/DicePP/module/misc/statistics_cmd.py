@@ -38,11 +38,14 @@ class StatisticsCommand(UserCommandBase):
         arg_str = hint
         feedback: str = ""
         if not arg_str:  # 统计当前用户信息
-            # 统计处理信息情况
-            try:
-                user_stat: UserStatInfo = self.bot.data_manager.get_data(DC_USER_DATA, [meta.user_id, DCK_USER_STAT])
-            except DataManagerError:
-                user_stat = UserStatInfo()
+            # 从 SQLite 读取用户统计
+            _row = await self.bot.db.user_stat.get(meta.user_id)
+            user_stat = UserStatInfo()
+            if _row and _row.data:
+                try:
+                    user_stat.deserialize(_row.data)
+                except Exception:
+                    pass
             feedback += f"今日收到信息:{user_stat.msg.cur_day_val}, 昨日:{user_stat.msg.last_day_val}, 总计:{user_stat.msg.total_val}\n"
             # 统计指令使用情况
             feedback += stat_cmd_info(user_stat.cmd)
@@ -51,11 +54,14 @@ class StatisticsCommand(UserCommandBase):
         elif arg_str == "群聊":
             if not meta.group_id:
                 feedback += f"当前不在群聊中..."
-            # 统计处理信息情况
-            try:
-                group_stat: GroupStatInfo = self.bot.data_manager.get_data(DC_GROUP_DATA, [meta.group_id, DCK_GROUP_STAT])
-            except DataManagerError:
-                group_stat = GroupStatInfo()
+            # 从 SQLite 读取群统计
+            _row = await self.bot.db.group_stat.get(meta.group_id)
+            group_stat = GroupStatInfo()
+            if _row and _row.data:
+                try:
+                    group_stat.deserialize(_row.data)
+                except Exception:
+                    pass
             feedback += f"今日收到信息:{group_stat.msg.cur_day_val}, 昨日:{group_stat.msg.last_day_val}, 总计:{group_stat.msg.total_val}\n"
             # 统计指令使用情况
             feedback += stat_cmd_info(group_stat.cmd)

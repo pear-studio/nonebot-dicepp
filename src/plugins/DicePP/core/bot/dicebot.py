@@ -21,6 +21,7 @@ from core.data import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE, DC_USER_DATA,
     DCK_META_STAT, DCK_USER_STAT, DCK_GROUP_STAT
 from core.data import DataManager, DataManagerError
 from core.data import BotDatabase
+from core.data.models import UserStat, GroupStat, MetaStat
 from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo
 
 from core.bot.macro import BotMacro, MACRO_PARSE_LIMIT
@@ -467,9 +468,27 @@ class Bot:
 
         bot_commands: List[BotCommandBase] = []
 
-        # 统计信息
-        meta_stat: MetaStatInfo = self.data_manager.get_data(DC_META, [DCK_META_STAT], default_gen=MetaStatInfo, get_ref=True)
-        user_stat: UserStatInfo = self.data_manager.get_data(DC_USER_DATA, [meta.user_id, DCK_USER_STAT], default_gen=UserStatInfo, get_ref=True)
+        # 统计信息 —— 从 SQLite 读取，失败则创建默认值
+        _meta_stat_row = await self.db.meta_stat.get("meta")
+        if _meta_stat_row and _meta_stat_row.data:
+            meta_stat = MetaStatInfo()
+            try:
+                meta_stat.deserialize(_meta_stat_row.data)
+            except Exception:
+                meta_stat = MetaStatInfo()
+        else:
+            meta_stat = MetaStatInfo()
+
+        _user_stat_row = await self.db.user_stat.get(meta.user_id)
+        if _user_stat_row and _user_stat_row.data:
+            user_stat = UserStatInfo()
+            try:
+                user_stat.deserialize(_user_stat_row.data)
+            except Exception:
+                user_stat = UserStatInfo()
+        else:
+            user_stat = UserStatInfo()
+
         # 修改meta的permission参数
         # 4:骰主 3:骰管理 2:群主 1:群管理 0:普通人 -1:黑名单
         if meta.user_id in self.cfg_helper.get_config(CFG_MASTER):
@@ -484,9 +503,17 @@ class Bot:
                     meta.permission = 1
                 else: #elif meta.sender.role == "member": # 群员，或普通人
                     meta.permission = 0
-        # 群内资料同步
+        # 群内资料同步 —— 从 SQLite 读取
         if meta.group_id:
-            group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [meta.group_id, DCK_GROUP_STAT], default_gen=GroupStatInfo, get_ref=True)
+            _group_stat_row = await self.db.group_stat.get(meta.group_id)
+            if _group_stat_row and _group_stat_row.data:
+                group_stat = GroupStatInfo()
+                try:
+                    group_stat.deserialize(_group_stat_row.data)
+                except Exception:
+                    group_stat = GroupStatInfo()
+            else:
+                group_stat = GroupStatInfo()
         else:
             group_stat = GroupStatInfo()
         # 统计收到的消息数量
@@ -586,6 +613,16 @@ class Bot:
         if self.proxy and bot_commands:
             # 处理指令
             await self.proxy.process_bot_command_list(bot_commands)
+
+        # 将统计数据写回 SQLite
+        try:
+            await self.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=user_stat.serialize()))
+            await self.db.meta_stat.upsert(MetaStat(key="meta", data=meta_stat.serialize()))
+            if meta.group_id:
+                await self.db.group_stat.upsert(GroupStat(group_id=meta.group_id, data=group_stat.serialize()))
+        except Exception as _exc:
+            dice_log(f"[Stat] 写入统计 DB 失败: {_exc}")
+
         return bot_commands
 
     def process_request(self, data: RequestData) -> Optional[bool]:
