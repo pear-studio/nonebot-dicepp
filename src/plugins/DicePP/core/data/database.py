@@ -13,6 +13,18 @@ from .models import (
     Variable,
     DNDCharacter,
     COCCharacter,
+    UserNickname,
+    UserPoint,
+    GroupConfig,
+    GroupActivate,
+    GroupWelcome,
+    ChatRecord,
+    BotControl,
+    UserStat,
+    GroupStat,
+    MetaStat,
+    NPCHealth,
+    UserVariable,
 )
 
 
@@ -33,6 +45,18 @@ class BotDatabase:
         self._characters_dnd: Optional[Repository[DNDCharacter]] = None
         self._characters_coc: Optional[Repository[COCCharacter]] = None
         self._log: Optional[LogRepository] = None
+        self._nickname: Optional[Repository[UserNickname]] = None
+        self._point: Optional[Repository[UserPoint]] = None
+        self._group_config: Optional[Repository[GroupConfig]] = None
+        self._group_activate: Optional[Repository[GroupActivate]] = None
+        self._group_welcome: Optional[Repository[GroupWelcome]] = None
+        self._chat_record: Optional[Repository[ChatRecord]] = None
+        self._bot_control: Optional[Repository[BotControl]] = None
+        self._user_stat: Optional[Repository[UserStat]] = None
+        self._group_stat: Optional[Repository[GroupStat]] = None
+        self._meta_stat: Optional[Repository[MetaStat]] = None
+        self._npc_health: Optional[Repository[NPCHealth]] = None
+        self._variable: Optional[Repository[UserVariable]] = None
 
     @property
     def karma(self) -> Repository[UserKarma]:
@@ -76,6 +100,78 @@ class BotDatabase:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._log
 
+    @property
+    def nickname(self) -> Repository[UserNickname]:
+        if self._nickname is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._nickname
+
+    @property
+    def point(self) -> Repository[UserPoint]:
+        if self._point is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._point
+
+    @property
+    def group_config(self) -> Repository[GroupConfig]:
+        if self._group_config is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._group_config
+
+    @property
+    def group_activate(self) -> Repository[GroupActivate]:
+        if self._group_activate is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._group_activate
+
+    @property
+    def group_welcome(self) -> Repository[GroupWelcome]:
+        if self._group_welcome is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._group_welcome
+
+    @property
+    def chat_record(self) -> Repository[ChatRecord]:
+        if self._chat_record is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._chat_record
+
+    @property
+    def bot_control(self) -> Repository[BotControl]:
+        if self._bot_control is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._bot_control
+
+    @property
+    def user_stat(self) -> Repository[UserStat]:
+        if self._user_stat is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._user_stat
+
+    @property
+    def group_stat(self) -> Repository[GroupStat]:
+        if self._group_stat is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._group_stat
+
+    @property
+    def meta_stat(self) -> Repository[MetaStat]:
+        if self._meta_stat is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._meta_stat
+
+    @property
+    def npc_health(self) -> Repository[NPCHealth]:
+        if self._npc_health is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._npc_health
+
+    @property
+    def variable(self) -> Repository[UserVariable]:
+        if self._variable is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._variable
+
     async def connect(self) -> None:
         os.makedirs(self._bot_dir, exist_ok=True)
 
@@ -106,6 +202,18 @@ class BotDatabase:
         self._characters_dnd = None
         self._characters_coc = None
         self._log = None
+        self._nickname = None
+        self._point = None
+        self._group_config = None
+        self._group_activate = None
+        self._group_welcome = None
+        self._chat_record = None
+        self._bot_control = None
+        self._user_stat = None
+        self._group_stat = None
+        self._meta_stat = None
+        self._npc_health = None
+        self._variable = None
 
     async def _ensure_all_tables(self) -> None:
         self._karma = Repository[UserKarma](
@@ -140,3 +248,63 @@ class BotDatabase:
 
         self._log = LogRepository(self._log_db)
         await self._log._ensure_table()
+
+        self._nickname = Repository[UserNickname](
+            self._db, UserNickname, "nickname", ["user_id", "group_id"]
+        )
+        await self._nickname._ensure_table()
+
+        self._point = Repository[UserPoint](
+            self._db, UserPoint, "point", ["user_id"]
+        )
+        await self._point._ensure_table()
+
+        self._group_config = Repository[GroupConfig](
+            self._db, GroupConfig, "group_config", ["group_id"]
+        )
+        await self._group_config._ensure_table()
+
+        self._group_activate = Repository[GroupActivate](
+            self._db, GroupActivate, "group_activate", ["group_id"]
+        )
+        await self._group_activate._ensure_table()
+
+        self._group_welcome = Repository[GroupWelcome](
+            self._db, GroupWelcome, "group_welcome", ["group_id"]
+        )
+        await self._group_welcome._ensure_table()
+
+        self._chat_record = Repository[ChatRecord](
+            self._db, ChatRecord, "chat_record", ["group_id", "user_id", "time"]
+        )
+        await self._chat_record._ensure_table()
+
+        self._bot_control = Repository[BotControl](
+            self._db, BotControl, "bot_control", ["key"]
+        )
+        await self._bot_control._ensure_table()
+
+        self._user_stat = Repository[UserStat](
+            self._db, UserStat, "user_stat", ["user_id"]
+        )
+        await self._user_stat._ensure_table()
+
+        self._group_stat = Repository[GroupStat](
+            self._db, GroupStat, "group_stat", ["group_id"]
+        )
+        await self._group_stat._ensure_table()
+
+        self._meta_stat = Repository[MetaStat](
+            self._db, MetaStat, "meta_stat", ["key"]
+        )
+        await self._meta_stat._ensure_table()
+
+        self._npc_health = Repository[NPCHealth](
+            self._db, NPCHealth, "npc_health", ["group_id", "name"]
+        )
+        await self._npc_health._ensure_table()
+
+        self._variable = Repository[UserVariable](
+            self._db, UserVariable, "variable", ["user_id", "group_id", "name"]
+        )
+        await self._variable._ensure_table()

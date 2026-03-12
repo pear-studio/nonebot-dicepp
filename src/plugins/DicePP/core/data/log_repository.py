@@ -180,3 +180,80 @@ class LogRepository:
         )
         await self._db.commit()
         return cursor.rowcount
+
+    async def insert(self, record: LogRecord) -> int:
+        cursor = await self._db.execute(
+            "INSERT INTO records (log_id, time, user_id, nickname, content, source, message_id) VALUES (?,?,?,?,?,?,?)",
+            (
+                record.log_id,
+                record.time.isoformat() if isinstance(record.time, datetime) else record.time,
+                record.user_id,
+                record.nickname,
+                record.content,
+                record.source,
+                record.message_id,
+            ),
+        )
+        await self._db.commit()
+        return cursor.lastrowid
+
+    async def query_by_group(self, group_id: str, limit: int = 100) -> List[LogRecord]:
+        cursor = await self._db.execute(
+            """
+            SELECT r.id, r.log_id, r.time, r.user_id, r.nickname, r.content, r.source, r.message_id
+            FROM records r
+            JOIN logs l ON r.log_id = l.id
+            WHERE l.group_id = ?
+            ORDER BY r.id DESC
+            LIMIT ?
+            """,
+            (group_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [
+            LogRecord(
+                id=row[0],
+                log_id=row[1],
+                time=datetime.fromisoformat(row[2]),
+                user_id=row[3],
+                nickname=row[4] or "",
+                content=row[5],
+                source=row[6],
+                message_id=row[7],
+            )
+            for row in rows
+        ]
+
+    async def query_by_user(self, user_id: str, limit: int = 50) -> List[LogRecord]:
+        cursor = await self._db.execute(
+            """
+            SELECT id, log_id, time, user_id, nickname, content, source, message_id
+            FROM records
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        )
+        rows = await cursor.fetchall()
+        return [
+            LogRecord(
+                id=row[0],
+                log_id=row[1],
+                time=datetime.fromisoformat(row[2]),
+                user_id=row[3],
+                nickname=row[4] or "",
+                content=row[5],
+                source=row[6],
+                message_id=row[7],
+            )
+            for row in rows
+        ]
+
+    async def delete_before(self, timestamp: datetime) -> int:
+        cursor = await self._db.execute(
+            "DELETE FROM records WHERE time < ?",
+            (timestamp.isoformat(),),
+        )
+        await self._db.commit()
+        return cursor.rowcount

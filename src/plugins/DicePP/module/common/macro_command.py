@@ -1,7 +1,9 @@
 from typing import List, Tuple, Any, Optional
+import json
 
 from core.bot import Bot, BotMacro, MACRO_COMMAND_SPLIT
 from core.data import DataManagerError, DC_MACRO
+from core.data.models import Macro
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -52,11 +54,19 @@ class MacroCommand(UserCommandBase):
         arg_str: str = hint
         feedback: str = ""
 
-        macro_list: List[BotMacro]
-        try:
-            macro_list = self.bot.data_manager.get_data(DC_MACRO, [meta.user_id])
-        except DataManagerError:
-            macro_list = []
+        macro_db: Optional[Macro] = await self.bot.db.macro.get(meta.user_id)
+        macro_list: List[BotMacro] = []
+        if macro_db and macro_db.content:
+            try:
+                data = json.loads(macro_db.content)
+                for item in data:
+                    m = BotMacro()
+                    m.key = item.get("key", "")
+                    m.args = item.get("args", [])
+                    m.target = item.get("target", "")
+                    macro_list.append(m)
+            except Exception:
+                macro_list = []
 
         if not arg_str:
             def format_macro_info(i, macro):
@@ -66,7 +76,7 @@ class MacroCommand(UserCommandBase):
         elif arg_str.startswith("del"):
             macro_key = arg_str[3:].strip()
             if macro_key == "all":
-                self.bot.data_manager.delete_data(DC_MACRO, [meta.user_id])
+                await self.bot.db.macro.delete(meta.user_id)
                 feedback = self.format_loc(LOC_DEFINE_DEL, macro=str([macro.key for macro in macro_list]))
             else:
                 del_index = -1
@@ -76,7 +86,8 @@ class MacroCommand(UserCommandBase):
                         break
                 if del_index != -1:
                     del macro_list[del_index]
-                    self.bot.data_manager.set_data(DC_MACRO, [meta.user_id], macro_list)
+                    macro_data = json.dumps([{"key": m.key, "args": m.args, "target": m.target} for m in macro_list])
+                    await self.bot.db.macro.upsert(Macro(user_id=meta.user_id, name="macro", content=macro_data))
                     feedback = self.format_loc(LOC_DEFINE_DEL, macro=macro_key)
                 else:
                     feedback = self.format_loc(LOC_DEFINE_FAIL, error=f"找不到关键字为{macro_key}的宏")
@@ -95,7 +106,7 @@ class MacroCommand(UserCommandBase):
             if len(macro_list) >= macro_num_limit:
                 feedback = self.format_loc(LOC_DEFINE_FAIL, error=f"自定义宏数量超出上限: {macro_num_limit} 请先删除已有宏")
                 macro_new = None
-            if macro_new.key == "all":
+            if macro_new and macro_new.key == "all":
                 feedback = self.format_loc(LOC_DEFINE_FAIL, error=f"宏关键字为保留字: {macro_new.key}")
                 macro_new = None
 
@@ -105,7 +116,8 @@ class MacroCommand(UserCommandBase):
                     if macro_prev.key == macro_new.key:
                         macro_list.remove(macro_prev)
                 macro_list.append(macro_new)
-                self.bot.data_manager.set_data(DC_MACRO, [meta.user_id], macro_list)
+                macro_data = json.dumps([{"key": m.key, "args": m.args, "target": m.target} for m in macro_list])
+                await self.bot.db.macro.upsert(Macro(user_id=meta.user_id, name="macro", content=macro_data))
                 feedback = self.format_loc(LOC_DEFINE_SUCCESS, macro=macro_new.key, args=macro_new.args, target=macro_new.target)
 
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]

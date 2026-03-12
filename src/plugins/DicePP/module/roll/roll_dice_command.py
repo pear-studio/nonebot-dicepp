@@ -18,7 +18,8 @@ from module.roll.default_dice import (
     apply_default_expr,
     extract_default_type_hint,
 )
-from module.roll.karma_manager import get_karma_manager
+from module.roll.karma_manager import get_karma_manager, KarmaConfig
+from core.data.models import UserKarma
 from utils.logger import dice_log
 
 LOC_ROLL_RESULT = "roll_result"
@@ -256,6 +257,14 @@ class RollDiceCommand(UserCommandBase):
                 karma_manager = get_karma_manager(self.bot)
             except (AttributeError, TypeError, ValueError) as exc:
                 dice_log(f"[KarmaDice] 获取管理器失败: {exc}")
+            if karma_manager and meta.group_id:
+                try:
+                    group_cfg = await self.bot.db.group_config.get(meta.group_id)
+                    if group_cfg and group_cfg.data:
+                        karma_cfg = KarmaConfig.from_group_config(group_cfg.data)
+                        karma_manager.set_runtime(meta.group_id, karma_cfg)
+                except Exception as exc:
+                    dice_log(f"[KarmaDice] 加载群配置失败: {exc}")
             if karma_manager:
                 user_token = meta.user_id or "_anon_"
                 try:
@@ -404,6 +413,20 @@ class RollDiceCommand(UserCommandBase):
         record_roll_data(self.bot, meta, res_list)
         if karma_enabled:
             feedback = feedback + "*"
+            # 将 karma 历史平均值持久化到 DB（仅在业力引擎实际参与掷骰时写入）
+            if karma_manager and meta.group_id and meta.user_id:
+                try:
+                    user_token = meta.user_id
+                    avg = karma_manager.get_user_average(meta.group_id, user_token)
+                    if avg is not None:
+                        karma_record = UserKarma(
+                            user_id=user_token,
+                            group_id=meta.group_id,
+                            value=round(avg),
+                        )
+                        await self.bot.db.karma.upsert(karma_record)
+                except Exception as exc:
+                    dice_log(f"[KarmaDice] 写入 DB 失败: {exc}")
         commands.append(BotSendMsgCommand(self.bot.account, feedback, [port]))
         return commands
 

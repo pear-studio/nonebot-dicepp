@@ -13,7 +13,7 @@ import random
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Deque, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Deque, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from core.data import DataChunkBase, custom_data_chunk
 
@@ -115,6 +115,14 @@ class KarmaConfig:
             intro_sent=bool(data.get("intro_sent", False)),
         )
 
+    @classmethod
+    def from_group_config(cls, group_config_data: Optional[Dict[str, Any]]) -> "KarmaConfig":
+        """从 GroupConfig 的 data 字段创建 KarmaConfig"""
+        if not group_config_data:
+            return cls()
+        karma_data = group_config_data.get("karma", {})
+        return cls.from_dict(karma_data)
+
 
 class KarmaState:
     """维护群内掷骰历史，用于计算滚动期望。"""
@@ -191,6 +199,10 @@ class KarmaDiceManager:
         self.bot.data_manager.set_data(DC_KARMA, [group_id], config.to_dict())
         self._config_cache[group_id] = config
 
+    def set_runtime(self, group_id: str, config: KarmaConfig) -> None:
+        """设置运行时配置（用于从 DB 加载配置后注入）"""
+        self._config_cache[group_id] = config
+
     def _get_state(self, group_id: str, user_id: str, dice_type: int) -> KarmaState:
         group_states = self._state.setdefault(group_id, {})
         user_states = group_states.setdefault(user_id, {})
@@ -199,6 +211,19 @@ class KarmaDiceManager:
         _, window = self._get_effective_params(config)
         state.resize(window)
         return state
+
+    def get_user_average(self, group_id: str, user_id: str) -> Optional[float]:
+        """返回指定用户在指定群的全骰面加权平均值（百分比 0-100），无历史则返回 None。"""
+        group_states = self._state.get(group_id, {})
+        user_states = group_states.get(user_id, {})
+        total_sum = 0.0
+        total_count = 0
+        for dice_state in user_states.values():
+            total_sum += sum(dice_state.history)
+            total_count += len(dice_state.history)
+        if total_count == 0:
+            return None
+        return total_sum / total_count
 
     def reset_history(self, group_id: str, user_id: Optional[str] = None) -> None:
         """清空指定群聊或指定用户的业力历史。"""

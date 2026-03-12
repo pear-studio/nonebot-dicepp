@@ -181,3 +181,140 @@ class TestLogRepository:
 
         deleted = await log_repo.delete_records_by_message("session1", "msg1")
         assert deleted == 1
+
+    @pytest.mark.asyncio
+    async def test_insert_record(self, log_repo):
+        session = LogSession(
+            id="session1",
+            group_id="group1",
+            name="Test",
+            recording=True,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        await log_repo.save_session(session)
+
+        record = LogRecord(
+            log_id="session1",
+            time=datetime.now(),
+            user_id="user1",
+            nickname="User One",
+            content="Test message",
+            source="user",
+        )
+        record_id = await log_repo.insert(record)
+        assert record_id > 0
+
+    @pytest.mark.asyncio
+    async def test_query_by_group(self, log_repo):
+        session1 = LogSession(
+            id="session1",
+            group_id="group1",
+            name="Test Group 1",
+            recording=True,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        session2 = LogSession(
+            id="session2",
+            group_id="group2",
+            name="Test Group 2",
+            recording=True,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        await log_repo.save_session(session1)
+        await log_repo.save_session(session2)
+
+        await log_repo.add_record(LogRecord(
+            log_id="session1",
+            time=datetime.now(),
+            user_id="user1",
+            nickname="User One",
+            content="Hello from group1",
+            source="user",
+        ))
+        await log_repo.add_record(LogRecord(
+            log_id="session2",
+            time=datetime.now(),
+            user_id="user2",
+            nickname="User Two",
+            content="Hello from group2",
+            source="user",
+        ))
+
+        records = await log_repo.query_by_group("group1", limit=10)
+        assert len(records) >= 1
+        assert records[0].content == "Hello from group1"
+
+    @pytest.mark.asyncio
+    async def test_query_by_user(self, log_repo):
+        session = LogSession(
+            id="session1",
+            group_id="group1",
+            name="Test",
+            recording=True,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        await log_repo.save_session(session)
+
+        await log_repo.add_record(LogRecord(
+            log_id="session1",
+            time=datetime.now(),
+            user_id="user1",
+            nickname="User One",
+            content="Message from user1",
+            source="user",
+        ))
+        await log_repo.add_record(LogRecord(
+            log_id="session1",
+            time=datetime.now(),
+            user_id="user2",
+            nickname="User Two",
+            content="Message from user2",
+            source="user",
+        ))
+
+        records = await log_repo.query_by_user("user1", limit=10)
+        assert len(records) >= 1
+        assert records[0].user_id == "user1"
+        assert records[0].content == "Message from user1"
+
+    @pytest.mark.asyncio
+    async def test_delete_before(self, log_repo):
+        session = LogSession(
+            id="session1",
+            group_id="group1",
+            name="Test",
+            recording=True,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+        )
+        await log_repo.save_session(session)
+
+        old_time = datetime(2020, 1, 1)
+        new_time = datetime.now()
+
+        await log_repo.insert(LogRecord(
+            log_id="session1",
+            time=old_time,
+            user_id="user1",
+            nickname="User One",
+            content="Old message",
+            source="user",
+        ))
+        await log_repo.insert(LogRecord(
+            log_id="session1",
+            time=new_time,
+            user_id="user1",
+            nickname="User One",
+            content="New message",
+            source="user",
+        ))
+
+        deleted_count = await log_repo.delete_before(datetime(2023, 1, 1))
+        assert deleted_count == 1
+
+        records = await log_repo.query_by_user("user1", limit=10)
+        assert len(records) >= 1

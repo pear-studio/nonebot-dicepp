@@ -49,6 +49,24 @@ class TestKarmaConfig(unittest.TestCase):
         self.assertEqual(cfg.engine, "advantage")  # Default engine is "advantage"
         self.assertEqual(cfg.custom_roll_count, DEFAULT_WINDOW)
 
+    def test_from_group_config_none(self):
+        cfg = KarmaConfig.from_group_config(None)
+        self.assertFalse(cfg.is_enabled)
+        self.assertEqual(cfg.mode, "custom")
+
+    def test_from_group_config_with_karma(self):
+        group_data = {"karma": {"is_enabled": True, "mode": "hero", "engine": "advantage"}}
+        cfg = KarmaConfig.from_group_config(group_data)
+        self.assertTrue(cfg.is_enabled)
+        self.assertEqual(cfg.mode, "hero")
+        self.assertEqual(cfg.engine, "advantage")
+
+    def test_from_group_config_without_karma(self):
+        group_data = {"other_setting": "value"}
+        cfg = KarmaConfig.from_group_config(group_data)
+        self.assertFalse(cfg.is_enabled)
+        self.assertEqual(cfg.mode, "custom")
+
 
 class TestKarmaState(unittest.TestCase):
     def test_append_and_average(self):

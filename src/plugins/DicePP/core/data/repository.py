@@ -92,6 +92,14 @@ class Repository(Generic[T]):
         rows = await cursor.fetchall()
         return [self._model_class.model_validate_json(row[0]) for row in rows]
 
+    async def get_keys(self, user_id: str, group_id: str) -> List[str]:
+        cursor = await self._db.execute(
+            f"SELECT DISTINCT name FROM {self._table_name} WHERE user_id = ? AND group_id = ?",
+            (user_id, group_id),
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
     async def list_by(self, **filters: str) -> List[T]:
         if not filters:
             return await self.list_all()

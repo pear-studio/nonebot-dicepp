@@ -6,6 +6,7 @@ import re
 from typing import Dict, List, Tuple, Any, Literal, Optional
 from core.bot import Bot, BotVariable
 from core.data import DataManagerError, DC_VARIABLE
+from core.data.models import UserVariable
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -54,8 +55,8 @@ class VariableCommand(UserCommandBase):
         feedback: str
 
         try:
-            cur_var_list = self.bot.data_manager.get_keys(DC_VARIABLE, [meta.user_id, meta.group_id])
-        except DataManagerError:
+            cur_var_list = await self.bot.db.variable.get_keys(meta.user_id, meta.group_id or "")
+        except Exception:
             cur_var_list = []
 
         if cmd_type == "set":
@@ -87,40 +88,46 @@ class VariableCommand(UserCommandBase):
                     feedback = self.format_loc(LOC_VAR_ERROR, error=f"{var_val_str}: {e.info}")
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             if set_type == "=":
-                bot_var = BotVariable()
-                bot_var.initialize(var_name, var_val)
-                self.bot.data_manager.set_data(DC_VARIABLE, [meta.user_id, meta.group_id, var_name], bot_var)
+                await self.bot.db.variable.upsert(UserVariable(
+                    user_id=meta.user_id,
+                    group_id=meta.group_id or "",
+                    name=var_name,
+                    val=var_val
+                ))
                 feedback = self.format_loc(LOC_VAR_SET, name=var_name, val=var_val)
             else:
                 if var_name not in cur_var_list:
                     feedback = self.format_loc(LOC_VAR_ERROR, error=f"{var_name}不存在, 当前可用变量: {list(cur_var_list)}")
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-                bot_var: BotVariable = self.bot.data_manager.get_data(DC_VARIABLE, [meta.user_id, meta.group_id, var_name])
+                existing_var = await self.bot.db.variable.get((meta.user_id, meta.group_id or "", var_name))
+                if existing_var is None:
+                    feedback = self.format_loc(LOC_VAR_ERROR, error=f"{var_name}不存在")
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                 if set_type == "+":
-                    feedback = self.format_loc(LOC_VAR_SET, name=var_name, val=f"{bot_var.val}+{var_val}={bot_var.val+var_val}")
-                    bot_var.val = bot_var.val + var_val
+                    new_val = existing_var.val + var_val
+                    feedback = self.format_loc(LOC_VAR_SET, name=var_name, val=f"{existing_var.val}+{var_val}={new_val}")
                 else:  # set_type == "-"
-                    feedback = self.format_loc(LOC_VAR_SET, name=var_name, val=f"{bot_var.val}-{var_val}={bot_var.val-var_val}")
-                    bot_var.val = bot_var.val - var_val
-                self.bot.data_manager.set_data(DC_VARIABLE, [meta.user_id, meta.group_id, var_name], bot_var)
+                    new_val = existing_var.val - var_val
+                    feedback = self.format_loc(LOC_VAR_SET, name=var_name, val=f"{existing_var.val}-{var_val}={new_val}")
+                existing_var.val = new_val
+                await self.bot.db.variable.upsert(existing_var)
         elif cmd_type == "get":
             var_name = arg_str
             if var_name:
                 if var_name not in cur_var_list:
                     feedback = self.format_loc(LOC_VAR_ERROR, error=f"{var_name}不存在, 当前可用变量: {list(cur_var_list)}")
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-                bot_var: BotVariable = self.bot.data_manager.get_data(DC_VARIABLE, [meta.user_id, meta.group_id, var_name])
+                bot_var: UserVariable = await self.bot.db.variable.get((meta.user_id, meta.group_id or "", var_name))
+                if bot_var is None:
+                    feedback = self.format_loc(LOC_VAR_ERROR, error=f"{var_name}不存在")
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                 feedback = self.format_loc(LOC_VAR_GET, name=var_name, val=bot_var.val)
             else:
-                bot_var_dict: Dict[str, BotVariable]
-                try:
-                    bot_var_dict = self.bot.data_manager.get_data(DC_VARIABLE, [meta.user_id, meta.group_id])
-                except DataManagerError:
-                    bot_var_dict = {}
-                if not bot_var_dict:
+                var_list = await self.bot.db.variable.list_by(user_id=meta.user_id, group_id=meta.group_id or "")
+                if not var_list:
                     info = "暂无任何变量"
                 else:
-                    var_info = [f"{var.name}={var.val}" for var in bot_var_dict.values()]
+                    var_info = [f"{v.name}={v.val}" for v in var_list]
                     info = "; ".join(var_info)
                 feedback = self.format_loc(LOC_VAR_GET_ALL, info=info)
         else:  # cmd_type == "del"
@@ -128,12 +135,14 @@ class VariableCommand(UserCommandBase):
             if not var_name:
                 feedback = self.format_loc(LOC_VAR_ERROR, error="请指定变量名")
             elif var_name == "all":
-                self.bot.data_manager.delete_data(DC_VARIABLE, [meta.user_id, meta.group_id])
+                var_list = await self.bot.db.variable.list_by(user_id=meta.user_id, group_id=meta.group_id or "")
+                for v in var_list:
+                    await self.bot.db.variable.delete((meta.user_id, meta.group_id or "", v.name))
                 feedback = self.format_loc(LOC_VAR_DEL, name="; ".join(cur_var_list))
             elif var_name not in cur_var_list:
                 feedback = self.format_loc(LOC_VAR_ERROR, error=f"{var_name}不存在, 当前可用变量: {list(cur_var_list)}")
             else:
-                self.bot.data_manager.delete_data(DC_VARIABLE, [meta.user_id, meta.group_id, var_name])
+                await self.bot.db.variable.delete((meta.user_id, meta.group_id or "", var_name))
                 feedback = self.format_loc(LOC_VAR_DEL, name=var_name)
 
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]

@@ -21,29 +21,6 @@ from core.communication import GroupMessagePort, MessageMetaData
 from utils.time import get_current_date_str, str_to_datetime
 from utils.logger import dice_log
 
-# 日志数据库后端（将记录存入 SQLite，导出从 DB 读取）
-try:
-    from .log_db import (
-        get_connection,
-        upsert_log,
-        insert_record,
-        fetch_records,
-        delete_log,
-        delete_records_by_message_id,
-        set_recording,
-        update_log_upload,
-    )
-except Exception:
-    # 兼容导入失败场景，保持旧逻辑可运行（但不会用到 DB）
-    get_connection = None  # type: ignore
-    upsert_log = None  # type: ignore
-    insert_record = None  # type: ignore
-    fetch_records = None  # type: ignore
-    delete_log = None  # type: ignore
-    delete_records_by_message_id = None  # type: ignore
-    set_recording = None  # type: ignore
-    update_log_upload = None  # type: ignore
-
 # 旧版本使用的常量，保留以兼容外部引用或进行数据迁移
 DC_LOG_SESSION = "log_session"
 DCK_ACTIVE = "active"

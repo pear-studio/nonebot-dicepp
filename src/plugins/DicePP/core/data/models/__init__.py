@@ -18,6 +18,20 @@ from .character import (
     EXT_ITEM_LIST, EXT_ITEM_NUM, EXT_ITEM_INDEX_DICT,
     SAVING_ALL_KEY, ATTACK_ALL_KEY,
 )
+from .extended import (
+    UserNickname,
+    UserPoint,
+    GroupConfig,
+    GroupActivate,
+    GroupWelcome,
+    ChatRecord,
+    BotControl,
+    UserStat,
+    GroupStat,
+    MetaStat,
+    NPCHealth,
+    UserVariable,
+)
 
 __all__ = [
     # 数据模型
@@ -35,6 +49,18 @@ __all__ = [
     "MoneyInfo",
     "DNDCharacter",
     "COCCharacter",
+    # 扩展模型
+    "UserNickname",
+    "UserPoint",
+    "GroupConfig",
+    "GroupActivate",
+    "GroupWelcome",
+    "ChatRecord",
+    "BotControl",
+    "UserStat",
+    "GroupStat",
+    "MetaStat",
+    "NPCHealth",
     # 角色常量
     "CHAR_INFO_KEY_HP",
     "CHAR_INFO_KEY_HP_DICE",

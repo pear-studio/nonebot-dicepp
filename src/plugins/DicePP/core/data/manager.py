@@ -6,6 +6,7 @@
 import os
 import copy
 import asyncio
+import warnings
 from json import JSONDecodeError
 from typing import Tuple, List, Dict, Any, Optional, Callable
 
@@ -15,6 +16,14 @@ from utils import update_json_async, read_json
 from core.config import DATA_PATH as ROOT_DATA_PATH
 
 from core.data.data_chunk import DATA_CHUNK_TYPES, DataChunkBase
+
+
+warnings.warn(
+    "DataManager is deprecated. Use BotDatabase (async) instead. "
+    "See db-migration-and-async change for migration details.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
 class DataManager:

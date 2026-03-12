@@ -94,7 +94,7 @@ class InitiativeCommand(UserCommandBase):
         should_pass: bool = False
         return should_proc, should_pass, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 回复端口
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
 
@@ -257,7 +257,7 @@ class InitiativeCommand(UserCommandBase):
                     name = self.bot.get_nickname(meta.user_id, meta.group_id)
                 result_dict[name] = (res.get_val(), res.get_complete_result())
 
-            feedback = self.add_initiative_entities(result_dict, owner_id, meta.group_id)
+            feedback = await self.add_initiative_entities(result_dict, owner_id, meta.group_id)
 
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         
@@ -274,16 +274,15 @@ class InitiativeCommand(UserCommandBase):
                         result_dict["".join(data[:-1])] = (int(data[-1]),data[-1] + "(导入)")
             
             if len(result_dict) > 0:
-                feedback = self.add_initiative_entities(result_dict, "", meta.group_id)
+                feedback = await self.add_initiative_entities(result_dict, "", meta.group_id)
             else:
                 feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         
         # 先找到先攻数据是否存在
-        init_data: dict
-        try:
-            init_data = self.bot.data_manager.get_data(DC_INIT, [meta.group_id], get_ref=True)
-        except DataManagerError:
+        init_data: InitList
+        init_data = await self.bot.db.initiative.get(meta.group_id)
+        if init_data is None:
             feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # Normalize entities to ensure InitEntity objects (defensive for older or malformed data)
@@ -412,25 +411,24 @@ class InitiativeCommand(UserCommandBase):
             # 尝试删除临时生命值信息
             try:
                 from module.character.dnd5e import DC_CHAR_HP, HPInfo
-                init_data: InitList = self.bot.data_manager.get_data(DC_INIT, [meta.group_id])
-                for entity in init_data.entities:
-                    if not entity.owner:
-                        try:
-                            hp_info: HPInfo = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id, entity.name])
-                            assert hp_info.hp_max == 0  # 不清除已经设置了最大生命值的生命值信息
-                            self.bot.data_manager.delete_data(DC_CHAR_HP, [meta.group_id, entity.name])
-                        except DataManagerError:  # 没有设置生命值信息
-                            pass
-                        except AssertionError:  # 已经设置最大生命值
-                            if not feedback:
-                                feedback = "注意: 没有清除已设置最大生命值的 "
-                            feedback += entity.name + " "
-            except (ImportError, DataManagerError):  # 没有生命值模块或没有先攻信息
+                init_data = await self.bot.db.initiative.get(meta.group_id)
+                if init_data:
+                    for entity in init_data.entities:
+                        if not entity.owner:
+                            try:
+                                from module.character.dnd5e import get_hp_info
+                                hp_info = await get_hp_info(self.bot, meta.group_id, entity.name)
+                                assert hp_info.hp_max == 0
+                                from module.character.dnd5e import delete_hp_info
+                                await delete_hp_info(self.bot, meta.group_id, entity.name)
+                            except Exception:
+                                pass
+            except Exception:
                 pass
             if feedback:
                 feedback = feedback.strip() + "的生命值信息\n"
             # 尝试删除先攻信息
-            self.bot.data_manager.delete_data(DC_INIT, [meta.group_id])
+            await self.bot.db.initiative.delete(meta.group_id)
             feedback += self.format_loc(LOC_INIT_INFO_CLR)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
@@ -451,6 +449,7 @@ class InitiativeCommand(UserCommandBase):
             for i, entity in enumerate(init_data.entities):
                 if i <= index and entity.init == init_val:
                     init_data.entities[i], init_data.entities[index] = init_data.entities[index], init_data.entities[i]
+            await self.bot.db.initiative.upsert(init_data)
             feedback = self.format_loc(LOC_INIT_ENTITY_FIRST, name = name)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
@@ -489,6 +488,7 @@ class InitiativeCommand(UserCommandBase):
                         r_index = i
                 init_data.entities[l_index].init,init_data.entities[r_index].init = init_data.entities[r_index].init,init_data.entities[l_index].init
                 init_data.entities[l_index],init_data.entities[r_index] = init_data.entities[r_index],init_data.entities[l_index]
+                await self.bot.db.initiative.upsert(init_data)
                 feedback = self.format_loc(LOC_INIT_ENTITY_SWAP, name1 = name_list_valid_l[0], name2 = name_list_valid_r[0])
             # 错误信息已经给出了
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -523,6 +523,7 @@ class InitiativeCommand(UserCommandBase):
                 if name_list_deleted:
                     for name in name_list_deleted:
                         feedback += self.format_loc(LOC_INIT_INFO_DEL, entity_list=name)
+                    await self.bot.db.initiative.upsert(init_data)
             feedback = feedback.strip()
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
@@ -574,7 +575,7 @@ class InitiativeCommand(UserCommandBase):
                 feedback += self.format_loc(LOC_INIT_ERROR, error_info=f"列表中存在同名条目{name}, 联系开发者") + "\n"
         return (result_list,feedback)
 
-    def add_initiative_entities(self, result_dict: Dict[str, Tuple[int, str]], owner_id: str, group_id: str) -> str:
+    async def add_initiative_entities(self, result_dict: Dict[str, Tuple[int, str]], owner_id: str, group_id: str) -> str:
         """
 
         Args:
@@ -586,7 +587,9 @@ class InitiativeCommand(UserCommandBase):
             feedback: 操作执行成功或失败的提示
         """
         # 获取先攻列表
-        init_data: InitList = self.bot.data_manager.get_data(DC_INIT, [group_id], default_gen=InitList, get_ref=True)
+        init_data: InitList = await self.bot.db.initiative.get(group_id)
+        if init_data is None:
+            init_data = InitList()
 
         # Defensive normalization: some older or malformed saved data may contain
         # strings or dicts in init_data.entities. Normalize them to InitEntity
@@ -655,4 +658,6 @@ class InitiativeCommand(UserCommandBase):
         feedback += "\n".join(feedback_list)
         if same_warn:
             feedback += "\n" + self.format_loc(LOC_INIT_ENTITY_SAME) + same_warn
+
+        await self.bot.db.initiative.upsert(init_data)
         return feedback
