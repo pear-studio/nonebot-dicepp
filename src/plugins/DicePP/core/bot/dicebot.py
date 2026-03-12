@@ -17,15 +17,13 @@ from core.communication import MessageMetaData, MessagePort, PrivateMessagePort,
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import GroupInfo
-from core.data import DC_META, DC_NICKNAME, DC_MACRO, DC_VARIABLE, DC_USER_DATA, DC_GROUP_DATA,\
+from core.data import DC_META, DC_NICKNAME, DC_USER_DATA, DC_GROUP_DATA,\
     DCK_META_STAT, DCK_USER_STAT, DCK_GROUP_STAT
 from core.data import DataManager, DataManagerError
 from core.data import BotDatabase
 from core.data.models import UserStat, GroupStat, MetaStat
 from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo
 
-from core.bot.macro import BotMacro, MACRO_PARSE_LIMIT
-from core.bot.variable import BotVariable
 import shutil
 
 # 日志清理相关常量
@@ -520,29 +518,6 @@ class Bot:
         meta_stat.msg.inc()
         group_stat.msg.inc()
         user_stat.msg.inc()
-
-        # 处理宏
-        macro_list: List[BotMacro]
-        try:
-            assert not msg.startswith(".define")
-            macro_list = self.data_manager.get_data(DC_MACRO, [meta.user_id], get_ref=True)
-        except (DataManagerError, AssertionError):
-            macro_list = []
-        for macro in macro_list:
-            msg = macro.process(msg)
-            if len(msg) > MACRO_PARSE_LIMIT:
-                break
-
-        # 处理变量
-        try:
-            var_name_list: List[str] = self.data_manager.get_keys(DC_VARIABLE, [meta.user_id, meta.group_id])
-        except DataManagerError:
-            var_name_list = []
-        for var_name in var_name_list:
-            key = f"%{var_name}%"
-            if key in msg:
-                var: BotVariable = self.data_manager.get_data(DC_VARIABLE, [meta.user_id, meta.group_id, var_name])
-                msg = msg.replace(key, str(var.val))
 
         # 处理分行指令
         command_split: str = self.cfg_helper.get_config(CFG_COMMAND_SPLIT)[0]

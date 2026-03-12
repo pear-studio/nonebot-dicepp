@@ -1,8 +1,6 @@
 from .karma import UserKarma
 from .initiative import InitEntity, InitList, INIT_LIST_SIZE, InitiativeError
 from .log import LogSession, LogRecord
-from .macro import Macro
-from .variable import Variable
 from .character import (
     # 数据模型
     HPInfo, AbilityInfo, SpellInfo, MoneyInfo, DNDCharacter, COCCharacter,
@@ -41,8 +39,6 @@ __all__ = [
     "INIT_LIST_SIZE",
     "LogSession",
     "LogRecord",
-    "Macro",
-    "Variable",
     "HPInfo",
     "AbilityInfo",
     "SpellInfo",
