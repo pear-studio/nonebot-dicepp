@@ -6,7 +6,6 @@ from typing import List, Tuple, Any, Literal, Optional, Dict
 import re
 
 from core.bot import Bot
-from core.data import DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -309,30 +308,16 @@ class HPCommand(UserCommandBase):
         target_id_name_dict = {}
         pc_set: set = set()
         try:
-            from module.initiative import DC_INIT, InitList, InitEntity
-            init_list: InitList = self.bot.data_manager.get_data(DC_INIT, [group_id])
-            for entity in getattr(init_list, 'entities', []):
-                if isinstance(entity, InitEntity):
+            from core.data.models import InitList
+            init_list: InitList = await self.bot.db.initiative.get(group_id)
+            if init_list is not None:
+                for entity in init_list.entities:
                     if entity.owner:
                         target_id_name_dict[entity.owner] = entity.name
                         pc_set.add(entity.owner)
                     else:
                         target_id_name_dict[entity.name] = entity.name
-                elif isinstance(entity, dict):
-                    name = entity.get('name') or ''
-                    owner = entity.get('owner') or ''
-                    if owner:
-                        target_id_name_dict[owner] = name
-                        pc_set.add(owner)
-                    else:
-                        target_id_name_dict[name] = name
-                else:
-                    try:
-                        name = str(entity)
-                    except Exception:
-                        name = ''
-                    target_id_name_dict[name] = name
-        except DataManagerError:
+        except Exception:
             pass
         target_poss = match_substring(target_intent, target_id_name_dict.values())
         if len(target_poss) == 1:

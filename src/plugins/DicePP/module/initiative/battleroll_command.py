@@ -1,16 +1,11 @@
 from typing import List, Tuple, Any
 
-import json
-
 from core.bot import Bot
-from core.data import DataManagerError
-from core.data.models import InitList
+from core.data.models import InitList, InitEntity
 from core.command.const import *
 from core.command import UserCommandBase , custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from .initiative_list import DC_INIT
-from module.initiative.initiative_entity import InitEntity
 from utils.string import match_substring
 from utils.cq_code import get_cq_at
 
@@ -123,30 +118,6 @@ class BattlerollCommand(UserCommandBase):
                 feedback = self.format_loc(LOC_BR_NO_INIT)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
-            # Defensive normalization: ensure entities are InitEntity instances
-            normalized = []
-            for ent in getattr(init_data, 'entities', []):
-                if isinstance(ent, InitEntity):
-                    normalized.append(ent)
-                elif isinstance(ent, dict):
-                    e = InitEntity()
-                    try:
-                        e.deserialize(json.dumps(ent))
-                    except Exception:
-                        for k, v in ent.items():
-                            try:
-                                setattr(e, k, v)
-                            except Exception:
-                                pass
-                    normalized.append(e)
-                else:
-                    e = InitEntity()
-                    try:
-                        e.name = str(ent)
-                    except Exception:
-                        e.name = ""
-                    normalized.append(e)
-            init_data.entities = normalized
             if not init_data.entities:
                 return [BotSendMsgCommand(self.bot.account, self.format_loc(LOC_BR_NO_INIT), [port])]
 

@@ -754,7 +754,6 @@ class Bot:
         from core.command import BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotCommandBase
         from module.common import DC_POINT, DC_WELCOME, DC_ACTIVATE, DC_CHAT_RECORD
         from module.character.dnd5e import DC_CHAR_DND, DC_CHAR_HP
-        from module.initiative import DC_INIT
 
         cur_date = get_current_date_raw()
         try:

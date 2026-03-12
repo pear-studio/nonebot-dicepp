@@ -1,17 +1,13 @@
 from typing import List, Tuple, Dict, Any
 
-import json
-
 from core.bot import Bot
-from core.data import DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from module.roll import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, RollDiceError, is_roll_exp, sift_roll_exp_and_reason
 
-from module.initiative.initiative_list import DC_INIT, InitList, InitiativeError
-from module.initiative.initiative_entity import InitEntity
+from core.data.models import InitList, InitEntity, InitiativeError, HPInfo
 from utils.string import match_substring
 
 LOC_INIT_ROLL = "initiative_roll"
@@ -285,30 +281,8 @@ class InitiativeCommand(UserCommandBase):
         if init_data is None:
             feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-        # Normalize entities to ensure InitEntity objects (defensive for older or malformed data)
-        normalized = []
-        for ent in getattr(init_data, 'entities', []):
-            if isinstance(ent, InitEntity):
-                normalized.append(ent)
-            elif isinstance(ent, dict):
-                e = InitEntity()
-                try:
-                    e.deserialize(json.dumps(ent))
-                except Exception:
-                    # fallback: shallow attribute copy
-                    for k, v in ent.items():
-                        try:
-                            setattr(e, k, v)
-                        except Exception:
-                            pass
-                normalized.append(e)
-            else:
-                e = InitEntity()
-                e.name = str(ent)
-                normalized.append(e)
-        init_data.entities = normalized
 
-        # 更新玩家姓名
+        # 更新玩家姓名（Pydantic 保证 entities 都是 InitEntity 实例）
         for entity in init_data.entities:
             if entity.owner:
                 entity.name = self.bot.get_nickname(entity.owner, meta.group_id)
@@ -316,120 +290,55 @@ class InitiativeCommand(UserCommandBase):
 
         # 处理需要有表存在才能使用的指令
         if mode == "inspect":  # 查看先攻信息
-            # 尝试获取生命值信息
-            from module.character.dnd5e import DC_CHAR_HP, DC_CHAR_DND, HPInfo, DNDCharInfo
-            hp_dict: Dict[str, HPInfo] = self.bot.data_manager.get_data(DC_CHAR_HP, [meta.group_id], default_val={})
-            char_dict: Dict[str, DNDCharInfo] = self.bot.data_manager.get_data(DC_CHAR_DND, [meta.group_id], default_val={})
-            hp_dict.update(dict([(user_id, char_info.hp_info) for user_id, char_info in char_dict.items()]))
-            # Defensive normalization: ensure all hp_dict values are HPInfo objects
-            for user_id, hp_val in list(hp_dict.items()):
-                if isinstance(hp_val, HPInfo):
-                    continue
-                hp_obj = HPInfo()
-                try:
-                    if isinstance(hp_val, dict):
-                        # reconstruct from dict
-                        hp_obj.deserialize(json.dumps(hp_val))
-                    elif isinstance(hp_val, str):
-                        # try parsing string as JSON first, then fallback to integer
-                        try:
-                            parsed = json.loads(hp_val)
-                            if isinstance(parsed, dict):
-                                hp_obj.deserialize(json.dumps(parsed))
-                            elif isinstance(parsed, int):
-                                hp_obj.initialize(parsed, parsed)
-                            else:
-                                # parsed to a primitive we don't understand; leave default
-                                pass
-                        except Exception:
-                            # not JSON — try plain int
-                            try:
-                                hp_cur = int(hp_val)
-                                hp_obj.initialize(hp_cur, hp_cur)
-                            except Exception:
-                                # leave default hp_obj
-                                pass
-                    else:
-                        # unknown type, leave default hp_obj
-                        pass
-                except Exception:
-                    # on any error, fall back to empty HPInfo
-                    hp_obj = HPInfo()
-                hp_dict[user_id] = hp_obj
+            # 从 SQLite 查询 HP 信息：PC 来自 characters_dnd，NPC 来自 npc_health
+            from core.data.models import DNDCharacter, NPCHealth
+            # user_id -> HPInfo (PC)
+            hp_dict: Dict[str, HPInfo] = {}
+            pc_chars = await self.bot.db.characters_dnd.list_by(group_id=meta.group_id)
+            for char in pc_chars:
+                if char.is_init:
+                    hp_dict[char.user_id] = char.hp_info
+            # name -> HPInfo (NPC)
+            npc_hp_dict: Dict[str, HPInfo] = {}
+            npc_list = await self.bot.db.npc_health.list_by(group_id=meta.group_id)
+            for npc in npc_list:
+                if npc.hp_data:
+                    try:
+                        npc_hp_dict[npc.name] = HPInfo.model_validate_json(npc.hp_data)
+                    except Exception:
+                        npc_hp_dict[npc.name] = HPInfo()
+                else:
+                    npc_hp_dict[npc.name] = HPInfo()
+
             turn_index = max(0, min(len(init_data.entities) - 1, init_data.turn - 1))
             current_entity = init_data.entities[turn_index]
             init_info = f"当前是第{init_data.round}轮,{current_entity.name}的回合\n"
             for index, entity in enumerate(init_data.entities):
-                entity: InitEntity = entity
-                # 生命值信息
                 entity_hp_info: str = ""
-                # Defensive: hp_dict may contain raw dict/str/int; normalize on-the-fly if needed
-                def _hp_info_from_val(val):
-                    try:
-                        if isinstance(val, HPInfo):
-                            return val.get_info()
-                        # try reconstructing HPInfo from dict or JSON string
-                        hp_obj = HPInfo()
-                        if isinstance(val, dict):
-                            hp_obj.deserialize(json.dumps(val))
-                            return hp_obj.get_info()
-                        if isinstance(val, str):
-                            try:
-                                parsed = json.loads(val)
-                                if isinstance(parsed, dict):
-                                    hp_obj.deserialize(json.dumps(parsed))
-                                    return hp_obj.get_info()
-                                elif isinstance(parsed, int):
-                                    hp_obj.initialize(parsed, parsed)
-                                    return hp_obj.get_info()
-                                else:
-                                    return str(val)
-                            except Exception:
-                                # not JSON, try plain int
-                                try:
-                                    v = int(val)
-                                    hp_obj.initialize(v, v)
-                                    return hp_obj.get_info()
-                                except Exception:
-                                    return str(val)
-                        # other primitives: just stringify
-                        return str(val)
-                    except Exception:
-                        return str(val)
-
                 if entity.owner and entity.owner in hp_dict:  # 玩家HP信息
-                    entity_hp_info = _hp_info_from_val(hp_dict[entity.owner])
-                if not entity.owner and entity.name in hp_dict:  # NPC信息
-                    entity_hp_info = _hp_info_from_val(hp_dict[entity.name])
+                    entity_hp_info = hp_dict[entity.owner].get_info()
+                elif not entity.owner and entity.name in npc_hp_dict:  # NPC信息
+                    entity_hp_info = npc_hp_dict[entity.name].get_info()
                 init_info += f"{index + 1}.{entity.get_info()} {entity_hp_info}\n"
-            init_info = init_info.strip()  # 去掉末尾的换行
+            init_info = init_info.strip()
             feedback = self.format_loc(LOC_INIT_INFO, init_info=init_info)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         elif mode == "clear":  # 清除所有先攻信息
-            feedback = ""
-            # 尝试删除临时生命值信息
-            try:
-                from module.character.dnd5e import DC_CHAR_HP, HPInfo
-                init_data = await self.bot.db.initiative.get(meta.group_id)
-                if init_data:
-                    for entity in init_data.entities:
-                        if not entity.owner:
-                            try:
-                                from module.character.dnd5e import get_hp_info
-                                hp_info = await get_hp_info(self.bot, meta.group_id, entity.name)
-                                assert hp_info.hp_max == 0
-                                from module.character.dnd5e import delete_hp_info
-                                await delete_hp_info(self.bot, meta.group_id, entity.name)
-                            except Exception:
-                                pass
-            except Exception:
-                pass
-            if feedback:
-                feedback = feedback.strip() + "的生命值信息\n"
-            # 尝试删除先攻信息
+            # 删除先攻列表中 NPC（无 owner）的临时血量数据
+            for entity in init_data.entities:
+                if not entity.owner:
+                    try:
+                        npc_obj = await self.bot.db.npc_health.get(meta.group_id, entity.name)
+                        if npc_obj and npc_obj.hp_data:
+                            hp_info = HPInfo.model_validate_json(npc_obj.hp_data)
+                            if hp_info.hp_max == 0:  # 仅清除没有设置最大值的临时血量
+                                await self.bot.db.npc_health.delete(meta.group_id, entity.name)
+                    except Exception:
+                        pass
+            # 删除先攻信息
             await self.bot.db.initiative.delete(meta.group_id)
-            feedback += self.format_loc(LOC_INIT_INFO_CLR)
+            feedback = self.format_loc(LOC_INIT_INFO_CLR)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         elif mode == "first":  # 提前先攻条目
@@ -497,22 +406,22 @@ class InitiativeCommand(UserCommandBase):
             # 在列表中搜索名字, 结果加入到name_list_valid
             name_list: List[str] = [name.strip() for name in arg_str.split("/")]  # 类似.init del A/B/C 这样的用法
             name_list_valid: List[str]
-            name_list_valid, feedback = self.find_valid_entities(name_list,entities_name_list)
+            name_list_valid, feedback = self.find_valid_entities(name_list, entities_name_list)
             # 删除
             if name_list_valid:
                 name_list_deleted: List[str] = []
                 for v_name in name_list_valid:
-                    # 删除生命值信息
+                    # 找到条目索引
                     index = None
                     for i, entity in enumerate(init_data.entities):
                         if entity.name == v_name:
                             index = i
                             break
-                    if not init_data.entities[index].owner:
+                    # 如果是 NPC（无 owner），删除其生命值信息
+                    if index is not None and not init_data.entities[index].owner:
                         try:
-                            from module.character.dnd5e import DC_CHAR_HP
-                            self.bot.data_manager.delete_data(DC_CHAR_HP, [meta.group_id, v_name])
-                        except (ImportError, DataManagerError):  # 没有设置生命值信息
+                            await self.bot.db.npc_health.delete(meta.group_id, v_name)
+                        except Exception:
                             pass
                     # 删除先攻信息
                     try:
@@ -590,35 +499,6 @@ class InitiativeCommand(UserCommandBase):
         init_data: InitList = await self.bot.db.initiative.get(group_id)
         if init_data is None:
             init_data = InitList()
-
-        # Defensive normalization: some older or malformed saved data may contain
-        # strings or dicts in init_data.entities. Normalize them to InitEntity
-        # instances so callers can safely access .name/.owner/.init without
-        # AttributeError.
-        normalized = []
-        for ent in getattr(init_data, 'entities', []):
-            if isinstance(ent, InitEntity):
-                normalized.append(ent)
-            elif isinstance(ent, dict):
-                e = InitEntity()
-                try:
-                    # try to reuse existing deserialize if available
-                    e.deserialize(json.dumps(ent))
-                except Exception:
-                    for k, v in ent.items():
-                        try:
-                            setattr(e, k, v)
-                        except Exception:
-                            pass
-                normalized.append(e)
-            else:
-                e = InitEntity()
-                try:
-                    e.name = str(ent)
-                except Exception:
-                    e.name = ""
-                normalized.append(e)
-        init_data.entities = normalized
 
         # 针对 .ri 3#地精 这种用法简化一下输出(会产生3次一样的roll_res)
         final_result_dict: Dict[str, Tuple[List[str], int]] = {}
