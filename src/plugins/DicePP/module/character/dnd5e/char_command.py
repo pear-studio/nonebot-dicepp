@@ -6,20 +6,20 @@ from typing import List, Tuple, Any, Optional
 import re
 
 from core.bot import Bot
-from core.data import DataChunkBase, custom_data_chunk, DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
-from module.character.dnd5e import DNDCharInfo, gen_template_char
+from core.data.models import DNDCharacter
+from module.character.dnd5e.services import CharacterService, HPService, gen_template_char
 
 LOC_CHAR_SET = "char_set"
 LOC_CHAR_MISS = "char_miss"
 LOC_CHAR_DEL = "char_delete"
 LOC_CHECK_RES = "check_result"
 
-DC_CHAR_DND = "character_dnd"
+DC_CHAR_DND = "character_dnd"  # 保留常量供 hp_command.py 的 search_target 识别
 
 CMD_TYPE_CHAR = "char"
 CMD_TYPE_STATE = "state"
@@ -28,12 +28,6 @@ CMD_TYPE_SAVING = "check_saving"
 CMD_TYPE_ATTACK = "check_attack"
 CMD_TYPE_HP_DICE = "hp_dice"
 CMD_TYPE_REST_LONG = "rest_long"
-
-
-@custom_data_chunk(identifier=DC_CHAR_DND, include_json_object=True)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
 
 
 @custom_user_command(readable_name="DND5E角色卡", priority=DPP_COMMAND_PRIORITY_DEFAULT+10,
@@ -110,37 +104,34 @@ class CharacterDNDCommand(UserCommandBase):
         # 解析语句
         cmd_type: str = hint[0]
         feedback: str = ""
-        # 获取当前角色卡
-        char_info: Optional[DNDCharInfo]
-        try:
-            char_info = self.bot.data_manager.get_data(DC_CHAR_DND, [meta.group_id, meta.user_id])
-        except DataManagerError:
-            char_info = None
+
+        # 从 SQLite 读取角色卡
+        char_info: Optional[DNDCharacter] = await self.bot.db.characters_dnd.get(
+            meta.group_id, meta.user_id
+        )
 
         if cmd_type == CMD_TYPE_CHAR:
             content: str = hint[1]
             if not content:  # 查看角色卡
-                if not char_info:
+                if not char_info or not char_info.is_init:
                     feedback = self.format_loc(LOC_CHAR_MISS)
                 else:
                     feedback = char_info.get_char_info()
 
             elif content.startswith("记录"):  # 记录角色卡
                 content = content[2:].strip()
-                char_info = DNDCharInfo()
                 try:
-                    char_info.initialize(content)
-                    self.bot.data_manager.set_data(DC_CHAR_DND, [meta.group_id, meta.user_id], char_info)
+                    new_char = CharacterService.parse(content, meta.group_id, meta.user_id)
+                    await self.bot.db.characters_dnd.save(new_char)
                     feedback = self.format_loc(LOC_CHAR_SET)
+                    # 设置昵称
+                    if new_char.name:
+                        self.bot.update_nickname(meta.user_id, meta.group_id, new_char.name)
                 except AssertionError as e:
-                    char_info = None
                     feedback = e.args[0]
-                # 设置昵称
-                if char_info and char_info.name:
-                    self.bot.update_nickname(meta.user_id, meta.group_id, char_info.name)
 
             elif content.startswith("清除"):  # 清除角色卡
-                self.bot.data_manager.delete_data(DC_CHAR_DND, [meta.group_id, meta.user_id], ignore_miss=True)
+                await self.bot.db.characters_dnd.delete(meta.group_id, meta.user_id)
                 feedback = self.format_loc(LOC_CHAR_DEL)
 
             elif content.startswith("模板"):  # 查看角色卡模板
@@ -150,7 +141,7 @@ class CharacterDNDCommand(UserCommandBase):
                 feedback = "可用的角色卡指令: [记录, 清除, 模板]"
 
         elif cmd_type == CMD_TYPE_STATE:  # 查看角色卡状态
-            if not char_info:
+            if not char_info or not char_info.is_init:
                 feedback = self.format_loc(LOC_CHAR_MISS)
             else:
                 feedback = char_info.hp_info.get_info()
@@ -166,7 +157,7 @@ class CharacterDNDCommand(UserCommandBase):
             if mod_str.startswith("劣势"):
                 advantage = -1
                 mod_str = mod_str[2:]
-            if not char_info:
+            if not char_info or not char_info.is_init:
                 feedback = self.format_loc(LOC_CHAR_MISS)
             else:
                 check_result_list: List[str] = []
@@ -175,9 +166,12 @@ class CharacterDNDCommand(UserCommandBase):
                 if check_name == "先攻":
                     time = 1
                 try:
+                    from module.character.dnd5e.services import AbilityService
                     hint_str = ""
                     for t in range(time):
-                        hint_str, result_str, result_val = char_info.ability_info.perform_check(check_name, advantage, mod_str)
+                        hint_str, result_str, result_val = AbilityService.perform_check(
+                            char_info.ability_info, check_name, advantage, mod_str
+                        )
                         check_result_list.append(result_str)
                         check_value_list.append(result_val)
                     name_str = char_info.name
@@ -205,17 +199,18 @@ class CharacterDNDCommand(UserCommandBase):
 
         elif cmd_type == CMD_TYPE_HP_DICE:  # 使用生命骰
             time = hint[1]
-            if not char_info:
+            if not char_info or not char_info.is_init:
                 feedback = self.format_loc(LOC_CHAR_MISS)
             else:
-                feedback = char_info.use_hp_dice(time)
-                self.bot.data_manager.set_data(DC_CHAR_DND, [meta.group_id, meta.user_id], char_info)
+                feedback = CharacterService.use_hp_dice(char_info, time)
+                await self.bot.db.characters_dnd.save(char_info)
+
         elif cmd_type == CMD_TYPE_REST_LONG:  # 进行长休
-            if not char_info:
+            if not char_info or not char_info.is_init:
                 feedback = self.format_loc(LOC_CHAR_MISS)
             else:
                 feedback = char_info.long_rest()
-                self.bot.data_manager.set_data(DC_CHAR_DND, [meta.group_id, meta.user_id], char_info)
+                await self.bot.db.characters_dnd.save(char_info)
 
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
