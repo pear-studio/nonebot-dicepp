@@ -18,7 +18,6 @@ from .character import (
 )
 from .extended import (
     UserNickname,
-    UserPoint,
     GroupConfig,
     GroupActivate,
     GroupWelcome,
@@ -47,7 +46,6 @@ __all__ = [
     "COCCharacter",
     # 扩展模型
     "UserNickname",
-    "UserPoint",
     "GroupConfig",
     "GroupActivate",
     "GroupWelcome",

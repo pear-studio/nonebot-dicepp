@@ -10,7 +10,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_FUNC_DISABLE
-from module.common import try_use_point, DC_GROUPCONFIG
+from module.common import DC_GROUPCONFIG
 
 from module.roll import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, sift_roll_exp_and_reason, RollDiceError
 from module.roll.default_dice import (
@@ -44,8 +44,6 @@ LOC_ROLL_EXP = "roll_exp"
 
 CFG_ROLL_ENABLE = "roll_enable"
 CFG_ROLL_HIDE_ENABLE = "roll_hide_enable"
-CFG_ROLL_EXP_COST = "roll_exp_cost"
-
 MULTI_ROLL_LIMIT = 10  # 多轮掷骰上限次数
 
 
@@ -99,7 +97,6 @@ class RollDiceCommand(UserCommandBase):
 
         bot.cfg_helper.register_config(CFG_ROLL_ENABLE, "1", "掷骰指令开关")
         bot.cfg_helper.register_config(CFG_ROLL_HIDE_ENABLE, "1", "暗骰指令开关(暗骰会发送私聊信息, 可能增加风控风险)")
-        bot.cfg_helper.register_config(CFG_ROLL_EXP_COST, "10", "计算掷骰表达式期望(.rexp)所花费的点数")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".r")
@@ -287,21 +284,14 @@ class RollDiceCommand(UserCommandBase):
         port = GroupMessagePort(meta.group_id) if not is_hidden and meta.group_id else PrivateMessagePort(meta.user_id)
 
         if compute_exp:  # 计算期望走单独的流程
-            # 尝试扣除点数
-            cost_point = int(self.bot.cfg_helper.get_config(CFG_ROLL_EXP_COST)[0])
-            res = try_use_point(self.bot, meta.user_id, cost_point)
-            # 点数不足
-            if res:
-                return [BotSendMsgCommand(self.bot.account, res, [port])]
-            else:
-                async def roll_exp_task():
-                    exp_result = await get_roll_exp_result(exp)
-                    exp_feedback = self.format_loc(LOC_ROLL_EXP, expression=exp.get_result().get_exp(), expectation=exp_result)
-                    return [BotSendMsgCommand(self.bot.account, exp_feedback, [port])]
-                self.bot.register_task(roll_exp_task, timeout=30, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "计算超时!", [port])])
+            async def roll_exp_task():
+                exp_result = await get_roll_exp_result(exp)
+                exp_feedback = self.format_loc(LOC_ROLL_EXP, expression=exp.get_result().get_exp(), expectation=exp_result)
+                return [BotSendMsgCommand(self.bot.account, exp_feedback, [port])]
+            self.bot.register_task(roll_exp_task, timeout=30, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "计算超时!", [port])])
 
-                feedback = self.format_loc(LOC_ROLL_EXP_START)
-                return [BotSendMsgCommand(self.bot.account, feedback, [port])]
+            feedback = self.format_loc(LOC_ROLL_EXP_START)
+            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
         # 得到结果字符串
         if len(res_list) > 1:

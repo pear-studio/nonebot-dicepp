@@ -9,12 +9,9 @@ from .log_repository import LogRepository
 from .models import (
     UserKarma,
     InitList,
-    Macro,
-    Variable,
     DNDCharacter,
     COCCharacter,
     UserNickname,
-    UserPoint,
     GroupConfig,
     GroupActivate,
     GroupWelcome,
@@ -40,13 +37,10 @@ class BotDatabase:
 
         self._karma: Optional[Repository[UserKarma]] = None
         self._initiative: Optional[Repository[InitList]] = None
-        self._macro: Optional[Repository[Macro]] = None
-        self._variable: Optional[Repository[Variable]] = None
         self._characters_dnd: Optional[Repository[DNDCharacter]] = None
         self._characters_coc: Optional[Repository[COCCharacter]] = None
         self._log: Optional[LogRepository] = None
         self._nickname: Optional[Repository[UserNickname]] = None
-        self._point: Optional[Repository[UserPoint]] = None
         self._group_config: Optional[Repository[GroupConfig]] = None
         self._group_activate: Optional[Repository[GroupActivate]] = None
         self._group_welcome: Optional[Repository[GroupWelcome]] = None
@@ -71,18 +65,6 @@ class BotDatabase:
         return self._initiative
 
     @property
-    def macro(self) -> Repository[Macro]:
-        if self._macro is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return self._macro
-
-    @property
-    def variable(self) -> Repository[Variable]:
-        if self._variable is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return self._variable
-
-    @property
     def characters_dnd(self) -> Repository[DNDCharacter]:
         if self._characters_dnd is None:
             raise RuntimeError("Database not connected. Call connect() first.")
@@ -105,12 +87,6 @@ class BotDatabase:
         if self._nickname is None:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._nickname
-
-    @property
-    def point(self) -> Repository[UserPoint]:
-        if self._point is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return self._point
 
     @property
     def group_config(self) -> Repository[GroupConfig]:
@@ -197,13 +173,10 @@ class BotDatabase:
 
         self._karma = None
         self._initiative = None
-        self._macro = None
-        self._variable = None
         self._characters_dnd = None
         self._characters_coc = None
         self._log = None
         self._nickname = None
-        self._point = None
         self._group_config = None
         self._group_activate = None
         self._group_welcome = None
@@ -226,16 +199,6 @@ class BotDatabase:
         )
         await self._initiative._ensure_table()
 
-        self._macro = Repository[Macro](
-            self._db, Macro, "macro", ["user_id", "name"]
-        )
-        await self._macro._ensure_table()
-
-        self._variable = Repository[Variable](
-            self._db, Variable, "variable", ["user_id", "name"]
-        )
-        await self._variable._ensure_table()
-
         self._characters_dnd = Repository[DNDCharacter](
             self._db, DNDCharacter, "characters_dnd", ["group_id", "user_id"]
         )
@@ -253,11 +216,6 @@ class BotDatabase:
             self._db, UserNickname, "nickname", ["user_id", "group_id"]
         )
         await self._nickname._ensure_table()
-
-        self._point = Repository[UserPoint](
-            self._db, UserPoint, "point", ["user_id"]
-        )
-        await self._point._ensure_table()
 
         self._group_config = Repository[GroupConfig](
             self._db, GroupConfig, "group_config", ["group_id"]

@@ -7,8 +7,6 @@ from plugins.DicePP.core.data.models import (
     InitList,
     LogSession,
     LogRecord,
-    Macro,
-    Variable,
     DNDCharacter,
     COCCharacter,
     HPInfo,
@@ -16,7 +14,6 @@ from plugins.DicePP.core.data.models import (
 )
 from plugins.DicePP.core.data.models.extended import (
     UserNickname,
-    UserPoint,
     GroupConfig,
     GroupActivate,
     GroupWelcome,
@@ -111,21 +108,6 @@ class TestLogModel:
         assert record.content == "Hello"
 
 
-class TestMacroModel:
-    def test_create(self):
-        macro = Macro(user_id="user1", name="test", content="{d20}")
-        assert macro.user_id == "user1"
-        assert macro.name == "test"
-        assert macro.content == "{d20}"
-
-
-class TestVariableModel:
-    def test_create(self):
-        variable = Variable(user_id="user1", name="counter", value=10)
-        assert variable.user_id == "user1"
-        assert variable.value == 10
-
-
 class TestDNDCharacterModel:
     def test_create(self):
         character = DNDCharacter(group_id="group1", user_id="user1", name="TestChar")
@@ -206,11 +188,6 @@ class TestExtendedModels:
         nick = UserNickname(user_id="user1", group_id="group1", nickname="TestNick")
         json_str = nick.model_dump_json()
         assert "TestNick" in json_str
-
-    def test_user_point(self):
-        point = UserPoint(user_id="user1", cur_point=100, today_point=50)
-        assert point.cur_point == 100
-        assert point.today_point == 50
 
     def test_group_config(self):
         cfg = GroupConfig(group_id="group1", data={"key": "value"})
