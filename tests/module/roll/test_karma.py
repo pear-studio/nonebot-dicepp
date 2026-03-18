@@ -190,41 +190,42 @@ class TestKarmaCommand(IsolatedAsyncioTestCase):
                     os.rmdir(os.path.join(root, name))
             os.rmdir(test_path)
 
-    async def _send_msg(self, msg: str, group_id: str = "test_group"):
+    async def _send_msg(self, msg: str, group_id: str = "test_group", permission: int = 1):
         from core.communication import MessageMetaData, MessageSender
         meta = MessageMetaData(msg, msg, MessageSender("user1", "User"), group_id, False)
+        meta.permission = permission
         return await self.bot.process_message(msg, meta)
 
     async def test_enable_disable(self):
-        cmds = await self._send_msg(".karma on")
+        cmds = await self._send_msg(".karmadice on")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("开启", result)
 
-        cmds = await self._send_msg(".karma off")
+        cmds = await self._send_msg(".karmadice off")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("关闭", result)
 
     async def test_set_mode(self):
-        await self._send_msg(".karma on")
-        cmds = await self._send_msg(".karma mode hero")
+        await self._send_msg(".karmadice on")
+        cmds = await self._send_msg(".karmadice mode hero")
         result = "\n".join([str(c) for c in cmds])
-        self.assertIn("hero", result.lower())
+        self.assertIn("主角光环", result)
 
     async def test_set_engine(self):
-        await self._send_msg(".karma on")
-        cmds = await self._send_msg(".karma engine precise")
+        await self._send_msg(".karmadice on")
+        cmds = await self._send_msg(".karmadice engine precise")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("精确", result)
 
     async def test_status(self):
-        await self._send_msg(".karma on")
-        cmds = await self._send_msg(".karma status")
+        await self._send_msg(".karmadice on")
+        cmds = await self._send_msg(".karmadice status")
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(result) > 0)
 
     async def test_reset_history(self):
-        await self._send_msg(".karma on")
+        await self._send_msg(".karmadice on")
         await self._send_msg(".r")
-        cmds = await self._send_msg(".karma reset")
+        cmds = await self._send_msg(".karmadice reset")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("清空", result)
