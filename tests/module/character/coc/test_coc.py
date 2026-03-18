@@ -1,5 +1,6 @@
 import unittest
 import pytest
+from unittest.async_case import IsolatedAsyncioTestCase
 
 import sys
 from pathlib import Path
@@ -132,19 +133,18 @@ class TestCocMoney(unittest.TestCase):
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Test uses async process_message without await")
-class TestCocCharCommand(unittest.TestCase):
-    def setUp(self):
+class TestCocCharCommand(IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
         from core.bot import Bot
         from core.config import ConfigItem, CFG_MASTER
 
         self.bot = Bot("test_coc_bot")
         self.bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
         self.bot.cfg_helper.save_config()
-        self.bot.delay_init_debug()
+        await self.bot.delay_init_command()
 
-    def tearDown(self):
-        self.bot.shutdown_debug()
+    async def asyncTearDown(self):
+        await self.bot.shutdown_async()
         import os
         test_path = self.bot.data_path
         if os.path.exists(test_path):
@@ -155,18 +155,18 @@ class TestCocCharCommand(unittest.TestCase):
                     os.rmdir(os.path.join(root, name))
             os.rmdir(test_path)
 
-    def _send_msg(self, msg: str, group_id: str = "test_group", user_id: str = "user1"):
+    async def _send_msg(self, msg: str, group_id: str = "test_group", user_id: str = "user1"):
         from core.communication import MessageMetaData, MessageSender
         meta = MessageMetaData(msg, msg, MessageSender(user_id, "User"), group_id, False)
-        return self.bot.process_message(msg, meta)
+        return await self.bot.process_message(msg, meta)
 
-    def test_char_record_and_query(self):
-        cmds = self._send_msg(".coc7 1d 10 14 12 16 15 13 12")
+    async def test_char_record_and_query(self):
+        cmds = await self._send_msg(".coc7 1d 10 14 12 16 15 13 12")
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(result) > 0)
 
-    def test_skill_check(self):
-        self._send_msg(".coc7 1d 10 14 12 16 15 13 12")
-        cmds = self._send_msg(".侦察")
+    async def test_skill_check(self):
+        await self._send_msg(".coc7 1d 10 14 12 16 15 13 12")
+        cmds = await self._send_msg(".侦察")
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(result) > 0)

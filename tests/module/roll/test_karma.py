@@ -1,5 +1,6 @@
 import unittest
 import pytest
+from unittest.async_case import IsolatedAsyncioTestCase
 
 from module.roll.karma_manager import KarmaConfig, KarmaState, DEFAULT_WINDOW, DEFAULT_PERCENTAGE
 
@@ -167,19 +168,18 @@ class TestKarmaEngines(unittest.TestCase):
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Test uses async process_message without await")
-class TestKarmaCommand(unittest.TestCase):
-    def setUp(self):
+class TestKarmaCommand(IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
         from core.bot import Bot
         from core.config import ConfigItem, CFG_MASTER
 
         self.bot = Bot("test_karma_cmd_bot")
         self.bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
         self.bot.cfg_helper.save_config()
-        self.bot.delay_init_debug()
+        await self.bot.delay_init_command()
 
-    def tearDown(self):
-        self.bot.shutdown_debug()
+    async def asyncTearDown(self):
+        await self.bot.shutdown_async()
         import os
         test_path = self.bot.data_path
         if os.path.exists(test_path):
@@ -190,41 +190,41 @@ class TestKarmaCommand(unittest.TestCase):
                     os.rmdir(os.path.join(root, name))
             os.rmdir(test_path)
 
-    def _send_msg(self, msg: str, group_id: str = "test_group"):
+    async def _send_msg(self, msg: str, group_id: str = "test_group"):
         from core.communication import MessageMetaData, MessageSender
         meta = MessageMetaData(msg, msg, MessageSender("user1", "User"), group_id, False)
-        return self.bot.process_message(msg, meta)
+        return await self.bot.process_message(msg, meta)
 
-    def test_enable_disable(self):
-        cmds = self._send_msg(".karma on")
+    async def test_enable_disable(self):
+        cmds = await self._send_msg(".karma on")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("开启", result)
 
-        cmds = self._send_msg(".karma off")
+        cmds = await self._send_msg(".karma off")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("关闭", result)
 
-    def test_set_mode(self):
-        self._send_msg(".karma on")
-        cmds = self._send_msg(".karma mode hero")
+    async def test_set_mode(self):
+        await self._send_msg(".karma on")
+        cmds = await self._send_msg(".karma mode hero")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("hero", result.lower())
 
-    def test_set_engine(self):
-        self._send_msg(".karma on")
-        cmds = self._send_msg(".karma engine precise")
+    async def test_set_engine(self):
+        await self._send_msg(".karma on")
+        cmds = await self._send_msg(".karma engine precise")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("精确", result)
 
-    def test_status(self):
-        self._send_msg(".karma on")
-        cmds = self._send_msg(".karma status")
+    async def test_status(self):
+        await self._send_msg(".karma on")
+        cmds = await self._send_msg(".karma status")
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(result) > 0)
 
-    def test_reset_history(self):
-        self._send_msg(".karma on")
-        self._send_msg(".r")
-        cmds = self._send_msg(".karma reset")
+    async def test_reset_history(self):
+        await self._send_msg(".karma on")
+        await self._send_msg(".r")
+        cmds = await self._send_msg(".karma reset")
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("清空", result)

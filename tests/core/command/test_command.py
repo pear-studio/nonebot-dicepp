@@ -14,17 +14,15 @@ from src.plugins.DicePP import GroupMemberInfo, GroupInfo
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Test references non-existent attributes - pre-existing issue")
 class MyTestCase(IsolatedAsyncioTestCase):
     test_bot = None
     test_proxy = None
     test_index = 0
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.test_bot = Bot("test_bot")
-        cls.test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
-        cls.test_bot.cfg_helper.save_config()
+    async def asyncSetUp(self) -> None:
+        self.test_bot = Bot("test_bot")
+        self.test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
+        self.test_bot.cfg_helper.save_config()
 
         class TestProxy(ClientProxy):
             def __init__(self):
@@ -50,16 +48,15 @@ class MyTestCase(IsolatedAsyncioTestCase):
             async def get_group_member_info(self, group_id: str, user_id: str) -> GroupMemberInfo:
                 return GroupMemberInfo("DumbId", "DumbId")
 
-        cls.test_proxy = TestProxy()
-        cls.test_bot.set_client_proxy(cls.test_proxy)
-        cls.test_bot.delay_init_debug()
-        cls.test_proxy.mute = True
+        self.test_proxy = TestProxy()
+        self.test_bot.set_client_proxy(self.test_proxy)
+        await self.test_bot.delay_init_command()
+        self.test_proxy.mute = True
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.test_bot.shutdown_debug()
+    async def asyncTearDown(self) -> None:
+        await self.test_bot.shutdown_async()
 
-        test_path = cls.test_bot.data_path
+        test_path = self.test_bot.data_path
         if os.path.exists(test_path):
             for root, dirs, files in os.walk(test_path, topdown=False):
                 for name in files:
