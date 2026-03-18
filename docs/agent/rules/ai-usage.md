@@ -16,7 +16,7 @@ uv run python bot.py                       # 运行
 
 ## 测试
 
-- 运行指令: scripts\test\run\_unit\_test.bat, 需要一点时间, 不要重复执行
+- 使用技能run-tests
 
 ## 风格
 

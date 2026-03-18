@@ -19,18 +19,7 @@ Run tests for the DicePP project to validate implementation correctness.
 
 **Steps**
 
-1. **Check Python environment**
-
-   Verify Python is available:
-   ```powershell
-   python --version
-   ```
-
-   If Python is not available:
-   - Add CRITICAL issue: "Python not found"
-   - Recommendation: "Install Python 3.10+ and ensure it's in PATH"
-
-2. **Check dependencies**
+1. **Check dependencies**
 
    Verify pytest is installed:
    ```powershell
@@ -40,7 +29,7 @@ Run tests for the DicePP project to validate implementation correctness.
    If pytest is not installed:
    - Recommendation: "Run: uv pip install '.[dev]'"
 
-3. **Run All Tests**
+2. **Run All Tests**
 
    Execute pytest:
    ```powershell
@@ -60,7 +49,7 @@ Run tests for the DicePP project to validate implementation correctness.
      - List failing tests
      - Recommendation: "Fix failing tests before continuing"
 
-4. **Run Specific Module Tests**
+3. **Run Specific Module Tests**
 
    To test a specific module:
    ```powershell
@@ -74,7 +63,7 @@ Run tests for the DicePP project to validate implementation correctness.
    uv run pytest tests/core/ -v
    ```
 
-5. **Run Coverage Report**
+4. **Run Coverage Report**
 
    Execute pytest with coverage:
    ```powershell
@@ -85,7 +74,7 @@ Run tests for the DicePP project to validate implementation correctness.
    - Report coverage percentage
    - List uncovered lines if below threshold
 
-6. **Generate Test Report**
+5. **Generate Test Report**
 
    Create a summary report:
 
@@ -137,3 +126,11 @@ uv run pytest tests/module/roll/test_karma.py -v
 - Coverage should be maintained or improved
 
 If tests fail, report specific failing tests and suggest fixes.
+
+**Important Note**
+
+测试运行需要一定时间（约1分钟），请耐心等待测试完成后再查看结果。
+
+在 Trae IDE 中运行测试时，输出可能会以"实时滚动"的方式显示，只显示最新的一行内容。这是正常的输出行为，不代表内容被截断。请等待测试完全结束后再读取完整结果。
+
+如果需要保存完整输出用于后续分析，可以使用重定向
