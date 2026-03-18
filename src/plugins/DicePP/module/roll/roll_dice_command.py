@@ -3,7 +3,8 @@ import asyncio
 import math
 
 from core.bot import Bot
-from core.data import DC_USER_DATA, DC_GROUP_DATA, DCK_USER_STAT, DCK_GROUP_STAT, DataManagerError
+from core.data import DC_USER_DATA, DC_GROUP_DATA, DCK_USER_STAT, DCK_GROUP_STAT
+from core.data.manager import DataManagerError
 from core.statistics import UserStatInfo, GroupStatInfo
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command

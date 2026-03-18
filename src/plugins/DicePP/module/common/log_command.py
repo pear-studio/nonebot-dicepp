@@ -12,7 +12,8 @@ except Exception:  # pragma: no cover
     requests = None
 
 from core.bot import Bot
-from core.data import DataManagerError, DataChunkBase, custom_data_chunk
+from core.data import DataChunkBase, custom_data_chunk
+from core.data.manager import DataManagerError
 from core.config import CFG_MASTER
 from core.command.const import *
 from core.command import BotCommandBase, BotSendFileCommand, BotSendMsgCommand

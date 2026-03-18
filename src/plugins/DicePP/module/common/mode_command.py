@@ -80,9 +80,9 @@ class ModeCommand(UserCommandBase):
         data_path = os.path.join(DATA_PATH, MODE_FILE_PATH)
         if os.path.exists(data_path):
             wb = openpyxl.load_workbook(data_path)
-            id_list = wb.get_sheet_names()
+            id_list = wb.sheetnames
             if bot_id in id_list:
-                ws = wb.get_sheet_by_name(bot_id)
+                ws = wb[bot_id]
                 for row in ws:
                     if str(row[0].value) == "mode":
                         self.mode_field = [str(cell.value) for cell in row]

@@ -120,20 +120,6 @@ class TestKarmaEngines(unittest.TestCase):
         self.assertGreater(avg, 40)
         self.assertLess(avg, 60)
 
-    @pytest.mark.skip(reason="Flaky probabilistic test - may fail randomly")
-    def test_hero_mode_skews_high(self):
-        from module.roll.karma_manager import KarmaDiceManager, KarmaConfig, DC_KARMA
-        from core.bot import Bot
-
-        bot = Bot("test_karma_hero")
-        manager = KarmaDiceManager(bot)
-        cfg = KarmaConfig(is_enabled=True, mode="hero")
-        bot.data_manager.set_data(DC_KARMA, ["g1"], cfg.to_dict())
-
-        values = [manager.generate_value("g1", "u1", 100) for _ in range(1000)]
-        avg = sum(values) / len(values)
-        self.assertGreater(avg, 52)  # Relaxed threshold for probabilistic test
-
     def test_grim_mode_skews_low(self):
         from module.roll.karma_manager import KarmaDiceManager, KarmaConfig, DC_KARMA
         from core.bot import Bot

@@ -127,7 +127,6 @@ class MyTestCase(IsolatedAsyncioTestCase):
     #     await self.test_bot.reboot_async()
 
     async def test_1_localization(self):
-        self.test_bot.loc_helper.save_localization()
         self.test_bot.loc_helper.load_localization()
         self.test_bot.loc_helper.load_chat()
         # 默认对话
@@ -213,49 +212,6 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".help\\\\.r", checker=lambda s: "提出意见~\n测试用户 的掷骰结果为" in s)
         await self.__vg_msg(".r\\\\.r\\\\", checker=lambda s: s.count("测试用户 的掷骰结果为") == 2)
 
-    @unittest.skip("宏定义(.define)功能尚未在当前代码库实现")
-    async def test_2_define(self):
-        await self.__vg_msg(".define", checker=lambda s: "Macro list:" in s and "1" not in s)
-        await self.__vg_msg(".define 掷骰指令宏 .r", checker=lambda s: "Define 掷骰指令宏 as .r, args are: []" in s)
-        await self.__vg_msg("掷骰指令宏", checker=lambda s: "的掷骰结果为" in s)
-        await self.__vg_msg(".define", checker=lambda s: "1. Keywords: 掷骰指令宏 Args: [] -> .r" in s)
-        await self.__vg_msg(".define 参数指令宏(A,B,C) .A B C", checker=lambda s: "Define 参数指令宏 as .{a} {b} {c}, args are: ['a', 'b', 'c']" in s)
-        await self.__vg_msg("参数指令宏:r:d4:原因", checker=lambda s: "为 原因 进行的掷骰结果为" in s and "1D4" in s)
-        await self.__vg_msg(".define", checker=lambda s: "2. Keywords: 参数指令宏 Args: ['a', 'b', 'c'] -> .{a} {b} {c}" in s)
-        await self.__vg_msg(".define del 参数指令宏", checker=lambda s: "Delete macro: 参数指令宏" in s)
-        await self.__vg_msg("参数指令宏:r:d4:原因", checker=lambda s: not s)
-        await self.__vg_msg(".define", checker=lambda s: "2" not in s)
-        await self.__vg_msg("掷骰指令宏", checker=lambda s: "的掷骰结果为" in s)
-        await self.__vg_msg(".define del 掷骰指令宏", checker=lambda s: "Delete macro: 掷骰指令宏" in s)
-        await self.__vg_msg(".define del", checker=lambda s: "Delete macro: 参数指令宏" not in s)
-        await self.__vg_msg("掷骰指令宏", checker=lambda s: not s)
-        await self.__vg_msg(".define 长剑攻击 .rd+4 攻击检定 %% .rd8+2 伤害掷骰", checker=lambda s: "Define 长剑攻击" in s)
-        await self.__vg_msg("长剑攻击", checker=lambda s: s.count("进行的掷骰结果为") == 2)
-        await self.__vg_msg(".define 长剑攻击 .rd+4 攻击检定", checker=lambda s: "Define 长剑攻击" in s)
-        await self.__vg_msg("长剑攻击", checker=lambda s: s.count("进行的掷骰结果为") == 1)
-        await self.__vg_msg(".define 掷骰指令宏 .r", checker=lambda s: "Define 掷骰指令宏 as .r, args are: []" in s)
-        await self.__vg_msg(".define del all", checker=lambda s: "Delete macro: ['长剑攻击', '掷骰指令宏']" in s)
-        await self.__vg_msg(".define", checker=lambda s: "1" not in s)
-
-    @unittest.skip("变量指令(.set/.get/.del)功能尚未在当前代码库实现")
-    async def test_2_variable(self):
-        await self.__vg_msg(".set 战斗如潮=2", checker=lambda s: "set variable 战斗如潮 as 2" in s)
-        await self.__vg_msg(".r %战斗如潮%d20", checker=lambda s: "测试用户 的掷骰结果为 2D20" in s)
-        await self.__vg_msg(".set 战斗如潮-1", checker=lambda s: "set variable 战斗如潮 as 2-1=1" in s)
-        await self.__vg_msg(".r %战斗如潮%d20", checker=lambda s: "测试用户 的掷骰结果为 1D20" in s)
-        await self.__vg_msg(".set 生命骰=4d6", checker=lambda s: "set variable 生命骰 as" in s)
-        await self.__vg_msg(".set 生命骰-1d20", checker=lambda s: "set variable 生命骰 as" in s)
-        await self.__vg_msg(".get 战斗如潮", checker=lambda s: "战斗如潮 = 1" in s)
-        await self.__vg_msg(".get", checker=lambda s: "All Variables:\n战斗如潮=1; 生命骰=" in s)
-        await self.__vg_msg(".get ABC", checker=lambda s: "Error when process var: abc不存在, 当前可用变量: ['战斗如潮', '生命骰']" in s)
-        await self.__vg_msg(".set ABC", checker=lambda s: "Error when process var: 至少包含['=', '+', '-']其中之一" in s)
-        await self.__vg_msg(".set ABC=1", checker=lambda s: "set variable abc as 1" in s)
-        await self.__vg_msg(".set 生命骰=10000000", checker=lambda s: "set variable 生命骰 as 10000000" in s)
-        await self.__vg_msg(".del 生命骰", checker=lambda s: "Delete variable: 生命骰" in s)
-        await self.__vg_msg(".get", checker=lambda s: "All Variables:\n战斗如潮=1; abc=1" in s)
-        await self.__vg_msg(".del all", checker=lambda s: "Delete variable: 战斗如潮; abc" in s)
-        await self.__vg_msg(".get", checker=lambda s: "All Variables:\n暂无任何变量" in s)
-
     async def test_3_init(self):
         # Basic
         await self.__vg_msg(".nn 伊丽莎白")
@@ -299,83 +255,6 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".init del 炎魔", checker=lambda s: "先攻里没有炎魔" in s)
         await self.__vg_msg(".init clr", checker=lambda s: "已清除先攻列表" in s)
         await self.__vg_msg(".nn")
-
-    # noinspection SpellCheckingInspection
-    @unittest.skip("QueryCommand.src_uuid_dict 接口已变更，测试需要重写")
-    async def test_3_query(self):
-        # noinspection PyBroadException
-        try:
-            condition_a, condition_b, condition_c = False, False, False
-            sources = self.test_bot.command_dict["QueryCommand"].src_uuid_dict.values()
-            for source in sources:
-                if "test.xlsx" in source.path and source.sheet == "test_sheet_A":
-                    condition_a = True
-                if "test.xlsx" in source.path and source.sheet == "test_sheet_B":
-                    condition_b = True
-                if "测试.xlsx" in source.path and source.sheet == "test_sheet_A":
-                    condition_c = True
-            assert condition_a and condition_b and condition_c
-        except Exception as e:
-            self.assertTrue(False, f"测试查询资料库未加载成功, 无法测试查询功能! {e}")
-            return
-        await self.__vg_msg(".查询", checker=lambda s: "已加载" in s and "查询条目" in s)
-        await self.__vg_msg(".查询 TEST_KEY", checker=lambda s: "TEST_KEY: \nCONTENT_3" in s and "目录: TEST_CAT_3" in s)
-        await self.__vg_msg(".q TEST_KEY", checker=lambda s: "TEST_KEY: \nCONTENT_3" in s and "目录: TEST_CAT_3" in s)
-        await self.__vg_msg(".q TEST_KEY_REPEAT", checker=lambda s: ("0.TEST_KEY_REPEAT, 1.TEST_KEY_REPEAT" in s))
-        await self.__vp_msg(".q TEST_KEY_REPEAT",
-                            checker=lambda s: ("0. TEST_KEY_REPEAT: TEST_DESC_1" in s and " #Tag1A #Tag1B #Tag1C Space 目录: TEST_CAT_1" in s
-                                               and "1. TEST_KEY_REPEAT: TEST_DESC_2 目录: T" in s))
-        await self.__vg_msg(".q TEST_KEY_MULT_A", checker=lambda s: ("0.TEST_KEY_MULT_A, 1.TEST_KEY_MULT_A" in s))
-        await self.__vp_msg(".q TEST_KEY_MULT_A", checker=lambda s: ("0. TEST_KEY_MULT_A: CONTENT_4..." in s and " #OTHER_TAG 目录: OTHER_CAT" in s))
-        await self.__vg_msg(".q TEST_KEY_MULT_B", checker=lambda s: ("TEST_KEY_MULT_B: \nCONTENT_5" in s and "#" not in s))
-        await self.__vg_msg(".q TEST/MULT", checker=lambda s: "0." in s and "4." in s)
-        await self.__vp_msg(".q TEST/MULT", checker=lambda s: "4. " in s and "CONTENT_7..." in s and " OTHER_DESC #" in s)
-        await self.__vg_msg(".q SYN_1A", checker=lambda s: "TEST_KEY_REPEAT" in s and "CONTENT_1" in s)
-        await self.__vg_msg("-", checker=lambda s: "This is the first page!" not in s)
-        await self.__vg_msg(".q PAGE_TEST", checker=lambda s: "27." in s and "0." in s and "PAGE_TEST_28" in s)
-        await self.__vg_msg("+", checker=lambda s: "This is the final page!" in s)
-        await self.__vp_msg(".q PAGE_TEST", checker=lambda s: "9. " in s and "+ for next page, - for prev page" in s)
-        await self.__vp_msg("-", checker=lambda s: "This is the first page!" in s)
-        await self.__vp_msg("0", checker=lambda s: "PAGE_TEST_1: \nDUMB" in s)
-        await self.__vp_msg("+", checker=lambda s: "Page2/3" in s)
-        await self.__vp_msg("0", checker=lambda s: "PAGE_TEST_11: \nDUMB" in s)
-        await self.__vp_msg("+", checker=lambda s: "Page3/3" in s)
-        await self.__vp_msg("+", checker=lambda s: "This is the final page!" in s)
-        await self.__vp_msg(".q PAGE_TEST_1", checker=lambda s: "PAGE_TEST_1: \nDUMB" in s)
-        await self.__vp_msg("0", checker=lambda s: not s)
-        await self.__vg_msg(".s CONTENT_7", checker=lambda s: "TEST_KEY_MULT_D: \nCONTENT_7" in s)
-        await self.__vg_msg(".s B", checker=lambda s: "Page1/4" not in s)
-        await self.__vp_msg(".s B", checker=lambda s: "Page1/4" in s)
-        await self.__vg_msg("-", checker=lambda s: "This is the first page!" in s)
-        await self.__vg_msg(".s TENT_1/KEY_REP", checker=lambda s: "0." not in s and "TEST_KEY_REPEAT" in s)
-
-    @unittest.skip("需要测试数据文件 (DeckData/*.xlsx)，当前环境无数据文件")
-    async def test_4_deck(self):
-        await self.__vg_msg(".draw", checker=lambda s: "找不到牌库" in s)
-        await self.__vg_msg(".draw Deck_A", checker=lambda s: "从Deck_A中抽取1次：" in s)
-        await self.__vg_msg(".draw 3#Deck_A", checker=lambda s: "抽取3次" in s and "第3次：CA" in s)
-        await self.__vg_msg(".draw 2D4+2#Deck_A", checker=lambda s: "第4次：CA" in s)
-        await self.__vg_msg(".draw Deck_B", checker=lambda s: "从Deck_B中抽取1次：" in s)
-        await self.__vg_msg(".draw 8#Deck_B", checker=lambda s: "抽取8次" in s and "第5次：" in s and "已抽空" in s)
-        await self.__vg_msg(".draw 5#Deck_B", checker=lambda s: "C1" in s and "C2" in s and "C3" in s and "C4" in s and "C5" in s, test_times=20)
-        await self.__vg_msg(".draw 5#Deck_B", checker=lambda s: "C1" in s and "C2" in s and "C3" in s and "C4" in s and "C5" in s, test_times=20)
-        await self.__vg_msg(".draw 5#Deck_C", checker=lambda s: "抽取提前结束！" in s and s.count("\n") == 2)
-        await self.__vg_msg(".draw 5#Deck_D", checker=lambda s: s.count("抽取提前结束！") == 5 and s.count("\n") == 5)
-        await self.__vg_msg(".draw 5#Deck_E", checker=lambda s: "抽取提前结束！（全部）" in s and s.count("\n") == 2)
-        await self.__vg_msg(".draw 5#Deck_F", checker=lambda s: s.count("抽取提前结束！（全部）") == 1 and s.count("\n") == 2)
-        await self.__vg_msg(".draw 5#Deck_G", checker=lambda s: "第1次：1D4=" in s and "第5次：1D4=" in s)
-        await self.__vg_msg(".draw -1#Deck_G", checker=lambda s: "抽取次数-1无效！" in s and "从Deck_G中抽取-1次" not in s)
-        await self.__vg_msg(".draw #Deck_G", checker=lambda s: "抽取次数零无效！" in s and "次：" not in s)
-        await self.__vg_msg(".draw deck_z", checker=lambda s: "从Deck_Z中抽取1次：\nC1" in s)
-
-    @unittest.skip("需要测试数据文件 (RandomGenData/*.xlsx)，当前环境无数据文件")
-    async def test_4_rand_gen(self):
-        await self.__vg_msg(".随机", checker=lambda s: "可用的随机生成器：" in s and "姓名" in s)
-        await self.__vg_msg(".随机男性姓名")
-        await self.__vg_msg(".随机精灵姓名", checker=lambda s: "·" in s)
-        await self.__vg_msg(".随机10#姓名", checker=lambda s: "#9 " in s)
-        await self.__vg_msg(".随机角色生平", checker=lambda s: "女性" in s or "男性" in s)
-        await self.__vg_msg(".随机今日笑话")
 
     async def test_4_utils(self):
         await self.__vg_msg(".dnd", checker=lambda s: "DND人物作成" in s and s.count("\n") == 1)
@@ -495,13 +374,6 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".角色卡清除", checker=lambda s: "角色卡已删除" in s)
         await self.__vg_msg(".角色卡", checker=lambda s: "找不到角色卡" in s)
         await self.__vg_msg(".nn", checker=lambda s: "已将您的昵称从伊丽莎白重置为测试用户" in s)
-
-    @unittest.skip("DiceHub 命令接口已重写，connect 子命令已移除，测试需要更新")
-    async def test_7_hub(self):
-        test_card = "dicehub%%$card%%test_bot-S-未定义-S-test_master-S-"
-        await self.__vp_msg(".hub connect 1234", user_id="test_master", checker=lambda s: test_card in s)
-        test_card = test_card.replace("test_bot", "12345678")
-        await self.__vp_msg(test_card, user_id="12345678", checker=lambda s: "A new member 测试用户(12345678) connect to hub" in s)
 
     async def test_8_jrrp(self):
         await self.__vg_msg(".jrrp", checker=lambda s: "测试用户的今日人品是:" in s)

@@ -86,7 +86,7 @@ class WelcomeCommand(UserCommandBase):
                 self.bot.data_manager.delete_data(DC_WELCOME, [meta.group_id])
                 feedback = self.format_loc(LOC_WELCOME_RESET)
             elif arg_str == "test":
-                from core.data import DataManagerError
+                from core.data.manager import DataManagerError
                 from random import choice
                 # 复制core/dicebot的代码
                 feedback = self.bot.data_manager.get_data(DC_WELCOME, [meta.group_id])

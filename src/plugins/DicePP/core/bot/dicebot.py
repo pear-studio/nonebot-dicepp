@@ -19,7 +19,7 @@ from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNot
 from core.communication import GroupInfo
 from core.data import DC_META, DC_NICKNAME, DC_USER_DATA, DC_GROUP_DATA,\
     DCK_META_STAT, DCK_USER_STAT, DCK_GROUP_STAT
-from core.data import DataManager, DataManagerError
+from core.data.manager import DataManager, DataManagerError
 from core.data import BotDatabase
 from core.data.models import UserStat, GroupStat, MetaStat
 from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo

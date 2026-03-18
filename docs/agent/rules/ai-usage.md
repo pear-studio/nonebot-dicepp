@@ -16,8 +16,7 @@ uv run python bot.py                       # 运行
 
 ## 测试
 
-- 文件: `test_*.py`
-- 目录: `tests/`
+- 运行指令: scripts\test\run\_unit\_test.bat, 需要一点时间, 不要重复执行
 
 ## 风格
 

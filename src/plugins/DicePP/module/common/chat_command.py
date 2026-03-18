@@ -2,7 +2,8 @@ from typing import List, Tuple, Any
 import datetime
 
 from core.bot import Bot
-from core.data import custom_data_chunk, DataChunkBase, DataManagerError
+from core.data import custom_data_chunk, DataChunkBase
+from core.data.manager import DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand

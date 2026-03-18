@@ -5,7 +5,7 @@
 from typing import List, Tuple, Any, Dict
 
 from core.bot import Bot
-from core.data import DataManagerError
+from core.data.manager import DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
