@@ -52,6 +52,10 @@ class Repository(Generic[T]):
 
         return self._model_class.model_validate_json(row[0])
 
+    async def upsert(self, item: T) -> None:
+        """upsert 是 save 的别名，使用 INSERT OR REPLACE 语义。"""
+        await self.save(item)
+
     async def save(self, item: T) -> None:
         key_values = [getattr(item, field) for field in self._key_fields]
         data_json = item.model_dump_json()

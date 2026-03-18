@@ -39,9 +39,9 @@ class CharacterDNDCommand(UserCommandBase):
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
-        bot.loc_helper.register_loc_text(LOC_CHAR_SET, "Already set your character", "成功设置角色卡")
-        bot.loc_helper.register_loc_text(LOC_CHAR_MISS, "Cannot find your character", "找不到有效的角色卡")
-        bot.loc_helper.register_loc_text(LOC_CHAR_DEL, "Already delete your character", "删除角色卡")
+        bot.loc_helper.register_loc_text(LOC_CHAR_SET, "角色卡已设置", "成功设置角色卡")
+        bot.loc_helper.register_loc_text(LOC_CHAR_MISS, "找不到角色卡", "找不到有效的角色卡")
+        bot.loc_helper.register_loc_text(LOC_CHAR_DEL, "角色卡已删除", "删除角色卡")
         bot.loc_helper.register_loc_text(LOC_CHECK_RES, "{name} throw {check}\n{hint}\n{result}", "删除角色卡")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
@@ -189,7 +189,7 @@ class CharacterDNDCommand(UserCommandBase):
                         init_cmd: InitiativeCommand = self.bot.command_dict[InitiativeCommand.__name__]
                         assert name_str, "Unexpected Code: name_str is empty"
                         result_dict = {name_str: (check_value_list[0], check_result_list[0])}
-                        init_feedback = init_cmd.add_initiative_entities(result_dict, meta.user_id, meta.group_id)
+                        init_feedback = await init_cmd.add_initiative_entities(result_dict, meta.user_id, meta.group_id)
                         if check_result_list[0] in feedback:
                             feedback = feedback.replace(check_result_list[0], init_feedback)
                         else:

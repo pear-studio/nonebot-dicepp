@@ -37,9 +37,9 @@ class RandomGeneratorCommand(UserCommandBase):
         self.source_name_dict: Dict[str, RandomDataSource] = {}
         self.daily_limit_dict: Dict[str, Dict[str, int]] = {}
 
-        bot.loc_helper.register_loc_text(LOC_RAND_GEN_LIST, "These are available generator: {list}", "展示可用的随机生成器列表")
-        bot.loc_helper.register_loc_text(LOC_RAND_GEN_MISS, "Cannot find {name} generator...", "找不到用户输入的随机生成器")
-        bot.loc_helper.register_loc_text(LOC_RAND_GEN_VAGUE, "Maybe you want these generator? {list}", "用户输入的随机生成器名称有多个匹配可能")
+        bot.loc_helper.register_loc_text(LOC_RAND_GEN_LIST, "可用的随机生成器：{list}", "展示可用的随机生成器列表")
+        bot.loc_helper.register_loc_text(LOC_RAND_GEN_MISS, "找不到随机生成器{name}", "找不到用户输入的随机生成器")
+        bot.loc_helper.register_loc_text(LOC_RAND_GEN_VAGUE, "可能的随机生成器：{list}", "用户输入的随机生成器名称有多个匹配可能")
 
         bot.cfg_helper.register_config(CFG_RAND_GEN_ENABLE, "1", "随机生成器指令开关")
         bot.cfg_helper.register_config(CFG_RAND_GEN_DATA_PATH, f"./{RAND_GEN_DATA_PATH}", "随机生成器指令的数据来源, .代表Data文件夹")

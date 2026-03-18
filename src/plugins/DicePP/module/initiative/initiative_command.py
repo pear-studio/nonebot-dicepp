@@ -53,7 +53,7 @@ class InitiativeCommand(UserCommandBase):
                                          "先攻里没有{name}",
                                          "使用.init del删除不存在的条目时返回")
         bot.loc_helper.register_loc_text(LOC_INIT_ENTITY_VAGUE,
-                                         "Input entity name {name} is vague, possible {name_list}",
+                                         "先攻对象名称{name}存在歧义，可能是{name_list}",
                                          "使用.init del删除的条目存在歧义 {name_list}:所有匹配的结果")
         bot.loc_helper.register_loc_text(LOC_INIT_ENTITY_REPEAT,
                                          "你重复投掷了先攻",
@@ -74,12 +74,11 @@ class InitiativeCommand(UserCommandBase):
                                          "已从先攻列表中移除 {entity_list}",
                                          ".init del返回的语句")
         bot.loc_helper.register_loc_text(LOC_INIT_UNKNOWN,
-                                         "Your sub-command {invalid_command} is unclear," +
-                                         " available sub-commands are {sub_command_list}",
+                                         "子指令{invalid_command}无效，可用的子指令为{sub_command_list}",
                                          ".init 后面跟的子指令无效, {invalid_command}:用户输入的指令;" +
                                          " {sub_command_list}:当前所有可用的子指令")
         bot.loc_helper.register_loc_text(LOC_INIT_ERROR,
-                                         "Error occurs when performing initiative command. {error_info}",
+                                         "处理先攻指令时出现错误：{error_info}",
                                          "处理.init或.ri指令时出现问题 {error_info}:错误信息")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
@@ -157,8 +156,27 @@ class InitiativeCommand(UserCommandBase):
                     exp_str = exp_str[1:]
                 elif "优势" in exp_str or "劣势" in exp_str:
                     exp_str = "D20" + exp_str  # 因为要处理优劣势所以不能写1D20
-            # 新版本直接利用这种方式进行拆分
-            exp_str, name = sift_roll_exp_and_reason(exp_str)
+            # 如果有空格，空格前是掷骰表达式，空格后是名称（可能包含 # 用于多个NPC）
+            if " " in exp_str:
+                exp_str, name = exp_str.split(" ", 1)
+                name = name.strip()
+            elif "#" in exp_str:
+                # 处理 .ri 3#地精 或 .ri+2 3#地精 格式（无空格但含 # 作为多人先攻标识）
+                # # 不是掷骰表达式的合法字符，找到第一个 # 前的数字串作为边界
+                hash_idx = exp_str.index("#")
+                # 往 # 前面找数字（重复次数前缀），作为 name 的开始
+                num_start = hash_idx
+                while num_start > 0 and exp_str[num_start - 1].isdigit():
+                    num_start -= 1
+                name = exp_str[num_start:]   # 包含 "3#地精"
+                exp_str = exp_str[:num_start].strip()  # 可能是空或 "+2" 等
+                if not exp_str:
+                    exp_str = "D20"
+                elif exp_str[0] in ["+", "-", "*", "/"]:
+                    exp_str = "D20" + exp_str
+            else:
+                # 无空格时用通用函数分割（支持 .ri+1强盗 .ri20巢穴动作 格式）
+                exp_str, name = sift_roll_exp_and_reason(exp_str)
             """
             # 显式给出空格时
             if " " in arg_str:
@@ -199,7 +217,7 @@ class InitiativeCommand(UserCommandBase):
             for n in name.split("/"):  # 对于 .ri 地精/大地精 这种情况
                 n = n.strip()
 
-                final_exp_str = exp_str  # 处理 .ri 地精+1/地精优势这种情况
+                final_exp_str = exp_str.lower()  # 统一小写以便处理优劣势（.ri 地精+1/地精优势这种情况）
                 if ("优势" in n and not n.startswith("优势")) or ("劣势" in n and not n.startswith("劣势")):  # 处理额外优劣势
                     if "优势" in n:
                         if "d20优势" in final_exp_str:
@@ -242,7 +260,7 @@ class InitiativeCommand(UserCommandBase):
                         return [BotSendMsgCommand(self.bot.account, f"{num}不是一个有效的数字 (1~10)", [port])]
                     for i in range(num):
                         # 获取先攻结果
-                        name_dict[n + chr(ord("A") + i)] = roll_exp.get_result()
+                        name_dict[n + chr(ord("a") + i)] = roll_exp.get_result()
                 else:
                     # 获取先攻结果
                     name_dict[n] = roll_exp.get_result()
@@ -498,7 +516,7 @@ class InitiativeCommand(UserCommandBase):
         # 获取先攻列表
         init_data: InitList = await self.bot.db.initiative.get(group_id)
         if init_data is None:
-            init_data = InitList()
+            init_data = InitList(group_id=group_id)
 
         # 针对 .ri 3#地精 这种用法简化一下输出(会产生3次一样的roll_res)
         final_result_dict: Dict[str, Tuple[List[str], int]] = {}

@@ -10,6 +10,7 @@ from utils.cq_code import get_cq_image
 class LocalizationText:
     def __init__(self, key: str, default_text: str = "", comment: str = ""):
         self.key = key
+        self.default_text = default_text
         self.loc_texts: list = [default_text] if default_text else []
         self.comment = comment
 
@@ -21,7 +22,7 @@ class LocalizationText:
 
     def get(self) -> str:
         """
-        返回一个可选择的本地化字符串, 若没有可用的本地化字符串, 返回空字符串
+        返回一个可选择的本地化字符串, 若没有可用的本地化字符串, 返回默认值（仍为空字符串则返回空）
         """
         def replace_image_code(match):
             key = match.group(1)
@@ -32,7 +33,7 @@ class LocalizationText:
                 dice_log(f"[LocalImage] 找不到图片 {file_path}")
                 return match.group(0)
 
-        loc_text = random.choice(self.loc_texts) if self.loc_texts else ""
+        loc_text = random.choice(self.loc_texts) if self.loc_texts else (self.default_text or "")
         loc_text = re.sub(r"IMG\((.{1,50}?\.[A-Za-z]{1,10}?)\)", replace_image_code, loc_text)
         loc_text = re.sub(r"图片\((.{1,50}?\.[A-Za-z]{1,10}?)\)", replace_image_code, loc_text)
         return loc_text

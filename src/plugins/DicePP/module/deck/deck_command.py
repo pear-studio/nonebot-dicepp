@@ -226,21 +226,21 @@ class DeckCommand(UserCommandBase):
         super().__init__(bot)
         self.deck_dict: Dict[str, Deck] = {}
 
-        bot.loc_helper.register_loc_text(LOC_DRAW_RESULT, "Draw {times} times from {deck_name}:\n{result}",
+        bot.loc_helper.register_loc_text(LOC_DRAW_RESULT, "从{deck_name}中抽取{times}次：\n{result}",
                                          f"抽卡回复, times为次数, deck_name为牌库名, result由{LOC_DRAW_SINGLE}和{LOC_DRAW_MULTI}定义")
         bot.loc_helper.register_loc_text(LOC_DRAW_RESULT_INLINE, "[Draw {times} times from {deck_name}:{result}]",
                                          f"嵌套抽卡内容（可能自我嵌套）, times为次数, deck_name为牌库名, "
                                          f"result由{LOC_DRAW_SINGLE}和{LOC_DRAW_MULTI}定义")
         bot.loc_helper.register_loc_text(LOC_DRAW_RESULT_DESIGN, "{result}","每次抽卡的最终结果的显示文本（不可能自我嵌套） result为结果原文, ")
         bot.loc_helper.register_loc_text(LOC_DRAW_SINGLE, "{content}", "只抽一次时的回复的内容（可能自我嵌套）")
-        bot.loc_helper.register_loc_text(LOC_DRAW_MULTI, "Result {time}: {content}", "抽取多次时单条内容（可能自我嵌套）, time为当前次数")
-        bot.loc_helper.register_loc_text(LOC_DRAW_FIN_ALL, "Finalize draw! (All)", "抽到的内容使得所有抽取提前终止")
-        bot.loc_helper.register_loc_text(LOC_DRAW_FIN_INNER, "Finalize draw! (Inner)", "抽到的内容使得内层抽取提前终止")
-        bot.loc_helper.register_loc_text(LOC_DRAW_ERR_EMPTY_DECK, "Current decks is empty!", "牌库被抽光了(都是不放回的)")
-        bot.loc_helper.register_loc_text(LOC_DRAW_ERR_TIME, "The draw time {times} is invalid!",
+        bot.loc_helper.register_loc_text(LOC_DRAW_MULTI, "第{time}次：{content}", "抽取多次时单条内容（可能自我嵌套）, time为当前次数")
+        bot.loc_helper.register_loc_text(LOC_DRAW_FIN_ALL, "抽取提前结束！（全部）", "抽到的内容使得所有抽取提前终止")
+        bot.loc_helper.register_loc_text(LOC_DRAW_FIN_INNER, "抽取提前结束！（内层）", "抽到的内容使得内层抽取提前终止")
+        bot.loc_helper.register_loc_text(LOC_DRAW_ERR_EMPTY_DECK, "当前牌库已抽空！", "牌库被抽光了(都是不放回的)")
+        bot.loc_helper.register_loc_text(LOC_DRAW_ERR_TIME, "抽取次数{times}无效！",
                                          "抽取次数不是合法正整数或不是合法的掷骰表达式, time为识别到的次数")
-        bot.loc_helper.register_loc_text(LOC_DRAW_ERR_NO_DECK, "Cannot find deck {deck_name}", "找不到想要抽取的牌库")
-        bot.loc_helper.register_loc_text(LOC_DRAW_ERR_VAGUE_DECK, "Possible decks: {deck_list}", "找到多个可能的牌库")
+        bot.loc_helper.register_loc_text(LOC_DRAW_ERR_NO_DECK, "找不到牌库{deck_name}", "找不到想要抽取的牌库")
+        bot.loc_helper.register_loc_text(LOC_DRAW_ERR_VAGUE_DECK, "可能的牌库：{deck_list}", "找到多个可能的牌库")
 
         bot.cfg_helper.register_config(CFG_DECK_ENABLE, "1", "抽卡指令开关")
         bot.cfg_helper.register_config(CFG_DECK_DATA_PATH, f"./{DRAW_DATA_PATH}", "牌库指令的数据来源, .代表Data文件夹")

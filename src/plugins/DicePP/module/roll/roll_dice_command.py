@@ -63,15 +63,13 @@ class RollDiceCommand(UserCommandBase):
                                          ".r不带原因时返回的语句 {nickname}:昵称; {roll_result_final}:最终掷骰结果"
                                          " {roll_state}: 如果骰子中包含唯一d20时返回的语句, 具体内容见下文")
         bot.loc_helper.register_loc_text(LOC_ROLL_RESULT_REASON,
-                                         "{nickname} 为 {roll_reason} 进行的掷骰结果为" +
-                                         "is {roll_result_final} {roll_state}",
+                                         "{nickname} 为 {roll_reason} 进行的掷骰结果为 {roll_result_final} {roll_state}",
                                          ".r带原因时返回的语句 {roll_reason}:原因; 其他关键字见上文同名关键字")
         bot.loc_helper.register_loc_text(LOC_ROLL_RESULT_HIDE,
                                          "{nickname} 的暗骰结果为 {roll_result_final} {roll_state}",
                                          ".rh不带原因时返回的语句 关键字见上文同名关键字")
         bot.loc_helper.register_loc_text(LOC_ROLL_RESULT_HIDE_REASON,
-                                         "{nickname} 为 {roll_reason} 进行的暗骰结果为" +
-                                         "{roll_result_final} {roll_state}",
+                                         "{nickname} 为 {roll_reason} 进行的暗骰结果为 {roll_result_final} {roll_state}",
                                          ".rh带原因时返回的语句 关键字见上文同名关键字")
         bot.loc_helper.register_loc_text(LOC_ROLL_RESULT_HIDE_GROUP,
                                          "{nickname} 进行了一次暗骰",

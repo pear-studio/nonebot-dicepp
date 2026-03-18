@@ -26,16 +26,16 @@ class NicknameCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(LOC_NICKNAME_SET,
-                                         "Set your nickname as {nickname}",
+                                         "已将您的昵称设为{nickname}",
                                          ".nn {nickname}返回的语句 {nickname}:昵称")
         bot.loc_helper.register_loc_text(LOC_NICKNAME_RESET,
-                                         "Reset your nickname from {nickname_prev} to {nickname_new}",
+                                         "已将您的昵称从{nickname_prev}重置为{nickname_new}",
                                          ".nn重置昵称时返回的语句 {nickname_prev}: 之前设置的昵称; {nickname_new}: 当前默认昵称")
         bot.loc_helper.register_loc_text(LOC_NICKNAME_RESET_FAIL,
-                                         "You have not set nickname before, your current nickname is {nickname}",
+                                         "您尚未设置过昵称，当前昵称为{nickname}",
                                          ".nn重置昵称且没有设置过昵称时返回的语句 {nickname}: 当前默认昵称")
         bot.loc_helper.register_loc_text(LOC_NICKNAME_ILLEGAL,
-                                         "Illegal nickname!",
+                                         "非法昵称！",
                                          "设置不合法的昵称时返回的语句")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:

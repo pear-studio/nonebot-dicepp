@@ -47,8 +47,10 @@ class LocalizationManager:
             key = str(row[0].value)  # 第一个元素为关键字
             if key not in self.all_local_texts:  # 无效的关键字
                 continue
-            comment: str = self.all_local_texts[key].comment  # 沿用原来的注释, 不用文件里的
-            self.all_local_texts[key] = LocalizationText(key, comment=comment)
+            old = self.all_local_texts[key]
+            comment: str = old.comment  # 沿用原来的注释, 不用文件里的
+            default_text: str = old.default_text  # 沿用原来的默认值, 以便 reset_to_default() 可以复原
+            self.all_local_texts[key] = LocalizationText(key, default_text=default_text, comment=comment)
             for text in [str(cell.value) for cell in row[1:] if cell.value and cell.value.strip()]:
                 self.all_local_texts[key].add(text)
         dice_log(f"[Local] [Load] 成功读取本地化文件 {self.data_path.replace(ROOT_DATA_PATH, '~')}")
@@ -107,6 +109,13 @@ class LocalizationManager:
         except PermissionError:
             dice_log(f"[Local] [ChatSave] 无法保存自定义对话文件 {self.chat_data_path.replace(ROOT_DATA_PATH, '~')}, 没有写入权限")
         workbook.close()
+
+    def reset_to_default(self):
+        """将所有本地化文本重置为默认值（用于测试环境，避免磁盘文件污染）"""
+        for loc_text in self.all_local_texts.values():
+            loc_text.loc_texts = [loc_text.default_text] if loc_text.default_text else []
+        for loc_text in self.all_chat_texts.values():
+            loc_text.loc_texts = [loc_text.default_text] if loc_text.default_text else []
 
     def register_loc_text(self, key: str, default_text: str, comment: str = ""):
         """
@@ -176,21 +185,16 @@ def save_loc_text_to_row(sheet: worksheet, l_text: LocalizationText, row: int):
         sheet.cell(row=row, column=ci + 2, value=text)
 
 
-def load_sheet_from_path(data_path: str, identifier: str, default_id: str = DEFAULT_ID) -> (openpyxl.Workbook, worksheet):
-    """若指定data_path无效或id无效, 返回None. 若id无效会尝试使用default_id, 一般用来得到读取的sheet"""
+def load_sheet_from_path(data_path: str, identifier: str) -> (openpyxl.Workbook, worksheet):
+    """若指定data_path无效或identifier对应的sheet不存在, 返回(None, None). 一般用来得到读取的sheet"""
     if not os.path.exists(data_path):
         return None, None
     workbook = read_xlsx(data_path)
     if identifier in workbook.sheetnames:
         sheet = workbook[identifier]
-        sheet.title = identifier
-    elif default_id in workbook.sheetnames:
-        sheet = workbook[default_id]
-        sheet.title = default_id
-    else:
-        workbook.close()
-        return None, None
-    return workbook, sheet
+        return workbook, sheet
+    workbook.close()
+    return None, None
 
 
 def get_sheet_from_path(data_path: str, identifier: str) -> (openpyxl.Workbook, worksheet):

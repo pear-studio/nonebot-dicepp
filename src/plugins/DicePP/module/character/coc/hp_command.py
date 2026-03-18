@@ -39,12 +39,12 @@ class HPCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(LOC_HP_INFO, "{name}: {hp_info}", "查看当前生命值")
-        bot.loc_helper.register_loc_text(LOC_HP_INFO_MISS, "Cannot find hp info for: {name}", "找不到指定的生命值信息")
-        bot.loc_helper.register_loc_text(LOC_HP_INFO_MULTI, "Possible target is: {name_list}", "匹配到多个可能的生命值信息")
-        bot.loc_helper.register_loc_text(LOC_HP_INFO_NONE, "None of hp info in this group", "查看生命值列表时找不到任何信息")
+        bot.loc_helper.register_loc_text(LOC_HP_INFO_MISS, "找不到{name}的生命值信息", "找不到指定的生命值信息")
+        bot.loc_helper.register_loc_text(LOC_HP_INFO_MULTI, "存在多个匹配目标：{name_list}", "匹配到多个可能的生命值信息")
+        bot.loc_helper.register_loc_text(LOC_HP_INFO_NONE, "本群没有任何生命值信息", "查看生命值列表时找不到任何信息")
         bot.loc_helper.register_loc_text(LOC_HP_MOD, "{name}: {hp_mod}", "修改生命值信息")
-        bot.loc_helper.register_loc_text(LOC_HP_MOD_ERR, "Error when modify hp: {error}", "修改生命值信息时出现错误")
-        bot.loc_helper.register_loc_text(LOC_HP_DEL, "Delete hp info for {name}", "成功删除生命值信息")
+        bot.loc_helper.register_loc_text(LOC_HP_MOD_ERR, "修改生命值时出现错误：{error}", "修改生命值信息时出现错误")
+        bot.loc_helper.register_loc_text(LOC_HP_DEL, "已删除{name}的生命值信息", "成功删除生命值信息")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".hp")

@@ -42,11 +42,12 @@ NICKNAME_ERROR = "UNDEF_NAME"
 
 # noinspection PyBroadException
 class Bot:
-    def __init__(self, account: str):
+    def __init__(self, account: str, readonly: bool = False):
         """
         实例化机器人
         Args:
             account: QQ账号
+            readonly: 只读模式，跳过本地化文件写入（适用于测试环境）
         """
         import core.command as command
         import module  # module中可能会定义新的DataChunk和local text等, 所以要在一开始import
@@ -68,7 +69,7 @@ class Bot:
         self.tick_task: Optional[asyncio.Task] = None
         self.todo_tasks: Dict[Union[Callable, asyncio.Task], Dict] = {}
 
-        self.start_up()
+        self.start_up(readonly=readonly)
 
     def set_client_proxy(self, proxy):
         from adapter import ClientProxy
@@ -77,12 +78,14 @@ class Bot:
         else:
             raise TypeError("Incorrect Client Proxy!")
 
-    def start_up(self):
+    def start_up(self, readonly: bool = False):
         self.register_command()
         self.loc_helper.load_localization()  # 要在注册完命令后再读取本地化文件
-        self.loc_helper.save_localization()  # 更新本地文件
+        if not readonly:
+            self.loc_helper.save_localization()  # 更新本地文件
         self.loc_helper.load_chat()
-        self.loc_helper.save_chat()
+        if not readonly:
+            self.loc_helper.save_chat()
         self.cfg_helper.load_config()
         self.cfg_helper.save_config()
 
@@ -544,10 +547,12 @@ class Bot:
                     feedback = self.loc_helper.format_loc_text(LOC_GROUP_ONLY_NOTICE)
                     bot_commands += [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(meta.user_id)])]
                     break
-                # 无权限者/权限不足者企图使用一条需要权限的指令, 回复一条提示
+                # 无权限者/权限不足者企图使用一条需要权限的指令
                 if meta.permission < command.permission_require:
-                    feedback = self.loc_helper.format_loc_text(LOC_PERMISSION_DENIED_NOTICE)
-                    bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)])]
+                    # 骰管理及以上级别的指令 (permission_require >= 3) 对普通用户静默，避免暴露管理指令
+                    if command.permission_require < 3:
+                        feedback = self.loc_helper.format_loc_text(LOC_PERMISSION_DENIED_NOTICE)
+                        bot_commands += [BotSendMsgCommand(self.account, feedback, [GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)])]
                     break
                 # 执行指令
                 # 注意: process_msg 是异步方法，需要使用 await 调用
@@ -633,12 +638,14 @@ class Bot:
                     activate = False
 
                 if activate:
-                    feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id],default_val="")
+                    # "default" 表示未设置（用默认欢迎词），"" 表示已关闭（不发送）
+                    feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id], default_val="default")
 
-                    if not feedback:
+                    if feedback == "default":
                         feedback = self.loc_helper.format_loc_text(LOC_WELCOME_DEFAULT)
                     
-                    bot_commands += [BotSendMsgCommand(self.account, choice(feedback.split("|")), [GroupMessagePort(data.group_id)])]
+                    if feedback:  # 关闭时 feedback 为 ""，跳过发送
+                        bot_commands += [BotSendMsgCommand(self.account, choice(feedback.split("|")), [GroupMessagePort(data.group_id)])]
 
         if self.proxy:
             for command in bot_commands:
