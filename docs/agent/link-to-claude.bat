@@ -17,6 +17,12 @@ if not exist "docs\agent\skills" (
     exit /b 1
 )
 
+if not exist "docs\agent\CLAUDE.md" (
+    echo 警告: 源文件 docs\agent\CLAUDE.md 不存在
+) else (
+    echo 找到 docs\agent\CLAUDE.md
+)
+
 echo 正在创建符号链接...
 
 :: 确保 .claude 目录存在
@@ -33,13 +39,24 @@ if exist ".claude\skills" (
     del ".claude\skills" 2>nul
     echo 已删除 .claude\skills
 )
+if exist ".claude\CLAUDE.md" (
+    rmdir /s /q ".claude\CLAUDE.md" 2>nul
+    del ".claude\CLAUDE.md" 2>nul
+    echo 已删除 .claude\CLAUDE.md
+)
 
 :: 创建符号链接（使用绝对路径）
 mklink /D ".claude\rules" "%cd%\docs\agent\rules"
 mklink /D ".claude\skills" "%cd%\docs\agent\skills"
+if exist "docs\agent\CLAUDE.md" (
+    mklink ".claude\CLAUDE.md" "%cd%\docs\agent\CLAUDE.md"
+)
 
 echo.
 echo 符号链接创建完成:
-echo   .claude\rules  -^> docs\agent\rules
-echo   .claude\skills -^> docs\agent\skills
+echo   .claude\rules   -^> docs\agent\rules
+echo   .claude\skills  -^> docs\agent\skills
+if exist "docs\agent\CLAUDE.md" (
+    echo   .claude\CLAUDE.md -^> docs\agent\CLAUDE.md
+)
 pause
