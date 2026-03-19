@@ -5,13 +5,12 @@
 from typing import List, Tuple, Any, Dict
 
 from core.bot import Bot
-from core.data.manager import DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
-from core.data import DC_META, DC_NICKNAME, DC_USER_DATA, DC_GROUP_DATA, DCK_USER_STAT, DCK_GROUP_STAT
+from core.data import DC_META, DC_NICKNAME
 from core.statistics import GroupStatInfo, UserStatInfo, UserCommandStatInfo, RollStatInfo
 
 # LOC_TEMP = "template_loc"
@@ -72,10 +71,13 @@ class StatisticsCommand(UserCommandBase):
                 feedback = "权限不足"
             else:
                 merge_user_stat = UserStatInfo()
-                for user_id in self.bot.data_manager.get_keys(DC_USER_DATA, []):
+                all_user_stats = await self.bot.db.user_stat.list_all()
+                for user_stat_row in all_user_stats:
                     try:
-                        user_stat: UserStatInfo = self.bot.data_manager.get_data(DC_USER_DATA, [user_id, DCK_USER_STAT])
-                    except DataManagerError:
+                        user_stat = UserStatInfo()
+                        if user_stat_row.data:
+                            user_stat.deserialize(user_stat_row.data)
+                    except Exception:
                         continue
                     # 统计处理信息情况
                     merge_user_stat.msg += user_stat.msg
@@ -90,11 +92,15 @@ class StatisticsCommand(UserCommandBase):
                 feedback = "权限不足"
             else:
                 group_info_list: List[List[str, int, str]] = []  # id, sort_key, info_str
-                for group_id in self.bot.data_manager.get_keys(DC_GROUP_DATA, []):
+                all_group_stats = await self.bot.db.group_stat.list_all()
+                for group_stat_row in all_group_stats:
+                    group_id = group_stat_row.group_id
                     group_info = [group_id, 0, ""]
                     try:
-                        group_stat: GroupStatInfo = self.bot.data_manager.get_data(DC_GROUP_DATA, [group_id, DCK_GROUP_STAT])
-                    except DataManagerError:
+                        group_stat = GroupStatInfo()
+                        if group_stat_row.data:
+                            group_stat.deserialize(group_stat_row.data)
+                    except Exception:
                         continue
 
                     group_info[1] = group_stat.meta.member_count  # 最小优先级

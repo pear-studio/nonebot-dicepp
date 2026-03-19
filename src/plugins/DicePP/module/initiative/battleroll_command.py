@@ -212,7 +212,7 @@ class BattlerollCommand(UserCommandBase):
             name_updated = False
             at_code: str = ""
             if current_entity.owner:
-                display_name = self.bot.get_nickname(current_entity.owner, meta.group_id)
+                display_name = await self.bot.get_nickname(current_entity.owner, meta.group_id)
                 if current_entity.name != display_name:
                     current_entity.name = display_name
                     name_updated = True
@@ -282,7 +282,7 @@ class BattlerollCommand(UserCommandBase):
             init_data.turns_in_round = turns_in_round
             # 更新回合结束者的名字
             if init_data.entities[turn-1].owner:
-                init_data.entities[turn-1].name = self.bot.get_nickname(init_data.entities[turn-1].owner, meta.group_id)
+                init_data.entities[turn-1].name = await self.bot.get_nickname(init_data.entities[turn-1].owner, meta.group_id)
             feedbacks.append(self.format_loc(LOC_BR_TURN_END,round=str(round),turn=str(turn),turn_name=init_data.entities[turn-1].name))
             # 回合数+1
             turn += 1
@@ -293,7 +293,7 @@ class BattlerollCommand(UserCommandBase):
                 feedbacks.append(self.format_loc(LOC_BR_ROUND_NEW,round=str(round),turn=str(turn),turn_name=init_data.entities[turn-1].name))
             # 更新回合开始者的名字
             if init_data.entities[turn-1].owner:
-                nickname = self.bot.get_nickname(init_data.entities[turn-1].owner, meta.group_id)
+                nickname = await self.bot.get_nickname(init_data.entities[turn-1].owner, meta.group_id)
                 init_data.entities[turn-1].name = nickname
                 feedbacks.append(self.format_loc(LOC_BR_TURN_NEW_WITH_AT,round=str(round),turn=str(turn),turn_name=nickname,at=get_cq_at(init_data.entities[turn-1].owner)))
             else:

@@ -14,7 +14,7 @@ from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCom
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.localization import LOC_FUNC_DISABLE
 from core.config import DATA_PATH, CFG_MASTER, CFG_ADMIN
-from module.common import DC_GROUPCONFIG
+from core.data.models import GroupConfig
 from module.query import create_empty_sqlite_database, load_data_from_xlsx_to_sqlite
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.data import yield_deduplicate
@@ -120,14 +120,20 @@ class HomebrewCommand(UserCommandBase):
         source_port = meta.group_id
         mode: Optional[Literal["load","template","help","show","clean","on","off"]] = hint[0]
         arg_str: str = hint[1]
-        open = self.bot.data_manager.get_data(DC_GROUPCONFIG,[meta.group_id,"query_homebrew"],default_val=False)
+
+        # 获取群配置
+        row = await self.bot.db.group_config.get(meta.group_id)
+        query_homebrew = False
+        if row and row.data:
+            query_homebrew = row.data.get("query_homebrew", False)
+
         has_database = False
-        
+
         db = "HB" + source_port
         path = self.data_path + "/" + db + ".db"
         if os.path.exists(path):
             has_database = True
-            
+
         feedback: str = ""
 
         # 判断功能开关
@@ -159,10 +165,14 @@ class HomebrewCommand(UserCommandBase):
             else:
                 feedback += self.clean_homebrews(db,arg_str)
         elif mode == "on":
-            self.bot.data_manager.set_data(DC_GROUPCONFIG,[meta.group_id,"query_homebrew"],True)
+            config_dict = dict(row.data) if row and row.data else {}
+            config_dict["query_homebrew"] = True
+            await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
             feedback = self.format_loc(LOC_HOMEBREW_ON)
         elif mode == "off":
-            self.bot.data_manager.set_data(DC_GROUPCONFIG,[meta.group_id,"query_homebrew"],False)
+            config_dict = dict(row.data) if row and row.data else {}
+            config_dict["query_homebrew"] = False
+            await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
             feedback = self.format_loc(LOC_HOMEBREW_OFF)
         else:
             if has_database:

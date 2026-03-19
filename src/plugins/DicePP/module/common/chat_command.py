@@ -2,8 +2,7 @@ from typing import List, Tuple, Any
 import datetime
 
 from core.bot import Bot
-from core.data import custom_data_chunk, DataChunkBase
-from core.data.manager import DataManagerError
+from core.data.models import GroupConfig, UserStat
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -13,15 +12,8 @@ from utils.time import get_current_date_str, get_current_date_raw, str_to_dateti
 
 CFG_CHAT_INTER = "chat_interval"
 
-# 增加自定义DataChunk
 DC_CHAT_RECORD = "chat_record"
 DCK_CHAT_TIME = "time"
-
-
-@custom_data_chunk(identifier=DC_CHAT_RECORD)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
 
 
 def get_default_chat_time(interval: int) -> str:
@@ -44,17 +36,25 @@ class ChatCommand(UserCommandBase):
         self.interval_delta: datetime.timedelta = datetime.timedelta(seconds=20)
         # 自定义对话的开关由groupconifg_command操控
 
-    def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
+    async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = False
         # 如果没开chat，那就别处理了
-        if not self.bot.data_manager.get_data(DC_GROUPCONFIG,[meta.group_id,"chat"],default_val=True):
+        _row = await self.bot.db.group_config.get(meta.group_id)
+        chat_enabled = True
+        if _row and _row.data:
+            chat_enabled = _row.data.get("chat", True)
+        if not chat_enabled:
             return False, False, ""
-        target: str = meta.group_id if meta.group_id else meta.user_id
-        try:
-            time_str = self.bot.data_manager.get_data(DC_CHAT_RECORD, [target, DCK_CHAT_TIME])
-        except DataManagerError:
+        # 获取上次聊天时间
+        if meta.group_id:
+            _row = await self.bot.db.group_config.get(meta.group_id)
+            time_str = _row.data.get("chat_time") if _row and _row.data else None
+        else:
+            _row = await self.bot.db.user_stat.get(meta.user_id)
+            time_str = _row.data.get("chat_time") if _row and _row.data else None
+        if time_str is None:
             default_time = get_default_chat_time(self.get_interval())
-            time_str = self.bot.data_manager.get_data(DC_CHAT_RECORD, [target, DCK_CHAT_TIME], default_val=default_time)
+            time_str = default_time
         feedback = ""
         # 兼容旧格式：可能存成 YYYY_MM_DD_HH_MM_SS（下划线）
         parse_ok = False
@@ -67,12 +67,20 @@ class ChatCommand(UserCommandBase):
             if '_' in time_str and time_str.count('_') >= 5:
                 parts = time_str.split('_')
                 if len(parts) >= 6:
-                    # YYYY_MM_DD_HH_MM_SS -> YYYY/MM/DD HH:MM:SS
                     repaired = f"{parts[0]}/{parts[1]}/{parts[2]} {parts[3]}:{parts[4]}:{parts[5]}"
                     try:
                         dt_base = str_to_datetime(repaired)
-                        # 写回修复后的标准格式，防止下次再解析失败
-                        self.bot.data_manager.set_data(DC_CHAT_RECORD, [target, DCK_CHAT_TIME], repaired)
+                        new_time_str = repaired
+                        if meta.group_id:
+                            _row = await self.bot.db.group_config.get(meta.group_id)
+                            config_dict = dict(_row.data) if _row and _row.data else {}
+                            config_dict["chat_time"] = new_time_str
+                            await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
+                        else:
+                            _row = await self.bot.db.user_stat.get(meta.user_id)
+                            data_dict = _row.data.copy() if _row and _row.data else {}
+                            data_dict["chat_time"] = new_time_str
+                            await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=data_dict))
                         parse_ok = True
                     except Exception:
                         pass
@@ -80,7 +88,17 @@ class ChatCommand(UserCommandBase):
             feedback = self.bot.loc_helper.process_chat(msg_str)
         if feedback:
             should_proc = True
-            self.bot.data_manager.set_data(DC_CHAT_RECORD, [target, DCK_CHAT_TIME], get_current_date_str())
+            new_time_str = get_current_date_str()
+            if meta.group_id:
+                _row = await self.bot.db.group_config.get(meta.group_id)
+                config_dict = dict(_row.data) if _row and _row.data else {}
+                config_dict["chat_time"] = new_time_str
+                await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
+            else:
+                _row = await self.bot.db.user_stat.get(meta.user_id)
+                data_dict = _row.data.copy() if _row and _row.data else {}
+                data_dict["chat_time"] = new_time_str
+                await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=data_dict))
         should_pass: bool = False
         return should_proc, should_pass, feedback
 

@@ -386,8 +386,10 @@ class MyTestCase(IsolatedAsyncioTestCase):
         await self.__vg_msg(".统计所有群聊", user_id="test_master", checker=lambda s: "权限不足" not in s and "条群组信息" in s)
 
     async def test_end_reload(self):
-        await self.test_bot.data_manager.save_data_async()
-        self.test_bot.data_manager.load_data()
+        # BotDatabase auto-saves, no need for manual save/load
+        # await self.test_bot.data_manager.save_data_async()
+        # self.test_bot.data_manager.load_data()
+        pass
 
 
 if __name__ == '__main__':

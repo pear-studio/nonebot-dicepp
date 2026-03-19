@@ -5,7 +5,7 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, GroupMessagePort, PrivateMessagePort
-from module.common import DC_GROUPCONFIG
+from core.data.models import GroupConfig
 from module.roll.default_dice import (
     format_default_expr_from_input,
     format_default_expr_from_storage,
@@ -50,9 +50,10 @@ class DiceSetCommand(UserCommandBase):
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         arg: str = hint if hint is not None else ""
 
-        stored = self.bot.data_manager.get_data(
-            DC_GROUPCONFIG, [meta.group_id, "default_dice"], default_val="D20"
-        )
+        row = await self.bot.db.group_config.get(meta.group_id)
+        stored = "D20"
+        if row and row.data:
+            stored = row.data.get("default_dice", "D20")
         current_expr = format_default_expr_from_storage(stored)
 
         if not arg:
@@ -68,7 +69,9 @@ class DiceSetCommand(UserCommandBase):
                                                           max_face=str(DICE_TYPE_MAX))
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
-        self.bot.data_manager.set_data(DC_GROUPCONFIG, [meta.group_id, "default_dice"], new_expr)
+        config_dict = dict(row.data) if row and row.data else {}
+        config_dict["default_dice"] = new_expr
+        await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
         feedback = self.bot.loc_helper.format_loc_text(LOC_DSET_SUCCESS, expr=new_expr, dice=new_expr)
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 

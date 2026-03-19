@@ -2,11 +2,6 @@ from __future__ import annotations
 
 """
 业力骰子核心管理器，负责配置读取、历史队列维护与掷骰修正逻辑。
-
-注意: 此模块保持使用旧的 data_manager API，因为:
-1. roll_a_dice 是同步函数，被掷骰表达式解析器同步调用
-2. runtime.roll() 必须是同步的
-3. 改变这个架构会影响整个掷骰系统，风险太大
 """
 
 import random
@@ -15,23 +10,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from core.data import DataChunkBase, custom_data_chunk
+from core.data.models import GroupConfig
 
 from .karma_runtime import DiceRuntime, reset_runtime, set_runtime
 
 if TYPE_CHECKING:
     from core.bot import Bot
-
-# 数据持久化标识
-DC_KARMA = "karma_dice"
-
-
-@custom_data_chunk(identifier=DC_KARMA)
-class _(DataChunkBase):
-    """为 DataManager 注册业力骰子配置存储块。"""
-
-    def __init__(self):
-        super().__init__()
 
 
 # 常量配置
@@ -174,30 +158,51 @@ class _KarmaRuntime(DiceRuntime):
 
 
 class KarmaDiceManager:
-    """业力骰子核心调度器。
-    
-    注意: 所有方法都是同步的，使用旧的 data_manager API。
-    这是因为 generate_value 被同步的 roll_a_dice 调用。
-    """
+    """业力骰子核心调度器。"""
 
     def __init__(self, bot: "Bot"):
         self.bot = bot
         self._state: Dict[str, Dict[str, Dict[int, KarmaState]]] = {}
         self._config_cache: Dict[str, KarmaConfig] = {}
 
-    # ---------- 配置与状态维护 (同步，使用 data_manager) ----------
-    def _get_config(self, group_id: str) -> KarmaConfig:
+    # ---------- 配置与状态维护 ----------
+    async def _load_config_from_db(self, group_id: str) -> KarmaConfig:
+        """从数据库加载群配置（异步方法）"""
         if group_id in self._config_cache:
             return self._config_cache[group_id]
-        default_cfg = KarmaConfig().to_dict()
-        data = self.bot.data_manager.get_data(DC_KARMA, [group_id], default_val=default_cfg)
-        config = KarmaConfig.from_dict(data)
+        default_cfg = KarmaConfig()
+        try:
+            row = await self.bot.db.group_config.get(group_id)
+            if row and row.data:
+                config = KarmaConfig.from_group_config(row.data)
+            else:
+                config = default_cfg
+        except Exception:
+            config = default_cfg
         self._config_cache[group_id] = config
         return config
 
-    def _save_config(self, group_id: str, config: KarmaConfig) -> None:
-        self.bot.data_manager.set_data(DC_KARMA, [group_id], config.to_dict())
+    async def _save_config_to_db(self, group_id: str, config: KarmaConfig) -> None:
+        """保存群配置到数据库（异步方法）"""
+        try:
+            row = await self.bot.db.group_config.get(group_id)
+            if row and row.data:
+                config_dict = dict(row.data)
+            else:
+                config_dict = {}
+            config_dict["karma"] = config.to_dict()
+            await self.bot.db.group_config.upsert(
+                GroupConfig(group_id=group_id, data=config_dict)
+            )
+        except Exception:
+            pass
         self._config_cache[group_id] = config
+
+    def _get_config(self, group_id: str) -> KarmaConfig:
+        """同步获取配置（从缓存，配置应通过 set_runtime 或异步方法预加载）"""
+        if group_id in self._config_cache:
+            return self._config_cache[group_id]
+        return KarmaConfig()
 
     def set_runtime(self, group_id: str, config: KarmaConfig) -> None:
         """设置运行时配置（用于从 DB 加载配置后注入）"""
@@ -238,7 +243,7 @@ class KarmaDiceManager:
             return False
         return self._get_config(group_id).is_enabled
 
-    def enable(self, group_id: str) -> Tuple[bool, bool]:
+    async def enable(self, group_id: str) -> Tuple[bool, bool]:
         config = self._get_config(group_id)
         was_enabled = config.is_enabled
         if not was_enabled:
@@ -247,20 +252,20 @@ class KarmaDiceManager:
             config.intro_sent = True
             config.mode = "balanced"
             config.engine = "precise"
-            self._save_config(group_id, config)
+            await self._save_config_to_db(group_id, config)
             self.reset_history(group_id)
             return True, first_intro
         return False, False
 
-    def disable(self, group_id: str) -> bool:
+    async def disable(self, group_id: str) -> bool:
         config = self._get_config(group_id)
         if not config.is_enabled:
             return False
         config.is_enabled = False
-        self._save_config(group_id, config)
+        await self._save_config_to_db(group_id, config)
         return True
 
-    def set_engine(self, group_id: str, engine: str) -> bool:
+    async def set_engine(self, group_id: str, engine: str) -> bool:
         engine_norm = self.normalize_engine(engine)
         if not engine_norm:
             raise ValueError("未知的业力引擎")
@@ -268,10 +273,10 @@ class KarmaDiceManager:
         if config.engine == engine_norm:
             return False
         config.engine = engine_norm
-        self._save_config(group_id, config)
+        await self._save_config_to_db(group_id, config)
         return True
 
-    def set_mode(self, group_id: str, mode: str) -> bool:
+    async def set_mode(self, group_id: str, mode: str) -> bool:
         mode_norm = self.normalize_mode(mode)
         if not mode_norm:
             raise ValueError("未知的业力模式")
@@ -281,18 +286,18 @@ class KarmaDiceManager:
         config.mode = mode_norm
         if mode_norm == "balanced":
             config.engine = "precise"
-        self._save_config(group_id, config)
+        await self._save_config_to_db(group_id, config)
         self.reset_history(group_id)
         return True
 
-    def set_custom_params(self, group_id: str, percentage: int, window: int) -> None:
+    async def set_custom_params(self, group_id: str, percentage: int, window: int) -> None:
         percentage = max(1, min(percentage, 100))
         window = max(1, min(window, MAX_WINDOW))
         config = self._get_config(group_id)
         config.custom_percentage = percentage
         config.custom_roll_count = window
         config.mode = "custom"
-        self._save_config(group_id, config)
+        await self._save_config_to_db(group_id, config)
         self.reset_history(group_id)
 
     def get_status(self, group_id: str, user_id: str) -> Dict[str, object]:

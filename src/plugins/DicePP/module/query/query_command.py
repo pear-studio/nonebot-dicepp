@@ -15,7 +15,7 @@ from core.communication import MessageMetaData, MessagePort, PrivateMessagePort,
 from core.localization import LOC_FUNC_DISABLE
 from core.config import DATA_PATH, CFG_MASTER, CFG_ADMIN
 from core.data import DC_USER_DATA
-from module.common import DC_GROUPCONFIG
+from core.data.models import GroupConfig
 from module.query import create_empty_sqlite_database, load_data_from_xlsx_to_sqlite, QUERY_DATA_FIELD, QUERY_DATA_FIELD_LIST, QUERY_REDIRECT_FIELD, QUERY_REDIRECT_FIELD_LIST
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.time import get_current_date_raw
@@ -512,11 +512,17 @@ class QueryCommand(UserCommandBase):
         # 检测是否为群内
         if meta.group_id:
             port = GroupMessagePort(meta.group_id)
-            database = self.bot.data_manager.get_data(DC_GROUPCONFIG,[meta.group_id,"query_database"],default_val="DND5E")
+            row = await self.bot.db.group_config.get(meta.group_id)
+            database = "DND5E"
+            if row and row.data:
+                database = row.data.get("query_database", "DND5E")
         else:
             port = PrivateMessagePort(meta.user_id)
             # 私聊优先使用用户私设的 query_database（支持私聊切换模式），回退到全局私聊默认
-            database = self.bot.data_manager.get_data(DC_USER_DATA, [meta.user_id, "query_database"], default_val=None)
+            user_row = await self.bot.db.user_stat.get(meta.user_id)
+            database = None
+            if user_row and user_row.data:
+                database = user_row.data.get("query_database")
             if not database:
                 database = self.bot.cfg_helper.get_config(CFG_QUERY_PRIVATE_DATABASE)[0]
         source_port = MessagePort(meta.group_id, meta.user_id)
@@ -526,7 +532,12 @@ class QueryCommand(UserCommandBase):
         feedback: str = ""
 
         # 私设查询库
-        if meta.group_id and self.bot.data_manager.get_data(DC_GROUPCONFIG,[meta.group_id,"query_homebrew"],default_val=False):
+        query_homebrew = False
+        if meta.group_id:
+            group_row = await self.bot.db.group_config.get(meta.group_id)
+            if group_row and group_row.data:
+                query_homebrew = group_row.data.get("query_homebrew", False)
+        if meta.group_id and query_homebrew:
             homebrew_database = "HB" + meta.group_id
             if homebrew_database not in CONNECTED_QUERY_DATABASES:
                 homebrew_path:str = DATA_PATH + "/QueryData/Homebrew/" + homebrew_database + ".db"

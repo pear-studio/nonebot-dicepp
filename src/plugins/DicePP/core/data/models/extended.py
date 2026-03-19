@@ -79,3 +79,10 @@ class UserVariable(BaseModel):
     group_id: str
     name: str
     val: int = 0
+
+
+class UserFavor(BaseModel):
+    user_id: str
+    group_id: str
+    favor_value: int = 0
+    last_update: datetime = Field(default_factory=datetime.now)

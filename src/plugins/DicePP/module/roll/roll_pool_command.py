@@ -4,7 +4,6 @@ import random
 
 from core.bot import Bot
 from core.data import DC_USER_DATA, DC_GROUP_DATA
-from core.data.manager import DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -143,7 +142,7 @@ class RollPoolCommand(UserCommandBase):
                 should_end = True
             index += 1
 
-        nickname = self.bot.get_nickname(meta.user_id, meta.group_id)
+        nickname = await self.bot.get_nickname(meta.user_id, meta.group_id)
         if short:
             if feedback:
                 feedback = self.format_loc(LOC_ROLL_POOL_RESULT_SHORT_REASON,roll_reason=feedback,nickname=nickname,wins=str(wins),global_times=str(global_times),base_times=str(base_times),addon_times=str(addon_times))

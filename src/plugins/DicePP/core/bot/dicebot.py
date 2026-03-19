@@ -19,9 +19,8 @@ from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNot
 from core.communication import GroupInfo
 from core.data import DC_META, DC_NICKNAME, DC_USER_DATA, DC_GROUP_DATA,\
     DCK_META_STAT, DCK_USER_STAT, DCK_GROUP_STAT
-from core.data.manager import DataManager, DataManagerError
 from core.data import BotDatabase
-from core.data.models import UserStat, GroupStat, MetaStat
+from core.data.models import UserStat, GroupStat, MetaStat, BotControl, UserNickname
 from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo
 
 import shutil
@@ -57,7 +56,6 @@ class Bot:
         self.proxy: Optional[ClientProxy] = None
         self.data_path = os.path.join(BOT_DATA_PATH, account)
 
-        self.data_manager = DataManager(self.data_path)
         self.fix_data()
         self.db = BotDatabase(self.account)
         self.hub_manager = HubManager(self)
@@ -111,7 +109,15 @@ class Bot:
         loop = asyncio.get_event_loop()
         time_counter = [loop.time()] * 2
 
-        meta_stat: MetaStatInfo = self.data_manager.get_data(DC_META, [DCK_META_STAT], default_gen=MetaStatInfo)
+        _meta_stat_row = await self.db.meta_stat.get("meta")
+        if _meta_stat_row and _meta_stat_row.data:
+            meta_stat = MetaStatInfo()
+            try:
+                meta_stat.deserialize(_meta_stat_row.data)
+            except Exception:
+                meta_stat = MetaStatInfo()
+        else:
+            meta_stat = MetaStatInfo()
         meta_stat.update(is_first_time=True)
 
         while True:
@@ -129,8 +135,8 @@ class Bot:
                     # 更新在线时间并尝试每日更新
                     if meta_stat.update():
                         await self.tick_daily(bot_commands)
-                    # 保存数据到本地
-                    await self.data_manager.save_data_async()
+                    # 保存 meta_stat 到数据库
+                    await self.db.meta_stat.upsert(MetaStat(key="meta", data=meta_stat.serialize()))
                     # 内存监控检查
                     await self._check_memory_and_handle()
                     # 更新计时器
@@ -264,19 +270,27 @@ class Bot:
 
     async def tick_daily(self, bot_commands):
         # 更新用户统计
-        for user_id in self.data_manager.get_keys(DC_USER_DATA, []):
-            try:
-                user_stat: UserStatInfo = self.data_manager.get_data(DC_USER_DATA, [user_id, DCK_USER_STAT], get_ref=True)
-            except DataManagerError:
-                continue
-            user_stat.daily_update()
+        user_stat_rows = await self.db.user_stat.list_all()
+        for user_stat_row in user_stat_rows:
+            if user_stat_row.data:
+                user_stat = UserStatInfo()
+                try:
+                    user_stat.deserialize(user_stat_row.data)
+                except Exception:
+                    user_stat = UserStatInfo()
+                user_stat.daily_update()
+                await self.db.user_stat.upsert(UserStat(user_id=user_stat_row.user_id, data=user_stat.serialize()))
         # 更新群聊统计
-        for group_id in self.data_manager.get_keys(DC_GROUP_DATA, []):
-            try:
-                group_stat: GroupStatInfo = self.data_manager.get_data(DC_USER_DATA, [group_id, DCK_GROUP_STAT], get_ref=True)
-            except DataManagerError:
-                continue
-            group_stat.daily_update()
+        group_stat_rows = await self.db.group_stat.list_all()
+        for group_stat_row in group_stat_rows:
+            if group_stat_row.data:
+                group_stat = GroupStatInfo()
+                try:
+                    group_stat.deserialize(group_stat_row.data)
+                except Exception:
+                    group_stat = GroupStatInfo()
+                group_stat.daily_update()
+                await self.db.group_stat.upsert(GroupStat(group_id=group_stat_row.group_id, data=group_stat.serialize()))
 
         # 尝试清理过期群聊和过期用户信息
         async def clear_expired_data():
@@ -334,7 +348,6 @@ class Bot:
 
         if self.tick_task:
             self.tick_task.cancel()
-        await self.data_manager.save_data_async()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
         # self.loc_helper.save_localization() # 暂时不会在运行时修改, 不需要保存
         # self.cfg_helper.save_config() # 暂时不会在运行时修改, 不需要保存
@@ -429,7 +442,8 @@ class Bot:
             from module.common.master_command import DC_CTRL
             
             # 检查是否开启了静默模式
-            is_silent = self.data_manager.get_data(DC_CTRL, ["silent_startup"], False)
+            _ctrl_row = await self.db.bot_control.get("silent_startup")
+            is_silent = _ctrl_row.value == "True" if _ctrl_row else False
             
             feedback = self.loc_helper.format_loc_text(LOC_LOGIN_NOTICE)
             if feedback and feedback != "$":
@@ -445,9 +459,10 @@ class Bot:
                     dice_log("[Bot] 静默模式已开启，跳过发送启动通知")
                 else:
                     # 给上次reboot的Admin或Master汇报
-                    rebooter = self.data_manager.get_data(DC_CTRL, ["rebooter"], "")
+                    _rebooter_row = await self.db.bot_control.get("rebooter")
+                    rebooter = _rebooter_row.value if _rebooter_row else ""
                     if rebooter != "":
-                        self.data_manager.set_data(DC_CTRL, ["rebooter"], "")
+                        await self.db.bot_control.upsert(BotControl(key="rebooter", value=""))
                         command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(rebooter)])
                         await self.proxy.process_bot_command(command)
                     # 如果不存在reboot者，则给所有Master汇报
@@ -463,7 +478,7 @@ class Bot:
         """处理消息"""
         from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 
-        self.update_nickname(meta.user_id, "origin", meta.nickname)
+        await self.update_nickname(meta.user_id, "origin", meta.nickname)
 
         msg = preprocess_msg(msg)  # 转换中文符号, 转换小写等等
 
@@ -532,8 +547,12 @@ class Bot:
         for msg_cur in msg_list:
             for command in self.command_dict.values():
                 # 判断是否能处理该条指令
+                import inspect
                 try:
-                    should_proc, should_pass, hint = command.can_process_msg(msg_cur, meta)
+                    if inspect.iscoroutinefunction(command.can_process_msg):
+                        should_proc, should_pass, hint = await command.can_process_msg(msg_cur, meta)
+                    else:
+                        should_proc, should_pass, hint = command.can_process_msg(msg_cur, meta)
                 except (AttributeError, TypeError, ValueError):
                     # 发现未处理的错误, 汇报给主Master
                     should_proc, should_pass, hint = False, False, None
@@ -632,19 +651,17 @@ class Bot:
         elif isinstance(data, GroupIncreaseNoticeData):
             data: GroupIncreaseNoticeData = data
             if data.user_id != self.account:
-                try:
-                    activate = self.data_manager.get_data(DC_ACTIVATE, [data.group_id],default_val="已激活")[0]
-                except DataManagerError:
-                    activate = False
+                _activate_row = await self.db.group_activate.get(data.group_id)
+                activate = _activate_row.active if _activate_row else True
 
                 if activate:
-                    # "default" 表示未设置（用默认欢迎词），"" 表示已关闭（不发送）
-                    feedback = self.data_manager.get_data(DC_WELCOME, [data.group_id], default_val="default")
+                    _welcome_row = await self.db.group_welcome.get(data.group_id)
+                    feedback = _welcome_row.welcome_msg if _welcome_row else "default"
 
                     if feedback == "default":
                         feedback = self.loc_helper.format_loc_text(LOC_WELCOME_DEFAULT)
                     
-                    if feedback:  # 关闭时 feedback 为 ""，跳过发送
+                    if feedback:
                         bot_commands += [BotSendMsgCommand(self.account, choice(feedback.split("|")), [GroupMessagePort(data.group_id)])]
 
         if self.proxy:
@@ -675,7 +692,7 @@ class Bot:
         if master_list:
             await self.proxy.process_bot_command(BotSendMsgCommand(self.account, msg, [PrivateMessagePort(master_list[0])]))
 
-    def get_nickname(self, user_id: str, group_id: str = "") -> str:
+    async def get_nickname(self, user_id: str, group_id: str = "") -> str:
         """
         获取用户昵称
         Args:
@@ -685,19 +702,18 @@ class Bot:
         if not group_id:
             group_id = "default"
 
-        try:
-            nickname = self.data_manager.get_data(DC_NICKNAME, [user_id, group_id])  # 使用用户在群内的昵称
-        except DataManagerError:
-            try:
-                nickname = self.data_manager.get_data(DC_NICKNAME, [user_id, "default"])  # 使用用户定义的默认昵称
-            except DataManagerError:
-                try:
-                    nickname = self.data_manager.get_data(DC_NICKNAME, [user_id, "origin"])  # 使用用户本身的用户名
-                except DataManagerError:
-                    nickname = NICKNAME_ERROR
-        return nickname
+        _nick_row = await self.db.nickname.get(user_id, group_id)
+        if _nick_row:
+            return _nick_row.nickname
+        _nick_row = await self.db.nickname.get(user_id, "default")
+        if _nick_row:
+            return _nick_row.nickname
+        _nick_row = await self.db.nickname.get(user_id, "origin")
+        if _nick_row:
+            return _nick_row.nickname
+        return NICKNAME_ERROR
 
-    def update_nickname(self, user_id: str, group_id: str = "", nickname: str = ""):
+    async def update_nickname(self, user_id: str, group_id: str = "", nickname: str = ""):
         """
         更新昵称
         Args:
@@ -707,25 +723,42 @@ class Bot:
         """
         if not group_id:
             group_id = "default"
-        nickname_prev = self.data_manager.get_data(DC_NICKNAME, [user_id, group_id], nickname)
-        if nickname_prev != nickname:
-            self.data_manager.set_data(DC_NICKNAME, [user_id, group_id], nickname)
+        _nick_row = await self.db.nickname.get(user_id, group_id)
+        if _nick_row is None or _nick_row.nickname != nickname:
+            await self.db.nickname.upsert(UserNickname(user_id=user_id, group_id=group_id, nickname=nickname))
 
     async def update_group_info_all(self) -> List[GroupInfo]:
         if not self.proxy:
             return []
         group_info_list: List[GroupInfo] = await self.proxy.get_group_list()
-        all_group_id = set(self.data_manager.get_keys(DC_GROUP_DATA, []))
+        group_stat_rows = await self.db.group_stat.list_all()
+        all_group_id = set(row.group_id for row in group_stat_rows)
         valid_group_id = set((info.group_id for info in group_info_list))
         for info in group_info_list:
-            group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [info.group_id, DCK_GROUP_STAT],
-                                                                   default_gen=GroupStatInfo, get_ref=True)
+            _row = await self.db.group_stat.get(info.group_id)
+            if _row and _row.data:
+                group_stat = GroupStatInfo()
+                try:
+                    group_stat.deserialize(_row.data)
+                except Exception:
+                    group_stat = GroupStatInfo()
+            else:
+                group_stat = GroupStatInfo()
             group_stat.meta.update(info.group_name, info.member_count, info.max_member_count)
+            await self.db.group_stat.upsert(GroupStat(group_id=info.group_id, data=group_stat.serialize()))
         for group_id in all_group_id.difference(valid_group_id):
-            group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [group_id, DCK_GROUP_STAT],
-                                                                   default_gen=GroupStatInfo, get_ref=True)
+            _row = await self.db.group_stat.get(group_id)
+            if _row and _row.data:
+                group_stat = GroupStatInfo()
+                try:
+                    group_stat.deserialize(_row.data)
+                except Exception:
+                    group_stat = GroupStatInfo()
+            else:
+                group_stat = GroupStatInfo()
             group_stat.meta.member_count = -1
             group_stat.meta.max_member = -1
+            await self.db.group_stat.upsert(GroupStat(group_id=group_id, data=group_stat.serialize()))
 
         return group_info_list
 
@@ -734,7 +767,6 @@ class Bot:
 
     async def clear_expired_data(self) -> List:
         from core.command import BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotCommandBase
-        from module.common import DC_POINT, DC_WELCOME, DC_ACTIVATE, DC_CHAT_RECORD
         from module.character.dnd5e import DC_CHAR_DND, DC_CHAR_HP
 
         cur_date = get_current_date_raw()
@@ -755,23 +787,25 @@ class Bot:
         white_list_user: List[str] = preprocess_white_list(self.cfg_helper.get_config(CFG_WHITE_LIST_USER))
 
         # 清理过期用户信息
-        all_user_id: Set[str] = set(self.data_manager.get_keys(DC_USER_DATA, []))
-        # all_user_id.union(set(self.data_manager.get_keys(DC_NICKNAME, [])))
+        user_stat_rows = await self.db.user_stat.list_all()
+        all_user_id: Set[str] = set(row.user_id for row in user_stat_rows)
         invalid_user_id = []
         for user_id in all_user_id:
             is_valid = False
-            # 白名单中的用户不会被清理
             if user_id in white_list_user:
                 continue
-            try:
-                user_stat: UserStatInfo = self.data_manager.get_data(DC_USER_DATA, [user_id, DCK_USER_STAT])
-            except DataManagerError:
+            _row = await self.db.user_stat.get(user_id)
+            if not _row or not _row.data:
                 invalid_user_id.append(user_id)
                 continue
-            # 掷骰次数超过一定次数的用户不会被清理
+            user_stat = UserStatInfo()
+            try:
+                user_stat.deserialize(_row.data)
+            except Exception:
+                invalid_user_id.append(user_id)
+                continue
             if user_stat.roll.times.total_val > 200:
                 is_valid = True
-            # 过去一段时间内使用过指令的用户不会被清理
             for flag in user_stat.cmd.flag_dict.keys():
                 flag_date = int_to_datetime(user_stat.cmd.flag_dict[flag].update_time)
                 if cur_date - flag_date < datetime.timedelta(days=user_expire_day):
@@ -782,36 +816,41 @@ class Bot:
             index += 1
             if index % 500 == 0:
                 await asyncio.sleep(0)
-        self.data_manager.delete_data_all([user_id for user_id in invalid_user_id])
+        for user_id in invalid_user_id:
+            await self.db.user_stat.delete(user_id)
 
         # 清理过期群聊消息
-        all_group_id: Set[str] = set(self.data_manager.get_keys(DC_GROUP_DATA, []))
+        group_stat_rows = await self.db.group_stat.list_all()
+        all_group_id: Set[str] = set(row.group_id for row in group_stat_rows)
         invalid_group_id = []
         warning_group_id = []
         for group_id in all_group_id:
             is_valid = False
-            # 白名单中的群聊不会被清理
             if group_id in white_list_group:
                 continue
-            try:
-                group_stat: GroupStatInfo = self.data_manager.get_data(DC_GROUP_DATA, [group_id, DCK_GROUP_STAT], get_ref=True)
-            except DataManagerError:
+            _row = await self.db.group_stat.get(group_id)
+            if not _row or not _row.data:
                 invalid_group_id.append(group_id)
                 continue
-            # 过去一段时间内使用过指令的群不会被清理
+            group_stat = GroupStatInfo()
+            try:
+                group_stat.deserialize(_row.data)
+            except Exception:
+                invalid_group_id.append(group_id)
+                continue
             for flag in group_stat.cmd.flag_dict.keys():
                 flag_date = int_to_datetime(group_stat.cmd.flag_dict[flag].update_time)
                 if cur_date - flag_date < datetime.timedelta(days=group_expire_day):
                     is_valid = True
                     break
-            # 对还没有到达警告次数上限的群进行警告, 不会进行清理
             if not is_valid and group_stat.meta.warn_time < group_expire_time:
                 is_valid = True
                 group_stat.meta.warn_time += 1
-                if group_stat.meta.member_count > 0:  # 只对拥有群成员的群发送警告消息, 没有说明已经不在该群了
+                if group_stat.meta.member_count > 0:
                     result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
                     result_commands.append(BotSendMsgCommand(self.account, group_expire_warn, [GroupMessagePort(group_id)]))
                     warning_group_id.append(group_id)
+                await self.db.group_stat.upsert(GroupStat(group_id=group_id, data=group_stat.serialize()))
             if not is_valid:
                 invalid_group_id.append(group_id)
             index += 1
@@ -819,10 +858,8 @@ class Bot:
                 await asyncio.sleep(0)
         for group_id in invalid_group_id:
             result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
-            # temp_warning = "[测试]该群聊已被标记为无效群聊, 尝试使用掷骰指令以清除此标记和提醒(目前没有实际作用, 被误标记了也不用担心)"
-            # result_commands.append(BotSendMsgCommand(self.account, temp_warning, [GroupMessagePort(group_id)]))
             result_commands.append(BotLeaveGroupCommand(self.account, group_id))
-            self.data_manager.delete_data_all([group_id])
+            await self.db.group_stat.delete(group_id)
 
         # 给Master汇报清理情况
         if self.get_master_ids():

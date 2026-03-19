@@ -44,7 +44,7 @@ class JrrpCommand(UserCommandBase):
 
         random.seed(datetime_to_str(get_current_date_raw()))  #  复原seed
 
-        user_name: str = self.bot.get_nickname(meta.user_id, meta.group_id)
+        user_name: str = await self.bot.get_nickname(meta.user_id, meta.group_id)
         feedback: str = ""
         if jrrp == 1:  #  最小值
             feedback += self.format_loc(LOC_JRRP_MIN, name=user_name, jrrp=str(jrrp))

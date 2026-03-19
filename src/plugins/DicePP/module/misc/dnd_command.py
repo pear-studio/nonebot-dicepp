@@ -70,7 +70,7 @@ class UtilsDNDCommand(UserCommandBase):
             dnd_result.append(f"{sum(attr_result)} : {attr_result_str}")
         result = "\n".join(dnd_result)
 
-        user_name = self.bot.get_nickname(meta.user_id, meta.group_id)
+        user_name = await self.bot.get_nickname(meta.user_id, meta.group_id)
         if reason:
             feedback: str = self.format_loc(LOC_DND_RES, name=user_name, reason=reason, result=result)
         else:

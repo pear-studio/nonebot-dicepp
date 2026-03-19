@@ -208,7 +208,7 @@ class InitiativeCommand(UserCommandBase):
             owner_id = ""
             if not name:
                 # 已知在这个位置处理昵称会出现问题，因此后置
-                # name = self.bot.get_nickname(meta.user_id, meta.group_id)
+                # name = await self.bot.get_nickname(meta.user_id, meta.group_id)
                 name = "self"
                 owner_id = meta.user_id
 
@@ -268,7 +268,7 @@ class InitiativeCommand(UserCommandBase):
             result_dict: Dict[str, Tuple[int, str]] = dict()
             for name, res in name_dict.items():
                 if name == "self" or name == "我" :
-                    name = self.bot.get_nickname(meta.user_id, meta.group_id)
+                    name = await self.bot.get_nickname(meta.user_id, meta.group_id)
                 result_dict[name] = (res.get_val(), res.get_complete_result())
 
             feedback = await self.add_initiative_entities(result_dict, owner_id, meta.group_id)
@@ -303,7 +303,7 @@ class InitiativeCommand(UserCommandBase):
         # 更新玩家姓名（Pydantic 保证 entities 都是 InitEntity 实例）
         for entity in init_data.entities:
             if entity.owner:
-                entity.name = self.bot.get_nickname(entity.owner, meta.group_id)
+                entity.name = await self.bot.get_nickname(entity.owner, meta.group_id)
         entities_name_list: List[str] = [entity.name for entity in init_data.entities]
 
         # 处理需要有表存在才能使用的指令
@@ -392,7 +392,7 @@ class InitiativeCommand(UserCommandBase):
                 swap_target_l = arg_str.split(" ",1)[0].strip()
                 swap_target_r = arg_str.split(" ",1)[1].strip()
             else:
-                swap_target_l = self.bot.get_nickname(meta.user_id, meta.group_id)
+                swap_target_l = await self.bot.get_nickname(meta.user_id, meta.group_id)
                 swap_target_r = arg_str
             # 寻找更换目标
             name_list_valid_l: List[str]

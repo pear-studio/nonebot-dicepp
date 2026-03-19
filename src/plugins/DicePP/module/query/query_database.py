@@ -6,7 +6,6 @@ import openpyxl
 import sqlite3
 from openpyxl.comments import Comment
 
-from core.data import custom_data_chunk, DataChunkBase
 from core.data import JsonObject, custom_json_object
 from utils.time import get_current_date_str
 

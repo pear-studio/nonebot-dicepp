@@ -79,7 +79,7 @@ class UtilsCOCCommand(UserCommandBase):
             coc_result.append(f"合计{sum(attr_result[:8])}/{sum(attr_result)} : {attr_result_str}")
         result = "\n".join(coc_result)
 
-        user_name = self.bot.get_nickname(meta.user_id, meta.group_id)
+        user_name = await self.bot.get_nickname(meta.user_id, meta.group_id)
         if reason:
             feedback: str = self.format_loc(LOC_COC_RES, name=user_name, reason=reason, result=result)
         else:

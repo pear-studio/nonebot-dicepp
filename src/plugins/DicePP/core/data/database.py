@@ -22,6 +22,7 @@ from .models import (
     MetaStat,
     NPCHealth,
     UserVariable,
+    UserFavor,
 )
 
 
@@ -51,6 +52,7 @@ class BotDatabase:
         self._meta_stat: Optional[Repository[MetaStat]] = None
         self._npc_health: Optional[Repository[NPCHealth]] = None
         self._variable: Optional[Repository[UserVariable]] = None
+        self._favor: Optional[Repository[UserFavor]] = None
 
     @property
     def karma(self) -> Repository[UserKarma]:
@@ -148,6 +150,12 @@ class BotDatabase:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._variable
 
+    @property
+    def favor(self) -> Repository[UserFavor]:
+        if self._favor is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._favor
+
     async def connect(self) -> None:
         os.makedirs(self._bot_dir, exist_ok=True)
 
@@ -187,6 +195,7 @@ class BotDatabase:
         self._meta_stat = None
         self._npc_health = None
         self._variable = None
+        self._favor = None
 
     async def _ensure_all_tables(self) -> None:
         self._karma = Repository[UserKarma](
@@ -266,3 +275,8 @@ class BotDatabase:
             self._db, UserVariable, "variable", ["user_id", "group_id", "name"]
         )
         await self._variable._ensure_table()
+
+        self._favor = Repository[UserFavor](
+            self._db, UserFavor, "favor", ["user_id", "group_id"]
+        )
+        await self._favor._ensure_table()

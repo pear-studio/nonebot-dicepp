@@ -208,7 +208,7 @@ class KarmaDiceCommand(UserCommandBase):
 
         if action == "on":
             try:
-                changed, need_intro = manager.enable(meta.group_id)
+                changed, need_intro = await manager.enable(meta.group_id)
                 if changed:
                     feedback = self.format_loc(LOC_KARMA_ON)
                     if need_intro:
@@ -220,7 +220,7 @@ class KarmaDiceCommand(UserCommandBase):
                 feedback = "业力骰子开启失败，请检查日志。"
         elif action == "off":
             try:
-                changed = manager.disable(meta.group_id)
+                changed = await manager.disable(meta.group_id)
                 feedback = self.format_loc(LOC_KARMA_OFF if changed else LOC_KARMA_ALREADY_OFF)
             except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
                 dice_log(f"[KarmaDice] 关闭失败: {exc}")
@@ -287,7 +287,7 @@ class KarmaDiceCommand(UserCommandBase):
                     config = manager._get_config(meta.group_id)
                     window = int(params[1]) if len(params) > 1 else config.custom_roll_count
                     try:
-                        manager.set_custom_params(meta.group_id, target, window)
+                        await manager.set_custom_params(meta.group_id, target, window)
                         feedback = self.format_loc(LOC_KARMA_SET_OK, target=target, window=window)
                     except (AttributeError, TypeError, KeyError, ValueError, RuntimeError) as exc:
                         dice_log(f"[KarmaDice] 设置参数失败: {exc}")
@@ -305,7 +305,7 @@ class KarmaDiceCommand(UserCommandBase):
                     feedback = self.format_loc(LOC_KARMA_MODE_INVALID, modes=available)
                 else:
                     try:
-                        changed = manager.set_mode(meta.group_id, mode_norm)
+                        changed = await manager.set_mode(meta.group_id, mode_norm)
                         display = MODE_DISPLAY.get(mode_norm, mode_norm)
                         feedback = self.format_loc(LOC_KARMA_MODE_OK, mode=display)
                         if not changed:
@@ -324,7 +324,7 @@ class KarmaDiceCommand(UserCommandBase):
                     feedback = self.format_loc(LOC_KARMA_ENGINE_INVALID, engines=available)
                 else:
                     try:
-                        changed = manager.set_engine(meta.group_id, engine_norm)
+                        changed = await manager.set_engine(meta.group_id, engine_norm)
                         display = ENGINE_DISPLAY.get(engine_norm, engine_norm)
                         feedback = self.format_loc(LOC_KARMA_ENGINE_OK, engine=display)
                         if not changed:

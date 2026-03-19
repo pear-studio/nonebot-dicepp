@@ -121,20 +121,20 @@ class TestKarmaEngines(unittest.TestCase):
         self.assertLess(avg, 60)
 
     def test_grim_mode_skews_low(self):
-        from module.roll.karma_manager import KarmaDiceManager, KarmaConfig, DC_KARMA
+        from module.roll.karma_manager import KarmaDiceManager, KarmaConfig
         from core.bot import Bot
 
         bot = Bot("test_karma_grim")
         manager = KarmaDiceManager(bot)
         cfg = KarmaConfig(is_enabled=True, mode="grim")
-        bot.data_manager.set_data(DC_KARMA, ["g1"], cfg.to_dict())
+        manager.set_runtime("g1", cfg)
 
         values = [manager.generate_value("g1", "u1", 100) for _ in range(1000)]
         avg = sum(values) / len(values)
         self.assertLess(avg, 55)
 
     def test_stable_mode_lower_variance(self):
-        from module.roll.karma_manager import KarmaDiceManager, KarmaConfig, DC_KARMA
+        from module.roll.karma_manager import KarmaDiceManager, KarmaConfig
         from core.bot import Bot
         import statistics
 
@@ -142,8 +142,8 @@ class TestKarmaEngines(unittest.TestCase):
         manager = KarmaDiceManager(bot)
         cfg_standard = KarmaConfig(is_enabled=True, mode="custom")
         cfg_stable = KarmaConfig(is_enabled=True, mode="stable")
-        bot.data_manager.set_data(DC_KARMA, ["g1"], cfg_standard.to_dict())
-        bot.data_manager.set_data(DC_KARMA, ["g2"], cfg_stable.to_dict())
+        manager.set_runtime("g1", cfg_standard)
+        manager.set_runtime("g2", cfg_stable)
 
         values_standard = [manager.generate_value("g1", "u1", 100) for _ in range(500)]
         values_stable = [manager.generate_value("g2", "u2", 100) for _ in range(500)]

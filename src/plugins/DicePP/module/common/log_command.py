@@ -12,8 +12,6 @@ except Exception:  # pragma: no cover
     requests = None
 
 from core.bot import Bot
-from core.data import DataChunkBase, custom_data_chunk
-from core.data.manager import DataManagerError
 from core.config import CFG_MASTER
 from core.command.const import *
 from core.command import BotCommandBase, BotSendFileCommand, BotSendMsgCommand
@@ -140,12 +138,6 @@ def _pick_color(color_map: Dict[str, str], user_id: str) -> str:
     if user_id not in color_map:
         color_map[user_id] = COLOR_POOL[len(color_map) % len(COLOR_POOL)]
     return color_map[user_id]
-
-
-@custom_data_chunk(identifier=DC_LOG_SESSION)
-class _(DataChunkBase):  # noqa: E742
-    def __init__(self):
-        super().__init__()
 
 
 def _now_str() -> str:
@@ -352,7 +344,9 @@ def _init_group_payload(bot: Bot, group_id: str, legacy: Optional[Dict[str, Any]
             if legacy.get(DCK_ACTIVE, False):
                 payload[LOG_GROUP_CURRENT] = log_id
 
-    bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
+    # TODO: 迁移到 BotDatabase
+    # bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
+    # 暂时使用内存存储
     return payload
 
 
@@ -368,10 +362,9 @@ def _rebuild_name_index(payload: Dict[str, Any]) -> None:
 
 
 def _load_group_payload(bot: Bot, group_id: str) -> Dict[str, Any]:
-    try:
-        payload = bot.data_manager.get_data(DC_LOG_SESSION, [group_id])
-    except DataManagerError:
-        payload = None
+    # TODO: 迁移到 BotDatabase — DC_LOG_SESSION 存储尚未完成迁移，暂时返回 None
+    # 由调用方通过 bot.db.log 异步接口加载数据
+    payload = None
 
     if not isinstance(payload, dict) or LOG_GROUP_LOGS not in payload:
         payload = _init_group_payload(bot, group_id, payload if isinstance(payload, dict) else None)
@@ -410,12 +403,16 @@ def _load_group_payload(bot: Bot, group_id: str) -> Dict[str, Any]:
             mutated = True
         _rebuild_name_index(payload)
         if mutated:
-            bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
+            # TODO: 迁移到 BotDatabase
+            # bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
+            pass
     return payload
 
 
 def _save_group_payload(bot: Bot, group_id: str, payload: Dict[str, Any]) -> None:
-    bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
+    # TODO: 迁移到 BotDatabase
+    # bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
+    pass
 
 
 def _find_log_id_by_name(payload: Dict[str, Any], name: str) -> Optional[str]:
@@ -1400,7 +1397,7 @@ class LogCommand(UserCommandBase):
         state = "ON" if filters[key] else "OFF"
         return self.bot.loc_helper.format_loc_text(LOC_LOG_SET_TOGGLED, item=param, state=state)
 
-    def _generate_file(self, group_id: str, log_entry: Dict[str, Any], filters: Dict[str, bool], *, log_id: Optional[str] = None) -> Tuple[str, str, List[Tuple[str, str]]]:
+    async def _generate_file(self, group_id: str, log_entry: Dict[str, Any], filters: Dict[str, bool], *, log_id: Optional[str] = None) -> Tuple[str, str, List[Tuple[str, str]]]:
         # 优先从 DB 读取记录，避免占用内存
         records: List[Dict[str, Any]]
         # Prefer DB records but merge with any legacy in-memory records so that
@@ -1445,7 +1442,7 @@ class LogCommand(UserCommandBase):
             uid = record.get('user_id')
             if uid and uid not in nickname_cache:
                 try:
-                    nick = self.bot.get_nickname(uid, group_id)
+                    nick = await self.bot.get_nickname(uid, group_id)
                 except Exception:
                     nick = None
                 if nick and nick not in ("UNDEF_NAME", "----"):
@@ -1467,6 +1464,20 @@ class LogCommand(UserCommandBase):
             if uid and uid not in user_display:
                 user_display[uid] = nickname_cache.get(uid) or record.get('nickname') or uid
 
+        # 预取所有 [CQ:at] 引用的 uid 昵称，避免在同步回调中调用 async 方法
+        at_uid_set: set = set()
+        for record in records:
+            for m in re.finditer(r"\[CQ:at,qq=(\d+)", record.get('content', '')):
+                at_uid_set.add(m.group(1))
+        for at_uid in at_uid_set:
+            if at_uid not in nickname_cache:
+                try:
+                    nick = await self.bot.get_nickname(at_uid, group_id)
+                except Exception:
+                    nick = None
+                if nick and nick not in ("UNDEF_NAME", "----"):
+                    nickname_cache[at_uid] = nick
+
         def humanize_cq(raw: str) -> str:
             text = raw
 
@@ -1485,12 +1496,10 @@ class LogCommand(UserCommandBase):
 
             def repl_at(match: re.Match) -> str:
                 uid = match.group(1)
-                nick = user_display.get(uid)
+                # 优先用预取的昵称缓存，其次用 user_display，最后 fallback 到 uid
+                nick = nickname_cache.get(uid) or user_display.get(uid)
                 if not nick or nick in ("UNDEF_NAME", "----"):
-                    try:
-                        nick = self.bot.get_nickname(uid, group_id) or uid
-                    except Exception:
-                        nick = uid
+                    nick = uid
                 return f"@{nick}"
 
             text = re.sub(r"\[CQ:at,qq=(\d+)(?:,[^\]]*)?\]", repl_at, text)

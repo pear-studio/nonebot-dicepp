@@ -4,7 +4,6 @@ import random
 
 from core.bot import Bot
 from core.data import DC_USER_DATA, DC_GROUP_DATA
-from core.data.manager import DataManagerError
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -65,7 +64,7 @@ class RollChooseCommand(UserCommandBase):
         
         # 打乱列表
         random.shuffle(args)
-        nickname = self.bot.get_nickname(meta.user_id, meta.group_id)
+        nickname = await self.bot.get_nickname(meta.user_id, meta.group_id)
         if choose_time == 1:
             result = args[0]
             return [BotSendMsgCommand(self.bot.account, self.format_loc(LOC_ROLL_CHOOSE_RESULT, nickname=nickname,roll_choose_result=result), [port])]

@@ -28,6 +28,7 @@ from .extended import (
     MetaStat,
     NPCHealth,
     UserVariable,
+    UserFavor,
 )
 
 __all__ = [

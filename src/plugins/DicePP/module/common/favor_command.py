@@ -1,6 +1,3 @@
-from core.data import DataChunkBase, custom_data_chunk
-
-
 LOC_FAVOR_SHOW = "favor_show"
 LOC_FAVOR_BLOCK = "favor_block"
 LOC_FAVOR_PHASE_HAPPY = "favor_phase_happy"
@@ -26,9 +23,3 @@ CFG_FAVOR_MOD_REPEAT = "favor_mod_repeat"
 CFG_FAVOR_MOD_WRONG_USE = "favor_mod_wrong_use"
 
 DC_FAVOR = "favor"
-
-# 存放好感度数据（待实现）
-@custom_data_chunk(identifier=DC_FAVOR)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()

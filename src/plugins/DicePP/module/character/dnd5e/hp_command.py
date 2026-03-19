@@ -58,7 +58,7 @@ class HPCommand(UserCommandBase):
         feedback: str
 
         if not arg_str:  # 查看自己生命值
-            nickname = self.bot.get_nickname(meta.user_id, meta.group_id)
+            nickname = await self.bot.get_nickname(meta.user_id, meta.group_id)
             char_info: Optional[DNDCharacter] = await self.bot.db.characters_dnd.get(
                 meta.group_id, meta.user_id
             )
@@ -75,7 +75,7 @@ class HPCommand(UserCommandBase):
                 for char in pc_chars:
                     if not char.is_init:
                         continue
-                    nickname = self.bot.get_nickname(char.user_id, meta.group_id)
+                    nickname = await self.bot.get_nickname(char.user_id, meta.group_id)
                     feedback += f"{nickname} {char.hp_info.get_info()}\n"
                 for npc in npc_list:
                     if npc.hp_data:
@@ -94,7 +94,7 @@ class HPCommand(UserCommandBase):
             arg_str = arg_str[3:].strip()
             if not arg_str:  # 默认删除自己
                 await self.bot.db.characters_dnd.delete(meta.group_id, meta.user_id)
-                name = self.bot.get_nickname(meta.user_id, meta.group_id)
+                name = await self.bot.get_nickname(meta.user_id, meta.group_id)
                 feedback = self.format_loc(LOC_HP_DEL, name=name)
             else:
                 source_key, target_id = await self.search_target(arg_str, meta.group_id)
@@ -107,7 +107,7 @@ class HPCommand(UserCommandBase):
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                 if source_key == DC_CHAR_DND:
                     await self.bot.db.characters_dnd.delete(meta.group_id, target_id)
-                    name = self.bot.get_nickname(target_id, meta.group_id)
+                    name = await self.bot.get_nickname(target_id, meta.group_id)
                 else:
                     await self.bot.db.npc_health.delete(meta.group_id, target_id)
                     name = target_id
@@ -204,7 +204,7 @@ class HPCommand(UserCommandBase):
                     )
                     char_obj.is_init = True  # 设置 HP 后标记为已初始化
                     await self.bot.db.characters_dnd.save(char_obj)
-                    name = self.bot.get_nickname(target_id, meta.group_id)
+                    name = await self.bot.get_nickname(target_id, meta.group_id)
                 else:
                     npc_obj: Optional[NPCHealth] = await self.bot.db.npc_health.get(
                         meta.group_id, target_id
@@ -278,7 +278,7 @@ class HPCommand(UserCommandBase):
         # 1. 查找角色卡信息（PC）
         user_ids = await self.bot.db.characters_dnd.list_key_values_by("user_id", group_id=group_id)
         for uid in user_ids:
-            target_id_name_dict[uid] = self.bot.get_nickname(uid, group_id)
+            target_id_name_dict[uid] = await self.bot.get_nickname(uid, group_id)
         target_poss = match_substring(target_intent, target_id_name_dict.values())
         if len(target_poss) == 1:
             source = DC_CHAR_DND

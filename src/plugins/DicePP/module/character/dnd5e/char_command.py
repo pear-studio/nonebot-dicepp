@@ -126,7 +126,7 @@ class CharacterDNDCommand(UserCommandBase):
                     feedback = self.format_loc(LOC_CHAR_SET)
                     # 设置昵称
                     if new_char.name:
-                        self.bot.update_nickname(meta.user_id, meta.group_id, new_char.name)
+                        await self.bot.update_nickname(meta.user_id, meta.group_id, new_char.name)
                 except AssertionError as e:
                     feedback = e.args[0]
 
@@ -176,7 +176,7 @@ class CharacterDNDCommand(UserCommandBase):
                         check_value_list.append(result_val)
                     name_str = char_info.name
                     if not name_str:
-                        name_str = self.bot.get_nickname(meta.user_id, meta.group_id)
+                        name_str = await self.bot.get_nickname(meta.user_id, meta.group_id)
                     check_name = check_name + "检定" if time <= 1 else f"{time}次{check_name}检定"
                     result_str = "\n".join(check_result_list)
                     feedback = self.format_loc(LOC_CHECK_RES, name=name_str, check=check_name, hint=hint_str, result=result_str)

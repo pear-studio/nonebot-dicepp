@@ -17,7 +17,6 @@ from core.config import DATA_PATH as ROOT_DATA_PATH
 
 from core.data.data_chunk import DATA_CHUNK_TYPES, DataChunkBase
 
-
 warnings.warn(
     "DataManager is deprecated. Use BotDatabase (async) instead. "
     "See db-migration-and-async change for migration details.",

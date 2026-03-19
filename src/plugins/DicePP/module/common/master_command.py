@@ -12,7 +12,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.config import CFG_MASTER, CFG_ADMIN
-from core.data import custom_data_chunk, DataChunkBase
+from core.data.models import BotControl
 
 LOC_REBOOT = "master_reboot"
 LOC_SEND_MASTER = "master_send_to_master"
@@ -25,12 +25,6 @@ LOC_SILENT_OFF = "master_silent_off"
 LOC_SILENT_STATUS = "master_silent_status"
 
 DC_CTRL = "master_control"
-
-@custom_data_chunk(identifier=DC_CTRL,
-                   include_json_object=True)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
 
 @custom_user_command(readable_name="Master指令", priority=DPP_COMMAND_PRIORITY_MASTER,flag=DPP_COMMAND_FLAG_MANAGE,
                      permission_require=3 # 限定骰管理使用
@@ -77,7 +71,7 @@ class MasterCommand(UserCommandBase):
 
         if arg_str == "reboot" or arg_str == "reboot now":
             # 立即重启
-            self.bot.data_manager.set_data(DC_CTRL, ["rebooter"], meta.user_id)
+            await self.bot.db.bot_control.upsert(BotControl(key="rebooter", value=meta.user_id))
             try:
                 self.bot.reboot()
                 feedback = self.format_loc(LOC_REBOOT)
@@ -114,7 +108,7 @@ class MasterCommand(UserCommandBase):
                     command_list.append(BotSendMsgCommand(self.bot.account, feedback, [port]))
                     return command_list
             
-            self.bot.data_manager.set_data(DC_CTRL, ["rebooter"], meta.user_id)
+            await self.bot.db.bot_control.upsert(BotControl(key="rebooter", value=meta.user_id))
             
             async def delayed_reboot():
                 from core.command import BotSendMsgCommand
@@ -234,16 +228,17 @@ class MasterCommand(UserCommandBase):
                 feedback = "无法获取内存信息，可能未安装 psutil"
         elif arg_str == "silent" or arg_str == "silent status":
             # 查询静默模式状态
-            is_silent = self.bot.data_manager.get_data(DC_CTRL, ["silent_startup"], False)
+            _ctrl_row = await self.bot.db.bot_control.get("silent_startup")
+            is_silent = _ctrl_row.value == "True" if _ctrl_row else False
             status_text = "开启" if is_silent else "关闭"
             feedback = self.format_loc(LOC_SILENT_STATUS, status=status_text)
         elif arg_str == "silent on":
             # 开启静默模式
-            self.bot.data_manager.set_data(DC_CTRL, ["silent_startup"], True)
+            await self.bot.db.bot_control.upsert(BotControl(key="silent_startup", value="True"))
             feedback = self.format_loc(LOC_SILENT_ON)
         elif arg_str == "silent off":
             # 关闭静默模式
-            self.bot.data_manager.set_data(DC_CTRL, ["silent_startup"], False)
+            await self.bot.db.bot_control.upsert(BotControl(key="silent_startup", value="False"))
             feedback = self.format_loc(LOC_SILENT_OFF)
         else:
             feedback = self.get_help("m", meta)

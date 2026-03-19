@@ -54,18 +54,20 @@ class NicknameCommand(UserCommandBase):
             else:
                 group_id = meta.group_id
 
-            nickname_prev = self.bot.data_manager.delete_data("nickname", [meta.user_id, group_id])
+            _nick_row = await self.bot.db.nickname.get(meta.user_id, group_id)
+            nickname_prev = _nick_row.nickname if _nick_row else None
             if nickname_prev:
-                nickname_new = self.bot.get_nickname(meta.user_id, group_id)
+                await self.bot.db.nickname.delete(meta.user_id, group_id)
+                nickname_new = await self.bot.get_nickname(meta.user_id, group_id)
                 feedback = self.format_loc(LOC_NICKNAME_RESET, nickname_prev=nickname_prev, nickname_new=nickname_new)
             else:  # 获取不到当前昵称
-                nickname_prev = self.bot.get_nickname(meta.user_id, group_id)
+                nickname_prev = await self.bot.get_nickname(meta.user_id, group_id)
                 feedback = self.format_loc(LOC_NICKNAME_RESET_FAIL, nickname=nickname_prev)
         else:  # 设置昵称
             if not self.is_legal_nickname(arg_str):  # 非法昵称
                 feedback = self.format_loc(LOC_NICKNAME_ILLEGAL)
             else:
-                self.bot.update_nickname(meta.user_id, meta.group_id, arg_str)
+                await self.bot.update_nickname(meta.user_id, meta.group_id, arg_str)
                 feedback = self.format_loc(LOC_NICKNAME_SET, nickname=arg_str)
 
         # 回复端口

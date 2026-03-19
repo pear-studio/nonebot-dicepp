@@ -3,15 +3,12 @@ import asyncio
 import math
 
 from core.bot import Bot
-from core.data import DC_USER_DATA, DC_GROUP_DATA, DCK_USER_STAT, DCK_GROUP_STAT
-from core.data.manager import DataManagerError
 from core.statistics import UserStatInfo, GroupStatInfo
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_FUNC_DISABLE
-from module.common import DC_GROUPCONFIG
 
 from module.roll import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, sift_roll_exp_and_reason, RollDiceError
 from module.roll.default_dice import (
@@ -239,10 +236,23 @@ class RollDiceCommand(UserCommandBase):
         try:
             exp_str = preprocess_roll_exp(exp_str)
             if meta.group_id:
-                stored_default = self.bot.data_manager.get_data(DC_GROUPCONFIG, [meta.group_id, "default_dice"], default_val="D20")
+                _row = await self.bot.db.group_config.get(meta.group_id)
+                if _row and _row.data and "default_dice" in _row.data:
+                    stored_default = _row.data["default_dice"]
+                else:
+                    stored_default = "D20"
             else:
                 # 私聊时尝试从用户配置读取默认骰面（支持私聊切换模式产生的设置）
-                stored_default = self.bot.data_manager.get_data(DC_USER_DATA, [meta.user_id, "default_dice"], default_val="D20")
+                _row = await self.bot.db.user_stat.get(meta.user_id)
+                stored_default = "D20"
+                if _row and _row.data:
+                    try:
+                        user_stat = UserStatInfo()
+                        user_stat.deserialize(_row.data)
+                        # 尝试从 meta 中读取 default_dice（需要扩展 UserMetaInfo）
+                        # 目前暂时无法支持用户级别 default_dice 的持久化
+                    except Exception:
+                        pass
             default_expr = format_default_expr_from_storage(stored_default)
             exp_str = apply_default_expr(exp_str, default_expr)
             default_type_hint = extract_default_type_hint(default_expr)
@@ -373,7 +383,7 @@ class RollDiceCommand(UserCommandBase):
                 roll_result_final = res_list[0].get_exp_val()
 
         # 获取其他信息
-        nickname = self.bot.get_nickname(meta.user_id, meta.group_id)
+        nickname = await self.bot.get_nickname(meta.user_id, meta.group_id)
         # 大成功和大失败次数
         roll_state = get_roll_state_loc_text(self.bot, res_list)
         d20_state = roll_state # 兼容旧版
@@ -436,36 +446,46 @@ class RollDiceCommand(UserCommandBase):
     def get_description(self) -> str:
         return ".r 掷骰"
 
-    def tick_daily(self) -> List[BotCommandBase]:
+    async def tick_daily(self) -> List[BotCommandBase]:
         # 清除今日统计
+        from core.data.models import UserStat, GroupStat
+
         # 更新用户数据
-        for user_id in self.bot.data_manager.get_keys(DC_USER_DATA, []):
-            dcp_user_prefix = [user_id] + DCP_USER_DATA_ROLL_A_UID
-            # 掷骰次数
+        user_stat_list = await self.bot.db.user_stat.list_all()
+        for user_stat_row in user_stat_list:
+            user_stat = UserStatInfo()
             try:
-                user_time_data = self.bot.data_manager.get_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_TIME_A_ID_ROLL, get_ref=True)
-                user_time_data[DCK_ROLL_TODAY] = 0
-            except DataManagerError:
+                if user_stat_row.data:
+                    user_stat.deserialize(user_stat_row.data)
+            except Exception:
                 pass
+            # 重置掷骰统计
+            user_stat.roll.times.update(1)
+            user_stat.roll.d20.update()
+            # 保存回去
             try:
-                user_time_data = self.bot.data_manager.get_data(DC_USER_DATA, dcp_user_prefix + DCP_ROLL_D20_A_ID_ROLL, get_ref=True)
-                user_time_data[DCK_ROLL_TODAY] = [0] * 21
-            except DataManagerError:
+                await self.bot.db.user_stat.upsert(UserStat(user_id=user_stat_row.user_id, data=user_stat.serialize()))
+            except Exception:
                 pass
+
         # 更新群聊数据
-        for group_id in self.bot.data_manager.get_keys(DC_GROUP_DATA, []):
-            dcp_group_prefix = [group_id] + DCP_GROUP_DATA_ROLL_A_GID
-            # 掷骰次数
+        group_stat_list = await self.bot.db.group_stat.list_all()
+        for group_stat_row in group_stat_list:
+            group_stat = GroupStatInfo()
             try:
-                user_time_data = self.bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_TIME_A_ID_ROLL, get_ref=True)
-                user_time_data[DCK_ROLL_TODAY] = 0
-            except DataManagerError:
+                if group_stat_row.data:
+                    group_stat.deserialize(group_stat_row.data)
+            except Exception:
                 pass
+            # 重置掷骰统计
+            group_stat.roll.times.update(1)
+            group_stat.roll.d20.update()
+            # 保存回去
             try:
-                user_time_data = self.bot.data_manager.get_data(DC_GROUP_DATA, dcp_group_prefix + DCP_ROLL_D20_A_ID_ROLL, get_ref=True)
-                user_time_data[DCK_ROLL_TODAY] = [0] * 21
-            except DataManagerError:
+                await self.bot.db.group_stat.upsert(GroupStat(group_id=group_stat_row.group_id, data=group_stat.serialize()))
+            except Exception:
                 pass
+
         return []
 
 

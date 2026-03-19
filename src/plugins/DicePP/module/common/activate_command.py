@@ -5,8 +5,7 @@ bot [on/off], dismiss
 from typing import List, Tuple, Any, Literal
 
 from core.bot import Bot
-from core.data import custom_data_chunk, DataChunkBase
-from core.data.manager import DataManagerError
+from core.data.models import GroupActivate
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotLeaveGroupCommand
@@ -25,12 +24,6 @@ CFG_BOT_DEF_ENABLE = "bot_default_enable"
 DC_ACTIVATE = "activate"
 
 BOT_SHOW_APPEND = f"{BOT_DESCRIBE} {BOT_VERSION}"
-
-
-@custom_data_chunk(identifier=DC_ACTIVATE)
-class _(DataChunkBase):
-    def __init__(self):
-        super().__init__()
 
 
 def get_default_activate_data(default_enable: bool) -> List:
@@ -56,16 +49,18 @@ class ActivateCommand(UserCommandBase):
 
         bot.cfg_helper.register_config(CFG_BOT_DEF_ENABLE, "1", "新加入群聊时是否默认开启(.bot on)")
 
-    def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
+    async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         if meta.group_id:
-            try:
-                activate_data = self.bot.data_manager.get_data(DC_ACTIVATE, [meta.group_id])
-            except DataManagerError:
+            _row = await self.bot.db.group_activate.get(meta.group_id)
+            if _row:
+                activate_data = [bool(int(_row.active))] if isinstance(_row.active, str) else [_row.active]
+            else:
                 try:
                     default_enable: bool = bool(int(self.bot.cfg_helper.get_config(CFG_BOT_DEF_ENABLE)[0]))
                 except (IndexError, ValueError):
                     default_enable = True
-                activate_data = self.bot.data_manager.get_data(DC_ACTIVATE, [meta.group_id], default_gen=lambda: get_default_activate_data(default_enable))
+                activate_data = [default_enable]
+                await self.bot.db.group_activate.upsert(GroupActivate(group_id=meta.group_id, active=str(int(default_enable))))
         else:
             activate_data = None
         should_pass: bool = False
@@ -102,15 +97,13 @@ class ActivateCommand(UserCommandBase):
             bot_show = bot_show + "\n" if bot_show else ""
             feedback = f"{bot_show}{BOT_SHOW_APPEND}"
         else:
-            if meta.permission < 0: # 其他指令需要至少1级权限（群管理/骰管理）才能执行
+            if meta.permission < 0:  # 其他指令需要至少1级权限（群管理/骰管理）才能执行
                 feedback = self.bot.loc_helper.format_loc_text(LOC_PERMISSION_DENIED_NOTICE)
-            elif mode == "on": # 开启骰娘
-                activate_data = get_default_activate_data(True)
-                self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
+            elif mode == "on":  # 开启骰娘
+                await self.bot.db.group_activate.upsert(GroupActivate(group_id=meta.group_id, active="1"))
                 feedback = self.format_loc(LOC_BOT_ON)
-            elif mode == "off": # 关闭骰娘
-                activate_data = get_default_activate_data(False)
-                self.bot.data_manager.set_data(DC_ACTIVATE, [meta.group_id], activate_data)
+            elif mode == "off":  # 关闭骰娘
+                await self.bot.db.group_activate.upsert(GroupActivate(group_id=meta.group_id, active="0"))
                 feedback = self.format_loc(LOC_BOT_OFF)
             else:  # mode == "dismiss":
                 feedback = self.format_loc(LOC_BOT_DISMISS)
