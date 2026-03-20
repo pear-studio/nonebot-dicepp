@@ -5,7 +5,7 @@
 from typing import List, Tuple, Any
 
 from core.bot import Bot
-# from core.data import DataChunkBase, custom_data_chunk
+# from core.data import BotDatabase  # 持久化请使用 self.bot.db 与各 Repository
 # from core.command.const import *
 from core.command import UserCommandBase  # , custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -15,13 +15,7 @@ LOC_TEMP = "template_loc"
 
 CFG_TEMP = "template_config"
 
-# 增加自定义DataChunk
-# DC_TEMP = "template_data"
-# @custom_data_chunk(identifier=DC_TEMP)
-# class _(DataChunkBase):
-#     def __init__(self):
-#         super().__init__()
-
+# 新业务数据：在 core/data/models/ 定义 Pydantic 模型，在 database.py 注册表与 Repository
 
 # 使用之前取消注释掉下面一行
 # @custom_user_command(readable_name="指令模板", priority=DPP_COMMAND_PRIORITY_DEFAULT)

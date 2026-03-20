@@ -344,9 +344,7 @@ def _init_group_payload(bot: Bot, group_id: str, legacy: Optional[Dict[str, Any]
             if legacy.get(DCK_ACTIVE, False):
                 payload[LOG_GROUP_CURRENT] = log_id
 
-    # TODO: 迁移到 BotDatabase
-    # bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
-    # 暂时使用内存存储
+    # 群级 payload 为内存结构；持久化由 bot.db.log（SQLite）承担
     return payload
 
 
@@ -362,8 +360,7 @@ def _rebuild_name_index(payload: Dict[str, Any]) -> None:
 
 
 def _load_group_payload(bot: Bot, group_id: str) -> Dict[str, Any]:
-    # TODO: 迁移到 BotDatabase — DC_LOG_SESSION 存储尚未完成迁移，暂时返回 None
-    # 由调用方通过 bot.db.log 异步接口加载数据
+    # 由调用方通过 bot.db.log 异步加载并装配；此处尚未注入 DB 行时走 _init_group_payload
     payload = None
 
     if not isinstance(payload, dict) or LOG_GROUP_LOGS not in payload:
@@ -403,15 +400,12 @@ def _load_group_payload(bot: Bot, group_id: str) -> Dict[str, Any]:
             mutated = True
         _rebuild_name_index(payload)
         if mutated:
-            # TODO: 迁移到 BotDatabase
-            # bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
-            pass
+            pass  # 写回见 bot.db.log.save_session / add_record 等
     return payload
 
 
 def _save_group_payload(bot: Bot, group_id: str, payload: Dict[str, Any]) -> None:
-    # TODO: 迁移到 BotDatabase
-    # bot.data_manager.set_data(DC_LOG_SESSION, [group_id], payload)
+    """占位：历史上曾写 JSON chunk；现为 no-op，持久化走 bot.db.log。"""
     pass
 
 
@@ -519,7 +513,7 @@ def _trim_records_if_needed(bot: Bot, entry: Dict[str, Any]) -> None:
         limit = int(str(cfg_val).strip())
     except (ValueError, TypeError):
         limit = LOG_MAX_RECORDS_DEFAULT
-    # 强制收敛至安全上限，确保 DataManager 深拷贝时不会携带过多记录。
+    # 强制收敛至安全上限，避免内存中日志缓存过大。
     if LOG_IN_MEMORY_SAFE_LIMIT > 0:
         if limit <= 0 or limit > LOG_IN_MEMORY_SAFE_LIMIT:
             limit = LOG_IN_MEMORY_SAFE_LIMIT

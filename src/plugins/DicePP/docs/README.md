@@ -50,7 +50,7 @@
 ## 关键概念
 
 1. **命令模式**: 所有用户交互通过 `UserCommandBase` 处理，详见 [命令模式](./command_pattern.md)
-2. **数据驱动**: 配置和数据通过 `DataManager` 持久化，详见 [架构总览](./architecture.md)
+2. **数据驱动**: 业务数据通过 `BotDatabase`（SQLite + `Repository`）持久化，详见 [架构总览](./architecture.md) 与仓库根目录 `docs/DATA_LAYER.md`
 3. **国际化**: 文本通过 `LocalizationManager` 管理
 
 ---

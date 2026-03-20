@@ -57,10 +57,10 @@ nonebot-dicepp/
 
 | 需求 | 文件位置 |
 |------|----------|
-| Bot 主类 | `src/plugins/DicePP/core/bot.py` |
-| 命令基类 | `src/plugins/DicePP/core/command/user_command.py` |
+| Bot 主类 | `src/plugins/DicePP/core/bot/dicebot.py` |
+| 命令基类 | `src/plugins/DicePP/core/command/user_cmd.py` |
 | 掷骰命令示例 | `src/plugins/DicePP/module/roll/roll_dice_command.py` |
-| 数据管理 | `src/plugins/DicePP/core/data/manager.py` |
+| 数据层（SQLite） | `src/plugins/DicePP/core/data/database.py` |
 
 ---
 

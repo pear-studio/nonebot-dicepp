@@ -232,19 +232,7 @@ RollModDivide (/)         # 除算
 
 ## 数据持久化
 
-掷骰命令会记录统计数据：
-
-```python
-def record_roll_data(bot, meta, res_list):
-    # 更新用户统计
-    user_stat = bot.data_manager.get_data(DC_USER_DATA, [user_id, DCK_USER_STAT])
-    user_stat.roll.times.inc(roll_times)
-
-    # 记录 D20 分布
-    for res in results:
-        if res.d20_num == 1:
-            user_stat.roll.d20.record(int(res.val_list[0]))
-```
+掷骰命令会读写统计数据（异步、经 `bot.db`），典型流程为：从 `user_stat` / `group_stat` 读出 `UserStatInfo` / `GroupStatInfo`，更新后再 `upsert` 回 SQLite。实现见 `module/roll/roll_dice_command.py` 与 `core/bot/dicebot.py` 中的 `process_message` / `tick` 相关逻辑。
 
 ## 小结
 

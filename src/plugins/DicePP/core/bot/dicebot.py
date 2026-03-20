@@ -50,7 +50,7 @@ class Bot:
             no_tick: 为 True 时不启动 tick_loop（供确定性自动化测试）
         """
         import core.command as command
-        import module  # module中可能会定义新的DataChunk和local text等, 所以要在一开始import
+        import module  # 加载各 module 子包以注册命令、本地化键等，需尽早 import
         from module.dice_hub import HubManager
         from adapter import ClientProxy
         self.account: str = account

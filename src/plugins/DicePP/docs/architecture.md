@@ -11,7 +11,7 @@ DicePP/
 │   ├── command/        # 命令系统
 │   ├── communication/  # 消息系统
 │   ├── config/        # 配置管理
-│   ├── data/          # 数据持久化
+│   ├── data/          # 数据持久化 (BotDatabase, Repository)
 │   ├── localization/  # 国际化
 │   └── statistics/    # 统计系统
 ├── module/             # 功能模块
@@ -32,12 +32,12 @@ Bot 是整个机器人的核心，负责：
 
 ```python
 class Bot:
-    def __init__(self, account: str):
-        self.data_manager = DataManager(self.data_path)  # 数据管理
-        self.loc_helper = LocalizationManager(...)         # 国际化
-        self.cfg_helper = ConfigManager(...)               # 配置管理
-        self.command_dict: Dict[str, UserCommandBase] = {} # 命令字典
-        self.hub_manager = HubManager(self)                # 骰子中心
+    def __init__(self, account: str, ...):
+        self.db = BotDatabase(self.account)   # 异步 SQLite（connect 在 delay_init_command）
+        self.loc_helper = LocalizationManager(...)
+        self.cfg_helper = ConfigManager(...)
+        self.command_dict: Dict[str, UserCommandBase] = {}
+        self.hub_manager = HubManager(self)
 ```
 
 **主要职责：**
@@ -53,26 +53,23 @@ class Bot:
 ```
 UserCommandBase (抽象基类)
     ├── can_process_msg()  # 判断是否处理该消息
-    ├── process_msg()       # 处理消息并返回命令列表
+    ├── process_msg()       # 处理消息并返回命令列表（异步）
     ├── get_help()          # 获取帮助文本
     └── get_description()   # 获取简短描述
 ```
 
-### 3. 数据管理 (core/data/)
+### 3. 数据持久化 (core/data/)
 
-```
-DataManager
-    ├── get_data(key)      # 读取数据
-    ├── set_data(key, val) # 写入数据
-    └── get_keys()         # 获取所有键
-```
+运行时数据通过 **`BotDatabase`**（`aiosqlite`）访问：
 
-数据存储结构：
-- `DC_USER_DATA` - 用户数据
-- `DC_GROUP_DATA` - 群数据
-- `DC_NICKNAME` - 昵称
-- `DC_MACRO` - 宏定义
-- `DC_VARIABLE` - 变量
+- **`bot_data.db`**：各业务表的键值 + JSON `data` 列（Pydantic 模型），由 **`Repository<T>`** 封装 CRUD。
+- **`log.db`**：跑团日志会话与逐条记录，由 **`LogRepository`** 维护（与主库分离）。
+
+`Bot` 在异步初始化流程中调用 `await self.db.connect()` 后，命令内使用 `await self.bot.db.<repo>.get(...)` 等形式读写。
+
+**命名常量**（`core/data/basic.py` 等）：如 `DC_USER_DATA`、`DCK_USER_STAT` 等仍用于兼容文档与部分逻辑中的「数据域」标识，不等同于旧版按 JSON 文件分块存储的实现。
+
+**内存模型**：统计、部分角色子结构仍使用 **`JsonObject`**（`core/data/json_object.py`）做序列化，再写入 SQLite 的 `data` 字段或由业务自行拼装。
 
 ### 4. 消息系统 (core/communication/)
 
@@ -107,14 +104,14 @@ Bot.process_message()
 ```
 Bot (主类)
     ↓ 依赖
-├── DataManager (数据)
+├── BotDatabase (SQLite / Repository)
 ├── LocalizationManager (文本)
 ├── ConfigManager (配置)
 ├── HubManager (骰子中心)
 └── CommandDict (命令)
     ↓ 依赖
 ├── UserCommandBase.process_msg()
-│   ├── DataManager (读写数据)
+│   ├── await bot.db.* （异步持久化）
 │   ├── LocalizationManager (格式化文本)
 │   └── ConfigManager (读取配置)
 └── BotCommandBase
@@ -123,8 +120,8 @@ Bot (主类)
 
 ## 关键技术点
 
-1. **异步处理**: 使用 `asyncio` 处理并发任务
-2. **数据持久化**: JSON 格式存储，支持热加载
+1. **异步处理**: 命令处理与数据库访问以 `async/await` 为主。
+2. **数据持久化**: SQLite（WAL），业务行内 JSON 与日志规范化表并存；详见仓库根目录 `docs/DATA_LAYER.md`。
 3. **国际化**: 支持多语言文本替换
 4. **插件化**: 命令通过注册机制动态加载
 

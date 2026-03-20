@@ -385,8 +385,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
 
     async def test_end_reload(self):
         # BotDatabase auto-saves, no need for manual save/load
-        # await self.test_bot.data_manager.save_data_async()
-        # self.test_bot.data_manager.load_data()
+        # 持久化经 BotDatabase：测试中按需 await self.test_bot.db.connect() / close()
         pass
 
 

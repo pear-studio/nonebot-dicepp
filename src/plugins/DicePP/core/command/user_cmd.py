@@ -77,9 +77,8 @@ class UserCommandBase(metaclass=abc.ABCMeta):
         ─────────────────────────
         1. 将方法签名从 `def process_msg(...)` 改为 `async def process_msg(...)`
         2. 如果方法内部调用了其他异步方法，需要加 await
-        3. 数据库调用示例:
-           - 旧: self.bot.data_manager.get_data(DC_KARMA, [user_id, group_id])
-           - 新: await self.bot.db.karma.get(user_id, group_id)
+        3. 数据库: await self.bot.db.<repository>.get(...) / save(...) / upsert(...)
+           （`Bot` 持有 `self.db: BotDatabase`，在 `delay_init_command` 中 connect）
         4. 即使方法内部暂时没有 await 调用，也要改成 async def（为将来迁移做准备）
         """
         bot_commands = []

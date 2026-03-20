@@ -177,16 +177,19 @@ DPP_COMMAND_FLAG_SYSTEM = 1 << 2   # 系统
 value = self.bot.cfg_helper.get_config(CFG_ROLL_ENABLE)[0]
 ```
 
-### 2. 读写数据
+### 2. 读写数据（SQLite / Repository）
 
 ```python
-# 读取
-data = self.bot.data_manager.get_data(DC_USER_DATA, [user_id, "key"])
-
-# 写入 (需要 get_ref=True 获取引用)
-data_ref = self.bot.data_manager.get_data(DC_USER_DATA, [user_id, "key"], get_ref=True)
-data_ref["field"] = value
+# 示例：用户统计（UserStat / UserStatInfo 见 core/data/models、core/statistics）
+row = await self.bot.db.user_stat.get(meta.user_id)
+if row:
+    stat = UserStatInfo()
+    stat.deserialize(row.data)
+# 修改后写回
+await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=stat.serialize()))
 ```
+
+各表访问入口为 `self.bot.db` 上的属性（如 `karma`、`group_config`、`initiative`）。连接在 `delay_init_command` 中建立，处理消息前已可用。
 
 ### 3. 格式化文本
 
