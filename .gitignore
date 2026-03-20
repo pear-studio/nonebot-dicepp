@@ -157,5 +157,8 @@ uv.lock
 .trae/
 .claude/
 
+# Cursor IDE 配置
+.cursor/
+
 # OpenSpec 变更管理目录
 openspec/
