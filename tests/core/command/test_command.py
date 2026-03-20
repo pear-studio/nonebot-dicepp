@@ -3,7 +3,10 @@ import pytest
 from unittest.async_case import IsolatedAsyncioTestCase
 import os
 import asyncio
+import uuid
 from typing import Callable, List, Any, Optional
+
+from tests.fs_utils import rmtree_retry
 
 from core.bot import Bot
 from core.command import BotCommandBase
@@ -20,7 +23,10 @@ class MyTestCase(IsolatedAsyncioTestCase):
     test_index = 0
 
     async def asyncSetUp(self) -> None:
-        self.test_bot = Bot("test_bot", readonly=True)
+        # 每次唯一子目录，避免 Windows 上 test_bot 目录删不干净时读到旧 bot_data.db
+        self.test_bot = Bot(
+            f"test_cmd_{uuid.uuid4().hex[:12]}", readonly=True, no_tick=True
+        )
         self.test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
         self.test_bot.cfg_helper.save_config()
 
@@ -54,21 +60,13 @@ class MyTestCase(IsolatedAsyncioTestCase):
         self.test_proxy.mute = True
 
     async def asyncTearDown(self) -> None:
-        await self.test_bot.shutdown_async()
-
         test_path = self.test_bot.data_path
+        await self.test_bot.shutdown_async()
+        rmtree_retry(test_path)
         if os.path.exists(test_path):
-            for root, dirs, files in os.walk(test_path, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                    print(f"[Test TearDown] 清除文件{name}")
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-                    print(f"[Test TearDown] 清除文件夹{name}")
-            os.rmdir(test_path)
-            print(f"[Test TearDown] 清除文件夹{test_path}")
+            print(f"[Test TearDown] 仍无法完全删除: {test_path}")
         else:
-            print(f"测试路径不存在! path:{test_path}")
+            print(f"[Test TearDown] 清除文件夹{test_path}")
 
     def setUp(self) -> None:
         self.test_index += 1

@@ -1,0 +1,33 @@
+{
+    "character_name": "测试勇者",
+    "race": "人类",
+    "class": "战士",
+    "level": 5,
+    "ability": {
+        "力量": 18,
+        "敏捷": 14,
+        "体质": 16,
+        "智力": 10,
+        "感知": 12,
+        "魅力": 8
+    },
+    "hp": {
+        "current": 45,
+        "max": 45,
+        "temp": 5
+    },
+    "proficiency_bonus": 3,
+    "saving_throws": [
+        "力量",
+        "体质"
+    ],
+    "skills": [
+        "Athletics",
+        "Intimidation",
+        "Survival"
+    ],
+    "spell_slots": {
+        "1": {"current": 4, "max": 4},
+        "2": {"current": 3, "max": 3}
+    }
+}

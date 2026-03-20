@@ -1,8 +1,28 @@
 import sys
 import pytest
 import asyncio
+import json
+import os
+import tempfile
+import uuid
+import atexit
 from pathlib import Path
 from typing import Callable, List, Any, Optional
+from unittest.mock import MagicMock, AsyncMock
+
+from tests.fs_utils import rmtree_retry
+
+# Isolate each pytest process into its own app/data directory.
+_PYTEST_WORKER_ID = os.getenv("PYTEST_XDIST_WORKER", "main")
+_TEST_APP_DIR = tempfile.mkdtemp(prefix=f"dicepp-test-{_PYTEST_WORKER_ID}-")
+os.environ["DICEPP_APP_DIR"] = _TEST_APP_DIR
+
+
+def _cleanup_test_app_dir() -> None:
+    rmtree_retry(_TEST_APP_DIR)
+
+
+atexit.register(_cleanup_test_app_dir)
 
 # Add DicePP source path to sys.path
 dicepp_path = Path(__file__).parent.parent / "src" / "plugins" / "DicePP"
@@ -61,9 +81,13 @@ class TestProxy(ClientProxy):
         return GroupMemberInfo("DumbId", "DumbId")
 
 
+def _new_test_account(prefix: str) -> str:
+    return f"{prefix}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+
+
 @pytest.fixture(scope="class")
 def shared_bot():
-    test_bot = Bot("test_bot")
+    test_bot = Bot(_new_test_account("test_bot"), no_tick=True)
     test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
     test_bot.cfg_helper.save_config()
 
@@ -75,20 +99,13 @@ def shared_bot():
     yield test_bot
 
     test_bot.shutdown_debug()
-    import os
     test_path = test_bot.data_path
-    if os.path.exists(test_path):
-        for root, dirs, files in os.walk(test_path, topdown=False):
-            for name in files:
-                os.remove(os.path.join(root, name))
-            for name in dirs:
-                os.rmdir(os.path.join(root, name))
-        os.rmdir(test_path)
+    rmtree_retry(test_path)
 
 
 @pytest.fixture(scope="function")
 def fresh_bot():
-    test_bot = Bot("test_bot_fresh")
+    test_bot = Bot(_new_test_account("test_bot_fresh"), no_tick=True)
     test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
     test_bot.cfg_helper.save_config()
 
@@ -100,15 +117,12 @@ def fresh_bot():
     yield test_bot, test_proxy
 
     test_bot.shutdown_debug()
-    import os
     test_path = test_bot.data_path
-    if os.path.exists(test_path):
-        for root, dirs, files in os.walk(test_path, topdown=False):
-            for name in files:
-                os.remove(os.path.join(root, name))
-            for name in dirs:
-                os.rmdir(os.path.join(root, name))
-        os.rmdir(test_path)
+    rmtree_retry(test_path)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    _cleanup_test_app_dir()
 
 
 def make_group_meta(msg: str, user_id: str = "user", nickname: str = "测试用户",
@@ -132,3 +146,42 @@ async def send_and_check(bot: Bot, msg: str, meta: MessageMetaData,
     if target_checker:
         assert target_checker(bot_commands), f"Target check failed for: {bot_commands}"
     return bot_commands
+
+
+@pytest.fixture
+def fixtures_path():
+    """返回测试 fixtures 目录路径"""
+    return Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def load_json_fixture(fixtures_path):
+    """加载 JSON fixture 文件的辅助函数"""
+    def _load(filename: str) -> dict:
+        filepath = fixtures_path / filename
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return _load
+
+
+@pytest.fixture
+def mock_client_proxy():
+    """创建模拟的 ClientProxy"""
+    proxy = MagicMock(spec=ClientProxy)
+    proxy.process_bot_command = AsyncMock()
+    proxy.process_bot_command_list = AsyncMock()
+    proxy.get_group_list = AsyncMock(return_value=[])
+    proxy.get_group_info = AsyncMock(return_value=MagicMock(group_id="test_group"))
+    proxy.get_group_member_list = AsyncMock(return_value=[])
+    proxy.get_group_member_info = AsyncMock(
+        return_value=MagicMock(group_id="test_group", user_id="test_user")
+    )
+    return proxy
+
+
+@pytest.fixture
+def temp_data_dir(tmp_path):
+    """创建临时数据目录"""
+    data_dir = tmp_path / "test_data"
+    data_dir.mkdir()
+    return data_dir

@@ -4,8 +4,8 @@ import os
 import tempfile
 from typing import List
 
-from plugins.DicePP.core.data import Repository
-from plugins.DicePP.core.data.models import UserKarma
+from core.data import Repository
+from core.data.models import UserKarma
 
 
 class TestRepository:

@@ -2,12 +2,6 @@ import unittest
 import pytest
 from unittest.async_case import IsolatedAsyncioTestCase
 
-import sys
-from pathlib import Path
-dicepp_path = Path(__file__).parent.parent
-if str(dicepp_path) not in sys.path:
-    sys.path.insert(0, str(dicepp_path))
-
 
 @pytest.mark.unit
 class TestCocAbility(unittest.TestCase):
@@ -105,6 +99,60 @@ class TestCocHealth(unittest.TestCase):
         self.assertEqual(info.hp_cur, 17)
 
 
+
+@pytest.mark.integration
+class TestCocCharCommand(IsolatedAsyncioTestCase):
+    """COC 角色卡命令集成测试"""
+
+    async def asyncSetUp(self):
+        from core.bot import Bot
+        from core.config import ConfigItem, CFG_MASTER
+
+        self.bot = Bot("test_coc_bot")
+        self.bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
+        self.bot.cfg_helper.save_config()
+        await self.bot.delay_init_command()
+
+    async def asyncTearDown(self):
+        await self.bot.shutdown_async()
+        import os
+        test_path = self.bot.data_path
+        if os.path.exists(test_path):
+            for root, dirs, files in os.walk(test_path, topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+                for name in dirs:
+                    os.rmdir(os.path.join(root, name))
+            os.rmdir(test_path)
+
+    async def _send_msg(self, msg: str, group_id: str = "test_group", user_id: str = "user1"):
+        from core.communication import MessageMetaData, MessageSender
+        meta = MessageMetaData(msg, msg, MessageSender(user_id, "User"), group_id, False)
+        return await self.bot.process_message(msg, meta)
+
+    async def test_coc_char_generate_returns_output(self):
+        """测试 .coc7 指令返回非空输出"""
+        cmds = await self._send_msg(".coc7 1d 10 14 12 16 15 13 12")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertTrue(len(cmds) > 0, "应至少返回一条命令")
+        self.assertTrue(len(result) > 0, "返回内容不应为空")
+
+    async def test_coc_char_generate_contains_stats(self):
+        """测试 .coc7 输出包含属性数值"""
+        import re
+        cmds = await self._send_msg(".coc7 1d 10 14 12 16 15 13 12")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertTrue(re.search(r'\d+', result), "COC7 输出应包含属性数值")
+
+    async def test_coc_check_command(self):
+        """测试 .ra 技能检定指令"""
+        cmds = await self._send_msg(".ra50")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertTrue(len(cmds) > 0, "技能检定应返回结果")
+        has_result = any(kw in result for kw in ["成功", "失败", "大成功", "大失败", "极限成功"])
+        self.assertTrue(has_result, f"检定结果应包含成功/失败判断，实际输出：{result}")
+
+
 @pytest.mark.unit
 class TestCocMoney(unittest.TestCase):
     def test_money_info_init(self):
@@ -134,6 +182,8 @@ class TestCocMoney(unittest.TestCase):
 
 @pytest.mark.integration
 class TestCocCharCommand(IsolatedAsyncioTestCase):
+    """COC 角色卡命令集成测试"""
+
     async def asyncSetUp(self):
         from core.bot import Bot
         from core.config import ConfigItem, CFG_MASTER
@@ -160,7 +210,24 @@ class TestCocCharCommand(IsolatedAsyncioTestCase):
         meta = MessageMetaData(msg, msg, MessageSender(user_id, "User"), group_id, False)
         return await self.bot.process_message(msg, meta)
 
-    async def test_char_record_and_query(self):
+    async def test_coc_char_generate_returns_output(self):
+        """测试 .coc7 指令返回非空输出"""
         cmds = await self._send_msg(".coc7 1d 10 14 12 16 15 13 12")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(result) > 0)
+        self.assertTrue(len(cmds) > 0, "应至少返回一条命令")
+        self.assertTrue(len(result) > 0, "返回内容不应为空")
+
+    async def test_coc_char_generate_contains_stats(self):
+        """测试 .coc7 输出包含属性数值"""
+        import re
+        cmds = await self._send_msg(".coc7 1d 10 14 12 16 15 13 12")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertTrue(re.search(r'\d+', result), "COC7 输出应包含属性数值")
+
+    async def test_coc_check_command(self):
+        """测试 .ra 技能检定指令"""
+        cmds = await self._send_msg(".ra50")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertTrue(len(cmds) > 0, "技能检定应返回结果")
+        has_result = any(kw in result for kw in ["成功", "失败", "大成功", "大失败", "极限成功"])
+        self.assertTrue(has_result, f"检定结果应包含成功/失败判断，实际输出：{result}")

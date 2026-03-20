@@ -3,8 +3,8 @@ import os
 import tempfile
 from datetime import datetime
 
-from plugins.DicePP.core.data import LogRepository
-from plugins.DicePP.core.data.models import LogSession, LogRecord
+from core.data import LogRepository
+from core.data.models import LogSession, LogRecord
 
 
 class TestLogRepository:

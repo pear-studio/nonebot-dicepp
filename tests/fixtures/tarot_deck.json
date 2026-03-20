@@ -1,0 +1,15 @@
+{
+    "deck_name": "塔罗牌",
+    "cards": [
+        {"id": 0, "name": "愚人", "meaning": "新的开始、自由"},
+        {"id": 1, "name": "魔术师", "meaning": "创造力、意志力"},
+        {"id": 2, "name": "女祭司", "meaning": "直觉、智慧"},
+        {"id": 3, "name": "皇后", "meaning": "丰盛、母性"},
+        {"id": 4, "name": "皇帝", "meaning": "权威、稳定"},
+        {"id": 5, "name": "教皇", "meaning": "传统、教导"},
+        {"id": 6, "name": "恋人", "meaning": "爱情、选择"},
+        {"id": 7, "name": "战车", "meaning": "胜利、意志"},
+        {"id": 8, "name": "力量", "meaning": "勇气、耐心"},
+        {"id": 9, "name": "隐士", "meaning": "内省、智慧"}
+    ]
+}

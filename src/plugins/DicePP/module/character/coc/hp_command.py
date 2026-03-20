@@ -202,6 +202,7 @@ class HPCommand(UserCommandBase):
                         hp_info, cmd_type, hp_cur_mod_result, hp_max_mod_result, hp_temp_mod_result,
                         short_feedback=(len(target_list) > 1)
                     )
+                    char_obj.is_init = True  # 设置 HP 后标记为已初始化（与 dnd5e/hp_command 保持一致）
                     await self.bot.db.characters_dnd.save(char_obj)
                     name = await self.bot.get_nickname(target_id, meta.group_id)
                 else:

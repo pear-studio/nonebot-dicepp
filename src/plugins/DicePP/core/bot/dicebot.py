@@ -41,12 +41,13 @@ NICKNAME_ERROR = "UNDEF_NAME"
 
 # noinspection PyBroadException
 class Bot:
-    def __init__(self, account: str, readonly: bool = False):
+    def __init__(self, account: str, readonly: bool = False, no_tick: bool = False):
         """
         实例化机器人
         Args:
             account: QQ账号
             readonly: 只读模式，跳过本地化文件写入（适用于测试环境）
+            no_tick: 为 True 时不启动 tick_loop（供确定性自动化测试）
         """
         import core.command as command
         import module  # module中可能会定义新的DataChunk和local text等, 所以要在一开始import
@@ -66,6 +67,7 @@ class Bot:
 
         self.tick_task: Optional[asyncio.Task] = None
         self.todo_tasks: Dict[Union[Callable, asyncio.Task], Dict] = {}
+        self._no_tick: bool = no_tick
 
         self.start_up(readonly=readonly)
 
@@ -86,12 +88,6 @@ class Bot:
             self.loc_helper.save_chat()
         self.cfg_helper.load_config()
         self.cfg_helper.save_config()
-
-        try:
-            asyncio.get_running_loop()
-            self.tick_task = asyncio.create_task(self.tick_loop())
-        except RuntimeError:  # 在Debug中
-            pass
 
     def register_task(self, task: Callable, is_async: bool = True, timeout: float = 10, timeout_callback: Optional[Callable] = None):
         """
@@ -472,6 +468,13 @@ class Bot:
                             await self.proxy.process_bot_command(command)
             else:
                 dice_log(init_info)
+
+        if not self._no_tick and (self.tick_task is None or self.tick_task.done()):
+            try:
+                asyncio.get_running_loop()
+                self.tick_task = asyncio.create_task(self.tick_loop())
+            except RuntimeError:
+                pass
 
     # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:

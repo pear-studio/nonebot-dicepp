@@ -9,6 +9,8 @@ frozen.py - 打包环境检测与路径适配层
 import sys
 import os
 
+APP_DIR_ENV_KEY = "DICEPP_APP_DIR"
+
 
 def is_frozen() -> bool:
     """
@@ -31,6 +33,10 @@ def get_app_dir() -> str:
     Returns:
         应用根目录的绝对路径
     """
+    env_app_dir = os.getenv(APP_DIR_ENV_KEY)
+    if env_app_dir:
+        return os.path.abspath(env_app_dir)
+
     if is_frozen():
         # sys.executable 指向 DicePP.exe 的完整路径
         return os.path.dirname(sys.executable)

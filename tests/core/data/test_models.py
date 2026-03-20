@@ -1,7 +1,7 @@
 import pytest
 from datetime import datetime
 
-from plugins.DicePP.core.data.models import (
+from core.data.models import (
     UserKarma,
     InitEntity,
     InitList,
@@ -12,7 +12,7 @@ from plugins.DicePP.core.data.models import (
     HPInfo,
     AbilityInfo,
 )
-from plugins.DicePP.core.data.models.extended import (
+from core.data.models.extended import (
     UserNickname,
     GroupConfig,
     GroupActivate,
@@ -76,7 +76,7 @@ class TestInitListModel:
         assert len(init_list.entities) == 0
 
     def test_del_entity_not_found(self):
-        from plugins.DicePP.core.data.models import InitiativeError
+        from core.data.models import InitiativeError
         init_list = InitList()
         with pytest.raises(InitiativeError):
             init_list.del_entity("NotExists")
