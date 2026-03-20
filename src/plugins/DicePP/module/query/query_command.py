@@ -16,7 +16,6 @@ from core.config import (
     CONTENT_PATH,
     CONTENT_QUERY_DATA_PATH,
     CONTENT_EXCEL_DATA_PATH,
-    QUERY_HOME_BREW_DATA_PATH,
     CFG_MASTER,
     CFG_ADMIN,
 )
@@ -575,7 +574,7 @@ class QueryCommand(UserCommandBase):
         if meta.group_id and query_homebrew:
             homebrew_database = "HB" + meta.group_id
             if not self.bot.db.query.has_database(homebrew_database):
-                homebrew_path: str = os.path.join(QUERY_HOME_BREW_DATA_PATH, homebrew_database + ".db")
+                homebrew_path: str = os.path.join(self.bot.data_path, "QueryHomebrew", homebrew_database + ".db")
                 if os.path.exists(homebrew_path):
                     await self.bot.db.query.connect_path(homebrew_path)
                 else:

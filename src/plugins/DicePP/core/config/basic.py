@@ -72,8 +72,6 @@ USER_DATA_PATH = os.path.join(DATA_PATH, "UserData")
 # 运行时数据（按 bot_id 拆分到子目录中）
 BOT_DATA_PATH = os.path.join(USER_DATA_PATH, "Bot")
 # 用户房规（HB*.db）也归类为“运行时用户数据”
-QUERY_HOME_BREW_DATA_PATH = os.path.join(USER_DATA_PATH, "QueryHomebrew")
-
 CONTENT_QUERY_DATA_PATH = os.path.join(CONTENT_PATH, "QueryData")
 CONTENT_DECK_DATA_PATH = os.path.join(CONTENT_PATH, "DeckData")
 CONTENT_RANDOM_GEN_DATA_PATH = os.path.join(CONTENT_PATH, "RandomGenData")
@@ -88,7 +86,6 @@ ALL_LOCAL_DIR_PATH = [
     USER_DATA_PATH,
     CONTENT_PATH,
     BOT_DATA_PATH,
-    QUERY_HOME_BREW_DATA_PATH,
     CONTENT_QUERY_DATA_PATH,
     CONTENT_DECK_DATA_PATH,
     CONTENT_RANDOM_GEN_DATA_PATH,

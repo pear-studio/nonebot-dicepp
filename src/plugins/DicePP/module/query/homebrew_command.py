@@ -12,7 +12,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.localization import LOC_FUNC_DISABLE
-from core.config import QUERY_HOME_BREW_DATA_PATH, CONTENT_EXCEL_DATA_PATH, CFG_MASTER, CFG_ADMIN
+from core.config import CONTENT_EXCEL_DATA_PATH, CFG_MASTER, CFG_ADMIN
 from core.data.models import GroupConfig
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.data import yield_deduplicate
@@ -54,7 +54,7 @@ class HomebrewCommand(UserCommandBase):
         super().__init__(bot)
         self.homebrew_database: Dict[str] = {}
         self.homebrew_sqlcur: Dict[str] = {}
-        self.data_path = QUERY_HOME_BREW_DATA_PATH
+        self.data_path = os.path.join(self.bot.data_path, "QueryHomebrew")
         if not os.path.exists(self.data_path):
             create_parent_dir(self.data_path)
 
@@ -127,7 +127,7 @@ class HomebrewCommand(UserCommandBase):
         has_database = False
 
         db = "HB" + source_port
-        path = self.data_path + "/" + db + ".db"
+        path = os.path.join(self.data_path, db + ".db")
         if os.path.exists(path):
             has_database = True
 
