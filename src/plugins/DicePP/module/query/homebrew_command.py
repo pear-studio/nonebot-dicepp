@@ -2,7 +2,6 @@ from typing import List, Tuple, Dict, Optional, Set, Literal, Iterable, Any
 import os
 import datetime
 #import openpyxl
-import sqlite3
 import math
 #import random
 # from openpyxl.utils import get_column_letter
@@ -15,7 +14,6 @@ from core.communication import MessageMetaData, MessagePort, PrivateMessagePort,
 from core.localization import LOC_FUNC_DISABLE
 from core.config import DATA_PATH, CFG_MASTER, CFG_ADMIN
 from core.data.models import GroupConfig
-from module.query import create_empty_sqlite_database, load_data_from_xlsx_to_sqlite
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.data import yield_deduplicate
 
@@ -115,7 +113,6 @@ class HomebrewCommand(UserCommandBase):
         return should_proc, should_pass, hint
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        from module.query.query_database import CONNECTED_QUERY_DATABASES
         port = GroupMessagePort(meta.group_id)
         source_port = meta.group_id
         mode: Optional[Literal["load","template","help","show","clean","on","off"]] = hint[0]
@@ -146,13 +143,20 @@ class HomebrewCommand(UserCommandBase):
         # 处理指令
         if mode == "load":
             if not has_database:
-                create_empty_sqlite_database(path)
+                await self.bot.db.query.create_empty_database(path)
                 feedback += "\n" + self.format_loc(LOC_HOMEBREW_LOAD_NEW)
             feedback += self.format_loc(LOC_HOMEBREW_LOAD)
             if len(arg_str) > 0:
-                if load_data_from_xlsx_to_sqlite(DATA_PATH + "/ExcelData/" + arg_str + ".xlsx", path, 2):
+                if await self.bot.db.query.load_data_from_xlsx_to_sqlite(
+                    DATA_PATH + "/ExcelData/" + arg_str + ".xlsx",
+                    path,
+                    2,
+                ):
                     feedback += "\n加载了 " + arg_str + ".xlsx\n"
-                    feedback += self.format_loc(LOC_HOMEBREW_LOAD_FINISHED,num=self.show_homebrews_count_by_from(db,arg_str))
+                    feedback += self.format_loc(
+                        LOC_HOMEBREW_LOAD_FINISHED,
+                        num=await self.show_homebrews_count_by_from(db, arg_str),
+                    )
                 else:
                     feedback += "\n加载失败。"
         elif mode == "template":
@@ -163,7 +167,7 @@ class HomebrewCommand(UserCommandBase):
             if not has_database:
                 feedback = self.format_loc(LOC_HOMEBREW_NULL)
             else:
-                feedback += self.clean_homebrews(db,arg_str)
+                feedback += await self.clean_homebrews(db, arg_str)
         elif mode == "on":
             config_dict = dict(row.data) if row and row.data else {}
             config_dict["query_homebrew"] = True
@@ -176,53 +180,55 @@ class HomebrewCommand(UserCommandBase):
             feedback = self.format_loc(LOC_HOMEBREW_OFF)
         else:
             if has_database:
-                feedback = self.show_homebrew_status(db)
+                feedback = await self.show_homebrew_status(db)
             else:
                 feedback = self.format_loc(LOC_HOMEBREW_STATUS_NOTHING)
 
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         
-    def show_homebrew_status(self, db: str) -> str:
-        from module.query.query_database import CONNECTED_QUERY_DATABASES, DATABASE_CURSOR
+    async def show_homebrew_status(self, db: str) -> str:
         feedback = "已加载以下私设:"
-        if db in CONNECTED_QUERY_DATABASES.keys():
-            cursor = DATABASE_CURSOR[db]
-            cursor.execute("select 来源, count(名称) from data group by 来源")
-            for val in cursor:
+        if self.bot.db.query.has_database(db):
+            rows = await self.bot.db.query.fetchall(
+                db, "select 来源, count(名称) from data group by 来源"
+            )
+            for val in rows:
                 feedback += "\n" + val[0][3:] + " " + str(val[1]) + "个条目"
             return feedback
         else:
             return f"未加载 {db} 的私设条目。"
         
-    def show_homebrew_count(self, db: str) -> str:
-        from module.query.query_database import CONNECTED_QUERY_DATABASES, DATABASE_CURSOR
-        if db in CONNECTED_QUERY_DATABASES.keys():
-            cursor = DATABASE_CURSOR[db]
-            cursor.execute("select max(rowid) from data")
-            return f"已加载 {db} 的 {str(cursor.fetchone()[0])} 条私设条目。"
+    async def show_homebrew_count(self, db: str) -> str:
+        if self.bot.db.query.has_database(db):
+            row = await self.bot.db.query.fetchone(db, "select max(rowid) from data")
+            return f"已加载 {db} 的 {str(row[0])} 条私设条目。"
         else:
             return f"未加载 {db} 的私设条目。"
     
-    def show_homebrews_count_by_from(self, db: str, name: str) -> int:
-        from module.query.query_database import CONNECTED_QUERY_DATABASES, DATABASE_CURSOR
+    async def show_homebrews_count_by_from(self, db: str, name: str) -> int:
         result: int = 0
-        if db in CONNECTED_QUERY_DATABASES.keys():
-            cursor = DATABASE_CURSOR[db]
-            cursor.execute("select count(名称) from data where 来源 like '私设:" + name + "'")
-            result = int(cursor.fetchone()[0])
+        if self.bot.db.query.has_database(db):
+            row = await self.bot.db.query.fetchone(
+                db,
+                "select count(名称) from data where 来源 like ?",
+                (f"私设:{name}",),
+            )
+            result = int(row[0])
         else:
             result = 0
         return result
     
-    def clean_homebrews(self, db: str, name: str = "") -> str:
-        from module.query.query_database import CONNECTED_QUERY_DATABASES, DATABASE_CURSOR
+    async def clean_homebrews(self, db: str, name: str = "") -> str:
         if name == "":
             return "你必须指定一个私设来源才能进行此操作"
-        if db in CONNECTED_QUERY_DATABASES.keys():
-            cursor = DATABASE_CURSOR[db]
-            cursor.execute("delete from data where 来源 like '私设:" + name + "'")
-            CONNECTED_QUERY_DATABASES[db].commit()
-            return self.format_loc(LOC_HOMEBREW_CLEAN_FINISHED,name = name)
+        if self.bot.db.query.has_database(db):
+            await self.bot.db.query.execute(
+                db,
+                "delete from data where 来源 like ?",
+                (f"私设:{name}",),
+                commit=True,
+            )
+            return self.format_loc(LOC_HOMEBREW_CLEAN_FINISHED, name=name)
         else:
             return f"未加载 {db} 私设条目。"
 

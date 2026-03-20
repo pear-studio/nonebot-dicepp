@@ -56,6 +56,37 @@ class Repository(Generic[T]):
         """upsert 是 save 的别名，使用 INSERT OR REPLACE 语义。"""
         await self.save(item)
 
+    async def upsert_many(self, items: List[T]) -> None:
+        """
+        批量 upsert：减少多次 commit 的开销。
+
+        仅当调用方一次性产生多个更新项时使用（比如定时统计更新）。
+        """
+        if not items:
+            return
+
+        columns = ", ".join(self._key_fields)
+        placeholders = ", ".join(["?"] * len(self._key_fields))
+
+        # ON CONFLICT({keys}) DO UPDATE 语义保持与单条 save 一致
+        sql = f"""
+        INSERT INTO {self._table_name} ({columns}, data, updated_at)
+        VALUES ({placeholders}, ?, ?)
+        ON CONFLICT({", ".join(self._key_fields)}) DO UPDATE SET
+            data = excluded.data,
+            updated_at = excluded.updated_at
+        """
+
+        now = datetime.now().isoformat()
+        values = []
+        for item in items:
+            key_values = [getattr(item, field) for field in self._key_fields]
+            data_json = item.model_dump_json()
+            values.append((*key_values, data_json, now))
+
+        await self._db.executemany(sql, values)
+        await self._db.commit()
+
     async def save(self, item: T) -> None:
         key_values = [getattr(item, field) for field in self._key_fields]
         data_json = item.model_dump_json()

@@ -2,7 +2,6 @@ from typing import List, Tuple, Dict, Optional, Set, Literal, Iterable, Any
 import os
 import datetime
 #import openpyxl
-import sqlite3
 import math
 #import random
 # from openpyxl.utils import get_column_letter
@@ -16,12 +15,15 @@ from core.localization import LOC_FUNC_DISABLE
 from core.config import DATA_PATH, CFG_MASTER, CFG_ADMIN
 from core.data import DC_USER_DATA
 from core.data.models import GroupConfig
-from module.query import create_empty_sqlite_database, load_data_from_xlsx_to_sqlite, QUERY_DATA_FIELD, QUERY_DATA_FIELD_LIST, QUERY_REDIRECT_FIELD, QUERY_REDIRECT_FIELD_LIST
-from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
+from core.data.query_store import (
+    QUERY_DATA_FIELD,
+    QUERY_DATA_FIELD_LIST,
+    QUERY_REDIRECT_FIELD,
+    QUERY_REDIRECT_FIELD_LIST,
+    regexp_normalize,
+)
 from utils.time import get_current_date_raw
 from utils.data import yield_deduplicate
-
-from module.query.query_database import CONNECTED_QUERY_DATABASES, DATABASE_CURSOR, create_query_database, connect_query_database, disconnect_query_database, regexp_normalize
 
 LOC_QUERY_RESULT = "query_result"
 LOC_QUERY_SINGLE_RESULT = "query_single_result"
@@ -170,6 +172,8 @@ class QueryRecord:
         self.editing = False  # 编辑中
         self.edit_new = False  # 新建条目模式
         self.edit_index = -1  # 正在编辑的内容的index
+        # 异步持久化：由 can_process_msg 标记，process_msg 真正执行 store 写入
+        self.pending_db_action: Optional[str] = None  # "commit" | "delete" | None
     
     def process_data(self):
         # 处理一下数据使得数据更易于查看
@@ -280,21 +284,33 @@ class QueryRecord:
         self.edit_index = -1
         return "编辑完成，您可以根据上表继续您的编辑。"
 
-    def edit_commit(self, database, cursor):
+    async def edit_commit(self, store):
         data = self.data[0]
+        db_name = self.database
+
         if self.edit_new:
-            cursor.execute("INSERT INTO data " + data.replace_semicolon_for_insert())
+            # 兼容旧版：INSERT VALUES 子句仍由 QueryData 生成
+            await store.execute(db_name, "INSERT INTO data " + data.replace_semicolon_for_insert(), commit=True)
         else:
-            cursor.execute("UPDATE data SET 名称 = ?,英文 = ?,来源 = ?,分类 = ?,标签 = ?,内容 = ? " + data.origin_check(),data.to_tuple())
+            await store.execute(
+                db_name,
+                "UPDATE data SET 名称 = ?,英文 = ?,来源 = ?,分类 = ?,标签 = ?,内容 = ? " + data.origin_check(),
+                data.to_tuple(),
+                commit=True,
+            )
             # 如果改变了名称，就顺带着改编一下重定向
             if data.data_name != data.original_data[0] and data.original_data[0] != "":
-                cursor.execute("UPDATE redirect SET 重定向 = ? WHERE 重定向 == ?",(data.data_name,data.original_data[0]))
-        database.commit()
+                await store.execute(
+                    db_name,
+                    "UPDATE redirect SET 重定向 = ? WHERE 重定向 == ?",
+                    (data.data_name, data.original_data[0]),
+                    commit=True,
+                )
     
-    def delete(self, database, cursor):
+    async def delete(self, store):
         data = self.data[0]
-        cursor.execute("DELETE FROM data" + data.origin_check())
-        database.commit()
+        db_name = self.database
+        await store.execute(db_name, "DELETE FROM data " + data.origin_check(), commit=True)
 
 class QueryError(Exception):
     """
@@ -349,7 +365,7 @@ class QueryCommand(UserCommandBase):
         bot.cfg_helper.register_config(CFG_QUERY_PRIVATE_DATABASE, "DND5E2014", "查询指令私聊时默认使用的数据库，群聊使用数据库以群配置为准")
         #已弃用，请使用mode_command那边的CFG。
 
-    def delay_init(self) -> List[str]:
+    async def delay_init(self) -> List[str]:
         # 从本地文件中读取数据库
         data_path_list: List[str] = self.bot.cfg_helper.get_config(CFG_QUERY_DATA_PATH)
         init_info: List[str] = [""]
@@ -357,7 +373,7 @@ class QueryCommand(UserCommandBase):
             if path.startswith("./"):  # 用DATA_PATH作为当前路径
                 data_path_list[i] = os.path.join(DATA_PATH, path[2:])
         for data_path in data_path_list:
-            connect_query_database(data_path)
+            await self.bot.db.query.connect_path(data_path)
         init_info[0] = self.get_state()
         return init_info
 
@@ -381,9 +397,8 @@ class QueryCommand(UserCommandBase):
                             if not record.data[0].data_name and not record.data[0].data_name_en:
                                 mode, arg_str = "feedback", "查询条目的名称或英文不能为空！"
                             else:
-                                database = record.data[0].database
-                                self.record_dict[port].edit_commit(CONNECTED_QUERY_DATABASES[database],DATABASE_CURSOR[database])
-                                del self.record_dict[port]
+                                # 异步持久化放到 process_msg 中执行
+                                record.pending_db_action = "commit"
                                 mode, arg_str = "feedback", "已结束本次编辑并保存"
                             should_proc = True
                         elif msg_word == "-":  # 取消编辑
@@ -392,9 +407,8 @@ class QueryCommand(UserCommandBase):
                             should_proc = True
                         elif msg_word == QUERY_DELETE_MAGICWORD:  # 删除条目
                             if not record.edit_new:
-                                database = record.data[0].database
-                                self.record_dict[port].delete(CONNECTED_QUERY_DATABASES[database],DATABASE_CURSOR[database])
-                                del self.record_dict[port]
+                                # 异步持久化放到 process_msg 中执行
+                                record.pending_db_action = "delete"
                                 mode, arg_str = "feedback", "接收到密文，已删除该条目"
                                 should_proc = True
                         else:  # 开始编辑
@@ -531,6 +545,20 @@ class QueryCommand(UserCommandBase):
         show_mode: int = hint[2] #if meta.group_id else 1
         feedback: str = ""
 
+        # 处理编辑提交/删除：该逻辑来自 can_process_msg（不能在 can_process_msg 中直接做异步 DB 写入）
+        record = self.record_dict.get(source_port)
+        if mode == "feedback" and record and record.pending_db_action:
+            if record.pending_db_action == "commit":
+                await record.edit_commit(self.bot.db.query)
+                feedback = arg_str
+            elif record.pending_db_action == "delete":
+                await record.delete(self.bot.db.query)
+                feedback = arg_str
+            record.pending_db_action = None
+            # 提交/删除完成后清理交互状态
+            if source_port in self.record_dict:
+                del self.record_dict[source_port]
+
         # 私设查询库
         query_homebrew = False
         if meta.group_id:
@@ -539,10 +567,10 @@ class QueryCommand(UserCommandBase):
                 query_homebrew = group_row.data.get("query_homebrew", False)
         if meta.group_id and query_homebrew:
             homebrew_database = "HB" + meta.group_id
-            if homebrew_database not in CONNECTED_QUERY_DATABASES:
+            if not self.bot.db.query.has_database(homebrew_database):
                 homebrew_path:str = DATA_PATH + "/QueryData/Homebrew/" + homebrew_database + ".db"
                 if os.path.exists(homebrew_path):
-                    connect_query_database(homebrew_path)
+                    await self.bot.db.query.connect_path(homebrew_path)
                 else:
                     homebrew_database = ""
         else:
@@ -559,10 +587,17 @@ class QueryCommand(UserCommandBase):
         if not arg_str and (mode == "query" or mode == "search"):
             feedback = self.get_state()
         elif mode == "query" or mode == "search":
-            if database not in CONNECTED_QUERY_DATABASES.keys():
+            if not self.bot.db.query.has_database(database):
                 feedback = "未加载的数据库。"
             else:
-                feedback = self.query_info(database, homebrew_database, arg_str, source_port, search_mode=( 0 if mode == "query" else 1), show_mode=show_mode)
+                feedback = await self.query_info(
+                    database,
+                    homebrew_database,
+                    arg_str,
+                    source_port,
+                    search_mode=(0 if mode == "query" else 1),
+                    show_mode=show_mode,
+                )
                 if feedback:
                     feedback = self.format_loc(LOC_QUERY_RESULT, result = feedback)
                 else:
@@ -580,7 +615,8 @@ class QueryCommand(UserCommandBase):
                         feedback = record.choose_edit_target(index)
                     else:
                         item = record.data[index]
-                        feedback = self.format_loc(LOC_QUERY_RESULT, result = self.query_feedback(database, homebrew_database,item, source_port))
+                        result = await self.query_feedback(database, homebrew_database, item, source_port)
+                        feedback = self.format_loc(LOC_QUERY_RESULT, result=result)
             else:
                 index = int(arg_str)
                 if index >= len(record.catalogue_list.keys()):
@@ -632,18 +668,25 @@ class QueryCommand(UserCommandBase):
             feedback = self.record_dict[source_port].choose_edit_target(0)
             self.record_dict[source_port].edit_new = True
         elif mode == "redirect":
-            if show_mode == 9:# 删除重定向
-                data = DATABASE_CURSOR[database].execute("SELECT {0} FROM redirect WHERE 名称 Like '{1}'".format(QUERY_REDIRECT_FIELD,arg_str.replace("'","''")))
-                query_data: list = []
-                for _data in data:
-                    query_data.append(_data[1])
-                if len(query_data) > 0:
-                    DATABASE_CURSOR[database].execute("DELETE FROM redirect WHERE 名称 Like '{0}'".format(arg_str.replace("'","''")))
-                    CONNECTED_QUERY_DATABASES[database].commit()
+            if show_mode == 9:  # 删除重定向
+                rows = await self.bot.db.query.fetchall(
+                    database,
+                    f"SELECT {QUERY_REDIRECT_FIELD} FROM redirect WHERE 名称 Like ?",
+                    (arg_str,),
+                )
+                query_data = [row[1] for row in rows]
+                if query_data:
+                    await self.bot.db.query.execute(
+                        database,
+                        "DELETE FROM redirect WHERE 名称 Like ?",
+                        (arg_str,),
+                        commit=True,
+                    )
                     feedback = "已删除重定向: " + arg_str + " -> " + "/".join(query_data)
                 else:
                     feedback = self.format_loc(LOC_QUERY_NO_RESULT)
-            elif show_mode == 8:# 创建重定向
+
+            elif show_mode == 8:  # 创建重定向
                 if "=" in arg_str:
                     arg = arg_str.split("=")
                     name_list = [name.strip() for name in arg[0].split("/")]
@@ -653,42 +696,58 @@ class QueryCommand(UserCommandBase):
                         for name in name_list:
                             for redirect in redirect_list:
                                 if name != redirect and name != "" and redirect != "":
-                                    cmd.append((name,redirect))
+                                    cmd.append((name, redirect))
                         if len(cmd) != 0:
-                            DATABASE_CURSOR[database].executemany("INSERT INTO redirect VALUES(?,?)",cmd)
-                            CONNECTED_QUERY_DATABASES[database].commit()
-                            feedback = "已创建重定向: " + "/".join(name_list) + " -> " + "/".join(redirect_list)
+                            await self.bot.db.query.executemany(
+                                database,
+                                "INSERT INTO redirect VALUES(?,?)",
+                                cmd,
+                                commit=True,
+                            )
+                            feedback = (
+                                "已创建重定向: " + "/".join(name_list) + " -> " + "/".join(redirect_list)
+                            )
                         else:
                             feedback = "无法创建重定向：内容有误"
                     else:
                         feedback = "无法创建重定向：无法创建N->N的重定向"
                 else:
                     feedback = "无法创建重定向：错误的格式"
+
             elif len(arg_str) > 0:
                 feedback = ""
                 # 显示所有 重定向 → XX
-                data = DATABASE_CURSOR[database].execute("SELECT {0} FROM redirect WHERE 名称 == '{1}'".format(QUERY_REDIRECT_FIELD,arg_str.replace("'","''")))
-                query_data: list = []
-                for _data in data:
-                    query_data.append(_data[1])
-                if len(query_data) > 0:
+                rows = await self.bot.db.query.fetchall(
+                    database,
+                    f"SELECT {QUERY_REDIRECT_FIELD} FROM redirect WHERE 名称 == ?",
+                    (arg_str,),
+                )
+                query_data = [row[1] for row in rows]
+                if query_data:
                     feedback += "以下是 " + arg_str + " 可重定向到的目标条目：\n" + " , ".join(query_data)
+
                 # 显示所有 XX → 重定向
-                data = DATABASE_CURSOR[database].execute("SELECT {0} FROM redirect WHERE 重定向 == '{1}'".format(QUERY_REDIRECT_FIELD,arg_str.replace("'","''")))
-                query_data: list = []
-                for _data in data:
-                    query_data.append(_data[0])
-                if len(query_data) > 0:
+                rows = await self.bot.db.query.fetchall(
+                    database,
+                    f"SELECT {QUERY_REDIRECT_FIELD} FROM redirect WHERE 重定向 == ?",
+                    (arg_str,),
+                )
+                query_data = [row[0] for row in rows]
+                if query_data:
                     feedback += "以下是重定向到 " + arg_str + " 的同义词：\n" + " , ".join(query_data)
+
                 if len(feedback) == 0:
                     feedback = self.format_loc(LOC_QUERY_NO_RESULT)
+
             else:
-                feedback = "重定向删改"\
-                    "。重定向创建 [名称]=[对象] 创建一个1->1的重定向"\
-                    "。重定向创建 [名称]/[名称]/...=[对象] 创建一组N->1的重定向"\
-                    "。重定向创建 [名称]=[对象]/[对象]/... 创建一组1->N的消歧义重定向"\
-                    "。重定向删除 [名称] 删除一个重定向"\
+                feedback = (
+                    "重定向删改"
+                    "。重定向创建 [名称]=[对象] 创建一个1->1的重定向"
+                    "。重定向创建 [名称]/[名称]/...=[对象] 创建一组N->1的重定向"
+                    "。重定向创建 [名称]=[对象]/[对象]/... 创建一组1->N的消歧义重定向"
+                    "。重定向删除 [名称] 删除一个重定向"
                     "。重定向 [名称/对象] 查阅已有的重定向"
+                )
         elif mode == "database":
             if arg_str.strip() == "" and show_mode != 5:
                 show_mode = 0
@@ -699,17 +758,17 @@ class QueryCommand(UserCommandBase):
             if show_mode == 1:# 加载数据库
                 database = arg_str.strip().upper()
                 database_file_path = DATA_PATH+"/QueryData/"+database+".db"
-                if database in CONNECTED_QUERY_DATABASES.keys():
+                if self.bot.db.query.has_database(database):
                     feedback = f"{database}.db 已经被加载过了，无需再次加载。"
                 else:
-                    feedback = connect_query_database(database_file_path)
+                    feedback = await self.bot.db.query.connect_path(database_file_path)
                     if len(feedback) == 0:
                         feedback = f"已载入 {database}.db。"
             elif show_mode == 2:# 卸载数据库
                 database = arg_str.strip().upper()
                 database_file_path = DATA_PATH+"/QueryData/"+database+".db"
-                if database in CONNECTED_QUERY_DATABASES.keys():
-                    disconnect_query_database(database)
+                if self.bot.db.query.has_database(database):
+                    await self.bot.db.query.disconnect_database(database)
                     feedback = f"已卸载 {database}.db，您现在可以手动删除对应数据库来防止重启后被再次自动加载。"
                 elif os.path.exists(database_file_path):
                     feedback = f"未加载 {database}.db。"
@@ -718,15 +777,19 @@ class QueryCommand(UserCommandBase):
             elif show_mode == 3:# 创建数据库
                 database = arg_str.strip().upper()
                 database_file_path = DATA_PATH+"/QueryData/"+database+".db"
-                if database in CONNECTED_QUERY_DATABASES.keys():
+                if self.bot.db.query.has_database(database):
                     feedback = f" {database}.db 已经处于加载状态，无法再次创建。"
                 elif os.path.exists(database_file_path):
                     feedback = f"文件{database}.db 已存在，请使用 。数据库加载 进行加载。"
                 else:
-                    create_query_database(database_file_path)
-                    feedback = connect_query_database(database_file_path)
-                    if len(feedback) == 0:
-                        feedback = f"已创建并载入{database}.db。"
+                    ok = await self.bot.db.query.create_empty_database(database_file_path)
+                    feedback = ""
+                    if ok:
+                        feedback = await self.bot.db.query.connect_path(database_file_path)
+                        if len(feedback) == 0:
+                            feedback = f"已创建并载入{database}.db。"
+                    else:
+                        feedback = f"创建{database}.db 失败。权限不足或路径不可写。"
             elif show_mode == 4:# 导入数据库
                 arg_list = arg_str.split(" ")
                 if len(arg_list) != 3:
@@ -737,33 +800,36 @@ class QueryCommand(UserCommandBase):
                     file_path = arg_list[2].strip()
                     if xlsx_mode in ["0","1","2"]:
                         database_file_path = DATA_PATH+"/QueryData/"+database+".db"
-                        if database in CONNECTED_QUERY_DATABASES.keys():
+                        if self.bot.db.query.has_database(database):
                             load_dir = DATA_PATH+"/ExcelData/"+file_path
                             if os.path.isdir(load_dir):
-                                try:
-                                    for inner_path,inner_dirs,file_names in os.walk(load_dir):
-                                        for file_name in file_names:
-                                            if file_name.endswith(".xlsx"):
-                                                inner_full_path = os.path.join(inner_path, file_name)
-                                                load_data_from_xlsx_to_sqlite(inner_full_path, database_file_path,int(xlsx_mode)) # 0 旧版梨骰数据
-                                    feedback += f"已将 ExcelData/{file_path}下的全部xlsx文件载入至 {database}.db。"
-                                except FileNotFoundError as e:  # 文件夹不存在
-                                    feedback += f"读取 ExcelData/{file_path} 时遇到错误: {e}"
+                                for inner_path, inner_dirs, file_names in os.walk(load_dir):
+                                    for file_name in file_names:
+                                        if file_name.endswith(".xlsx"):
+                                            inner_full_path = os.path.join(inner_path, file_name)
+                                            await self.bot.db.query.load_data_from_xlsx_to_sqlite(
+                                                inner_full_path,
+                                                database_file_path,
+                                                int(xlsx_mode),
+                                            )  # 0 旧版梨骰数据
+                                feedback += f"已将 ExcelData/{file_path}下的全部xlsx文件载入至 {database}.db。"
                             else:
                                 file_full_path = DATA_PATH+"/ExcelData/"+file_path
                                 if os.path.exists(file_full_path):
-                                    try:
-                                        load_data_from_xlsx_to_sqlite(file_full_path, database_file_path,int(xlsx_mode)) # 0 旧版梨骰数据
-                                        feedback += f"已将 ExcelData/{file_path}文件载入至 {database}.db。"
-                                    except FileNotFoundError as e:  # 文件夹不存在
-                                        feedback += f"读取 ExcelData/{file_path} 时遇到错误: {e}"
+                                    await self.bot.db.query.load_data_from_xlsx_to_sqlite(
+                                        file_full_path,
+                                        database_file_path,
+                                        int(xlsx_mode),
+                                    )
+                                    feedback += f"已将 ExcelData/{file_path}文件载入至 {database}.db。"
                                 elif os.path.exists(file_full_path+".xlsx"):
                                     file_full_path = file_full_path+".xlsx"
-                                    try:
-                                        load_data_from_xlsx_to_sqlite(file_full_path, database_file_path,int(xlsx_mode)) # 0 旧版梨骰数据
-                                        feedback += f"已将 ExcelData/{file_path}文件载入至 {database}.db。"
-                                    except FileNotFoundError as e:  # 文件夹不存在
-                                        feedback += f"读取 ExcelData/{file_path} 时遇到错误: {e}"
+                                    await self.bot.db.query.load_data_from_xlsx_to_sqlite(
+                                        file_full_path,
+                                        database_file_path,
+                                        int(xlsx_mode),
+                                    )
+                                    feedback += f"已将 ExcelData/{file_path}文件载入至 {database}.db。"
                                 else:
                                     feedback += f"你输入的 ExcelData/{file_path} 既不是文件夹也不是xlsx文件"
                         else:
@@ -771,7 +837,10 @@ class QueryCommand(UserCommandBase):
                     else:
                         feedback = f"请输入正确的模式值：\n0:旧版梨骰查询资料表\n1:新式梨骰查询表\n2:新式梨骰私设表"
             elif show_mode == 5:# 显示数据库
-                feedback = "目前已加载以下数据库（不包含私设数据库）：\n  -"+"\n  -".join([key for key in CONNECTED_QUERY_DATABASES.keys() if not key.startswith("HB")])
+                feedback = (
+                    "目前已加载以下数据库（不包含私设数据库）：\n  -"
+                    + "\n  -".join([key for key in self.bot.db.query.list_databases() if not key.startswith("HB")])
+                )
             else:
                 feedback = "数据库编辑"\
                     "。数据库创建 [名称] 创建一个新的数据库\n"\
@@ -837,7 +906,15 @@ class QueryCommand(UserCommandBase):
     def get_description(self) -> str:
         return ".查询 根据关键字查找资料 .搜索 根据关键字和内容查找资料"
 
-    def query_info(self, database: str, homebrew_database: str, query_keywords: str, port: MessagePort, search_mode: int, show_mode: int = 0) -> str:
+    async def query_info(
+        self,
+        database: str,
+        homebrew_database: str,
+        query_keywords: str,
+        port: MessagePort,
+        search_mode: int,
+        show_mode: int = 0,
+    ) -> str:
         """
         查询信息, 返回输出给用户的字符串, 若给出选项将会记录信息以便响应用户之后的快速查询.
         search_mode != 0则使用全文查找
@@ -853,7 +930,12 @@ class QueryCommand(UserCommandBase):
             edit_flag = False
         # 找到搜索候选
         try:
-            poss_result = self.query_item(database, homebrew_database if not edit_flag else "", query_keywords, search_mode)
+            poss_result = await self.query_item(
+                database,
+                homebrew_database if not edit_flag else "",
+                query_keywords,
+                search_mode,
+            )
         except QueryError:
             return self.format_loc(LOC_QUERY_TOO_MUCH_RESULT)
         poss_result_num: int = len(poss_result)
@@ -870,7 +952,7 @@ class QueryCommand(UserCommandBase):
                 self.record_dict[port].edit_flag = edit_flag
                 feedback = self.record_dict[port].choose_edit_target(0)
             else:
-                feedback = self.query_feedback(database,homebrew_database,poss_result[0],port)
+                feedback = await self.query_feedback(database, homebrew_database, poss_result[0], port)
         else:  # len(poss_result) > 1  找到多个结果, 记录当前信息并提示用户选择
             # 记录当前信息以备将来查询或编辑
             self.record_dict[port] = QueryRecord(poss_result, database, get_current_date_raw(), poss_result_num)
@@ -934,13 +1016,19 @@ class QueryCommand(UserCommandBase):
             result_list.append(prefix + collect_words.strip())
         return result_list
     
-    def query_item(self, database: str, homebrew_database: str, query_keywords: str,search_mode: int = 0) -> List[QueryData]:
+    async def query_item(
+        self,
+        database: str,
+        homebrew_database: str,
+        query_keywords: str,
+        search_mode: int = 0,
+    ) -> List[QueryData]:
         """
         查询的实际处理,会同时处理普通数据库与房规数据库
         """
         poss_result: List[QueryData] = []
         # 如果库不存在直接撤
-        if database not in CONNECTED_QUERY_DATABASES.keys():
+        if not self.bot.db.query.has_database(database):
             return poss_result
         # 分割关键字，这里不检测超出，因为全部由数据库决定
         query_command_list:List[str] = []
@@ -951,10 +1039,10 @@ class QueryCommand(UserCommandBase):
         else:
             return poss_result
         # 找到搜索候选
-        poss_result = self.search_item(database, query_command_list, search_mode)
+        poss_result = await self.search_item(database, query_command_list, search_mode)
         # 找到私设候选（如果开的话）
         if homebrew_database != "":
-            homebrew_result = self.search_item(homebrew_database, query_command_list, search_mode)
+            homebrew_result = await self.search_item(homebrew_database, query_command_list, search_mode)
             for homebrew in homebrew_result[::-1]:
                 if len(poss_result) > 0:
                     for poss in poss_result[::-1]:
@@ -966,111 +1054,14 @@ class QueryCommand(UserCommandBase):
         
         return poss_result
 
-    '''
-    def search_item(self,database: str, query_command_list: List[str], search_mode: int = 0) -> List[QueryData]:
-        """
-        搜索合规的对象
-        """
-        sql_search_command: str = "Select {0} From {1} Where ".format(QUERY_DATA_FIELD, "data")
-        sql_redirect_command: str = "Select {0} From {1} Where ".format(QUERY_REDIRECT_FIELD, "redirect")
-        query_sqlcur = DATABASE_CURSOR[database]
-        cursor: sqlite3.Cursor
-        query_result: List[QueryData] = []
-        result_length: int = 0
-        # 分割查询指令
-        name: str = ""
-        condition_list: List[str] = []
-        redirect_name_list: List[str] = []
-        redirect_condition_list: List[str] = []
-        for query_command in query_command_list:
-            command_list = [command for command in query_command.split("/")]
-            func = ""
-            # 预处理指令
-            if len(command_list) > 0:
-                if len(command_list[0]) == 0:
-                    command_list = [query_command]
-                    continue
-                elif command_list[0][0] in ("#","&"):
-                    func = query_command[0]
-                    command_list[0] = command_list[0][1:]
-            # 添加条件指令
-            if len(command_list) > 0:
-                if func == "#":
-                    cmd = self.generate_search_sql_regexp(command_list,"lower(replace(replace(来源 || '#' || 分类 || '#' || 标签,' ','#'),x'0A','|'))")
-                    condition_list.append(cmd)
-                    redirect_condition_list.append(cmd)
-                elif func == "&":
-                    cmd = self.generate_search_sql_in(command_list,"分类")
-                    condition_list.append(cmd)
-                    redirect_condition_list.append(cmd)
-                else:
-                    if search_mode == 0:
-                        condition_list.append(self.generate_search_sql_regexp(command_list,"lower(replace(replace(名称 || '#' || 英文,' ','#'),x'0A','|'))"))
-                        redirect_name_list.append(self.generate_search_sql_regexp(command_list,"名称"))
-                        name = name + "".join(command_list)
-                    else:
-                        condition_list.append(self.generate_search_sql_regexp(command_list,"lower(replace(replace(名称 || 英文 || 来源 || 分类 || 标签 || 内容,' ',''),x'0A','|'))"))
-                        redirect_name_list.append(self.generate_search_sql_regexp(command_list,"名称"))
-        # 正常查询
-        if len(condition_list) > 0:
-            sql_condition = sql_search_command + " AND ".join(condition_list)
-            # print(sql_condition)
-            cursor = query_sqlcur.execute(sql_condition)
-            for _data in cursor:
-                query_result.append(QueryData(_data))
-                result_length += 1
-                if result_length > MAX_QUERY_ITEM_NUM:
-                    raise QueryError("匹配条目过多，无法查询")
-        # 处理重定向
-        if len(redirect_name_list) > 0:
-            redirect_result: List[Tuple[str]] = []
-            sql_condition = sql_redirect_command + " AND ".join(redirect_name_list)
-            cursor = query_sqlcur.execute(sql_condition)
-            for _data in cursor:
-                redirect_result.append(_data)
-            if len(redirect_condition_list) > 0:
-                sql_condition = " AND " + " AND ".join(redirect_condition_list)
-            else:
-                sql_condition = ""
-            for _redirect in redirect_result:
-                cursor = query_sqlcur.execute(sql_search_command + " 名称 = '" + _redirect[1].replace("'","''") + "'"+ sql_condition)
-                for _data in cursor:
-                    query_result.append(QueryData(_data,_redirect[0]))
-                    result_length += 1
-                    if result_length > MAX_QUERY_ITEM_NUM:
-                        raise QueryError("匹配条目过多，无法查询")
-        # 去除重复的条目，并寻找直接确认者,或者同名确认者
-        dupe_list: List[str] = []
-        new_query_result: List[QueryData] = []
-        found_equal: bool = False
-        for query_data in query_result:
-            if query_data.original_data[0] == name and name != "":
-                if not found_equal:
-                    dupe_list.clear()
-                    new_query_result.clear()
-                if query_data.hash_word not in dupe_list:
-                    dupe_list.append(query_data.hash_word)
-                    new_query_result.append(query_data)
-                found_equal = True
-            elif not found_equal:
-                if query_data.hash_word not in dupe_list:
-                    dupe_list.append(query_data.hash_word)
-                    new_query_result.append(query_data)
-        # 生成额外数据供使用
-        for query_data in query_result:
-            query_data.data_extend()
-        # 查询结束
-        return new_query_result
-    '''
-    def search_item(self,database: str, query_command_list: List[str], search_mode: int = 0) -> List[QueryData]:
+    async def search_item(self, database: str, query_command_list: List[str], search_mode: int = 0) -> List[QueryData]:
         """
         搜索合规的对象
         """
         sql_search_command_prefix: str = "Select * From data Where " #查询指令前缀
         sql_redirect_command_prefix: str = "Select * From redirect Where " #查询指令前缀
         sql_command_suffix: str = "" #" COLLATE NOCASE" #查询指令后缀
-        query_sqlcur = DATABASE_CURSOR[database] # 指针
-        cursor: sqlite3.Cursor
+        # 统一通过异步 store 访问 query db
         query_result: List[QueryData] = []
         result_length: int = 0
         use_redirect: bool = True
@@ -1136,11 +1127,15 @@ class QueryCommand(UserCommandBase):
         if condition_size == 0:
             return []
         # 正常查询
-        sql_condition = self.generate_search_conditions(condition_list)
+        sql_condition, params = self.generate_search_conditions(condition_list)
         #print(sql_condition)
-        cursor = query_sqlcur.execute(sql_search_command_prefix + sql_condition + sql_command_suffix)
-        for _data in cursor:
-            query_result.append(QueryData(_data,database=database))
+        rows = await self.bot.db.query.fetchall(
+            database,
+            sql_search_command_prefix + sql_condition + sql_command_suffix,
+            params,
+        )
+        for _data in rows:
+            query_result.append(QueryData(_data, database=database))
             result_length += 1
             if result_length > MAX_QUERY_ITEM_NUM:
                 raise QueryError("匹配条目过多，无法查询")
@@ -1159,16 +1154,24 @@ class QueryCommand(UserCommandBase):
                     sql_condition_list[key_list] = condition_list[key_list]
             if len(redirect_condition_list[("名称",)]) != 0:
                 redirect_result: List[List[str]] = []
-                sql_condition = self.generate_search_conditions(redirect_condition_list)
-                cursor = query_sqlcur.execute(sql_redirect_command_prefix + sql_condition + sql_command_suffix)
-                for _data in cursor:
+                sql_condition, params = self.generate_search_conditions(redirect_condition_list)
+                redirect_rows = await self.bot.db.query.fetchall(
+                    database,
+                    sql_redirect_command_prefix + sql_condition + sql_command_suffix,
+                    params,
+                )
+                for _data in redirect_rows:
                     redirect_result.append([_data[0],_data[1]])
                 if len(redirect_condition_list) > 0:
                     for _redirect in redirect_result:
                         sql_condition_list[("名称",)] = [[_redirect[1]]]
-                        sql_condition = self.generate_search_conditions(sql_condition_list)
-                        cursor = query_sqlcur.execute(sql_search_command_prefix + sql_condition+ sql_command_suffix)
-                        for _data in cursor:
+                        sql_condition, params = self.generate_search_conditions(sql_condition_list)
+                        redirected_rows = await self.bot.db.query.fetchall(
+                            database,
+                            sql_search_command_prefix + sql_condition + sql_command_suffix,
+                            params,
+                        )
+                        for _data in redirected_rows:
                             query_result.append(QueryData(_data,_redirect[0],database))
                             result_length += 1
                             if result_length > MAX_QUERY_ITEM_NUM:
@@ -1205,7 +1208,13 @@ class QueryCommand(UserCommandBase):
         # 查询结束
         return new_query_result
 
-    def query_feedback(self, database: str, homebrew_database: str, item: QueryData, port: MessagePort) -> str:
+    async def query_feedback(
+        self,
+        database: str,
+        homebrew_database: str,
+        item: QueryData,
+        port: MessagePort,
+    ) -> str:
         """
         生成查询到目标的返回文本，包括处理嵌套查询
         """
@@ -1221,7 +1230,7 @@ class QueryCommand(UserCommandBase):
                     if "|" in command:
                         extra_command = command.split("|")
                         command = extra_command.pop(0)
-                    extra_items = self.query_item(database, homebrew_database, command)
+                    extra_items = await self.query_item(database, homebrew_database, command)
                     item_lines[index] = "[ " + self.format_items_list_feedback(extra_items,len(sub_query_items)) + " ]"
                     # 处理专用的附加指令
                     for excmd in extra_command:
@@ -1255,52 +1264,108 @@ class QueryCommand(UserCommandBase):
         item.data_content = "\n".join(item_lines)
         return self.format_item_feedback(item)
 
-    def generate_search_conditions(self, condition_list: Dict[tuple,List[List[str]]]) -> str:
-        results = []
+    def generate_search_conditions(
+        self,
+        condition_list: Dict[tuple, List[List[str]]],
+    ) -> Tuple[str, List[Any]]:
+        """
+        将多维条件构造成：
+        - 可执行的 SQL 片段（含占位符）
+        - 对应的 params 列表
+        """
+        sql_fragments: List[str] = []
+        params: List[Any] = []
+
         for key_list in condition_list.keys():
-            if len(condition_list[key_list]) != 0:
-                    key_results = []
-                    if "全部" in key_list:
-                        for command in condition_list[key_list]:
-                            key_results.append(self.generate_search_sql_regexp(command,"名称||英文||来源||分类||标签||内容"))
-                    elif key_list == ["分类"]:
-                        for command in condition_list[key_list]:
-                            key_results.append(self.generate_search_sql_in(command,"分类"))
-                    else:
-                        for command in condition_list[key_list]:
-                            key_results.append(self.generate_search_sql_regexp(command,"||".join(key_list)))
-                    if len(key_results) != 0:
-                        results.append("(" + " AND ".join(key_results) + ")")
-        return " AND ".join(results)
+            cmd_groups = condition_list[key_list]
+            if len(cmd_groups) == 0:
+                continue
+
+            key_sql_parts: List[str] = []
+            key_params: List[Any] = []
+
+            if "全部" in key_list:
+                for command in cmd_groups:
+                    sql_part, part_params = self.generate_search_sql_regexp(
+                        command, "名称||英文||来源||分类||标签||内容"
+                    )
+                    key_sql_parts.append(sql_part)
+                    key_params.extend(part_params)
+            elif key_list == ["分类"]:
+                for command in cmd_groups:
+                    sql_part, part_params = self.generate_search_sql_in(command, "分类")
+                    key_sql_parts.append(sql_part)
+                    key_params.extend(part_params)
+            else:
+                for command in cmd_groups:
+                    sql_part, part_params = self.generate_search_sql_regexp(
+                        command, "||".join(key_list)
+                    )
+                    key_sql_parts.append(sql_part)
+                    key_params.extend(part_params)
+
+            if len(key_sql_parts) != 0:
+                sql_fragments.append("(" + " AND ".join(key_sql_parts) + ")")
+                params.extend(key_params)
+
+        return " AND ".join(sql_fragments), params
     
-    def generate_search_sql_regexp(self, command_list: List[str], prefix: str = "名称") -> str:
-        # 生成正则表达式的condition
+    def generate_search_sql_regexp(
+        self,
+        command_list: List[str],
+        prefix: str = "名称",
+    ) -> Tuple[str, List[str]]:
+        # 生成正则表达式的 condition（params 化）
         result: List[str] = []
         for command in command_list:
             if command.startswith("-") and len(command) > 1:
-                result.append("^(?!.*" + regexp_normalize(command[1:].replace("'","''")) + ")")
+                result.append(f"^(?!.*{regexp_normalize(command[1:])})")
             elif command.startswith("=") and len(command) > 1:
-                result.append("^" + regexp_normalize(command[1:].replace("'","''")) + "$")
+                result.append(f"^{regexp_normalize(command[1:])}$")
             elif len(command) > 0:
-                result.append(regexp_normalize(command.replace("'","''")))
-        return prefix + " regexp '" + "|".join(result) + "'"
+                result.append(regexp_normalize(command))
+
+        pattern = "|".join(result)
+        return f"{prefix} regexp ?", [pattern]
     
-    def generate_search_sql_in(self, command_list: List[str], prefix: str = "来源") -> str:
-        # 生成列表中检测的condition
-        result: str = ""
+    def generate_search_sql_in(
+        self,
+        command_list: List[str],
+        prefix: str = "来源",
+    ) -> Tuple[str, List[str]]:
+        # 生成列表检测 condition（params 化）
         words: List[str] = []
         anti_words: List[str] = []
         for command in command_list:
             if command.startswith("-") and len(command) > 1:
-                anti_words.append("'" + command[1:].replace("'","''") + "'")
+                anti_words.append(command[1:])
             elif command.startswith("=") and len(command) > 1:
-                words.append("'" + command[1:].replace("'","''") + "'")
+                words.append(command[1:])
             elif len(command) > 0:
-                words.append("'" + command.replace("'","''") + "'")
-        result = prefix + " in (" + ",".join(words) + ")"
-        if len(anti_words) > 0:
-            result = "(" + result + "or" + prefix + " not in (" + ",".join(anti_words) + ")"
-        return result
+                words.append(command)
+
+        clauses: List[str] = []
+        params: List[str] = []
+
+        if words:
+            placeholders = ",".join(["?"] * len(words))
+            clauses.append(f"{prefix} in ({placeholders})")
+            params.extend(words)
+
+        if anti_words:
+            placeholders = ",".join(["?"] * len(anti_words))
+            clauses.append(f"{prefix} not in ({placeholders})")
+            params.extend(anti_words)
+
+        if not clauses:
+            # 理论上不会发生：search_item 会保证至少有一个有效 token
+            return "1=0", []
+
+        if len(clauses) == 1:
+            return clauses[0], params
+
+        # words + anti_words：保持旧语义的 OR（满足 in 或不在 anti 集）
+        return f"({clauses[0]} OR {clauses[1]})", params
 
     def format_item_feedback(self, item: QueryData) -> str:
         # 最基本的单条目返回文本
@@ -1373,8 +1438,9 @@ class QueryCommand(UserCommandBase):
 
     def get_state(self) -> str:
         feedback: str
-        if CONNECTED_QUERY_DATABASES:
-            feedback = f"已载入{len(CONNECTED_QUERY_DATABASES)}个数据库!"
+        dbs = self.bot.db.query.list_databases()
+        if dbs:
+            feedback = f"已载入{len(dbs)}个数据库!"
         else:
             feedback = f"尚未加载任何数据库"
         return feedback

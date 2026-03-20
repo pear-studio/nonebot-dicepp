@@ -11,7 +11,6 @@ from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.config import DATA_PATH
 from core.localization import LOC_PERMISSION_DENIED_NOTICE, LOC_FUNC_DISABLE
-from module.query.query_database import CONNECTED_QUERY_DATABASES
 
 LOC_MODE_SWITCH = "mode_switch"
 LOC_MODE_INVALID = "mode_invalid"
@@ -251,7 +250,7 @@ class ModeCommand(UserCommandBase):
             """在已连接数据库中查找匹配项"""
             query_upper = query.upper()
             results: List[str] = []
-            for db_name in CONNECTED_QUERY_DATABASES.keys():
+            for db_name in self.bot.db.query.list_databases():
                 db_upper = db_name.upper()
                 # 精确匹配（忽略大小写）
                 if db_upper == query_upper:

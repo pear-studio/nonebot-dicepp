@@ -267,6 +267,7 @@ class Bot:
     async def tick_daily(self, bot_commands):
         # 更新用户统计
         user_stat_rows = await self.db.user_stat.list_all()
+        user_updates = []
         for user_stat_row in user_stat_rows:
             if user_stat_row.data:
                 user_stat = UserStatInfo()
@@ -275,9 +276,13 @@ class Bot:
                 except Exception:
                     user_stat = UserStatInfo()
                 user_stat.daily_update()
-                await self.db.user_stat.upsert(UserStat(user_id=user_stat_row.user_id, data=user_stat.serialize()))
+                user_updates.append(
+                    UserStat(user_id=user_stat_row.user_id, data=user_stat.serialize())
+                )
+        await self.db.user_stat.upsert_many(user_updates)
         # 更新群聊统计
         group_stat_rows = await self.db.group_stat.list_all()
+        group_updates = []
         for group_stat_row in group_stat_rows:
             if group_stat_row.data:
                 group_stat = GroupStatInfo()
@@ -286,7 +291,10 @@ class Bot:
                 except Exception:
                     group_stat = GroupStatInfo()
                 group_stat.daily_update()
-                await self.db.group_stat.upsert(GroupStat(group_id=group_stat_row.group_id, data=group_stat.serialize()))
+                group_updates.append(
+                    GroupStat(group_id=group_stat_row.group_id, data=group_stat.serialize())
+                )
+        await self.db.group_stat.upsert_many(group_updates)
 
         # 尝试清理过期群聊和过期用户信息
         async def clear_expired_data():
@@ -423,6 +431,9 @@ class Bot:
         for command in self.command_dict.values():
             try:
                 init_info_cur = command.delay_init()
+                # 兼容某些命令在启动期需要异步初始化：delay_init 可能返回 awaitable
+                if asyncio.iscoroutine(init_info_cur):
+                    init_info_cur = await init_info_cur
                 for i in range(len(init_info_cur)):
                     init_info_cur[i] = f"{command.__class__.readable_name}: {init_info_cur[i]}"
                 init_info += init_info_cur

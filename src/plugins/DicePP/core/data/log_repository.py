@@ -52,6 +52,11 @@ class LogRepository:
         )
         await self._db.execute("CREATE INDEX IF NOT EXISTS idx_records_log ON records(log_id);")
         await self._db.execute("CREATE INDEX IF NOT EXISTS idx_records_msg ON records(message_id);")
+        # 常见查询优化：按 group/user 拉取记录时的时间/倒序分页
+        await self._db.execute("CREATE INDEX IF NOT EXISTS idx_records_user_id_desc ON records(user_id, id DESC);")
+        await self._db.execute("CREATE INDEX IF NOT EXISTS idx_records_log_id_desc ON records(log_id, id DESC);")
+        # 清理过期记录/按时间筛选
+        await self._db.execute("CREATE INDEX IF NOT EXISTS idx_records_time ON records(time);")
         await self._db.commit()
 
     async def get_session(self, log_id: str) -> Optional[LogSession]:

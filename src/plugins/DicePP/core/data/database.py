@@ -6,6 +6,7 @@ import aiosqlite
 from core.config import DATA_PATH
 from .repository import Repository
 from .log_repository import LogRepository
+from .query_store import QueryStore
 from .models import (
     UserKarma,
     InitList,
@@ -53,6 +54,7 @@ class BotDatabase:
         self._npc_health: Optional[Repository[NPCHealth]] = None
         self._variable: Optional[Repository[UserVariable]] = None
         self._favor: Optional[Repository[UserFavor]] = None
+        self.query: QueryStore = QueryStore()
 
     @property
     def karma(self) -> Repository[UserKarma]:
@@ -196,6 +198,9 @@ class BotDatabase:
         self._npc_health = None
         self._variable = None
         self._favor = None
+
+        # 关闭 query 数据库连接
+        await self.query.close_all()
 
     async def _ensure_all_tables(self) -> None:
         self._karma = Repository[UserKarma](
