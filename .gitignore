@@ -147,7 +147,17 @@ dmypy.json
 .vscode
 
 # DicePP
-src/plugins/DicePP/Data/
+src/plugins/DicePP/Data/UserData/
+src/plugins/DicePP/Data/Content/**
+!src/plugins/DicePP/Data/Content/**/*.gitkeep
+!src/plugins/DicePP/Data/Content/QueryData/
+!src/plugins/DicePP/Data/Content/QueryData/.gitkeep
+!src/plugins/DicePP/Data/Content/DeckData/
+!src/plugins/DicePP/Data/Content/DeckData/.gitkeep
+!src/plugins/DicePP/Data/Content/RandomGenData/
+!src/plugins/DicePP/Data/Content/RandomGenData/.gitkeep
+!src/plugins/DicePP/Data/Content/ExcelData/
+!src/plugins/DicePP/Data/Content/ExcelData/.gitkeep
 src/plugins/DicePP/module/misc/log_command.py
 
 # uv lock 文件（可选是否追踪，这里选择不追踪）

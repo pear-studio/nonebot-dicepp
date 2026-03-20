@@ -12,7 +12,14 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.localization import LOC_FUNC_DISABLE
-from core.config import DATA_PATH, CFG_MASTER, CFG_ADMIN
+from core.config import (
+    CONTENT_PATH,
+    CONTENT_QUERY_DATA_PATH,
+    CONTENT_EXCEL_DATA_PATH,
+    QUERY_HOME_BREW_DATA_PATH,
+    CFG_MASTER,
+    CFG_ADMIN,
+)
 from core.data import DC_USER_DATA
 from core.data.models import GroupConfig
 from core.data.query_store import (
@@ -371,7 +378,7 @@ class QueryCommand(UserCommandBase):
         init_info: List[str] = [""]
         for i, path in enumerate(data_path_list):
             if path.startswith("./"):  # 用DATA_PATH作为当前路径
-                data_path_list[i] = os.path.join(DATA_PATH, path[2:])
+                data_path_list[i] = os.path.join(CONTENT_PATH, path[2:])
         for data_path in data_path_list:
             await self.bot.db.query.connect_path(data_path)
         init_info[0] = self.get_state()
@@ -568,7 +575,7 @@ class QueryCommand(UserCommandBase):
         if meta.group_id and query_homebrew:
             homebrew_database = "HB" + meta.group_id
             if not self.bot.db.query.has_database(homebrew_database):
-                homebrew_path:str = DATA_PATH + "/QueryData/Homebrew/" + homebrew_database + ".db"
+                homebrew_path: str = os.path.join(QUERY_HOME_BREW_DATA_PATH, homebrew_database + ".db")
                 if os.path.exists(homebrew_path):
                     await self.bot.db.query.connect_path(homebrew_path)
                 else:
@@ -757,7 +764,7 @@ class QueryCommand(UserCommandBase):
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             if show_mode == 1:# 加载数据库
                 database = arg_str.strip().upper()
-                database_file_path = DATA_PATH+"/QueryData/"+database+".db"
+                database_file_path = os.path.join(CONTENT_QUERY_DATA_PATH, database + ".db")
                 if self.bot.db.query.has_database(database):
                     feedback = f"{database}.db 已经被加载过了，无需再次加载。"
                 else:
@@ -766,7 +773,7 @@ class QueryCommand(UserCommandBase):
                         feedback = f"已载入 {database}.db。"
             elif show_mode == 2:# 卸载数据库
                 database = arg_str.strip().upper()
-                database_file_path = DATA_PATH+"/QueryData/"+database+".db"
+                database_file_path = os.path.join(CONTENT_QUERY_DATA_PATH, database + ".db")
                 if self.bot.db.query.has_database(database):
                     await self.bot.db.query.disconnect_database(database)
                     feedback = f"已卸载 {database}.db，您现在可以手动删除对应数据库来防止重启后被再次自动加载。"
@@ -776,7 +783,7 @@ class QueryCommand(UserCommandBase):
                     feedback = f"未找到文件{database}.db。"
             elif show_mode == 3:# 创建数据库
                 database = arg_str.strip().upper()
-                database_file_path = DATA_PATH+"/QueryData/"+database+".db"
+                database_file_path = os.path.join(CONTENT_QUERY_DATA_PATH, database + ".db")
                 if self.bot.db.query.has_database(database):
                     feedback = f" {database}.db 已经处于加载状态，无法再次创建。"
                 elif os.path.exists(database_file_path):
@@ -799,9 +806,9 @@ class QueryCommand(UserCommandBase):
                     xlsx_mode = arg_list[1].strip()
                     file_path = arg_list[2].strip()
                     if xlsx_mode in ["0","1","2"]:
-                        database_file_path = DATA_PATH+"/QueryData/"+database+".db"
+                        database_file_path = os.path.join(CONTENT_QUERY_DATA_PATH, database + ".db")
                         if self.bot.db.query.has_database(database):
-                            load_dir = DATA_PATH+"/ExcelData/"+file_path
+                            load_dir = os.path.join(CONTENT_EXCEL_DATA_PATH, file_path)
                             if os.path.isdir(load_dir):
                                 for inner_path, inner_dirs, file_names in os.walk(load_dir):
                                     for file_name in file_names:
@@ -814,7 +821,7 @@ class QueryCommand(UserCommandBase):
                                             )  # 0 旧版梨骰数据
                                 feedback += f"已将 ExcelData/{file_path}下的全部xlsx文件载入至 {database}.db。"
                             else:
-                                file_full_path = DATA_PATH+"/ExcelData/"+file_path
+                                file_full_path = os.path.join(CONTENT_EXCEL_DATA_PATH, file_path)
                                 if os.path.exists(file_full_path):
                                     await self.bot.db.query.load_data_from_xlsx_to_sqlite(
                                         file_full_path,

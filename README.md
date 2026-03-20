@@ -198,3 +198,24 @@ scripts\test\run_integration_test.bat -i
 - 更新 README.md 和 DEPLOY.md 部署文档
 - 修复部分 bug
 - 优化 log 代码，新增外部接口
+
+## 数据目录约定（DicePP）
+
+从当前版本开始，`Data/` 目录按“运行时数据”和“内容数据”分离：
+
+- `Data/UserData/`：**可写**，用于运行时产生或更新的数据
+  - `Bot/`：按 bot 账号隔离的运行数据（如 bot 数据库）
+  - `QueryHomebrew/`：群自定义房规数据库（HB*.db）
+  - `LocalImage/`：本地图片资源缓存/素材
+- `Data/Content/`：**只读**，用于内容库数据
+  - `QueryData/`：查询数据库（`.db`）
+  - `DeckData/`：牌堆与抽卡相关数据
+  - `RandomGenData/`：随机生成器数据
+  - `ExcelData/`：导入用 Excel 数据源
+
+### Docker 挂载建议
+
+- 将 `Data/UserData` 以可写方式挂载到容器内
+- 将 `Data/Content` 以只读方式挂载到容器内（例如 `:ro`）
+
+这样可以避免运行时误改内容库数据，同时保持用户数据持久化。

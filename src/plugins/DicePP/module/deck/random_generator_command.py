@@ -7,7 +7,7 @@ from pathlib import Path
 import openpyxl
 
 from core.bot import Bot
-from core.config import DATA_PATH,CFG_MASTER, CFG_ADMIN
+from core.config import CONTENT_PATH, CFG_MASTER, CFG_ADMIN
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -49,7 +49,7 @@ class RandomGeneratorCommand(UserCommandBase):
         data_path_list: List[str] = self.bot.cfg_helper.get_config(CFG_RAND_GEN_DATA_PATH)
         for i, path in enumerate(data_path_list):
             if path.startswith("./"):  # 用DATA_PATH作为当前路径
-                data_path_list[i] = os.path.join(DATA_PATH, path[2:])
+                data_path_list[i] = os.path.join(CONTENT_PATH, path[2:])
             data_path_list[i] = Path(data_path_list[i])
         data_path_list: List[Path]
         data_dir_path_list: List[Path] = []
@@ -186,7 +186,7 @@ class RandomGeneratorCommand(UserCommandBase):
             new_source = RandomDataSource("", meta_path.parent)
             error = new_source.read_from_sheet(ws)
             if error:
-                error = f"读取{meta_path.relative_to(DATA_PATH)}/{name}时遇到错误: {error}"
+                error = f"读取{meta_path.relative_to(CONTENT_PATH)}/{name}时遇到错误: {error}"
                 error_info.append(error)
             else:
                 self.source_list.append(new_source)

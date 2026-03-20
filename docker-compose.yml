@@ -21,9 +21,12 @@ services:
     environment:
       - TZ=Asia/Shanghai
     
-    # 数据持久化：整个 Data 目录 bind mount
+    # 数据持久化：
+    # - UserData：运行时写入（可写）
+    # - Content：外部内容库（只读）
     volumes:
-      - ./src/plugins/DicePP/Data:/app/src/plugins/DicePP/Data
+      - ./src/plugins/DicePP/Data/UserData:/app/src/plugins/DicePP/Data/UserData
+      - ./src/plugins/DicePP/Data/Content:/app/src/plugins/DicePP/Data/Content:ro
     
     # 日志配置：自动轮转
     logging:

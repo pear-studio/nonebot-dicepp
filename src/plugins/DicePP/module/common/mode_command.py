@@ -9,7 +9,7 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config import DATA_PATH
+from core.config import BOT_DATA_PATH
 from core.localization import LOC_PERMISSION_DENIED_NOTICE, LOC_FUNC_DISABLE
 
 LOC_MODE_SWITCH = "mode_switch"
@@ -75,7 +75,7 @@ class ModeCommand(UserCommandBase):
         init_info: List[str] = []
         edited: bool = False
         # 从本地文件中读取可用模式一览
-        data_path = os.path.join(DATA_PATH, MODE_FILE_PATH)
+        data_path = os.path.join(self.bot.data_path, MODE_FILE_PATH)
         if os.path.exists(data_path):
             wb = openpyxl.load_workbook(data_path)
             id_list = wb.sheetnames

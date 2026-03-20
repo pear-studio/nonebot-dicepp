@@ -12,7 +12,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.localization import LOC_FUNC_DISABLE
-from core.config import DATA_PATH, CFG_MASTER, CFG_ADMIN
+from core.config import QUERY_HOME_BREW_DATA_PATH, CONTENT_EXCEL_DATA_PATH, CFG_MASTER, CFG_ADMIN
 from core.data.models import GroupConfig
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.data import yield_deduplicate
@@ -54,7 +54,7 @@ class HomebrewCommand(UserCommandBase):
         super().__init__(bot)
         self.homebrew_database: Dict[str] = {}
         self.homebrew_sqlcur: Dict[str] = {}
-        self.data_path = os.path.join(DATA_PATH, "QueryData/Homebrew")
+        self.data_path = QUERY_HOME_BREW_DATA_PATH
         if not os.path.exists(self.data_path):
             create_parent_dir(self.data_path)
 
@@ -148,7 +148,7 @@ class HomebrewCommand(UserCommandBase):
             feedback += self.format_loc(LOC_HOMEBREW_LOAD)
             if len(arg_str) > 0:
                 if await self.bot.db.query.load_data_from_xlsx_to_sqlite(
-                    DATA_PATH + "/ExcelData/" + arg_str + ".xlsx",
+                    os.path.join(CONTENT_EXCEL_DATA_PATH, arg_str + ".xlsx"),
                     path,
                     2,
                 ):

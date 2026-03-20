@@ -12,7 +12,7 @@ from core.config import ConfigManager, CFG_COMMAND_SPLIT, CFG_MASTER, CFG_FRIEND
 from core.config import CFG_DATA_EXPIRE, CFG_USER_EXPIRE_DAY, CFG_GROUP_EXPIRE_DAY, CFG_GROUP_EXPIRE_WARNING,\
     CFG_WHITE_LIST_GROUP, CFG_WHITE_LIST_USER, CFG_ADMIN, CFG_MASTER, preprocess_white_list
 from core.config import CFG_MEMORY_MONITOR_ENABLE, CFG_MEMORY_WARN_PERCENT, CFG_MEMORY_RESTART_PERCENT, CFG_MEMORY_RESTART_MB
-from core.config import BOT_DATA_PATH, CONFIG_PATH
+from core.config import BOT_DATA_PATH
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
@@ -60,8 +60,10 @@ class Bot:
         self.fix_data()
         self.db = BotDatabase(self.account)
         self.hub_manager = HubManager(self)
-        self.loc_helper = LocalizationManager(CONFIG_PATH, self.account)
-        self.cfg_helper = ConfigManager(CONFIG_PATH, self.account)
+        bot_config_path = os.path.join(self.data_path, "Config")
+        os.makedirs(bot_config_path, exist_ok=True)
+        self.loc_helper = LocalizationManager(bot_config_path, self.account)
+        self.cfg_helper = ConfigManager(bot_config_path, self.account)
 
         self.command_dict: Dict[str, command.UserCommandBase] = {}
 

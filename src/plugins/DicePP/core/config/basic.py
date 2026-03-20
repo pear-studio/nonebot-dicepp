@@ -13,20 +13,24 @@ def _data_dir_score(data_path: str) -> int:
     if not os.path.isdir(data_path):
         return -1
     expected_dirs = [
-        "Config",
-        "Bot",
-        "QueryData",
-        "DeckData",
-        "RandomGenData",
+        "UserData",
+        "Content",
     ]
     score = 0
     for name in expected_dirs:
         if os.path.isdir(os.path.join(data_path, name)):
             score += 2
-    # 常见标志文件
-    if os.path.exists(os.path.join(data_path, "Config", "config.xlsx")):
+
+    # 更细粒度的标志目录（无需知道 bot_id）
+    if os.path.isdir(os.path.join(data_path, "Content", "QueryData")):
         score += 2
-    if os.path.exists(os.path.join(data_path, "Config", "localization.xlsx")):
+    if os.path.isdir(os.path.join(data_path, "Content", "DeckData")):
+        score += 2
+    if os.path.isdir(os.path.join(data_path, "Content", "RandomGenData")):
+        score += 2
+    if os.path.isdir(os.path.join(data_path, "UserData", "Bot")):
+        score += 2
+    if os.path.isdir(os.path.join(data_path, "UserData", "LocalImage")):
         score += 1
     return score
 
@@ -62,12 +66,35 @@ def _select_data_path(project_path: str) -> str:
 
 DATA_PATH = _select_data_path(PROJECT_PATH)
 
-BOT_DATA_PATH = os.path.join(DATA_PATH, 'Bot')
-CONFIG_PATH = os.path.join(DATA_PATH, 'Config')
-LOCAL_IMG_PATH = os.path.join(CONFIG_PATH, 'LocalImage')
+CONTENT_PATH = os.path.join(DATA_PATH, "Content")
+USER_DATA_PATH = os.path.join(DATA_PATH, "UserData")
+
+# 运行时数据（按 bot_id 拆分到子目录中）
+BOT_DATA_PATH = os.path.join(USER_DATA_PATH, "Bot")
+# 用户房规（HB*.db）也归类为“运行时用户数据”
+QUERY_HOME_BREW_DATA_PATH = os.path.join(USER_DATA_PATH, "QueryHomebrew")
+
+CONTENT_QUERY_DATA_PATH = os.path.join(CONTENT_PATH, "QueryData")
+CONTENT_DECK_DATA_PATH = os.path.join(CONTENT_PATH, "DeckData")
+CONTENT_RANDOM_GEN_DATA_PATH = os.path.join(CONTENT_PATH, "RandomGenData")
+CONTENT_EXCEL_DATA_PATH = os.path.join(CONTENT_PATH, "ExcelData")
+
+# localization.xlsx 里使用 IMG(...) 引用的本地图片资源（给所有 bot 共用也更合理）
+LOCAL_IMG_PATH = os.path.join(USER_DATA_PATH, "LocalImage")
 
 
-ALL_LOCAL_DIR_PATH = [DATA_PATH, BOT_DATA_PATH, CONFIG_PATH, LOCAL_IMG_PATH]
+ALL_LOCAL_DIR_PATH = [
+    DATA_PATH,
+    USER_DATA_PATH,
+    CONTENT_PATH,
+    BOT_DATA_PATH,
+    QUERY_HOME_BREW_DATA_PATH,
+    CONTENT_QUERY_DATA_PATH,
+    CONTENT_DECK_DATA_PATH,
+    CONTENT_RANDOM_GEN_DATA_PATH,
+    CONTENT_EXCEL_DATA_PATH,
+    LOCAL_IMG_PATH,
+]
 
 for dirPath in ALL_LOCAL_DIR_PATH:
     if not os.path.exists(dirPath):

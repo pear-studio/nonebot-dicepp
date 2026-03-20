@@ -10,7 +10,7 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort, preprocess_msg
-from core.config import DATA_PATH, LOCAL_IMG_PATH
+from core.config import CONTENT_PATH, CONTENT_DECK_DATA_PATH, LOCAL_IMG_PATH
 from core.localization import LocalizationManager, LOC_FUNC_DISABLE
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.string import match_substring
@@ -135,7 +135,7 @@ class DeckItem:
         def handle_img(match):
             key = match.group(1)
             file_path_relative = Path(source.path) / key
-            file_path_absolute = Path(DATA_PATH) / DRAW_DATA_PATH / key
+            file_path_absolute = Path(CONTENT_DECK_DATA_PATH) / key
             file_path_local_img = Path(LOCAL_IMG_PATH) / key
             if file_path_relative.exists():
                 return get_cq_image(file_path_relative.read_bytes())
@@ -250,7 +250,7 @@ class DeckCommand(UserCommandBase):
         data_path_list: List[str] = self.bot.cfg_helper.get_config(CFG_DECK_DATA_PATH)
         for i, path in enumerate(data_path_list):
             if path.startswith("./"):  # 用DATA_PATH作为当前路径
-                data_path_list[i] = os.path.join(DATA_PATH, path[2:])
+                data_path_list[i] = os.path.join(CONTENT_PATH, path[2:])
         init_info: List[str] = []
         for data_path in data_path_list:
             self.load_data_from_path(data_path, init_info)
