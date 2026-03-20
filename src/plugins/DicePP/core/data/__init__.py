@@ -16,7 +16,6 @@ from core.data.models import (
     SpellInfo,
     MoneyInfo,
     DNDCharacter,
-    COCCharacter,
 )
 
 __all__ = [
@@ -33,5 +32,4 @@ __all__ = [
     "SpellInfo",
     "MoneyInfo",
     "DNDCharacter",
-    "COCCharacter",
 ]

@@ -3,7 +3,7 @@ from .initiative import InitEntity, InitList, INIT_LIST_SIZE, InitiativeError
 from .log import LogSession, LogRecord
 from .character import (
     # 数据模型
-    HPInfo, AbilityInfo, SpellInfo, MoneyInfo, DNDCharacter, COCCharacter,
+    HPInfo, AbilityInfo, SpellInfo, MoneyInfo, DNDCharacter,
     # 常量
     CHAR_INFO_KEY_HP, CHAR_INFO_KEY_HP_DICE,
     CHAR_INFO_KEY_NAME, CHAR_INFO_KEY_LEVEL, CHAR_INFO_KEY_ABILITY,
@@ -44,7 +44,6 @@ __all__ = [
     "SpellInfo",
     "MoneyInfo",
     "DNDCharacter",
-    "COCCharacter",
     # 扩展模型
     "UserNickname",
     "GroupConfig",

@@ -8,7 +8,6 @@ from core.data.models import (
     LogSession,
     LogRecord,
     DNDCharacter,
-    COCCharacter,
     HPInfo,
     AbilityInfo,
 )
@@ -134,12 +133,6 @@ class TestDNDCharacterModel:
         restored = DNDCharacter.model_validate_json(json_str)
         assert restored.name == "TestChar"
         assert restored.hp_info.hp_cur == 10
-
-
-class TestCOCCharacterModel:
-    def test_create(self):
-        character = COCCharacter(group_id="group1", user_id="user1", name="COCChar")
-        assert character.name == "COCChar"
 
 
 class TestHPInfoModel:

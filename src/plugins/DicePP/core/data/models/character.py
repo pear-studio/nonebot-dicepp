@@ -324,14 +324,3 @@ class DNDCharacter(BaseModel):
         result += self.hp_info.long_rest()
         return result.strip()
 
-
-class COCCharacter(BaseModel):
-    """COC 角色卡"""
-    group_id: str
-    user_id: str
-    name: str = ""
-    hp_info: HPInfo = Field(default_factory=HPInfo)
-    ability_info: AbilityInfo = Field(default_factory=AbilityInfo)
-    spell_info: SpellInfo = Field(default_factory=SpellInfo)
-    money_info: MoneyInfo = Field(default_factory=MoneyInfo)
-    is_init: bool = False

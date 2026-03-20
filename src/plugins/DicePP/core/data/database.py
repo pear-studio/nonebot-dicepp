@@ -11,7 +11,6 @@ from .models import (
     UserKarma,
     InitList,
     DNDCharacter,
-    COCCharacter,
     UserNickname,
     GroupConfig,
     GroupActivate,
@@ -40,7 +39,6 @@ class BotDatabase:
         self._karma: Optional[Repository[UserKarma]] = None
         self._initiative: Optional[Repository[InitList]] = None
         self._characters_dnd: Optional[Repository[DNDCharacter]] = None
-        self._characters_coc: Optional[Repository[COCCharacter]] = None
         self._log: Optional[LogRepository] = None
         self._nickname: Optional[Repository[UserNickname]] = None
         self._group_config: Optional[Repository[GroupConfig]] = None
@@ -73,12 +71,6 @@ class BotDatabase:
         if self._characters_dnd is None:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._characters_dnd
-
-    @property
-    def characters_coc(self) -> Repository[COCCharacter]:
-        if self._characters_coc is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return self._characters_coc
 
     @property
     def log(self) -> LogRepository:
@@ -187,7 +179,6 @@ class BotDatabase:
         self._karma = None
         self._initiative = None
         self._characters_dnd = None
-        self._characters_coc = None
         self._log = None
         self._nickname = None
         self._group_config = None
@@ -220,11 +211,6 @@ class BotDatabase:
             self._db, DNDCharacter, "characters_dnd", ["group_id", "user_id"]
         )
         await self._characters_dnd._ensure_table()
-
-        self._characters_coc = Repository[COCCharacter](
-            self._db, COCCharacter, "characters_coc", ["group_id", "user_id"]
-        )
-        await self._characters_coc._ensure_table()
 
         self._log = LogRepository(self._log_db)
         await self._log._ensure_table()
