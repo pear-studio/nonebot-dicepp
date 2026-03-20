@@ -68,6 +68,9 @@ hiddenimports = [
     'aiohttp',
     'aiofiles',
     
+    # SQLite (async)
+    'aiosqlite',
+    
     # 数据处理
     'openpyxl',
     'openpyxl.cell',
