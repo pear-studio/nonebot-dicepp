@@ -71,6 +71,11 @@ class Bot:
         self.todo_tasks: Dict[Union[Callable, asyncio.Task], Dict] = {}
         self._no_tick: bool = no_tick
 
+        # Some packaged runs may receive events before on_bot_connect completes.
+        # Guard delay_init_command() so DB + per-command initialization always happen once.
+        self._delay_init_lock = asyncio.Lock()
+        self._delay_init_done: bool = False
+
         self.start_up(readonly=readonly)
 
     def set_client_proxy(self, proxy):
@@ -427,72 +432,82 @@ class Bot:
 
     async def delay_init_command(self):
         """在载入本地化文本和配置等数据后调用"""
-        await self.db.connect()
+        async with self._delay_init_lock:
+            if self._delay_init_done:
+                return
+            await self.db.connect()
 
-        init_info: List[str] = []
-        for command in self.command_dict.values():
-            try:
-                init_info_cur = command.delay_init()
-                # 兼容某些命令在启动期需要异步初始化：delay_init 可能返回 awaitable
-                if asyncio.iscoroutine(init_info_cur):
-                    init_info_cur = await init_info_cur
-                for i in range(len(init_info_cur)):
-                    init_info_cur[i] = f"{command.__class__.readable_name}: {init_info_cur[i]}"
-                init_info += init_info_cur
-            except (AttributeError, TypeError, RuntimeError):
-                if self.proxy:
-                    bc_list = self.handle_exception(f"加载{command.__class__.__name__}失败")  # 报错不用中文名
-                    for bc in bc_list:
-                        await self.proxy.process_bot_command(bc)
+            init_info: List[str] = []
+            for command in self.command_dict.values():
+                try:
+                    init_info_cur = command.delay_init()
+                    # 兼容某些命令在启动期需要异步初始化：delay_init 可能返回 awaitable
+                    if asyncio.iscoroutine(init_info_cur):
+                        init_info_cur = await init_info_cur
+                    for i in range(len(init_info_cur)):
+                        init_info_cur[i] = f"{command.__class__.readable_name}: {init_info_cur[i]}"
+                    init_info += init_info_cur
+                except (AttributeError, TypeError, RuntimeError):
+                    if self.proxy:
+                        bc_list = self.handle_exception(f"加载{command.__class__.__name__}失败")  # 报错不用中文名
+                        for bc in bc_list:
+                            await self.proxy.process_bot_command(bc)
 
-        if self.proxy:
-            from core.command import BotSendMsgCommand
-            from core.localization import LOC_LOGIN_NOTICE
-            from module.common.master_command import DC_CTRL
-            
-            # 检查是否开启了静默模式
-            _ctrl_row = await self.db.bot_control.get("silent_startup")
-            is_silent = _ctrl_row.value == "True" if _ctrl_row else False
-            
-            feedback = self.loc_helper.format_loc_text(LOC_LOGIN_NOTICE)
-            if feedback and feedback != "$":
-                feedback_prefix = ""
-                for i in range(len(init_info)):
-                    if init_info[i] and init_info[i] != "$":
-                        feedback_prefix += init_info[i]+"\n"
-                feedback = f"{feedback_prefix}\n{feedback}"
-                dice_log(feedback)
-                
-                # 如果开启了静默模式，跳过发送通知
-                if is_silent:
-                    dice_log("[Bot] 静默模式已开启，跳过发送启动通知")
-                else:
-                    # 给上次reboot的Admin或Master汇报
-                    _rebooter_row = await self.db.bot_control.get("rebooter")
-                    rebooter = _rebooter_row.value if _rebooter_row else ""
-                    if rebooter != "":
-                        await self.db.bot_control.upsert(BotControl(key="rebooter", value=""))
-                        command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(rebooter)])
-                        await self.proxy.process_bot_command(command)
-                    # 如果不存在reboot者，则给所有Master汇报
-                    else :
-                        for master in self.cfg_helper.get_config(CFG_MASTER):
-                            command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
+            if self.proxy:
+                from core.command import BotSendMsgCommand
+                from core.localization import LOC_LOGIN_NOTICE
+                from module.common.master_command import DC_CTRL
+
+                # 检查是否开启了静默模式
+                _ctrl_row = await self.db.bot_control.get("silent_startup")
+                is_silent = _ctrl_row.value == "True" if _ctrl_row else False
+
+                feedback = self.loc_helper.format_loc_text(LOC_LOGIN_NOTICE)
+                if feedback and feedback != "$":
+                    feedback_prefix = ""
+                    for i in range(len(init_info)):
+                        if init_info[i] and init_info[i] != "$":
+                            feedback_prefix += init_info[i] + "\n"
+                    feedback = f"{feedback_prefix}\n{feedback}"
+                    dice_log(feedback)
+
+                    # 如果开启了静默模式，跳过发送通知
+                    if is_silent:
+                        dice_log("[Bot] 静默模式已开启，跳过发送启动通知")
+                    else:
+                        # 给上次reboot的Admin或Master汇报
+                        _rebooter_row = await self.db.bot_control.get("rebooter")
+                        rebooter = _rebooter_row.value if _rebooter_row else ""
+                        if rebooter != "":
+                            await self.db.bot_control.upsert(BotControl(key="rebooter", value=""))
+                            command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(rebooter)])
                             await self.proxy.process_bot_command(command)
-            else:
-                dice_log(init_info)
+                        # 如果不存在reboot者，则给所有Master汇报
+                        else:
+                            for master in self.cfg_helper.get_config(CFG_MASTER):
+                                command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
+                                await self.proxy.process_bot_command(command)
+                else:
+                    dice_log(init_info)
 
-        if not self._no_tick and (self.tick_task is None or self.tick_task.done()):
-            try:
-                asyncio.get_running_loop()
-                self.tick_task = asyncio.create_task(self.tick_loop())
-            except RuntimeError:
-                pass
+            if not self._no_tick and (self.tick_task is None or self.tick_task.done()):
+                try:
+                    asyncio.get_running_loop()
+                    self.tick_task = asyncio.create_task(self.tick_loop())
+                except RuntimeError:
+                    pass
+
+            self._delay_init_done = True
 
     # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:
         """处理消息"""
         from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
+
+        # Packaged runs may receive events before on_bot_connect completes.
+        # Ensure DB + per-command delay_init have been executed once.
+        if not self._delay_init_done:
+            await self.delay_init_command()
 
         await self.update_nickname(meta.user_id, "origin", meta.nickname)
 
@@ -660,6 +675,10 @@ class Bot:
         from core.command import BotCommandBase, BotSendMsgCommand
         from module.common import DC_ACTIVATE, DC_WELCOME, LOC_WELCOME_DEFAULT
         bot_commands: List[BotCommandBase] = []
+
+        # Ensure DB + per-command init completed before reading/writing sqlite.
+        if not self._delay_init_done:
+            await self.delay_init_command()
 
         if isinstance(data, FriendAddNoticeData):
             feedback = self.loc_helper.format_loc_text(LOC_FRIEND_ADD_NOTICE)

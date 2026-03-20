@@ -159,6 +159,9 @@ class BotDatabase:
         return self._favor
 
     async def connect(self) -> None:
+        # allow idempotent connect() (some packaged runs may receive events early)
+        if self._db is not None and self._log_db is not None:
+            return
         os.makedirs(self._bot_dir, exist_ok=True)
 
         self._db = await aiosqlite.connect(self._db_path)
