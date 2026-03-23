@@ -69,6 +69,8 @@ class ModeCommand(UserCommandBase):
 
         self.mode_dict: Dict[str, List[str]] = {}
         self.mode_field: List[str] = DEFAULT_FIELD
+        # 大写模式名到原始模式名映射，减少重复遍历
+        self.mode_upper_map: Dict[str, str] = {}
 
     def delay_init(self) -> List[str]:
         bot_id: str = self.bot.account
@@ -109,12 +111,21 @@ class ModeCommand(UserCommandBase):
             init_info.append("已创建模式文件。")
         if edited:
             wb.save(data_path)
+        self.mode_upper_map = {k.upper(): k for k in self.mode_dict.keys()}
         return init_info
 
     async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = True
         should_pass: bool = False
         hint: str = ""
+        # 先进行轻量前缀判断，避免非本指令消息触发数据库读写
+        if msg_str.startswith(".模式"):
+            hint = msg_str[3:].strip()
+        elif msg_str.startswith(".mode"):
+            hint = msg_str[5:].strip()
+        else:
+            return False, should_pass, hint
+
         # 判断是否初始化，没有初始化则进行一次初始化（群/私聊分别处理）
         is_private = not bool(meta.group_id)
         target_id = meta.user_id if is_private else meta.group_id
@@ -138,13 +149,6 @@ class ModeCommand(UserCommandBase):
                     new_config = GroupConfig(group_id=config_key, data={"mode": "NULL"})
                     await self.bot.db.group_config.upsert(new_config)
 
-        # 判断指令（支持群聊与私聊）
-        if msg_str.startswith(".模式"):
-            hint = msg_str[3:].strip()
-        elif msg_str.startswith(".mode"):
-            hint = msg_str[5:].strip()
-        else:
-            should_proc = False
         return should_proc, should_pass, hint
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
@@ -187,11 +191,7 @@ class ModeCommand(UserCommandBase):
                 stored_mode = str(self.bot.cfg_helper.get_config(CFG_MODE_DEFAULT)[0])
 
             # 尝试从 mode_dict 中找到对应的显示信息
-            mode_key = None
-            for k in self.mode_dict.keys():
-                if k.upper() == str(stored_mode).upper():
-                    mode_key = k
-                    break
+            mode_key = self.mode_upper_map.get(str(stored_mode).upper())
 
             if mode_key is not None:
                 dice = self.mode_dict[mode_key][0] if len(self.mode_dict[mode_key]) > 0 else ""
@@ -263,14 +263,13 @@ class ModeCommand(UserCommandBase):
         matched = False
         feedback = ""
         # 尝试精准匹配预定义模式
-        for key in self.mode_dict.keys():
-            ukey = key.upper()
-            if ukey == mode:  # 精准匹配
-                await update_group_config(target_id, self.mode_field, [
-                                    key]+self.mode_dict[key], is_private_inner=is_private)
-                feedback = self.bot.loc_helper.format_loc_text(
-                    LOC_MODE_SWITCH, new_mode=key, dice=self.mode_dict[key][0], database=self.mode_dict[key][1])
-                matched = True
+        exact_key = self.mode_upper_map.get(mode)
+        if exact_key is not None:
+            await update_group_config(target_id, self.mode_field, [
+                                exact_key]+self.mode_dict[exact_key], is_private_inner=is_private)
+            feedback = self.bot.loc_helper.format_loc_text(
+                LOC_MODE_SWITCH, new_mode=exact_key, dice=self.mode_dict[exact_key][0], database=self.mode_dict[exact_key][1])
+            matched = True
         # 尝试模糊匹配预定义模式
         if not matched:
             result: List[str] = []
@@ -284,12 +283,8 @@ class ModeCommand(UserCommandBase):
                 matched = True  # 有多个候选，不继续尝试数据库匹配
             elif len(result) == 1:
                 key_upper = result[0]
-                # 找到原始 key 名称（mode_dict 的键）
-                orig_key = None
-                for k in self.mode_dict.keys():
-                    if k.upper() == key_upper:
-                        orig_key = k
-                        break
+                # 通过映射回原始 key 名称
+                orig_key = self.mode_upper_map.get(key_upper)
                 if orig_key is not None:
                     await update_group_config(target_id, self.mode_field, [
                                         orig_key]+self.mode_dict[orig_key], is_private_inner=is_private)
