@@ -1,6 +1,8 @@
 import pytest
 from datetime import datetime
 
+pytestmark = pytest.mark.unit
+
 from core.data.models import (
     UserKarma,
     InitEntity,

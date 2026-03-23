@@ -4,6 +4,8 @@ import os
 import tempfile
 from typing import List
 
+pytestmark = pytest.mark.integration
+
 from core.data import Repository
 from core.data.models import UserKarma
 

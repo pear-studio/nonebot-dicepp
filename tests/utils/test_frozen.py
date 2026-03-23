@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 from unittest.mock import patch
 
+pytestmark = pytest.mark.unit
+
 # 被测模块
 from utils.frozen import is_frozen, get_app_dir, get_data_dir, get_runtime_info
 

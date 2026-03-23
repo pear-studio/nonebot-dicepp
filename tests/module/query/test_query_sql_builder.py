@@ -1,5 +1,7 @@
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_query_search_exact_name_regexp_params(fresh_bot, tmp_path):

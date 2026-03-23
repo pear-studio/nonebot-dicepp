@@ -3,6 +3,8 @@ import os
 import tempfile
 from datetime import datetime
 
+pytestmark = pytest.mark.integration
+
 from core.data import LogRepository
 from core.data.models import LogSession, LogRecord
 

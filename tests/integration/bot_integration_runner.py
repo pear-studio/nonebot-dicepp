@@ -6,9 +6,9 @@ DicePP Bot 集成测试脚本
 模拟 OneBot V11 协议向 Bot 发送消息，验证 Bot 能否正常接收和处理。
 
 使用方法:
-    uv run python scripts/test/test_bot.py              # 自动测试
-    uv run python scripts/test/test_bot.py -i           # 交互模式
-    uv run python scripts/test/test_bot.py --port 8080  # 指定端口
+    uv run python tests/integration/bot_integration_runner.py              # 自动测试
+    uv run python tests/integration/bot_integration_runner.py -i           # 交互模式
+    uv run python tests/integration/bot_integration_runner.py --port 8080  # 指定端口
 
 说明:
     - HTTP 200/204 表示 Bot 成功接收并处理了消息

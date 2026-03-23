@@ -1,5 +1,7 @@
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_botdatabase_exposes_query_store_and_can_connect(fresh_bot, tmp_path):

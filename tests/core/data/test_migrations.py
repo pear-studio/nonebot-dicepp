@@ -4,6 +4,8 @@ import tempfile
 import aiosqlite
 import pytest
 
+pytestmark = pytest.mark.integration
+
 from core.data.database import BotDatabase
 from core.data.migrations.base import Migration, MigrationContext
 from core.data.migrations.operations import run_temp_replay_check

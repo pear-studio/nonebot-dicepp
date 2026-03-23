@@ -34,13 +34,13 @@ if "%1"=="--interactive" goto :INTERACTIVE
 REM 自动测试模式
 echo [INFO] Running integration tests...
 echo.
-uv run python scripts\test\test_bot.py %*
+uv run python tests\integration\bot_integration_runner.py %*
 goto :RESULT
 
 :INTERACTIVE
 echo [INFO] Entering interactive mode...
 echo.
-uv run python scripts\test\test_bot.py -i
+uv run python tests\integration\bot_integration_runner.py -i
 goto :END
 
 :RESULT
