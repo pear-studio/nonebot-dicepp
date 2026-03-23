@@ -435,7 +435,15 @@ class Bot:
         async with self._delay_init_lock:
             if self._delay_init_done:
                 return
-            await self.db.connect()
+            try:
+                await self.db.connect()
+            except Exception as exc:
+                dice_log(f"[Migration] 数据库迁移失败，启动中断: {exc}")
+                if self.proxy:
+                    bc_list = self.handle_exception("启动前数据库迁移失败")
+                    for bc in bc_list:
+                        await self.proxy.process_bot_command(bc)
+                raise
 
             init_info: List[str] = []
             for command in self.command_dict.values():

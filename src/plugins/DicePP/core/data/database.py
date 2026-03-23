@@ -4,6 +4,7 @@ from typing import Optional
 import aiosqlite
 
 from core.config import BOT_DATA_PATH
+from core.data.migrations import MigrationExecutionError, MigrationRunner, default_registry
 from .repository import Repository
 from .log_repository import LogRepository
 from .query_store import QueryStore
@@ -53,6 +54,7 @@ class BotDatabase:
         self._variable: Optional[Repository[UserVariable]] = None
         self._favor: Optional[Repository[UserFavor]] = None
         self.query: QueryStore = QueryStore()
+        self._migration_runner: Optional[MigrationRunner] = None
 
     @property
     def karma(self) -> Repository[UserKarma]:
@@ -166,7 +168,13 @@ class BotDatabase:
         await self._log_db.execute("PRAGMA synchronous=NORMAL;")
         await self._log_db.execute("PRAGMA foreign_keys=ON;")
 
-        await self._ensure_all_tables()
+        self._migration_runner = MigrationRunner(
+            db=self._db,
+            log_db=self._log_db,
+            registry=default_registry(),
+        )
+        await self._migration_runner.migrate_up()
+        await self._init_repositories()
 
     async def close(self) -> None:
         if self._db is not None:
@@ -192,85 +200,94 @@ class BotDatabase:
         self._npc_health = None
         self._variable = None
         self._favor = None
+        self._migration_runner = None
 
         # 关闭 query 数据库连接
         await self.query.close_all()
 
-    async def _ensure_all_tables(self) -> None:
+    async def schema_version(self) -> int:
+        if self._migration_runner is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return await self._migration_runner.current_version()
+
+    async def target_schema_version(self) -> int:
+        if self._migration_runner is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return await self._migration_runner.latest_version()
+
+    async def pending_schema_versions(self) -> list[int]:
+        if self._migration_runner is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        pending = await self._migration_runner.pending_migrations()
+        return [migration.version for migration in pending]
+
+    async def run_migrations(self) -> None:
+        if self._migration_runner is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        try:
+            await self._migration_runner.migrate_up()
+        except MigrationExecutionError:
+            raise
+
+    async def _init_repositories(self) -> None:
         self._karma = Repository[UserKarma](
             self._db, UserKarma, "karma", ["user_id", "group_id"]
         )
-        await self._karma._ensure_table()
 
         self._initiative = Repository[InitList](
             self._db, InitList, "initiative", ["group_id"]
         )
-        await self._initiative._ensure_table()
 
         self._characters_dnd = Repository[DNDCharacter](
             self._db, DNDCharacter, "characters_dnd", ["group_id", "user_id"]
         )
-        await self._characters_dnd._ensure_table()
 
         self._log = LogRepository(self._log_db)
-        await self._log._ensure_table()
 
         self._nickname = Repository[UserNickname](
             self._db, UserNickname, "nickname", ["user_id", "group_id"]
         )
-        await self._nickname._ensure_table()
 
         self._group_config = Repository[GroupConfig](
             self._db, GroupConfig, "group_config", ["group_id"]
         )
-        await self._group_config._ensure_table()
 
         self._group_activate = Repository[GroupActivate](
             self._db, GroupActivate, "group_activate", ["group_id"]
         )
-        await self._group_activate._ensure_table()
 
         self._group_welcome = Repository[GroupWelcome](
             self._db, GroupWelcome, "group_welcome", ["group_id"]
         )
-        await self._group_welcome._ensure_table()
 
         self._chat_record = Repository[ChatRecord](
             self._db, ChatRecord, "chat_record", ["group_id", "user_id", "time"]
         )
-        await self._chat_record._ensure_table()
 
         self._bot_control = Repository[BotControl](
             self._db, BotControl, "bot_control", ["key"]
         )
-        await self._bot_control._ensure_table()
 
         self._user_stat = Repository[UserStat](
             self._db, UserStat, "user_stat", ["user_id"]
         )
-        await self._user_stat._ensure_table()
 
         self._group_stat = Repository[GroupStat](
             self._db, GroupStat, "group_stat", ["group_id"]
         )
-        await self._group_stat._ensure_table()
 
         self._meta_stat = Repository[MetaStat](
             self._db, MetaStat, "meta_stat", ["key"]
         )
-        await self._meta_stat._ensure_table()
 
         self._npc_health = Repository[NPCHealth](
             self._db, NPCHealth, "npc_health", ["group_id", "name"]
         )
-        await self._npc_health._ensure_table()
 
         self._variable = Repository[UserVariable](
             self._db, UserVariable, "variable", ["user_id", "group_id", "name"]
         )
-        await self._variable._ensure_table()
 
         self._favor = Repository[UserFavor](
             self._db, UserFavor, "favor", ["user_id", "group_id"]
         )
-        await self._favor._ensure_table()

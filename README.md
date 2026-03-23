@@ -145,6 +145,19 @@ scripts/
 | 集成测试 | `scripts\test\run_integration_test.bat` |
 | 打包构建 | `scripts\build\build.bat` |
 | 构建验证 | `scripts\test\run_build_test.bat` |
+| 查看 schema 版本 | `scripts\migrate\manage_migrations.bat --bot-id <BOT_ID> version` |
+| 查看迁移计划 | `scripts\migrate\manage_migrations.bat --bot-id <BOT_ID> plan` |
+| 执行迁移 | `scripts\migrate\manage_migrations.bat --bot-id <BOT_ID> up` |
+| 迁移校验（临时库双轮重放） | `scripts\migrate\manage_migrations.bat --bot-id <BOT_ID> check` |
+
+### 数据迁移命令说明
+
+`scripts\migrate\manage_migrations.bat` 提供统一迁移入口，当前支持：
+
+- `version`：输出当前版本与目标版本
+- `plan`：输出待执行版本列表
+- `up`：执行所有待迁移版本（失败返回非零退出码并输出失败版本）
+- `check`：默认使用临时库重放两轮 `up`，验证可达性与幂等性，不污染运行库
 
 ### 构建独立 EXE
 

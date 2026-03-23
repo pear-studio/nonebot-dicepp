@@ -52,6 +52,17 @@
 1. **命令模式**: 所有用户交互通过 `UserCommandBase` 处理，详见 [命令模式](./command_pattern.md)
 2. **数据驱动**: 业务数据通过 `BotDatabase`（SQLite + `Repository`）持久化，详见 [架构总览](./architecture.md) 与仓库根目录 `docs/DATA_LAYER.md`
 3. **国际化**: 文本通过 `LocalizationManager` 管理
+4. **Schema 迁移治理**: 数据结构变更通过 `core/data/migrations/` 统一管理，默认由启动流程前置执行，迁移失败会阻止启动
+
+---
+
+## 数据迁移开发规范（新增）
+
+- 新增/修改表结构时，必须新增 migration 版本，不得直接依赖业务层“建表兜底”
+- migration 版本号必须严格递增且唯一（禁止复用版本号）
+- 每个 migration 必须幂等，可重复执行
+- 基线 `v1` 已纳管现有业务表，后续变更必须在此基础上追加新版本
+- 提交涉及 schema 变更的 PR 时，需同时提交对应测试（至少覆盖执行与幂等）
 
 ---
 
