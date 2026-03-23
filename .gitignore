@@ -172,3 +172,6 @@ uv.lock
 
 # OpenSpec 变更管理目录
 openspec/
+
+# 临时文件
+.temp
