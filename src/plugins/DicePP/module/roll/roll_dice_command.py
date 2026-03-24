@@ -11,7 +11,7 @@ from core.communication import MessageMetaData, PrivateMessagePort, GroupMessage
 from core.localization import LOC_FUNC_DISABLE
 
 from module.roll import RollResult, preprocess_roll_exp, sift_roll_exp_and_reason, RollDiceError
-from module.roll.ast_engine import sample_roll_exp_ast
+from module.roll.ast_engine import build_sampling_plan, sample_from_plan
 from module.roll.ast_engine.errors import RollEngineError
 from module.roll.default_dice import (
     format_default_expr_from_storage,
@@ -498,22 +498,75 @@ class RollDiceCommand(UserCommandBase):
         return []
 
 
-async def get_roll_exp_result(expression: str) -> str:
-    """统计掷骰表达式的分布（重复采样 ~20 万次）。
+# ---------------------------------------------------------------------------
+# Adaptive sampling tier thresholds (value_range = observed max - min)
+# ---------------------------------------------------------------------------
+_SAMPLE_TIERS = [
+    (20,    5_000),
+    (100,   20_000),
+    (1_000, 100_000),
+]
+_SAMPLE_MAX = 200_000
+_WARMUP_SIZE = 1_000   # also used as the fixed batch size for asyncio yield
+_BATCH_SIZE  = 1_000   # fixed samples per asyncio.sleep(0) yield
 
-    使用 AST 引擎的轻量采样接口 sample_roll_exp_ast，完全走 AST 路径。
+
+def _adaptive_sample_count(value_range: int) -> int:
+    """Return total sample count for the given observed value_range."""
+    for threshold, count in _SAMPLE_TIERS:
+        if value_range <= threshold:
+            return count
+    return _SAMPLE_MAX
+
+
+async def get_roll_exp_result(expression: str) -> str:
+    """统计掷骰表达式的分布（自适应采样次数）。
+
+    优化策略（单次请求内）：
+    1. 编译阶段：build_sampling_plan() 执行一次 preprocess + parse，
+       得到可复用的 SamplingPlan（仅限本次请求，不跨请求共享）。
+    2. 预热阶段：采样 _WARMUP_SIZE 次，计算 value_range = max - min。
+    3. 主采样阶段：根据 value_range 分档确定总采样次数，预热样本并入最终样本集。
+    4. 分批调度：固定每批 _BATCH_SIZE 次后 await asyncio.sleep(0) 让出事件循环，
+       避免长时间占用协程调度器。
+
+    完全走 AST 路径，不引入跨请求缓存状态。
     """
-    repeat_times = 200000
-    break_times = 32
     stat_range = [1, 5, 25, 45, 55, 75, 95, 99]  # 统计区间, 大于0, 小于100
-    res_list: List[int] = []
-    for _ in range(break_times):
-        res_list += list(sorted((sample_roll_exp_ast(expression) for _ in range(repeat_times // break_times))))
-        await asyncio.sleep(0)
+
+    # --- 编译阶段：一次 preprocess + parse，本请求内复用 ---
+    plan = build_sampling_plan(expression)
+
+    # --- 预热阶段：采样 _WARMUP_SIZE 次，计算 value_range ---
+    warmup: List[int] = []
+    remaining_in_batch = _BATCH_SIZE
+    for _ in range(_WARMUP_SIZE):
+        warmup.append(sample_from_plan(plan))
+        remaining_in_batch -= 1
+        if remaining_in_batch == 0:
+            await asyncio.sleep(0)
+            remaining_in_batch = _BATCH_SIZE
+
+    value_range = max(warmup) - min(warmup)
+    repeat_times = _adaptive_sample_count(value_range)
+
+    # --- 主采样阶段：剩余次数 = repeat_times - _WARMUP_SIZE ---
+    res_list: List[int] = warmup
+    remaining_main = repeat_times - _WARMUP_SIZE
+    while remaining_main > 0:
+        batch = min(remaining_in_batch, remaining_main)
+        for _ in range(batch):
+            res_list.append(sample_from_plan(plan))
+        remaining_main -= batch
+        remaining_in_batch -= batch
+        if remaining_in_batch == 0:
+            await asyncio.sleep(0)
+            remaining_in_batch = _BATCH_SIZE
+
     res_list = sorted(res_list)
-    mean = sum(res_list)/repeat_times
+    mean = sum(res_list) / repeat_times
     info = []
-    stat_range_num: List[int] = [0] + [repeat_times*r//100 for r in stat_range] + [-1]
+    stat_range_num: List[int] = [0] + [repeat_times * r // 100 for r in stat_range] + [-1]
     for num in stat_range_num:
         info.append(res_list[num])
     feedback = ""

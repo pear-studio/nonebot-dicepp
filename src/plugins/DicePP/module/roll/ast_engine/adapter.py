@@ -10,7 +10,7 @@ The adapter:
 - Enables gradual migration from legacy to AST engine
 """
 
-from typing import Optional, Union, Callable
+from typing import Optional, Union, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -175,6 +175,89 @@ def exec_roll_exp_unified(
         return _exec_legacy(expression)
 
 
+@dataclass
+class SamplingPlan:
+    """
+    A compiled sampling plan for a roll expression.
+
+    Encapsulates the results of the one-time compile phase (preprocess + parse)
+    so that repeated sampling within a single `.rexp` request can reuse the
+    parsed AST without re-parsing on every call.
+
+    Scope contract: a SamplingPlan is valid for ONE request only.  It MUST NOT
+    be stored in any module-level or class-level cache and MUST NOT be shared
+    across independent requests.  The caller (get_roll_exp_result) is
+    responsible for creating a new plan per request and discarding it when
+    sampling is complete.
+
+    Limits note: static limits (expression length) are checked once at plan
+    construction time.  Dynamic limits (e.g. dice count per evaluation) are
+    enforced by evaluate() on every call and are NOT moved into the plan.
+    """
+    _ast: Any = field(repr=False)
+    _limits: SafetyLimits = field(repr=False)
+
+    def sample(self) -> int:
+        """Execute one evaluation using the cached AST and return the integer result.
+
+        Dynamic safety limits are checked inside evaluate() on every call,
+        preserving the same error semantics as the non-cached path.
+
+        Raises:
+            RollRuntimeError: If evaluation fails.
+            RollLimitError: If dynamic safety limits are exceeded.
+        """
+        result = evaluate(self._ast, limits=self._limits)
+        return int(result.value)
+
+
+def build_sampling_plan(expression: str, limits: Optional[SafetyLimits] = None) -> SamplingPlan:
+    """
+    Compile a roll expression into a reusable SamplingPlan for a single request.
+
+    Performs the one-time compile phase: preprocess → static limits check →
+    parse.  The resulting plan can be passed to sample_from_plan() repeatedly
+    within the same request without re-parsing.
+
+    Args:
+        expression: The roll expression string.
+        limits: Safety limits to apply (defaults to DEFAULT_LIMITS).
+
+    Returns:
+        A SamplingPlan ready for repeated evaluate() calls.
+
+    Raises:
+        RollSyntaxError: If expression has syntax errors.
+        RollLimitError: If static expression-length limits are exceeded.
+    """
+    limits = limits or DEFAULT_LIMITS
+    processed = preprocess(expression)
+    # Static limit check: expression length is determined once from the text.
+    check_expression_length(processed, limits)
+    ast = parse_expression(processed)
+    return SamplingPlan(_ast=ast, _limits=limits)
+
+
+def sample_from_plan(plan: SamplingPlan) -> int:
+    """
+    Draw one integer sample from a pre-compiled SamplingPlan.
+
+    This is the hot-path call used inside the sampling loop.  Dynamic limits
+    are enforced by evaluate() on every invocation.
+
+    Args:
+        plan: A SamplingPlan built by build_sampling_plan() for this request.
+
+    Returns:
+        The integer value of one evaluation sample.
+
+    Raises:
+        RollRuntimeError: If evaluation fails.
+        RollLimitError: If dynamic safety limits are exceeded.
+    """
+    return plan.sample()
+
+
 def sample_roll_exp_ast(expression: str) -> int:
     """
     Sample a single integer value from a roll expression using the AST engine.
@@ -182,6 +265,10 @@ def sample_roll_exp_ast(expression: str) -> int:
     This is a lightweight hot-path variant for statistical sampling (e.g. .rexp
     expectation calculation which calls this ~200,000 times).  It skips trace
     rendering and canonical-string building to minimise per-call overhead.
+
+    For high-frequency repeated sampling of the *same* expression within a
+    single request, prefer build_sampling_plan() + sample_from_plan() to avoid
+    redundant preprocess/parse on every call.
 
     Args:
         expression: The roll expression string (will be preprocessed internally).
@@ -194,11 +281,8 @@ def sample_roll_exp_ast(expression: str) -> int:
         RollRuntimeError: If evaluation fails.
         RollLimitError: If safety limits exceeded.
     """
-    processed = preprocess(expression)
-    check_expression_length(processed, DEFAULT_LIMITS)
-    ast = parse_expression(processed)
-    result = evaluate(ast, limits=DEFAULT_LIMITS)
-    return int(result.value)
+    plan = build_sampling_plan(expression)
+    return plan.sample()
 
 
 def _exec_legacy(expression: str) -> RollExpressionResult:
