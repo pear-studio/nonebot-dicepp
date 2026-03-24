@@ -686,10 +686,166 @@ def sift_roll_exp_and_reason(input_str: str) -> Tuple[str,str]:
     """
     return (input_str[0:exp_right].strip().upper(),input_str[exp_right:length].strip())
 
+def _build_roll_result(ast_result: "RollExpressionResult") -> RollResult:
+    """
+    将 AST 引擎的 RollExpressionResult 转换为完整填充的 RollResult。
+
+    字段填充规则（与 legacy 引擎保持语义一致）：
+
+    val_list
+        - 若表达式是"纯骰"（所有 kept 骰子之和 == 最终值，无额外常量偏移），
+          val_list 为各 kept 骰子的值列表，与 legacy XDY 的 val_list=[r1,r2,...] 一致。
+          判定方式：kept_sum == ast_result.value（整数比较，排除 float 场景）。
+          例：3D6 → val_list=[3,4,5]；2D20K1 → val_list=[15]。
+        - 有常量偏移或 float：val_list 压成 [total]（例：1D20+5）。
+        - 多组骰子且无 float：val_list 为各组 kept 值展开（例：1D20+1D6 → [r20, r6]）。
+
+    dice_num / d20_num / d100_num
+        仅统计最终 kept 骰子数量（经过 K/KL 修饰符过滤后保留的骰子）。
+        例：2D20K1 → dice_num=1, d20_num=1；3D20K2 → dice_num=2, d20_num=2。
+
+    success / fail（大成功/大失败）
+        D20：值为 20 → 大成功，值为 1 → 大失败。
+        D100：值为 1 → 大成功，值为 100 → 大失败。
+        统计口径：仅 kept 骰子参与。
+
+    average_list
+        对每个 kept D20/D100 骰子，按 round((val-1)*100/(sides-1)) 计算百分位出目。
+        用于 .r 命令展示平均出目（与 legacy 口径一致）。
+
+    type
+        仅当表达式为"单组纯骰"（only one DiceResult group AND is_pure）时有效，
+        值为骰子面数；否则为 None（与 legacy connector 运算后 type=None 语义一致）。
+
+    float_state
+        当 ast_result.value 是 Python float 类型时为 True，否则为 False。
+        触发场景：浮点字面量（如 1.2+1.2）、未来的 float 骰子模式。
+    """
+    from .ast_engine.evaluator import EvalResult
+
+    result = RollResult()
+    result.info = ast_result.info
+    result.exp = ast_result.exp
+
+    # Fix 1：float_state 由结果值类型决定，不硬编码 False
+    result.float_state = isinstance(ast_result.value, float)
+
+    eval_result: EvalResult = ast_result._eval_result  # type: ignore[assignment]
+
+    # ── 无骰子：纯算术表达式 ──────────────────────────────────────────────────
+    if eval_result is None or not eval_result.dice_results:
+        result.val_list = [ast_result.value]
+        return result
+
+    dice_results: list = eval_result.dice_results
+
+    # ── Fix 2：判断是否为"纯骰"（无额外常量偏移） ─────────────────────────────
+    # 条件：只有一组骰子 AND 非 float AND kept 骰子之和恰好等于最终值。
+    # 正例：1D20, 3D6, 2D20K1（kept 1 颗，其值即为 total）
+    # 反例：1D20+5（kept_sum=骰子值，total=骰子值+5，不等）
+    #        1D20抗性 → (1D20)/2（非整数时 float，或整数除法 kept_sum≠total）
+    # 注意：1D20+1D6（两组骰子）不属于"纯骰"，但 val_list 应为各组 kept 值明细，
+    #       与 legacy connector 运算后行为一致（[d20_val, d6_val]，而非 [total]）。
+    if not result.float_state and len(dice_results) == 1:
+        kept_values_candidate = [r.value for r in dice_results[0].rolls if r.kept]
+        kept_sum = sum(kept_values_candidate)
+        is_pure = (isinstance(ast_result.value, int) and kept_sum == ast_result.value)
+    else:
+        kept_values_candidate = []
+        is_pure = False
+
+    # ── val_list ──────────────────────────────────────────────────────────────
+    # 纯骰：各 kept 骰子值明细列表。
+    # 多骰算术（len > 1）：所有组的 kept 骰子值明细，与 legacy connector 一致。
+    # 有常量偏移 / float：压成 [total]（kept_sum ≠ total，无法拆解）。
+    if is_pure:
+        result.val_list = kept_values_candidate if kept_values_candidate else [ast_result.value]
+    elif not result.float_state and len(dice_results) > 1:
+        # 多组骰子：展开各组 kept 骰子值，与 legacy 对齐
+        multi_kept = []
+        for dr in dice_results:
+            multi_kept.extend(r.value for r in dr.rolls if r.kept)
+        result.val_list = multi_kept if multi_kept else [ast_result.value]
+    else:
+        result.val_list = [ast_result.value]
+
+    # ── dice_num / d20_num / d100_num / success / fail / average_list ─────────
+    # 口径：所有 DiceResult 中 kept 骰子（统计 kept，与 legacy K/KL 后行为一致）
+    for dr in dice_results:
+        kept_rolls = [r for r in dr.rolls if r.kept]
+        kept_count = len(kept_rolls)
+        sides = dr.sides
+
+        result.dice_num += kept_count
+
+        if sides == 20:
+            result.d20_num += kept_count
+            for r in kept_rolls:
+                if r.value == 20:
+                    result.success += 1
+                elif r.value == 1:
+                    result.fail += 1
+            result.average_list += [
+                round((r.value - 1) * 100 / (sides - 1)) for r in kept_rolls
+            ]
+
+        elif sides == 100:
+            result.d100_num += kept_count
+            for r in kept_rolls:
+                if r.value == 1:
+                    result.success += 1
+                elif r.value == 100:
+                    result.fail += 1
+            result.average_list += [
+                round((r.value - 1) * 100 / (sides - 1)) for r in kept_rolls
+            ]
+
+    # ── type ──────────────────────────────────────────────────────────────────
+    # 仅"单组纯骰"时 type 有意义，与 legacy RollExpressionDice.get_result() 设置 type 的场景一致。
+    if is_pure:
+        result.type = dice_results[0].sides
+    else:
+        result.type = None
+
+    return result
+
+
 def exec_roll_exp(input_str: str) -> RollResult:
     """
     根据输入执行一次掷骰表达式并返回结果
     若需要重复执行多次同一掷骰表达式, 应当直接调用preprocess_roll_exp和parse_roll_exp并重复get_result
+
+    当 AST 引擎启用时（默认），将委托给 ast_engine 执行以获得更精确的解析；
+    若 AST 引擎未启用或解析失败，回退到旧引擎（legacy fallback）。
+    """
+    from .ast_engine.adapter import is_ast_engine_enabled, exec_roll_exp_ast, RollExpressionResult
+    from .ast_engine.errors import RollEngineError
+
+    if is_ast_engine_enabled():
+        try:
+            ast_result = exec_roll_exp_ast(input_str)
+            return _build_roll_result(ast_result)
+        except RollEngineError as e:
+            # AST 引擎报错不静默 fallback，包装为 RollDiceError 以兼容上游 handler
+            raise RollDiceError(e.info) from e
+        except Exception as e:
+            # 非预期内部错误：记录 warning 后 fallback 到 legacy，避免生产服务中断。
+            # 注意：此处不应 raise，否则会暴露 AST 引擎 bug 给用户；
+            # 但必须留日志，否则 AST 缺陷在测试期间无法发现。
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "AST engine unexpected error for %r: %s: %s, falling back to legacy",
+                input_str, type(e).__name__, e,
+            )
+
+    return exec_roll_exp_legacy(input_str)
+
+
+def exec_roll_exp_legacy(input_str: str) -> RollResult:
+    """
+    强制走 legacy 引擎路径（不经过 AST 开关判断）。
+
+    该函数用于适配层在显式选择 legacy 时避免递归回到 AST 分支。
     """
     exp = parse_roll_exp(preprocess_roll_exp(input_str))
     result: RollResult = exp.get_result()
