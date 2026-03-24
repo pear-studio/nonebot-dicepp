@@ -13,23 +13,38 @@ DicePP 使用经典的命令模式来处理用户交互。
 ```python
 class UserCommandBase(metaclass=abc.ABCMeta):
     readable_name: str = "未命名指令"  # 命令显示名称
-    priority: int = 0                   # 优先级 (越小越高)
-    flag: int = 0                      # 命令标识
-    group_only: bool = False            # 是否仅群聊
+    priority: int = DPP_COMMAND_PRIORITY_DEFAULT  # 优先级 (越小越高)
+    flag: int = DPP_COMMAND_FLAG_DEFAULT           # 命令标识
+    cluster: int = DPP_COMMAND_CLUSTER_DEFAULT     # 命令群组（用于开关某类功能）
+    group_only: bool = False                       # 是否仅群聊
+    permission_require: int = 0                    # 所需权限（0=所有人）
 
     def __init__(self, bot: Bot):
         self.bot = bot
+        self.format_loc = self.bot.loc_helper.format_loc_text  # 格式化本地化文本的快捷方式
+
+    def delay_init(self) -> List[str]:
+        """机器人完成初始化后调用，可在此读取配置，返回提示信息"""
+        return []
+
+    def tick(self) -> List[BotCommandBase]:
+        """每秒调用一次"""
+        return []
+
+    def tick_daily(self) -> List[BotCommandBase]:
+        """每天调用一次"""
+        return []
 
     @abc.abstractmethod
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        """判断是否处理该消息"""
+        """判断是否处理该消息（可以是同步或异步方法）"""
         should_proc: bool = False
         should_pass: bool = False  # 是否继续传递给其他命令
         return should_proc, should_pass, None
 
     @abc.abstractmethod
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        """处理消息，返回命令列表"""
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+        """处理消息，返回命令列表（必须是异步方法）"""
         return []
 
     @abc.abstractmethod
@@ -95,8 +110,8 @@ class RollDiceCommand(UserCommandBase):
         should_proc = msg_str.startswith(".r")
         return should_proc, False, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        # 解析和处理逻辑
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
+        # 解析和处理逻辑（process_msg 必须是异步方法）
         feedback = "掷骰结果: 1D20=15"
 
         # 根据消息来源选择发送端口

@@ -23,17 +23,17 @@
 
 ## 指令总览
 
-DicePP 共包含 **36** 个用户指令，分布在 9 个功能模块中。
+DicePP 共包含 **29** 个注册用户指令，分布在 9 个功能模块中。
 
 | 模块 | 指令数量 | 主要功能 |
 |------|----------|----------|
-| roll | 6 | 掷骰、随机选择、骰池、业力骰子 |
-| character | 4 | 角色卡、生命值管理 |
-| common | 13 | 帮助、昵称、日志、宏、变量等 |
+| roll | 5 | 掷骰、随机选择、骰池、默认骰、业力骰子 |
+| character | 2 | 角色卡、生命值管理 |
+| common | 10 | 帮助、昵称、日志、日志统计、激活、配置、模式、欢迎词、自定义对话、Master |
 | query | 2 | 资料查询、私设管理 |
 | deck | 2 | 抽卡、随机生成 |
-| initiative | 2 | 先攻列表、战斗轮 |
-| misc | 5 | 今日人品、属性生成、统计 |
+| initiative | 3 | 先攻列表、投掷先攻、战斗轮 |
+| misc | 4 | 今日人品、属性生成、统计、邀请链接处理 |
 | dice_hub | 1 | 多机器人互联 |
 
 ---
@@ -147,23 +147,26 @@ DicePP 共包含 **36** 个用户指令，分布在 9 个功能模块中。
 ### 默认骰设置指令
 
 **指令名称**: 默认骰设置指令  
-**触发词**: `.set`  
-**优先级**: 0  
-**Flag**: 无
+**触发词**: `.dset`  
+**优先级**: -1  
+**Flag**: `DPP_COMMAND_FLAG_MANAGE`  
+**仅群聊**: 是  
+**权限要求**: 管理员
 
 **语法格式**:
 ```
-.set [骰面]
-.set [骰子表达式]
+.dset [骰子表达式]
+.dset               # 不带参数时显示当前设置
 ```
 
-**说明**: 设置当 `.r` 不指定骰面时使用的默认骰子。
+**说明**: 设置当 `.r` 不指定骰面时使用的群默认骰子表达式。
 
 **示例**:
 ```
-.set d20               # 设置默认为d20
-.set d100              # 设置默认为d100 (COC模式)
-.set 2d6               # 设置默认为2d6
+.dset                  # 查看当前默认骰
+.dset d20              # 设置默认为d20
+.dset d100             # 设置默认为d100 (COC模式)
+.dset 2d6              # 设置默认为2d6
 ```
 
 ---
@@ -403,53 +406,22 @@ DicePP 共包含 **36** 个用户指令，分布在 9 个功能模块中。
 
 ---
 
-### 宏指令
+### 自定义对话指令
 
-**指令名称**: 宏指令  
-**触发词**: `.define` / `.def` / `.宏`  
-**优先级**: 默认  
-**Flag**: 无
+**指令名称**: 自定义对话指令  
+**触发词**: *(无固定触发词，由本地化文本匹配)*  
+**优先级**: `DPP_COMMAND_PRIORITY_TRIVIAL`（最低）  
+**Flag**: `DPP_COMMAND_FLAG_FUN | DPP_COMMAND_FLAG_CHAT`
 
-**语法格式**:
-```
-.def [宏名] [内容]
-.def del [宏名]
-.def list
-```
+**说明**: 
+- 根据 `LocalizationManager` 中配置的聊天文本进行自动回复
+- 有触发间隔限制（默认 20 秒），防止频繁回复
+- 群聊中可通过 `.config` 开关 `chat` 功能
 
-**说明**: 宏可以存储常用的掷骰表达式或文本，使用时直接调用宏名。
-
-**示例**:
-```
-.def 攻击 d20+7          # 定义攻击宏
-.def 伤害 2d6+4          # 定义伤害宏
-.def list                # 查看所有宏
-.def del 攻击            # 删除攻击宏
-.r$攻击$                 # 使用宏进行掷骰
-```
-
----
-
-### 变量指令
-
-**指令名称**: 变量指令  
-**触发词**: `.set` / `.get` / `.var`  
-**优先级**: 0
-
-**语法格式**:
-```
-.set [变量名] [值]
-.get [变量名]
-```
-
-**说明**: 变量可以存储数值，在掷骰表达式中使用。
-
-**示例**:
-```
-.set str 3               # 设置力量调整值为3
-.get str                 # 查看力量调整值
-.r d20+$str$             # 使用变量掷骰
-```
+**配置项**:
+| 配置键 | 默认值 | 说明 |
+|--------|--------|------|
+| `chat_interval` | 20 | 聊天触发间隔（秒） |
 
 ---
 
@@ -549,42 +521,26 @@ DicePP 共包含 **36** 个用户指令，分布在 9 个功能模块中。
 
 ---
 
-### 好感度指令
+### 日志统计指令
 
-**指令名称**: 好感指令  
-**触发词**: `.好感` / `.favor`  
-**优先级**: 默认
-
-**语法格式**:
-```
-.好感 [角色名] [+/-数值]
-.好感 [角色名]
-```
-
-**示例**:
-```
-.好感 艾琳 +10           # 增加艾琳好感度10点
-.好感 艾琳               # 查看艾琳好感度
-```
-
----
-
-### 点数指令
-
-**指令名称**: 点数指令  
-**触发词**: `.point` / `.pt`  
-**优先级**: 默认
+**指令名称**: 日志统计指令  
+**触发词**: `.stat log` / `.stat 日志`  
+**优先级**: 默认  
+**Flag**: `DPP_COMMAND_FLAG_INFO`  
+**仅群聊**: 是
 
 **语法格式**:
 ```
-.pt [操作] [数值]
+.stat log [日志名]
+.stat 日志 [日志名]
 ```
+
+**说明**: 查看当前或指定日志的统计信息（掷骰次数、参与人员等）。不带日志名时查看当前活跃日志。
 
 **示例**:
 ```
-.pt                      # 查看当前点数
-.pt +100                 # 增加100点数
-.pt -50                  # 消耗50点数
+.stat log               # 查看当前日志统计
+.stat log 第一章        # 查看"第一章"日志统计
 ```
 
 ---
@@ -899,6 +855,17 @@ DicePP 共包含 **36** 个用户指令，分布在 9 个功能模块中。
 
 ---
 
+### JSON 邀请链接处理
+
+**指令名称**: 新功能测试指令（JSON邀请链接处理）  
+**触发词**: *(自动触发：检测到 CQ:json 格式的群邀请链接)*  
+**优先级**: 0  
+**Flag**: `DPP_COMMAND_FLAG_FUN`
+
+**说明**: 当用户私聊发送 JSON 格式的群邀请链接时，自动回复提示信息，告知骰娘暂不支持此类邀请方式。无需手动触发。
+
+---
+
 ## 骰子中心 (dice_hub)
 
 骰子中心模块提供多机器人互联功能。
@@ -959,20 +926,20 @@ class MyCommand(UserCommandBase):
         # 注册本地化文本
         # 注册配置项
 
-    def can_process_msg(self, msg_str: str, meta: MessageMetaData):
+    async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc = msg_str.startswith(".mycmd")
         return should_proc, False, None
 
-    def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any):
+    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 处理逻辑
         return [BotSendMsgCommand(...)]
 
-    def get_help(self, keyword: str, meta: MessageMetaData):
+    def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword == "mycmd":
             return "帮助文本"
         return ""
 
-    def get_description(self):
+    def get_description(self) -> str:
         return ".mycmd 指令描述"
 ```
 
@@ -1008,20 +975,19 @@ class MyCommand(UserCommandBase):
 | `.r` | 掷骰指令 | roll |
 | `.c` | 随机选择指令 | roll |
 | `.w` | 骰池指令 | roll |
-| `.set` | 默认骰设置 / 变量指令 | roll / common |
+| `.dset` | 默认骰设置指令 | roll |
 | `.karmadice` | 业力骰子指令 | roll |
 | `.角色卡` | DND5E角色卡 | character |
 | `.hp` | 生命值指令 | character |
 | `.help` | 帮助指令 | common |
 | `.nn` | 昵称指令 | common |
 | `.log` | 跑团日志指令 | common |
-| `.def` | 宏指令 | common |
+| `.stat log` | 日志统计指令 | common |
+| *(自动)* | 自定义对话指令 | common |
 | `.bot` | 激活指令 | common |
 | `.config` | 群配置指令 | common |
 | `.mode` | 模式指令 | common |
 | `.welcome` | 欢迎词指令 | common |
-| `.好感` | 好感度指令 | common |
-| `.pt` | 点数指令 | common |
 | `.master` | Master指令 | common |
 | `.q` | 查询指令 | query |
 | `.hb` | 私设指令 | query |
@@ -1034,6 +1000,7 @@ class MyCommand(UserCommandBase):
 | `.coc` | COC属性生成 | misc |
 | `.dnd` | DND属性生成 | misc |
 | `.统计` | 统计指令 | misc |
+| *(自动)* | JSON邀请链接处理 | misc |
 | `.hub` | DiceHub指令 | dice_hub |
 
 ---

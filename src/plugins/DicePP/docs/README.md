@@ -13,7 +13,7 @@
 | [架构总览](./architecture.md) | 项目整体架构介绍，包括核心模块职责与数据流 |
 | [命令模式](./command_pattern.md) | 命令系统的设计与实现，自定义命令开发指南 |
 | [命令示例：以掷骰为例](./example_roll.md) | 以 `.r` 掷骰命令为例，详解完整实现流程 |
-| [指令速查手册](./command_reference.md) | 所有 36 个用户指令的完整参考文档 |
+| [指令速查手册](./command_reference.md) | 所有 29 个注册用户指令的完整参考文档 |
 
 ---
 
@@ -35,9 +35,9 @@
 
 | 模块 | 职责 | 相关指令 |
 |------|------|----------|
-| `roll/` | 骰子引擎与掷骰命令 | `.r`, `.c`, `.w`, `.karmadice` |
-| `character/` | 角色系统 (CoC / D&D 5e) | `.角色卡`, `.hp` |
-| `common/` | 通用功能 (日志、宏、变量等) | `.help`, `.nn`, `.log`, `.def` |
+| `roll/` | 骰子引擎与掷骰命令 | `.r`, `.c`, `.w`, `.dset`, `.karmadice` |
+| `character/` | 角色系统 (D&D 5e) | `.角色卡`, `.hp` |
+| `common/` | 通用功能 (日志、昵称、配置等) | `.help`, `.nn`, `.log`, `.stat log`, `.bot`, `.config`, `.mode`, `.master` |
 | `initiative/` | 先攻系统 | `.init`, `.ri`, `.bt` |
 | `deck/` | 卡牌与随机生成器 | `.draw`, `.gen` |
 | `dice_hub/` | 多机器人互联 | `.hub` |

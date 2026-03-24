@@ -10,18 +10,24 @@ DicePP/
 │   ├── bot/            # 机器人主类
 │   ├── command/        # 命令系统
 │   ├── communication/  # 消息系统
-│   ├── config/        # 配置管理
-│   ├── data/          # 数据持久化 (BotDatabase, Repository)
-│   ├── localization/  # 国际化
-│   └── statistics/    # 统计系统
+│   ├── config/         # 配置管理
+│   ├── data/           # 数据持久化 (BotDatabase, Repository)
+│   │   ├── migrations/ # Schema 迁移版本（v1_baseline 等）
+│   │   ├── models/     # Pydantic 数据模型（character, initiative, karma, log 等）
+│   │   ├── database.py # BotDatabase 主类
+│   │   ├── repository.py # 通用 Repository<T> CRUD
+│   │   ├── log_repository.py # 日志专用仓库
+│   │   └── query_store.py    # 查询数据存储
+│   ├── localization/   # 国际化
+│   └── statistics/     # 统计系统
 ├── module/             # 功能模块
-│   ├── roll/          # 骰子系统
-│   ├── character/     # 角色系统
-│   ├── common/        # 通用功能
+│   ├── roll/           # 骰子系统
+│   ├── character/      # 角色系统
+│   ├── common/         # 通用功能
 │   └── ...
-├── utils/             # 工具函数
-├── adapter/           # 适配器
-└── docs/              # 文档
+├── utils/              # 工具函数
+├── adapter/            # 适配器
+└── docs/               # 文档
 ```
 
 ## 核心组件
