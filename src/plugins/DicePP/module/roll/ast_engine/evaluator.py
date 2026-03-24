@@ -472,7 +472,7 @@ class Evaluator(ASTVisitor):
 # Public API
 # =============================================================================
 
-def evaluate(ast: ASTNode, dice_roller=None, expression: str = "") -> EvalResult:
+def evaluate(ast: ASTNode, dice_roller=None, expression: str = "", limits=None) -> EvalResult:
     """
     Evaluate an AST and return the result.
     
@@ -480,11 +480,12 @@ def evaluate(ast: ASTNode, dice_roller=None, expression: str = "") -> EvalResult
         ast: The root ASTNode to evaluate
         dice_roller: Optional callable(sides) -> int for rolling dice
         expression: Original expression string (used for trace)
+        limits: Optional SafetyLimits override (defaults to DEFAULT_LIMITS)
         
     Returns:
         EvalResult with the computed value, dice details and evaluation trace
     """
-    evaluator = Evaluator(dice_roller=dice_roller, expression=expression)
+    evaluator = Evaluator(dice_roller=dice_roller, expression=expression, limits=limits)
     result = ast.accept(evaluator)
     # Attach the trace to the final result so callers can render it
     result.trace = evaluator._trace

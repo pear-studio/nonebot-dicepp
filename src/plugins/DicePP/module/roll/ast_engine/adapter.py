@@ -29,18 +29,29 @@ class EngineType(Enum):
     AST = "ast"
 
 
-# Default engine selection
+# Default engine: always AST.
+# This constant is not meant to be changed at runtime.
+# To use legacy engine, enable the explicit code switch in legacy_adapter._LEGACY_ENABLED.
 _default_engine: EngineType = EngineType.AST
 
 
 def set_default_engine(engine: EngineType) -> None:
-    """Set the default engine for expression evaluation."""
+    """Set the default engine for expression evaluation.
+
+    .. deprecated::
+        The default engine is now permanently AST.
+        This function is kept for backward compatibility only (e.g., tests that
+        call disable_ast_engine() to test legacy path explicitly).
+        Setting to LEGACY requires the explicit legacy switch in legacy_adapter
+        to also be enabled, otherwise calls will raise RuntimeError at the
+        legacy guard.
+    """
     global _default_engine
     _default_engine = engine
 
 
 def get_default_engine() -> EngineType:
-    """Get the current default engine."""
+    """Get the current default engine (always AST in production)."""
     return _default_engine
 
 
@@ -105,8 +116,8 @@ def exec_roll_exp_ast(
     # Parse expression
     ast = parse_expression(processed)
     
-    # Evaluate (pass original expression for display, processed for trace)
-    result = evaluate(ast, dice_roller=dice_roller, expression=processed)
+    # Evaluate (pass original expression for display, processed for trace, and limits)
+    result = evaluate(ast, dice_roller=dice_roller, expression=processed, limits=limits)
 
     # Build canonical exp from AST (e.g. "D" → "1D20", "3D" → "3D20")
     exp = canonical_str(ast)
@@ -162,6 +173,32 @@ def exec_roll_exp_unified(
     else:
         # Fall back to legacy engine
         return _exec_legacy(expression)
+
+
+def sample_roll_exp_ast(expression: str) -> int:
+    """
+    Sample a single integer value from a roll expression using the AST engine.
+
+    This is a lightweight hot-path variant for statistical sampling (e.g. .rexp
+    expectation calculation which calls this ~200,000 times).  It skips trace
+    rendering and canonical-string building to minimise per-call overhead.
+
+    Args:
+        expression: The roll expression string (will be preprocessed internally).
+
+    Returns:
+        The integer value of one evaluation sample.
+
+    Raises:
+        RollSyntaxError: If expression has syntax errors.
+        RollRuntimeError: If evaluation fails.
+        RollLimitError: If safety limits exceeded.
+    """
+    processed = preprocess(expression)
+    check_expression_length(processed, DEFAULT_LIMITS)
+    ast = parse_expression(processed)
+    result = evaluate(ast, limits=DEFAULT_LIMITS)
+    return int(result.value)
 
 
 def _exec_legacy(expression: str) -> RollExpressionResult:

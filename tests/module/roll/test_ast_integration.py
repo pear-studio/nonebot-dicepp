@@ -126,16 +126,13 @@ class TestUnifiedExecution:
         )
         assert result.value == 10
     
-    def test_unified_explicit_legacy(self):
-        # Legacy engine uses its own random, so just test it doesn't crash
-        result = exec_roll_exp_unified("1+2", engine=EngineType.LEGACY)
-        assert result.value == 3
-
-    def test_unified_explicit_legacy_ignores_default_ast(self):
-        """Explicit LEGACY execution should not be redirected by default AST switch."""
-        enable_ast_engine()  # ensure default is AST
-        result = exec_roll_exp_unified("1+2", engine=EngineType.LEGACY)
-        assert result.value == 3
+    def test_unified_explicit_legacy_blocked_by_default(self):
+        """Explicit LEGACY via unified API should be blocked by legacy guard when switch is off."""
+        from module.roll.ast_engine.legacy_adapter import _LEGACY_ENABLED
+        # By default, legacy switch is OFF — calling legacy path should raise RuntimeError
+        assert not _LEGACY_ENABLED, "Legacy switch must default to False"
+        with pytest.raises(RuntimeError, match="roll_engine=legacy explicit switch is OFF"):
+            exec_roll_exp_unified("1+2", engine=EngineType.LEGACY)
 
 
 @pytest.mark.unit

@@ -25,6 +25,7 @@ from .preprocessor import preprocess
 from .adapter import (
     exec_roll_exp_ast,
     exec_roll_exp_unified,
+    sample_roll_exp_ast,
     RollExpressionResult,
     EngineType,
     set_default_engine,
@@ -49,6 +50,7 @@ __all__ = [
     # Adapter (main API)
     "exec_roll_exp_ast",
     "exec_roll_exp_unified",
+    "sample_roll_exp_ast",
     "RollExpressionResult",
     "EngineType",
     "set_default_engine",

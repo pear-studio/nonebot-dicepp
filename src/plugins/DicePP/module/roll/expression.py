@@ -9,6 +9,8 @@ from .modifier import RollExpModifier, ROLL_MODIFIERS_DICT
 from .connector import RollExpConnector, ROLL_CONNECTORS_DICT, REModSubstract, REModAdd
 from .roll_utils import RollDiceError, roll_a_dice, match_outer_parentheses, clear_border_parentheses, remove_redundant_parentheses
 from .result import RollResult
+from .ast_engine.adapter import exec_roll_exp_ast
+from .ast_engine.errors import RollEngineError
 
 XDY_RE = "([1-9][0-9]*)?D([1-9][0-9]*)?"
 XB_RE = "([1-9][0-9]*)?B"
@@ -812,44 +814,48 @@ def _build_roll_result(ast_result: "RollExpressionResult") -> RollResult:
 
 def exec_roll_exp(input_str: str) -> RollResult:
     """
-    根据输入执行一次掷骰表达式并返回结果
-    若需要重复执行多次同一掷骰表达式, 应当直接调用preprocess_roll_exp和parse_roll_exp并重复get_result
+    根据输入执行一次掷骰表达式并返回结果。
+    若需要重复执行多次同一掷骰表达式，应当直接调用 preprocess_roll_exp 和 parse_roll_exp 并重复 get_result。
 
-    当 AST 引擎启用时（默认），将委托给 ast_engine 执行以获得更精确的解析；
-    若 AST 引擎未启用或解析失败，回退到旧引擎（legacy fallback）。
+    默认路径：AST 引擎（ast_engine）。默认路径中不存在 legacy fallback。
+    若需要使用 legacy 路径，须通过 ast_engine.legacy_adapter 中的显式开关启用，
+    并调用 exec_roll_exp_legacy()。
     """
-    from .ast_engine.adapter import is_ast_engine_enabled, exec_roll_exp_ast, RollExpressionResult
-    from .ast_engine.errors import RollEngineError
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
 
-    if is_ast_engine_enabled():
-        try:
-            ast_result = exec_roll_exp_ast(input_str)
-            return _build_roll_result(ast_result)
-        except RollEngineError as e:
-            # AST 引擎报错不静默 fallback，包装为 RollDiceError 以兼容上游 handler
-            raise RollDiceError(e.info) from e
-        except Exception as e:
-            # 非预期内部错误：记录 warning 后 fallback 到 legacy，避免生产服务中断。
-            # 注意：此处不应 raise，否则会暴露 AST 引擎 bug 给用户；
-            # 但必须留日志，否则 AST 缺陷在测试期间无法发现。
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "AST engine unexpected error for %r: %s: %s, falling back to legacy",
-                input_str, type(e).__name__, e,
-            )
-
-    return exec_roll_exp_legacy(input_str)
+    try:
+        ast_result = exec_roll_exp_ast(input_str)
+        return _build_roll_result(ast_result)
+    except RollEngineError as e:
+        # AST 引擎语义错误：包装为 RollDiceError 以兼容上游 handler，不回退 legacy。
+        _log.error("roll_engine=ast expression=%r error=%s: %s", input_str, type(e).__name__, e.info)
+        raise RollDiceError(e.info) from e
+    except Exception as e:
+        # 非预期内部错误：记录错误日志后直接向上抛出，默认路径不允许静默回退 legacy。
+        _log.error("roll_engine=ast expression=%r unexpected_error=%s: %s", input_str, type(e).__name__, e)
+        raise RollDiceError(f"掷骰引擎内部错误: {type(e).__name__}: {e}") from e
 
 
 def exec_roll_exp_legacy(input_str: str) -> RollResult:
     """
-    强制走 legacy 引擎路径（不经过 AST 开关判断）。
+    显式 legacy 引擎路径入口——仅在 legacy 显式开关启用时可调用。
 
-    该函数用于适配层在显式选择 legacy 时避免递归回到 AST 分支。
+    ⚠️  此函数受 legacy_adapter._LEGACY_ENABLED 开关守卫。
+    默认情况下该开关关闭，任何从默认路径调用此函数的代码都将在开关检查处报错。
+    仅允许通过修改 ast_engine/legacy_adapter.py 中的 _LEGACY_ENABLED = True 来启用。
     """
+    from .ast_engine.legacy_adapter import assert_legacy_enabled
+
+    assert_legacy_enabled()  # 开关守卫：默认阻止 legacy 调用
+
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "roll_engine=legacy expression=%r (explicit legacy switch enabled)", input_str
+    )
+
     exp = parse_roll_exp(preprocess_roll_exp(input_str))
     result: RollResult = exp.get_result()
-    # result.info = remove_redundant_parentheses(result.info,readable=False) #不能在这里偷懒
     return result
 
 

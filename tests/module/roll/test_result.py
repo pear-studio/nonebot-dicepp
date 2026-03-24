@@ -318,23 +318,27 @@ class TestBuildRollResult:
 
     # ── Fix 4: except Exception 日志（集成验证）────────────────────────────────
 
-    def test_unexpected_ast_error_falls_back_to_legacy(self, caplog):
-        """AST 引擎非预期内部错误应 fallback 到 legacy 并留 warning 日志。"""
+    def test_unexpected_ast_error_raises_roll_dice_error(self, caplog):
+        """AST 引擎非预期内部错误应抛出 RollDiceError（不再 fallback 到 legacy）。
+
+        BREAKING CHANGE: 原测试期望 fallback 行为，迁移后默认路径不允许静默 fallback。
+        现行为：非预期内部错误抛出 RollDiceError 并写 ERROR 日志，字段包含 roll_engine=ast。
+        """
         import logging
         from unittest.mock import patch
         from module.roll.expression import exec_roll_exp
+        from module.roll.roll_utils import RollDiceError
 
-        # exec_roll_exp 内部通过局部 import 调用 exec_roll_exp_ast 后紧接着调用
-        # _build_roll_result()。通过 patch _build_roll_result 触发非预期内部错误，
-        # 验证 except Exception 分支留下 warning 日志并 fallback。
         with patch(
             "module.roll.expression._build_roll_result",
             side_effect=RuntimeError("simulated internal bug"),
         ):
-            with caplog.at_level(logging.WARNING):
-                # 应 fallback 到 legacy，不 raise
-                result = exec_roll_exp("1D20")
-                assert result is not None
+            with caplog.at_level(logging.ERROR):
+                # 新行为：非预期错误应抛出 RollDiceError，不 fallback
+                with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
+                    exec_roll_exp("1D20")
 
-        # 应留有 warning 日志
-        assert any("unexpected error" in r.message.lower() for r in caplog.records)
+        # 应留有 ERROR 日志，包含 roll_engine=ast
+        assert any("roll_engine=ast" in r.message for r in caplog.records), (
+            f"Expected 'roll_engine=ast' in error log, got: {[r.message for r in caplog.records]}"
+        )

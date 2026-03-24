@@ -15,6 +15,7 @@ import pytest
 from typing import List, Optional
 from dataclasses import dataclass
 
+import module.roll.ast_engine.legacy_adapter as legacy_adapter_module
 from module.roll.expression import exec_roll_exp, exec_roll_exp_legacy
 from module.roll.roll_utils import RollDiceError
 from module.roll.ast_engine import exec_roll_exp_ast
@@ -52,6 +53,11 @@ class _SequenceRuntime:
 
 
 def _run_legacy(expression: str, runtime: _SequenceRuntime):
+    """Run expression through legacy engine (explicitly enables legacy switch for test purposes)."""
+    # Temporarily enable legacy switch to allow calling exec_roll_exp_legacy in tests.
+    # This is the only acceptable use of the legacy switch in test code.
+    original = legacy_adapter_module._LEGACY_ENABLED
+    legacy_adapter_module._LEGACY_ENABLED = True
     token = set_runtime(runtime)
     try:
         result = exec_roll_exp_legacy(expression)
@@ -60,6 +66,7 @@ def _run_legacy(expression: str, runtime: _SequenceRuntime):
         return ("err", None, "runtime")
     finally:
         reset_runtime(token)
+        legacy_adapter_module._LEGACY_ENABLED = original
 
 
 def _run_ast(expression: str, runtime: _SequenceRuntime):

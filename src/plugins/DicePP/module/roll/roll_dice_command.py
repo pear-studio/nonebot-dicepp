@@ -10,11 +10,12 @@ from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_FUNC_DISABLE
 
-from module.roll import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, sift_roll_exp_and_reason, RollDiceError
+from module.roll import RollResult, preprocess_roll_exp, sift_roll_exp_and_reason, RollDiceError
+from module.roll.ast_engine import sample_roll_exp_ast
+from module.roll.ast_engine.errors import RollEngineError
 from module.roll.default_dice import (
     format_default_expr_from_storage,
     apply_default_expr,
-    extract_default_type_hint,
 )
 from module.roll.karma_manager import get_karma_manager, KarmaConfig
 from core.data.models import UserKarma
@@ -232,7 +233,7 @@ class RollDiceCommand(UserCommandBase):
             else:
                 exp_str, reason_str = msg_str, ""
 
-        # 解析表达式并生成结果
+        # 解析表达式并生成结果 (默认路径：AST 引擎)
         try:
             exp_str = preprocess_roll_exp(exp_str)
             if meta.group_id:
@@ -255,8 +256,6 @@ class RollDiceCommand(UserCommandBase):
                         pass
             default_expr = format_default_expr_from_storage(stored_default)
             exp_str = apply_default_expr(exp_str, default_expr)
-            default_type_hint = extract_default_type_hint(default_expr)
-            exp: RollExpression = parse_roll_exp(exp_str, default_type_hint)
             karma_enabled = False
             karma_manager = None
             try:
@@ -271,19 +270,29 @@ class RollDiceCommand(UserCommandBase):
                         karma_manager.set_runtime(meta.group_id, karma_cfg)
                 except Exception as exc:
                     dice_log(f"[KarmaDice] 加载群配置失败: {exc}")
+
+            def _exec_ast_once() -> RollResult:
+                """通过 exec_roll_exp() 执行当前 exp_str（含完整异常兜底）。
+
+                exec_roll_exp() 已统一处理 RollEngineError 和非预期内部异常，
+                全部包装为 RollDiceError 抛出，避免命令层异常外泄。
+                """
+                from module.roll.expression import exec_roll_exp as _exec_roll_exp
+                return _exec_roll_exp(exp_str)
+
             if karma_manager:
                 user_token = meta.user_id or "_anon_"
                 try:
                     with karma_manager.activate(meta.group_id, user_token) as active:
                         karma_enabled = active
-                        res_list: List[RollResult] = [exp.get_result() for _ in range(times)]
+                        res_list: List[RollResult] = [_exec_ast_once() for _ in range(times)]
                 except (AttributeError, TypeError, RuntimeError) as exc:
                     dice_log(f"[KarmaDice] 激活失败，回退普通掷骰: {exc}")
                     karma_enabled = False
-                    res_list = [exp.get_result() for _ in range(times)]
+                    res_list = [_exec_ast_once() for _ in range(times)]
             else:
-                res_list = [exp.get_result() for _ in range(times)]
-        except RollDiceError as e:
+                res_list = [_exec_ast_once() for _ in range(times)]
+        except (RollDiceError, RollEngineError) as e:
             feedback = e.info
             # 生成机器人回复端口
             port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
@@ -292,10 +301,10 @@ class RollDiceCommand(UserCommandBase):
         # 回复端口
         port = GroupMessagePort(meta.group_id) if not is_hidden and meta.group_id else PrivateMessagePort(meta.user_id)
 
-        if compute_exp:  # 计算期望走单独的流程
+        if compute_exp:
             async def roll_exp_task():
-                exp_result = await get_roll_exp_result(exp)
-                exp_feedback = self.format_loc(LOC_ROLL_EXP, expression=exp.get_result().get_exp(), expectation=exp_result)
+                exp_result = await get_roll_exp_result(exp_str)
+                exp_feedback = self.format_loc(LOC_ROLL_EXP, expression=exp_str, expectation=exp_result)
                 return [BotSendMsgCommand(self.bot.account, exp_feedback, [port])]
             self.bot.register_task(roll_exp_task, timeout=30, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "计算超时!", [port])])
 
@@ -489,13 +498,17 @@ class RollDiceCommand(UserCommandBase):
         return []
 
 
-async def get_roll_exp_result(expression: RollExpression) -> str:
+async def get_roll_exp_result(expression: str) -> str:
+    """统计掷骰表达式的分布（重复采样 ~20 万次）。
+
+    使用 AST 引擎的轻量采样接口 sample_roll_exp_ast，完全走 AST 路径。
+    """
     repeat_times = 200000
     break_times = 32
     stat_range = [1, 5, 25, 45, 55, 75, 95, 99]  # 统计区间, 大于0, 小于100
     res_list: List[int] = []
     for _ in range(break_times):
-        res_list += list(sorted((expression.get_result().get_val() for _ in range(repeat_times // break_times))))
+        res_list += list(sorted((sample_roll_exp_ast(expression) for _ in range(repeat_times // break_times))))
         await asyncio.sleep(0)
     res_list = sorted(res_list)
     mean = sum(res_list)/repeat_times
