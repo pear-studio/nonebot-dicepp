@@ -7,8 +7,11 @@ from core.data import DC_USER_DATA, DC_GROUP_DATA
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import CommandTextParser  # Task 3.4
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 #from core.localization import LOC_FUNC_DISABLE
+
+_CHOOSE_PARSER = CommandTextParser(command_prefix="c")
 
 LOC_ROLL_CHOOSE_RESULT = "roll_choose_result"
 LOC_ROLL_CHOOSE_RESULT_MULTI = "roll_choose_result_multi"
@@ -38,14 +41,17 @@ class RollChooseCommand(UserCommandBase):
                                          ".c指令失败时返回")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".c")
-        should_pass: bool = False
-        return should_proc, should_pass, None
+        parse = _CHOOSE_PARSER.parse(msg_str)
+        if parse.has_errors:
+            return False, False, None
+        return True, False, parse
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 解析掷骰语句
+        # hint: CommandParseResult；选项解析从 raw 取（支持 / 或空格分隔，选项可含特殊字符）
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        arg_str = msg_str[2:].strip()
+        parse = hint
+        arg_str = parse.raw.strip()
         args = []
         choose_time = 1
         # 获取选项与次数

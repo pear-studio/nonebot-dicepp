@@ -6,7 +6,11 @@ from core.data.models import GroupWelcome
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import CommandTextParser
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from core.localization import LOC_FUNC_DISABLE
+
+_WELCOME_PARSER = CommandTextParser(command_prefix="welcome")
 
 LOC_WELCOME_DEFAULT = "welcome_default"
 LOC_WELCOME_SET = "welcome_set"
@@ -42,20 +46,20 @@ class WelcomeCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_WELCOME_ILLEGAL, "不可用的欢迎词: {reason}", "非法的入群欢迎词, reason为原因")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".welcome")
-        should_pass: bool = False
-        if should_proc:  # 以raw文本处理前面有cq码的情况
-            arg_start_place: int = meta.raw_msg.find(".welcome") + 9
-            welcome_arg: str = ""
-            if len(meta.raw_msg) >= arg_start_place:
-                welcome_arg = meta.raw_msg[arg_start_place:].strip()
-            return should_proc, should_pass, welcome_arg
-        else:
-            return should_proc, should_pass, ""
+        parse = _WELCOME_PARSER.parse(msg_str)
+        if parse.has_errors:
+            return False, False, None
+        return True, False, parse
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        arg_str = hint
+        # hint: CommandParseResult
+        # 注意：msg_str 经过全局小写化（process.py），欢迎词需要从 meta.raw_msg 取原始大小写
+        raw_idx = meta.raw_msg.find(".welcome")
+        if raw_idx >= 0:
+            arg_str = meta.raw_msg[raw_idx + len(".welcome"):].strip()
+        else:
+            arg_str = hint.raw.strip()
         feedback: str
 
         if not arg_str or arg_str == "show":

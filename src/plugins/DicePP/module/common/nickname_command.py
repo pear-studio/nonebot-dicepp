@@ -4,7 +4,11 @@ from core.bot import Bot
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import CommandTextParser  # Task 3.4
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from core.localization import LOC_FUNC_DISABLE, LOC_PERMISSION_DENIED_NOTICE
+
+_NN_PARSER = CommandTextParser(command_prefix="nn")
 
 LOC_NICKNAME_SET = "nickname_set"
 LOC_NICKNAME_RESET = "nickname_reset"
@@ -39,13 +43,19 @@ class NicknameCommand(UserCommandBase):
                                          "设置不合法的昵称时返回的语句")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".nn")
-        should_pass: bool = False
-        return should_proc, should_pass, None
+        parse = _NN_PARSER.parse(msg_str)
+        if parse.has_errors:
+            return False, False, None
+        return True, False, parse
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        # 解析语句
-        arg_str = msg_str[3:].strip()
+        # hint: CommandParseResult
+        # 注意：msg_str 经过全局小写化（process.py），昵称需从 meta.raw_msg 取原始大小写
+        raw_idx = meta.raw_msg.find(".nn")
+        if raw_idx >= 0:
+            arg_str = meta.raw_msg[raw_idx + len(".nn"):].strip()
+        else:
+            arg_str = hint.raw.strip()
         feedback: str
 
         if not arg_str:  # 重设昵称

@@ -5,8 +5,12 @@ from core.bot import Bot
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import CommandTextParser  # Task 3.4
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
+from core.localization import LOC_FUNC_DISABLE
 from utils.time import datetime_to_str_day, get_current_date_raw, datetime_to_str
+
+_JRRP_PARSER = CommandTextParser(command_prefix="jrrp")
 
 LOC_JRRP = "jrrp"
 LOC_JRRP_LOWER = "jrrp_lower"
@@ -29,13 +33,14 @@ class JrrpCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_JRRP_MAX, "{name}的今日人品是...这是！这是大吉的{jrrp}哦！", ".jrrp出最大值时返回的内容,{name}:用户名,{jrrp}:今日人品值.")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".jrrp")
-        should_pass: bool = False
-        return should_proc, should_pass, msg_str[5:].strip()
+        parse = _JRRP_PARSER.parse(msg_str)
+        if parse.has_errors:
+            return False, False, None
+        return True, False, parse
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        # 解析语句
+        # hint: CommandParseResult（解析层已处理前缀，此处直接计算人品）
         random.seed(datetime_to_str_day(get_current_date_raw() - datetime.timedelta(days=1)) + str(meta.user_id))  # 获取昨日数据与用户id，拼接形成一个固定的seed
         zrrp: int = random.randint(1, 100)  # 根据上面的seed获取昨日人品
         

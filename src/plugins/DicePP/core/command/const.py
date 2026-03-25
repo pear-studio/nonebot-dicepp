@@ -42,3 +42,38 @@ DPP_COMMAND_CLUSTER_DEFAULT = 0  # 命令所属的功能群
 DPP_COMMAND_CLUSTER_DICT = {
     DPP_COMMAND_CLUSTER_DEFAULT: "Default",
 }
+
+# ---------------------------------------------------------------------------
+# 全局共享 Flag 命名表（Task 1.3）
+# 仅收录跨命令具有相同含义且可互换的 flags/options。
+# 命令私有 flags 不在此列，由各命令适配层在注册时自行声明。
+# 判定标准：若同一 flag 在两个或更多命令中含义相同且可互换，则纳入此表。
+# ---------------------------------------------------------------------------
+GLOBAL_FLAG_QUIET = "q"         # 安静模式，减少回显输出（长参数 --quiet）
+GLOBAL_FLAG_HELP = "help"       # 输出帮助（长参数 --help）
+GLOBAL_KWARG_GROUP = "group"    # 强制群维度操作（长参数 --group=<group_id>）
+
+# ---------------------------------------------------------------------------
+# 解析错误码常量（Task 4.1）
+# 供 CommandTextParser 和命令适配层使用，统一错误分类
+# ---------------------------------------------------------------------------
+
+# 前缀/格式错误
+PARSE_ERR_PREFIX_MISMATCH = "PREFIX_MISMATCH"       # 前缀不匹配
+PARSE_ERR_UNKNOWN_FLAG = "UNKNOWN_FLAG"              # 未识别的 flag
+PARSE_ERR_INVALID_ARG_TYPE = "INVALID_ARG_TYPE"     # 参数类型非法（如期望数字但输入文字）
+PARSE_ERR_ARG_OUT_OF_RANGE = "ARG_OUT_OF_RANGE"     # 参数超出允许范围
+PARSE_ERR_TOO_MANY_ARGS = "TOO_MANY_ARGS"           # 参数过多
+PARSE_ERR_MISSING_REQUIRED_ARG = "MISSING_REQUIRED_ARG"  # 缺少必需参数
+PARSE_WARN_KWARG_MISSING_VALUE = "KWARG_MISSING_VALUE"   # 键值参数缺少值（可恢复）
+PARSE_WARN_COMPAT_CONFLICT = "COMPAT_CONFLICT"           # 兼容映射产生冲突（可恢复）
+PARSE_WARN_COMPAT_RULE_ERROR = "COMPAT_RULE_ERROR"       # 兼容规则执行异常（可恢复）
+
+GLOBAL_FLAG_TABLE = {
+    GLOBAL_FLAG_QUIET:  {"long": "--quiet",  "desc": "安静模式，减少回显输出"},
+    GLOBAL_FLAG_HELP:   {"long": "--help",   "desc": "输出命令帮助"},
+}
+
+GLOBAL_KWARG_TABLE = {
+    GLOBAL_KWARG_GROUP: {"long": "--group",  "desc": "强制群维度操作，值为群 ID"},
+}

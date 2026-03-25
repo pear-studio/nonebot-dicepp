@@ -8,9 +8,14 @@ from core.data.models.extended import GroupConfig
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import CommandTextParser, CommandContextResolver
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.config import BOT_DATA_PATH
 from core.localization import LOC_PERMISSION_DENIED_NOTICE, LOC_FUNC_DISABLE
+
+# Task 3.3: 统一解析器（替代内嵌前缀判断与参数切分）
+_MODE_PARSER_ZH = CommandTextParser(command_prefix="模式", strip_prefix_len=3)
+_MODE_PARSER_EN = CommandTextParser(command_prefix="mode", strip_prefix_len=5)
 
 LOC_MODE_SWITCH = "mode_switch"
 LOC_MODE_INVALID = "mode_invalid"
@@ -115,41 +120,17 @@ class ModeCommand(UserCommandBase):
         return init_info
 
     async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = True
-        should_pass: bool = False
-        hint: str = ""
-        # 先进行轻量前缀判断，避免非本指令消息触发数据库读写
+        # ── Task 3.3: 统一解析层前缀识别（仅做文本解析，不触库）──────────────
         if msg_str.startswith(".模式"):
-            hint = msg_str[3:].strip()
+            parse_result = _MODE_PARSER_ZH.parse(msg_str)
         elif msg_str.startswith(".mode"):
-            hint = msg_str[5:].strip()
+            parse_result = _MODE_PARSER_EN.parse(msg_str)
         else:
-            return False, should_pass, hint
+            return False, False, None
 
-        # 判断是否初始化，没有初始化则进行一次初始化（群/私聊分别处理）
-        is_private = not bool(meta.group_id)
-        target_id = meta.user_id if is_private else meta.group_id
-
-        # 获取当前配置
-        # 私聊配置也存储在 group_config 表中，以 "__user__{user_id}" 作为 group_id
-        config_key = f"__user__{target_id}" if is_private else target_id
-        config = await self.bot.db.group_config.get(config_key)
-        current_mode = config.data.get("mode", "") if config else ""
-
-        if current_mode == "":
-            default_mode = str(self.bot.cfg_helper.get_config(CFG_MODE_DEFAULT)[0])
-            if default_mode != "":
-                await self.switch_mode(target_id, default_mode, is_private=is_private)
-            else:
-                # 保存 NULL 模式
-                if config:
-                    config.data["mode"] = "NULL"
-                    await self.bot.db.group_config.upsert(config)
-                else:
-                    new_config = GroupConfig(group_id=config_key, data={"mode": "NULL"})
-                    await self.bot.db.group_config.upsert(new_config)
-
-        return should_proc, should_pass, hint
+        # hint 携带 CommandParseResult 供 process_msg 消费（避免重复解析）
+        # 群模式初始化检查移入 process_msg，保持 can_process_msg 纯解析、不触库
+        return True, False, parse_result
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(
@@ -163,15 +144,33 @@ class ModeCommand(UserCommandBase):
                 LOC_FUNC_DISABLE, func=self.readable_name)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 判断权限：群内需要权限>=0才能执行；私聊允许用户修改自己的私聊模式
-        if meta.group_id and meta.permission < 0: # 群内执行需至少0级权限（群管理/骰管理）
+        if meta.group_id and meta.permission < 0:
             feedback = self.bot.loc_helper.format_loc_text(LOC_PERMISSION_DENIED_NOTICE)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-        # 解析语句
-        arg_var = hint.strip().upper()
 
-        # 依据消息来源选择保存位置：群配置写入 group_config，私聊写入 user_stat
-        is_private = not bool(meta.group_id)
-        target_id = meta.user_id if is_private else meta.group_id
+        # ── 构建本次 invocation 的唯一 CommandContext（per-invocation 缓存）──
+        ctx = await CommandContextResolver.resolve(self.bot, meta)
+        target_id = ctx.user_id if ctx.is_private else ctx.group_id
+        is_private = ctx.is_private
+
+        # ── 群模式初始化检查（原在 can_process_msg，移此处以符合"不触库"约定）──
+        config = await ctx.group_config()
+        current_mode = config.data.get("mode", "") if config else ""
+        if current_mode == "":
+            default_mode = str(self.bot.cfg_helper.get_config(CFG_MODE_DEFAULT)[0])
+            if default_mode != "":
+                await self.switch_mode(target_id, default_mode, is_private=is_private)
+            else:
+                from core.data.models.extended import GroupConfig
+                if config:
+                    config.data["mode"] = "NULL"
+                    await self.bot.db.group_config.upsert(config)
+                else:
+                    new_config = GroupConfig(group_id=ctx.config_key, data={"mode": "NULL"})
+                    await self.bot.db.group_config.upsert(new_config)
+
+        # ── Task 3.3: 从 CommandParseResult 消费解析结果 ───────────────────
+        arg_var = hint.first_arg("").strip().upper()
 
         if arg_var == "DEFAULT" or arg_var == "CLEAR":
             feedback = await self.switch_mode(
@@ -179,10 +178,8 @@ class ModeCommand(UserCommandBase):
         elif arg_var != "":
             feedback = await self.switch_mode(target_id, arg_var, is_private=is_private)
         else:
-            # 显示当前目标（群/私聊）的模式
-            # 私聊配置存储在 group_config 表中，以 "__user__{user_id}" 作为 group_id
-            config_key = f"__user__{target_id}" if is_private else target_id
-            config = await self.bot.db.group_config.get(config_key)
+            # 显示当前目标（群/私聊）的模式（使用 ctx 缓存读取，避免重复 DB 访问）
+            config = await ctx.group_config()
 
             stored_mode = config.data.get("mode", "") if config else ""
 

@@ -4,7 +4,8 @@ from core.bot import Bot
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, GroupMessagePort, PrivateMessagePort
+from core.command import CommandTextParser  # Task 3.4
+from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.data.models import GroupConfig
 from module.roll.default_dice import (
     format_default_expr_from_input,
@@ -12,6 +13,9 @@ from module.roll.default_dice import (
 )
 from module.roll.roll_config import DICE_TYPE_MAX
 from module.roll.roll_utils import RollDiceError
+from core.localization import LOC_FUNC_DISABLE
+
+_DSET_PARSER = CommandTextParser(command_prefix="dset")
 
 LOC_DSET_SUCCESS = "roll_default_dice_set_success"
 LOC_DSET_INVALID = "roll_default_dice_set_invalid"
@@ -39,16 +43,20 @@ class DiceSetCommand(UserCommandBase):
                                          "查询群默认掷骰表达式或缺少参数时的提示")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc = msg_str.startswith(".dset")
-        should_pass = False
-        if not should_proc:
+        parse = _DSET_PARSER.parse(msg_str)
+        if parse.has_errors:
             return False, False, None
-        arg = msg_str[5:].strip()
-        return True, should_pass, arg
+        return True, False, parse
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        arg: str = hint if hint is not None else ""
+        # hint: CommandParseResult
+        # 注意：msg_str 经过全局小写化（process.py），骰子表达式从 meta.raw_msg 取保留大小写
+        raw_idx = meta.raw_msg.find(".dset")
+        if raw_idx >= 0:
+            arg = meta.raw_msg[raw_idx + len(".dset"):].strip()
+        else:
+            arg = hint.raw.strip()
 
         row = await self.bot.db.group_config.get(meta.group_id)
         stored = "D20"

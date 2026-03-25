@@ -7,8 +7,11 @@ from core.data import DC_USER_DATA, DC_GROUP_DATA
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import CommandTextParser  # Task 3.4
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_FUNC_DISABLE
+
+_ROLL_POOL_PARSER = CommandTextParser(command_prefix="w", private_flags={"s"})
 
 LOC_ROLL_POOL_RESULT = "roll_pool_result"
 LOC_ROLL_POOL_RESULT_REASON = "roll_pool_result_reason"
@@ -62,18 +65,18 @@ class RollPoolCommand(UserCommandBase):
         #bot.cfg_helper.register_config(CFG_ROLL_HIDE_ENABLE, "1", "暗骰指令开关(暗骰会发送私聊信息, 可能增加风控风险)")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".w")
-        should_pass: bool = False
-        return should_proc, should_pass, None
+        parse = _ROLL_POOL_PARSER.parse(msg_str)
+        if parse.has_errors:
+            return False, False, None
+        return True, False, parse
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        # 解析掷骰语句
-        short = False
-        if msg_str.startswith(".ws"):
-            short = True
-            msg_str = msg_str[3:]
-        else:
-            msg_str = msg_str[2:]
+        # hint: CommandParseResult；short 模式从 flags 读，骰池参数字符串从 args 读
+        parse = hint
+        short = "s" in parse.flags
+        # parse.raw 保留了 "s" 等 flag 字符（如 ".ws5w10" → raw="s5w10"），
+        # 必须使用已剥离 flag 的 args[0]（语义层）而非 raw（词法层），与旧逻辑对齐
+        msg_str = parse.args[0] if parse.args else ""
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         global_times: int = 0
         base_times: int = 0

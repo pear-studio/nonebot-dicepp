@@ -7,8 +7,16 @@ from core.statistics import UserStatInfo, GroupStatInfo
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import CommandTextParser  # Task 3.4: 统一解析器入口
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_FUNC_DISABLE
+
+# Task 3.4: roll 命令统一解析器实例（私有 flags 在命令适配层声明）
+# process_msg 主体仍使用旧逻辑，待完整迁移时切换
+_ROLL_PARSER = CommandTextParser(
+    command_prefix="r",
+    private_flags={"h", "s", "a", "n"},
+)
 
 from module.roll import RollResult, preprocess_roll_exp, sift_roll_exp_and_reason, RollDiceError
 from module.roll.ast_engine import build_sampling_plan, sample_from_plan

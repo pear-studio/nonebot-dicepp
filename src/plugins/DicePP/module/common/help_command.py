@@ -4,8 +4,11 @@ from core.bot import Bot
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import CommandTextParser
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.config import BOT_DESCRIBE, BOT_VERSION, BOT_GIT_LINK, CFG_AGREEMENT
+
+_HELP_PARSER = CommandTextParser(command_prefix="help")
 
 LOC_HELP_INFO = "help_info"
 LOC_HELP_COMMAND = "help_command"
@@ -42,13 +45,15 @@ class HelpCommand(UserCommandBase):
                                          "当用户输入.help {keyword}且keyword无效时发送这条消息")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".help")
-        should_pass: bool = False
-        return should_proc, should_pass, msg_str[5:].strip()
+        if not msg_str.startswith(".help"):
+            return False, False, None
+        # Task 3.4: 统一解析层
+        parse_result = _HELP_PARSER.parse(msg_str)
+        return True, False, parse_result
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        # 解析语句
-        arg_str = hint
+        # hint 始终为 CommandParseResult（can_process_msg 统一返回）
+        arg_str = hint.first_arg("") or hint.tail_text
         feedback: str
 
         if not arg_str:  # 显示机器人总览描述

@@ -1,0 +1,63 @@
+{
+  "_comment": "Golden File 快照用法说明",
+  "_description": [
+    "此文件记录 roll 命令的历史输入 → 预期解析结果映射。",
+    "迁移后每次运行 test_snapshot_compat.py，实际解析输出须与此文件完全一致。",
+    "如需有意变更行为，同步更新此文件，并在 PR 描述中记录：",
+    "  - input: 输入示例",
+    "  - old_behavior: 旧行为说明",
+    "  - new_behavior: 新行为说明",
+    "  - impact: 影响范围",
+    "  - approved_by: 确认人"
+  ],
+  "cases": [
+    {
+      "id": "r_simple",
+      "input": ".rd20",
+      "expected": {
+        "command_name": "r",
+        "raw": "d20",
+        "flags": [],
+        "args": ["d20"],
+        "tail_text": "",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_with_flag_h",
+      "input": ".rhd20",
+      "expected": {
+        "command_name": "r",
+        "raw": "hd20",
+        "flags": ["h"],
+        "args": ["d20"],
+        "tail_text": "",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_with_tail",
+      "input": ".rd20 攻击地精",
+      "expected": {
+        "command_name": "r",
+        "raw": "d20 攻击地精",
+        "flags": [],
+        "args": ["d20"],
+        "tail_text": "攻击地精",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_with_flag_s_and_tail",
+      "input": ".rsd20 偷袭",
+      "expected": {
+        "command_name": "r",
+        "raw": "sd20 偷袭",
+        "flags": ["s"],
+        "args": ["d20"],
+        "tail_text": "偷袭",
+        "issue_codes": []
+      }
+    }
+  ]
+}
