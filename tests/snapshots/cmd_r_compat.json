@@ -58,6 +58,138 @@
         "tail_text": "偷袭",
         "issue_codes": []
       }
+    },
+    {
+      "id": "r_with_flags_hs_and_tail",
+      "input": ".rhsd20+4 攻击地精",
+      "expected": {
+        "command_name": "r",
+        "raw": "hsd20+4 攻击地精",
+        "flags": ["h", "s"],
+        "args": ["d20+4"],
+        "tail_text": "攻击地精",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_with_flag_a",
+      "input": ".ra50",
+      "expected": {
+        "command_name": "r",
+        "raw": "a50",
+        "flags": ["a"],
+        "args": ["50"],
+        "tail_text": "",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_with_flag_n",
+      "input": ".rn+3",
+      "expected": {
+        "command_name": "r",
+        "raw": "n+3",
+        "flags": ["n"],
+        "args": ["+3"],
+        "tail_text": "",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_with_flag_na",
+      "input": ".rna+3",
+      "expected": {
+        "command_name": "r",
+        "raw": "na+3",
+        "flags": ["n", "a"],
+        "args": ["+3"],
+        "tail_text": "",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_with_times_hash",
+      "input": ".r3#d20",
+      "expected": {
+        "command_name": "r",
+        "raw": "3#d20",
+        "flags": [],
+        "args": ["3#d20"],
+        "tail_text": "",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_with_flag_h_times_and_tail",
+      "input": ".rh3#d20 偷袭",
+      "expected": {
+        "command_name": "r",
+        "raw": "h3#d20 偷袭",
+        "flags": ["h"],
+        "args": ["3#d20"],
+        "tail_text": "偷袭",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_times_hash_with_tail",
+      "input": ".r3#d20+4 攻击地精",
+      "expected": {
+        "command_name": "r",
+        "raw": "3#d20+4 攻击地精",
+        "flags": [],
+        "args": ["3#d20+4"],
+        "tail_text": "攻击地精",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_bab_no_tail",
+      "input": ".rd20+8-4b",
+      "expected": {
+        "command_name": "r",
+        "raw": "d20+8-4b",
+        "flags": [],
+        "args": ["d20+8-4b"],
+        "tail_text": "",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_bab_with_tail",
+      "input": ".rd20+8-4b 全回合攻击",
+      "expected": {
+        "command_name": "r",
+        "raw": "d20+8-4b 全回合攻击",
+        "flags": [],
+        "args": ["d20+8-4b"],
+        "tail_text": "全回合攻击",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_exp_keyword_no_tail",
+      "input": ".rexpd20+5",
+      "expected": {
+        "command_name": "r",
+        "raw": "expd20+5",
+        "flags": [],
+        "args": ["expd20+5"],
+        "tail_text": "",
+        "issue_codes": []
+      }
+    },
+    {
+      "id": "r_exp_keyword_with_tail",
+      "input": ".rexpd20+5 攻击地精",
+      "expected": {
+        "command_name": "r",
+        "raw": "expd20+5 攻击地精",
+        "flags": [],
+        "args": ["expd20+5"],
+        "tail_text": "攻击地精",
+        "issue_codes": []
+      }
     }
   ]
 }

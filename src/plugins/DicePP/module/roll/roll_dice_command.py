@@ -1,24 +1,26 @@
 from typing import List, Tuple, Any
 import asyncio
-import math
 
 from core.bot import Bot
 from core.statistics import UserStatInfo, GroupStatInfo
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
-from core.command import CommandTextParser  # Task 3.4: 统一解析器入口
+from core.command import CommandTextParser
+from core.command.parse_result import CommandParseResult
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_FUNC_DISABLE
 
-# Task 3.4: roll 命令统一解析器实例（私有 flags 在命令适配层声明）
-# process_msg 主体仍使用旧逻辑，待完整迁移时切换
+# roll 命令统一解析器实例（私有 flags 在命令适配层声明）
 _ROLL_PARSER = CommandTextParser(
     command_prefix="r",
     private_flags={"h", "s", "a", "n"},
 )
 
-from module.roll import RollResult, preprocess_roll_exp, sift_roll_exp_and_reason, RollDiceError
+from module.roll.roll_const import MULTI_ROLL_LIMIT
+from module.roll.roll_parse_args import RollParseArgs, _parse_roll_args
+
+from module.roll import RollResult, preprocess_roll_exp, RollDiceError
 from module.roll.ast_engine import build_sampling_plan, sample_from_plan
 from module.roll.ast_engine.errors import RollEngineError
 from module.roll.default_dice import (
@@ -51,7 +53,7 @@ LOC_ROLL_EXP = "roll_exp"
 
 CFG_ROLL_ENABLE = "roll_enable"
 CFG_ROLL_HIDE_ENABLE = "roll_hide_enable"
-MULTI_ROLL_LIMIT = 10  # 多轮掷骰上限次数
+# MULTI_ROLL_LIMIT 统一定义于 module.roll.roll_const，已在文件顶部导入
 
 
 @custom_user_command(readable_name="掷骰指令",
@@ -104,9 +106,11 @@ class RollDiceCommand(UserCommandBase):
         bot.cfg_helper.register_config(CFG_ROLL_HIDE_ENABLE, "1", "暗骰指令开关(暗骰会发送私聊信息, 可能增加风控风险)")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".r")
+        parse_result = _ROLL_PARSER.parse(msg_str)
+        should_proc: bool = not parse_result.has_errors  # has_errors 是 @property，不是方法
         should_pass: bool = False
-        return should_proc, should_pass, None
+        hint = parse_result if should_proc else None
+        return should_proc, should_pass, hint
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 判断功能开关
@@ -116,110 +120,22 @@ class RollDiceCommand(UserCommandBase):
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
             port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-        # 解析掷骰语句
-        msg_str = msg_str[2:].strip()
-        is_hidden = False
-        is_show_info = True
-        special_mode = ""
-        compute_exp = False
 
-        # 处理重复掷骰次数，以及全回合打数
-        times = 1  
-        if "#" in msg_str:
-            # 直接有写明次数的
-            time_str, msg_str = msg_str.split("#", 1)
-            if len(time_str) > 0:
-                str_length = 1
-                while(str_length <= len(time_str) and time_str[-str_length].isdigit()):
-                    str_length += 1
-                try:
-                    times = int(time_str[-str_length:])
-                    msg_str = time_str[:-str_length] + msg_str
-                    assert 0 < times <= MULTI_ROLL_LIMIT
-                except (ValueError, AssertionError):
-                    times = 1
-        elif "b" in msg_str:
-            # 需要用BAB计算的，必须以+N-B的形式撰写
-            time_str = msg_str.split("b", 1)[0]+"b"
-            if len(time_str) > 0:
-                i = 1
-                collecter = ""
-                b_num = 0
-                ab_num = 0
-                while(i <= len(time_str)):
-                    _word = time_str[-i]
-                    if _word == "-" and "b" in collecter and b_num == 0:
-                        try:
-                            if collecter != "b":
-                                b_num = int(collecter[:-1])
-                            else:
-                                b_num = 5
-                        except (ValueError, AssertionError):
-                            b_num = 5
-                        collecter = ""
-                    elif _word == "+" and ab_num == 0:
-                        try:
-                            ab_num = int(collecter)
-                            collecter = ""
-                        except (ValueError, AssertionError):
-                            collecter = ""
-                    else:
-                        if _word in "+-*/":
-                            collecter = ""
-                        else:
-                            collecter = _word + collecter
-                    i += 1
-                if b_num != 0 and ab_num != 0:
-                    try:
-                        times = math.ceil(ab_num / b_num)
-                        assert 0 < times <= MULTI_ROLL_LIMIT
-                    except (ValueError, AssertionError):
-                        times = 1
-                
-            
-        while msg_str and msg_str[0] in ["h", "s","a","n"]:
-            if msg_str[0] == "h":  # 暗骰
-                is_hidden = True
-                msg_str = msg_str[1:]
-            elif msg_str[0] == "s":  # 缩略中间结果
-                is_show_info = False
-                msg_str = msg_str[1:]
-            elif msg_str[0] == "a":  # 概率用检定
-                special_mode = "a"
-                if len(msg_str) > 1:
-                    if msg_str[1] in "1234567890":
-                        msg_str = "D100CS<=" + msg_str[1:]
-                    elif msg_str[-1] in "1234567890":
-                        if msg_str[-2] in "1234567890":
-                            msg_str = "D100CS<=" + msg_str[-2:] + msg_str[1:-2]
-                        else:
-                            msg_str = "D100CS<=" + msg_str[-1:] + msg_str[1:-1]
-                    else:
-                        msg_str = "D100CS<=50" + msg_str[1:]
-                else:
-                    msg_str = "D100CS<=50"
-            elif msg_str[0] == "n":  # 后日谈用检定
-                special_mode = "n"
-                if len(msg_str) > 1:
-                    if msg_str[1] in "+-*/":
-                        msg_str = "D10" + msg_str[1:]
-                    elif msg_str[1] == "a":
-                        special_mode = "na"
-                        if len(msg_str) > 2:
-                            if msg_str[2] in "+-*/":
-                                msg_str = "D10" + msg_str[2:]
-                            else:
-                                msg_str = "D10+" + msg_str[2:]
-                        else:
-                            msg_str = "D10"
-                    else:
-                        msg_str = "D10+" + msg_str[1:]
-                else:
-                    msg_str = "D10"
-        if msg_str[:3] == "exp":  # 计算期望 
-            msg_str = msg_str[3:]
-            compute_exp = True
-        msg_str = msg_str.strip()
+        # 使用统一解析层结果（hint 由 can_process_msg 传入），解析 roll 参数
+        # 防御性检查：正常流程 hint 不应为 None，但防止框架异常路径静默失败
+        if hint is None:
+            return []
+        parse_result: CommandParseResult = hint  # type: ignore[assignment]
+        roll_args: RollParseArgs = _parse_roll_args(parse_result.raw)
+
+        times = roll_args.times
+        is_hidden = roll_args.is_hidden
+        is_show_info = roll_args.is_show_info
+        special_mode = roll_args.special_mode
+        compute_exp = roll_args.compute_exp
+        exp_str = roll_args.exp_str
+        reason_str = roll_args.reason_str
+
         # 判断暗骰开关
         try:
             assert (not is_hidden or int(self.bot.cfg_helper.get_config(CFG_ROLL_HIDE_ENABLE)[0]) != 0)
@@ -227,19 +143,6 @@ class RollDiceCommand(UserCommandBase):
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func="暗骰指令")
             port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-
-        exp_str: str
-        reason_str: str
-        # 分割掷骰原因与掷骰表达式
-        if len(msg_str) < 100:
-            sift = sift_roll_exp_and_reason(msg_str)
-            exp_str, reason_str = sift[0], sift[1]
-        else:
-            if " " in msg_str and not compute_exp:
-                exp_str, reason_str = msg_str.split(" ", 1)
-                reason_str = reason_str.strip()
-            else:
-                exp_str, reason_str = msg_str, ""
 
         # 解析表达式并生成结果 (默认路径：AST 引擎)
         try:
