@@ -16,60 +16,97 @@ from adapter import ClientProxy
 from src.plugins.DicePP import GroupMemberInfo, GroupInfo
 
 
+class _TestProxy(ClientProxy):
+    """可被 MyTestCase 类级复用的 ClientProxy 实现。"""
+
+    def __init__(self):
+        super().__init__()
+        self.mute = False
+
+    async def process_bot_command(self, command: BotCommandBase):
+        if not self.mute:
+            print(f"Process Command: {command}")
+
+    async def process_bot_command_list(self, command_list: List[BotCommandBase]):
+        for command in command_list:
+            await self.process_bot_command(command)
+
+    async def get_group_list(self) -> List[GroupInfo]:
+        return []
+
+    async def get_group_info(self, group_id: str) -> GroupInfo:
+        return GroupInfo("DumbId")
+
+    async def get_group_member_list(self, group_id: str) -> List[GroupMemberInfo]:
+        return []
+
+    async def get_group_member_info(self, group_id: str, user_id: str) -> GroupMemberInfo:
+        return GroupMemberInfo("DumbId", "DumbId")
+
+
 @pytest.mark.integration
 class MyTestCase(IsolatedAsyncioTestCase):
-    test_bot = None
-    test_proxy = None
-    test_index = 0
+    # 类级共享的 Bot 与 Proxy（在第一次 asyncSetUp 时初始化，在 tearDownClass 时销毁）
+    _class_bot: Optional[Bot] = None
+    _class_proxy: Optional[_TestProxy] = None
+    _class_data_path: Optional[str] = None
+    _bot_initialized: bool = False
+
+    test_bot: Optional[Bot] = None
+    test_proxy: Optional[_TestProxy] = None
+    test_index: int = 0
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """类生命周期结束时同步清理：shutdown Bot 并删除数据目录。"""
+        if cls._class_bot is not None:
+            try:
+                # 使用 asyncio.Runner 显式管理 loop，避免与可能存在的 running loop 冲突
+                with asyncio.Runner() as runner:
+                    runner.run(cls._class_bot.shutdown_async())
+            except Exception as e:
+                print(f"[TearDownClass] shutdown_async 异常: {e}")
+        if cls._class_data_path:
+            rmtree_retry(cls._class_data_path)
+            if os.path.exists(cls._class_data_path):
+                print(f"[TearDownClass] 仍无法完全删除: {cls._class_data_path}")
+            else:
+                print(f"[TearDownClass] 清除文件夹 {cls._class_data_path}")
+        cls._class_bot = None
+        cls._class_proxy = None
+        cls._class_data_path = None
+        cls._bot_initialized = False
 
     async def asyncSetUp(self) -> None:
-        # 每次唯一子目录，避免 Windows 上 test_bot 目录删不干净时读到旧 bot_data.db
-        self.test_bot = Bot(
-            f"test_cmd_{uuid.uuid4().hex[:12]}", readonly=True, no_tick=True
-        )
-        self.test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
-        self.test_bot.cfg_helper.save_config()
+        if not MyTestCase._bot_initialized:
+            # 首次：创建 Bot，写入配置，完成 delay_init_command
+            bot = Bot(
+                f"test_cmd_{uuid.uuid4().hex[:12]}", readonly=True, no_tick=True
+            )
+            bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
+            bot.cfg_helper.save_config()
 
-        class TestProxy(ClientProxy):
-            def __init__(self):
-                self.mute = False
+            proxy = _TestProxy()
+            bot.set_client_proxy(proxy)
+            await bot.delay_init_command()
+            proxy.mute = True
 
-            async def process_bot_command(self, command: BotCommandBase):
-                if not self.mute:
-                    print(f"Process Command: {command}")
+            MyTestCase._class_bot = bot
+            MyTestCase._class_proxy = proxy
+            MyTestCase._class_data_path = bot.data_path
+            MyTestCase._bot_initialized = True
 
-            async def process_bot_command_list(self, command_list: List[BotCommandBase]):
-                for command in command_list:
-                    await self.process_bot_command(command)
-
-            async def get_group_list(self) -> List[GroupInfo]:
-                return []
-
-            async def get_group_info(self, group_id: str) -> GroupInfo:
-                return GroupInfo("DumbId")
-
-            async def get_group_member_list(self, group_id: str) -> List[GroupMemberInfo]:
-                return []
-
-            async def get_group_member_info(self, group_id: str, user_id: str) -> GroupMemberInfo:
-                return GroupMemberInfo("DumbId", "DumbId")
-
-        self.test_proxy = TestProxy()
-        self.test_bot.set_client_proxy(self.test_proxy)
-        await self.test_bot.delay_init_command()
-        self.test_proxy.mute = True
+        # 将类级实例暴露为实例属性，保持各测试方法访问方式不变
+        self.test_bot = MyTestCase._class_bot
+        self.test_proxy = MyTestCase._class_proxy
 
     async def asyncTearDown(self) -> None:
-        test_path = self.test_bot.data_path
-        await self.test_bot.shutdown_async()
-        rmtree_retry(test_path)
-        if os.path.exists(test_path):
-            print(f"[Test TearDown] 仍无法完全删除: {test_path}")
-        else:
-            print(f"[Test TearDown] 清除文件夹{test_path}")
+        # 类级复用模式下，每条用例不再 shutdown / 删除目录；
+        # 由 tearDownClass 统一处理。
+        pass
 
     def setUp(self) -> None:
-        self.test_index += 1
+        MyTestCase.test_index += 1
 
     async def __vg_msg(self, msg: str,
                        group_id: str = "group", user_id: str = "user", nickname: str = "测试用户",
