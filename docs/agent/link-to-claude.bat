@@ -4,6 +4,7 @@ chcp 65001 >nul
 :: 需要管理员权限运行
 
 cd /d %~dp0\..\..
+set "REPO_ROOT=%CD%"
 
 :: 检查源目录是否存在
 if not exist "docs\agent\rules" (
@@ -15,12 +16,6 @@ if not exist "docs\agent\skills" (
     echo 错误: 源目录 docs\agent\skills 不存在
     pause
     exit /b 1
-)
-
-if not exist "docs\agent\CLAUDE.md" (
-    echo 警告: 源文件 docs\agent\CLAUDE.md 不存在
-) else (
-    echo 找到 docs\agent\CLAUDE.md
 )
 
 echo 正在创建符号链接...
@@ -39,7 +34,7 @@ if exist ".claude\skills" (
     del ".claude\skills" 2>nul
     echo 已删除 .claude\skills
 )
-if exist ".claude\CLAUDE.md" (
+if 0==1 (
     rmdir /s /q ".claude\CLAUDE.md" 2>nul
     del ".claude\CLAUDE.md" 2>nul
     echo 已删除 .claude\CLAUDE.md
@@ -48,15 +43,25 @@ if exist ".claude\CLAUDE.md" (
 :: 创建符号链接（使用绝对路径）
 mklink /D ".claude\rules" "%cd%\docs\agent\rules"
 mklink /D ".claude\skills" "%cd%\docs\agent\skills"
-if exist "docs\agent\CLAUDE.md" (
-    mklink ".claude\CLAUDE.md" "%cd%\docs\agent\CLAUDE.md"
+if 0==1 (
+    echo Linking Claude instructions: docs\agent\CLAUDE.md -^> .claude\CLAUDE.md
+    mklink /H ".claude\CLAUDE.md" "%REPO_ROOT%\docs\agent\CLAUDE.md" >nul 2>nul
+    if %ERRORLEVEL% neq 0 (
+        echo Failed to create hardlink, trying symlink...
+        mklink ".claude\CLAUDE.md" "%REPO_ROOT%\docs\agent\CLAUDE.md" >nul 2>nul
+    )
 )
 
 echo.
 echo 符号链接创建完成:
 echo   .claude\rules   -^> docs\agent\rules
 echo   .claude\skills  -^> docs\agent\skills
-if exist "docs\agent\CLAUDE.md" (
+if 0==1 (
     echo   .claude\CLAUDE.md -^> docs\agent\CLAUDE.md
+)
+echo.
+echo Skills:
+for /d %%d in (docs\agent\skills\*) do (
+    echo   - %%~nd
 )
 pause
