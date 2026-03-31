@@ -445,6 +445,12 @@ class Bot:
                         await self.proxy.process_bot_command(bc)
                 raise
 
+            # Hub 配置已迁移至数据库，启动时先加载到 HubManager 缓存。
+            try:
+                await self.hub_manager.load_config()
+            except Exception as exc:
+                dice_log(f"[DiceHub] 读取 Hub 配置失败，将使用内置默认值: {exc}")
+
             init_info: List[str] = []
             for command in self.command_dict.values():
                 try:

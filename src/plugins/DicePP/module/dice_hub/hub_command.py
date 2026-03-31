@@ -274,14 +274,8 @@ class HubCommand(UserCommandBase):
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def _handle_url(self, arg: str, port) -> List[BotCommandBase]:
-        from core.config import CFG_HUB_API_URL
-        from core.config.config_item import ConfigItem
-
         if arg:
-            self.bot.cfg_helper.all_configs[CFG_HUB_API_URL] = ConfigItem(
-                CFG_HUB_API_URL, arg.strip()
-            )
-            self.bot.cfg_helper.save_config()
+            run_async(self.bot.hub_manager.set_api_url(arg.strip()))
             return [BotSendMsgCommand(
                 self.bot.account,
                 self.format_loc(LOC_HUB_URL_SET, url=arg.strip()),

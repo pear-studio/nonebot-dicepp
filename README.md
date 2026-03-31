@@ -79,6 +79,20 @@ python bot.py
 nb run
 ```
 
+### 方式三：Standalone 模式（无 OneBot/QQ）
+
+```bash
+python standalone_bot.py --bot-id 123456 --hub-url http://localhost:8000 --port 8080
+```
+
+也可使用环境变量：
+
+```bash
+BOT_ID=123456 HUB_URL=http://localhost:8000 PORT=8080 python standalone_bot.py
+```
+
+更多参数和接口说明见 `docs/standalone.md`。
+
 ## Docker 部署
 
 ### 构建镜像

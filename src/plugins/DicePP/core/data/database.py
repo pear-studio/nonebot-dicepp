@@ -229,6 +229,31 @@ class BotDatabase:
         except MigrationExecutionError:
             raise
 
+    async def hub_get(self, key: str) -> Optional[str]:
+        if self._db is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        cursor = await self._db.execute(
+            "SELECT value FROM hub_config WHERE key = ?",
+            (key,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+    async def hub_set(self, key: str, value: str) -> None:
+        if self._db is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        await self._db.execute(
+            """
+            INSERT INTO hub_config (key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = datetime('now')
+            """,
+            (key, value),
+        )
+        await self._db.commit()
+
     async def _init_repositories(self) -> None:
         self._karma = Repository[UserKarma](
             self._db, UserKarma, "karma", ["user_id", "group_id"]

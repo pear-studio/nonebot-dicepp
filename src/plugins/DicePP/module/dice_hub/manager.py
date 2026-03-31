@@ -3,8 +3,7 @@ import datetime
 import asyncio
 
 from core.bot import Bot
-from core.config import CFG_HUB_API_URL, CFG_HUB_API_KEY, CFG_HUB_NAME, BOT_VERSION
-from core.config.config_item import ConfigItem
+from core.config import CFG_MASTER, BOT_VERSION
 from utils.time import get_current_date_str, get_current_date_raw
 from utils.logger import dice_log
 
@@ -15,6 +14,11 @@ HEARTBEAT_INTERVAL_PROD = 180
 HEARTBEAT_FAIL_THRESHOLD = 3
 
 LIST_REFRESH_INTERVAL = 600
+HUB_KEY_API_URL = "api_url"
+HUB_KEY_API_KEY = "api_key"
+HUB_KEY_NICKNAME = "nickname"
+HUB_KEY_MASTER_ID = "master_id"
+HUB_KEY_HEARTBEAT_INTERVAL = "heartbeat_interval"
 
 
 class HubManager:
@@ -27,23 +31,52 @@ class HubManager:
         self._heartbeat_tick_counter = 0
         self._online_robots_cache: List[Dict[str, Any]] = []
         self._last_list_refresh: Optional[datetime.datetime] = None
+        self._config_cache: Dict[str, str] = {}
+
+    async def load_config(self) -> None:
+        api_url = await self.bot.db.hub_get(HUB_KEY_API_URL) or ""
+        api_key = await self.bot.db.hub_get(HUB_KEY_API_KEY) or ""
+        nickname = await self.bot.db.hub_get(HUB_KEY_NICKNAME) or ""
+        master_id = await self.bot.db.hub_get(HUB_KEY_MASTER_ID) or ""
+        heartbeat_interval = await self.bot.db.hub_get(HUB_KEY_HEARTBEAT_INTERVAL) or ""
+        self._config_cache = {
+            HUB_KEY_API_URL: api_url,
+            HUB_KEY_API_KEY: api_key,
+            HUB_KEY_NICKNAME: nickname,
+            HUB_KEY_MASTER_ID: master_id,
+            HUB_KEY_HEARTBEAT_INTERVAL: heartbeat_interval,
+        }
+
+    async def set_api_url(self, api_url: str) -> None:
+        self._config_cache[HUB_KEY_API_URL] = (api_url or "").strip()
+        await self.bot.db.hub_set(HUB_KEY_API_URL, self._config_cache[HUB_KEY_API_URL])
+
+    async def set_api_key(self, api_key: str) -> None:
+        self._config_cache[HUB_KEY_API_KEY] = (api_key or "").strip()
+        await self.bot.db.hub_set(HUB_KEY_API_KEY, self._config_cache[HUB_KEY_API_KEY])
+
+    async def set_nickname(self, nickname: str) -> None:
+        self._config_cache[HUB_KEY_NICKNAME] = (nickname or "").strip()
+        await self.bot.db.hub_set(HUB_KEY_NICKNAME, self._config_cache[HUB_KEY_NICKNAME])
+
+    async def set_master_id(self, master_id: str) -> None:
+        self._config_cache[HUB_KEY_MASTER_ID] = (master_id or "").strip()
+        await self.bot.db.hub_set(HUB_KEY_MASTER_ID, self._config_cache[HUB_KEY_MASTER_ID])
 
     def get_api_url(self) -> str:
-        urls = self.bot.cfg_helper.get_config(CFG_HUB_API_URL)
-        return urls[0] if urls else ""
+        return self._config_cache.get(HUB_KEY_API_URL, "")
 
     def get_api_key(self) -> str:
-        keys = self.bot.cfg_helper.get_config(CFG_HUB_API_KEY)
-        return keys[0] if keys else ""
+        return self._config_cache.get(HUB_KEY_API_KEY, "")
 
     def get_nickname(self) -> str:
-        names = self.bot.cfg_helper.get_config(CFG_HUB_NAME)
-        if names and names[0]:
-            return names[0]
-        return f"Bot_{self.bot.account}"
+        nickname = self._config_cache.get(HUB_KEY_NICKNAME, "")
+        return nickname or f"Bot_{self.bot.account}"
 
     def get_master_id(self) -> str:
-        from core.config import CFG_MASTER
+        master_id = self._config_cache.get(HUB_KEY_MASTER_ID, "")
+        if master_id:
+            return master_id
         masters = self.bot.cfg_helper.get_config(CFG_MASTER)
         return masters[0] if masters else ""
 
@@ -75,10 +108,7 @@ class HubManager:
 
         api_key = result.get("api_key")
         if api_key:
-            self.bot.cfg_helper.all_configs[CFG_HUB_API_KEY] = ConfigItem(
-                CFG_HUB_API_KEY, api_key
-            )
-            self.bot.cfg_helper.save_config()
+            await self.set_api_key(api_key)
 
         self.api_client = HubAPIClient(self.get_api_url(), api_key)
         return result
@@ -169,8 +199,12 @@ class HubManager:
 
         self._heartbeat_tick_counter += 1
 
-        is_test_mode = True
-        interval = HEARTBEAT_INTERVAL_TEST if is_test_mode else HEARTBEAT_INTERVAL_PROD
+        interval_raw = self._config_cache.get(HUB_KEY_HEARTBEAT_INTERVAL, "").strip()
+        try:
+            interval = int(interval_raw) if interval_raw else HEARTBEAT_INTERVAL_PROD
+        except ValueError:
+            interval = HEARTBEAT_INTERVAL_PROD
+        interval = max(interval, 5)
 
         if self._heartbeat_tick_counter >= interval:
             self._heartbeat_tick_counter = 0

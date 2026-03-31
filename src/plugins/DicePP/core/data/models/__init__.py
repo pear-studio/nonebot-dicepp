@@ -30,6 +30,7 @@ from .extended import (
     UserVariable,
     UserFavor,
 )
+from .hub_config import HubConfig
 
 __all__ = [
     # 数据模型
@@ -55,6 +56,7 @@ __all__ = [
     "GroupStat",
     "MetaStat",
     "NPCHealth",
+    "HubConfig",
     # 角色常量
     "CHAR_INFO_KEY_HP",
     "CHAR_INFO_KEY_HP_DICE",
