@@ -41,15 +41,13 @@ nonebot-dicepp/
 
 ## 详细文档位置
 
-**完整架构文档**: `src/plugins/DicePP/docs/README.md`
+**完整架构文档**: `docs/dicepp/README.md`
 
 包含:
-- 架构总览 - 核心模块职责与数据流
-- 命令模式 - 如何开发新命令
-- 掷骰示例 - 完整命令实现流程
-- 指令速查 - 所有 36 个用户指令参考
-
-**开发规范**: `docs/agent/rules/dicepp.md`
+- 系统总览 - 核心模块职责与主执行链路
+- 命令运行机制 - 如何注册与分发命令
+- 命令目录 - 当前命令与触发词索引
+- 开发配方 - 新命令开发与调试闭环
 
 ---
 
@@ -75,5 +73,5 @@ uv run pytest -v                           # 运行测试
 
 **Further Reading**: 
 
-1. 阅读 `src/plugins/DicePP/docs/README.md` 了解完整架构
-2. 阅读 `docs/agent/rules/dicepp.md` 了解开发规范
+1. 阅读 `docs/dicepp/README.md` 了解完整架构
+2. 阅读 `docs/agent/rules/ai-usage.md` 了解开发规范

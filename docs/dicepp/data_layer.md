@@ -1,3 +1,125 @@
+# 数据层说明
+
+本文档描述 DicePP 当前数据持久化架构与命令中的访问方式。
+
+## 存储结构
+
+`BotDatabase` 统一管理数据访问，主要包括：
+
+- `bot_data.db`：业务表，按键字段 + `data`（JSON）组织
+- `log.db`：日志会话与记录，由 `LogRepository` 维护
+
+关键代码：
+
+- `core/data/database.py`
+- `core/data/repository.py`
+- `core/data/log_repository.py`
+
+## 初始化与迁移
+
+- 启动阶段在 `Bot.delay_init_command()` 中执行 `await self.db.connect()`
+- 连接后会执行数据库初始化与迁移检查
+- 迁移脚本在 `core/data/migrations/`
+
+关键路径：
+
+- `core/bot/dicebot.py`（`delay_init_command()`）
+
+## 命令内访问模式
+
+命令通过 `self.bot.db.<repo>` 访问数据，常见 API：
+
+```python
+row = await self.bot.db.xxx.get(key1, key2)
+await self.bot.db.xxx.save(item)
+await self.bot.db.xxx.upsert(item)
+await self.bot.db.xxx.delete(key1)
+rows = await self.bot.db.xxx.list_all()
+```
+
+说明：
+
+- 键字段数量与顺序由表注册定义决定
+- `process_msg` 是异步函数，数据访问统一使用 `await`
+
+## 数据模型与序列化
+
+- 模型定义：`core/data/models/`
+- 部分结构仍使用 `JsonObject` 做序列化拼装：`core/data/json_object.py`
+- 业务表通常采用模型对象与 JSON 数据列配合
+
+## 开发约束
+
+- 涉及 schema 变更时，必须新增迁移版本，不应依赖运行期“兜底建表”
+- 迁移脚本需保证可重复执行（幂等）
+- 建议同步补充对应测试（迁移执行 + 幂等验证）
+
+## 相关文档
+
+- 系统总览：`system_overview.md`
+- 命令运行机制：`command_runtime.md`
+- 开发配方：`dev_recipes.md`
+# 数据层说明
+
+本文档描述 DicePP 当前数据持久化架构与命令中的访问方式。
+
+## 存储结构
+
+`BotDatabase` 统一管理数据访问，主要包括：
+
+- `bot_data.db`：业务表，按键字段 + `data`（JSON）组织
+- `log.db`：日志会话与记录，由 `LogRepository` 维护
+
+关键代码：
+
+- `core/data/database.py`
+- `core/data/repository.py`
+- `core/data/log_repository.py`
+
+## 初始化与迁移
+
+- 启动阶段在 `Bot.delay_init_command()` 中执行 `await self.db.connect()`
+- 连接后会执行数据库初始化与迁移检查
+- 迁移脚本在 `core/data/migrations/`
+
+关键路径：
+
+- `core/bot/dicebot.py`（`delay_init_command()`）
+
+## 命令内访问模式
+
+命令通过 `self.bot.db.<repo>` 访问数据，常见 API：
+
+```python
+row = await self.bot.db.xxx.get(key1, key2)
+await self.bot.db.xxx.save(item)
+await self.bot.db.xxx.upsert(item)
+await self.bot.db.xxx.delete(key1)
+rows = await self.bot.db.xxx.list_all()
+```
+
+说明：
+
+- 键字段数量与顺序由表注册定义决定
+- `process_msg` 是异步函数，数据访问统一使用 `await`
+
+## 数据模型与序列化
+
+- 模型定义：`core/data/models/`
+- 部分结构仍使用 `JsonObject` 做序列化拼装：`core/data/json_object.py`
+- 业务表通常采用模型对象与 JSON 数据列配合
+
+## 开发约束
+
+- 涉及 schema 变更时，必须新增迁移版本，不应依赖运行期“兜底建表”
+- 迁移脚本需保证幂等
+- 建议同步补充对应测试（迁移执行 + 幂等验证）
+
+## 相关文档
+
+- 系统总览：`system_overview.md`
+- 命令运行机制：`command_runtime.md`
+- 开发配方：`dev_recipes.md`
 # 数据层架构说明
 
 ## 概述
@@ -95,5 +217,5 @@ uv run pytest tests/core/data/ -v
 
 ## 相关文档
 
-- 框架总览：`src/plugins/DicePP/docs/architecture.md`
-- 命令内访问模式：`src/plugins/DicePP/docs/command_pattern.md`
+- 框架总览：`docs/dicepp/architecture.md`
+- 命令内访问模式：`docs/dicepp/command_pattern.md`

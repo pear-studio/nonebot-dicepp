@@ -2,6 +2,8 @@
 
 DicePP 支持独立运行模式（Standalone），无需 OneBot 或 QQ 客户端即可启动并提供 HTTP 接口。
 
+开发实现细节见：`docs/dicepp/standalone_runtime.md`
+
 ## 启动方式
 
 配置优先级如下（从高到低）：
