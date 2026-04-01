@@ -19,6 +19,8 @@ if str(PLUGIN_ROOT) not in sys.path:
 
 from core.bot import Bot as DiceBot  # noqa: E402
 from adapter.standalone_proxy import StandaloneClientProxy  # noqa: E402
+from adapter.web_chat_adapter import WebChatAdapter  # noqa: E402
+from adapter.web_chat_proxy import WebChatProxy  # noqa: E402
 from module.fastapi.api import dpp_api, bind_runtime  # noqa: E402
 from utils.logger import dice_log  # noqa: E402
 
@@ -45,6 +47,11 @@ def _resolve_value(cli_value: str | None, env_name: str, cfg: dict[str, Any], cf
     return default
 
 
+def _resolve_bool(cli_value: str | None, env_name: str, cfg: dict[str, Any], cfg_key: str, default: bool = False) -> bool:
+    raw = _resolve_value(cli_value, env_name, cfg, cfg_key, str(default).lower())
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="DicePP standalone runtime")
     parser.add_argument("--bot-id", dest="bot_id", default=None)
@@ -64,12 +71,18 @@ def resolve_runtime_config(args: argparse.Namespace) -> tuple[dict[str, str], in
     port_str = _resolve_value(str(args.port) if args.port else None, "PORT", config_json, "port", "8080")
     port = int(port_str)
     heartbeat_interval = _resolve_value(None, "HUB_HEARTBEAT_INTERVAL", config_json, "hub_heartbeat_interval", "180")
+    webchat_hub_url = _resolve_value(None, "WEBCHAT_HUB_URL", config_json, "webchat_hub_url", "")
+    webchat_api_key = _resolve_value(None, "WEBCHAT_API_KEY", config_json, "webchat_api_key", "")
+    webchat_enabled = _resolve_bool(None, "WEBCHAT_ENABLED", config_json, "webchat_enabled", False)
     runtime_config = {
         "bot_id": bot_id,
         "hub_url": hub_url,
         "master_id": master_id,
         "nickname": nickname,
         "heartbeat_interval": heartbeat_interval,
+        "webchat_hub_url": webchat_hub_url,
+        "webchat_api_key": webchat_api_key,
+        "webchat_enabled": "true" if webchat_enabled else "false",
     }
     return runtime_config, port
 
@@ -80,12 +93,27 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
     master_id = runtime_cfg["master_id"]
     nickname = runtime_cfg["nickname"]
     heartbeat_interval = runtime_cfg["heartbeat_interval"]
+    webchat_hub_url = runtime_cfg.get("webchat_hub_url", "").strip()
+    webchat_api_key = runtime_cfg.get("webchat_api_key", "").strip()
+    webchat_enabled = runtime_cfg.get("webchat_enabled", "false").lower() == "true"
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         bot = DiceBot(bot_id)
-        proxy = StandaloneClientProxy()
-        bot.set_client_proxy(proxy)
+        standalone_proxy = StandaloneClientProxy()
+        active_proxy = standalone_proxy
+        webchat_adapter = None
+        webchat_active = False
+
+        if webchat_enabled and webchat_hub_url and webchat_api_key:
+            webchat_adapter = WebChatAdapter(webchat_hub_url, webchat_api_key)
+            active_proxy = WebChatProxy(webchat_adapter)
+            webchat_active = True
+            dice_log(f"[Standalone] WebChat enabled for hub={webchat_hub_url}")
+        elif webchat_enabled:
+            dice_log("[Standalone][WARN] WEBCHAT_ENABLED is true but webchat_hub_url or webchat_api_key is empty")
+
+        bot.set_client_proxy(active_proxy)
         await bot.delay_init_command()
 
         if hub_url:
@@ -122,10 +150,15 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
                     )
                     await asyncio.sleep(wait_s)
 
-        bind_runtime(bot, proxy)
+        if webchat_adapter is not None:
+            await webchat_adapter.start(bot)
+
+        bind_runtime(bot, active_proxy, webchat_enabled=webchat_active)
         try:
             yield
         finally:
+            if webchat_adapter is not None:
+                await webchat_adapter.close()
             await bot.shutdown_async()
 
     app = FastAPI(lifespan=lifespan)

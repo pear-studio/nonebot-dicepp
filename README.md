@@ -27,6 +27,12 @@ Standalone 示例：
 python standalone_bot.py --bot-id 123456 --hub-url http://localhost:8000 --port 8080
 ```
 
+Web Chat（反向 WS）配置键：
+
+- `webchat_enabled`：是否启用 Web Chat（默认 `false`）
+- `webchat_hub_url`：网站 Gateway 地址（建议生产使用 `wss://.../ws/bot/`）
+- `webchat_api_key`：鉴权密钥（不要写入日志）
+
 ## 文档入口
 
 根目录只保留总览，详细说明请查阅 `docs/`：

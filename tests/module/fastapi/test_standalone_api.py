@@ -79,6 +79,14 @@ def test_command_returns_500_on_unhandled_exception():
     assert resp.status_code == 500
 
 
+def test_command_returns_503_when_webchat_enabled():
+    proxy = _FakeProxy()
+    bind_runtime(_FakeBot(proxy), proxy, webchat_enabled=True)
+    client = TestClient(dpp_api)
+    resp = client.post("/command", json={"text": ".help"})
+    assert resp.status_code == 503
+
+
 @pytest.mark.asyncio
 async def test_command_outputs_are_isolated_under_concurrency():
     proxy = _FakeProxy()

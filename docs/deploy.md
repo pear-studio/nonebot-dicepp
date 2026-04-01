@@ -185,6 +185,12 @@ make help            # 显示所有命令
 | HOST | 监听地址 | 0.0.0.0 |
 | PORT | 监听端口 | 8080 |
 | ACCESS_TOKEN | 访问令牌（可选） | - |
+| WEBCHAT_ENABLED | 启用 Web Chat 反向 WS（Standalone） | false |
+| WEBCHAT_HUB_URL | Web Chat 网关地址（建议 `wss://.../ws/bot/`） | - |
+| WEBCHAT_API_KEY | Web Chat 鉴权密钥 | - |
+
+> 启用 Web Chat 的生产环境请使用 `wss://` 并保持 TLS 证书校验开启；不要在日志中输出 API Key。  
+> 运维监控建议以 WebSocket 协议层 ping/pong 为主指标；若网页端暂存应用层 JSON ping，请将其视为过渡信号而非权威心跳。
 
 #### 应用根目录覆盖（一般无需配置）
 

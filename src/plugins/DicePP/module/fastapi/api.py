@@ -11,13 +11,15 @@ if TYPE_CHECKING:
 dpp_api = FastAPI()
 _active_bot: Optional["Bot"] = None
 _active_proxy = None
+_webchat_enabled = False
 _command_lock = asyncio.Lock()
 
 
-def bind_runtime(bot: "Bot", proxy) -> None:
-    global _active_bot, _active_proxy
+def bind_runtime(bot: "Bot", proxy, webchat_enabled: bool = False) -> None:
+    global _active_bot, _active_proxy, _webchat_enabled
     _active_bot = bot
     _active_proxy = proxy
+    _webchat_enabled = webchat_enabled
 
 
 def _require_runtime() -> tuple["Bot", object]:
@@ -48,6 +50,14 @@ async def manual_heartbeat():
 @dpp_api.post("/command")
 async def execute_command(request: Request):
     bot, proxy = _require_runtime()
+    if _webchat_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "webchat_enabled",
+                "message": "POST /dpp/command is disabled when Web Chat mode is enabled; use websocket gateway instead",
+            },
+        )
     try:
         payload = await request.json()
     except Exception as exc:

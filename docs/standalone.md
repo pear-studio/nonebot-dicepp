@@ -29,6 +29,12 @@ BOT_ID=123456 HUB_URL=http://localhost:8000 MASTER_ID=10001 NICKNAME=DicePP PORT
 
 可选环境变量：
 - `HUB_HEARTBEAT_INTERVAL`（单位秒，默认 `180`，最小值 `5`）
+- `WEBCHAT_ENABLED`（`true/false`，默认 `false`）
+- `WEBCHAT_HUB_URL`（Web Chat 网关地址，例如 `wss://example.com/ws/bot/`）
+- `WEBCHAT_API_KEY`（Web Chat 鉴权密钥）
+
+> 生产环境启用 Web Chat 时应使用 `wss://` 并开启证书校验（默认开启）。
+> Web Chat 保活以 **协议层 ping/pong** 为准；若网页端短期保留应用层 JSON ping，请勿将其作为主健康指标，避免双重保活导致监控误判。
 
 ### 配置文件
 
@@ -41,6 +47,7 @@ BOT_ID=123456 HUB_URL=http://localhost:8000 MASTER_ID=10001 NICKNAME=DicePP PORT
 - `POST /dpp/command`：执行一条 Bot 命令
 
 `POST /dpp/command` 在单进程内采用串行执行，以保证请求级输出隔离。
+当 `WEBCHAT_ENABLED=true` 且 Web Chat 配置完整时，`POST /dpp/command` 返回 `503`（WebSocket 模式下不再通过 `_outputs` 拉取 Bot 回复）。
 
 ### 命令请求示例
 
@@ -69,6 +76,11 @@ BOT_ID=123456 HUB_URL=http://localhost:8000 MASTER_ID=10001 NICKNAME=DicePP PORT
 
 - 默认 Mock 群号：`10000`
 - 默认 Mock 用户号：`10001`
+
+### Web Chat 群组 API 说明（重要）
+
+当启用 Web Chat 时，`WebChatProxy` 仍实现 `ClientProxy` 的群组查询接口，但返回的是**确定性 Mock 数据**，不是网站或 QQ 的真实群状态。  
+这仅用于保持命令运行稳定（避免 `NotImplemented`），不能用于需要真实群信息的一致性判断。
 
 ## 自动注册重试策略
 
