@@ -12,7 +12,6 @@ except Exception:  # pragma: no cover
     requests = None
 
 from core.bot import Bot
-from core.config import CFG_MASTER
 from core.command.const import *
 from core.command import BotCommandBase, BotSendFileCommand, BotSendMsgCommand
 from core.command import UserCommandBase, custom_user_command
@@ -508,11 +507,7 @@ def _trim_records_if_needed(bot: Bot, entry: Dict[str, Any]) -> None:
     - 读取配置 CFG_LOG_MAX_RECORDS（默认 5000）。
     - 当超限时，删除最早的一批（回落到阈值的 80%）以减少频繁切片的成本。
     """
-    try:
-        cfg_val = bot.cfg_helper.get_config(CFG_LOG_MAX_RECORDS)[0]
-        limit = int(str(cfg_val).strip())
-    except (ValueError, TypeError):
-        limit = LOG_MAX_RECORDS_DEFAULT
+    limit = bot.config.log.max_records
     # 强制收敛至安全上限，避免内存中日志缓存过大。
     if LOG_IN_MEMORY_SAFE_LIMIT > 0:
         if limit <= 0 or limit > LOG_IN_MEMORY_SAFE_LIMIT:
@@ -919,11 +914,6 @@ class LogCommand(UserCommandBase):
         self.log_on_start = self.messages.new_started
         self.log_off_result = self.messages.end_summary
         self.bot.loc_helper.register_loc_text(LOC_LOG_SET_TOGGLED, "{item} 切换为 {state}", "切换日志设置")
-        self.bot.cfg_helper.register_config(CFG_LOG_UPLOAD_ENABLE, "1", "是否在 .log end 时上传日志云端 (1/0)")
-        self.bot.cfg_helper.register_config(CFG_LOG_UPLOAD_ENDPOINT, UPLOAD_ENDPOINT_DEFAULT, "日志云端上传接口地址")
-        self.bot.cfg_helper.register_config(CFG_LOG_UPLOAD_TOKEN, "", "日志云端上传授权 Token，可留空")
-        # 允许配置内存中保留的最大日志记录条数，超出自动丢弃最早的记录以避免 OOM
-        self.bot.cfg_helper.register_config(CFG_LOG_MAX_RECORDS, str(LOG_MAX_RECORDS_DEFAULT), "单个日志在内存中保留的最大消息条数，超过将自动丢弃最早的记录；-1 为不限制（不建议长期开启）")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         if not msg_str.startswith(".log"):
@@ -1548,23 +1538,13 @@ class LogCommand(UserCommandBase):
         return txt_path, os.path.basename(txt_path), extra_files
 
     def _get_upload_settings(self) -> Dict[str, Any]:
-        try:
-            enabled = self.bot.cfg_helper.get_config(CFG_LOG_UPLOAD_ENABLE)[0]
-        except (ValueError, TypeError, KeyError):
-            enabled = "1"
-        try:
-            endpoint = self.bot.cfg_helper.get_config(CFG_LOG_UPLOAD_ENDPOINT)[0]
-        except (ValueError, TypeError, KeyError):
-            endpoint = UPLOAD_ENDPOINT_DEFAULT
-        try:
-            token = self.bot.cfg_helper.get_config(CFG_LOG_UPLOAD_TOKEN)[0]
-        except Exception:
-            token = ""
-        endpoint = endpoint.strip() or UPLOAD_ENDPOINT_DEFAULT
+        enabled = self.bot.config.log.upload_enable
+        endpoint = (self.bot.config.log.upload_endpoint or UPLOAD_ENDPOINT_DEFAULT).strip()
+        token = self.bot.config.log.upload_token.strip()
         return {
-            "enabled": str(enabled).strip() != "0",
+            "enabled": enabled,
             "endpoint": endpoint,
-            "token": token.strip(),
+            "token": token,
         }
 
     def _build_upload_payload(self, log_entry: Dict[str, Any], log_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -1655,10 +1635,7 @@ class LogCommand(UserCommandBase):
         files = {
             'file': ('log-zlib-compressed', payload_data['file'], 'application/octet-stream')
         }
-        try:
-            masters = self.bot.cfg_helper.get_config(CFG_MASTER)
-        except (ValueError, TypeError, KeyError):
-            masters = []
+        masters = self.bot.config.master
         uploader_id = None
         for mid in masters:
             if mid.strip():

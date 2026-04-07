@@ -242,12 +242,10 @@ class DeckCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_DRAW_ERR_NO_DECK, "找不到牌库{deck_name}", "找不到想要抽取的牌库")
         bot.loc_helper.register_loc_text(LOC_DRAW_ERR_VAGUE_DECK, "可能的牌库：{deck_list}", "找到多个可能的牌库")
 
-        bot.cfg_helper.register_config(CFG_DECK_ENABLE, "1", "抽卡指令开关")
-        bot.cfg_helper.register_config(CFG_DECK_DATA_PATH, f"./{DRAW_DATA_PATH}", "牌库指令的数据来源, .代表Data文件夹")
 
     def delay_init(self) -> List[str]:
         # 从本地文件中读取资料
-        data_path_list: List[str] = self.bot.cfg_helper.get_config(CFG_DECK_DATA_PATH)
+        data_path_list: List[str] = [self.bot.config.deck.data_path]
         for i, path in enumerate(data_path_list):
             if path.startswith("./"):  # 用DATA_PATH作为当前路径
                 data_path_list[i] = os.path.join(CONTENT_PATH, path[2:])
@@ -273,9 +271,7 @@ class DeckCommand(UserCommandBase):
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 判断功能开关
-        try:
-            assert (int(self.bot.cfg_helper.get_config(CFG_DECK_ENABLE)[0]) != 0)
-        except AssertionError:
+        if not self.bot.config.deck.enable:
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析语句

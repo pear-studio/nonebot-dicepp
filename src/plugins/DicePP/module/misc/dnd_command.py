@@ -33,7 +33,6 @@ class UtilsDNDCommand(UserCommandBase):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(LOC_DND_RES, "{name} DND人物作成——{reason}:\n{result}", ".dnd返回的内容 name为用户昵称, reason为原因")
         bot.loc_helper.register_loc_text(LOC_DND_RES_NOREASON, "{name} DND人物作成:\n{result}", ".dnd返回的内容（无原因） name为用户昵称")
-        bot.cfg_helper.register_config(CFG_ROLL_DND_ENABLE, "1", "DND指令开关")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".dnd")

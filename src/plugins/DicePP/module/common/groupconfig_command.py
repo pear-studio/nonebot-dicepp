@@ -9,7 +9,6 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config import CFG_MASTER, CFG_ADMIN
 
 LOC_GROUP_CONFIG_SET = "group_config_set"
 LOC_GROUP_CONFIG_GET = "group_config_get"

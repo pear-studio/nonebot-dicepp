@@ -1,0 +1,20 @@
+{
+  "name": "default",
+  "_comment": "默认人设。localization 字段覆盖对应回复文本，chat 字段定义自定义对话触发规则。未指定的 key 使用代码内默认值。",
+
+  "localization": {
+    "login_notice": "早上好~",
+    "friend_add_notice": "现在你是我的好友啦！",
+    "group_only_notice": "此指令只能在群聊中使用。",
+    "group_permission_denied_notice": "您使用该指令的权限不足。",
+    "daily_update": "每日更新完成",
+    "group_expire_warning": "还有人需要我么？",
+    "func_disable": "该指令{func}已被关闭"
+  },
+
+  "chat": {
+    "^你好$": ["你好啊", "你好呀"]
+  },
+
+  "llm_personality": "你是一个 helpful 的助手，回答简洁。"
+}

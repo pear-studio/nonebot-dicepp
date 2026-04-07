@@ -102,8 +102,6 @@ class RollDiceCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_ROLL_EXP_START, "开始计算掷骰期望 ...", "计算掷骰表达式期望时的回复")
         bot.loc_helper.register_loc_text(LOC_ROLL_EXP, " {expression} 的期望为:\n{expectation}", "计算掷骰表达式期望时的回复")
 
-        bot.cfg_helper.register_config(CFG_ROLL_ENABLE, "1", "掷骰指令开关")
-        bot.cfg_helper.register_config(CFG_ROLL_HIDE_ENABLE, "1", "暗骰指令开关(暗骰会发送私聊信息, 可能增加风控风险)")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         parse_result = _ROLL_PARSER.parse(msg_str)
@@ -114,9 +112,7 @@ class RollDiceCommand(UserCommandBase):
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         # 判断功能开关
-        try:
-            assert (int(self.bot.cfg_helper.get_config(CFG_ROLL_ENABLE)[0]) != 0)
-        except AssertionError:
+        if not self.bot.config.roll.enable:
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
             port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -137,9 +133,7 @@ class RollDiceCommand(UserCommandBase):
         reason_str = roll_args.reason_str
 
         # 判断暗骰开关
-        try:
-            assert (not is_hidden or int(self.bot.cfg_helper.get_config(CFG_ROLL_HIDE_ENABLE)[0]) != 0)
-        except AssertionError:
+        if is_hidden and not self.bot.config.roll.hide_enable:
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func="暗骰指令")
             port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]

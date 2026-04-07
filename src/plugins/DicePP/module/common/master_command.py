@@ -11,7 +11,7 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config import CFG_MASTER, CFG_ADMIN
+from core.config import BOT_DATA_PATH
 from core.data.models import BotControl
 
 LOC_REBOOT = "master_reboot"
@@ -208,13 +208,9 @@ class MasterCommand(UserCommandBase):
             # 内存状态查询
             status = self.bot.get_memory_status()
             if status:
-                from core.config import CFG_MEMORY_WARN_PERCENT, CFG_MEMORY_RESTART_PERCENT, CFG_MEMORY_RESTART_MB
-                try:
-                    warn_pct = int(self.bot.cfg_helper.get_config(CFG_MEMORY_WARN_PERCENT)[0])
-                    restart_pct = int(self.bot.cfg_helper.get_config(CFG_MEMORY_RESTART_PERCENT)[0])
-                    restart_mb = int(self.bot.cfg_helper.get_config(CFG_MEMORY_RESTART_MB)[0])
-                except Exception:
-                    warn_pct, restart_pct, restart_mb = 80, 90, 2048
+                warn_pct = self.bot.config.memory_monitor.warn_percent
+                restart_pct = self.bot.config.memory_monitor.restart_percent
+                restart_mb = self.bot.config.memory_monitor.restart_mb
                 feedback = (
                     f"📊 内存状态\n"
                     f"当前占用: {status['rss_mb']:.1f} MB ({status['percent']:.1f}%)\n"

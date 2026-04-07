@@ -6,7 +6,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.command import CommandTextParser
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config import BOT_DESCRIBE, BOT_VERSION, BOT_GIT_LINK, CFG_AGREEMENT
+from core.config import BOT_DESCRIBE, BOT_VERSION, BOT_GIT_LINK
 
 _HELP_PARSER = CommandTextParser(command_prefix="help")
 
@@ -88,7 +88,7 @@ class HelpCommand(UserCommandBase):
         elif keyword == "链接":
             return BOT_GIT_LINK
         elif keyword == "协议":
-            return self.bot.cfg_helper.get_config(CFG_AGREEMENT)[0]
+            return self.bot.config.agreement
         elif keyword == "更新":  # ToDo: 更新内容
             return "暂无信息"
 

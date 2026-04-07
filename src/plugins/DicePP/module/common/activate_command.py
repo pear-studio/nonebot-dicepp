@@ -47,7 +47,6 @@ class ActivateCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_BOT_OFF, "DicePP现已关闭。", ".bot off时回应的语句（需要群管理/骰管理）")
         bot.loc_helper.register_loc_text(LOC_BOT_DISMISS, "再见啦。", ".dismiss时回应的语句")
 
-        bot.cfg_helper.register_config(CFG_BOT_DEF_ENABLE, "1", "新加入群聊时是否默认开启(.bot on)")
 
     async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         if meta.group_id:
@@ -55,10 +54,7 @@ class ActivateCommand(UserCommandBase):
             if _row:
                 activate_data = [bool(int(_row.active))] if isinstance(_row.active, str) else [_row.active]
             else:
-                try:
-                    default_enable: bool = bool(int(self.bot.cfg_helper.get_config(CFG_BOT_DEF_ENABLE)[0]))
-                except (IndexError, ValueError):
-                    default_enable = True
+                default_enable: bool = self.bot.config.bot_default_enable
                 activate_data = [default_enable]
                 await self.bot.db.group_activate.upsert(GroupActivate(group_id=meta.group_id, active=str(int(default_enable))))
         else:

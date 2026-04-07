@@ -1,0 +1,14 @@
+{
+  "_comment": "账号配置模板。复制此文件为 {账号}.local.json 并填写以下字段。此文件本身可入版本库；*.local.json 已被 .gitignore 忽略。",
+
+  "master": [],
+  "admin": [],
+  "friend_token": [],
+  "persona": "default",
+  "nickname": "",
+
+  "_llm_comment": "如需为此账号单独设置 LLM，在此覆盖 llm 字段",
+  "llm": {
+    "api_key": ""
+  }
+}

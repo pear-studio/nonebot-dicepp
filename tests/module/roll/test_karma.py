@@ -157,11 +157,9 @@ class TestKarmaEngines(unittest.TestCase):
 class TestKarmaCommand(IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from core.bot import Bot
-        from core.config import ConfigItem, CFG_MASTER
 
         self.bot = Bot("test_karma_cmd_bot")
-        self.bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
-        self.bot.cfg_helper.save_config()
+        self.bot.config.master = ["test_master"]
         await self.bot.delay_init_command()
 
     async def asyncTearDown(self):

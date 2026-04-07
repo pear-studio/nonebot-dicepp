@@ -9,10 +9,6 @@ from core.command.user_cmd import UserCommandBase, custom_user_command
 from core.command.bot_cmd import BotSendMsgCommand
 from core.communication import PrivateMessagePort, GroupMessagePort, MessageMetaData
 from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FUN
-from core.config import (
-    CFG_LLM_ENABLED, CFG_LLM_API_KEY, CFG_LLM_BASE_URL, CFG_LLM_MODEL,
-    CFG_LLM_PERSONALITY, CFG_LLM_MAX_CONTEXT, CFG_LLM_TIMEOUT
-)
 from .client import SimpleLLMClient
 from .memory import SimpleMemory
 from utils.logger import dice_log
@@ -33,34 +29,28 @@ class LLMChatCommand(UserCommandBase):
 
     def delay_init(self) -> List[str]:
         """延迟初始化 LLM 客户端"""
-        cfg = self.bot.cfg_helper
-        self.enabled = cfg.get_config(CFG_LLM_ENABLED)[0].lower() == "true"
+        llm_cfg = self.bot.config.llm
+        self.enabled = llm_cfg.enabled
 
         if not self.enabled:
             return ["LLM 模块已禁用"]
 
         try:
-            api_key = cfg.get_config(CFG_LLM_API_KEY)[0] if cfg.get_config(CFG_LLM_API_KEY) else ""
+            api_key = llm_cfg.api_key
             if not api_key:
                 self.enabled = False
                 return ["LLM 模块初始化失败: 未配置 API Key"]
 
-            base_url = cfg.get_config(CFG_LLM_BASE_URL)[0] if cfg.get_config(CFG_LLM_BASE_URL) else "https://api.moonshot.cn/v1"
-            model = cfg.get_config(CFG_LLM_MODEL)[0] if cfg.get_config(CFG_LLM_MODEL) else "kimi-k2.5"
-
             self.client = SimpleLLMClient(
                 api_key=api_key,
-                base_url=base_url,
-                model=model
+                base_url=llm_cfg.base_url,
+                model=llm_cfg.model,
             )
+            self.memory = SimpleMemory(max_size=llm_cfg.max_context)
+            self.system_prompt = llm_cfg.personality
+            self.timeout = llm_cfg.timeout
 
-            max_context = int(cfg.get_config(CFG_LLM_MAX_CONTEXT)[0]) if cfg.get_config(CFG_LLM_MAX_CONTEXT) else 20
-            self.memory = SimpleMemory(max_size=max_context)
-
-            self.system_prompt = cfg.get_config(CFG_LLM_PERSONALITY)[0] if cfg.get_config(CFG_LLM_PERSONALITY) else "你是一个 helpful 的助手，回答简洁。"
-            self.timeout = int(cfg.get_config(CFG_LLM_TIMEOUT)[0]) if cfg.get_config(CFG_LLM_TIMEOUT) else 10
-
-            return [f"LLM 模块已加载 (模型: {model})"]
+            return [f"LLM 模块已加载 (模型: {llm_cfg.model})"]
         except Exception as e:
             self.enabled = False
             dice_log(f"[LLM] 初始化失败: {e}")

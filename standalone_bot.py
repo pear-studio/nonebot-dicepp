@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
+"""
+DicePP standalone runtime.
+
+Configuration priority (high → low):
+  1. CLI arguments  (--hub-url, --master-id, --nickname, --port)
+  2. Environment variables  (BOT_ID, HUB_URL, MASTER_ID, NICKNAME, PORT, DICE_*)
+  3. Data/bots/{bot_id}.local.json
+  4. Data/config.local.json
+  5. Data/config.json
+
+bot_id MUST be provided via --bot-id or BOT_ID env var; it is not read from JSON.
+port   is standalone-only and is never stored in JSON config.
+"""
 import argparse
 import asyncio
 from contextlib import asynccontextmanager
-import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
@@ -25,82 +36,53 @@ from module.fastapi.api import dpp_api, bind_runtime  # noqa: E402
 from utils.logger import dice_log  # noqa: E402
 
 
-def _read_config_json() -> dict[str, Any]:
-    config_path = PROJECT_ROOT / "config.json"
-    if not config_path.exists():
-        return {}
-    try:
-        return json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="DicePP standalone runtime")
+    parser.add_argument("--bot-id", dest="bot_id", default=None,
+                        help="Bot account ID (required; also via BOT_ID env var)")
+    parser.add_argument("--hub-url", dest="hub_url", default=None,
+                        help="DiceHub API URL override")
+    parser.add_argument("--master-id", dest="master_id", default=None,
+                        help="Master user ID override (added to master list)")
+    parser.add_argument("--nickname", dest="nickname", default=None,
+                        help="Bot nickname override")
+    parser.add_argument("--port", dest="port", type=int, default=None,
+                        help="HTTP listen port (default: 8080)")
+    return parser.parse_args()
 
 
-def _resolve_value(cli_value: str | None, env_name: str, cfg: dict[str, Any], cfg_key: str, default: str = "") -> str:
+def _resolve(cli_value, env_name: str, default: str = "") -> str:
     if cli_value:
         return str(cli_value).strip()
     env_val = os.getenv(env_name, "").strip()
     if env_val:
         return env_val
-    cfg_val = str(cfg.get(cfg_key, "")).strip()
-    if cfg_val:
-        return cfg_val
     return default
 
 
-def _resolve_bool(cli_value: str | None, env_name: str, cfg: dict[str, Any], cfg_key: str, default: bool = False) -> bool:
-    raw = _resolve_value(cli_value, env_name, cfg, cfg_key, str(default).lower())
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+def inject_cli_env_overrides(args: argparse.Namespace) -> None:
+    """
+    Push CLI / env-var overrides into environment so ConfigLoader picks them up
+    via the DICE_* env-var layer.
+    """
+    if args.hub_url:
+        os.environ.setdefault("DICE_DICEHUB_API_URL", args.hub_url.strip())
+    hub_url_env = os.getenv("HUB_URL", "").strip()
+    if hub_url_env:
+        os.environ.setdefault("DICE_DICEHUB_API_URL", hub_url_env)
+
+    if args.nickname:
+        os.environ.setdefault("DICE_NICKNAME", args.nickname.strip())
+    nickname_env = os.getenv("NICKNAME", "").strip()
+    if nickname_env:
+        os.environ.setdefault("DICE_NICKNAME", nickname_env)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="DicePP standalone runtime")
-    parser.add_argument("--bot-id", dest="bot_id", default=None)
-    parser.add_argument("--hub-url", dest="hub_url", default=None)
-    parser.add_argument("--master-id", dest="master_id", default=None)
-    parser.add_argument("--nickname", dest="nickname", default=None)
-    parser.add_argument("--port", dest="port", type=int, default=None)
-    return parser.parse_args()
-
-
-def resolve_runtime_config(args: argparse.Namespace) -> tuple[dict[str, str], int]:
-    config_json = _read_config_json()
-    bot_id = _resolve_value(args.bot_id, "BOT_ID", config_json, "bot_id", "999999999")
-    hub_url = _resolve_value(args.hub_url, "HUB_URL", config_json, "hub_url", "")
-    master_id = _resolve_value(args.master_id, "MASTER_ID", config_json, "master_id", "")
-    nickname = _resolve_value(args.nickname, "NICKNAME", config_json, "nickname", "")
-    port_str = _resolve_value(str(args.port) if args.port else None, "PORT", config_json, "port", "8080")
-    port = int(port_str)
-    heartbeat_interval = _resolve_value(None, "HUB_HEARTBEAT_INTERVAL", config_json, "hub_heartbeat_interval", "180")
-    webchat_hub_url = _resolve_value(None, "WEBCHAT_HUB_URL", config_json, "webchat_hub_url", "")
-    webchat_api_key = _resolve_value(None, "WEBCHAT_API_KEY", config_json, "webchat_api_key", "")
-    webchat_enabled = _resolve_bool(None, "WEBCHAT_ENABLED", config_json, "webchat_enabled", False)
-    runtime_config = {
-        "bot_id": bot_id,
-        "hub_url": hub_url,
-        "master_id": master_id,
-        "nickname": nickname,
-        "heartbeat_interval": heartbeat_interval,
-        "webchat_hub_url": webchat_hub_url,
-        "webchat_api_key": webchat_api_key,
-        "webchat_enabled": "true" if webchat_enabled else "false",
-    }
-    return runtime_config, port
-
-
-def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
-    bot_id = runtime_cfg["bot_id"]
-    hub_url = runtime_cfg["hub_url"]
-    master_id = runtime_cfg["master_id"]
-    nickname = runtime_cfg["nickname"]
-    heartbeat_interval = runtime_cfg["heartbeat_interval"]
-    webchat_hub_url = runtime_cfg.get("webchat_hub_url", "").strip()
-    webchat_api_key = runtime_cfg.get("webchat_api_key", "").strip()
-    webchat_enabled = runtime_cfg.get("webchat_enabled", "false").lower() == "true"
+def create_app(bot_id: str) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         bot = DiceBot(bot_id)
-        # 初始始终创建 StandaloneClientProxy（轻量级，无需认证）
         standalone_proxy = StandaloneClientProxy()
         active_proxy = standalone_proxy
         webchat_adapter = None
@@ -109,20 +91,22 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
         bot.set_client_proxy(active_proxy)
         await bot.delay_init_command()
 
-        if hub_url:
-            await bot.hub_manager.set_api_url(hub_url)
-        if master_id:
-            await bot.hub_manager.set_master_id(master_id)
-        if nickname:
-            await bot.hub_manager.set_nickname(nickname)
-        if heartbeat_interval:
-            await bot.db.hub_set("heartbeat_interval", str(heartbeat_interval))
+        cfg = bot.config
+
+        # Apply hub config from BotConfig (already loaded by ConfigLoader)
+        if cfg.dicehub.api_url:
+            await bot.hub_manager.set_api_url(cfg.dicehub.api_url)
+        if cfg.master:
+            await bot.hub_manager.set_master_id(cfg.master[0])
+        if cfg.nickname:
+            await bot.hub_manager.set_nickname(cfg.nickname)
+        if cfg.dicehub.heartbeat_interval:
+            await bot.db.hub_set("heartbeat_interval", str(cfg.dicehub.heartbeat_interval))
             await bot.hub_manager.load_config()
 
-        # Optional auto-registration with exponential backoff.
-        # Unified policy: 6 attempts, wait sequence 2s/4s/8s/10s/10s (total wait 34s).
+        # Optional hub registration with exponential backoff
         registration_success = False
-        if hub_url:
+        if cfg.dicehub.api_url:
             waits = [2, 4, 8, 10, 10]
             max_attempts = len(waits) + 1
             for attempt in range(max_attempts):
@@ -134,27 +118,24 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
                     error_type = exc.__class__.__name__
                     if attempt >= max_attempts - 1:
                         dice_log(
-                            f"[Standalone][HubRegister][ERROR] hub_url={hub_url} bot_id={bot_id} "
+                            f"[Standalone][HubRegister][ERROR] hub_url={cfg.dicehub.api_url} bot_id={bot_id} "
                             f"attempt={attempt + 1}/{max_attempts} error_type={error_type} detail={exc}"
                         )
                         break
                     wait_s = waits[attempt]
                     dice_log(
-                        f"[Standalone][HubRegister][WARN] hub_url={hub_url} bot_id={bot_id} "
+                        f"[Standalone][HubRegister][WARN] hub_url={cfg.dicehub.api_url} bot_id={bot_id} "
                         f"attempt={attempt + 1}/{max_attempts} error_type={error_type} next_retry_in={wait_s}s detail={exc}"
                     )
                     await asyncio.sleep(wait_s)
 
-        # 注册完成后，根据配置启用 WebChat
+        # Optional WebChat via DiceHub
+        # webchat_url can be set separately; falls back to api_url if not set
+        webchat_hub_url = cfg.dicehub.webchat_url or cfg.dicehub.api_url
+        webchat_enabled = cfg.dicehub.enable and bool(webchat_hub_url)
         if webchat_enabled and webchat_hub_url:
-            # 确定 api_key 来源（按优先级）
-            final_api_key = ""
-            if webchat_api_key:
-                # 优先使用显式提供的 WEBCHAT_API_KEY
-                final_api_key = webchat_api_key
-                dice_log("[Standalone] Using explicit WEBCHAT_API_KEY for WebChat")
-            elif registration_success:
-                # 注册成功，从 hub_manager 获取 api_key
+            final_api_key = cfg.dicehub.api_key
+            if not final_api_key and registration_success:
                 final_api_key = bot.hub_manager.get_api_key()
                 if final_api_key:
                     dice_log("[Standalone] Using api_key from hub registration for WebChat")
@@ -173,8 +154,7 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
                     active_proxy = standalone_proxy
                     webchat_active = False
             else:
-                dice_log("[Standalone][WARN] WEBCHAT_ENABLED is true but no api_key available")
-                dice_log("[Standalone] Provide WEBCHAT_API_KEY or ensure hub registration succeeds")
+                dice_log("[Standalone][WARN] DiceHub enabled but no api_key available")
 
         bind_runtime(bot, active_proxy, webchat_enabled=webchat_active)
         try:
@@ -191,11 +171,17 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
 
 def main() -> None:
     args = parse_args()
-    runtime_cfg, port = resolve_runtime_config(args)
-    app = create_app(runtime_cfg)
+
+    bot_id = _resolve(args.bot_id, "BOT_ID", "999999999")
+    port = int(_resolve(str(args.port) if args.port else None, "PORT", "8080"))
+    master_id = _resolve(args.master_id, "MASTER_ID", "")
+
+    # Push CLI overrides into env so ConfigLoader sees them via DICE_* layer
+    inject_cli_env_overrides(args)
+
+    app = create_app(bot_id)
     uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
     main()
-

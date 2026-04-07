@@ -6,9 +6,28 @@
 
 - 部署与运行：[`deploy.md`](./deploy.md)
 - Standalone 模式：[`standalone.md`](./standalone.md)
+- **配置系统（新）**：[`config-system.md`](./config-system.md)
 - 数据层架构：[`dicepp/data_layer.md`](./dicepp/data_layer.md)
 - 掷骰引擎：[`dicepp/roll_engine.md`](./dicepp/roll_engine.md)
 - DicePP 架构与命令文档：[`dicepp/README.md`](./dicepp/README.md)
+
+## 配置系统
+
+DicePP 使用 **分层 JSON 配置**（已弃用旧 Excel 方案）。优先级从高到低：
+
+> 环境变量（`DICE_*`）→ 账号配置（`Data/bots/{id}.local.json`）→ 全局密钥（`Data/config.local.json`）→ 人设 LLM（`Data/personas/{name}.json`）→ 全局默认（`Data/config.json`）
+
+**快速上手**：
+
+```
+# 1. 复制账号模板并填写 master/admin/llm.api_key
+cp Data/bots/_template.json Data/bots/{your_bot_id}.local.json
+
+# 2. 启动
+python standalone_bot.py --bot-id {your_bot_id}
+```
+
+详细说明见 [`config-system.md`](./config-system.md)。
 
 ## DicePP 开发文档（`docs/dicepp`）
 

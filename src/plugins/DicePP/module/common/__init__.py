@@ -7,3 +7,4 @@ from .nickname_command import NicknameCommand
 from .welcome_command import WelcomeCommand, DC_WELCOME, LOC_WELCOME_DEFAULT
 from .master_command import MasterCommand, DC_CTRL
 from .log_command import LogCommand, LogRecorderCommand, LogStatCommand, DC_LOG_SESSION
+from .reload_config_command import ReloadConfigCommand

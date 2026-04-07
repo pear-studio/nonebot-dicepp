@@ -7,7 +7,8 @@ from pathlib import Path
 import openpyxl
 
 from core.bot import Bot
-from core.config import CONTENT_PATH, CFG_MASTER, CFG_ADMIN
+from core.config import CONTENT_PATH
+from core.localization import LOC_FUNC_DISABLE
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -41,12 +42,10 @@ class RandomGeneratorCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_RAND_GEN_MISS, "找不到随机生成器{name}", "找不到用户输入的随机生成器")
         bot.loc_helper.register_loc_text(LOC_RAND_GEN_VAGUE, "可能的随机生成器：{list}", "用户输入的随机生成器名称有多个匹配可能")
 
-        bot.cfg_helper.register_config(CFG_RAND_GEN_ENABLE, "1", "随机生成器指令开关")
-        bot.cfg_helper.register_config(CFG_RAND_GEN_DATA_PATH, f"./{RAND_GEN_DATA_PATH}", "随机生成器指令的数据来源, .代表Data文件夹")
 
     def delay_init(self) -> List[str]:
         # 从本地文件中读取资料
-        data_path_list: List[str] = self.bot.cfg_helper.get_config(CFG_RAND_GEN_DATA_PATH)
+        data_path_list: List[str] = [self.bot.config.random_gen.data_path]
         for i, path in enumerate(data_path_list):
             if path.startswith("./"):  # 用DATA_PATH作为当前路径
                 data_path_list[i] = os.path.join(CONTENT_PATH, path[2:])
@@ -71,12 +70,10 @@ class RandomGeneratorCommand(UserCommandBase):
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        admin = (meta.user_id in self.bot.cfg_helper.get_config(CFG_MASTER)) or (meta.user_id in self.bot.cfg_helper.get_config(CFG_ADMIN))
+        admin = (meta.user_id in self.bot.config.master) or (meta.user_id in self.bot.config.admin)
         # 判断功能开关
-        try:
-            assert (int(self.bot.cfg_helper.get_config(CFG_RAND_GEN_ENABLE)[0]) != 0)
-        except AssertionError:
-            feedback = self.bot.loc_helper.format_loc_text(CFG_RAND_GEN_ENABLE, func=self.readable_name)
+        if not self.bot.config.random_gen.enable:
+            feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 解析语句
         arg_str: str = hint

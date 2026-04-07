@@ -27,7 +27,6 @@ class TemplateCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(LOC_TEMP, "内容", "注释")
-        bot.cfg_helper.register_config(CFG_TEMP, "内容", "注释")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".xxx")

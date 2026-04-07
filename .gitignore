@@ -147,6 +147,7 @@ dmypy.json
 .vscode
 
 # DicePP
+*.local.json
 src/plugins/DicePP/Data/UserData/
 src/plugins/DicePP/Data/Content/**
 !src/plugins/DicePP/Data/Content/**/*.gitkeep

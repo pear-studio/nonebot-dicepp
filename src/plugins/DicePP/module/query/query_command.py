@@ -16,8 +16,6 @@ from core.config import (
     CONTENT_PATH,
     CONTENT_QUERY_DATA_PATH,
     CONTENT_EXCEL_DATA_PATH,
-    CFG_MASTER,
-    CFG_ADMIN,
 )
 from core.data import DC_USER_DATA
 from core.data.models import GroupConfig
@@ -366,14 +364,11 @@ class QueryCommand(UserCommandBase):
         reg_loc(LOC_QUERY_CELL_REDIRECT, "\n重定向自：{redirect}",
                 "重定向展示格式，redirect: 重定向自*")
 
-        bot.cfg_helper.register_config(CFG_QUERY_ENABLE, "1", "查询指令开关")
-        bot.cfg_helper.register_config(CFG_QUERY_DATA_PATH, "./QueryData", "查询指令的数据来源，已弃用，请勿修改")
-        bot.cfg_helper.register_config(CFG_QUERY_PRIVATE_DATABASE, "DND5E2014", "查询指令私聊时默认使用的数据库，群聊使用数据库以群配置为准")
         #已弃用，请使用mode_command那边的CFG。
 
     async def delay_init(self) -> List[str]:
         # 从本地文件中读取数据库
-        data_path_list: List[str] = self.bot.cfg_helper.get_config(CFG_QUERY_DATA_PATH)
+        data_path_list: List[str] = [self.bot.config.query.data_path]
         init_info: List[str] = [""]
         for i, path in enumerate(data_path_list):
             if path.startswith("./"):  # 用DATA_PATH作为当前路径
@@ -544,7 +539,7 @@ class QueryCommand(UserCommandBase):
             if user_row and user_row.data:
                 database = user_row.data.get("query_database")
             if not database:
-                database = self.bot.cfg_helper.get_config(CFG_QUERY_PRIVATE_DATABASE)[0]
+                database = self.bot.config.query.private_database
         source_port = MessagePort(meta.group_id, meta.user_id)
         mode: Literal["query", "search", "select", "flip_page", "editing", "new", "feedback", "redirect"] = hint[0]
         arg_str: str = hint[1]
@@ -583,9 +578,7 @@ class QueryCommand(UserCommandBase):
             homebrew_database = ""
 
         # 判断功能开关
-        try:
-            assert (int(self.bot.cfg_helper.get_config(CFG_QUERY_ENABLE)[0]) != 0)
-        except AssertionError:
+        if not self.bot.config.query.enable:
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 

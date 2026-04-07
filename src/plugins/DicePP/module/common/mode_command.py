@@ -69,8 +69,6 @@ class ModeCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_MODE_DB_MATCH, "已自动匹配到数据库{database}（默认{dice}面骰点）。", ".mode自动匹配数据库时返回")
         bot.loc_helper.register_loc_text(LOC_MODE_DB_MULTI_MATCH, "找到多个匹配的数据库：{databases}，请使用更精确的名称。", ".mode自动匹配到多个数据库时返回")
 
-        bot.cfg_helper.register_config(CFG_MODE_ENABLE, "1", "模式指令开关")
-        bot.cfg_helper.register_config(CFG_MODE_DEFAULT, "DND5E2024", "群内默认模式")
 
         self.mode_dict: Dict[str, List[str]] = {}
         self.mode_field: List[str] = DEFAULT_FIELD
@@ -83,6 +81,7 @@ class ModeCommand(UserCommandBase):
         edited: bool = False
         # 从本地文件中读取可用模式一览
         data_path = os.path.join(self.bot.data_path, MODE_FILE_PATH)
+        os.makedirs(os.path.dirname(data_path), exist_ok=True)
         if os.path.exists(data_path):
             wb = openpyxl.load_workbook(data_path)
             id_list = wb.sheetnames
@@ -136,12 +135,8 @@ class ModeCommand(UserCommandBase):
         port = GroupMessagePort(
             meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # 判断功能开关
-        try:
-            assert (int(self.bot.cfg_helper.get_config(
-                CFG_MODE_ENABLE)[0]) != 0)
-        except AssertionError:
-            feedback = self.bot.loc_helper.format_loc_text(
-                LOC_FUNC_DISABLE, func=self.readable_name)
+        if not self.bot.config.mode.enable:
+            feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         # 判断权限：群内需要权限>=0才能执行；私聊允许用户修改自己的私聊模式
         if meta.group_id and meta.permission < 0:
@@ -157,7 +152,7 @@ class ModeCommand(UserCommandBase):
         config = await ctx.group_config()
         current_mode = config.data.get("mode", "") if config else ""
         if current_mode == "":
-            default_mode = str(self.bot.cfg_helper.get_config(CFG_MODE_DEFAULT)[0])
+            default_mode = self.bot.config.mode.default
             if default_mode != "":
                 await self.switch_mode(target_id, default_mode, is_private=is_private)
             else:
@@ -174,7 +169,7 @@ class ModeCommand(UserCommandBase):
 
         if arg_var == "DEFAULT" or arg_var == "CLEAR":
             feedback = await self.switch_mode(
-                target_id, self.bot.cfg_helper.get_config(CFG_MODE_DEFAULT)[0], is_private=is_private)
+                target_id, self.bot.config.mode.default, is_private=is_private)
         elif arg_var != "":
             feedback = await self.switch_mode(target_id, arg_var, is_private=is_private)
         else:
@@ -185,7 +180,7 @@ class ModeCommand(UserCommandBase):
 
             # 处理空/NULL
             if not stored_mode or stored_mode == "NULL":
-                stored_mode = str(self.bot.cfg_helper.get_config(CFG_MODE_DEFAULT)[0])
+                stored_mode = self.bot.config.mode.default
 
             # 尝试从 mode_dict 中找到对应的显示信息
             mode_key = self.mode_upper_map.get(str(stored_mode).upper())
@@ -196,7 +191,7 @@ class ModeCommand(UserCommandBase):
             else:
                 # 回退到读取已保存的具体字段（若存在）或使用默认回退值
                 dice = config.data.get("default_dice", "D20") if config else "D20"
-                database = config.data.get("query_database", self.bot.cfg_helper.get_config("query_private_database")[0] if self.bot.cfg_helper.get_config("query_private_database") else "") if config else ""
+                database = config.data.get("query_database", self.bot.config.query.private_database) if config else ""
 
             current_text = self.bot.loc_helper.format_loc_text(LOC_MODE_CURRENT, new_mode=stored_mode, dice=dice, database=database)
             list_text = self.bot.loc_helper.format_loc_text(LOC_MODE_LIST, modes="、".join(self.mode_dict.keys()))

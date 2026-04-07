@@ -33,7 +33,6 @@ class UtilsCOCCommand(UserCommandBase):
         super().__init__(bot)
         bot.loc_helper.register_loc_text(LOC_COC_RES, "{name} COC人物作成——{reason}:\n{result}", ".coc返回的内容 name为用户昵称, reason为原因")
         bot.loc_helper.register_loc_text(LOC_COC_RES_NOREASON, "{name} COC人物作成:\n{result}", ".coc返回的内容（无原因） name为用户昵称")
-        bot.cfg_helper.register_config(CFG_ROLL_COC_ENABLE, "1", "COC指令开关")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".coc")

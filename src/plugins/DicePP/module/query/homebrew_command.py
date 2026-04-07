@@ -12,7 +12,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.localization import LOC_FUNC_DISABLE
-from core.config import CONTENT_EXCEL_DATA_PATH, CFG_MASTER, CFG_ADMIN
+from core.config import CONTENT_EXCEL_DATA_PATH
 from core.data.models import GroupConfig
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.data import yield_deduplicate
@@ -81,7 +81,7 @@ class HomebrewCommand(UserCommandBase):
         should_pass: bool = False
         mode: Optional[Literal["load","template","help","show","clean","on","off"]] = None
         arg_str: Optional[str] = None
-        admin: bool = (meta.user_id in self.bot.cfg_helper.get_config(CFG_MASTER)) or (meta.user_id in self.bot.cfg_helper.get_config(CFG_ADMIN))
+        admin: bool = (meta.user_id in self.bot.config.master) or (meta.user_id in self.bot.config.admin)
 
         # 常规查询指令
         if admin:
@@ -134,9 +134,7 @@ class HomebrewCommand(UserCommandBase):
         feedback: str = ""
 
         # 判断功能开关
-        try:
-            assert (int(self.bot.cfg_helper.get_config(CFG_QUERY_ENABLE)[0]) != 0)
-        except AssertionError:
+        if not self.bot.config.query.enable:
             feedback = self.bot.loc_helper.format_loc_text(LOC_FUNC_DISABLE, func=self.readable_name)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 

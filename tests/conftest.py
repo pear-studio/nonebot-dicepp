@@ -30,7 +30,6 @@ if str(dicepp_path) not in sys.path:
     sys.path.insert(0, str(dicepp_path))
 
 from core.bot import Bot
-from core.config import ConfigItem, CFG_MASTER
 from core.command import BotCommandBase
 from core.communication import MessageMetaData, MessageSender
 from adapter import ClientProxy
@@ -88,8 +87,8 @@ def _new_test_account(prefix: str) -> str:
 @pytest.fixture(scope="class")
 def shared_bot():
     test_bot = Bot(_new_test_account("test_bot"), no_tick=True)
-    test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
-    test_bot.cfg_helper.save_config()
+    # Override master directly on the config object for test isolation
+    test_bot.config.master = ["test_master"]
 
     test_proxy = TestProxy()
     test_bot.set_client_proxy(test_proxy)
@@ -106,8 +105,7 @@ def shared_bot():
 @pytest.fixture(scope="function")
 def fresh_bot():
     test_bot = Bot(_new_test_account("test_bot_fresh"), no_tick=True)
-    test_bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
-    test_bot.cfg_helper.save_config()
+    test_bot.config.master = ["test_master"]
 
     test_proxy = TestProxy()
     test_bot.set_client_proxy(test_proxy)

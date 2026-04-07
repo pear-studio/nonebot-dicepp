@@ -11,7 +11,6 @@ from tests.fs_utils import rmtree_retry
 from core.bot import Bot
 from core.command import BotCommandBase
 from core.communication import MessageMetaData, MessageSender, NoticeData, GroupIncreaseNoticeData
-from core.config import ConfigItem, CFG_MASTER
 from adapter import ClientProxy
 from src.plugins.DicePP import GroupMemberInfo, GroupInfo
 
@@ -83,8 +82,7 @@ class MyTestCase(IsolatedAsyncioTestCase):
             bot = Bot(
                 f"test_cmd_{uuid.uuid4().hex[:12]}", readonly=True, no_tick=True
             )
-            bot.cfg_helper.all_configs[CFG_MASTER] = ConfigItem(CFG_MASTER, "test_master")
-            bot.cfg_helper.save_config()
+            bot.config.master = ["test_master"]
 
             proxy = _TestProxy()
             bot.set_client_proxy(proxy)

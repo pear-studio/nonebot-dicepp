@@ -3,7 +3,7 @@ import datetime
 import asyncio
 
 from core.bot import Bot
-from core.config import CFG_MASTER, BOT_VERSION
+from core.config import BOT_VERSION
 from utils.time import get_current_date_str, get_current_date_raw
 from utils.logger import dice_log
 
@@ -77,7 +77,7 @@ class HubManager:
         master_id = self._config_cache.get(HUB_KEY_MASTER_ID, "")
         if master_id:
             return master_id
-        masters = self.bot.cfg_helper.get_config(CFG_MASTER)
+        masters = self.bot.config.master
         return masters[0] if masters else ""
 
     def is_configured(self) -> bool:

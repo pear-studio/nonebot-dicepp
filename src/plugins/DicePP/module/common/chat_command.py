@@ -31,7 +31,6 @@ class ChatCommand(UserCommandBase):
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
-        bot.cfg_helper.register_config(CFG_CHAT_INTER, "20", "自定义聊天触发间隔, 单位:秒")
         self.interval: int = -1
         self.interval_delta: datetime.timedelta = datetime.timedelta(seconds=20)
         # 自定义对话的开关由groupconifg_command操控
@@ -116,10 +115,7 @@ class ChatCommand(UserCommandBase):
     def get_interval(self) -> int:
         if self.interval >= 0:
             return self.interval
-        try:
-            self.interval = int(self.bot.cfg_helper.get_config(CFG_CHAT_INTER)[0])
-        except (ValueError, IndexError):
-            self.interval = 20
+        self.interval = self.bot.config.chat_interval
         self.interval_delta = datetime.timedelta(seconds=self.interval)
         return self.interval
 

@@ -108,18 +108,13 @@ class HubCommand(UserCommandBase):
             "查看 URL 时的回复",
         )
 
-        from core.config import CFG_HUB_ENABLE
-        self.bot.cfg_helper.register_config(CFG_HUB_ENABLE, "1", "1为开启, 0为关闭")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = False
         should_pass: bool = False
         hint = None
 
-        try:
-            from core.config import CFG_HUB_ENABLE
-            assert int(self.bot.cfg_helper.get_config(CFG_HUB_ENABLE)[0]) == 1
-        except (AssertionError, ValueError, IndexError):
+        if not self.bot.config.dicehub.enable:
             return should_proc, should_pass, hint
 
         if msg_str.startswith(".hub"):
@@ -131,8 +126,7 @@ class HubCommand(UserCommandBase):
         return should_proc, should_pass, hint
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        from core.config import CFG_MASTER
-        if meta.user_id not in self.bot.cfg_helper.get_config(CFG_MASTER):
+        if meta.user_id not in self.bot.config.master:
             return []
 
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)

@@ -1,0 +1,75 @@
+{
+  "_comment": "DicePP 全局默认配置。此文件可提交到版本库。敏感信息请写入 config.local.json",
+
+  "agreement": "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议视为同意并承诺遵守此协议，否则请移除骰娘。\n2.不允许禁言骰娘或刷屏掷骰等对骰娘的不友善行为，这些行为将会提高骰娘被制裁的风险。开关骰娘响应请使用.bot on/off。\n3.邀请骰娘入群应已事先得到群内同意。因擅自邀请而使骰娘遭遇不友善行为时，邀请者因未履行预见义务而将承担连带责任。\n4.禁止将骰娘用于赌博及其他违法犯罪行为，禁止将本骰娘用作TRPG外的用途，禁止拉入非TRPG群。\n5.对于设置敏感昵称等无法预见但有可能招致言论审查的行为，骰娘可能会出于自我保护而拒绝提供服务\n6.由于技术以及资金原因，无法保证骰娘100%的时间稳定运行，可能不定时停机维护或遭遇冻结，敬请谅解。\n7.对于违反协议的行为，骰娘将视情况终止对用户和所在群提供服务。\n8.本协议内容可能改动，请注意查看最新协议。\n9.本服务最终解释权归服务提供方所有。",
+
+  "command_split": "\\\\",
+
+  "group_invite": true,
+  "data_expire": false,
+  "user_expire_day": 60,
+  "group_expire_day": 14,
+  "group_expire_warning_time": 1,
+  "bot_default_enable": true,
+  "chat_interval": 20,
+
+  "llm": {
+    "enabled": false,
+    "base_url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.5",
+    "personality": "你是一个 helpful 的助手，回答简洁。",
+    "max_context": 20,
+    "timeout": 10
+  },
+
+  "memory_monitor": {
+    "enable": false,
+    "warn_percent": 80,
+    "restart_percent": 90,
+    "restart_mb": 2048
+  },
+
+  "dicehub": {
+    "api_url": "",
+    "api_key": "",
+    "webchat_url": "",
+    "name": "未命名",
+    "enable": true,
+    "heartbeat_interval": 180
+  },
+
+  "roll": {
+    "enable": true,
+    "hide_enable": true,
+    "dnd_enable": true,
+    "coc_enable": true
+  },
+
+  "deck": {
+    "enable": true,
+    "data_path": "./DeckData"
+  },
+
+  "random_gen": {
+    "enable": true,
+    "data_path": "./RandomGenData"
+  },
+
+  "query": {
+    "enable": true,
+    "data_path": "./QueryData",
+    "private_database": "DND5E2014"
+  },
+
+  "log": {
+    "upload_enable": true,
+    "upload_endpoint": "https://dice.weizaima.com/dice/api/log",
+    "upload_token": "",
+    "max_records": 5000
+  },
+
+  "mode": {
+    "enable": true,
+    "default": "DND5E2024"
+  }
+}

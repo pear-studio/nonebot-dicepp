@@ -8,11 +8,10 @@ from random import choice
 from utils.logger import dice_log, get_exception_info
 from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
 from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
-from core.config import ConfigManager, CFG_COMMAND_SPLIT, CFG_MASTER, CFG_FRIEND_TOKEN, CFG_GROUP_INVITE
-from core.config import CFG_DATA_EXPIRE, CFG_USER_EXPIRE_DAY, CFG_GROUP_EXPIRE_DAY, CFG_GROUP_EXPIRE_WARNING,\
-    CFG_WHITE_LIST_GROUP, CFG_WHITE_LIST_USER, CFG_ADMIN, CFG_MASTER, preprocess_white_list
-from core.config import CFG_MEMORY_MONITOR_ENABLE, CFG_MEMORY_WARN_PERCENT, CFG_MEMORY_RESTART_PERCENT, CFG_MEMORY_RESTART_MB
-from core.config import BOT_DATA_PATH
+from core.config import BOT_DATA_PATH, DATA_PATH
+from core.config.loader import ConfigLoader, ConfigValidationError
+from core.config.pydantic_models import BotConfig
+from core.persona import PersonaLoader
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
@@ -60,10 +59,14 @@ class Bot:
         self.fix_data()
         self.db = BotDatabase(self.account)
         self.hub_manager = HubManager(self)
-        bot_config_path = os.path.join(self.data_path, "Config")
-        os.makedirs(bot_config_path, exist_ok=True)
-        self.loc_helper = LocalizationManager(bot_config_path, self.account)
-        self.cfg_helper = ConfigManager(bot_config_path, self.account)
+
+        # New config system: ConfigLoader + PersonaLoader
+        self._cfg_loader = ConfigLoader(DATA_PATH, account)
+        self._persona_loader = PersonaLoader(DATA_PATH)
+        self.config: BotConfig = self._cfg_loader.load()
+
+        # LocalizationManager now takes a PersonaLoader; no file paths needed
+        self.loc_helper = LocalizationManager(persona_loader=self._persona_loader)
 
         self.command_dict: Dict[str, command.UserCommandBase] = {}
 
@@ -87,14 +90,8 @@ class Bot:
 
     def start_up(self, readonly: bool = False):
         self.register_command()
-        self.loc_helper.load_localization()  # 要在注册完命令后再读取本地化文件
-        if not readonly:
-            self.loc_helper.save_localization()  # 更新本地文件
-        self.loc_helper.load_chat()
-        if not readonly:
-            self.loc_helper.save_chat()
-        self.cfg_helper.load_config()
-        self.cfg_helper.save_config()
+        # Apply persona overrides after commands have registered their loc keys
+        self.loc_helper.set_persona(self.config.persona)
 
     def register_task(self, task: Callable, is_async: bool = True, timeout: float = 10, timeout_callback: Optional[Callable] = None):
         """
@@ -218,11 +215,7 @@ class Bot:
         """内存监控：检查内存使用情况，必要时发送警告或触发重启"""
         if not PSUTIL_AVAILABLE:
             return
-        try:
-            enable = int(self.cfg_helper.get_config(CFG_MEMORY_MONITOR_ENABLE)[0])
-            if not enable:
-                return
-        except (ValueError, TypeError, KeyError):
+        if not self.config.memory_monitor.enable:
             return
 
         status = self.get_memory_status()
@@ -231,13 +224,9 @@ class Bot:
 
         rss_mb = status["rss_mb"]
         percent = status["percent"]
-        
-        try:
-            warn_pct = int(self.cfg_helper.get_config(CFG_MEMORY_WARN_PERCENT)[0])
-            restart_pct = int(self.cfg_helper.get_config(CFG_MEMORY_RESTART_PERCENT)[0])
-            restart_mb = int(self.cfg_helper.get_config(CFG_MEMORY_RESTART_MB)[0])
-        except (ValueError, TypeError, KeyError):
-            warn_pct, restart_pct, restart_mb = 80, 90, 2048
+        warn_pct = self.config.memory_monitor.warn_percent
+        restart_pct = self.config.memory_monitor.restart_percent
+        restart_mb = self.config.memory_monitor.restart_mb
 
         if percent >= restart_pct or rss_mb >= restart_mb:
             msg = f"⚠️ 内存超限，正在自动重启\n当前: {rss_mb:.0f}MB ({percent:.1f}%)\n阈值: {restart_pct}% 或 {restart_mb}MB"
@@ -360,8 +349,7 @@ class Bot:
         if self.tick_task:
             self.tick_task.cancel()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
-        # self.loc_helper.save_localization() # 暂时不会在运行时修改, 不需要保存
-        # self.cfg_helper.save_config() # 暂时不会在运行时修改, 不需要保存
+        # config is read-only at runtime; hot-reload is triggered via .reload command
 
     def reboot(self):
         """重启bot"""
@@ -498,7 +486,7 @@ class Bot:
                             await self.proxy.process_bot_command(command)
                         # 如果不存在reboot者，则给所有Master汇报
                         else:
-                            for master in self.cfg_helper.get_config(CFG_MASTER):
+                            for master in self.config.master:
                                 command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
                                 await self.proxy.process_bot_command(command)
                 else:
@@ -552,9 +540,9 @@ class Bot:
 
         # 修改meta的permission参数
         # 4:骰主 3:骰管理 2:群主 1:群管理 0:普通人 -1:黑名单
-        if meta.user_id in self.cfg_helper.get_config(CFG_MASTER):
+        if meta.user_id in self.config.master:
             meta.permission = 4
-        elif meta.user_id in self.cfg_helper.get_config(CFG_ADMIN):
+        elif meta.user_id in self.config.admin:
             meta.permission = 3
         else:
             if meta.sender.role is not None:
@@ -583,7 +571,7 @@ class Bot:
         user_stat.msg.inc()
 
         # 处理分行指令
-        command_split: str = self.cfg_helper.get_config(CFG_COMMAND_SPLIT)[0]
+        command_split: str = self.config.command_split
         msg_list = msg.split(command_split)
         msg_list = [m.strip() for m in msg_list]
         is_multi_command = len(msg_list) > 1
@@ -672,16 +660,13 @@ class Bot:
     def process_request(self, data: RequestData) -> Optional[bool]:
         """处理请求"""
         if isinstance(data, FriendRequestData):
-            passwords: List[str] = self.cfg_helper.get_config(CFG_FRIEND_TOKEN)
-            passwords = [password.strip() for password in passwords if password.strip()]
+            passwords = [t.strip() for t in self.config.friend_token if t.strip()]
             comment: str = data.comment.strip()
             return not passwords or comment in passwords
         elif isinstance(data, JoinGroupRequestData):
-            should_allow: int = int(self.cfg_helper.get_config(CFG_GROUP_INVITE)[0])
-            return should_allow == 1
+            return self.config.group_invite
         elif isinstance(data, InviteGroupRequestData):
-            should_allow: int = int(self.cfg_helper.get_config(CFG_GROUP_INVITE)[0])
-            return should_allow == 1
+            return self.config.group_invite
         return False
 
     async def process_notice(self, data: NoticeData) -> List:
@@ -725,14 +710,14 @@ class Bot:
         exception_info = "\n".join(exception_info[-8:]) if len(exception_info) > 8 else "\n".join(exception_info)
         additional_info = f"\n{info}" if info else ""
         feedback = f"未处理的错误:\n{exception_info}{additional_info}"
-        master_list = self.cfg_helper.get_config(CFG_MASTER)
+        master_list = self.config.master
         if master_list:
             return [BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master_list[0])])]
         else:
             return []
 
     def get_master_ids(self) -> List[str]:
-        return self.cfg_helper.get_config(CFG_MASTER)
+        return self.config.master
 
     async def send_msg_to_master(self, msg: str) -> None:
         """发送信息给主Master"""
@@ -819,21 +804,18 @@ class Bot:
         from module.character.dnd5e import DC_CHAR_DND, DC_CHAR_HP
 
         cur_date = get_current_date_raw()
-        try:
-            is_data_expire = bool(int(self.cfg_helper.get_config(CFG_DATA_EXPIRE)[0]))
-            user_expire_day = int(self.cfg_helper.get_config(CFG_USER_EXPIRE_DAY)[0])
-            group_expire_day = int(self.cfg_helper.get_config(CFG_GROUP_EXPIRE_DAY)[0])
-            group_expire_time = int(self.cfg_helper.get_config(CFG_GROUP_EXPIRE_WARNING)[0])
-            group_expire_warn = self.loc_helper.format_loc_text(LOC_GROUP_EXPIRE_WARNING)
-        except ValueError:
-            return self.handle_exception(f"自动清理信息")
+        is_data_expire = self.config.data_expire
+        user_expire_day = self.config.user_expire_day
+        group_expire_day = self.config.group_expire_day
+        group_expire_time = self.config.group_expire_warning_time
+        group_expire_warn = self.loc_helper.format_loc_text(LOC_GROUP_EXPIRE_WARNING)
         if not is_data_expire:
             return []
         result_commands: List[BotCommandBase] = []
         index = 0
 
-        white_list_group: List[str] = preprocess_white_list(self.cfg_helper.get_config(CFG_WHITE_LIST_GROUP))
-        white_list_user: List[str] = preprocess_white_list(self.cfg_helper.get_config(CFG_WHITE_LIST_USER))
+        white_list_group: List[str] = self.config.white_list_group
+        white_list_user: List[str] = self.config.white_list_user
 
         # 清理过期用户信息
         user_stat_rows = await self.db.user_stat.list_all()
