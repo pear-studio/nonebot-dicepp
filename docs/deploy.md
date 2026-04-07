@@ -93,6 +93,18 @@ cd nonebot-dicepp
 
 #### 2. 安装 LLOneBot
 
+> **注意**: 如果当前用户没有 Docker 权限，需要将用户加入 docker 组或全程使用 `sudo`
+
+```bash
+# 方法1：将用户加入 docker 组（推荐，之后无需 sudo）
+sudo usermod -aG docker $USER
+newgrp docker  # 刷新组权限（或重新登录生效）
+
+# 方法2：全程使用 sudo（如果方法1不可用）
+sudo bash scripts/deploy/linux/llonebot/setup.sh
+```
+
+正常安装：
 ```bash
 make setup-llbot
 # 或: bash scripts/deploy/linux/llonebot/setup.sh
@@ -104,16 +116,67 @@ make setup-llbot
 - 下载并运行 LLOneBot 官方安装脚本
 - 配置网络
 
+安装过程（交互式配置向导）：
+
+```
+===== LLOneBot 安装向导 =====
+
+请选择配置方式：
+1) 现在配置（命令行配置所有选项）
+2) 稍后配置（仅配置 WebUI，其他选项在 WebUI 中配置）
+请选择 (1/2): 1
+
+请输入 QQ 号（必填）: 你的QQ号
+
+WebUI 配置：
+WebUI 密码（必填，仅支持英文和数字）: 设置密码
+WebUI 端口 (默认 3080): 回车使用默认
+
+请选择要启用的协议（可多选）：
+1) OneBot 11
+2) Milky
+3) Satori
+输入选项（用空格分隔）: 1
+
+OneBot 11 连接配置：
+1) WebSocket 服务端
+2) WebSocket 客户端
+3) HTTP 服务端
+4) WebHook
+选择连接类型: 2
+WebSocket URL: ws://dicepp:8080/onebot/v11/ws
+Token (可选): 留空回车
+
+选择连接类型: 0  (完成配置)
+
+是否启用无头模式 (y/n): y
+
+是否使用 Docker 镜像源 (y/n): y
+```
+
+关键配置说明：
+- **协议选择**: 必须启用 `OneBot 11`
+- **连接类型**: 选择 `WebSocket 客户端`（反向连接）
+- **WebSocket URL**: 填写 `ws://dicepp:8080/onebot/v11/ws`（使用容器名，非 IP）
+- **无头模式**: 推荐 `y`（省内存），如遇掉线问题可改用有头模式
+
 安装完成后：
-1. 访问 WebUI: http://localhost:3080
-2. 扫码登录 QQ
-3. 配置反向 WebSocket: `ws://dicepp:8080/onebot/v11/ws`
+1. 查看日志获取二维码: `make llbot-logs` 或访问 `http://服务器IP:3080`
+2. 扫码登录 QQ（复制日志中的二维码网址到浏览器，用手机 QQ 扫描）
+3. 登录成功后 DicePP 才能正常连接
 
 #### 3. 部署 DicePP
 
 ```bash
 make deploy
 # 或: bash scripts/deploy/linux/setup.sh
+# 如需 sudo: sudo bash scripts/deploy/linux/setup.sh
+```
+
+如果提示网络不存在，先确认 `dice-net` 已创建：
+```bash
+docker network ls  # 查看网络列表
+docker network create dice-net  # 如不存在则手动创建
 ```
 
 ### 日常操作
@@ -269,7 +332,22 @@ docker network create dice-net
 # 确保 Docker 版本 >= 20.10
 
 # V1 (旧版)
-pip install docker-compose
+sudo pip install docker-compose
+```
+
+### Docker 权限问题
+
+如果提示权限不足：
+
+```bash
+# 方法1：将当前用户加入 docker 组（推荐，永久解决）
+sudo usermod -aG docker $USER
+newgrp docker  # 刷新组权限（或重新登录生效）
+
+# 方法2：使用 sudo 运行（临时）
+sudo make deploy
+# 或
+sudo bash scripts/deploy/linux/setup.sh
 ```
 
 ---
