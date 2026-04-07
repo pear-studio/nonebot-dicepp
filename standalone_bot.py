@@ -177,6 +177,16 @@ def create_app(bot_id: str) -> FastAPI:
             await bot.shutdown_async()
 
     app = FastAPI(lifespan=lifespan)
+
+    # 过滤健康检查访问日志, 只在出错时记录
+    @app.middleware("http")
+    async def filter_health_logs(request, call_next):
+        response = await call_next(request)
+        # 对 /dpp/ 健康检查端点, 200 响应不打日志
+        if request.url.path == "/dpp/" and request.method == "GET" and response.status_code == 200:
+            return response
+        return response
+
     app.mount("/dpp", dpp_api)
     return app
 
@@ -192,7 +202,7 @@ def main() -> None:
     inject_cli_env_overrides(args)
 
     app = create_app(bot_id)
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=port, access_log=False)
 
 
 if __name__ == "__main__":
