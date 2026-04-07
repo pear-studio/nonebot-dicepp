@@ -8,15 +8,11 @@ from module.fastapi.api import bind_runtime, dpp_api
 
 
 class _FakeHubManager:
-    def __init__(self, registered: bool = False, heartbeat_ok: bool = True):
+    def __init__(self, registered: bool = False):
         self._registered = registered
-        self._heartbeat_ok = heartbeat_ok
 
     def is_registered(self) -> bool:
         return self._registered
-
-    async def heartbeat(self) -> bool:
-        return self._heartbeat_ok
 
 
 class _FakeProxy:
@@ -59,16 +55,6 @@ def test_command_returns_400_when_text_missing():
     client = TestClient(dpp_api)
     resp = client.post("/command", json={"user_id": "10001"})
     assert resp.status_code == 400
-
-
-def test_heartbeat_returns_422_when_unregistered():
-    proxy = _FakeProxy()
-    bot = _FakeBot(proxy)
-    bot.hub_manager = _FakeHubManager(registered=False)
-    bind_runtime(bot, proxy)
-    client = TestClient(dpp_api)
-    resp = client.post("/heartbeat", json={})
-    assert resp.status_code == 422
 
 
 def test_command_returns_500_on_unhandled_exception():

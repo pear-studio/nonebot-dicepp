@@ -31,8 +31,6 @@ class DiceHubConfig(BaseModel):
     api_key: str = ""
     webchat_url: str = ""
     name: str = "未命名"
-    enable: bool = True
-    heartbeat_interval: int = 180
 
 
 class RollConfig(BaseModel):

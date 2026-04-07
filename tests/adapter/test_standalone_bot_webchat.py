@@ -1,17 +1,16 @@
 """
-standalone_bot WebChat 自动启用功能测试
+standalone_bot WebChat 可选启用功能测试
 
 策略：通过 create_app() 构建真实的 FastAPI app，驱动其 lifespan
 context manager，只 mock 外部依赖（DiceBot、WebChatAdapter.start、
 bind_runtime），从而验证 standalone_bot.py 里的真实代码路径。
 
 测试场景：
-  5.1  WEBCHAT_ENABLED=true，无显式 key，注册成功 → 自动获取 key 并切换到 WebChatProxy
-  5.2  WEBCHAT_ENABLED=true，有显式 WEBCHAT_API_KEY → 使用该 key，不依赖注册
-  5.3  WEBCHAT_ENABLED=true，有显式 key，无 HUB_URL → 不注册，WebChat 仍启动
-  5.4  WEBCHAT_ENABLED=false → 不创建 WebChatAdapter，proxy 保持 StandaloneClientProxy
-  5.5  注册失败且无显式 key → WebChat 未启用，proxy 保持 StandaloneClientProxy
-  5.6  WebChat start() 失败 → fallback 到 StandaloneClientProxy，webchat_enabled=False
+  1. 有 HUB_URL，注册成功 → 自动获取 key 并启动 WebChat
+  2. 有显式 WEBCHAT_API_KEY → 使用该 key，WebChat 正常启动
+  3. 无 HUB_URL → 正常启动（standalone 模式，不创建 WebChatAdapter）
+  4. WebChat start() 失败 → fallback 到 StandaloneClientProxy，不影响启动
+  5. 注册失败且无显式 key → WebChat 未启用，proxy 保持 StandaloneClientProxy
 """
 
 import sys
@@ -40,8 +39,7 @@ class _FakeBotConfig:
     def __init__(self, cfg: dict):
         self.master = [cfg.get("master_id")] if cfg.get("master_id") else []
         self.nickname = cfg.get("nickname", "")
-        # dicehub
-        webchat_enabled = cfg.get("webchat_enabled", "false").lower() == "true"
+
         hub_url = cfg.get("hub_url", "")
         webchat_url = cfg.get("webchat_hub_url", "")
         webchat_key = cfg.get("webchat_api_key", "")
@@ -49,11 +47,9 @@ class _FakeBotConfig:
         class _DiceHubCfg:
             pass
         dh = _DiceHubCfg()
-        dh.enable = webchat_enabled
-        dh.api_url = hub_url  # HTTP API URL for registration
-        dh.webchat_url = webchat_url  # WebSocket URL for chat
+        dh.api_url = hub_url
+        dh.webchat_url = webchat_url
         dh.api_key = webchat_key
-        dh.heartbeat_interval = int(cfg.get("heartbeat_interval", "180"))
         self.dicehub = dh
 
 
@@ -89,7 +85,6 @@ class _FakeBot:
 
 def _make_bot(
     *,
-    webchat_enabled: bool = False,
     webchat_hub_url: str = "ws://hub:8000/ws/bot/",
     webchat_api_key: str = "",
     hub_url: str = "",
@@ -97,10 +92,8 @@ def _make_bot(
     cfg = {
         "master_id": "",
         "nickname": "",
-        "heartbeat_interval": "180",
         "webchat_hub_url": webchat_hub_url,
         "webchat_api_key": webchat_api_key,
-        "webchat_enabled": "true" if webchat_enabled else "false",
         "hub_url": hub_url,
     }
     return _FakeBot("test_bot", cfg)
@@ -124,45 +117,9 @@ async def _run_lifespan(app) -> None:
 
 
 @pytest.mark.asyncio
-async def test_webchat_disabled_keeps_standalone_proxy():
-    """5.4: WEBCHAT_ENABLED=false → WebChatAdapter 不被构造，proxy 是 StandaloneClientProxy。"""
-    bot = _make_bot(webchat_enabled=False, webchat_api_key="irrelevant_key")
-
-    with patch("standalone_bot.DiceBot", return_value=bot), \
-         patch("standalone_bot.bind_runtime") as mock_bind, \
-         patch("standalone_bot.WebChatAdapter") as mock_adapter_cls:
-
-        await _run_lifespan(standalone_bot.create_app("test_bot"))
-
-    mock_adapter_cls.assert_not_called()
-    assert isinstance(bot._proxy, StandaloneClientProxy)
-    _, kwargs = mock_bind.call_args
-    assert kwargs.get("webchat_enabled") is False
-
-
-@pytest.mark.asyncio
-async def test_webchat_enabled_explicit_key_switches_to_webchat_proxy():
-    """5.2: WEBCHAT_ENABLED=true + 显式 key → 使用该 key 构造 adapter，切换到 WebChatProxy。"""
-    bot = _make_bot(webchat_enabled=True, webchat_api_key="explicit_key_123")
-    mock_adapter = _make_mock_adapter()
-
-    with patch("standalone_bot.DiceBot", return_value=bot), \
-         patch("standalone_bot.bind_runtime") as mock_bind, \
-         patch("standalone_bot.WebChatAdapter", return_value=mock_adapter) as mock_cls:
-
-        await _run_lifespan(standalone_bot.create_app("test_bot"))
-
-    mock_cls.assert_called_once_with("ws://hub:8000/ws/bot/", "explicit_key_123")
-    mock_adapter.start.assert_awaited_once_with(bot)
-    assert isinstance(bot._proxy, WebChatProxy)
-    _, kwargs = mock_bind.call_args
-    assert kwargs.get("webchat_enabled") is True
-
-
-@pytest.mark.asyncio
-async def test_webchat_enabled_no_explicit_key_uses_registered_key():
-    """5.1: WEBCHAT_ENABLED=true，无显式 key，注册成功 → 从 hub_manager 取 key 启动 WebChat。"""
-    bot = _make_bot(webchat_enabled=True, webchat_api_key="", hub_url="http://hub:8000")
+async def test_webchat_with_hub_url_registers_and_starts():
+    """有 HUB_URL，注册成功 → 自动获取 key 并启动 WebChat。"""
+    bot = _make_bot(webchat_api_key="", hub_url="http://hub:8000")
     bot.hub_manager.get_api_key.return_value = "registered_key_456"
     mock_adapter = _make_mock_adapter()
 
@@ -178,9 +135,9 @@ async def test_webchat_enabled_no_explicit_key_uses_registered_key():
 
 
 @pytest.mark.asyncio
-async def test_webchat_explicit_key_works_without_hub_url():
-    """5.3: WEBCHAT_ENABLED=true，有显式 key，无 HUB_URL → 不注册但 WebChat 正常启动。"""
-    bot = _make_bot(webchat_enabled=True, webchat_api_key="key_789", hub_url="")
+async def test_webchat_with_explicit_key_skips_registration():
+    """有显式 WEBCHAT_API_KEY → 使用该 key 构造 adapter，跳过注册。"""
+    bot = _make_bot(webchat_api_key="explicit_key_123", hub_url="http://hub:8000")
     mock_adapter = _make_mock_adapter()
 
     with patch("standalone_bot.DiceBot", return_value=bot), \
@@ -189,17 +146,17 @@ async def test_webchat_explicit_key_works_without_hub_url():
 
         await _run_lifespan(standalone_bot.create_app("test_bot"))
 
-    bot.hub_manager.register.assert_not_awaited()
-    mock_cls.assert_called_once_with("ws://hub:8000/ws/bot/", "key_789")
+    # 有显式 key 时也应该尝试注册（因为 hub_url 存在）
+    bot.hub_manager.register.assert_awaited()
+    mock_cls.assert_called_once_with("ws://hub:8000/ws/bot/", "explicit_key_123")
+    mock_adapter.start.assert_awaited_once_with(bot)
     assert isinstance(bot._proxy, WebChatProxy)
 
 
 @pytest.mark.asyncio
-async def test_registration_failure_without_explicit_key_stays_standalone():
-    """5.5: 注册失败且无显式 key → WebChatAdapter 不被构造，proxy 保持 StandaloneClientProxy。"""
-    bot = _make_bot(webchat_enabled=True, webchat_api_key="", hub_url="http://hub:8000")
-    bot.hub_manager.register.side_effect = Exception("connection refused")
-    bot.hub_manager.get_api_key.return_value = ""
+async def test_webchat_without_hub_url_starts_standalone():
+    """无 HUB_URL → 正常启动 standalone 模式，不创建 WebChatAdapter。"""
+    bot = _make_bot(webchat_hub_url="", webchat_api_key="", hub_url="")
 
     with patch("standalone_bot.DiceBot", return_value=bot), \
          patch("standalone_bot.bind_runtime") as mock_bind, \
@@ -215,8 +172,8 @@ async def test_registration_failure_without_explicit_key_stays_standalone():
 
 @pytest.mark.asyncio
 async def test_webchat_start_failure_falls_back_to_standalone():
-    """5.6: WebChat start() 抛异常 → fallback 到 StandaloneClientProxy，webchat_enabled=False。"""
-    bot = _make_bot(webchat_enabled=True, webchat_api_key="valid_key")
+    """WebChat start() 失败 → fallback 到 StandaloneClientProxy，启动不受影响。"""
+    bot = _make_bot(webchat_api_key="valid_key")
     mock_adapter = _make_mock_adapter()
     mock_adapter.start = AsyncMock(side_effect=RuntimeError("ws connect failed"))
 
@@ -226,7 +183,25 @@ async def test_webchat_start_failure_falls_back_to_standalone():
 
         await _run_lifespan(standalone_bot.create_app("test_bot"))
 
-    # start() 失败后 set_client_proxy(WebChatProxy) 未执行，proxy 保持 StandaloneClientProxy
+    assert isinstance(bot._proxy, StandaloneClientProxy)
+    _, kwargs = mock_bind.call_args
+    assert kwargs.get("webchat_enabled") is False
+
+
+@pytest.mark.asyncio
+async def test_registration_failure_without_explicit_key_stays_standalone():
+    """注册失败且无显式 key → WebChatAdapter 不被构造，proxy 保持 StandaloneClientProxy。"""
+    bot = _make_bot(webchat_api_key="", hub_url="http://hub:8000")
+    bot.hub_manager.register.side_effect = Exception("connection refused")
+    bot.hub_manager.get_api_key.return_value = ""
+
+    with patch("standalone_bot.DiceBot", return_value=bot), \
+         patch("standalone_bot.bind_runtime") as mock_bind, \
+         patch("standalone_bot.WebChatAdapter") as mock_adapter_cls:
+
+        await _run_lifespan(standalone_bot.create_app("test_bot"))
+
+    mock_adapter_cls.assert_not_called()
     assert isinstance(bot._proxy, StandaloneClientProxy)
     _, kwargs = mock_bind.call_args
     assert kwargs.get("webchat_enabled") is False

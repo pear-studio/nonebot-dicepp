@@ -79,10 +79,6 @@ class HubAPIClient:
         dice_log(f"[DiceHub] 注册机器人: bot_id={bot_id}, nickname={nickname}, master_id={master_id}, version={version}")
         return await self._request("POST", "/api/bots/register/", data)
 
-    async def heartbeat(self) -> Dict[str, Any]:
-        dice_log(f"[DiceHub] 发送心跳")
-        return await self._request("POST", "/api/bots/heartbeat/", {})
-
     async def get_robots(self, online_only: bool = False) -> List[Dict[str, Any]]:
         params = ""
         if online_only:

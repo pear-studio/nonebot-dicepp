@@ -1,24 +1,17 @@
 from typing import Dict, List, Optional, Any
 import datetime
-import asyncio
 
 from core.bot import Bot
 from core.config import BOT_VERSION
-from utils.time import get_current_date_str, get_current_date_raw
-from utils.logger import dice_log
+from utils.time import get_current_date_raw
 
 from module.dice_hub.api_client import HubAPIClient, HubAPIError
-
-HEARTBEAT_INTERVAL_TEST = 10
-HEARTBEAT_INTERVAL_PROD = 180
-HEARTBEAT_FAIL_THRESHOLD = 3
 
 LIST_REFRESH_INTERVAL = 600
 HUB_KEY_API_URL = "api_url"
 HUB_KEY_API_KEY = "api_key"
 HUB_KEY_NICKNAME = "nickname"
 HUB_KEY_MASTER_ID = "master_id"
-HUB_KEY_HEARTBEAT_INTERVAL = "heartbeat_interval"
 
 
 class HubManager:
@@ -26,9 +19,6 @@ class HubManager:
         self.bot = bot
         self.api_client: Optional[HubAPIClient] = None
         self._is_online = False
-        self._last_heartbeat: Optional[datetime.datetime] = None
-        self._heartbeat_fail_count = 0
-        self._heartbeat_tick_counter = 0
         self._online_robots_cache: List[Dict[str, Any]] = []
         self._last_list_refresh: Optional[datetime.datetime] = None
         self._config_cache: Dict[str, str] = {}
@@ -38,13 +28,11 @@ class HubManager:
         api_key = await self.bot.db.hub_get(HUB_KEY_API_KEY) or ""
         nickname = await self.bot.db.hub_get(HUB_KEY_NICKNAME) or ""
         master_id = await self.bot.db.hub_get(HUB_KEY_MASTER_ID) or ""
-        heartbeat_interval = await self.bot.db.hub_get(HUB_KEY_HEARTBEAT_INTERVAL) or ""
         self._config_cache = {
             HUB_KEY_API_URL: api_url,
             HUB_KEY_API_KEY: api_key,
             HUB_KEY_NICKNAME: nickname,
             HUB_KEY_MASTER_ID: master_id,
-            HUB_KEY_HEARTBEAT_INTERVAL: heartbeat_interval,
         }
 
     async def set_api_url(self, api_url: str) -> None:
@@ -113,26 +101,6 @@ class HubManager:
         self.api_client = HubAPIClient(self.get_api_url(), api_key)
         return result
 
-    async def heartbeat(self) -> bool:
-        if not self.is_registered():
-            return False
-
-        client = self.get_client()
-        if not client:
-            return False
-
-        try:
-            await client.heartbeat()
-            self._is_online = True
-            self._last_heartbeat = get_current_date_raw()
-            self._heartbeat_fail_count = 0
-            return True
-        except HubAPIError as e:
-            self._heartbeat_fail_count += 1
-            if self._heartbeat_fail_count >= HEARTBEAT_FAIL_THRESHOLD:
-                self._is_online = False
-            return False
-
     async def get_online_robots(self) -> List[Dict[str, Any]]:
         if not self.is_registered():
             return []
@@ -186,30 +154,5 @@ class HubManager:
             f"在线状态: {'在线' if self._is_online else '离线'}",
         ]
 
-        if self._last_heartbeat:
-            elapsed = get_current_date_raw() - self._last_heartbeat
-            lines.append(f"上次心跳: {int(elapsed.total_seconds())}秒前")
-
         return "\n".join(lines)
 
-    def tick(self) -> bool:
-        """每秒调用一次，返回 True 表示执行了心跳"""
-        if not self.is_registered():
-            return False
-
-        self._heartbeat_tick_counter += 1
-
-        interval_raw = self._config_cache.get(HUB_KEY_HEARTBEAT_INTERVAL, "").strip()
-        try:
-            interval = int(interval_raw) if interval_raw else HEARTBEAT_INTERVAL_PROD
-        except ValueError:
-            interval = HEARTBEAT_INTERVAL_PROD
-        interval = max(interval, 5)
-
-        if self._heartbeat_tick_counter >= interval:
-            self._heartbeat_tick_counter = 0
-            dice_log(f"[DiceHub] 定时心跳触发 (间隔: {interval}秒)")
-            asyncio.create_task(self.heartbeat())
-            return True
-
-        return False

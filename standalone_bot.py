@@ -77,6 +77,18 @@ def inject_cli_env_overrides(args: argparse.Namespace) -> None:
     if nickname_env:
         os.environ.setdefault("DICE_NICKNAME", nickname_env)
 
+    # Master ID from CLI or env
+    if args.master_id:
+        os.environ.setdefault("DICE_MASTER", args.master_id.strip())
+    master_env = os.getenv("MASTER_ID", "").strip()
+    if master_env:
+        os.environ.setdefault("DICE_MASTER", master_env)
+
+    # WebChat Hub URL from env (for WebSocket connection)
+    webchat_url_env = os.getenv("WEBCHAT_HUB_URL", "").strip()
+    if webchat_url_env:
+        os.environ.setdefault("DICE_DICEHUB_WEBCHAT_URL", webchat_url_env)
+
 
 def create_app(bot_id: str) -> FastAPI:
 
@@ -100,9 +112,7 @@ def create_app(bot_id: str) -> FastAPI:
             await bot.hub_manager.set_master_id(cfg.master[0])
         if cfg.nickname:
             await bot.hub_manager.set_nickname(cfg.nickname)
-        if cfg.dicehub.heartbeat_interval:
-            await bot.db.hub_set("heartbeat_interval", str(cfg.dicehub.heartbeat_interval))
-            await bot.hub_manager.load_config()
+        await bot.hub_manager.load_config()
 
         # Optional hub registration with exponential backoff
         registration_success = False
@@ -129,11 +139,12 @@ def create_app(bot_id: str) -> FastAPI:
                     )
                     await asyncio.sleep(wait_s)
 
-        # Optional WebChat via DiceHub
-        # webchat_url can be set separately; falls back to api_url if not set
-        webchat_hub_url = cfg.dicehub.webchat_url or cfg.dicehub.api_url
-        webchat_enabled = cfg.dicehub.enable and bool(webchat_hub_url)
-        if webchat_enabled and webchat_hub_url:
+        # Optional WebChat via DiceHub - connect in background, do not block startup
+        # Priority: WEBCHAT_HUB_URL env var > cfg.dicehub.webchat_url > cfg.dicehub.api_url
+        webchat_hub_url = os.getenv("WEBCHAT_HUB_URL", "").strip()
+        if not webchat_hub_url:
+            webchat_hub_url = cfg.dicehub.webchat_url or cfg.dicehub.api_url
+        if webchat_hub_url:
             final_api_key = cfg.dicehub.api_key
             if not final_api_key and registration_success:
                 final_api_key = bot.hub_manager.get_api_key()
@@ -147,14 +158,15 @@ def create_app(bot_id: str) -> FastAPI:
                     webchat_active = True
                     await webchat_adapter.start(bot)
                     bot.set_client_proxy(active_proxy)
-                    dice_log(f"[Standalone] WebChat enabled for hub={webchat_hub_url}")
+                    dice_log(f"[Standalone] WebChat started for hub={webchat_hub_url}")
                 except Exception as exc:
-                    dice_log(f"[Standalone][WARN] WebChat initialization failed: {exc}")
-                    dice_log("[Standalone] Continuing in standalone mode")
+                    dice_log(f"[Standalone][WARN] WebChat initialization failed, running without WebChat: {exc}")
                     active_proxy = standalone_proxy
                     webchat_active = False
             else:
-                dice_log("[Standalone][WARN] DiceHub enabled but no api_key available")
+                dice_log("[Standalone][WARN] DiceHub URL configured but no api_key available, WebChat disabled")
+        else:
+            dice_log("[Standalone] No DiceHub URL configured, running in standalone mode")
 
         bind_runtime(bot, active_proxy, webchat_enabled=webchat_active)
         try:

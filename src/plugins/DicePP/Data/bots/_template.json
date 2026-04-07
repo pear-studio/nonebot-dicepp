@@ -7,8 +7,5 @@
   "persona": "default",
   "nickname": "",
 
-  "_llm_comment": "如需为此账号单独设置 LLM，在此覆盖 llm 字段",
-  "llm": {
-    "api_key": ""
-  }
+  "_llm_comment": "如需为此账号单独设置 LLM，在此添加 llm 字段覆盖全局配置，如：\"llm\": {\"api_key\": \"xxx\"}"
 }

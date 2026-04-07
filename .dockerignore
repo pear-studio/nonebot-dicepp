@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+env
+*.egg-info
+
+# IDE
+.vscode
+.idea
+.cursor
+.trae
+.claude
+
+# 测试
+tests
+.pytest_cache
+.coverage
+htmlcov
+
+# 其他
+.temp
+*.md
+*.log
+Makefile
+Dockerfile*
+docker-compose*

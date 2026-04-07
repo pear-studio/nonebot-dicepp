@@ -231,6 +231,10 @@ class WebChatAdapter:
         if msg_type == "user_message":
             await self._handle_user_message(payload)
             return
+        if msg_type == "ping":
+            # 响应服务器心跳 ping
+            await self.enqueue_payload({"v": 1, "type": "pong"})
+            return
         if msg_type in {"auth_result", "auth"}:
             return
         await self.send_error(

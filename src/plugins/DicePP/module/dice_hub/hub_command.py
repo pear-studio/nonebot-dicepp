@@ -114,9 +114,6 @@ class HubCommand(UserCommandBase):
         should_pass: bool = False
         hint = None
 
-        if not self.bot.config.dicehub.enable:
-            return should_proc, should_pass, hint
-
         if msg_str.startswith(".hub"):
             msg_str = msg_str[5:].strip()
             if msg_str:
@@ -288,10 +285,6 @@ class HubCommand(UserCommandBase):
     def _handle_status(self, port) -> List[BotCommandBase]:
         status_msg = self.bot.hub_manager.generate_status_message()
         return [BotSendMsgCommand(self.bot.account, status_msg, [port])]
-
-    def tick(self) -> List[BotCommandBase]:
-        self.bot.hub_manager.tick()
-        return []
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         return "DiceHub 指令帮助:\n" \

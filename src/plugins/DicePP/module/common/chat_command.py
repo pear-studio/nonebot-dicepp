@@ -1,5 +1,6 @@
 from typing import List, Tuple, Any
 import datetime
+import json
 
 from core.bot import Bot
 from core.data.models import GroupConfig, UserStat
@@ -21,6 +22,23 @@ def get_default_chat_time(interval: int) -> str:
     return datetime_to_str(cur_time)
 
 
+def _get_data_dict(data) -> dict:
+    """Helper to convert data to dict (handles both str and dict types)"""
+    if isinstance(data, dict):
+        return data
+    elif isinstance(data, str) and data:
+        try:
+            return json.loads(data)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _get_data_as_json(data_dict: dict) -> str:
+    """Helper to convert dict to JSON string for storage"""
+    return json.dumps(data_dict, ensure_ascii=False)
+
+
 @custom_user_command(readable_name="自定义对话指令", priority=DPP_COMMAND_PRIORITY_TRIVIAL,
                      flag=DPP_COMMAND_FLAG_FUN | DPP_COMMAND_FLAG_CHAT)
 class ChatCommand(UserCommandBase):
@@ -40,16 +58,19 @@ class ChatCommand(UserCommandBase):
         _row = await self.bot.db.group_config.get(meta.group_id)
         chat_enabled = True
         if _row and _row.data:
-            chat_enabled = _row.data.get("chat", True)
+            data_dict = _get_data_dict(_row.data)
+            chat_enabled = data_dict.get("chat", True)
         if not chat_enabled:
             return False, False, ""
         # 获取上次聊天时间
         if meta.group_id:
             _row = await self.bot.db.group_config.get(meta.group_id)
-            time_str = _row.data.get("chat_time") if _row and _row.data else None
+            data_dict = _get_data_dict(_row.data) if _row and _row.data else {}
+            time_str = data_dict.get("chat_time")
         else:
             _row = await self.bot.db.user_stat.get(meta.user_id)
-            time_str = _row.data.get("chat_time") if _row and _row.data else None
+            data_dict = _get_data_dict(_row.data) if _row and _row.data else {}
+            time_str = data_dict.get("chat_time")
         if time_str is None:
             default_time = get_default_chat_time(self.get_interval())
             time_str = default_time
@@ -71,14 +92,14 @@ class ChatCommand(UserCommandBase):
                         new_time_str = repaired
                         if meta.group_id:
                             _row = await self.bot.db.group_config.get(meta.group_id)
-                            config_dict = dict(_row.data) if _row and _row.data else {}
+                            config_dict = _get_data_dict(_row.data) if _row and _row.data else {}
                             config_dict["chat_time"] = new_time_str
                             await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
                         else:
                             _row = await self.bot.db.user_stat.get(meta.user_id)
-                            data_dict = _row.data.copy() if _row and _row.data else {}
+                            data_dict = _get_data_dict(_row.data) if _row and _row.data else {}
                             data_dict["chat_time"] = new_time_str
-                            await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=data_dict))
+                            await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=_get_data_as_json(data_dict)))
                         parse_ok = True
                     except Exception:
                         pass
@@ -89,14 +110,14 @@ class ChatCommand(UserCommandBase):
             new_time_str = get_current_date_str()
             if meta.group_id:
                 _row = await self.bot.db.group_config.get(meta.group_id)
-                config_dict = dict(_row.data) if _row and _row.data else {}
+                config_dict = _get_data_dict(_row.data) if _row and _row.data else {}
                 config_dict["chat_time"] = new_time_str
                 await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
             else:
                 _row = await self.bot.db.user_stat.get(meta.user_id)
-                data_dict = _row.data.copy() if _row and _row.data else {}
+                data_dict = _get_data_dict(_row.data) if _row and _row.data else {}
                 data_dict["chat_time"] = new_time_str
-                await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=data_dict))
+                await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=_get_data_as_json(data_dict)))
         should_pass: bool = False
         return should_proc, should_pass, feedback
 

@@ -2,8 +2,42 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# 先复制依赖声明，利用 Docker 缓存层
+# 只要 pyproject.toml 不变，这一层就不会重建
+COPY pyproject.toml /app/
+
+# 解析并安装依赖（不安装当前包）
+RUN pip install --no-cache-dir \
+    aiofiles>=23.0 \
+    aiohttp>=3.9 \
+    nonebot2>=2.4.0 \
+    openai>=1.0.0 \
+    nb-cli>=1.4.0 \
+    nonebot-adapter-onebot>=2.4.0 \
+    openpyxl>=3.0.9 \
+    rsa>=4.8 \
+    gitpython>=3.1.40 \
+    python-docx>=0.8.11 \
+    lxml>=4.9.2 \
+    "uvicorn[standard]>=0.24.0" \
+    fastapi>=0.100.0 \
+    zhconv>=1.4.3 \
+    psutil>=5.9.0 \
+    "requests>=2.28.0,<2.32.0" \
+    "urllib3>=1.21.1,<2.0.0,!=1.25.0,!=1.25.1" \
+    "charset-normalizer>=3.0.0,<3.4.0" \
+    "chardet>=3.0.2,<6.0.0" \
+    pydantic>=2.0 \
+    pydantic-settings>=2.0 \
+    aiosqlite>=0.19.0 \
+    lark>=1.1.0 \
+    websockets>=15.0.1
+
+# 再复制代码（这层变化频繁，但依赖已缓存）
 COPY . /app
-RUN pip install --no-cache-dir .
+
+# 仅安装当前包（不重复安装依赖）
+RUN pip install --no-cache-dir --no-deps .
 
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8080
@@ -12,4 +46,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/dpp/').read()"
 
 CMD ["python", "standalone_bot.py"]
-
