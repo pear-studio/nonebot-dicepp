@@ -4,7 +4,7 @@ import json
 import pytest
 import websockets
 
-from adapter.web_chat_adapter import SEND_QUEUE_MAX, WebChatAdapter
+from adapter.web_chat_adapter import SEND_QUEUE_MAX, WebChatAdapter, WebChatAuthFailed
 from adapter.web_chat_proxy import WebChatProxy
 from core.command import BotSendForwardMsgCommand, BotSendMsgCommand
 from core.communication import PrivateMessagePort
@@ -33,6 +33,19 @@ class _MiniBot:
         command = BotSendMsgCommand("bot", f"reply:{msg}", [PrivateMessagePort(meta.user_id)])
         await self.proxy.process_bot_command(command)
         return [command]
+
+
+@pytest.mark.asyncio
+async def test_empty_api_key_raises_auth_failed():
+    """api_key 为空时 _perform_auth 应抛出 WebChatAuthFailed"""
+    adapter = WebChatAdapter("ws://localhost:0/ws/bot/", "")
+
+    # Mock websocket that should not be used since api_key is empty
+    class MockWs:
+        pass
+
+    with pytest.raises(WebChatAuthFailed, match="api_key is empty"):
+        await adapter._perform_auth(MockWs())
 
 
 @pytest.mark.asyncio

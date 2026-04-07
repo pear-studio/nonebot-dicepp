@@ -17,17 +17,27 @@
 
 `create_app()` 使用 FastAPI lifespan：
 
-1. 创建 `DiceBot` 与 `StandaloneClientProxy`
+1. 创建 `DiceBot`，初始使用 `StandaloneClientProxy`（轻量级，无需认证）
 2. 调用 `await bot.delay_init_command()`
-3. 注入 Hub 相关配置并可选自动注册（带退避重试）
-4. `bind_runtime(bot, proxy)` 绑定到 API
-5. 退出时 `await bot.shutdown_async()`
+3. 注入 Hub 相关配置
+4. **自动注册**：如果配置了 `HUB_URL`，尝试向后端注册（带退避重试）
+5. **自动启用 WebChat**（如果 `WEBCHAT_ENABLED=true`）：
+   - 优先使用显式配置的 `WEBCHAT_API_KEY`
+   - 若未配置，则从注册结果自动获取 `api_key`
+   - 创建 `WebChatAdapter + WebChatProxy` 并替换默认代理
+6. `bind_runtime(bot, proxy)` 绑定到 API
+7. 退出时 `await bot.shutdown_async()`
 
-当 `webchat_enabled=true` 且 `webchat_hub_url/webchat_api_key` 完整时：
+### WebChat 启用条件
 
-1. 生命周期会创建 `WebChatAdapter + WebChatProxy`
-2. `bot.set_client_proxy(WebChatProxy)` 替换默认 `StandaloneClientProxy`
-3. 启动 WebSocket 客户端任务并在退出时关闭
+| WEBCHAT_ENABLED | WEBCHAT_API_KEY | 注册结果 | 行为 |
+|-----------------|-----------------|----------|------|
+| false | - | - | 纯 Standalone 模式，无 WebSocket |
+| true | 有值 | - | 使用显式 `api_key` 启动 WebChat（不依赖注册） |
+| true | 无值 | 成功 | 注册后自动获取 `api_key` 启动 WebChat |
+| true | 无值 | 失败 | 记录警告，继续 Standalone 模式运行 |
+
+**注意**：即使未配置 `HUB_URL`，只要提供 `WEBCHAT_API_KEY` 和 `WEBCHAT_HUB_URL`，仍可启用 WebChat。
 
 ## HTTP 接口
 

@@ -100,18 +100,11 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         bot = DiceBot(bot_id)
+        # 初始始终创建 StandaloneClientProxy（轻量级，无需认证）
         standalone_proxy = StandaloneClientProxy()
         active_proxy = standalone_proxy
         webchat_adapter = None
         webchat_active = False
-
-        if webchat_enabled and webchat_hub_url and webchat_api_key:
-            webchat_adapter = WebChatAdapter(webchat_hub_url, webchat_api_key)
-            active_proxy = WebChatProxy(webchat_adapter)
-            webchat_active = True
-            dice_log(f"[Standalone] WebChat enabled for hub={webchat_hub_url}")
-        elif webchat_enabled:
-            dice_log("[Standalone][WARN] WEBCHAT_ENABLED is true but webchat_hub_url or webchat_api_key is empty")
 
         bot.set_client_proxy(active_proxy)
         await bot.delay_init_command()
@@ -128,12 +121,14 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
 
         # Optional auto-registration with exponential backoff.
         # Unified policy: 6 attempts, wait sequence 2s/4s/8s/10s/10s (total wait 34s).
+        registration_success = False
         if hub_url:
             waits = [2, 4, 8, 10, 10]
             max_attempts = len(waits) + 1
             for attempt in range(max_attempts):
                 try:
                     await bot.hub_manager.register()
+                    registration_success = True
                     break
                 except Exception as exc:
                     error_type = exc.__class__.__name__
@@ -150,8 +145,36 @@ def create_app(runtime_cfg: dict[str, str]) -> FastAPI:
                     )
                     await asyncio.sleep(wait_s)
 
-        if webchat_adapter is not None:
-            await webchat_adapter.start(bot)
+        # 注册完成后，根据配置启用 WebChat
+        if webchat_enabled and webchat_hub_url:
+            # 确定 api_key 来源（按优先级）
+            final_api_key = ""
+            if webchat_api_key:
+                # 优先使用显式提供的 WEBCHAT_API_KEY
+                final_api_key = webchat_api_key
+                dice_log("[Standalone] Using explicit WEBCHAT_API_KEY for WebChat")
+            elif registration_success:
+                # 注册成功，从 hub_manager 获取 api_key
+                final_api_key = bot.hub_manager.get_api_key()
+                if final_api_key:
+                    dice_log("[Standalone] Using api_key from hub registration for WebChat")
+
+            if final_api_key:
+                try:
+                    webchat_adapter = WebChatAdapter(webchat_hub_url, final_api_key)
+                    active_proxy = WebChatProxy(webchat_adapter)
+                    webchat_active = True
+                    await webchat_adapter.start(bot)
+                    bot.set_client_proxy(active_proxy)
+                    dice_log(f"[Standalone] WebChat enabled for hub={webchat_hub_url}")
+                except Exception as exc:
+                    dice_log(f"[Standalone][WARN] WebChat initialization failed: {exc}")
+                    dice_log("[Standalone] Continuing in standalone mode")
+                    active_proxy = standalone_proxy
+                    webchat_active = False
+            else:
+                dice_log("[Standalone][WARN] WEBCHAT_ENABLED is true but no api_key available")
+                dice_log("[Standalone] Provide WEBCHAT_API_KEY or ensure hub registration succeeds")
 
         bind_runtime(bot, active_proxy, webchat_enabled=webchat_active)
         try:

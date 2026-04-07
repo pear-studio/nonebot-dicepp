@@ -141,6 +141,8 @@ class WebChatAdapter:
                     self._ws = None
 
     async def _perform_auth(self, ws) -> None:
+        if not self._api_key:
+            raise WebChatAuthFailed("api_key is empty")
         await ws.send(json.dumps({"v": 1, "type": "auth", "api_key": self._api_key}, ensure_ascii=False))
         raw = await asyncio.wait_for(ws.recv(), timeout=10)
         msg = self._decode_json(raw)
