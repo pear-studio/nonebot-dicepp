@@ -17,7 +17,6 @@ from core.config import (
     CONTENT_QUERY_DATA_PATH,
     CONTENT_EXCEL_DATA_PATH,
 )
-from core.data import DC_USER_DATA
 from core.data.models import GroupConfig
 from core.data.query_store import (
     QUERY_DATA_FIELD,

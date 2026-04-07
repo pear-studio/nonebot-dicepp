@@ -7,7 +7,6 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from .groupconfig_command import DC_GROUPCONFIG
 from utils.time import get_current_date_str, get_current_date_raw, str_to_datetime, datetime_to_str
 
 CFG_CHAT_INTER = "chat_interval"

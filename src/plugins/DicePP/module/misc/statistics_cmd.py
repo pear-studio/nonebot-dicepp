@@ -10,7 +10,6 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
-from core.data import DC_META, DC_NICKNAME
 from core.statistics import GroupStatInfo, UserStatInfo, UserCommandStatInfo, RollStatInfo
 
 # LOC_TEMP = "template_loc"

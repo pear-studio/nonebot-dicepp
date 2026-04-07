@@ -16,8 +16,6 @@ from core.communication import MessageMetaData, MessagePort, PrivateMessagePort,
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import GroupInfo
-from core.data import DC_META, DC_NICKNAME, DC_USER_DATA, DC_GROUP_DATA,\
-    DCK_META_STAT, DCK_USER_STAT, DCK_GROUP_STAT
 from core.data import BotDatabase
 from core.data.models import UserStat, GroupStat, MetaStat, BotControl, UserNickname
 from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo
@@ -458,8 +456,6 @@ class Bot:
             if self.proxy:
                 from core.command import BotSendMsgCommand
                 from core.localization import LOC_LOGIN_NOTICE
-                from module.common.master_command import DC_CTRL
-
                 # 检查是否开启了静默模式
                 _ctrl_row = await self.db.bot_control.get("silent_startup")
                 is_silent = _ctrl_row.value == "True" if _ctrl_row else False
@@ -672,7 +668,7 @@ class Bot:
     async def process_notice(self, data: NoticeData) -> List:
         """处理提醒"""
         from core.command import BotCommandBase, BotSendMsgCommand
-        from module.common import DC_ACTIVATE, DC_WELCOME, LOC_WELCOME_DEFAULT
+        from module.common import LOC_WELCOME_DEFAULT
         bot_commands: List[BotCommandBase] = []
 
         # Ensure DB + per-command init completed before reading/writing sqlite.

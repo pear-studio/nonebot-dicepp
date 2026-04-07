@@ -1,5 +1,3 @@
-from core.data.basic import *
-
 from core.data.json_object import JsonObject, custom_json_object
 
 from core.data.database import BotDatabase
