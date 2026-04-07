@@ -349,7 +349,11 @@ class KarmaDiceCommand(UserCommandBase):
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
-        return self.format_loc(LOC_KARMA_HELP)
+        # 只响应业力骰子相关的关键词
+        karma_keywords = ["karmadice", "业力骰子", "骰子模式", "业力引擎", "karma"]
+        if keyword.lower() in karma_keywords:
+            return self.format_loc(LOC_KARMA_HELP)
+        return ""
 
     def get_description(self) -> str:
         return ".karmadice 业力骰子控制指令"

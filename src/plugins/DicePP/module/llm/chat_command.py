@@ -59,6 +59,9 @@ class LLMChatCommand(UserCommandBase):
     async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         """判断是否处理消息"""
         if not self.enabled or not self.client:
+            # 即使未启用，也响应 .llm status 或单独的 .llm
+            if msg_str.strip() == ".llm" or msg_str.strip().startswith(".llm "):
+                return True, False, "status"
             return False, False, None
 
         # @bot 或 .llm 前缀触发
@@ -81,10 +84,39 @@ class LLMChatCommand(UserCommandBase):
         if user_msg == "clear":
             self.memory.clear(user_id, group_id)
             response = "对话历史已清空"
-        elif user_msg == "status":
-            response = f"LLM 状态: 已启用\n模型: {self.client.model}\n上下文: {len(self.memory.get_history(user_id, group_id))} 条"
+        elif user_msg == "status" or hint == "status":
+            # 显示 LLM 状态
+            if not self.enabled or not self.client:
+                response = "LLM 状态: 未启用\n原因: 未配置 API Key"
+            else:
+                history_count = len(self.memory.get_history(user_id, group_id))
+                # 截断过长的 personality 显示
+                personality_display = self.system_prompt[:50] + "..." if len(self.system_prompt) > 50 else self.system_prompt
+                response = (
+                    f"LLM 状态: 已启用\n"
+                    f"模型: {self.client.model}\n"
+                    f"人格: {personality_display}\n"
+                    f"上下文: {history_count} 条\n"
+                    f"超时: {self.timeout} 秒\n"
+                    f"最大输入: {self.max_input_length} 字符"
+                )
         elif not user_msg:
-            response = "请输入消息，例如: .llm 你好 或 @bot 你好"
+            # 单独的 .llm 命令显示状态
+            if not self.enabled or not self.client:
+                response = "LLM 状态: 未启用\n原因: 未配置 API Key"
+            else:
+                history_count = len(self.memory.get_history(user_id, group_id))
+                # 截断过长的 personality 显示
+                personality_display = self.system_prompt[:50] + "..." if len(self.system_prompt) > 50 else self.system_prompt
+                response = (
+                    f"LLM 状态: 已启用\n"
+                    f"模型: {self.client.model}\n"
+                    f"人格: {personality_display}\n"
+                    f"上下文: {history_count} 条\n"
+                    f"超时: {self.timeout} 秒\n"
+                    f"最大输入: {self.max_input_length} 字符\n\n"
+                    f"使用方法: .llm <消息> 或 @bot <消息>"
+                )
         else:
             # 检查输入长度
             if len(user_msg) > self.max_input_length:
@@ -117,7 +149,7 @@ class LLMChatCommand(UserCommandBase):
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         """获取帮助信息"""
         if keyword in ["llm", "ai", "聊天", "AI"]:
-            return ".llm <消息> 或 @bot <消息> - 与 AI 对话\n.llm clear - 清空对话历史\n.llm status - 查看 LLM 状态"
+            return ".llm - 查看 LLM 状态\n.llm <消息> 或 @bot <消息> - 与 AI 对话\n.llm clear - 清空对话历史\n.llm status - 查看 LLM 状态"
         return ""
 
     def get_description(self) -> str:
