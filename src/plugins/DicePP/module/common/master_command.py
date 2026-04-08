@@ -11,7 +11,6 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config import BOT_DATA_PATH
 from core.data.models import BotControl
 
 LOC_REBOOT = "master_reboot"

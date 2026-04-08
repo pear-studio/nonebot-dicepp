@@ -1,5 +1,5 @@
 """
-PersonaLoader: discovers and loads Persona files from Data/personas/.
+PersonaLoader: discovers and loads Persona files from config/personas/.
 """
 import json
 from pathlib import Path
@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from utils.logger import dice_log
 from core.persona.models import PersonaModel
+from core.config.basic import Paths
 
 _PERSONAS_DIR = "personas"
 _DEFAULT_PERSONA = "default"
@@ -16,16 +17,20 @@ _DEFAULT_PERSONA = "default"
 
 class PersonaLoader:
     """
-    Loads and caches PersonaModel objects from Data/personas/*.json.
+    Loads and caches PersonaModel objects from config/personas/*.json.
 
     Usage:
-        loader = PersonaLoader(data_path)
-        persona = loader.get("cute")   # falls back to "default"
-        loader.reload()                # hot-reload all personas
+        loader = PersonaLoader()            # production: uses Paths.CONFIG_PERSONAS_DIR
+        loader = PersonaLoader(data_path)   # tests: looks in data_path/personas/
+        persona = loader.get("cute")        # falls back to "default"
+        loader.reload()                     # hot-reload all personas
     """
 
-    def __init__(self, data_path: str):
-        self._dir = Path(data_path) / _PERSONAS_DIR
+    def __init__(self, data_path: Optional[str] = None):
+        if data_path is not None:
+            self._dir = Path(data_path) / _PERSONAS_DIR
+        else:
+            self._dir = Paths.CONFIG_PERSONAS_DIR
         self._cache: Dict[str, PersonaModel] = {}
         self._load_all()
 

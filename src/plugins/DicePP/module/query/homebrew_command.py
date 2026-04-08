@@ -12,7 +12,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.localization import LOC_FUNC_DISABLE
-from core.config import CONTENT_EXCEL_DATA_PATH
+from core.config.basic import Paths
 from core.data.models import GroupConfig
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.data import yield_deduplicate
@@ -145,8 +145,13 @@ class HomebrewCommand(UserCommandBase):
                 feedback += "\n" + self.format_loc(LOC_HOMEBREW_LOAD_NEW)
             feedback += self.format_loc(LOC_HOMEBREW_LOAD)
             if len(arg_str) > 0:
+                try:
+                    xlsx_path = Paths.safe_content_path(Paths.CONTENT_EXCEL_DIR, arg_str, ".xlsx")
+                except ValueError:
+                    feedback += "\n文件名无效。"
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                 if await self.bot.db.query.load_data_from_xlsx_to_sqlite(
-                    os.path.join(CONTENT_EXCEL_DATA_PATH, arg_str + ".xlsx"),
+                    str(xlsx_path),
                     path,
                     2,
                 ):

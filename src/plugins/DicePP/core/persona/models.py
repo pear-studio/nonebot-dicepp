@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 class PersonaModel(BaseModel):
     """
     Represents a single persona definition loaded from
-    Data/personas/{name}.json
+    config/personas/{name}.json
     """
     name: str = "default"
 

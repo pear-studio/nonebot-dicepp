@@ -42,17 +42,17 @@ class RollConfig(BaseModel):
 
 class DeckConfig(BaseModel):
     enable: bool = True
-    data_path: str = "./DeckData"
+    data_path: str = "./decks"
 
 
 class RandomGenConfig(BaseModel):
     enable: bool = True
-    data_path: str = "./RandomGenData"
+    data_path: str = "./random"
 
 
 class QueryConfig(BaseModel):
     enable: bool = True
-    data_path: str = "./QueryData"
+    data_path: str = "./queries"
     private_database: str = "DND5E2014"
 
 

@@ -3,7 +3,7 @@ from typing import Optional
 
 import aiosqlite
 
-from core.config import BOT_DATA_PATH
+from core.config.basic import Paths
 from core.data.migrations import MigrationExecutionError, MigrationRunner, default_registry
 from .repository import Repository
 from .log_repository import LogRepository
@@ -30,7 +30,7 @@ from .models import (
 class BotDatabase:
     def __init__(self, bot_id: str):
         self._bot_id = bot_id
-        self._bot_dir = os.path.join(BOT_DATA_PATH, bot_id)
+        self._bot_dir = str(Paths.bot_data_dir(bot_id))
         self._db_path = os.path.join(self._bot_dir, "bot_data.db")
         self._log_db_path = os.path.join(self._bot_dir, "log.db")
 

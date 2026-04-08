@@ -12,7 +12,7 @@ PLUGIN_ROOT = os.path.join(PROJECT_ROOT, "src", "plugins", "DicePP")
 if PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, PLUGIN_ROOT)
 
-from core.config import BOT_DATA_PATH  # noqa: E402
+from core.config.basic import Paths  # noqa: E402
 from core.data.database import BotDatabase  # noqa: E402
 from core.data.migrations import MigrationExecutionError, default_registry, run_temp_replay_check  # noqa: E402
 
@@ -70,7 +70,7 @@ async def _cmd_up(bot_id: str) -> int:
 
 
 async def _cmd_check(bot_id: str) -> int:
-    bot_dir = os.path.join(BOT_DATA_PATH, bot_id)
+    bot_dir = str(Paths.bot_data_dir(bot_id))
     src_db_path = os.path.join(bot_dir, "bot_data.db")
     src_log_db_path = os.path.join(bot_dir, "log.db")
     code, message = await run_temp_replay_check(

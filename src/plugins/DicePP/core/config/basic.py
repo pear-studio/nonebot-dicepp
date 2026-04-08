@@ -1,99 +1,97 @@
 import os
+from pathlib import Path
 
 from utils.logger import dice_log
-from utils.frozen import get_app_dir
-
-PROJECT_PATH = get_app_dir()
-
-def _data_dir_score(data_path: str) -> int:
-    """
-    为 Data 目录候选打分：优先选择更“像真实数据目录”的那个。
-    主要用于 Linux 下大小写敏感导致的 Data/data 挂载不一致问题。
-    """
-    if not os.path.isdir(data_path):
-        return -1
-    expected_dirs = [
-        "UserData",
-        "Content",
-    ]
-    score = 0
-    for name in expected_dirs:
-        if os.path.isdir(os.path.join(data_path, name)):
-            score += 2
-
-    # 更细粒度的标志目录（无需知道 bot_id）
-    if os.path.isdir(os.path.join(data_path, "Content", "QueryData")):
-        score += 2
-    if os.path.isdir(os.path.join(data_path, "Content", "DeckData")):
-        score += 2
-    if os.path.isdir(os.path.join(data_path, "Content", "RandomGenData")):
-        score += 2
-    if os.path.isdir(os.path.join(data_path, "UserData", "Bot")):
-        score += 2
-    if os.path.isdir(os.path.join(data_path, "UserData", "LocalImage")):
-        score += 1
-    return score
+from utils.frozen import get_project_root
 
 
-def _select_data_path(project_path: str) -> str:
-    """
-    在 Data 与 data 之间择优选择：
-    - 若只有一个存在：用存在的；
-    - 若两者都存在：用“更像数据目录”的那个（更高得分）；
-    - 若都不存在：默认使用 Data（随后会创建）。
-    """
-    data_upper = os.path.join(project_path, "Data")
-    data_lower = os.path.join(project_path, "data")
+class Paths:
+    PROJECT_ROOT: Path = Path(get_project_root())
 
-    upper_exists = os.path.isdir(data_upper)
-    lower_exists = os.path.isdir(data_lower)
+    CONFIG_DIR:          Path = PROJECT_ROOT / "config"
+    CONFIG_GLOBAL:       Path = CONFIG_DIR / "global.json"
+    CONFIG_SECRETS:      Path = CONFIG_DIR / "secrets.json"
+    CONFIG_BOTS_DIR:     Path = CONFIG_DIR / "bots"
+    CONFIG_PERSONAS_DIR: Path = CONFIG_DIR / "personas"
 
-    if upper_exists and not lower_exists:
-        return data_upper
-    if lower_exists and not upper_exists:
-        return data_lower
+    DATA_DIR:      Path = PROJECT_ROOT / "data"
+    DATA_BOTS_DIR: Path = DATA_DIR / "bots"
+    LOCAL_IMG_DIR: Path = DATA_DIR / "local_images"
 
-    if upper_exists and lower_exists:
-        upper_score = _data_dir_score(data_upper)
-        lower_score = _data_dir_score(data_lower)
-        if lower_score > upper_score:
-            dice_log(f"[Config] [Init] 检测到 Data/data 同时存在，选择更匹配的数据目录: {data_lower}")
-            return data_lower
-        return data_upper
+    CONTENT_DIR:         Path = PROJECT_ROOT / "content"
+    CONTENT_QUERIES_DIR: Path = CONTENT_DIR / "queries"
+    CONTENT_DECKS_DIR:   Path = CONTENT_DIR / "decks"
+    CONTENT_RANDOM_DIR:  Path = CONTENT_DIR / "random"
+    CONTENT_EXCEL_DIR:   Path = CONTENT_DIR / "excel"
 
-    return data_upper
+    @classmethod
+    def bot_data_dir(cls, bot_id: str) -> Path:
+        return cls.DATA_BOTS_DIR / bot_id
 
+    @classmethod
+    def ensure_dirs(cls) -> None:
+        for d in [
+            cls.CONFIG_DIR, cls.CONFIG_BOTS_DIR, cls.CONFIG_PERSONAS_DIR,
+            cls.DATA_DIR, cls.DATA_BOTS_DIR, cls.LOCAL_IMG_DIR,
+            cls.CONTENT_DIR, cls.CONTENT_QUERIES_DIR, cls.CONTENT_DECKS_DIR,
+            cls.CONTENT_RANDOM_DIR, cls.CONTENT_EXCEL_DIR,
+        ]:
+            if not d.exists():
+                d.mkdir(parents=True, exist_ok=True)
+                dice_log("[Config] [Init] 创建文件夹: " + str(d))
 
-DATA_PATH = _select_data_path(PROJECT_PATH)
+    @classmethod
+    def safe_content_path(cls, base_dir: Path, name: str, suffix: str = "") -> Path:
+        """
+        将用户输入的文件名安全地拼接到 base_dir 下。
 
-CONTENT_PATH = os.path.join(DATA_PATH, "Content")
-USER_DATA_PATH = os.path.join(DATA_PATH, "UserData")
+        拒绝含路径分隔符或绝对路径的输入，并在 resolve 后验证结果
+        仍在 base_dir 之内，防止路径遍历攻击（../、绝对路径等）。
 
-# 运行时数据（按 bot_id 拆分到子目录中）
-BOT_DATA_PATH = os.path.join(USER_DATA_PATH, "Bot")
-# 用户房规（HB*.db）也归类为“运行时用户数据”
-CONTENT_QUERY_DATA_PATH = os.path.join(CONTENT_PATH, "QueryData")
-CONTENT_DECK_DATA_PATH = os.path.join(CONTENT_PATH, "DeckData")
-CONTENT_RANDOM_GEN_DATA_PATH = os.path.join(CONTENT_PATH, "RandomGenData")
-CONTENT_EXCEL_DATA_PATH = os.path.join(CONTENT_PATH, "ExcelData")
+        Args:
+            base_dir: 允许访问的根目录（如 Paths.CONTENT_EXCEL_DIR）
+            name:     用户输入的文件/目录名（不含后缀，不允许含路径分隔符）
+            suffix:   要附加的后缀（如 ".xlsx"）
 
-# localization.xlsx 里使用 IMG(...) 引用的本地图片资源（给所有 bot 共用也更合理）
-LOCAL_IMG_PATH = os.path.join(USER_DATA_PATH, "LocalImage")
+        Returns:
+            已验证的安全路径
 
+        Raises:
+            ValueError: 输入包含路径分隔符、绝对路径，或解析后越界
+        """
+        if "/" in name or "\\" in name:
+            raise ValueError(f"文件名不允许包含路径分隔符: {name!r}")
+        candidate = Path(name + suffix)
+        if candidate.is_absolute():
+            raise ValueError(f"不允许绝对路径: {name!r}")
+        resolved = (base_dir / candidate).resolve()
+        try:
+            resolved.relative_to(base_dir.resolve())
+        except ValueError:
+            raise ValueError(f"路径越界: {name!r}")
+        return resolved
 
-ALL_LOCAL_DIR_PATH = [
-    DATA_PATH,
-    USER_DATA_PATH,
-    CONTENT_PATH,
-    BOT_DATA_PATH,
-    CONTENT_QUERY_DATA_PATH,
-    CONTENT_DECK_DATA_PATH,
-    CONTENT_RANDOM_GEN_DATA_PATH,
-    CONTENT_EXCEL_DATA_PATH,
-    LOCAL_IMG_PATH,
-]
+    @classmethod
+    def safe_content_subpath(cls, base_dir: Path, rel: str) -> Path:
+        """
+        将用户输入的相对路径安全地拼接到 base_dir 下，允许含子目录。
 
-for dirPath in ALL_LOCAL_DIR_PATH:
-    if not os.path.exists(dirPath):
-        os.makedirs(dirPath)
-        dice_log("[Config] [Init] 创建文件夹: " + dirPath)
+        不拒绝路径分隔符（支持 'folder/file.xlsx' 形式），但在
+        resolve 后验证结果仍在 base_dir 之内，防止 ../ 越界。
+
+        Args:
+            base_dir: 允许访问的根目录
+            rel:      用户输入的相对路径（可含子目录，不可为绝对路径）
+
+        Raises:
+            ValueError: 输入为绝对路径或解析后越界
+        """
+        candidate = Path(rel)
+        if candidate.is_absolute():
+            raise ValueError(f"不允许绝对路径: {rel!r}")
+        resolved = (base_dir / candidate).resolve()
+        try:
+            resolved.relative_to(base_dir.resolve())
+        except ValueError:
+            raise ValueError(f"路径越界: {rel!r}")
+        return resolved

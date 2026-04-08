@@ -27,13 +27,13 @@ services:
       - TZ=Asia/Shanghai
     
     # 数据持久化：
-    # - UserData：运行时写入（可写）
-    # - bots：账号配置文件（可写）
-    # - Content：外部内容库（只读）
+    # - config：配置目录（可写，运行时生成 bots/*.json）
+    # - data：运行时数据（可写）
+    # - content：内容资源（可写，queries/ 运行时写入 .db）
     volumes:
-      - ./src/plugins/DicePP/Data/UserData:/app/src/plugins/DicePP/Data/UserData
-      - ./src/plugins/DicePP/Data/bots:/app/src/plugins/DicePP/Data/bots
-      - ./src/plugins/DicePP/Data/Content:/app/src/plugins/DicePP/Data/Content:ro
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./content:/app/content
     
     # 日志配置：自动轮转
     logging:

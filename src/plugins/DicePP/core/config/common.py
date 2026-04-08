@@ -3,7 +3,7 @@ Config key name constants and whitelist-preprocessing utility.
 
 These string constants are kept for backward compatibility with any module
 code that still references them.  The actual default values now live in
-Data/config.json and are loaded by ConfigLoader into BotConfig (pydantic_models.py).
+config/global.json and are loaded by ConfigLoader into BotConfig (pydantic_models.py).
 """
 from typing import List
 

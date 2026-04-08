@@ -10,6 +10,7 @@ import sys
 import os
 
 APP_DIR_ENV_KEY = "DICEPP_APP_DIR"
+PROJECT_ROOT_ENV_KEY = "DICEPP_PROJECT_ROOT"
 
 
 def is_frozen() -> bool:
@@ -45,16 +46,33 @@ def get_app_dir() -> str:
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def get_data_dir() -> str:
+def get_project_root() -> str:
     """
-    获取 Data 目录路径。
-    
-    Data 目录始终位于应用根目录下，用于存储用户数据。
-    
+    获取项目根目录（config/、data/、content/ 所在的目录）。
+
+    优先级:
+    - 环境变量 DICEPP_PROJECT_ROOT 优先（Docker/打包环境兜底）
+    - 打包环境: EXE 所在目录
+    - 开发环境: 从 src/plugins/DicePP/ 向上 3 级到达项目根
+
     Returns:
-        Data 目录的绝对路径
+        项目根目录的绝对路径
     """
-    return os.path.join(get_app_dir(), 'Data')
+    env_root = os.getenv(PROJECT_ROOT_ENV_KEY)
+    if env_root:
+        return os.path.abspath(env_root)
+
+    if is_frozen():
+        return os.path.dirname(sys.executable)
+
+    # 开发/Docker: frozen.py 位于 utils/ 下
+    # utils/ -> DicePP/ -> plugins/ -> src/ -> 项目根
+    utils_dir = os.path.dirname(os.path.abspath(__file__))
+    dicepp_dir = os.path.dirname(utils_dir)
+    plugins_dir = os.path.dirname(dicepp_dir)
+    src_dir = os.path.dirname(plugins_dir)
+    project_root = os.path.dirname(src_dir)
+    return project_root
 
 
 def get_runtime_info() -> dict:
@@ -67,7 +85,7 @@ def get_runtime_info() -> dict:
     return {
         'frozen': is_frozen(),
         'app_dir': get_app_dir(),
-        'data_dir': get_data_dir(),
+        'project_root': get_project_root(),
         'executable': sys.executable,
         'cwd': os.getcwd(),
     }

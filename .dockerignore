@@ -33,3 +33,10 @@ htmlcov
 Makefile
 Dockerfile*
 docker-compose*
+
+# Secrets — 防止本地配置文件被打包进 Docker 镜像
+config/secrets.json
+config/bots/*.json
+!config/bots/_template.json
+data/
+content/

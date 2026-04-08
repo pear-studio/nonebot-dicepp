@@ -10,7 +10,7 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort, preprocess_msg
-from core.config import CONTENT_PATH, CONTENT_DECK_DATA_PATH, LOCAL_IMG_PATH
+from core.config.basic import Paths
 from core.localization import LocalizationManager, LOC_FUNC_DISABLE
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.string import match_substring
@@ -33,7 +33,7 @@ LOC_DRAW_ERR_VAGUE_DECK = "draw_error_vague_deck"
 
 CFG_DECK_ENABLE = "deck_enable"
 CFG_DECK_DATA_PATH = "deck_data_path"
-DRAW_DATA_PATH = "DeckData"
+
 
 DRAW_LIMIT = 10  # 指令抽卡的上限
 HLDL_DRAW_LIMIT = 50  # 高级抽卡语言中抽卡的上限
@@ -135,8 +135,8 @@ class DeckItem:
         def handle_img(match):
             key = match.group(1)
             file_path_relative = Path(source.path) / key
-            file_path_absolute = Path(CONTENT_DECK_DATA_PATH) / key
-            file_path_local_img = Path(LOCAL_IMG_PATH) / key
+            file_path_absolute = Paths.CONTENT_DECKS_DIR / key
+            file_path_local_img = Paths.LOCAL_IMG_DIR / key
             if file_path_relative.exists():
                 return get_cq_image(file_path_relative.read_bytes())
             elif file_path_absolute.exists():
@@ -247,8 +247,8 @@ class DeckCommand(UserCommandBase):
         # 从本地文件中读取资料
         data_path_list: List[str] = [self.bot.config.deck.data_path]
         for i, path in enumerate(data_path_list):
-            if path.startswith("./"):  # 用DATA_PATH作为当前路径
-                data_path_list[i] = os.path.join(CONTENT_PATH, path[2:])
+            if path.startswith("./"):  # ./开头路径相对于 Paths.CONTENT_DIR 解析
+                data_path_list[i] = str(Paths.CONTENT_DIR / path[2:])
         init_info: List[str] = []
         for data_path in data_path_list:
             self.load_data_from_path(data_path, init_info)

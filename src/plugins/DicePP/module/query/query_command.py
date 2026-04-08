@@ -12,11 +12,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotSendForwardMsgCommand
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.localization import LOC_FUNC_DISABLE
-from core.config import (
-    CONTENT_PATH,
-    CONTENT_QUERY_DATA_PATH,
-    CONTENT_EXCEL_DATA_PATH,
-)
+from core.config.basic import Paths
 from core.data.models import GroupConfig
 from core.data.query_store import (
     QUERY_DATA_FIELD,
@@ -370,8 +366,8 @@ class QueryCommand(UserCommandBase):
         data_path_list: List[str] = [self.bot.config.query.data_path]
         init_info: List[str] = [""]
         for i, path in enumerate(data_path_list):
-            if path.startswith("./"):  # 用DATA_PATH作为当前路径
-                data_path_list[i] = os.path.join(CONTENT_PATH, path[2:])
+            if path.startswith("./"):  # ./开头路径相对于 Paths.CONTENT_DIR 解析
+                data_path_list[i] = str(Paths.CONTENT_DIR / path[2:])
         for data_path in data_path_list:
             await self.bot.db.query.connect_path(data_path)
         init_info[0] = self.get_state()
@@ -755,7 +751,11 @@ class QueryCommand(UserCommandBase):
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             if show_mode == 1:# 加载数据库
                 database = arg_str.strip().upper()
-                database_file_path = os.path.join(CONTENT_QUERY_DATA_PATH, database + ".db")
+                try:
+                    database_file_path = str(Paths.safe_content_path(Paths.CONTENT_QUERIES_DIR, database, ".db"))
+                except ValueError:
+                    feedback = f"数据库名称无效: {database}"
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                 if self.bot.db.query.has_database(database):
                     feedback = f"{database}.db 已经被加载过了，无需再次加载。"
                 else:
@@ -764,7 +764,11 @@ class QueryCommand(UserCommandBase):
                         feedback = f"已载入 {database}.db。"
             elif show_mode == 2:# 卸载数据库
                 database = arg_str.strip().upper()
-                database_file_path = os.path.join(CONTENT_QUERY_DATA_PATH, database + ".db")
+                try:
+                    database_file_path = str(Paths.safe_content_path(Paths.CONTENT_QUERIES_DIR, database, ".db"))
+                except ValueError:
+                    feedback = f"数据库名称无效: {database}"
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                 if self.bot.db.query.has_database(database):
                     await self.bot.db.query.disconnect_database(database)
                     feedback = f"已卸载 {database}.db，您现在可以手动删除对应数据库来防止重启后被再次自动加载。"
@@ -774,7 +778,11 @@ class QueryCommand(UserCommandBase):
                     feedback = f"未找到文件{database}.db。"
             elif show_mode == 3:# 创建数据库
                 database = arg_str.strip().upper()
-                database_file_path = os.path.join(CONTENT_QUERY_DATA_PATH, database + ".db")
+                try:
+                    database_file_path = str(Paths.safe_content_path(Paths.CONTENT_QUERIES_DIR, database, ".db"))
+                except ValueError:
+                    feedback = f"数据库名称无效: {database}"
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                 if self.bot.db.query.has_database(database):
                     feedback = f" {database}.db 已经处于加载状态，无法再次创建。"
                 elif os.path.exists(database_file_path):
@@ -797,9 +805,14 @@ class QueryCommand(UserCommandBase):
                     xlsx_mode = arg_list[1].strip()
                     file_path = arg_list[2].strip()
                     if xlsx_mode in ["0","1","2"]:
-                        database_file_path = os.path.join(CONTENT_QUERY_DATA_PATH, database + ".db")
+                        try:
+                            database_file_path = str(Paths.safe_content_path(Paths.CONTENT_QUERIES_DIR, database, ".db"))
+                            content_path = Paths.safe_content_subpath(Paths.CONTENT_EXCEL_DIR, file_path)
+                        except ValueError as e:
+                            feedback = f"路径无效: {e}"
+                            return [BotSendMsgCommand(self.bot.account, feedback, [port])]
                         if self.bot.db.query.has_database(database):
-                            load_dir = os.path.join(CONTENT_EXCEL_DATA_PATH, file_path)
+                            load_dir = str(content_path)
                             if os.path.isdir(load_dir):
                                 for inner_path, inner_dirs, file_names in os.walk(load_dir):
                                     for file_name in file_names:
@@ -810,16 +823,16 @@ class QueryCommand(UserCommandBase):
                                                 database_file_path,
                                                 int(xlsx_mode),
                                             )  # 0 旧版梨骰数据
-                                feedback += f"已将 ExcelData/{file_path}下的全部xlsx文件载入至 {database}.db。"
+                                feedback += f"已将 excel/{file_path}下的全部xlsx文件载入至 {database}.db。"
                             else:
-                                file_full_path = os.path.join(CONTENT_EXCEL_DATA_PATH, file_path)
+                                file_full_path = str(content_path)
                                 if os.path.exists(file_full_path):
                                     await self.bot.db.query.load_data_from_xlsx_to_sqlite(
                                         file_full_path,
                                         database_file_path,
                                         int(xlsx_mode),
                                     )
-                                    feedback += f"已将 ExcelData/{file_path}文件载入至 {database}.db。"
+                                    feedback += f"已将 excel/{file_path}文件载入至 {database}.db。"
                                 elif os.path.exists(file_full_path+".xlsx"):
                                     file_full_path = file_full_path+".xlsx"
                                     await self.bot.db.query.load_data_from_xlsx_to_sqlite(
@@ -827,9 +840,9 @@ class QueryCommand(UserCommandBase):
                                         database_file_path,
                                         int(xlsx_mode),
                                     )
-                                    feedback += f"已将 ExcelData/{file_path}文件载入至 {database}.db。"
+                                    feedback += f"已将 excel/{file_path}文件载入至 {database}.db。"
                                 else:
-                                    feedback += f"你输入的 ExcelData/{file_path} 既不是文件夹也不是xlsx文件"
+                                    feedback += f"你输入的 excel/{file_path} 既不是文件夹也不是xlsx文件"
                         else:
                             feedback = f"未加载 {database}.db，请先创建或加载后再进行此操作。"
                     else:
@@ -845,7 +858,7 @@ class QueryCommand(UserCommandBase):
                     "。数据库列表 查看全部已加载的数据库\n"\
                     "。数据库加载 [名称] 加载一个已有数据库\n"\
                     "。数据库卸载 [名称] 卸载一个已有数据库\n"\
-                    "。数据库导入 [名称] [模式] [文件相对路径(需后缀)] \n将ExcelData的一个xlsx文件/文件夹中的全部xlsx导入数据库，模式0为旧版梨骰查询资料表，1为新式梨骰查询表，2为新式梨骰私设表"
+                    "。数据库导入 [名称] [模式] [文件相对路径(需后缀)] \n将 excel/ 下的一个xlsx文件/文件夹中的全部xlsx导入数据库，模式0为旧版梨骰查询资料表，1为新式梨骰查询表，2为新式梨骰私设表"
         elif mode == "feedback":
             feedback = arg_str
         else:

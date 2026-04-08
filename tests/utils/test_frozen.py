@@ -18,7 +18,7 @@ from unittest.mock import patch
 pytestmark = pytest.mark.unit
 
 # 被测模块
-from utils.frozen import is_frozen, get_app_dir, get_data_dir, get_runtime_info
+from utils.frozen import is_frozen, get_app_dir, get_runtime_info, get_project_root, PROJECT_ROOT_ENV_KEY
 
 
 class TestIsFrozen:
@@ -86,24 +86,23 @@ class TestGetAppDir:
 
 def test_dicepp_app_dir_sets_config_data_path(tmp_path):
     """
-    子进程中首次导入 core.config.basic 时，PROJECT_PATH / DATA_PATH 应落在 DICEPP_APP_DIR 下。
+    子进程中首次导入 core.config.basic 时，Paths.PROJECT_ROOT 应落在项目根目录下，
+    Paths.CONFIG_DIR 应为 PROJECT_ROOT/config。
     （主 pytest 进程已导入过 config，需独立进程验证 import-time 行为。）
     """
     app_root = tmp_path / "dicepp_app_root"
     app_root.mkdir()
-    # tests/utils/test_frozen.py -> repo root is parents[2]
     dicepp_src = Path(__file__).resolve().parents[2] / "src" / "plugins" / "DicePP"
     script = f"""
 import os, sys
 sys.path.insert(0, {str(dicepp_src)!r})
 import core.config.basic as basic_mod
 expected_root = os.path.abspath({str(app_root)!r})
-expected_data = os.path.join(expected_root, "Data")
-assert basic_mod.PROJECT_PATH == expected_root, (basic_mod.PROJECT_PATH, expected_root)
-assert basic_mod.DATA_PATH == expected_data, (basic_mod.DATA_PATH, expected_data)
+assert str(basic_mod.Paths.PROJECT_ROOT) == expected_root, (str(basic_mod.Paths.PROJECT_ROOT), expected_root)
+assert str(basic_mod.Paths.CONFIG_DIR) == os.path.join(expected_root, "config"), str(basic_mod.Paths.CONFIG_DIR)
 """
     env = os.environ.copy()
-    env["DICEPP_APP_DIR"] = str(app_root)
+    env["DICEPP_PROJECT_ROOT"] = str(app_root)
     proc = subprocess.run(
         [sys.executable, "-c", script],
         env=env,
@@ -112,28 +111,6 @@ assert basic_mod.DATA_PATH == expected_data, (basic_mod.DATA_PATH, expected_data
         timeout=60,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-
-
-class TestGetDataDir:
-    """测试 get_data_dir() 函数"""
-
-    def test_data_dir_under_app_dir(self):
-        """Data 目录应位于 app_dir 下"""
-        data_dir = get_data_dir()
-        app_dir = get_app_dir()
-        
-        assert data_dir == os.path.join(app_dir, 'Data')
-
-    def test_frozen_environment_data_path(self, monkeypatch):
-        """模拟打包环境的 Data 目录路径"""
-        monkeypatch.delenv("DICEPP_APP_DIR", raising=False)
-        fake_exe_path = r'C:\Apps\DicePP\DicePP.exe'
-        expected_data_dir = r'C:\Apps\DicePP\Data'
-        
-        with patch.object(sys, 'frozen', True, create=True):
-            with patch.object(sys, 'executable', fake_exe_path):
-                data_dir = get_data_dir()
-                assert data_dir == expected_data_dir
 
 
 class TestGetRuntimeInfo:
@@ -146,9 +123,32 @@ class TestGetRuntimeInfo:
         assert isinstance(info, dict)
         assert 'frozen' in info
         assert 'app_dir' in info
-        assert 'data_dir' in info
+        assert 'project_root' in info
         assert 'executable' in info
         assert 'cwd' in info
+
+
+class TestGetProjectRoot:
+
+    def test_dev_environment_returns_repo_root(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        assert Path(get_project_root()) == repo_root
+
+    def test_env_var_override(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(PROJECT_ROOT_ENV_KEY, str(tmp_path))
+        assert get_project_root() == os.path.abspath(str(tmp_path))
+
+    def test_returns_absolute_path(self):
+        result = get_project_root()
+        assert os.path.isabs(result)
+
+    def test_frozen_environment(self, monkeypatch):
+        fake_exe = r'C:\Apps\DicePP\DicePP.exe'
+        monkeypatch.delenv(PROJECT_ROOT_ENV_KEY, raising=False)
+        with patch.object(sys, 'frozen', True, create=True):
+            with patch.object(sys, 'executable', fake_exe):
+                result = get_project_root()
+        assert result == os.path.dirname(fake_exe)
 
     def test_development_environment_info(self):
         """开发环境的运行时信息"""

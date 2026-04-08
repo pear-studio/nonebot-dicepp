@@ -8,7 +8,7 @@ from random import choice
 from utils.logger import dice_log, get_exception_info
 from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
 from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
-from core.config import BOT_DATA_PATH, DATA_PATH
+from core.config import Paths
 from core.config.loader import ConfigLoader, ConfigValidationError
 from core.config.pydantic_models import BotConfig
 from core.persona import PersonaLoader
@@ -52,15 +52,16 @@ class Bot:
         from adapter import ClientProxy
         self.account: str = account
         self.proxy: Optional[ClientProxy] = None
-        self.data_path = os.path.join(BOT_DATA_PATH, account)
+        self.data_path = str(Paths.bot_data_dir(account))
 
+        Paths.ensure_dirs()
         self.fix_data()
         self.db = BotDatabase(self.account)
         self.hub_manager = HubManager(self)
 
         # New config system: ConfigLoader + PersonaLoader
-        self._cfg_loader = ConfigLoader(DATA_PATH, account)
-        self._persona_loader = PersonaLoader(DATA_PATH)
+        self._cfg_loader = ConfigLoader(account=account)
+        self._persona_loader = PersonaLoader()
         self.config: BotConfig = self._cfg_loader.load()
 
         # LocalizationManager now takes a PersonaLoader; no file paths needed

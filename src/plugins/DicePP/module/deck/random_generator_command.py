@@ -7,7 +7,7 @@ from pathlib import Path
 import openpyxl
 
 from core.bot import Bot
-from core.config import CONTENT_PATH
+from core.config.basic import Paths
 from core.localization import LOC_FUNC_DISABLE
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
@@ -24,7 +24,6 @@ LOC_RAND_GEN_VAGUE = "rand_gen_vague"
 
 CFG_RAND_GEN_ENABLE = "random_gen_enable"
 CFG_RAND_GEN_DATA_PATH = "random_gen_data_path"
-RAND_GEN_DATA_PATH = "RandomGenData"
 META_FILE_NAME = "rule.xlsx"
 
 
@@ -47,8 +46,8 @@ class RandomGeneratorCommand(UserCommandBase):
         # 从本地文件中读取资料
         data_path_list: List[str] = [self.bot.config.random_gen.data_path]
         for i, path in enumerate(data_path_list):
-            if path.startswith("./"):  # 用DATA_PATH作为当前路径
-                data_path_list[i] = os.path.join(CONTENT_PATH, path[2:])
+            if path.startswith("./"):  # ./开头路径相对于 Paths.CONTENT_DIR 解析
+                data_path_list[i] = str(Paths.CONTENT_DIR / path[2:])
             data_path_list[i] = Path(data_path_list[i])
         data_path_list: List[Path]
         data_dir_path_list: List[Path] = []
@@ -183,7 +182,11 @@ class RandomGeneratorCommand(UserCommandBase):
             new_source = RandomDataSource("", meta_path.parent)
             error = new_source.read_from_sheet(ws)
             if error:
-                error = f"读取{meta_path.relative_to(CONTENT_PATH)}/{name}时遇到错误: {error}"
+                try:
+                    rel = meta_path.relative_to(Paths.CONTENT_DIR)
+                except ValueError:
+                    rel = meta_path
+                error = f"读取{rel}/{name}时遇到错误: {error}"
                 error_info.append(error)
             else:
                 self.source_list.append(new_source)

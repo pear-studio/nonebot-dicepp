@@ -6,7 +6,6 @@ DicePP PyInstaller Spec 文件
 使用方法: pyinstaller dicepp.spec
 
 打包模式: 目录模式 (--onedir)
-原因: Data 目录需要持久化，用户需要能直接访问和修改配置文件
 """
 
 import os
@@ -89,6 +88,19 @@ hiddenimports = [
     'lxml',
     'lxml.etree',
     'docx',
+
+    # lark 解析器 (DicePP 骰子表达式引擎依赖，动态导入无法被静态分析发现)
+    'lark',
+    'lark.parsers',
+    'lark.parsers.earley',
+    'lark.parsers.earley_common',
+    'lark.parsers.earley_forest',
+    'lark.parsers.lalr_interactive_parser',
+    'lark.parsers.lalr_analysis',
+    'lark.parsers.lalr_traditional',
+    'lark.parsers.xearley',
+    'lark.grammars',
+    'lark.tools',
     
     # Python 标准库动态导入
     'asyncio',
@@ -109,6 +121,7 @@ hiddenimports = [
 # 自动收集 nonebot 所有子模块
 hiddenimports += collect_submodules('nonebot')
 hiddenimports += collect_submodules('nonebot_adapter_onebot')
+hiddenimports += collect_submodules('lark')
 
 # ============================================================
 # Data Files - 需要打包的非 Python 文件
@@ -120,15 +133,17 @@ datas = [
     
     # DicePP 插件目录 - 保持与 pyproject.toml 中 plugin_dirs 一致的结构
     (os.path.join(PROJECT_ROOT, 'src', 'plugins', 'DicePP'), os.path.join('src', 'plugins', 'DicePP')),
-    
-    # Data 目录（用户数据，打包空目录结构）
-    # 注意：实际用户数据会在运行时生成，这里只打包默认模板（如果有）
+
+    # config/ 目录：打包全局默认配置和 bot 账号模板
+    # 运行时数据（data/）和用户内容（content/）由用户自行挂载，不打包
+    (os.path.join(PROJECT_ROOT, 'config', 'global.json'),           os.path.join('config')),
+    (os.path.join(PROJECT_ROOT, 'config', 'bots', '_template.json'), os.path.join('config', 'bots')),
 ]
 
-# 如果 Data 目录存在且有默认模板文件，则打包
-data_src = os.path.join(PROJECT_ROOT, 'src', 'plugins', 'DicePP', 'Data')
-if os.path.isdir(data_src):
-    datas.append((data_src, 'Data'))
+# personas 目录（包含 default.json 及用户自定义）
+personas_src = os.path.join(PROJECT_ROOT, 'config', 'personas')
+if os.path.isdir(personas_src):
+    datas.append((personas_src, os.path.join('config', 'personas')))
 
 # 收集 nonebot 的数据文件
 datas += collect_data_files('nonebot')
@@ -136,6 +151,9 @@ datas += collect_data_files('nonebot_adapter_onebot')
 
 # zhconv 库需要 zhcdict.json 字典文件
 datas += collect_data_files('zhconv')
+
+# lark 语法文件（.lark grammar files，运行时加载）
+datas += collect_data_files('lark')
 
 # ============================================================
 # Analysis

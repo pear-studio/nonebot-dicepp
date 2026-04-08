@@ -10,7 +10,6 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.command import CommandTextParser, CommandContextResolver
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config import BOT_DATA_PATH
 from core.localization import LOC_PERMISSION_DENIED_NOTICE, LOC_FUNC_DISABLE
 
 # Task 3.3: 统一解析器（替代内嵌前缀判断与参数切分）

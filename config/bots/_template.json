@@ -1,5 +1,5 @@
 {
-  "_comment": "账号配置模板。复制此文件为 {账号}.local.json 并填写以下字段。此文件本身可入版本库；*.local.json 已被 .gitignore 忽略。",
+  "_comment": "账号配置模板。复制此文件为 {账号}.json 并填写以下字段。此文件本身可入版本库；{账号}.json 已被 .gitignore 忽略。",
 
   "master": [],
   "admin": [],

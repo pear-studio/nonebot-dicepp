@@ -8,7 +8,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.cell.cell import Cell
 from openpyxl.comments import Comment
 
-from core.config import DATA_PATH
+from core.config.basic import Paths
 from module.roll import is_roll_exp, exec_roll_exp
 from utils.time import get_current_date_raw, datetime_to_str_day, datetime_to_str_week, datetime_to_str_month
 from utils.cq_code import get_cq_image
@@ -181,7 +181,11 @@ class RandomItem:
             result = ""
             for file_type, file_path in result_info:
                 if not file_path.exists():
-                    return f"数据文件{file_path.relative_to(DATA_PATH)}丢失"
+                    try:
+                        rel = file_path.relative_to(Paths.CONTENT_DIR)
+                    except ValueError:
+                        rel = file_path
+                    return f"数据文件{rel}丢失"
                 if file_type == SourceFileType.TXT:
                     result += file_path.read_text()
                 elif file_type == SourceFileType.IMG:

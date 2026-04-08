@@ -40,14 +40,14 @@ class _DataDir:
 
     @property
     def global_cfg(self) -> Path:
-        return self.root / "config.json"
+        return self.root / "global.json"
 
     @property
     def global_secrets(self) -> Path:
-        return self.root / "config.local.json"
+        return self.root / "secrets.json"
 
     def account_cfg(self, account: str) -> Path:
-        return self.root / "bots" / f"{account}.local.json"
+        return self.root / "bots" / f"{account}.json"
 
     def template(self) -> Path:
         return self.root / "bots" / "_template.json"

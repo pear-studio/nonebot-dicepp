@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import aiosqlite
 
-from core.config import CONTENT_QUERY_DATA_PATH
+from core.config.basic import Paths
 from utils import col_based_workbook_to_dict, create_parent_dir, read_xlsx
 
 
@@ -58,7 +58,7 @@ class QueryStore:
     """
 
     def __init__(self, base_dir: Optional[str] = None):
-        self._base_dir = base_dir or CONTENT_QUERY_DATA_PATH
+        self._base_dir = base_dir or str(Paths.CONTENT_QUERIES_DIR)
         self._conns: Dict[str, aiosqlite.Connection] = {}
 
     def _db_name_from_path(self, path: str) -> str:

@@ -1,8 +1,7 @@
-from pathlib import Path
 import re
 import random
 
-from core.config import LOCAL_IMG_PATH
+from core.config.basic import Paths
 from utils.logger import dice_log
 from utils.cq_code import get_cq_image
 
@@ -26,7 +25,7 @@ class LocalizationText:
         """
         def replace_image_code(match):
             key = match.group(1)
-            file_path = Path(LOCAL_IMG_PATH) / key
+            file_path = Paths.LOCAL_IMG_DIR / key
             if file_path.exists():
                 return get_cq_image(file_path.read_bytes())
             else:

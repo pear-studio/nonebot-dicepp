@@ -3,10 +3,10 @@ ConfigLoader: hierarchical JSON configuration loader for DicePP.
 
 Priority (high → low):
   1. Environment variables  (DICE_* prefix)
-  2. Account config         Data/bots/{account}.local.json
-  3. Global secrets         Data/config.local.json
-  4. Persona config         Data/personas/{persona}.json  (bot.config.llm.personality only)
-  5. Global defaults        Data/config.json
+  2. Account config         config/bots/{account}.json
+  3. Global secrets         config/secrets.json
+  4. Persona config         config/personas/{persona}.json  (bot.config.llm.personality only)
+  5. Global defaults        config/global.json
 """
 import json
 import os
@@ -18,11 +18,12 @@ from pydantic import ValidationError
 
 from utils.logger import dice_log
 from core.config.pydantic_models import BotConfig
+from core.config.basic import Paths
 
 _BOTS_DIR = "bots"
 _PERSONAS_DIR = "personas"
-_GLOBAL_CONFIG = "config.json"
-_GLOBAL_SECRETS = "config.local.json"
+_GLOBAL_CONFIG = "global.json"
+_GLOBAL_SECRETS = "secrets.json"
 _ACCOUNT_TEMPLATE = "_template.json"
 
 
@@ -100,13 +101,13 @@ class ConfigLoader:
     Loads BotConfig from layered JSON files and environment variables.
 
     Usage:
-        loader = ConfigLoader(data_path, account)
+        loader = ConfigLoader(account="my_bot_id")
         config = loader.load()
         loader.reload()   # atomic hot-reload
     """
 
-    def __init__(self, data_path: str, account: str):
-        self._data_path = Path(data_path)
+    def __init__(self, data_path: Optional[str] = None, account: str = ""):
+        self._data_path = Path(data_path) if data_path is not None else Paths.CONFIG_DIR
         self._account = account
         self._config: Optional[BotConfig] = None
 
@@ -177,7 +178,7 @@ class ConfigLoader:
 
     @property
     def _account_config_path(self) -> Path:
-        return self._data_path / _BOTS_DIR / f"{self._account}.local.json"
+        return self._data_path / _BOTS_DIR / f"{self._account}.json"
 
     def _ensure_account_config(self) -> Dict[str, Any]:
         """Return account config dict, auto-creating from template if missing."""
