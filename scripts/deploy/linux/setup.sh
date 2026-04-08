@@ -13,12 +13,52 @@ info "项目目录: $PROJECT_ROOT"
 echo ""
 
 # 1. 检查 Docker 环境
-step "1/5 检查 Docker 环境..."
+step "1/6 检查 Docker 环境..."
 COMPOSE_CMD=$(check_docker)
 success "Docker 环境正常 (使用: $COMPOSE_CMD)"
 
+# 1.5 配置镜像源（国内服务器自动检测）
+step "2/6 检测并配置镜像源..."
+
+# 检测是否在中国大陆（通过访问国内/国外镜像源速度）
+detect_mirror() {
+    # 尝试访问国内镜像源
+    if curl -s --max-time 2 -o /dev/null "https://mirrors.tuna.tsinghua.edu.cn" 2>/dev/null; then
+        echo "china"
+    else
+        echo "global"
+    fi
+}
+
+MIRROR_REGION=$(detect_mirror)
+
+if [ "$MIRROR_REGION" = "china" ]; then
+    info "检测到国内网络环境，使用国内镜像源加速"
+    # 设置环境变量供 docker-compose 使用
+    export APT_MIRROR="mirrors.tuna.tsinghua.edu.cn"
+    export PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+    export UV_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
+
+    # 保存到 .env 文件供后续使用
+    if [ -f ".env" ]; then
+        # 检查是否已存在相关配置
+        grep -q "^APT_MIRROR=" .env || echo "APT_MIRROR=mirrors.tuna.tsinghua.edu.cn" >> .env
+        grep -q "^PIP_INDEX_URL=" .env || echo "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple" >> .env
+        grep -q "^UV_INDEX_URL=" .env || echo "UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple" >> .env
+    fi
+
+    success "已配置清华镜像源"
+    info "如需使用其他镜像源，可设置环境变量:"
+    info "  APT_MIRROR=mirrors.aliyun.com make deploy"
+else
+    info "检测到国际网络环境，使用官方镜像源"
+    export APT_MIRROR="deb.debian.org"
+    export PIP_INDEX_URL="https://pypi.org/simple"
+    export UV_INDEX_URL="https://pypi.org/simple"
+fi
+
 # 2. 检查 dice-net 网络
-step "2/5 检查 dice-net 网络..."
+step "3/6 检查 dice-net 网络..."
 if ! check_network; then
     warn "dice-net 网络不存在"
     echo ""
@@ -41,34 +81,42 @@ else
 fi
 
 # 3. 配置环境变量
-step "3/5 配置环境变量..."
+step "4/6 配置环境变量..."
 cd "$PROJECT_ROOT"
 
 if [ ! -f ".env" ]; then
-    if [ -f ".env.example" ]; then
-        cp .env.example .env
-        success "已从 .env.example 创建 .env"
-        warn "请编辑 .env 文件配置必要的环境变量"
-    else
-        # 创建基本的 .env 文件
-        cat > .env << 'EOF'
+    # 创建默认 .env 文件，关键：HOST 必须是 0.0.0.0 才能被外部访问
+    cat > .env << 'EOF'
+# DicePP 环境变量配置
 HOST=0.0.0.0
 PORT=8080
 # ACCESS_TOKEN=your_token_here
 EOF
-        success "已创建默认 .env 文件"
-    fi
+    success "已创建默认 .env 文件 (HOST=0.0.0.0, PORT=8080)"
+    info "提示: 如需修改配置，请编辑 .env 文件"
 else
-    success ".env 文件已存在"
+    # 检查 .env 是否包含 HOST 配置
+    if ! grep -q "^HOST=" .env; then
+        warn ".env 文件缺少 HOST 配置，正在添加..."
+        echo "" >> .env
+        echo "# 添加于 $(date)" >> .env
+        echo "HOST=0.0.0.0" >> .env
+        success "已添加 HOST=0.0.0.0 到 .env"
+    elif grep -q "^HOST=127.0.0.1" .env || grep -q "^HOST=localhost" .env; then
+        warn ".env 中的 HOST 设置为本地地址，可能导致外部无法连接"
+        warn "建议修改为: HOST=0.0.0.0"
+    else
+        success ".env 文件已存在且包含 HOST 配置"
+    fi
 fi
 
 # 4. 构建 Docker 镜像
-step "4/5 构建 Docker 镜像..."
+step "5/6 构建 Docker 镜像..."
 $COMPOSE_CMD build
 success "Docker 镜像构建完成"
 
 # 5. 启动容器
-step "5/5 启动 DicePP 容器..."
+step "6/6 启动 DicePP 容器..."
 $COMPOSE_CMD up -d
 success "DicePP 容器已启动"
 

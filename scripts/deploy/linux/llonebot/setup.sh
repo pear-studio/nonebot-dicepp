@@ -79,24 +79,60 @@ else
         
         # 追加网络配置
         # 这里使用简单的追加方式，因为 yaml 结构可能不同
-        cat >> "$COMPOSE_FILE" << 'EOF'
+        # 使用 yq 或 Python 修改 YAML，在 service 级别添加网络
+        if command -v yq &>/dev/null; then
+            # 使用 yq（如果已安装）
+            for service in $($COMPOSE_CMD -f "$COMPOSE_FILE" config --services 2>/dev/null || echo ""); do
+                yq -i ".services.\$service.networks += [\"dice-net\"]" "$COMPOSE_FILE"
+            done
+            yq -i '.networks.dice-net.external = true' "$COMPOSE_FILE"
+            success "已使用 yq 自动添加网络配置"
+        elif command -v python3 &>/dev/null; then
+            # 使用 Python3
+            python3 << PYEOF
+import yaml
+
+with open("$COMPOSE_FILE", 'r') as f:
+    data = yaml.safe_load(f)
+
+# 为每个 service 添加 networks
+if 'services' in data:
+    for svc_name, svc_config in data['services'].items():
+        if 'networks' not in svc_config:
+            data['services'][svc_name]['networks'] = ['dice-net']
+        elif isinstance(svc_config['networks'], list) and 'dice-net' not in svc_config['networks']:
+            data['services'][svc_name]['networks'].append('dice-net')
+        elif isinstance(svc_config['networks'], dict) and 'dice-net' not in svc_config['networks']:
+            data['services'][svc_name]['networks']['dice-net'] = None
+
+# 添加全局网络定义
+if 'networks' not in data:
+    data['networks'] = {}
+if 'dice-net' not in data['networks']:
+    data['networks']['dice-net'] = {'external': True}
+
+with open("$COMPOSE_FILE", 'w') as f:
+    yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+print("已使用 Python3 自动添加网络配置")
+PYEOF
+            success "网络配置完成"
+        else
+            # 降级方案：简单追加 + 手动提示
+            cat >> "$COMPOSE_FILE" << 'EOF'
 
 # DicePP 网络配置 (自动添加)
 networks:
   dice-net:
     external: true
 EOF
-
-        # 需要在 service 下也添加 networks，但这比较复杂
-        # 提示用户手动检查
-        warn "已追加网络配置到 $COMPOSE_FILE"
-        warn "请手动编辑文件，在 service 下添加:"
-        echo ""
-        echo "  services:"
-        echo "    llonebot:  # 或实际的服务名"
-        echo "      networks:"
-        echo "        - dice-net"
-        echo ""
+            warn "缺少 yq/python3，无法自动修改 services"
+            warn "请手动编辑 $COMPOSE_FILE，在每个 service 下添加:"
+            echo ""
+            echo "    networks:"
+            echo "      - dice-net"
+            echo ""
+        fi
     fi
 fi
 

@@ -3,6 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # 国内镜像源配置（可通过环境变量覆盖）
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: dicepp
     restart: unless-stopped
     
@@ -23,9 +28,11 @@ services:
     
     # 数据持久化：
     # - UserData：运行时写入（可写）
+    # - bots：账号配置文件（可写）
     # - Content：外部内容库（只读）
     volumes:
       - ./src/plugins/DicePP/Data/UserData:/app/src/plugins/DicePP/Data/UserData
+      - ./src/plugins/DicePP/Data/bots:/app/src/plugins/DicePP/Data/bots
       - ./src/plugins/DicePP/Data/Content:/app/src/plugins/DicePP/Data/Content:ro
     
     # 日志配置：自动轮转

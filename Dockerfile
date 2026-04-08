@@ -1,27 +1,37 @@
 # ── 构建阶段 ──────────────────────────────────────────────────────
 FROM python:3.10-slim AS builder
 
+# 构建参数：镜像源配置
+ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
 WORKDIR /app
 
-# 使用国内镜像源加速
-RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources \
-    && sed -i 's/security.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources
+# 使用国内镜像源加速（支持通过 build-arg 自定义）
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources && \
+        sed -i "s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list && \
+        sed -i "s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list; \
+    fi
 
 # 安装构建工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 uv
-RUN pip install uv --index-url https://pypi.tuna.tsinghua.edu.cn/simple --no-cache-dir
+# 安装 uv（使用指定 pip 源）
+RUN pip install uv --index-url ${PIP_INDEX_URL} --no-cache-dir
 
 # 复制依赖文件
 COPY pyproject.toml .
 
-# 创建虚拟环境并安装依赖
+# 创建虚拟环境并安装依赖（使用指定 uv 源）
 RUN uv venv /app/.venv && \
     . /app/.venv/bin/activate && \
-    uv pip install . --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+    uv pip install . --index-url ${UV_INDEX_URL}
 
 # ── 运行阶段 ──────────────────────────────────────────────────────
 FROM python:3.10-slim

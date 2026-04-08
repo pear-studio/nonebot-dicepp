@@ -10,11 +10,11 @@ description: Read before every local git commit.
 - 中文 commit log 模板: `<type>: <一句话主题>` + 空行 + `说明为什么改/影响什么`(例: `feat: 优化前端搜索与鉴权恢复`).
 - 标点符号使用半角+空格, 如"xxx, xxx."
 - PowerShell 下不要使用 bash heredoc（如 `<<EOF`）拼接多行 `git commit -m`，否则会触发 `Missing file specification after redirection operator` 这类解析错误.
-- 推荐写法（PowerShell here-string）:
+- PowerShell下推荐写法, 如果在用普通bash可以不这么写@:
   ```powershell
   git commit -m @'
   <标题，第一行>
-
+  
   <说明/影响，多行都行>
   '@
   ```
