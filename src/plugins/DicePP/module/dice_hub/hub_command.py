@@ -287,12 +287,14 @@ class HubCommand(UserCommandBase):
         return [BotSendMsgCommand(self.bot.account, status_msg, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
-        return "DiceHub 指令帮助:\n" \
-               ".hub register - 注册机器人\n" \
-               ".hub key - 查看 API Key\n" \
-               ".hub list - 查看在线列表\n" \
-               ".hub online - 手动发送心跳\n" \
-               ".hub url <地址> - 设置/查看 API 地址"
+        if keyword in ["hub", "dicehub", "互联", "Hub"]:
+            return "DiceHub 指令帮助:\n" \
+                   ".hub register - 注册机器人\n" \
+                   ".hub key - 查看 API Key\n" \
+                   ".hub list - 查看在线列表\n" \
+                   ".hub online - 手动发送心跳\n" \
+                   ".hub url <地址> - 设置/查看 API 地址"
+        return ""
 
     def get_description(self) -> str:
         return "DiceHub 多机器人互联"
