@@ -72,13 +72,34 @@ scripts\dev\run.bat
 ### 前置要求
 
 - Docker Engine
-- Docker Compose (V1 或 V2)
+- Docker Compose V2 (推荐) 或 V1
 
 安装 Docker：
 
 ```bash
 curl -fsSL https://get.docker.com | bash
 sudo usermod -aG docker $USER && newgrp docker
+```
+
+安装 Docker Compose V2：
+
+```bash
+# 创建插件目录
+mkdir -p ~/.docker/cli-plugins
+
+# 下载 V2 插件（国内可用 ghfast.top 等代理加速）
+curl -SL https://github.com/docker/compose/releases/download/v2.34.0/docker-compose-linux-x86_64 \
+    -o ~/.docker/cli-plugins/docker-compose
+
+# 或国内加速
+curl -SL https://ghfast.top/https://github.com/docker/compose/releases/download/v2.34.0/docker-compose-linux-x86_64 \
+    -o ~/.docker/cli-plugins/docker-compose
+
+# 添加执行权限
+chmod +x ~/.docker/cli-plugins/docker-compose
+
+# 验证安装
+docker compose version
 ```
 
 ### 部署步骤
@@ -325,14 +346,27 @@ docker network create dice-net
 
 脚本会自动检测 `docker compose` (V2) 或 `docker-compose` (V1)。
 
-如果两者都不可用，安装 Docker Compose：
+如果两者都不可用，安装 Docker Compose V2：
 
 ```bash
-# V2 (推荐，随 Docker Engine 安装)
-# 确保 Docker 版本 >= 20.10
+mkdir -p ~/.docker/cli-plugins
+curl -SL https://github.com/docker/compose/releases/download/v2.34.0/docker-compose-linux-x86_64 \
+    -o ~/.docker/cli-plugins/docker-compose
+chmod +x ~/.docker/cli-plugins/docker-compose
+docker compose version
+```
 
-# V1 (旧版)
-sudo pip install docker-compose
+国内服务器如果下载慢，可使用代理：
+
+```bash
+curl -SL https://ghfast.top/https://github.com/docker/compose/releases/download/v2.34.0/docker-compose-linux-x86_64 \
+    -o ~/.docker/cli-plugins/docker-compose
+```
+
+或使用旧版 V1：
+
+```bash
+pip install docker-compose
 ```
 
 ### Docker 权限问题

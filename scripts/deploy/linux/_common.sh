@@ -43,7 +43,7 @@ get_llonebot_dir() {
 get_compose_cmd() {
     if docker compose version &>/dev/null; then
         echo "docker compose"
-    elif command -v docker-compose &>/dev/null; then
+    elif command -v docker-compose &>/dev/null && docker-compose version &>/dev/null; then
         echo "docker-compose"
     else
         echo ""
@@ -71,8 +71,16 @@ check_docker() {
     compose_cmd=$(get_compose_cmd)
     if [ -z "$compose_cmd" ]; then
         error "Docker Compose 未安装"
-        echo "Docker Compose V2 应随 Docker Engine 一起安装"
-        echo "如果使用旧版，请安装: pip install docker-compose"
+        echo ""
+        echo "安装 Docker Compose V2 (推荐):"
+        echo "  mkdir -p ~/.docker/cli-plugins"
+        echo "  curl -SL https://github.com/docker/compose/releases/download/v2.34.0/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose"
+        echo "  chmod +x ~/.docker/cli-plugins/docker-compose"
+        echo ""
+        echo "国内服务器可使用代理加速:"
+        echo "  curl -SL https://ghfast.top/https://github.com/docker/compose/releases/download/v2.34.0/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose"
+        echo ""
+        echo "或安装旧版 V1: pip install docker-compose"
         exit 1
     fi
     
