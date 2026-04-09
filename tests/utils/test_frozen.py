@@ -57,8 +57,8 @@ class TestGetAppDir:
     def test_frozen_environment_path(self, monkeypatch):
         """模拟打包环境应返回 EXE 所在目录"""
         monkeypatch.delenv("DICEPP_APP_DIR", raising=False)
-        fake_exe_path = r'C:\Program Files\DicePP\DicePP.exe'
-        expected_dir = r'C:\Program Files\DicePP'
+        expected_dir = os.path.join(os.sep, 'Program Files', 'DicePP')
+        fake_exe_path = os.path.join(expected_dir, 'DicePP.exe')
         
         with patch.object(sys, 'frozen', True, create=True):
             with patch.object(sys, 'executable', fake_exe_path):
@@ -68,8 +68,8 @@ class TestGetAppDir:
     def test_frozen_environment_with_unicode_path(self, monkeypatch):
         """模拟中文路径的打包环境"""
         monkeypatch.delenv("DICEPP_APP_DIR", raising=False)
-        fake_exe_path = r'D:\测试目录\骰子机器人\DicePP.exe'
-        expected_dir = r'D:\测试目录\骰子机器人'
+        expected_dir = os.path.join(os.sep, '测试目录', '骰子机器人')
+        fake_exe_path = os.path.join(expected_dir, 'DicePP.exe')
         
         with patch.object(sys, 'frozen', True, create=True):
             with patch.object(sys, 'executable', fake_exe_path):
@@ -143,12 +143,13 @@ class TestGetProjectRoot:
         assert os.path.isabs(result)
 
     def test_frozen_environment(self, monkeypatch):
-        fake_exe = r'C:\Apps\DicePP\DicePP.exe'
+        expected_dir = os.path.join(os.sep, 'Apps', 'DicePP')
+        fake_exe = os.path.join(expected_dir, 'DicePP.exe')
         monkeypatch.delenv(PROJECT_ROOT_ENV_KEY, raising=False)
         with patch.object(sys, 'frozen', True, create=True):
             with patch.object(sys, 'executable', fake_exe):
                 result = get_project_root()
-        assert result == os.path.dirname(fake_exe)
+        assert result == expected_dir
 
     def test_development_environment_info(self):
         """开发环境的运行时信息"""
@@ -161,7 +162,7 @@ class TestGetProjectRoot:
 
     def test_frozen_environment_info(self):
         """模拟打包环境的运行时信息"""
-        fake_exe_path = r'C:\Apps\DicePP\DicePP.exe'
+        fake_exe_path = os.path.join(os.sep, 'Apps', 'DicePP', 'DicePP.exe')
         
         with patch.object(sys, 'frozen', True, create=True):
             with patch.object(sys, 'executable', fake_exe_path):
