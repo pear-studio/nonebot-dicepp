@@ -154,6 +154,8 @@ data/
 content/**
 !content/**/
 !content/**/.gitkeep
+!content/characters/*.yaml
+content/characters/*.local.yaml
 src/plugins/DicePP/module/misc/log_command.py
 
 # uv lock 文件（可选是否追踪，这里选择不追踪）
@@ -171,3 +173,6 @@ openspec/
 
 # 临时文件
 .temp
+
+# Windows 保留设备名 (Git Bash 下可能意外生成实体文件)
+nul

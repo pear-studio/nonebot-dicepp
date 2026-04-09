@@ -9,14 +9,72 @@ from typing import List
 from pydantic import BaseModel, Field
 
 
-class LLMConfig(BaseModel):
+# ── Phase 4+: 主动消息配置（暂未启用）
+# class ProactiveConfig(BaseModel):
+#     enabled: bool = True
+#     quiet_hours: List[int] = [23, 7]
+#     min_interval_hours: int = 4
+#     max_shares_per_event: int = 10
+#     share_time_window_minutes: int = 5
+#     miss_enabled: bool = True
+#     miss_min_hours: int = 72
+#     miss_min_score: int = 40
+
+
+class PersonaConfig(BaseModel):
     enabled: bool = False
-    api_key: str = ""
-    base_url: str = "https://api.moonshot.cn/v1"
-    model: str = "kimi-k2.5"
-    personality: str = "你是一个 helpful 的助手，回答简洁。"
-    max_context: int = 20
-    timeout: int = 10
+    character_name: str = "default"
+    character_path: str = "./content/characters"
+    
+    whitelist_enabled: bool = True
+    
+    primary_api_key: str = ""
+    primary_base_url: str = "https://api.openai.com/v1"
+    primary_model: str = "gpt-4o"
+    
+    auxiliary_api_key: str = ""        # 留空时复用 primary_api_key
+    auxiliary_base_url: str = ""       # 留空时复用 primary_base_url
+    auxiliary_model: str = "gpt-4o-mini"
+    
+    max_concurrent_requests: int = 2
+    timeout: int = 30
+    timezone: str = "Asia/Shanghai"
+    
+    max_short_term_chars: int = 3000
+    max_messages: int = 200
+    
+    # ── Phase 4+: 群活跃度（影响主动消息频率，暂未启用）
+    # group_activity_decay_days: List[int] = [1, 3, 7]
+    # group_activity_decay_values: List[int] = [10, 30, 50]
+    # group_activity_min: int = 10
+    
+    game_enabled: bool = True
+    scoring_interval: int = 5
+    # ── Phase 3+: 好感度衰减（暂未启用）
+    # decay_enabled: bool = True
+    # grace_period_hours: int = 8
+    # decay_rate_per_hour: float = 0.5
+    # decay_daily_cap: float = 5.0
+    # cooldown_minutes: int = 30
+    
+    group_chat_enabled: bool = True
+    group_simple_scoring: bool = True
+    observe_group: bool = True
+    observe_min_length: int = 5
+    observe_max_length: int = 500
+    observe_initial_threshold: int = 20
+    observe_max_threshold: int = 60
+    observe_min_threshold: int = 5
+    observe_max_records: int = 30
+    
+    daily_limit: int = 20
+    allow_user_key: bool = True
+    
+    # ── Phase 4+: 主动消息（暂未启用）
+    # proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
+    
+    # ── Phase 4+: 生活模拟事件（暂未启用；事件分布参数在角色卡 extensions.persona 中配置）
+    # daily_events_count: int = 5
 
 
 class MemoryMonitorConfig(BaseModel):
@@ -100,7 +158,7 @@ class BotConfig(BaseModel):
     bot_default_enable: bool = True
 
     # Subsystem configs
-    llm: LLMConfig = Field(default_factory=LLMConfig)
+    persona_ai: PersonaConfig = Field(default_factory=PersonaConfig)
     memory_monitor: MemoryMonitorConfig = Field(default_factory=MemoryMonitorConfig)
     dicehub: DiceHubConfig = Field(default_factory=DiceHubConfig)
     roll: RollConfig = Field(default_factory=RollConfig)

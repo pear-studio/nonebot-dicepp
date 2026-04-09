@@ -5,8 +5,7 @@ Priority (high → low):
   1. Environment variables  (DICE_* prefix)
   2. Account config         config/bots/{account}.json
   3. Global secrets         config/secrets.json
-  4. Persona config         config/personas/{persona}.json  (bot.config.llm.personality only)
-  5. Global defaults        config/global.json
+  4. Global defaults        config/global.json
 """
 import json
 import os
@@ -21,7 +20,6 @@ from core.config.pydantic_models import BotConfig
 from core.config.basic import Paths
 
 _BOTS_DIR = "bots"
-_PERSONAS_DIR = "personas"
 _GLOBAL_CONFIG = "global.json"
 _GLOBAL_SECRETS = "secrets.json"
 _ACCOUNT_TEMPLATE = "_template.json"
@@ -56,7 +54,7 @@ def _load_json_file(path: Path) -> Dict[str, Any]:
 def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Apply DICE_* environment variables as overrides.
-    Mapping: DICE_MASTER → master, DICE_LLM_API_KEY → llm.api_key
+    Mapping examples: DICE_MASTER → master, DICE_NICKNAME → nickname
     Only a curated set of env vars is supported.
     """
     env_map: Dict[str, Any] = {}
@@ -77,11 +75,6 @@ def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
         "DICE_PERSONA": ["persona"],
         "DICE_NICKNAME": ["nickname"],
         "DICE_COMMAND_SPLIT": ["command_split"],
-        "DICE_LLM_ENABLED": ["llm", "enabled"],
-        "DICE_LLM_API_KEY": ["llm", "api_key"],
-        "DICE_LLM_BASE_URL": ["llm", "base_url"],
-        "DICE_LLM_MODEL": ["llm", "model"],
-        "DICE_LLM_PERSONALITY": ["llm", "personality"],
         "DICE_DICEHUB_API_URL": ["dicehub", "api_url"],
         "DICE_DICEHUB_API_KEY": ["dicehub", "api_key"],
         "DICE_DICEHUB_ENABLE": ["dicehub", "enable"],
@@ -137,24 +130,11 @@ class ConfigLoader:
     # ── internals ───────────────────────────────────────────────────────────
 
     def _build_config(self) -> BotConfig:
-        # Layer 5 (lowest): global defaults
+        # Layer 4 (lowest): global defaults
         raw = _load_json_file(self._data_path / _GLOBAL_CONFIG)
 
-        # Layer 4: global secrets
+        # Layer 3: global secrets
         raw = _deep_merge(raw, _load_json_file(self._data_path / _GLOBAL_SECRETS))
-
-        # Layer 3: persona llm_personality (only the personality field)
-        # Full persona localization is handled by PersonaLoader separately.
-        # We still read the persona name from the partially-merged raw so far.
-        persona_name = raw.get("persona", "default")
-        persona_path = self._data_path / _PERSONAS_DIR / f"{persona_name}.json"
-        if not persona_path.exists() and persona_name != "default":
-            dice_log(f"[Config] [Load] Persona '{persona_name}' not found, falling back to 'default'")
-            persona_name = "default"
-            persona_path = self._data_path / _PERSONAS_DIR / "default.json"
-        persona_data = _load_json_file(persona_path)
-        if "llm_personality" in persona_data:
-            raw.setdefault("llm", {})["personality"] = persona_data["llm_personality"]
 
         # Layer 2: account config
         account_cfg = self._ensure_account_config()

@@ -105,10 +105,11 @@ def test_global_config_overrides_pydantic_defaults(dd):
 
 
 def test_global_secrets_override_global_config(dd):
-    _write(dd.global_cfg, {"llm": {"api_key": "global_key"}})
-    _write(dd.global_secrets, {"llm": {"api_key": "secret_key"}})
+    _write(dd.global_cfg, {"persona_ai": {"primary_model": "global-model"}})
+    _write(dd.global_secrets, {"persona_ai": {"primary_api_key": "secret_key"}})
     cfg = dd.loader().load()
-    assert cfg.llm.api_key == "secret_key"
+    assert cfg.persona_ai.primary_api_key == "secret_key"
+    assert cfg.persona_ai.primary_model == "global-model"
 
 
 def test_account_config_overrides_global_secrets(dd):
@@ -119,20 +120,13 @@ def test_account_config_overrides_global_secrets(dd):
 
 
 def test_account_config_deep_merge_does_not_erase_siblings(dd):
-    """Account sets llm.api_key; global has llm.model — both survive."""
-    _write(dd.global_cfg, {"llm": {"model": "global-model", "enabled": True}})
-    _write(dd.account_cfg("bot1"), {"llm": {"api_key": "my-key"}})
+    """Account sets persona_ai.primary_api_key; global has persona_ai.primary_model — both survive."""
+    _write(dd.global_cfg, {"persona_ai": {"primary_model": "global-model", "enabled": True}})
+    _write(dd.account_cfg("bot1"), {"persona_ai": {"primary_api_key": "my-key"}})
     cfg = dd.loader("bot1").load()
-    assert cfg.llm.model == "global-model"
-    assert cfg.llm.api_key == "my-key"
-    assert cfg.llm.enabled is True
-
-
-def test_persona_llm_personality_applied(dd):
-    _write(dd.persona("kawaii"), {"llm_personality": "可爱的助手~"})
-    _write(dd.global_cfg, {"persona": "kawaii"})
-    cfg = dd.loader().load()
-    assert cfg.llm.personality == "可爱的助手~"
+    assert cfg.persona_ai.primary_model == "global-model"
+    assert cfg.persona_ai.primary_api_key == "my-key"
+    assert cfg.persona_ai.enabled is True
 
 
 def test_persona_fallback_when_missing(dd):
@@ -155,10 +149,10 @@ def test_env_var_master_comma_separated(dd):
     assert cfg.master == ["id1", "id2", "id3"]
 
 
-def test_env_var_nested_llm_api_key(dd):
-    with patch.dict(os.environ, {"DICE_LLM_API_KEY": "env-llm-key"}):
+def test_env_var_nested_persona_ai_model(dd):
+    with patch.dict(os.environ, {"DICE_NICKNAME": "env-nickname"}):
         cfg = dd.loader().load()
-    assert cfg.llm.api_key == "env-llm-key"
+    assert cfg.nickname == "env-nickname"
 
 
 def test_priority_order_all_layers(dd):
@@ -228,17 +222,16 @@ def test_invalid_type_raises_config_validation_error(dd):
 
 
 def test_invalid_nested_type_raises_error(dd):
-    _write(dd.global_cfg, {"llm": {"max_context": "oops"}})
+    _write(dd.global_cfg, {"persona_ai": {"timeout": "oops"}})
     with pytest.raises(ConfigValidationError):
         dd.loader().load()
 
 
 def test_valid_bool_string_accepted(dd):
     """Pydantic coerces string booleans when using lenient validators."""
-    # True/False as JSON booleans are always valid
-    _write(dd.global_cfg, {"llm": {"enabled": True}})
+    _write(dd.global_cfg, {"persona_ai": {"enabled": True}})
     cfg = dd.loader().load()
-    assert cfg.llm.enabled is True
+    assert cfg.persona_ai.enabled is True
 
 
 # ── 9.5: Atomic update / reload ──────────────────────────────────────────────

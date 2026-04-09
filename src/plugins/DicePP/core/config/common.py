@@ -35,15 +35,6 @@ CFG_HUB_API_KEY = "dicehub_api_key"
 CFG_HUB_NAME = "dicehub_name"
 CFG_HUB_ENABLE = "dicehub_enable"
 
-# ── LLM ─────────────────────────────────────────────────────────────────────
-CFG_LLM_ENABLED = "llm_enabled"
-CFG_LLM_API_KEY = "llm_api_key"
-CFG_LLM_BASE_URL = "llm_base_url"
-CFG_LLM_MODEL = "llm_model"
-CFG_LLM_PERSONALITY = "llm_personality"
-CFG_LLM_MAX_CONTEXT = "llm_max_context"
-CFG_LLM_TIMEOUT = "llm_timeout"
-
 
 def preprocess_white_list(raw_list: List[str]) -> List[str]:
     """Split semicolon-separated whitelist entries and strip whitespace."""
