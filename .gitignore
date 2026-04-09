@@ -148,8 +148,10 @@ dmypy.json
 
 # DicePP
 config/secrets.json
+!config/secrets.json.example
 config/bots/*.json
 !config/bots/_template.json
+config/personas/*.local.json
 data/
 content/**
 !content/**/

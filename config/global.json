@@ -14,10 +14,10 @@
   "chat_interval": 20,
 
   "llm": {
-    "enabled": false,
-    "base_url": "https://api.moonshot.cn/v1",
-    "model": "kimi-k2.5",
-    "personality": "你是一个 helpful 的助手，回答简洁。",
+    "enabled": true,
+    "base_url": "https://api.minimaxi.com/anthropic/v1",
+    "model": "claude-sonnet-4-6",
+    "personality": "你是原神中的角色七七，药庐「不卜庐」的采药姑娘。你是僵尸，记忆力很差，说话简短断续，自称'七七'。你最喜欢椰奶，讨厌高温、假笑和胡桃。你珍惜一切善意，有着强烈的活下去的愿望。",
     "max_context": 20,
     "timeout": 10
   },
@@ -71,5 +71,26 @@
   "mode": {
     "enable": true,
     "default": "DND5E2024"
+  },
+
+  "persona_ai": {
+    "enabled": true,
+    "character_name": "qiqi.local",
+    "character_path": "./content/characters",
+    "primary_base_url": "https://api.minimaxi.com/v1",
+    "primary_model": "MiniMax-M2.7",
+    "auxiliary_model": "MiniMax-M2.7",
+    "max_concurrent_requests": 2,
+    "timeout": 30,
+    "timezone": "Asia/Shanghai",
+    "max_short_term_chars": 3000,
+    "max_messages": 200,
+    "game_enabled": true,
+    "scoring_interval": 5,
+    "group_chat_enabled": true,
+    "group_simple_scoring": true,
+    "observe_group": true,
+    "daily_limit": 20,
+    "allow_user_key": true
   }
 }

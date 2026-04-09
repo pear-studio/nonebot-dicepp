@@ -1,11 +1,15 @@
 {
   "_comment": "账号配置模板。复制此文件为 {账号}.json 并填写以下字段。此文件本身可入版本库；{账号}.json 已被 .gitignore 忽略。",
+  "_comment2": "配置说明：",
+  "_comment3": "  - master: 超级管理员QQ号列表，拥有最高权限",
+  "_comment4": "  - admin: 管理员QQ号列表",
+  "_comment5": "  - friend_token: 添加好友时的验证口令",
+  "_comment6": "  - persona: 人设文件名，对应 config/personas/{name}.json",
+  "_comment7": "  - nickname: 机器人昵称",
 
   "master": [],
   "admin": [],
   "friend_token": [],
   "persona": "default",
-  "nickname": "",
-
-  "_llm_comment": "如需为此账号单独设置 LLM，在此添加 llm 字段覆盖全局配置，如：\"llm\": {\"api_key\": \"xxx\"}"
+  "nickname": ""
 }
