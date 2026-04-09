@@ -1,118 +1,203 @@
-# DicePP Configuration System
+# DicePP 配置系统
 
-## Overview
+DicePP 使用分层 JSON 配置系统（已替代旧的 Excel 配置）。
 
-DicePP uses a layered JSON-based configuration system (replaced the old Excel-based one).
+## 目录结构
 
-## File Locations
+```
+config/                 # 配置目录（可提交到版本库）
+├── global.json        # 全局默认配置
+├── secrets.json       # 敏感信息（API密钥等）- gitignored
+├── bots/              # 账号配置
+│   ├── _template.json # 配置模板
+│   └── {账号}.json    # 具体账号配置 - gitignored
+└── personas/          # 人设配置
+    ├── default.json
+    └── {自定义}.json
 
-| File | Purpose | Git-tracked? |
-|------|---------|-------------|
-| `Data/config.json` | Global defaults (public) | ✅ Yes |
-| `Data/config.local.json` | Global secrets (API keys, etc.) | ❌ No (gitignored) |
-| `Data/bots/{account}.local.json` | Account-specific settings | ❌ No (gitignored) |
-| `Data/personas/{name}.json` | Persona definitions | ✅ Yes |
+data/                  # 运行时数据（可写）
+├── bots/{账号}/       # 各账号数据
+└── local_images/      # 本地图片
 
-## Priority Order (highest → lowest)
+content/               # 内容资源（可写）
+├── characters/        # 角色卡（Persona AI 使用）
+├── decks/             # 牌组数据
+├── excel/             # Excel 配置
+├── queries/           # 查询数据库
+└── random/            # 随机生成数据
+```
 
-1. **Environment variables** (`DICE_*` prefix, e.g. `DICE_LLM_API_KEY`)
-2. **Account config** (`Data/bots/{account}.local.json`)
-3. **Global secrets** (`Data/config.local.json`)
-4. **Persona LLM personality** (`Data/personas/{persona}.json` → `llm_personality`)
-5. **Global defaults** (`Data/config.json`)
+## 配置优先级（高 → 低）
 
-## Quickstart
+1. **环境变量** (`DICE_*` 前缀，如 `DICE_MASTER`)
+2. **账号配置** (`config/bots/{账号}.json`)
+3. **全局密钥** (`config/secrets.json`)
+4. **全局默认** (`config/global.json`)
 
-1. Copy `Data/bots/_template.json` → `Data/bots/{your_account}.local.json`
-2. Set `master`, `admin`, and `llm.api_key` in the account file
-3. Run the bot
+**合并规则**：深度合并。`secrets.json` 中的子对象会与 `global.json` 递归合并，而非完全替换。
 
-## Account Config (`Data/bots/{account}.local.json`)
+## 快速开始
+
+### 1. 复制模板创建账号配置
+
+```bash
+cp config/bots/_template.json config/bots/你的QQ号.json
+```
+
+### 2. 编辑账号配置
 
 ```json
 {
-  "master": ["123456789"],
-  "admin": ["987654321"],
-  "friend_token": [],
+  "master": ["你的QQ号"],
+  "admin": [],
+  "friend_token": ["添加好友口令"],
   "persona": "default",
-  "nickname": "骰娘",
-  "llm": {
-    "api_key": "sk-..."
+  "nickname": "骰娘"
+}
+```
+
+### 3. 启用 Persona AI（可选）
+
+编辑 `config/global.json`：
+
+```json
+{
+  "persona_ai": {
+    "enabled": true,
+    "character_name": "default",
+    "character_path": "./content/characters",
+    "primary_base_url": "https://api.minimaxi.com/v1",
+    "primary_model": "MiniMax-M2.7",
+    "max_concurrent_requests": 2,
+    "timeout": 30,
+    "daily_limit": 20
   }
 }
 ```
 
-## Global Defaults (`Data/config.json`)
-
-Contains all default values. You can override any field here, or leave them at defaults.
-Key fields:
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `agreement` | (long string) | `.help协议` content |
-| `command_split` | `"\\\\"` | Multi-command separator |
-| `group_invite` | `true` | Accept group invites |
-| `data_expire` | `false` | Auto-delete old user/group data |
-| `llm.enabled` | `false` | Enable LLM chat module |
-| `dicehub.api_url` | `""` | DiceHub registration URL |
-| `roll.enable` | `true` | Roll commands enabled |
-| `mode.default` | `"DND5E2024"` | Default game mode |
-
-## Persona System
-
-A persona bundles:
-- **Localization overrides**: custom response texts per key
-- **Chat patterns**: regex → response list (replaces built-in chat)
-- **LLM personality**: system prompt override
-
-### Creating a Persona
-
-Create `Data/personas/mypersona.json`:
+编辑 `config/secrets.json`：
 
 ```json
 {
-  "name": "mypersona",
-  "localization": {
-    "login_notice": "我来了！",
-    "bot_show": "有什么需要帮忙的吗~"
-  },
-  "chat": {
-    "^你好$": ["你好呀！", "嗨~"],
-    "帮助": "使用 .help 查看指令列表"
-  },
-  "llm_personality": "你是一个活泼可爱的助手。"
+  "persona_ai": {
+    "primary_api_key": "你的API密钥"
+  }
 }
 ```
 
-Set in account config: `"persona": "mypersona"`.
+**⚠️ 注意**：`secrets.json` 只需包含敏感字段（如 API key），其他配置保留在 `global.json` 中。
 
-Unspecified keys fall back to code-level defaults.
+## 全局默认配置 (`config/global.json`)
 
-## Hot Reload
+关键字段说明：
 
-Admins (permission ≥ 3) can run `.reload` to atomically reload config + personas without restarting:
-- If validation fails, old config is preserved
-- Use after editing any JSON config file
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `agreement` | (长文本) | `.help协议` 内容 |
+| `command_split` | `\\` | 多指令分隔符 |
+| `group_invite` | `true` | 自动同意群邀请 |
+| `bot_default_enable` | `true` | 默认开启响应 |
+| `llm.enabled` | `false` | 旧版 LLM 模块（已弃用） |
+| `persona_ai.enabled` | `false` | Persona AI 模块 |
+| `mode.default` | `DND5E2024` | 默认游戏规则 |
 
-## Migration from Excel
+## 人设配置 (`config/personas/`)
 
-The old `Config.xlsx`, `localization.xlsx`, `chat.xlsx` files are no longer used.
+人设包含：
+- **localization**: 覆盖本地化文本
+- **chat**: 自定义对话触发规则
+- **llm_personality**: AI 人格描述
 
-| Old | New |
-|-----|-----|
-| `Config.xlsx` → `[CFG_KEY]` rows | `Data/config.json` fields |
-| `localization.xlsx` | `Data/personas/default.json` → `localization` section |
-| `chat.xlsx` | `Data/personas/default.json` → `chat` section |
-| `cfg_helper.get_config(CFG_KEY)` | `bot.config.field_name` |
+示例 (`qiqi.json`)：
 
-## Standalone Mode CLI / Env Vars
+```json
+{
+  "name": "qiqi",
+  "localization": {
+    "login_notice": "……七七……早上好……"
+  },
+  "chat": {
+    "^你好$": ["……你好……", "……你也好……"],
+    "^.*椰奶.*$": ["……椰奶……喜欢……"]
+  },
+  "llm_personality": "你是原神中的七七，僵尸少女……"
+}
+```
 
-| CLI | Env Var | Purpose |
-|-----|---------|---------|
-| `--bot-id` | `BOT_ID` | Bot account ID (required) |
-| `--hub-url` | `HUB_URL` | DiceHub API URL |
-| `--master-id` | `MASTER_ID` | Master user ID |
-| `--nickname` | `NICKNAME` | Bot nickname |
-| `--port` | `PORT` | HTTP listen port (default 8080) |
+## 角色卡配置 (`content/characters/`)
 
-DICE_* env vars (e.g. `DICE_LLM_API_KEY`, `DICE_PERSONA`) map directly to config fields and always override JSON files.
+Persona AI 模块使用 SillyTavern V2 格式的角色卡：
+
+```yaml
+name: "角色名"
+description: "角色背景"
+personality: "性格描述"
+scenario: "当前场景"
+first_mes: "首次见面开场白"
+mes_example: "示例对话"
+system_prompt: "系统提示词"
+
+# Persona 扩展
+extensions:
+  persona:
+    initial_relationship: 20
+    warmth_labels: ["陌生", "熟悉", "友好", "亲密"]
+```
+
+## 热重载
+
+管理员（权限 ≥ 3）可运行 `.reload` 原子重载配置，无需重启：
+- 验证失败时保留旧配置
+- 编辑 JSON 后使用
+
+## 环境变量
+
+支持的环境变量：
+
+| 变量 | 作用 |
+|------|------|
+| `DICE_MASTER` | 设置 master（逗号分隔多个） |
+| `DICE_ADMIN` | 设置 admin（逗号分隔多个） |
+| `DICE_NICKNAME` | 设置昵称 |
+| `DICE_PERSONA` | 设置人设 |
+| `DICEPP_PROJECT_ROOT` | 覆盖项目根目录 |
+
+## 故障排除
+
+### 配置未生效
+
+检查配置是否正确挂载到容器：
+```bash
+docker exec dicepp cat /app/config/global.json
+docker exec dicepp cat /app/config/secrets.json
+```
+
+### Docker 修改后未生效
+
+代码修改需要重新构建镜像：
+```bash
+docker compose down
+docker compose build
+docker compose up -d
+```
+
+### 更多问题
+
+参见 [MiniMax API 配置指南](./deploy-minimax-guide.md)
+
+## 从旧版本迁移
+
+### 从 Excel 配置迁移
+
+| 旧文件 | 新位置 |
+|--------|--------|
+| `Data/Config.xlsx` | `config/global.json` |
+| `Data/Localization.xlsx` | `config/personas/default.json` → `localization` |
+| `Data/Chat.xlsx` | `config/personas/default.json` → `chat` |
+
+### 从旧 Data/ 目录迁移
+
+项目已重构为 `config/` + `data/` + `content/` 三个目录：
+- **config/**: 只读配置，可版本控制
+- **data/**: 运行时数据，容器挂载
+- **content/**: 内容资源，容器挂载

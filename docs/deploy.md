@@ -312,6 +312,39 @@ make logs
 2. 确认网络配置：`docker network inspect dice-net`
 3. 确认 WebSocket 地址：`ws://dicepp:8080/onebot/v11/ws`
 
+### 配置 Persona AI（可选）
+
+如需启用 AI 对话功能，需配置 LLM API：
+
+**1. 编辑 `config/global.json`：**
+```json
+"persona_ai": {
+  "enabled": true,
+  "character_name": "default",
+  "character_path": "./content/characters",
+  "primary_base_url": "https://api.minimaxi.com/v1",
+  "primary_model": "MiniMax-M2.7",
+  "max_concurrent_requests": 2,
+  "timeout": 30,
+  "daily_limit": 20
+}
+```
+
+**2. 编辑 `config/secrets.json`：**
+```json
+{
+  "persona_ai": {
+    "primary_api_key": "your-api-key-here"
+  }
+}
+```
+
+**⚠️ 重要**：`secrets.json` 与 `global.json` 是**深度合并**，只需在 `secrets.json` 中放置敏感字段（如 API key），其他配置保留在 `global.json` 中即可。
+
+**支持的模型**（MiniMax）：
+- `MiniMax-M2.7` - 标准版
+- `MiniMax-M2.7-highspeed` - 高速版
+
 ### 验证 DicePP 是否正常工作
 
 在不连接 LLOneBot 的情况下，可以使用内置测试脚本验证 DicePP：
@@ -367,6 +400,33 @@ curl -SL https://ghfast.top/https://github.com/docker/compose/releases/download/
 
 ```bash
 pip install docker-compose
+```
+
+### 故障排除
+
+#### 404 Not Found
+**症状**：API 返回 404
+**原因**：`base_url` 配置错误
+**解决**：使用 `https://api.minimaxi.com/v1`，不要加 `/anthropic`
+
+#### 400 Bad Request - invalid chat setting (2013)
+**症状**：`invalid params, invalid chat setting (2013)`
+**原因**：MiniMax 不支持多条 system 消息
+**解决**：代码已修复，如仍报错请重新构建镜像：`docker compose build`
+
+#### 回复包含 `<think>` 标签
+**症状**：回复中显示思考过程
+**原因**：MiniMax-M2.7 模型的思维链输出
+**解决**：代码已自动过滤 `<think>...</think>` 标签
+
+#### 配置未生效
+**症状**：修改配置后行为未改变
+**原因**：Docker 使用镜像中的旧代码
+**解决**：
+```bash
+docker compose down
+docker compose build
+docker compose up -d
 ```
 
 ### Docker 权限问题
