@@ -3,14 +3,15 @@ Persona Orchestrator - 核心编排层
 
 协调各组件完成对话流程
 """
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Set
 import logging
 import time
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 
 from core.bot import Bot
 from .character.loader import CharacterLoader
-from .character.models import Character
+from .character.models import Character, ScheduledEventConfig
 from .llm.router import LLMRouter
 from .data.store import PersonaDataStore
 from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent
@@ -33,6 +34,7 @@ class PersonaOrchestrator:
         self._initialized = False
         self._pending_messages: Dict[str, List[Dict[str, str]]] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}  # key -> (message, timestamp)
+
 
     async def initialize(self) -> bool:
         """
@@ -258,3 +260,31 @@ class PersonaOrchestrator:
             "description": self.character.description[:100] + "..." if len(self.character.description) > 100 else self.character.description,
             "warmth_labels": self.character.get_warmth_labels(),
         }
+
+    async def reload_character(self) -> Tuple[bool, str]:
+        """
+        热重新加载角色卡
+
+        Returns:
+            (是否成功, 消息)
+        """
+        if not self.character_loader:
+            return False, "角色加载器未初始化"
+
+        try:
+            new_character = self.character_loader.load(self.config.character_name)
+
+            if not new_character:
+                return False, f"无法加载角色卡: {self.config.character_name}"
+
+            self.character = new_character
+
+            # 重新创建上下文构建器（因为角色变了）
+            self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars)
+
+            logger.info(f"角色卡已热重载: {self.character.name}")
+            return True, f"角色卡已重载: {self.character.name}"
+
+        except Exception as e:
+            logger.exception("角色卡重载失败")
+            return False, f"重载失败: {e}"

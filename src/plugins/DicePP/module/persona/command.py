@@ -101,13 +101,24 @@ class PersonaCommand(UserCommandBase):
             return False, False, None
         
         msg = msg_str.strip()
-        
-        # @bot 或 .ai 前缀触发
-        if not meta.to_me and not msg.startswith(".ai"):
+
+        # 过滤掉单独的 "." 或 "。"（可能是输错了指令）
+        if msg in [".", "。", "..", "。。", ". ", "。 "]:
             return False, False, None
-        
+
+        # 如果以 "." 或 "。" 开头但不是有效的 AI 命令，不处理
+        # 有效的 "." 前缀命令: .ai, .pa
+        if msg.startswith(".") and not msg.startswith(".ai") and not msg.startswith(".pa"):
+            return False, False, None
+        if msg.startswith("。") and not msg.startswith("。ai") and not msg.startswith("。pa"):
+            return False, False, None
+
+        # @bot 或 .ai 前缀触发
+        if not meta.to_me and not msg.startswith(".ai") and not msg.startswith("。ai"):
+            return False, False, None
+
         # 提取命令内容
-        if msg.startswith(".ai"):
+        if msg.startswith(".ai") or msg.startswith("。ai"):
             content = msg[3:].strip()
         else:
             content = msg
@@ -130,6 +141,13 @@ class PersonaCommand(UserCommandBase):
                 return True, False, "admin"
             else:
                 # 非管理员尝试执行 admin 命令，静默忽略
+                return False, False, None
+
+        # .pa 调试命令：仅管理员
+        if msg.startswith(".pa "):
+            if self._is_admin(meta.user_id):
+                return True, False, "debug"
+            else:
                 return False, False, None
 
         # 不调用 LLM 的工具类命令：无需白名单
@@ -163,7 +181,7 @@ class PersonaCommand(UserCommandBase):
         
         # 提取命令内容
         msg = msg_str.strip()
-        if msg.startswith(".ai"):
+        if msg.startswith(".ai") or msg.startswith("。ai"):
             content = msg[3:].strip()
         else:
             content = msg
@@ -188,6 +206,12 @@ class PersonaCommand(UserCommandBase):
         # 处理 admin 命令
         if cmd == "admin" or hint == "admin":
             response = await self._handle_admin(user_id, args)
+            port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
+            return [BotSendMsgCommand(self.bot.account, response, [port])]
+
+        # 处理 debug 命令 (.pa / 。pa)
+        if hint == "debug" or msg.startswith(".pa ") or msg.startswith("。pa "):
+            response = await self._handle_debug(user_id, group_id, msg)
             port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
             return [BotSendMsgCommand(self.bot.account, response, [port])]
 
@@ -467,15 +491,275 @@ class PersonaCommand(UserCommandBase):
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
         if keyword in ["ai", "persona", "AI", "人格"]:
-            return (
-                ".ai - 自我介绍\n"
-                "@bot <消息> - 与 AI 对话\n"
-                ".ai clear - 清空对话历史\n"
-                ".ai status - 查看状态\n"
-                ".ai profile - 查看你的档案\n"
-                ".ai join <口令> - 加入白名单（私聊）"
-            )
+            lines = [
+                ".ai - 自我介绍",
+                "@bot <消息> - 与 AI 对话",
+                ".ai clear - 清空对话历史",
+                ".ai status - 查看状态",
+                ".ai profile - 查看你的档案",
+                ".ai join <口令> - 加入白名单（私聊）",
+            ]
+            # 管理员额外显示调试命令
+            if self._is_admin(meta.user_id):
+                lines.append("")
+                lines.append("[管理员调试]")
+                lines.append(".pa debug - 调试信息")
+                lines.append(".pa rel <用户ID> - 查看关系")
+                lines.append(".pa setrel <用户ID> <分数> - 修改好感度")
+                lines.append(".pa reload - 热重载角色卡")
+                lines.append(".pa events - 事件配置")
+                lines.append(".pa today/yesterday - 查看今天/昨天的事件和日记")
+            return "\n".join(lines)
         return ""
+
+    async def _handle_debug(self, user_id: str, group_id: str, msg: str) -> str:
+        """处理调试命令 (.pa / 。pa) - 仅管理员"""
+        if not self._is_admin(user_id):
+            return "权限不足"
+
+        if not self.data_store:
+            return "模块未初始化"
+
+        # 去掉前缀 (.pa 或 。pa)
+        if msg.startswith(".pa"):
+            content = msg[3:].strip()
+        elif msg.startswith("。pa"):
+            content = msg[3:].strip()
+        else:
+            content = msg
+
+        parts = content.split()
+        cmd = parts[0] if parts else ""
+        args = parts[1:] if len(parts) > 1 else []
+
+        # .pa debug - 查看当前上下文信息
+        if cmd == "debug" or cmd == "":
+            lines = ["=== Persona AI 调试信息 ==="]
+
+            # 当前用户信息
+            profile = await self.data_store.get_user_profile(user_id)
+            rel = await self.data_store.get_relationship(user_id, group_id)
+
+            lines.append(f"\n当前用户: {user_id}")
+            if group_id:
+                lines.append(f"当前群组: {group_id}")
+
+            # 好感度信息
+            if rel:
+                lines.append(f"\n[好感度]")
+                lines.append(f"  亲密度: {rel.intimacy:.2f}")
+                lines.append(f"  激情: {rel.passion:.2f}")
+                lines.append(f"  信任: {rel.trust:.2f}")
+                lines.append(f"  安全感: {rel.secureness:.2f}")
+                lines.append(f"  综合: {rel.composite_score:.2f}")
+                lines.append(f"  最后互动: {rel.last_interaction_at.strftime('%Y-%m-%d %H:%M') if rel.last_interaction_at else '无'}")
+            else:
+                lines.append(f"\n[好感度] 暂无记录")
+
+            # 用户信息
+            if profile and profile.facts:
+                lines.append(f"\n[用户画像]")
+                for k, v in list(profile.facts.items())[:5]:  # 最多显示5条
+                    lines.append(f"  {k}: {v}")
+                if len(profile.facts) > 5:
+                    lines.append(f"  ... 还有 {len(profile.facts) - 5} 条")
+            else:
+                lines.append(f"\n[用户画像] 暂无")
+
+            # 模块配置
+            config = self.bot.config.persona_ai
+            lines.append(f"\n[配置]")
+            lines.append(f"  角色: {config.character_name}")
+            lines.append(f"  日限: {config.daily_limit} 次")
+            lines.append(f"  群聊: {'开启' if config.group_chat_enabled else '关闭'}")
+
+            return "\n".join(lines)
+
+        # .pa rel <用户ID> - 查看指定用户的关系
+        if cmd == "rel":
+            if not args:
+                return "用法: .pa rel <用户ID> [群组ID]"
+
+            target_user = args[0]
+            target_group = args[1] if len(args) > 1 else group_id
+
+            rel = await self.data_store.get_relationship(target_user, target_group)
+            profile = await self.data_store.get_user_profile(target_user)
+
+            lines = [f"=== 用户 {target_user} 的关系详情 ==="]
+            if target_group:
+                lines.append(f"群组: {target_group}")
+
+            if rel:
+                lines.append(f"\n[好感度]")
+                lines.append(f"  亲密度: {rel.intimacy:.2f}")
+                lines.append(f"  激情: {rel.passion:.2f}")
+                lines.append(f"  信任: {rel.trust:.2f}")
+                lines.append(f"  安全感: {rel.secureness:.2f}")
+                lines.append(f"  综合: {rel.composite_score:.2f}")
+                lines.append(f"  互动次数: {rel.interaction_count}")
+                lines.append(f"  最后互动: {rel.last_interaction_at.strftime('%Y-%m-%d %H:%M') if rel.last_interaction_at else '无'}")
+
+                # 好感度等级
+                if self.orchestrator and self.orchestrator.character:
+                    level, label = rel.get_warmth_level(self.orchestrator.character.get_warmth_labels())
+                    lines.append(f"  等级: {level} ({label})")
+            else:
+                lines.append("\n暂无关系记录")
+
+            if profile:
+                lines.append(f"\n[画像]")
+                lines.append(f"  创建时间: {profile.created_at.strftime('%Y-%m-%d') if profile.created_at else '未知'}")
+                lines.append(f"  更新时间: {profile.updated_at.strftime('%Y-%m-%d') if profile.updated_at else '未知'}")
+                if profile.facts:
+                    lines.append(f"  已知信息 ({len(profile.facts)}条):")
+                    for k, v in list(profile.facts.items())[:5]:
+                        lines.append(f"    {k}: {v}")
+
+            return "\n".join(lines)
+
+        # .pa setrel <用户ID> <分数> - 修改好感度
+        if cmd == "setrel":
+            if len(args) < 2:
+                return "用法: .pa setrel <用户ID> <综合分数> [群组ID]"
+
+            target_user = args[0]
+            try:
+                new_score = float(args[1])
+            except ValueError:
+                return "分数必须是数字"
+
+            if new_score < 0 or new_score > 100:
+                return "分数必须在 0-100 之间"
+
+            target_group = args[2] if len(args) > 2 else group_id
+
+            # 获取或创建关系
+            rel = await self.data_store.get_relationship(target_user, target_group)
+            if not rel:
+                # 创建新关系，使用默认初始值
+                initial = self.orchestrator.character.extensions.initial_relationship if self.orchestrator and self.orchestrator.character else 30.0
+                rel = await self.data_store.init_relationship(target_user, target_group, initial)
+
+            # 设置所有维度为相同值以达到目标综合分
+            rel.intimacy = new_score
+            rel.passion = new_score
+            rel.trust = new_score
+            rel.secureness = new_score
+
+            await self.data_store.update_relationship(rel)
+
+            return f"已设置用户 {target_user} 的好感度为 {new_score:.2f}"
+
+        # .pa reload - 热重载角色卡
+        if cmd == "reload":
+            if not self.orchestrator:
+                return "模块未初始化"
+
+            success, msg = await self.orchestrator.reload_character()
+            return f"重载{'成功' if success else '失败'}: {msg}"
+
+        # .pa events - 查看事件配置
+        if cmd == "events":
+            if not self.orchestrator or not self.orchestrator.character:
+                return "角色未加载"
+
+            char = self.orchestrator.character
+            ext = char.extensions
+
+            lines = [f"=== {char.name} 的事件配置 ==="]
+            lines.append(f"\n[基础设置]")
+            lines.append(f"  每日事件数: {ext.daily_events_count}")
+            lines.append(f"  活动时段: {ext.event_day_start_hour}:00 - {ext.event_day_end_hour}:00")
+            lines.append(f"  时间抖动: ±{ext.event_jitter_minutes} 分钟")
+
+            lines.append(f"\n[定时事件]")
+            for evt in ext.scheduled_events:
+                lines.append(f"  {evt.type}: {evt.time_range}")
+
+            # 世界观
+            if ext.world:
+                lines.append(f"\n[世界观]")
+                lines.append(f"  {ext.world}")
+
+            # 好感度标签
+            labels = char.get_warmth_labels()
+            lines.append(f"\n[好感度等级]")
+            for i, label in enumerate(labels):
+                lines.append(f"  {i*10}-{(i+1)*10}: {label}")
+
+            return "\n".join(lines)
+
+        # .pa list - 列出白名单/用户
+        if cmd == "list":
+            entries = await self.data_store.list_whitelist()
+            users = [e for e in entries if e.type == "user"]
+            groups = [e for e in entries if e.type == "group"]
+
+            lines = ["=== 白名单列表 ==="]
+            lines.append(f"\n用户: {len(users)} 个")
+            for u in users[:20]:
+                lines.append(f"  {u.id}")
+            if len(users) > 20:
+                lines.append(f"  ... 还有 {len(users)-20} 个")
+
+            lines.append(f"\n群组: {len(groups)} 个")
+            for g in groups[:20]:
+                lines.append(f"  {g.id}")
+            if len(groups) > 20:
+                lines.append(f"  ... 还有 {len(groups)-20} 个")
+
+            return "\n".join(lines)
+
+        # .pa today / .pa yesterday - 查看今天/昨天的事件和日记
+        if cmd in ["today", "yesterday", "diary"]:
+            from datetime import datetime, timedelta
+
+            if cmd == "yesterday":
+                date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                date_label = "昨天"
+            else:
+                date = datetime.now().strftime("%Y-%m-%d")
+                date_label = "今天"
+
+            # 获取日记
+            diary = await self.data_store.get_diary(date)
+
+            # 获取事件
+            events = await self.data_store.get_daily_events(date)
+
+            lines = [f"=== {date_label} ({date}) ==="]
+
+            # 日记
+            if diary:
+                lines.append(f"\n[日记]")
+                lines.append(diary)
+            else:
+                lines.append(f"\n[日记] 暂无")
+
+            # 事件
+            if events:
+                lines.append(f"\n[事件] ({len(events)} 个)")
+                for i, evt in enumerate(events[:10], 1):
+                    lines.append(f"  {i}. [{evt.event_type}] {evt.description}")
+                    if evt.reaction:
+                        lines.append(f"     反应: {evt.reaction}")
+            else:
+                lines.append(f"\n[事件] 暂无")
+
+            return "\n".join(lines)
+
+        return (
+            "=== Persona AI 调试命令 ===\n"
+            ".pa debug - 查看当前上下文\n"
+            ".pa rel <用户ID> [群组ID] - 查看指定用户关系\n"
+            ".pa setrel <用户ID> <分数> [群组ID] - 修改好感度\n"
+            ".pa reload - 热重载角色卡\n"
+            ".pa events - 查看事件配置\n"
+            ".pa list - 查看白名单\n"
+            ".pa today - 查看今天的事件和日记\n"
+            ".pa yesterday - 查看昨天的事件和日记"
+        )
 
     def get_description(self) -> str:
         """获取命令描述"""

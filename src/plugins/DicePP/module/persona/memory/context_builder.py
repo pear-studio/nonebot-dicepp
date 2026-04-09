@@ -30,12 +30,15 @@ class ContextBuilder:
     ) -> List[Dict[str, str]]:
         messages = []
 
+        # 合并所有 system 内容为一条（某些提供商如 MiniMax 不支持多条 system 消息）
+        system_parts = []
+
         system_prompt = self._build_system_prompt(user_profile, diary_context, warmth_label)
-        messages.append({"role": "system", "content": system_prompt})
+        system_parts.append(system_prompt)
 
         if self.character.mes_example:
             example = self.character.format_mes_example()
-            messages.append({"role": "system", "content": f"示例对话:\n{example}"})
+            system_parts.append(f"示例对话:\n{example}")
 
         short_term_text = self._format_short_term(short_term_history)
         if short_term_text:
@@ -46,7 +49,10 @@ class ContextBuilder:
                     short_term_text = short_term_text[first_user:]
                 short_term_text = "...（前文省略）" + short_term_text
 
-            messages.append({"role": "system", "content": f"近期对话:\n{short_term_text}"})
+            system_parts.append(f"近期对话:\n{short_term_text}")
+
+        # 合并为单条 system 消息
+        messages.append({"role": "system", "content": "\n\n".join(system_parts)})
 
         if current_message:
             messages.append({"role": "user", "content": current_message})

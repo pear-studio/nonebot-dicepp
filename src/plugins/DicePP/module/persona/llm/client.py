@@ -35,6 +35,15 @@ class LLMClient:
                 raise ImportError("openai package is required. Install with: pip install openai")
         return self._client
 
+    def _filter_think_tags(self, content: str) -> str:
+        """过滤 <think>...</think> 思考过程标签"""
+        import re
+        # 移除 <think>...</think> 及其内容
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+        # 清理多余的空白
+        content = content.strip()
+        return content
+
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -77,7 +86,10 @@ class LLMClient:
                 
                 # 提取回复文本
                 content = response.choices[0].message.content or ""
-                
+
+                # 过滤 <think>...</think> 思考过程（MiniMax-M2.7 等模型）
+                content = self._filter_think_tags(content)
+
                 # 构建元数据
                 metadata = {
                     "latency": latency,
@@ -87,7 +99,7 @@ class LLMClient:
                 }
                 
                 return content, metadata
-                
+
             except asyncio.TimeoutError as e:
                 last_error = e
                 if attempt < max_retries:
