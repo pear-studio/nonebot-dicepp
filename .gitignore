@@ -178,3 +178,6 @@ openspec/
 
 # Windows 保留设备名 (Git Bash 下可能意外生成实体文件)
 nul
+
+# DicePP Shell 会话数据
+.dicepp-shell/
