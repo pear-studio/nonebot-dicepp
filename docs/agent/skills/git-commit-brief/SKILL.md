@@ -19,3 +19,4 @@ description: Read before every local git commit.
   '@
   ```
 - 读取实际修改的文件, 确认是否都是一个主题修改, 如果无法确定则询问用户. 根据修改的内容编写 commit log, 避免只看文件名称.
+- 可以考虑将不同类别的修改分批提交
