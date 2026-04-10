@@ -71,7 +71,8 @@ python_classes = ["MyTestCase", "Test*"]
 python_functions = ["test*"]
 addopts = "--tb=short"
 markers = [
-    "unit: Unit tests for individual modules",
+    "unit: Unit tests for individual modules (no external I/O, all dependencies mocked)",
+    "e2e: End-to-end tests exercising the full bot lifecycle (may start real services)",
     "integration: Integration tests for command flow",
     "slow: Tests that take a long time to run",
     "karma: Tests for karma system",

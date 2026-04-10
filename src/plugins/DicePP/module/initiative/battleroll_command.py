@@ -106,7 +106,8 @@ class BattlerollCommand(UserCommandBase):
                 await self.bot.db.initiative.delete(meta.group_id)
                 feedbacks.append(self.format_loc(LOC_BR_NEW))
             except Exception as e:
-                self.bot.logger.error(f"清理先攻失败: {e}", exc_info=True)
+                if hasattr(self.bot, 'logger'):
+                    self.bot.logger.error(f"清理先攻失败: {e}", exc_info=True)
                 feedbacks.append(f"出错: {str(e)}")
         elif mode == "turn" or mode == "round":
             try:
@@ -114,7 +115,8 @@ class BattlerollCommand(UserCommandBase):
                 if init_data is None:
                     raise ValueError("No init data")
             except Exception as e:
-                self.bot.logger.error(f"获取先攻数据失败: {e}", exc_info=True)
+                if hasattr(self.bot, 'logger'):
+                    self.bot.logger.error(f"获取先攻数据失败: {e}", exc_info=True)
                 feedback = self.format_loc(LOC_BR_NO_INIT)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
@@ -259,7 +261,8 @@ class BattlerollCommand(UserCommandBase):
                 if init_data is None:
                     raise ValueError("No init data")
             except Exception as e:
-                self.bot.logger.error(f"获取先攻数据失败: {e}", exc_info=True)
+                if hasattr(self.bot, 'logger'):
+                    self.bot.logger.error(f"获取先攻数据失败: {e}", exc_info=True)
                 return [BotSendMsgCommand(self.bot.account, self.format_loc(LOC_BR_NO_INIT), [port])]
             if not init_data.entities:
                 return [BotSendMsgCommand(self.bot.account, self.format_loc(LOC_BR_NO_INIT), [port])]

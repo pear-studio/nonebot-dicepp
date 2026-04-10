@@ -84,6 +84,38 @@ def _new_test_account(prefix: str) -> str:
     return f"{prefix}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
 
 
+async def async_make_test_bot(prefix: str = "test_bot"):
+    """
+    Create and async-init a Bot suitable for IsolatedAsyncioTestCase.asyncSetUp.
+
+    Returns:
+        Tuple of (bot, proxy)
+
+    Usage::
+
+        async def asyncSetUp(self):
+            self.bot, self.proxy = await async_make_test_bot("my_prefix")
+
+        async def asyncTearDown(self):
+            await async_teardown_test_bot(self.bot)
+    """
+    test_bot = Bot(_new_test_account(prefix), no_tick=True)
+    test_bot.config.master = ["test_master"]
+    proxy = TestProxy()
+    test_bot.set_client_proxy(proxy)
+    await test_bot.delay_init_command()
+    proxy.mute = True
+    return test_bot, proxy
+
+
+async def async_teardown_test_bot(bot: Bot) -> None:
+    """Shutdown and cleanup a Bot created via async_make_test_bot."""
+    try:
+        await bot.shutdown_async()
+    finally:
+        rmtree_retry(bot.data_path)
+
+
 @pytest.fixture(scope="class")
 def shared_bot():
     test_bot = Bot(_new_test_account("test_bot"), no_tick=True)
