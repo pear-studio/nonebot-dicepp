@@ -16,6 +16,7 @@ from utils.logger import dice_log
 
 from .orchestrator import PersonaOrchestrator
 from .data.store import PersonaDataStore
+from .proactive.observation_buffer import ObservationBuffer
 
 
 @custom_user_command("PersonaAI", priority=DPP_COMMAND_PRIORITY_DEFAULT, flag=DPP_COMMAND_FLAG_FUN)
@@ -28,6 +29,7 @@ class PersonaCommand(UserCommandBase):
         self.orchestrator: PersonaOrchestrator = None
         self.data_store: PersonaDataStore = None
         self._whitelist_confirm_pending: Dict[str, float] = {}  # user_id -> timestamp
+        self._observation_buffers: Dict[str, ObservationBuffer] = {}  # group_id -> buffer
 
     def delay_init(self) -> List[str]:
         """延迟初始化"""
@@ -115,6 +117,9 @@ class PersonaCommand(UserCommandBase):
 
         # @bot 或 .ai 前缀触发
         if not meta.to_me and not msg.startswith(".ai") and not msg.startswith("。ai"):
+            # 群聊旁听模式（观察但不回复）
+            if meta.group_id and self.config.observe_group_enabled:
+                return True, False, "observe"
             return False, False, None
 
         # 提取命令内容
@@ -178,14 +183,19 @@ class PersonaCommand(UserCommandBase):
         group_id = meta.group_id or ""
         nickname = meta.nickname or ""
         is_private = not meta.group_id
-        
+
+        # 处理群聊旁听（观察模式）
+        if hint == "observe" and group_id:
+            await self._handle_group_observation(group_id, user_id, nickname, msg_str)
+            return []
+
         # 提取命令内容
         msg = msg_str.strip()
         if msg.startswith(".ai") or msg.startswith("。ai"):
             content = msg[3:].strip()
         else:
             content = msg
-        
+
         # 特殊提示：群聊中发送 join
         if hint == "join_group_hint":
             response = "请私聊发送此命令"
@@ -255,6 +265,21 @@ class PersonaCommand(UserCommandBase):
         # 发送回复（去重命中时 response 为 None，静默不发送）
         if not response:
             return []
+
+        # 更新群活跃度（群聊且是@触发或AI命令）
+        if group_id and self.data_store and self.config.group_activity_enabled:
+            try:
+                is_whitelisted = await self.data_store.is_group_whitelisted(group_id)
+                await self.data_store.update_group_activity(
+                    group_id=group_id,
+                    score_delta=self.config.group_activity_add_per_interaction,
+                    max_daily_add=self.config.group_activity_max_daily_add,
+                    is_whitelisted=is_whitelisted,
+                )
+            except Exception as e:
+                # 活跃度更新失败不影响主流程
+                pass
+
         port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
         return [BotSendMsgCommand(self.bot.account, response, [port])]
 
@@ -509,6 +534,7 @@ class PersonaCommand(UserCommandBase):
                 lines.append(".pa reload - 热重载角色卡")
                 lines.append(".pa events - 事件配置")
                 lines.append(".pa today/yesterday - 查看今天/昨天的事件和日记")
+                lines.append(".pa pause/resume - 暂停/恢复主动消息")
             return "\n".join(lines)
         return ""
 
@@ -572,6 +598,47 @@ class PersonaCommand(UserCommandBase):
             lines.append(f"  角色: {config.character_name}")
             lines.append(f"  日限: {config.daily_limit} 次")
             lines.append(f"  群聊: {'开启' if config.group_chat_enabled else '关闭'}")
+
+            # Phase 2 新增调试信息
+            lines.append(f"\n[Phase 2 系统]")
+            lines.append(f"  衰减: {'开启' if config.decay_enabled else '关闭'}")
+            lines.append(f"  生活模拟: {'开启' if config.character_life_enabled else '关闭'}")
+            lines.append(f"  主动消息: {'开启' if config.proactive_enabled else '关闭'}")
+            lines.append(f"  群聊观察: {'开启' if config.observe_group_enabled else '关闭'}")
+            lines.append(f"  群活跃度: {'开启' if config.group_activity_enabled else '关闭'}")
+
+            # 衰减详情
+            if config.decay_enabled:
+                lines.append(f"\n[衰减配置]")
+                lines.append(f"  免衰减期: {config.decay_grace_period_hours}h")
+                lines.append(f"  衰减率: {config.decay_rate_per_hour}/h")
+                lines.append(f"  每日上限: {config.decay_daily_cap}")
+
+            # 调度器状态
+            if self.orchestrator and self.orchestrator.scheduler:
+                scheduler_status = self.orchestrator.scheduler.get_status()
+                lines.append(f"\n[调度器状态]")
+                lines.append(f"  待分享: {scheduler_status.get('pending_shares', 0)}")
+                lines.append(f"  今日触发: {len(scheduler_status.get('scheduled_today', []))}")
+                lines.append(f"  安静时段: {'是' if scheduler_status.get('is_quiet_hours') else '否'}")
+
+            # 群活跃度（如果在群聊中）
+            if group_id and config.group_activity_enabled:
+                try:
+                    activity = await self.data_store.get_group_activity(group_id)
+                    lines.append(f"\n[群活跃度]")
+                    lines.append(f"  分数: {activity.score:.1f}")
+                    lines.append(f"  最后互动: {activity.last_interaction_at.strftime('%Y-%m-%d %H:%M') if activity.last_interaction_at else '无'}")
+                except Exception:
+                    pass
+
+            # 观察缓冲状态（如果在群聊中）
+            if group_id and group_id in self._observation_buffers:
+                buffer = self._observation_buffers[group_id]
+                status = buffer.get_status()
+                lines.append(f"\n[观察缓冲]")
+                lines.append(f"  缓冲消息: {status.get('buffer_size', 0)}")
+                lines.append(f"  当前阈值: {status.get('threshold', 0)}")
 
             return "\n".join(lines)
 
@@ -749,6 +816,20 @@ class PersonaCommand(UserCommandBase):
 
             return "\n".join(lines)
 
+        # .pa pause - 暂停主动消息
+        if cmd == "pause":
+            if self.orchestrator and self.orchestrator.scheduler:
+                self.orchestrator.scheduler.config.enabled = False
+                return "已暂停主动消息发送"
+            return "调度器未初始化"
+
+        # .pa resume - 恢复主动消息
+        if cmd == "resume":
+            if self.orchestrator and self.orchestrator.scheduler:
+                self.orchestrator.scheduler.config.enabled = True
+                return "已恢复主动消息发送"
+            return "调度器未初始化"
+
         return (
             "=== Persona AI 调试命令 ===\n"
             ".pa debug - 查看当前上下文\n"
@@ -758,9 +839,129 @@ class PersonaCommand(UserCommandBase):
             ".pa events - 查看事件配置\n"
             ".pa list - 查看白名单\n"
             ".pa today - 查看今天的事件和日记\n"
-            ".pa yesterday - 查看昨天的事件和日记"
+            ".pa yesterday - 查看昨天的事件和日记\n"
+            ".pa pause - 暂停主动消息\n"
+            ".pa resume - 恢复主动消息"
         )
+
+    async def _handle_group_observation(
+        self, group_id: str, user_id: str, nickname: str, msg_str: str
+    ) -> None:
+        """处理群聊观察"""
+        if not self.config.observe_group_enabled or not self.data_store:
+            return
+
+        try:
+            # 获取或创建缓冲区
+            if group_id not in self._observation_buffers:
+                self._observation_buffers[group_id] = ObservationBuffer(
+                    group_id=group_id,
+                    initial_threshold=self.config.observe_initial_threshold,
+                    max_threshold=self.config.observe_max_threshold,
+                    min_threshold=self.config.observe_min_threshold,
+                    max_records_per_group=self.config.observe_max_records,
+                )
+
+            buffer = self._observation_buffers[group_id]
+
+            # 添加消息到缓冲
+            should_extract = buffer.add_message(
+                user_id=user_id,
+                nickname=nickname,
+                content=msg_str,
+            )
+
+            # 触发提取
+            if should_extract:
+                from .proactive.observation_buffer import ObservationExtractor
+
+                messages = buffer.get_messages_for_extraction()
+
+                # 如果有 event_agent，进行提取
+                if self.orchestrator and self.orchestrator.event_agent:
+                    extractor = ObservationExtractor(
+                        event_agent=self.orchestrator.event_agent,
+                        data_store=self.data_store,
+                    )
+                    await extractor.extract_observations(group_id, messages)
+
+        except Exception as e:
+            # 观察失败不影响主流程
+            dice_log(f"[Persona] 群聊观察失败: {e}")
 
     def get_description(self) -> str:
         """获取命令描述"""
         return "Persona AI 对话" if self.enabled else "Persona AI 对话（已禁用）"
+
+    def tick(self) -> List[BotCommandBase]:
+        """
+        每秒调用，驱动主动消息调度器
+
+        TODO: 当前实现存在同步/异步混合问题。当事件循环已在运行时，
+        使用 asyncio.create_task() 不等待结果，可能导致消息丢失。
+        长期解决方案：考虑将框架的 tick() 改为 async def，或使用消息队列模式。
+        参见: review-250410-persona-phase2.md 设计质量部分
+        """
+        if not self.enabled or not self.orchestrator:
+            return []
+
+        # 使用 asyncio 运行异步 tick
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            # 检查是否已经在事件循环中
+            # 注意：这是妥协方案。当 loop 在运行时，create_task 不等待结果，
+            # 可能导致本次 tick 的消息丢失。但避免了 RuntimeError。
+            if loop.is_running():
+                # 如果在运行中，创建新任务（不等待结果）
+                asyncio.create_task(self.orchestrator.tick())
+                return []
+            # loop 不在运行时，可以安全地使用 run_until_complete
+            messages = loop.run_until_complete(self.orchestrator.tick())
+
+            # 转换为 BotSendMsgCommand
+            cmds = []
+            for msg in messages:
+                user_id = msg.get("user_id", "")
+                group_id = msg.get("group_id", "")
+                content = msg.get("content", "")
+
+                if group_id:
+                    port = GroupMessagePort(group_id)
+                else:
+                    port = PrivateMessagePort(user_id)
+
+                cmds.append(BotSendMsgCommand(self.bot.account, content, [port]))
+
+            return cmds
+        except Exception as e:
+            dice_log(f"[Persona] tick 失败: {e}")
+            return []
+
+    def tick_daily(self) -> List[BotCommandBase]:
+        """
+        每天调用，生成日记
+
+        TODO: 与 tick() 方法相同的同步/异步混合问题。参见 tick() 文档。
+        """
+        if not self.enabled or not self.orchestrator:
+            return []
+
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            # 检查是否已经在事件循环中
+            # 注意：这是妥协方案。当 loop 在运行时，create_task 不等待结果。
+            if loop.is_running():
+                asyncio.create_task(self.orchestrator.tick_daily())
+                return []
+            # loop 不在运行时，可以安全地使用 run_until_complete
+            diary = loop.run_until_complete(self.orchestrator.tick_daily())
+
+            if diary:
+                dice_log(f"[Persona] 生成日记: {len(diary)} 字")
+
+            return []
+        except Exception as e:
+            dice_log(f"[Persona] tick_daily 失败: {e}")
+            return []

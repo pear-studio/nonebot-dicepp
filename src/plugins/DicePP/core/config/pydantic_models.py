@@ -50,16 +50,40 @@ class PersonaConfig(BaseModel):
     
     game_enabled: bool = True
     scoring_interval: int = 5
-    # ── Phase 3+: 好感度衰减（暂未启用）
-    # decay_enabled: bool = True
-    # grace_period_hours: int = 8
-    # decay_rate_per_hour: float = 0.5
-    # decay_daily_cap: float = 5.0
-    # cooldown_minutes: int = 30
+    # ── Phase 2: 好感度时间衰减
+    decay_enabled: bool = True
+    decay_grace_period_hours: int = 8
+    decay_rate_per_hour: float = 0.5
+    decay_daily_cap: float = 5.0
+    decay_floor_offset: float = 20.0
+
+    # ── Phase 2: 角色生活模拟
+    character_life_enabled: bool = True
+    character_life_event_hours: List[int] = Field(default_factory=lambda: [8, 11, 14, 17, 20])
+    character_life_jitter_minutes: int = 15
+    character_life_diary_time: str = "23:30"
+
+    # ── Phase 2: 主动消息
+    proactive_enabled: bool = True
+    proactive_quiet_start: int = 23  # 安静时段开始
+    proactive_quiet_end: int = 7     # 安静时段结束
+    proactive_min_interval_hours: int = 4
+    proactive_max_shares: int = 10
+    proactive_miss_enabled: bool = True
+    proactive_miss_min_hours: int = 72
+    proactive_miss_min_score: float = 40.0
+
+    # ── Phase 2: 群活跃度
+    group_activity_enabled: bool = True
+    group_activity_decay_per_day: float = 10.0
+    group_activity_add_per_interaction: float = 2.0
+    group_activity_max_daily_add: float = 20.0
+    group_activity_min_threshold: float = 60.0  # 低于此值不发送主动消息
+    group_activity_floor_whitelist: float = 50.0  # 白名单群下限
     
     group_chat_enabled: bool = True
     group_simple_scoring: bool = True
-    observe_group: bool = True
+    observe_group_enabled: bool = True
     observe_min_length: int = 5
     observe_max_length: int = 500
     observe_initial_threshold: int = 20

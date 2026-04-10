@@ -17,6 +17,10 @@ from .data.store import PersonaDataStore
 from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent
 from .agents.scoring_agent import ScoringAgent
 from .memory.context_builder import ContextBuilder
+from .game.decay import DecayCalculator, DecayConfig
+from .proactive.character_life import CharacterLife, CharacterLifeConfig
+from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
+from .agents.event_agent import EventGenerationAgent
 
 logger = logging.getLogger("persona.orchestrator")
 
@@ -31,6 +35,10 @@ class PersonaOrchestrator:
         self.data_store: Optional[PersonaDataStore] = None
         self.scoring_agent: Optional[ScoringAgent] = None
         self.context_builder: Optional[ContextBuilder] = None
+        self.decay_calculator: Optional[DecayCalculator] = None
+        self.character_life: Optional[CharacterLife] = None
+        self.event_agent: Optional[EventGenerationAgent] = None
+        self.scheduler: Optional[ProactiveScheduler] = None
         self._initialized = False
         self._pending_messages: Dict[str, List[Dict[str, str]]] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}  # key -> (message, timestamp)
@@ -91,6 +99,52 @@ class PersonaOrchestrator:
 
             self.scoring_agent = ScoringAgent(self.llm_router)
             self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars)
+
+            # 初始化衰减计算器
+            decay_config = DecayConfig(
+                enabled=self.config.decay_enabled,
+                grace_period_hours=self.config.decay_grace_period_hours,
+                decay_rate_per_hour=self.config.decay_rate_per_hour,
+                daily_cap=self.config.decay_daily_cap,
+                floor_offset=self.config.decay_floor_offset,
+            )
+            self.decay_calculator = DecayCalculator(decay_config)
+            logger.info("衰减计算器已初始化")
+
+            # 初始化角色生活模拟
+            self.event_agent = EventGenerationAgent(self.llm_router)
+            life_config = CharacterLifeConfig(
+                enabled=self.config.character_life_enabled,
+                event_hours=self.config.character_life_event_hours,
+                jitter_minutes=self.config.character_life_jitter_minutes,
+                diary_time=self.config.character_life_diary_time,
+            )
+            self.character_life = CharacterLife(
+                config=life_config,
+                event_agent=self.event_agent,
+                data_store=self.data_store,
+                character=self.character,
+            )
+            logger.info("角色生活模拟已初始化")
+
+            # 初始化主动消息调度器
+            scheduler_config = ProactiveConfig(
+                enabled=self.config.proactive_enabled,
+                quiet_hours=(self.config.proactive_quiet_start, self.config.proactive_quiet_end),
+                min_interval_hours=self.config.proactive_min_interval_hours,
+                max_shares_per_event=self.config.proactive_max_shares,
+                miss_enabled=self.config.proactive_miss_enabled,
+                miss_min_hours=self.config.proactive_miss_min_hours,
+                miss_min_score=self.config.proactive_miss_min_score,
+            )
+            self.scheduler = ProactiveScheduler(
+                config=scheduler_config,
+                data_store=self.data_store,
+                character=self.character,
+                bot=self.bot,
+            )
+            logger.info("主动消息调度器已初始化")
+
             logger.info("评分 Agent 和上下文构建器已初始化")
 
             self._initialized = True
@@ -120,6 +174,9 @@ class PersonaOrchestrator:
         self._last_messages[dedup_key] = (message, now)
 
         try:
+            # 检查并应用时间衰减
+            await self._check_and_apply_decay(user_id, group_id)
+
             history = await self.data_store.get_recent_messages(user_id, group_id, limit=1)
             is_first = len(history) == 0
 
@@ -261,6 +318,40 @@ class PersonaOrchestrator:
             "warmth_labels": self.character.get_warmth_labels(),
         }
 
+    async def _check_and_apply_decay(self, user_id: str, group_id: str) -> None:
+        """检查并应用时间衰减"""
+        if not self.decay_calculator or not self.data_store:
+            return
+
+        try:
+            rel = await self.data_store.get_relationship(user_id, group_id)
+            if not rel:
+                return
+
+            initial = self.character.extensions.initial_relationship if self.character else 30.0
+            deltas, reason = self.decay_calculator.calculate_decay(rel, initial)
+
+            # 检查是否有实际衰减
+            if abs(deltas.intimacy) > 0.01:
+                composite_before = rel.composite_score
+                rel.apply_deltas(deltas)
+                await self.data_store.update_relationship(rel)
+
+                # 记录衰减事件
+                event = ScoreEvent(
+                    user_id=user_id,
+                    group_id=group_id,
+                    deltas=deltas,
+                    composite_before=composite_before,
+                    composite_after=rel.composite_score,
+                    reason=f"time_decay: {reason}",
+                )
+                await self.data_store.add_score_event(event)
+                logger.info(f"应用时间衰减: {user_id} 衰减 {deltas.intimacy:.2f}, 原因: {reason}")
+
+        except Exception as e:
+            logger.warning(f"衰减检查失败（不影响对话）: {e}")
+
     async def reload_character(self) -> Tuple[bool, str]:
         """
         热重新加载角色卡
@@ -288,3 +379,73 @@ class PersonaOrchestrator:
         except Exception as e:
             logger.exception("角色卡重载失败")
             return False, f"重载失败: {e}"
+
+    async def tick(self) -> List[Dict]:
+        """
+        定时调用（从 Command.tick 触发）
+        驱动角色生活模拟和主动消息调度
+
+        Returns:
+            待发送的消息列表
+        """
+        if not self._initialized:
+            return []
+
+        messages = []
+
+        try:
+            # 尝试生成生活事件
+            if self.character_life:
+                event = await self.character_life.tick()
+                if event:
+                    logger.info(f"角色生活事件: {event.get('description', '')[:50]}...")
+                    # 将事件添加到调度器的分享队列
+                    if self.scheduler:
+                        self.scheduler.add_event_to_share(event.get('description', ''))
+
+            # 运行主动消息调度器
+            if self.scheduler:
+                proactive_msgs = await self.scheduler.tick()
+                messages.extend(proactive_msgs)
+
+        except Exception as e:
+            logger.warning(f"tick 处理失败: {e}")
+
+        return messages
+
+    async def tick_daily(self) -> Optional[str]:
+        """
+        每日调用（从 Command.tick_daily 触发）
+        生成日记
+
+        Returns:
+            生成的日记内容
+        """
+        if not self._initialized or not self.character_life:
+            return None
+
+        try:
+            diary = await self.character_life.generate_diary()
+            if diary:
+                logger.info(f"生成日记: {len(diary)} 字")
+            return diary
+        except Exception as e:
+            logger.exception(f"日记生成失败: {e}")
+            return None
+
+    async def generate_daily_event(self) -> Optional[dict]:
+        """
+        手动触发生活事件生成（用于调试）
+
+        Returns:
+            事件数据 {"description": ..., "reaction": ..., "time": ...}
+        """
+        if not self._initialized or not self.character_life:
+            return None
+
+        try:
+            # 绕过 tick 的时间检查，直接生成事件
+            return await self.character_life._generate_daily_event()
+        except Exception as e:
+            logger.exception(f"手动生成事件失败: {e}")
+            return None

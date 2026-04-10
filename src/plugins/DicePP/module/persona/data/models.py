@@ -176,3 +176,20 @@ class CharacterState(BaseModel):
     """角色永久状态"""
     text: str = ""  # 自由文本格式，由 LLM 维护
     updated_at: Optional[datetime] = None
+
+
+class GroupActivity(BaseModel):
+    """群活跃度记录"""
+    group_id: str
+    score: float = 50.0  # 活跃度分数
+    last_interaction_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class DecayConfig(BaseModel):
+    """时间衰减配置"""
+    enabled: bool = True
+    grace_period_hours: int = 8  # 免衰减期（小时）
+    decay_rate_per_hour: float = 0.5  # 每小时衰减量
+    daily_cap: float = 5.0  # 每日衰减上限
+    floor_offset: float = 20.0  # 下限 = 初始值 + floor_offset

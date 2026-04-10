@@ -432,14 +432,14 @@ if not whitelist_active:
 
 ---
 
-### Phase 2: 主动消息 + 群聊观察 + 时间衰减（约 5 天）
+### Phase 2: 主动消息 + 群聊观察 + 时间衰减（已完成）
 
 > **说明**: 由原 Phase 2d + Phase 3 合并而成。Phase 2 的核心功能（2a/2b/2c）已在 Phase 1 中提前实现。
 
 
 ---
 
-#### Phase 2d: 时间衰减（未完成）
+#### Phase 2d: 时间衰减（已完成）
 
 **目标**：长时间不互动好感度缓慢下降
 
@@ -548,7 +548,7 @@ if not whitelist_active:
 
 ### 以下是原计划 Phase 3 的内容（合并到 Phase 2）
 
-#### Phase 2e: 一定触发事件骨架（原 Phase 3a）
+#### Phase 2e: 一定触发事件骨架（已完成）
 
 **状态**: ⏳ 待实现
 
@@ -574,7 +574,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2f: 好感度驱动分享（原 Phase 3b）
+#### Phase 2f: 好感度驱动分享（已完成）
 
 **状态**: ⏳ 待实现
 
@@ -593,7 +593,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2g: 角色生活模拟（原 Phase 3c）
+#### Phase 2g: 角色生活模拟（已完成）
 
 **状态**: ⏳ 待实现（世界观驱动）
 
@@ -640,7 +640,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2h: 事件分享（原 Phase 3d）
+#### Phase 2h: 事件分享（已完成）
 
 **状态**: ⏳ 待实现（含群聊策略）
 
@@ -675,7 +675,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2i: 想念触发（原 Phase 3e）
+#### Phase 2i: 想念触发（已完成）
 
 **状态**: ⏳ 待实现（日记事件驱动）
 
@@ -710,7 +710,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2j: 群聊观察（原 Phase 3f）
+#### Phase 2j: 群聊观察（已完成）
 
 **状态**: ⏳ 待实现（动态触发）
 

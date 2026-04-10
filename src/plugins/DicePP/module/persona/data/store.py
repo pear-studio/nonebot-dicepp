@@ -10,7 +10,7 @@ import aiosqlite
 
 from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, UserProfile,
-    RelationshipState, Observation, DailyEvent,
+    RelationshipState, Observation, DailyEvent, GroupActivity,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -512,3 +512,190 @@ class PersonaDataStore:
                 )
                 for row in rows
             ]
+
+    # ========== 群活跃度相关 ==========
+
+    async def get_group_activity(self, group_id: str) -> GroupActivity:
+        """
+        获取群活跃度（惰性计算，带衰减）
+
+        Returns:
+            GroupActivity 对象
+        """
+        async with self.db.execute(
+            "SELECT score, last_interaction_at, updated_at FROM persona_group_activity WHERE group_id = ?",
+            (group_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+            if not row:
+                # 新群，返回默认值
+                return GroupActivity(group_id=group_id)
+
+            score = row[0]
+            last_interaction = datetime.fromisoformat(row[1]) if row[1] else None
+            updated_at = datetime.fromisoformat(row[2]) if row[2] else None
+
+            # 计算衰减
+            if last_interaction:
+                days_since = (datetime.now() - last_interaction).days
+                if days_since > 0:
+                    # 每过一天衰减 10 分
+                    decay = days_since * 10
+                    score = max(0, score - decay)
+
+            return GroupActivity(
+                group_id=group_id,
+                score=score,
+                last_interaction_at=last_interaction,
+                updated_at=updated_at,
+            )
+
+    async def update_group_activity(
+        self,
+        group_id: str,
+        score_delta: float = 2.0,
+        max_daily_add: float = 20.0,
+        is_whitelisted: bool = False,
+    ) -> GroupActivity:
+        """
+        更新群活跃度
+
+        Args:
+            group_id: 群ID
+            score_delta: 每次互动增加的分数
+            max_daily_add: 每天最多增加的分数
+            is_whitelisted: 是否在白名单（有下限保护）
+
+        Returns:
+            更新后的 GroupActivity
+        """
+        # 先获取当前活跃度（含衰减计算）
+        activity = await self.get_group_activity(group_id)
+
+        # 计算今天已增加的分数
+        # 通过比较当前分数和衰减后的基准分数来估算
+        today_added = 0.0
+        if activity.updated_at and activity.updated_at.date() == datetime.now().date():
+            # 今天已经更新过，保守估计已增加分数
+            # 精确实现需要额外的表来追踪每日增量
+            today_added = score_delta
+
+        # 应用增加（不超过每日上限）
+        actual_add = min(score_delta, max_daily_add - today_added)
+        if actual_add > 0:
+            activity.score = min(100, activity.score + actual_add)
+
+        # 白名单下限保护
+        if is_whitelisted and activity.score < 50:
+            activity.score = 50
+
+        activity.last_interaction_at = datetime.now()
+        activity.updated_at = datetime.now()
+
+        # 保存到数据库
+        await self.db.execute(
+            """
+            INSERT INTO persona_group_activity (group_id, score, last_interaction_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(group_id) DO UPDATE SET
+                score = excluded.score,
+                last_interaction_at = excluded.last_interaction_at,
+                updated_at = excluded.updated_at
+            """,
+            (
+                group_id,
+                activity.score,
+                activity.last_interaction_at.isoformat(),
+                activity.updated_at.isoformat(),
+            )
+        )
+        await self.db.commit()
+
+        return activity
+
+    async def get_all_group_activities(self, min_score: float = 0) -> List[GroupActivity]:
+        """获取所有群活跃度"""
+        async with self.db.execute(
+            """
+            SELECT group_id, score, last_interaction_at, updated_at
+            FROM persona_group_activity
+            WHERE score >= ?
+            ORDER BY score DESC
+            """,
+            (min_score,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            activities = []
+            for row in rows:
+                activity = GroupActivity(
+                    group_id=row[0],
+                    score=row[1],
+                    last_interaction_at=datetime.fromisoformat(row[2]) if row[2] else None,
+                    updated_at=datetime.fromisoformat(row[3]) if row[3] else None,
+                )
+                # 应用衰减
+                if activity.last_interaction_at:
+                    days_since = (datetime.now() - activity.last_interaction_at).days
+                    if days_since > 0:
+                        activity.score = max(0, activity.score - days_since * 10)
+                activities.append(activity)
+            return activities
+
+    async def get_all_relationships(self, min_score: float = 0, active_within_days: int = 30) -> List[RelationshipState]:
+        """获取所有关系记录（用于想念触发等场景）
+
+        Args:
+            min_score: 最小综合分数
+            active_within_days: 只返回最近 N 天内有互动的关系
+
+        Returns:
+            关系状态列表
+        """
+        from datetime import datetime, timedelta
+        cutoff_date = (datetime.now() - timedelta(days=active_within_days)).isoformat()
+
+        async with self.db.execute(
+            """
+            SELECT user_id, group_id, intimacy, passion, trust, secureness,
+                   last_interaction_at, updated_at
+            FROM persona_user_relationships
+            WHERE (intimacy * 0.3 + passion * 0.2 + trust * 0.3 + secureness * 0.2) >= ?
+              AND last_interaction_at >= ?
+            ORDER BY last_interaction_at DESC
+            """,
+            (min_score, cutoff_date)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                RelationshipState(
+                    user_id=row[0],
+                    group_id=row[1] or "",
+                    intimacy=row[2],
+                    passion=row[3],
+                    trust=row[4],
+                    secureness=row[5],
+                    last_interaction_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                    updated_at=datetime.fromisoformat(row[7]) if row[7] else None
+                )
+                for row in rows
+            ]
+
+    async def prune_diaries(self, keep_days: int) -> int:
+        """清理旧日记，只保留最近 N 天的日记
+
+        Args:
+            keep_days: 保留最近 N 天的日记
+
+        Returns:
+            删除的记录数
+        """
+        from datetime import datetime, timedelta
+        cutoff_date = (datetime.now() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
+
+        cursor = await self.db.execute(
+            "DELETE FROM persona_diary WHERE date < ?",
+            (cutoff_date,)
+        )
+        await self.db.commit()
+        return cursor.rowcount

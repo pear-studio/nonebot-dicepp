@@ -1,13 +1,11 @@
-# dicepp-shell
-
-使用 DicePP Shell 工具进行交互式机器人测试。
-
-## 触发条件
-
-- 用户想要测试骰子机器人命令
-- 用户想要验证某个功能的行为
-- 用户想要探索 DicePP 的某个模块功能
-- 用户需要确定性测试结果（控制骰子结果）
+---
+name: dicepp-shell
+description: "使用 DicePP Shell 工具进行交互式机器人测试. 开发时可以用来快速确认指令工作是否正常, 新功能完成前必须调用该工具进行验收."
+license: MIT
+metadata:
+  author: DicePP
+  version: "1.0"
+---
 
 ## 前提条件
 
