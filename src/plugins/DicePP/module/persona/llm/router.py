@@ -74,6 +74,7 @@ class LLMRouter:
         messages: List[Dict[str, str]],
         model_tier: ModelTier = ModelTier.PRIMARY,
         timeout: Optional[int] = None,
+        temperature: Optional[float] = None,
     ) -> str:
         """
         生成回复
@@ -82,6 +83,7 @@ class LLMRouter:
             messages: 消息列表
             model_tier: 模型层级（primary/auxiliary）
             timeout: 超时时间（覆盖默认）
+            temperature: 采样温度；None 时使用服务端默认
             
         Returns:
             回复文本
@@ -98,6 +100,7 @@ class LLMRouter:
                 content, metadata = await client.chat(
                     messages=messages,
                     timeout=timeout,
+                    temperature=temperature,
                 )
                 
                 latency = time.monotonic() - start_time

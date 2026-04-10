@@ -1,7 +1,12 @@
 """
 数据库迁移脚本
 
-创建 Persona 模块所需的表
+创建 Persona 模块所需的表。
+
+.. note::
+    新列/新表：除本文件 ``ALL_MIGRATIONS`` 中的 ``CREATE`` 外，若需兼容**已存在**的 SQLite 文件，
+    往往还要在 ``PersonaDataStore._apply_runtime_schema_patches`` 里做条件 ``ALTER``。
+    两处须同步维护（store 模块顶部另有交叉引用注释）。
 """
 
 # 对话历史表
@@ -127,8 +132,22 @@ CREATE TABLE IF NOT EXISTS persona_user_relationships (
     trust REAL DEFAULT 30.0,
     secureness REAL DEFAULT 30.0,
     last_interaction_at TIMESTAMP,
+    last_relationship_decay_applied_at TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, group_id)
+);
+"""
+
+# 群活跃度表
+CREATE_GROUP_ACTIVITY_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_group_activity (
+    group_id TEXT PRIMARY KEY,
+    score REAL DEFAULT 50.0,
+    last_interaction_at TIMESTAMP,    -- 最后互动时间（@bot/AI回复）
+    last_content_at TIMESTAMP,        -- 最后内容时间（群聊观察触发）
+    content_count_today INTEGER DEFAULT 0,  -- 今日内容计数
+    daily_add_date TEXT,              -- 当日累计加分日期 (YYYY-MM-DD)
+    daily_add_total REAL DEFAULT 0    -- 当日累计加分值
 );
 """
 
@@ -145,4 +164,5 @@ ALL_MIGRATIONS = [
     CREATE_CHARACTER_STATE_TABLE,
     CREATE_USER_PROFILES_TABLE,
     CREATE_USER_RELATIONSHIPS_TABLE,
+    CREATE_GROUP_ACTIVITY_TABLE,
 ]

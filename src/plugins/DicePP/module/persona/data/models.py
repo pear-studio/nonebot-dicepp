@@ -41,6 +41,8 @@ class RelationshipState(BaseModel):
     trust: float = 30.0
     secureness: float = 30.0
     last_interaction_at: Optional[datetime] = None
+    # 上次将「时间衰减」计入存库分数的时刻（批处理与对话共用，避免对同一空闲窗口重复扣减）
+    last_relationship_decay_applied_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
     @property
@@ -176,3 +178,12 @@ class CharacterState(BaseModel):
     """角色永久状态"""
     text: str = ""  # 自由文本格式，由 LLM 维护
     updated_at: Optional[datetime] = None
+
+
+class GroupActivity(BaseModel):
+    """群活跃度记录"""
+    group_id: str
+    score: float = 50.0  # 活跃度分数
+    last_interaction_at: Optional[datetime] = None  # 最后互动时间（@bot/AI回复）
+    last_content_at: Optional[datetime] = None      # 最后内容时间（群聊观察触发）
+    content_count_today: int = 0                     # 今日内容计数（自然日）

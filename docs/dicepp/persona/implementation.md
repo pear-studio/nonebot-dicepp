@@ -439,7 +439,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2d: 时间衰减（已完成）
+#### Phase 2a: 时间衰减（已完成）
 
 **目标**：长时间不互动好感度缓慢下降
 
@@ -451,106 +451,7 @@ if not whitelist_active:
 
 ### 以下是原计划 Phase 3 的内容（合并到 Phase 2）
 
-#### ~~Phase 2a: 关系模型~~
-
-**状态**: ✅ 已完成（见 Phase 1h）
-
-~~**目标**：每个用户有独立的 4 维好感度，持久化到 DB~~
-
-**任务**：
-1. 定义 `game/relationship.py` — RelationshipState
-   - 字段：user_id, group_id, intimacy, passion, trust, secureness, last_interaction_at, updated_at
-   - **初始值**：从角色卡 `initial_relationship` 读取（默认全 30），落在"疏远"区间
-   - composite_score 属性：加权综合分
-   - warmth_level 属性：分数 → 区间标签（冷淡/疏远/友好/亲近/亲密）
-   - apply_deltas(dict) — 应用评分变化，clamp 到 0-100
-   - apply_decay(amount) — 应用衰减
-2. 使用 DicePP 的 Repository\<RelationshipState\> 模式持久化
-   - key_fields: ["user_id", "group_id"]
-3. PersonaDataStore 新增 relationship 属性
-4. 关系状态 key 规则（聊天好感度）：
-   - 私聊：`(user_id, "")` — 每人独立
-   - 群聊：`(user_id, group_id)` — 每人在每群独立，行为只影响自己的好感度
-5. 群活跃度（per-group）为 Phase 4+ 功能，key 为 `("", group_id)`，当前阶段不实现
-
----
-
-#### ~~Phase 2b: 好感度感知回复~~
-
-**状态**: ✅ 已完成（见 Phase 1i）
-
-~~**目标**：角色行为随好感度连续渐变~~
-
-**任务**：
-1. 在 ContextBuilder 中注入 warmth_level 到 system_prompt
-2. 定义各 warmth_level 的行为描述，作为 system_prompt 的一部分
-3. orchestrator.chat() 中加载关系状态，传给 ContextBuilder
-4. `.ai status` 显示综合好感度和区间标签
-
-**行为描述模板**（注入 system_prompt）：
-- 厌倦(0-10)：有概率拒绝回复（回复"……"或"不想说话"），偶尔回复也极其冷淡
-- 冷淡(10-20)：回复简短，保持距离
-- 疏远(20-40)：正常回复，不深入
-- 友好(40-60)：愿意分享，会主动提问
-- 亲近(60-80)：会开玩笑/撒娇，分享心事
-- 亲密(80-100)：非常自然亲密，主动关心
-
-**"厌倦"拒绝机制**：
-- composite_score <= 10 时，每次对话有 `P = 0.3 × (1 - score/10)` 概率拒绝
-- score=0 时拒绝概率 30%，score=10 时拒绝概率 0%
-- 拒绝时直接返回角色卡中定义的冷淡回复（不调用 LLM，省成本），如"……"、"嗯"
-- 不拒绝时仍正常对话，但 system_prompt 注入"厌倦"行为描述
-
-**恶意用户冷却机制**：
-- 评分 Agent 检测到单次评分产生**极端负 delta**（任一维度 <= -4.0）时，触发冷却
-- 冷却期间（默认 30 分钟，可配置 `cooldown_minutes`）：角色拒绝回复该用户，返回固定文本如"我现在不想和你说话。"
-- 冷却状态存储在内存 `_cooldown_until: dict[str, datetime]`（user_id → 解除时间）
-- 冷却期内的消息**不计入对话历史**，不触发评分，不消耗配额
-- 冷却结束后恢复正常对话，但好感度已经因负 delta 大幅下降，角色态度自然冷淡
-
----
-
-#### ~~Phase 2c: 批量评分~~
-
-**状态**: ✅ 已完成（见 Phase 1j）
-
-~~**目标**：每 5 轮对话批量分析好感度变化~~
-
-**任务**：
-1. 编写 `agents/scoring_agent.py` — ScoringAgent
-   - `batch_analyze(recent_messages, relationship)` → dict（4 维 delta）
-   - 使用辅助模型
-   - 输出格式：JSON `{"intimacy": 1.5, "passion": -0.5, "trust": 2.0, "secureness": 0.0}`
-   - **JSON 解析容错**（3 级 `extract_json`）：
-     1. 直接 `json.loads`（LLM 返回纯 JSON）
-     2. 去除 ` ```json ``` ` markdown 围栏后重试
-     3. 正则 `re.search(r"\{[^{}]*\}", text)` 提取第一个 `{...}` 块
-     4. 全部失败 → 返回 zero-delta（本次评分跳过），记录日志
-   - **Pydantic 校验**：解析后用 `ScoreDeltas` 模型校验值域（-5.0 ~ +5.0），越界 clamp
-2. Orchestrator 中维护 per-user 的 `_pending_turns` 计数器
-   - 每次对话 +1
-   - 达到 scoring_interval(5) 时调用 batch_analyze
-   - 将 deltas 应用到 RelationshipState
-   - 重置计数器
-   - 注意：计数器为内存变量，重启归零（可接受，最多偏移一次评分时机）
-3. DB 表：`persona_score_history` — 评分审计日志
-4. PersonaDataStore 新增 `add_score_event()`
-
-**评分 prompt 要点**：
-- 输入：最近 10 条消息（5 轮）+ 当前关系状态
-- 输出：严格 JSON，每个维度 -5.0 到 +5.0
-- 分析维度：用户的态度、话题深度、情感表达、信任行为
-
-**首次对话平滑**：
-- 前 10 轮（前 2 次评分周期）为"破冰期"，评分 delta 乘以衰减系数 0.5
-- 避免用户一句"你好"就产生极端评分波动
-- 第 11 轮起恢复正常系数 1.0
-
----
-
-### 以下是原计划 Phase 3 的内容（合并到 Phase 2）
-
-#### Phase 2e: 一定触发事件骨架（已完成）
+#### Phase 2b: 一定触发事件（已完成）
 
 **状态**: ✅ 已完成（`proactive/scheduler.py` 定时问候与配置化 `proactive_greeting_schedule`）
 
@@ -578,7 +479,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2f: 好感度驱动分享（已完成）
+#### Phase 2c: 好感度驱动分享（已完成）
 
 **状态**: ✅ 已完成（调度器内目标筛选与概率；与上文「档案个性化」细项可能仍有差距）
 
@@ -597,7 +498,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2g: 角色生活模拟（已完成）
+#### Phase 2d: 角色生活模拟（已完成）
 
 **状态**: ✅ 已完成（`proactive/character_life.py`、事件与日记管线）
 
@@ -605,9 +506,10 @@ if not whitelist_active:
 
 **任务**：
 1. 编写 `proactive/character_life.py` — CharacterLife
-   - `tick_check()` — 从 scheduler.tick() 调用
-   - 事件时间点：默认 8, 11, 14, 17, 20 点（可配置 `event_hours`）
-   - **时区**：北京时间（Asia/Shanghai）
+   - `tick()` — 由 `PersonaOrchestrator.tick()` 调用（先于主动调度器运行）
+   - **事件时刻（唯一权威）**：角色卡 `extensions.persona` 的 `daily_events_count`、`event_day_start_hour`、`event_day_end_hour`、`event_jitter_minutes`；`PersonaExtensions.generate_event_times()` 在活跃时段内均分槽位并施加 ± 抖动，返回**自 0 点起的分钟戳**。当日槽位会持久化（`persona_settings` / `PERSONA_SK_CHARACTER_LIFE`），避免进程重启后同一自然日重复采样。`persona_ai.character_life_jitter_minutes` 仅表示：当前本地「时:分」与某一计划槽相差不超过该分钟数即触发（配合约 60s 的 `tick`）。
+   - **时区**：`PersonaConfig.timezone`（与全模块墙钟一致；默认示例为 `Asia/Shanghai`）
+   - **日记触发时刻**：可在 `persona_ai.character_life_diary_time` 配置（运营向全局默认值，与「事件在一天内的分布」无关）
 
 2. 事件生成（System Agent）：
    - **输入**：
@@ -635,16 +537,18 @@ if not whitelist_active:
    - 读取全天 events + reactions → Character Agent 总结为日记
    - 存入 `persona_diary`，清理当日 events
 
-6. 角色卡配置：
+6. 角色卡配置（与 Phase 1 角色卡扩展示例一致）：
    ```yaml
-   daily_events_count: 5  # 3/5/10
-   event_hours: [8, 11, 14, 17, 20]
+   daily_events_count: 5          # 一天内生成几条生活事件
+   event_day_start_hour: 8        # 活跃时段起点（小时）
+   event_day_end_hour: 22         # 活跃时段终点（小时，开区间上界与 generate_event_times 实现一致）
+   event_jitter_minutes: 60       # 每个时间槽 ± 抖动（分钟）
    world: "现代都市，主角是出版社编辑"
    ```
 
 ---
 
-#### Phase 2h: 事件分享（已完成）
+#### Phase 2e: 事件分享（已完成）
 
 **状态**: ✅ 已完成（分享窗口、限额与群活跃度门槛等与配置联动）
 
@@ -679,7 +583,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2i: 想念触发（已完成）
+#### Phase 2f: 想念触发（已完成）
 
 **状态**: ✅ 已完成（`_check_missed_users`；由头主要为未分享生活事件）
 
@@ -714,7 +618,7 @@ if not whitelist_active:
 
 ---
 
-#### Phase 2j: 群聊观察（已完成）
+#### Phase 2g: 群聊观察（已完成）
 
 **状态**: ✅ 已完成（`ObservationBuffer`、提取与持久化；缓冲写库带节流）
 
@@ -958,16 +862,20 @@ if not whitelist_active:
 | `persona_user_profile_kv` | Repository\<T\> | 1g | 用户档案，key-value（从Phase 4提前） |
 | `persona_relationship_kv` | Repository\<T\> | 2a | 4 维好感度，key-value |
 | `persona_score_history` | 自定义 SQL | 2c | 评分审计日志 |
-| `persona_daily_events` | 自定义 SQL | 3c | 当日事件缓冲 |
-| `persona_diary` | 自定义 SQL | 3c | 每日日记 |
-| `persona_character_state` | 自定义 SQL | 3c | 角色永久状态（文本） |
-| `persona_observations` | 自定义 SQL | 3f | 群聊观察记录（动态触发） |
+| `persona_daily_events` | 自定义 SQL | 2d | 当日事件缓冲 |
+| `persona_diary` | 自定义 SQL | 2d | 每日日记 |
+| `persona_character_state` | 自定义 SQL | 2d | 角色永久状态（文本） |
+| `persona_observations` | 自定义 SQL | 2g | 群聊观察记录（动态触发） |
 | `persona_usage` | 自定义 SQL | 5a | 每日用量追踪 |
 | `persona_user_llm_kv` | Repository\<T\> | 5b | 用户自带 Key 配置 |
 
 ---
 
 ## 五、PersonaConfig 完整字段
+
+**角色生活（配置分层）**：`persona_ai` 含 `character_life_enabled`、`character_life_diary_time`、`character_life_jitter_minutes`（触发容差，见 Phase 2g）。**一天内生成几条生活事件、落在什么时段、槽位抖动**仅由角色卡 `extensions.persona` 的 `daily_events_count` / `event_day_start_hour` / `event_day_end_hour` / `event_jitter_minutes` 与 `PersonaExtensions.generate_event_times()` 决定；**不存在** `persona_ai.character_life_event_hours` 字段。
+
+下列 YAML 为结构说明，部分键名与当前仓库 `PersonaConfig` 可能略有出入，以 `core/config/pydantic_models.py` 为准；角色生活相关请以本节说明与 Phase 2g 为准。
 
 ```yaml
 persona_ai:
@@ -1049,13 +957,12 @@ persona_ai:
     miss_min_hours: 72                # 最少3天未互动才触发
     miss_min_score: 40                # 最低好感度40
 
-  # 角色生活模拟（Phase 4+；时间分布参数在角色卡 extensions.persona 中配置）
-  # daily_events_count: 5
-  # event_day_start_hour: 8
-  # event_day_end_hour: 22
-  # event_jitter_minutes: 60
+  # ── 角色生活模拟（persona_ai：开关、日记时刻、槽位触发容差；事件分布见角色卡 extensions.persona）──
+  # character_life_enabled: true
+  # character_life_jitter_minutes: 15   # 当前时刻与计划槽（日内分钟）之差 ≤ 该值则触发
+  # character_life_diary_time: "23:30"
   
-  # 角色卡配置示例（非PersonaConfig字段）：
+  # 角色卡配置示例（非 PersonaConfig 字段；extensions.persona）：
   # scheduled_events:
   #   - type: "wake_up"
   #     time_range: "07:00-08:00"
@@ -1092,7 +999,7 @@ tick() (每秒)
       → 筛选：≥3天未互动 + 有未分享事件 + 好感度≥40（**effective** 综合分，与对话展示一致）
       → 概率触发：P = 0.40 + 0.40 × (score/100)
       → 提及日记事件，私聊only
-    → CharacterLife.tick_check()        检查角色事件生成
+    → CharacterLife.tick()              检查角色事件生成（时刻分布以角色卡 generate_event_times 为规范）
       → 世界观驱动，含永久状态
       → register_task(async):
         → System Agent 生成事件

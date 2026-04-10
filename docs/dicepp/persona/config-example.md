@@ -1,93 +1,34 @@
-# Persona AI 配置示例
+# Persona AI 配置说明
 
-> Phase 2 完整配置参考
+**可复制范本**：仓库根目录 `config/global.json` 中的 `persona_ai` 对象已包含常用键、Phase 2 默认值及多条 `_comment_*` 说明；部署时在其上改 `character_name`、模型 URL 等即可。敏感项（如 `primary_api_key`）放在 `config/secrets.json`，按账号覆盖可写 `config/bots/{账号}.json`（见 `config/bots/_template.json`）。
 
-## 完整配置示例
+**本文档用途**：用表格列出各字段含义与注意点；与 `global.json` 不重复贴整段 JSON。更完整的设计说明见 [implementation.md](./implementation.md)。
 
-```json
-{
-  "persona_ai": {
-    "enabled": true,
-    "character_name": "default",
-    "character_path": "./content/characters",
+---
 
-    "whitelist_enabled": true,
+## 基础与时间
 
-    "primary_api_key": "sk-xxxxxxxx",
-    "primary_base_url": "https://api.openai.com/v1",
-    "primary_model": "gpt-4o",
+| 配置项 | 类型 | 示例 / 默认 | 说明 |
+|--------|------|-------------|------|
+| `enabled` | bool | `true` | 是否启用 Persona 模块 |
+| `character_name` | string | `default` | 角色卡文件名（不含路径），对应 `character_path` 下 yaml |
+| `character_path` | string | `./content/characters` | 角色卡目录 |
+| `timezone` | string | `Asia/Shanghai` | **IANA 时区名**（`ZoneInfo`）；勿写 `UTC+8` 等。见 `global.json` 内 `_comment_timezone` |
+| `whitelist_enabled` | bool | `true` | 是否启用白名单门禁（口令未设置时仍不拦访问，见 overview） |
+| `primary_api_key` 等 | string | （secrets） | 密钥建议只放 `secrets.json`；`auxiliary_*` 留空则复用 primary |
 
-    "auxiliary_api_key": "",
-    "auxiliary_base_url": "",
-    "auxiliary_model": "gpt-4o-mini",
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `max_concurrent_requests` | int | 2 | LLM 并发上限 |
+| `timeout` | int | 30 | 单次请求超时（秒） |
+| `max_short_term_chars` | int | 3000 | 短期记忆字数上限 |
+| `max_messages` | int | 200 | 每会话保留消息条数上限 |
+| `daily_limit` | int | 20 | 主模型每日对话次数上限（白名单等规则见 overview） |
+| `allow_user_key` | bool | true | 是否允许用户自带 API Key |
 
-    "max_concurrent_requests": 2,
-    "timeout": 30,
-    "timezone": "Asia/Shanghai",
+---
 
-    "max_short_term_chars": 3000,
-    "max_messages": 200,
-
-    "game_enabled": true,
-    "scoring_interval": 5,
-    "group_chat_enabled": true,
-    "group_simple_scoring": true,
-
-    "daily_limit": 20,
-    "allow_user_key": true,
-
-    "=== Phase 2 新增配置 ===": "",
-
-    "decay_enabled": true,
-    "decay_grace_period_hours": 8,
-    "decay_rate_per_hour": 0.5,
-    "decay_daily_cap": 5.0,
-    "decay_floor_offset": 20.0,
-
-    "character_life_enabled": true,
-    "character_life_event_hours": [8, 11, 14, 17, 20],
-    "character_life_jitter_minutes": 15,
-    "character_life_diary_time": "23:30",
-
-    "proactive_enabled": true,
-    "proactive_quiet_start": 23,
-    "proactive_quiet_end": 7,
-    "proactive_min_interval_hours": 4,
-    "proactive_max_shares": 10,
-    "proactive_miss_enabled": true,
-    "proactive_miss_min_hours": 72,
-    "proactive_miss_min_score": 40.0,
-    "proactive_share_time_window_minutes": 15,
-    "proactive_greeting_schedule": [
-      {"event_type": "wake_up", "time_range": "07:00-08:00"},
-      {"event_type": "lunch", "time_range": "11:30-13:00"},
-      {"event_type": "afternoon", "time_range": "14:00-15:00"},
-      {"event_type": "dinner", "time_range": "17:30-19:00"},
-      {"event_type": "good_night", "time_range": "22:00-23:00"}
-    ],
-
-    "group_activity_enabled": true,
-    "group_activity_decay_per_day": 10.0,
-    "group_activity_add_per_interaction": 2.0,
-    "group_activity_max_daily_add": 20.0,
-    "group_activity_min_threshold": 60.0,
-    "group_activity_floor_whitelist": 50.0,
-
-    "observe_group_enabled": true,
-    "observe_max_buffer_size": 60,
-    "observe_min_length": 5,
-    "observe_max_length": 500,
-    "observe_initial_threshold": 20,
-    "observe_max_threshold": 60,
-    "observe_min_threshold": 5,
-    "observe_max_records": 30
-  }
-}
-```
-
-## 配置说明
-
-### 时间衰减 (time-decay)
+## 时间衰减 (time-decay)
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
@@ -99,18 +40,21 @@
 
 展示与对话上下文会按当前规则**惰性计算**衰减；长时间未互动的关系还会在**每日任务**（`tick_daily`）里批量写回数据库，避免仅靠聊天才落库。
 
-### 角色生活模拟 (character-life)
+---
+
+## 角色生活模拟 (character-life)
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `character_life_enabled` | bool | true | 是否启用生活模拟 |
-| `character_life_event_hours` | list | [8,11,14,17,20] | 事件生成时间点 |
-| `character_life_jitter_minutes` | int | 15 | 时间抖动范围（±分钟） |
-| `character_life_diary_time` | string | "23:30" | 日记生成时间 |
+| `character_life_jitter_minutes` | int | 15 | 触发容差：当前本地「时:分」与角色卡 `generate_event_times()` 给出的计划槽（日内分钟）之差 ≤ 该值则生成事件（`tick` 约 60s） |
+| `character_life_diary_time` | string | `"23:30"` | 日记生成时间（`HH:MM`） |
 
-`timezone`（根级 `persona_ai`）用于生活模拟与主动调度器的本地时钟（`ZoneInfo`）。
+一天内**几条事件、活跃时段、槽位抖动**在角色卡 `extensions.persona`（`daily_events_count`、`event_day_start_hour`、`event_day_end_hour`、`event_jitter_minutes`）配置，不在 `persona_ai`。
 
-### 主动消息 (proactive-scheduler)
+---
+
+## 主动消息 (proactive-scheduler)
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
@@ -123,9 +67,11 @@
 | `proactive_miss_min_hours` | int | 72 | 想念触发最小空闲时间 |
 | `proactive_miss_min_score` | float | 40.0 | 想念触发最小好感度 |
 | `proactive_share_time_window_minutes` | int | 15 | 生活事件入队后仅在此窗口内继续分享 |
-| `proactive_greeting_schedule` | list | 见默认 | 定时问候：`event_type` 为日内去重键；`time_range` 为**同一自然日内** `HH:MM-HH:MM`（闭区间），**不支持跨午夜**，跨日请拆成多条 |
+| `proactive_greeting_schedule` | list | 见 `global.json` | 定时问候：`event_type` 为日内去重键；`time_range` 为**同一自然日内** `HH:MM-HH:MM`（闭区间），**不支持跨午夜**，跨日请拆成多条 |
 
-### 群活跃度 (group-activity)
+---
+
+## 群活跃度 (group-activity)
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
@@ -136,7 +82,9 @@
 | `group_activity_min_threshold` | float | 60.0 | 主动消息最低活跃度要求 |
 | `group_activity_floor_whitelist` | float | 50.0 | 白名单群下限 |
 
-### 群聊观察 (group-observation)
+---
+
+## 群聊观察 (group-observation)
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
@@ -147,3 +95,15 @@
 | `observe_max_threshold` | int | 60 | 最大触发阈值 |
 | `observe_min_threshold` | int | 5 | 最小触发阈值 |
 | `observe_max_records` | int | 30 | 每群最多保留观察数 |
+| `observe_max_buffer_size` | int | 60 | 群观察缓冲条数上限 |
+
+---
+
+## 群聊与评分（简要）
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `game_enabled` | bool | true | 是否启用好感度玩法相关逻辑 |
+| `scoring_interval` | int | 5 | 每多少轮对话做一次批量评分（轮 = 用户+助手各一条算一轮增量） |
+| `group_chat_enabled` | bool | true | 群聊是否可走 Persona |
+| `group_simple_scoring` | bool | true | 群聊是否使用简化好感度 |

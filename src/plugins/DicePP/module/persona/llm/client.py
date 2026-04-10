@@ -4,7 +4,7 @@ LLM 客户端封装
 基于 AsyncOpenAI 的异步客户端，支持超时和错误处理
 """
 import asyncio
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import time
 
 
@@ -49,6 +49,7 @@ class LLMClient:
         messages: List[Dict[str, str]],
         timeout: int = 30,
         max_retries: int = 3,
+        temperature: Optional[float] = None,
     ) -> tuple[str, dict]:
         """
         发送聊天请求
@@ -74,11 +75,15 @@ class LLMClient:
             try:
                 start_time = time.monotonic()
                 
+                create_kwargs: Dict[str, Any] = {
+                    "model": self.model,
+                    "messages": messages,
+                }
+                if temperature is not None:
+                    create_kwargs["temperature"] = temperature
+
                 response = await asyncio.wait_for(
-                    client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                    ),
+                    client.chat.completions.create(**create_kwargs),
                     timeout=timeout
                 )
                 

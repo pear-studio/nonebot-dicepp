@@ -5,8 +5,57 @@ All bot configuration is represented as typed fields here.
 Config is loaded hierarchically by ConfigLoader:
   global defaults < global secrets < persona < account overrides < env vars
 """
-from typing import List
-from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Dict, List
+
+from pydantic import AliasChoices, BaseModel, Field, field_validator
+
+
+class ProactiveGreetingEntry(BaseModel):
+    """定时问候时间段（使用 `PersonaConfig.timezone` 的本地时钟）。"""
+
+    event_type: str = Field(..., description="唯一键，用于同一天内去重")
+    time_range: str = Field(..., description="HH:MM-HH:MM，闭区间")
+
+    @field_validator("time_range")
+    @classmethod
+    def _validate_time_range(cls, v: str) -> str:
+        s = v.strip()
+        if "-" not in s:
+            raise ValueError("time_range 须为 HH:MM-HH:MM（含一个 '-'）")
+        left, right = s.split("-", 1)
+        left, right = left.strip(), right.strip()
+        try:
+            start_dt = datetime.strptime(left, "%H:%M")
+            end_dt = datetime.strptime(right, "%H:%M")
+        except ValueError as e:
+            raise ValueError("time_range 两端须为有效 HH:MM") from e
+        if start_dt > end_dt:
+            raise ValueError(
+                "time_range 不支持跨午夜：结束时间须 >= 开始时间；跨日请拆成两条 schedule 条目"
+            )
+        return f"{left}-{right}"
+
+
+def _default_proactive_greeting_schedule() -> List[ProactiveGreetingEntry]:
+    return [
+        ProactiveGreetingEntry(event_type="wake_up", time_range="07:00-08:00"),
+        ProactiveGreetingEntry(event_type="lunch", time_range="11:30-13:00"),
+        ProactiveGreetingEntry(event_type="afternoon", time_range="14:00-15:00"),
+        ProactiveGreetingEntry(event_type="dinner", time_range="17:30-19:00"),
+        ProactiveGreetingEntry(event_type="good_night", time_range="22:00-23:00"),
+    ]
+
+
+def _default_proactive_greeting_phrases() -> Dict[str, List[str]]:
+    """与默认 `proactive_greeting_schedule` 的 event_type 键一致；可在配置中覆盖。"""
+    return {
+        "wake_up": ["早上好！", "早安~", "起床啦~"],
+        "lunch": ["中午好~", "午饭吃了吗？", "午休时间~"],
+        "afternoon": ["下午好", "下午过得怎么样？", "下午有空吗？"],
+        "dinner": ["晚上好~", "吃晚饭了吗？", "晚上有空聊天吗？"],
+        "good_night": ["晚安", "早点休息~", "好梦~"],
+    }
 
 
 # ── Phase 4+: 主动消息配置（暂未启用）
@@ -50,23 +99,61 @@ class PersonaConfig(BaseModel):
     
     game_enabled: bool = True
     scoring_interval: int = 5
-    # ── Phase 3+: 好感度衰减（暂未启用）
-    # decay_enabled: bool = True
-    # grace_period_hours: int = 8
-    # decay_rate_per_hour: float = 0.5
-    # decay_daily_cap: float = 5.0
-    # cooldown_minutes: int = 30
+    # ── Phase 2: 好感度时间衰减
+    decay_enabled: bool = True
+    decay_grace_period_hours: int = 8
+    decay_rate_per_hour: float = 0.5
+    decay_daily_cap: float = 5.0
+    decay_floor_offset: float = 20.0
+
+    # ── Phase 2: 角色生活模拟
+    character_life_enabled: bool = True
+    # 生活事件时刻由角色卡 extensions.persona（generate_event_times）决定；此处仅控制触发容差
+    character_life_jitter_minutes: int = 15
+    character_life_diary_time: str = "23:30"
+
+    # ── Phase 2: 主动消息
+    proactive_enabled: bool = True
+    proactive_quiet_start: int = 23  # 安静时段开始
+    proactive_quiet_end: int = 7     # 安静时段结束
+    proactive_min_interval_hours: int = 4
+    proactive_max_shares: int = 10
+    # 生活事件加入分享队列后，仅在此时间窗口内继续选取并发送（与 implementation.md 一致）
+    proactive_share_time_window_minutes: int = 15
+    proactive_miss_enabled: bool = True
+    proactive_miss_min_hours: int = 72
+    proactive_miss_min_score: float = 40.0
+    proactive_greeting_schedule: List[ProactiveGreetingEntry] = Field(
+        default_factory=_default_proactive_greeting_schedule
+    )
+    proactive_greeting_phrases: Dict[str, List[str]] = Field(
+        default_factory=_default_proactive_greeting_phrases
+    )
+
+    # ── Phase 2: 群活跃度
+    group_activity_enabled: bool = True
+    group_activity_decay_per_day: float = 10.0           # 基础衰减（无内容时）
+    group_activity_decay_with_content: float = 5.0       # 有内容时衰减减半
+    group_activity_content_window_hours: float = 24.0    # 内容保护时间窗口（小时）
+    group_activity_add_per_interaction: float = 2.0
+    group_activity_max_daily_add: float = 20.0
+    group_activity_min_threshold: float = 60.0  # 低于此值不发送主动消息
+    group_activity_floor_whitelist: float = 50.0  # 白名单群下限
     
     group_chat_enabled: bool = True
     group_simple_scoring: bool = True
-    observe_group: bool = True
+    observe_group_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("observe_group_enabled", "observe_group"),
+    )
     observe_min_length: int = 5
     observe_max_length: int = 500
     observe_initial_threshold: int = 20
     observe_max_threshold: int = 60
     observe_min_threshold: int = 5
     observe_max_records: int = 30
-    
+    observe_max_buffer_size: int = 60
+
     daily_limit: int = 20
     allow_user_key: bool = True
     
