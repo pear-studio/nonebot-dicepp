@@ -22,6 +22,13 @@ class PersonaExtensions(BaseModel):
     event_day_end_hour: int = 22
     event_jitter_minutes: int = 60
     scheduled_events: List[ScheduledEventConfig] = Field(default_factory=list)
+    # Phase 3: 好感度低时的拒绝回复语（可选，不配置则使用系统默认）
+    # 语义说明：
+    # - None（或未配置）：使用系统默认拒绝语
+    # - []（空列表）：明确不拒绝（即使好感度低也正常回复）
+    # - ["...", "..."]（非空列表）：使用自定义拒绝语
+    # 注意：是否启用拒绝机制由全局配置 `relationship_refuse_enabled` 控制
+    refuse_messages: Optional[List[str]] = Field(default=None)
 
     def generate_event_times(self, count: Optional[int] = None) -> List[int]:
         n = count if count is not None else self.daily_events_count

@@ -15,7 +15,7 @@ class ContextBuilder:
     def __init__(
         self,
         character: Character,
-        max_short_term_chars: int = 3000,
+        max_short_term_chars: int = 1500,
     ):
         self.character = character
         self.max_short_term_chars = max_short_term_chars
@@ -40,14 +40,13 @@ class ContextBuilder:
             example = self.character.format_mes_example()
             system_parts.append(f"示例对话:\n{example}")
 
-        short_term_text = self._format_short_term(short_term_history)
+        # 按对话轮次截断，保留完整的 user-assistant 对
+        truncated_history = self._truncate_by_turns(short_term_history, self.max_short_term_chars)
+        short_term_text = self._format_short_term(truncated_history)
         if short_term_text:
-            if len(short_term_text) > self.max_short_term_chars:
-                short_term_text = short_term_text[-self.max_short_term_chars:]
-                first_user = short_term_text.find("\n用户:")
-                if first_user > 0:
-                    short_term_text = short_term_text[first_user:]
-                short_term_text = "...（前文省略）" + short_term_text
+            # 如果发生了截断（返回的历史比原历史短），添加省略标记
+            if len(truncated_history) < len(short_term_history):
+                short_term_text = "...（前文省略）\n" + short_term_text
 
             system_parts.append(f"近期对话:\n{short_term_text}")
 
@@ -98,3 +97,25 @@ class ContextBuilder:
             role = "用户" if msg["role"] == "user" else self.character.name
             lines.append(f"{role}: {msg['content']}")
         return "\n".join(lines)
+
+    def _truncate_by_turns(self, history: List[Dict[str, str]], max_chars: int) -> List[Dict[str, str]]:
+        """按对话轮次截断，从后往前保留完整的 user-assistant 对
+
+        避免截断在对话中间，保持上下文完整性。
+        """
+        if not history:
+            return []
+
+        # 从后往前累计
+        result = []
+        total_chars = 0
+
+        for msg in reversed(history):
+            msg_chars = len(msg.get("content", ""))
+            # 如果超限制且已保留至少一条，停止
+            if total_chars + msg_chars > max_chars and result:
+                break
+            result.insert(0, msg)  # 插入头部保持顺序
+            total_chars += msg_chars
+
+        return result

@@ -88,10 +88,23 @@ class PersonaConfig(BaseModel):
     max_concurrent_requests: int = 2
     timeout: int = 30
     timezone: str = "Asia/Shanghai"
-    
-    max_short_term_chars: int = 3000
-    max_messages: int = 200
-    
+
+    # ── Phase 3: 短期记忆限制
+    # 两个限制同时生效，语义如下：
+    # - max_messages: 数据库中保留的消息条数上限（user + assistant 各算一条）
+    # - max_short_term_chars: 注入上下文的短期记忆字符上限（包括 user 和 assistant 的内容）
+    # 注意：这是按总字数限制，如果消息较长，实际注入的轮数可能少于 max_messages
+    # 例如：每轮 300 字（user 100 + assistant 200），1500 字只能容纳约 5 轮
+    max_short_term_chars: int = 1500  # 从 3000 改为 1500（配合工具调用）
+    max_messages: int = 15  # 从 200 改为 15（约 7-8 轮对话）
+
+    # ── Phase 3: 工具调用
+    tools_enabled: bool = True
+    tools_max_rounds: int = 5  # 工具调用最大轮次
+
+    # ── Phase 3: 日记上下文长度限制
+    max_diary_context_chars: int = 500  # 日记注入上下文的最大字符数
+
     # ── Phase 4+: 群活跃度（影响主动消息频率，暂未启用）
     # group_activity_decay_days: List[int] = [1, 3, 7]
     # group_activity_decay_values: List[int] = [10, 30, 50]
@@ -156,7 +169,12 @@ class PersonaConfig(BaseModel):
 
     daily_limit: int = 20
     allow_user_key: bool = True
-    
+
+    # ── Phase 2: 厌倦拒绝机制配置
+    relationship_refuse_enabled: bool = True      # 是否开启好感度低时的拒绝回复
+    relationship_refuse_prob_base: float = 0.5    # 拒绝概率基础值（默认50%）
+    relationship_refuse_prob_max: float = 0.9     # 拒绝概率最大值（默认90%）
+
     # ── Phase 4+: 主动消息（暂未启用）
     # proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     

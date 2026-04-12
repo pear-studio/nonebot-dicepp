@@ -20,6 +20,10 @@ from .migrations import ALL_MIGRATIONS
 class PersonaDataStore:
     """Persona 数据存储"""
 
+    # 日记搜索默认天数
+    DEFAULT_DIARY_DAYS_PRIVATE = 7
+    DEFAULT_DIARY_DAYS_GROUP = 3
+
     def __init__(
         self,
         db_connection: aiosqlite.Connection,
@@ -41,6 +45,15 @@ class PersonaDataStore:
     def _wall_now(self) -> datetime:
         """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
         return persona_wall_now(self._timezone)
+
+    @staticmethod
+    def _is_private_chat(group_id: Optional[str]) -> bool:
+        """判断是否为私聊场景
+
+        私聊: group_id 为 None 或空字符串
+        群聊: group_id 为非空字符串
+        """
+        return not (group_id and group_id.strip())
 
     async def ensure_tables(self) -> None:
         """确保所有表已创建，并应用增量 schema 补丁（与 `migrations.py` 中 CREATE 互补；运行时 ALTER 见 `_apply_runtime_schema_patches`）。"""
@@ -239,6 +252,35 @@ class PersonaDataStore:
             (group_id,)
         ) as cursor:
             return await cursor.fetchone() is not None
+
+    # --- 用户主动消息静音 (Phase 3) ---
+
+    async def is_user_muted(self, user_id: str) -> bool:
+        """检查用户是否关闭了主动消息"""
+        async with self.db.execute(
+            "SELECT 1 FROM persona_user_mute WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+    async def mute_user(self, user_id: str, reason: str = "") -> None:
+        """关闭用户的主动消息"""
+        await self.db.execute(
+            """
+            INSERT OR REPLACE INTO persona_user_mute (user_id, muted_at, reason)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, self._wall_now().isoformat(), reason)
+        )
+        await self.db.commit()
+
+    async def unmute_user(self, user_id: str) -> None:
+        """开启用户的主动消息"""
+        await self.db.execute(
+            "DELETE FROM persona_user_mute WHERE user_id = ?",
+            (user_id,)
+        )
+        await self.db.commit()
 
     async def add_user_to_whitelist(self, user_id: str) -> None:
         """添加用户到白名单"""
@@ -1085,3 +1127,160 @@ class PersonaDataStore:
         )
         await self.db.commit()
         return cursor.rowcount
+
+    # ========== Phase 3: 记忆搜索工具 ==========
+
+    def _sanitize_search_query(self, query: str) -> str:
+        r"""转义 LIKE 特殊字符，防止通配符被误解释
+
+        转义规则:
+        - \ → \\ (先转义反斜杠本身)
+        - % → \%
+        - _ → \_
+        """
+        return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    async def search_memory(
+        self,
+        user_id: str,
+        group_id: str,
+        query: str,
+        search_type: str = "all",
+        days: Optional[int] = None,
+        limit: int = 5,
+    ) -> str:
+        """
+        搜索记忆，返回格式化的文本结果
+
+        Args:
+            search_type: all/profile/observation/diary
+            days: 日记搜索天数
+            limit: 最多返回几条
+
+        Returns:
+            格式化的搜索结果文本，或"未找到相关记忆"
+        """
+        results = []
+
+        # 1. 搜索用户档案
+        if search_type in ("all", "profile"):
+            profile = await self.get_user_profile(user_id)
+            if profile and profile.facts:
+                # 简单匹配：query 是否出现在 key 或 value 中
+                matched_facts = []
+                for key, value in profile.facts.items():
+                    if query.lower() in key.lower() or query.lower() in str(value).lower():
+                        matched_facts.append(f"{key}: {value}")
+                if matched_facts:
+                    results.append("【用户档案】\n" + "\n".join(matched_facts))
+
+        # 2. 搜索群聊观察
+        if search_type in ("all", "observation"):
+            observations = await self._search_observations(user_id, group_id, query, limit)
+            if observations:
+                results.append("【相关观察】\n" + "\n".join(observations))
+
+        # 3. 搜索日记
+        # R8/R11: 根据场景自动调整搜索范围（仅当用户未指定时）
+        if search_type in ("all", "diary"):
+            if days is None:
+                # 用户未指定，根据场景自动调整：私聊近7天，群聊近3天
+                actual_days = self.DEFAULT_DIARY_DAYS_PRIVATE if self._is_private_chat(group_id) else self.DEFAULT_DIARY_DAYS_GROUP
+            else:
+                # 用户显式指定，尊重用户选择
+                actual_days = days
+            diaries = await self._search_diaries(query, actual_days, limit)
+            if diaries:
+                results.append("【相关日记】\n" + "\n".join(diaries))
+
+        if results:
+            return "\n\n".join(results)
+        return "未找到相关记忆"
+
+    async def _search_observations(
+        self,
+        user_id: str,
+        group_id: str,
+        query: str,
+        limit: int,
+    ) -> List[str]:
+        """搜索群聊观察记录"""
+        # 私聊场景：搜索用户参与过的观察
+        # 群聊场景：搜索该群的所有观察
+        # 转义 LIKE 特殊字符
+        safe_query = self._sanitize_search_query(query)
+
+        if not self._is_private_chat(group_id):
+            # 群聊场景
+            sql = """
+                SELECT what, why_remember, observed_at
+                FROM persona_observations
+                WHERE group_id = ? AND (what LIKE ? ESCAPE '\' OR why_remember LIKE ? ESCAPE '\')
+                ORDER BY observed_at DESC
+                LIMIT ?
+            """
+            params = (group_id, f"%{safe_query}%", f"%{safe_query}%", limit)
+
+            async with self.db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                results = []
+                for row in rows:
+                    what = row[0]
+                    why = row[1]
+                    when = datetime.fromisoformat(row[2]).strftime("%m-%d") if row[2] else ""
+                    results.append(f"[{when}] {what} ({why})")
+                return results
+        else:
+            # 私聊场景：搜索该用户参与过的观察
+            # 使用 SQLite JSON 函数在查询层面过滤（SQLite 3.38+）
+            sql = """
+                SELECT what, why_remember, observed_at
+                FROM persona_observations
+                WHERE (what LIKE ? ESCAPE '\' OR why_remember LIKE ? ESCAPE '\')
+                  AND EXISTS (
+                      SELECT 1 FROM json_each(participants)
+                      WHERE json_each.value = ?
+                  )
+                ORDER BY observed_at DESC
+                LIMIT ?
+            """
+
+            async with self.db.execute(sql, (f"%{safe_query}%", f"%{safe_query}%", user_id, limit)) as cursor:
+                rows = await cursor.fetchall()
+                results = []
+                for row in rows:
+                    what = row[0]
+                    why = row[1]
+                    when = datetime.fromisoformat(row[2]).strftime("%m-%d") if row[2] else ""
+                    results.append(f"[{when}] {what} ({why})")
+                return results
+
+    async def _search_diaries(
+        self,
+        query: str,
+        days: int,
+        limit: int,
+    ) -> List[str]:
+        """搜索日记"""
+        cutoff_date = (self._wall_now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        safe_query = self._sanitize_search_query(query)
+
+        async with self.db.execute(
+            """
+            SELECT date, content
+            FROM persona_diary
+            WHERE date >= ? AND content LIKE ? ESCAPE '\'
+            ORDER BY date DESC
+            LIMIT ?
+            """,
+            (cutoff_date, f"%{safe_query}%", limit)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            results = []
+            for row in rows:
+                date = row[0]
+                content = row[1][:200]  # 只显示前200字
+                if len(row[1]) > 200:
+                    content += "..."
+                results.append(f"[{date}] {content}")
+            return results

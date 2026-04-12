@@ -655,48 +655,268 @@ if not whitelist_active:
 
 ---
 
-### Phase 4: 上下文升级（约 2 天）
+### Phase 3: 上下文升级 + Function Calling（约 3 天）
 
-**注**：去掉对话摘要，四层记忆集成
+**注**：原 Phase 4 重新编号为 Phase 3；去掉对话摘要，四层记忆集成 + 工具调用
 
 ---
 
-#### Phase 4a: 上下文组装
+#### Phase 3.0: `.ai mute` 用户主动消息开关
 
-**目标**：ContextBuilder 集成四层记忆，支持 LLM 按需查询
+**目标**：用户可关闭/开启主动消息，防止骚扰
+
+**DB 表**：
+- `persona_user_mute`（user_id TEXT PRIMARY KEY, muted_at TEXT, reason TEXT）
+
+**PersonaDataStore 新增方法**：
+- `is_user_muted(user_id) -> bool`
+- `mute_user(user_id, reason)`
+- `unmute_user(user_id)`
+
+**命令实现**：
+- `.ai mute` — 关闭主动消息，回复"已关闭主动消息，我不会再主动发消息给你了~"
+- `.ai unmute` — 开启主动消息，回复"已开启主动消息，想我的时候可以找我聊天哦~"
+- 再次发送相同命令 → 提示当前状态
+
+**集成点**：
+- `ProactiveScheduler._should_send_to_user()` 检查用户是否 muted
+- 群聊中用户被 mute 不影响群内其他用户接收消息
+
+---
+
+#### Phase 3a: 上下文组装优化
+
+**目标**：ContextBuilder 集成四层记忆，日记真正注入上下文
 
 **组装顺序**（system_prompt）：
 1. 角色卡 system_prompt
 2. warmth_labels 行为描述（对应当前区间）
-3. 角色今日生活（events 或昨日日记）
+3. 角色今日生活（events 或昨日日记）— **修复：实际传入 diary_context**
 4. 用户档案
-5. 群聊观察（Phase 3f 实现后接入，LLM 按需查询）
+5. 群聊观察（Phase 3c 实现后接入，LLM 按需查询）
 6. 世界书命中（Phase 6a 实现，此处预留）
 
-然后追加：短期记忆（字数限制 3000 字）+ 当前消息
+然后追加：短期记忆（字数限制 **1500** 字）+ 当前消息
 
-**Token 管理**（字数优先，不做精确 token 计数）：
-- 短期记忆：`max_short_term_chars=3000` 字符截断（尾部截断 + `...`）
-- 其他层：内容较短，不设硬限制；如超出可按需裁剪用户档案/观察记录
+**调整**：
+- `max_short_term_chars`: 3000 → **1500**（约 10-15 轮对话）
+- `max_messages`: 20 → **15**
 
-> Phase 4 不引入 tiktoken，字符数估算即可（中文 1 字 ≈ 1.5 token）
+**理由**：配合工具调用，LLM 可主动搜索深层记忆，不需要太长的短期记忆
 
 ---
 
-#### Phase 4b: 记忆搜索工具
+#### Phase 3b: Function Calling 基础设施
 
-**目标**：LLM 通过 function calling 按需查询深层记忆
+**目标**：支持 LLM 通过工具调用按需查询记忆，支持多轮工具调用
 
 **工具定义**（OpenAI function calling 格式）：
-- `search_user_profile(user_id)` — 获取用户档案 facts
-- `search_observations(user_id, group_id)` — 获取相关群聊观察
-- `search_diary(date_or_keyword)` — 搜索指定日期或关键词的日记
+
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "search_memory",
+    "description": "搜索关于用户或特定话题的记忆，包括用户档案、群聊观察记录、日记等",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "搜索关键词，如用户提到的内容、话题、名字等"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["all", "profile", "observation", "diary"],
+          "description": "搜索类型：all=全部, profile=用户档案, observation=群聊观察, diary=日记",
+          "default": "all"
+        },
+        "days": {
+          "type": "integer",
+          "description": "日记搜索天数限制（仅对 diary 有效）",
+          "default": 7
+        }
+      },
+      "required": ["query"]
+    }
+  }
+}
+```
+
+**LLMClient 新增方法**：
+
+```python
+async def chat_with_tools(
+    self,
+    messages: List[Dict],
+    tools: List[Dict],
+    max_tool_rounds: int = 5,  # 最多5轮工具调用
+    timeout: int = 60,
+) -> tuple[str, dict]:
+    """
+    支持多轮工具调用的对话
+    
+    Returns:
+        (最终回复文本, 元数据字典)
+    """
+    # 循环调用 LLM，直到：
+    # 1. LLM 不调用工具（返回普通回复）
+    # 2. 达到最大轮次限制
+    # 每次工具调用结果追加到 messages，继续下一轮
+```
+
+**LLMRouter 新增方法**：
+
+```python
+async def generate_with_tools(
+    self,
+    messages: List[Dict],
+    tools: List[Dict],
+    model_tier: ModelTier = ModelTier.PRIMARY,
+    timeout: Optional[int] = None,
+) -> str:
+    """生成回复，支持工具调用"""
+```
+
+**多轮工具调用流程**：
+
+```
+第1轮: User Message → LLM → Tool Call (search_memory)
+            ↓
+      执行工具，结果追加到 messages
+            ↓
+第2轮: Messages (含工具结果) → LLM → Tool Call (再次 search_memory)
+            ↓
+      执行工具，结果追加到 messages
+            ↓
+第3轮: Messages (含工具结果) → LLM → 普通回复（无 tool_calls）
+            ↓
+      返回给用户
+```
+
+**Prompt Caching 数据收集**：
+
+在 `LLMClient._get_cached_tokens()` 中已实现对 OpenAI 和 Anthropic 格式的缓存 token 提取，数据目前仅用于日志输出。
+
+```python
+# 当前仅用于日志，未持久化
+def _get_cached_tokens(self, response) -> int:
+    # OpenAI 格式 (GPT-4o+): response.usage.prompt_tokens_details.cached_tokens
+    # Anthropic 格式: response.usage.cache_read_input_tokens
+    ...
+```
+
+**TODO**: 后续可添加 `persona_llm_cache_stats` 表持久化缓存数据，用于：
+1. 统计缓存命中率，优化 Prompt 结构
+2. 分析不同模型的缓存效率差异
+3. 计算实际成本节省
+
+---
+
+#### Phase 3c: Memory 工具实现与集成
+
+**目标**：实现 `search_memory` 工具，在 Orchestrator 中处理工具调用
+
+**PersonaDataStore 新增方法**：
+
+```python
+async def search_memory(
+    self,
+    user_id: str,
+    group_id: str,
+    query: str,
+    search_type: str = "all",
+    days: int = 7,
+    limit: int = 5,
+) -> str:
+    """
+    搜索记忆，返回格式化的文本结果
+    
+    Args:
+        search_type: all/profile/observation/diary
+        days: 日记搜索天数
+        limit: 最多返回几条
+    
+    Returns:
+        格式化的搜索结果文本，或"未找到相关记忆"
+
+    **返回格式说明**：当前实现直接拼接搜索结果字符串。后续可优化为带结构化标记的格式，
+    如 `[相关度:高] [时间] 内容 (来源)`，提升 LLM 对记忆质量的判断能力。
+    """
+```
+
+**搜索范围策略**：
+
+| 场景 | 用户档案 | 群聊观察 | 日记 |
+|------|---------|---------|------|
+| **私聊** | 全部 | 只检索该用户参与过的 | 近7天 |
+| **群聊** | 全部 | 该群全部记录 | 近3天 |
+
+**Orchestrator 工具调用处理**：
+
+```python
+async def _handle_tool_calls(
+    self,
+    tool_calls: List[Dict],
+    user_id: str,
+    group_id: str,
+) -> List[Dict]:
+    """处理工具调用，返回 tool 结果消息列表"""
+    results = []
+    for tc in tool_calls:
+        if tc["function"]["name"] == "search_memory":
+            args = json.loads(tc["function"]["arguments"])
+            result = await self.data_store.search_memory(
+                user_id=user_id,
+                group_id=group_id,
+                query=args["query"],
+                search_type=args.get("type", "all"),
+                days=args.get("days", 7),
+            )
+            results.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": result,
+            })
+    return results
+```
+
+**配置项**：
+
+```python
+# PersonaConfig
+class PersonaConfig:
+    tools_enabled: bool = True  # 关闭时回退纯上下文模式
+    max_tool_rounds: int = 5
+```
+
+---
+
+#### Phase 3d: 厌倦拒绝机制（补充 Phase 2）
+
+**目标**：好感度跌至"厌倦"区间（0-10）时，角色有概率拒绝回复
 
 **实现**：
-1. PersonaDataStore 新增 `search_all_memory(user_id, group_id, query, limit)` — LIKE 匹配用户档案 + 群聊观察 + 日记
-2. Orchestrator 处理 tool_calls：LLM 返回 tool_call → 执行 → 结果追加 messages → 再次调用 LLM
-3. LLMRouter.generate() 支持传入 `tools` 参数
-4. PersonaConfig：`tools_enabled: bool = True`，关闭时回退纯上下文模式（兼容不支持 function calling 的模型）
+1. `orchestrator.chat()` 中检查 `RelationshipState.get_warmth_level()`
+2. 如果 warmth_level == 0（厌倦区间）：
+   - 普通骰子指令：正常响应（TRPG 优先）
+   - AI 对话/聊天：根据概率拒绝
+     - `P_refuse = 0.5 + 0.4 * (1 - score/10)`  # 50%-90% 拒绝概率
+     - 拒绝时返回随机拒绝语（角色卡配置或默认）
+3. 拒绝不消耗配额
+
+**骰子指令判断**：当前仅以 `.` 开头判断，可能误判 `.ai` 等 AI 模块命令。精确识别已注册骰子指令格式的改进延后到 Phase 5c（掷骰工具实现阶段）统一处理。
+
+**默认拒绝语**：
+- "...（对方似乎没有兴趣理你）"
+- "...（已读不回）"
+- "嗯。"（冷淡）
+
+---
+
+### Phase 4: 成本与配置（约 2 天）
+
+（原 Phase 5，编号顺延）
 
 ---
 

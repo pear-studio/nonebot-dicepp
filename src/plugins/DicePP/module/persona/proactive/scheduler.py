@@ -286,6 +286,9 @@ class ProactiveScheduler:
                     for target in targets[: self.config.max_shares_per_event]:
                         if not self._can_send_to_user(target.user_id):
                             continue
+                        # Phase 3: 检查用户是否关闭了主动消息
+                        if await self.data_store.is_user_muted(target.user_id):
+                            continue
 
                         msg = await self._create_proactive_message(
                             target, event, event_type
@@ -341,6 +344,9 @@ class ProactiveScheduler:
                 # 检查最小间隔
                 user_id = rel.user_id
                 if not self._can_send_to_user(user_id):
+                    continue
+                # Phase 3: 检查用户是否关闭了主动消息
+                if await self.data_store.is_user_muted(user_id):
                     continue
 
                 # 检查概率 P = 0.40 + 0.40 * (score/100)

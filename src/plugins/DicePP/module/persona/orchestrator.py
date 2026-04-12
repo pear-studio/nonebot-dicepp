@@ -4,6 +4,7 @@ Persona Orchestrator - 核心编排层
 协调各组件完成对话流程
 """
 from typing import List, Dict, Optional, Any, Tuple, Set
+import json
 import logging
 import time
 import random
@@ -196,12 +197,61 @@ class PersonaOrchestrator:
                 await self.data_store.add_message(user_id, group_id, "assistant", self.character.first_mes)
                 return self.character.first_mes
 
+            # Phase 3d: 厌倦拒绝机制
+            # 只在非首次对话且是聊天消息（非骰子/AI指令）时检查
+            # 反向排除：只有纯聊天消息和 .ai 命令才检查拒绝，所有 . 开头指令视为骰子指令
+            is_chat_message = not message.startswith(".") or message.lower().startswith(".ai")
+            if self.config.relationship_refuse_enabled and not is_first and is_chat_message:
+                rel = await self.data_store.get_relationship(user_id, group_id)
+                if rel:
+                    # 应用时间衰减获取有效关系状态
+                    if self.decay_calculator:
+                        initial = float(self.character.extensions.initial_relationship)
+                        rel = self.decay_calculator.effective_relationship(rel, initial)
+                    warmth_level, _ = rel.get_warmth_level(self.character.get_warmth_labels())
+                    if warmth_level == 0:
+                        # 厌倦区间（0-10分），计算拒绝概率
+                        score = rel.composite_score
+                        base = self.config.relationship_refuse_prob_base
+                        max_p = self.config.relationship_refuse_prob_max
+                        p_refuse = base + (max_p - base) * (1 - score / 10)
+                        if random.random() < p_refuse:
+                            # 随机选择拒绝语：优先使用角色卡配置，回退到系统默认
+                            default_refuse_messages = [
+                                "...（对方似乎没有兴趣理你）",
+                                "...（已读不回）",
+                                "嗯。",
+                            ]
+                            char_refuse = self.character.extensions.refuse_messages
+                            # None 表示未配置（使用默认），空列表表示明确不拒绝
+                            if char_refuse is None:
+                                refuse_messages = default_refuse_messages
+                            else:
+                                refuse_messages = char_refuse  # 空列表也表示明确配置
+
+                            if refuse_messages:
+                                # 非空列表才执行拒绝
+                                refuse_response = random.choice(refuse_messages)
+                                logger.info(
+                                    f"厌倦拒绝触发: user={user_id}, score={score:.2f}, "
+                                    f"p_refuse={p_refuse:.2%}"
+                                )
+                                # 记录用户消息和拒绝回复
+                                await self.data_store.add_message(user_id, group_id, "user", message)
+                                await self.data_store.add_message(user_id, group_id, "assistant", refuse_response)
+                                return refuse_response
+                            # 空列表表示明确不拒绝，继续正常对话
+
             messages = await self._build_messages(user_id, group_id, message)
 
-            response = await self.llm_router.generate(
-                messages=messages,
-                model_tier=ModelTier.PRIMARY,
-            )
+            # Phase 3: 工具调用
+            if self.config.tools_enabled:
+                response = await self._chat_with_tools(user_id, group_id, messages)
+            else:
+                response = await self.llm_router.generate(
+                    messages=messages,
+                    model_tier=ModelTier.PRIMARY,
+                )
 
             await self.data_store.add_message(user_id, group_id, "user", message)
             await self.data_store.add_message(user_id, group_id, "assistant", response)
@@ -214,6 +264,132 @@ class PersonaOrchestrator:
         except Exception as e:
             logger.exception("对话处理失败")
             return "抱歉，我出错了，请稍后再试..."
+
+    # ========== Phase 3: 工具调用 ==========
+
+    async def _chat_with_tools(
+        self,
+        user_id: str,
+        group_id: str,
+        messages: List[Dict],
+    ) -> str:
+        """
+        支持工具调用的对话（完整循环实现）
+
+        使用 tool_executor 回调在 LLMClient 内部完成工具调用循环，
+        支持最多 max_tool_rounds 轮工具调用。
+        """
+        tools = self._get_tools()
+
+        # 创建工具执行器回调
+        async def tool_executor(tool_calls: List[Dict]) -> List[Dict]:
+            """执行工具调用并返回结果"""
+            results = []
+            for tc in tool_calls:
+                result = await self._execute_tool(
+                    tool_name=tc["name"],
+                    arguments=tc["arguments"],
+                    user_id=user_id,
+                    group_id=group_id,
+                )
+                results.append({
+                    "tool_call_id": tc["id"],
+                    "content": str(result),
+                })
+            return results
+
+        # 调用带工具的生成，在内部完成完整循环
+        content, metadata = await self.llm_router.generate_with_tools(
+            messages=messages,
+            tools=tools,
+            tool_executor=tool_executor,
+            model_tier=ModelTier.PRIMARY,
+            max_tool_rounds=self.config.tools_max_rounds,
+        )
+
+        # 记录工具调用元数据便于调试
+        if metadata.get("tool_rounds", 0) > 0:
+            logger.debug(
+                f"工具调用完成: user={user_id}, "
+                f"rounds={metadata.get('tool_rounds')}, "
+                f"tools={metadata.get('tool_names')}, "
+                f"cached={metadata.get('cached_tokens', 0)}"
+            )
+
+        return content
+
+    def _get_tools(self) -> List[Dict]:
+        """获取工具定义"""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_memory",
+                    "description": "搜索关于用户或特定话题的记忆，包括用户档案、群聊观察记录、日记等",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "搜索关键词，如用户提到的内容、话题、名字等"
+                            },
+                            "type": {
+                                "type": "string",
+                                "enum": ["all", "profile", "observation", "diary"],
+                                "description": "搜索类型：all=全部, profile=用户档案, observation=群聊观察, diary=日记",
+                                "default": "all"
+                            },
+                            "days": {
+                                "type": "integer",
+                                "description": "日记搜索天数限制（仅对 diary 有效）",
+                                "default": 7
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "最多返回几条结果（1-20）",
+                                "default": 5,
+                                "minimum": 1,
+                                "maximum": 20
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }
+        ]
+
+    async def _execute_tool(
+        self,
+        tool_name: str,
+        arguments: str,
+        user_id: str,
+        group_id: str,
+    ) -> str:
+        """执行工具调用"""
+        try:
+            args = json.loads(arguments)
+        except json.JSONDecodeError:
+            return "工具参数解析失败"
+
+        if tool_name == "search_memory":
+            query = args.get("query", "")
+            search_type = args.get("type", "all")
+            days = args.get("days", 7)
+            limit = args.get("limit", 5)
+            # 限制范围 1-20
+            limit = max(1, min(20, limit))
+
+            result = await self.data_store.search_memory(
+                user_id=user_id,
+                group_id=group_id,
+                query=query,
+                search_type=search_type,
+                days=days,
+                limit=limit,
+            )
+            return result
+
+        return f"未知工具: {tool_name}"
 
     async def _update_interaction(self, user_id: str, group_id: str, user_msg: str, assistant_msg: str) -> None:
         if not self.data_store:
@@ -318,7 +494,7 @@ class PersonaOrchestrator:
         if not self.data_store or not self.character or not self.context_builder:
             return [{"role": "user", "content": current_message}]
 
-        history = await self.data_store.get_recent_messages(user_id, group_id, limit=20)
+        history = await self.data_store.get_recent_messages(user_id, group_id, limit=15)
         history_dicts = [{"role": msg.role, "content": msg.content} for msg in history]
         profile = await self.data_store.get_user_profile(user_id)
         rel = await self.data_store.get_relationship(user_id, group_id)
@@ -337,9 +513,44 @@ class PersonaOrchestrator:
             )
             _, warmth_label = temp_rel.get_warmth_level(self.character.get_warmth_labels())
 
+        # 获取今日生活事件或昨日日记
+        wall = persona_wall_now(self.config.timezone)
+        today = wall.strftime("%Y-%m-%d")
+        yesterday = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        events = await self.data_store.get_daily_events(today)
+        if events:
+            # 过滤空描述并按时间排序（最新的在前）
+            valid_events = [e for e in events if e.description and e.description.strip()]
+            valid_events.sort(key=lambda e: e.created_at or datetime.min, reverse=True)
+
+            if valid_events:
+                descriptions = [e.description for e in valid_events]
+                diary_context = "今天发生的事：" + "；".join(descriptions)
+
+                # 统一截断逻辑
+                max_diary_len = self.config.max_diary_context_chars
+                if len(diary_context) > max_diary_len:
+                    # 从最后一个完整事件处截断
+                    diary_context = diary_context[:max_diary_len].rsplit('；', 1)[0] + "..."
+            else:
+                diary_context = ""
+        else:
+            # 获取昨天日记
+            diary = await self.data_store.get_diary(yesterday)
+            if diary:
+                # 限制日记长度避免超出上下文预算
+                max_diary_len = self.config.max_diary_context_chars
+                if len(diary) > max_diary_len:
+                    diary = diary[:max_diary_len] + "..."
+                diary_context = "昨天的日记：" + diary
+            else:
+                diary_context = ""
+
         return self.context_builder.build(
             short_term_history=history_dicts,
             user_profile=profile,
+            diary_context=diary_context,
             current_message=current_message,
             warmth_label=warmth_label
         )

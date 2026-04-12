@@ -166,7 +166,7 @@ class PersonaCommand(UserCommandBase):
                 return False, False, None
 
         # 不调用 LLM 的工具类命令：无需白名单
-        if cmd in ("ping", "clear", "status", "profile") or cmd == "":
+        if cmd in ("ping", "clear", "status", "profile", "mute", "unmute") or cmd == "":
             return True, False, None
 
         # 聊天触发（@bot）：无需 .ai 前缀，也无需白名单以外的命令
@@ -254,6 +254,16 @@ class PersonaCommand(UserCommandBase):
                 response = "模块未初始化"
         elif content == "status" or hint == "status":
             response = await self._get_status(user_id, group_id, is_private)
+        elif content == "mute":
+            if not is_private:
+                response = "请在私聊中使用此命令~"
+            else:
+                response = await self._handle_mute(user_id, True)
+        elif content == "unmute":
+            if not is_private:
+                response = "请在私聊中使用此命令~"
+            else:
+                response = await self._handle_mute(user_id, False)
         elif not content:
             if is_at_trigger:
                 response = await self._get_status(user_id, group_id, is_private)
@@ -431,6 +441,24 @@ class PersonaCommand(UserCommandBase):
                     return "没有待确认的清空操作（可能已超时）"
         
         return "未知的管理员命令"
+
+    async def _handle_mute(self, user_id: str, mute: bool) -> str:
+        """处理 mute/unmute 命令"""
+        if not self.data_store:
+            return "模块未初始化"
+
+        is_muted = await self.data_store.is_user_muted(user_id)
+
+        if mute:
+            if is_muted:
+                return "你已经关闭了主动消息~"
+            await self.data_store.mute_user(user_id)
+            return "已关闭主动消息，我不会再主动发消息给你了~"
+        else:
+            if not is_muted:
+                return "你已经开启了主动消息~"
+            await self.data_store.unmute_user(user_id)
+            return "已开启主动消息，想我的时候可以找我聊天哦~"
 
     async def _handle_profile(self, user_id: str, group_id: str) -> str:
         if not self.data_store:

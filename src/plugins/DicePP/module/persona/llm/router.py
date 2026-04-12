@@ -4,7 +4,7 @@ LLM 路由器
 多模型路由 + 并发控制 + 配额管理
 """
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, Awaitable
 import time
 import logging
 
@@ -125,21 +125,77 @@ class LLMRouter:
                 
                 raise
 
-    # ── Phase 2+: 工具调用（暂未启用）
-    # async def generate_with_tools(
-    #     self,
-    #     messages: List[Dict[str, str]],
-    #     tools: List[Dict[str, Any]],
-    #     model_tier: ModelTier = ModelTier.PRIMARY,
-    #     timeout: Optional[int] = None,
-    # ) -> tuple[str, Optional[list]]:
-    #     timeout = timeout if timeout is not None else self.timeout
-    #     client = self.primary_client if model_tier == ModelTier.PRIMARY else self.auxiliary_client
-    #     async with self.semaphore:
-    #         content, tool_calls, _ = await client.chat_with_tools(
-    #             messages=messages, tools=tools, timeout=timeout,
-    #         )
-    #         return content, tool_calls
+    # ── Phase 3: 工具调用
+    async def generate_with_tools(
+        self,
+        messages: List[Dict],
+        tools: List[Dict],
+        tool_executor: Optional[
+            Callable[[List[Dict]], Awaitable[List[Dict]]]
+        ] = None,
+        model_tier: ModelTier = ModelTier.PRIMARY,
+        timeout: Optional[int] = None,
+        temperature: Optional[float] = None,
+        max_tool_rounds: int = 5,
+    ) -> tuple[str, dict]:
+        """
+        生成回复，支持工具调用（完整循环）
+
+        Args:
+            messages: 消息列表
+            tools: 工具定义列表
+            tool_executor: 工具执行回调函数，接收 tool_calls 列表，返回 tool_results 列表
+            model_tier: 模型层级
+            timeout: 超时时间
+            temperature: 采样温度
+            max_tool_rounds: 最多多少轮工具调用
+
+        Returns:
+            (回复文本, 元数据字典)
+        """
+        timeout = timeout if timeout is not None else self.timeout
+        client = self.primary_client if model_tier == ModelTier.PRIMARY else self.auxiliary_client
+        tier_name = "primary" if model_tier == ModelTier.PRIMARY else "auxiliary"
+
+        async with self.semaphore:
+            start_time = time.monotonic()
+            self.stats[tier_name]["requests"] += 1
+
+            try:
+                content, metadata = await client.chat_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    tool_executor=tool_executor,
+                    max_tool_rounds=max_tool_rounds,
+                    timeout=timeout,
+                    temperature=temperature,
+                )
+
+                latency = time.monotonic() - start_time
+
+                # 记录日志
+                tool_info = ""
+                if metadata.get("tool_names"):
+                    tool_info = f" tools={metadata['tool_names']}"
+
+                logger.info(
+                    f"model={metadata.get('model', client.model)} tier={tier_name} "
+                    f"latency={latency:.1f}s tools_rounds={metadata.get('tool_rounds', 0)}{tool_info} "
+                    f"cached={metadata.get('cached_tokens', 0)} status=ok"
+                )
+
+                return content, metadata
+
+            except Exception as e:
+                self.stats[tier_name]["errors"] += 1
+                latency = time.monotonic() - start_time
+
+                logger.warning(
+                    f"model={client.model} tier={tier_name} "
+                    f"latency={latency:.1f}s status=error error={e}"
+                )
+
+                raise
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
