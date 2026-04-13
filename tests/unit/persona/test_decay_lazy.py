@@ -1,9 +1,8 @@
 """好感度衰减：惰性 effective_relationship 不修改原对象"""
 
-import sys
+
 from datetime import datetime, timedelta
 
-sys.path.insert(0, "src")
 
 from plugins.DicePP.module.persona.data.models import RelationshipState
 from plugins.DicePP.module.persona.game.decay import DecayCalculator, DecayConfig

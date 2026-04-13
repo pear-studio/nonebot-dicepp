@@ -1,9 +1,8 @@
 """时间衰减：批处理与对话路径共用增量水位，避免对同一空闲窗口重复扣减。"""
 
-import sys
+
 from datetime import datetime, timedelta
 
-sys.path.insert(0, "src")
 
 from plugins.DicePP.module.persona.data.models import RelationshipState
 from plugins.DicePP.module.persona.game.decay import DecayCalculator, DecayConfig

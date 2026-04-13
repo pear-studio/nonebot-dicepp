@@ -8,11 +8,10 @@
 """
 
 import pytest
-import sys
+
 from datetime import datetime
 from unittest.mock import MagicMock, AsyncMock
 
-sys.path.insert(0, "src")
 
 from plugins.DicePP.module.persona.agents.event_agent import (
     EventGenerationAgent,

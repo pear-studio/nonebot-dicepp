@@ -3,8 +3,7 @@
 """
 
 import pytest
-import sys
-sys.path.insert(0, "src")
+
 
 from plugins.DicePP.module.persona.agents.scoring_agent import ScoringAgent
 from plugins.DicePP.module.persona.data.models import ScoreDeltas, UserProfile

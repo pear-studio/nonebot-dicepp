@@ -1,12 +1,11 @@
 """PersonaCommand.tick / tick_daily：事件循环中单槽调度，慢路径不堆积任务。"""
 
 import asyncio
-import sys
+
 from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, "src")
 
 from plugins.DicePP.module.persona.command import PersonaCommand
 

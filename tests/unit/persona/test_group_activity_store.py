@@ -2,12 +2,11 @@
 群活跃度存储：每日加分上限、衰减系数、私聊关系查询
 """
 
-import sys
+
 
 import aiosqlite
 import pytest
 
-sys.path.insert(0, "src")
 
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
