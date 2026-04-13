@@ -18,6 +18,14 @@ DicePP 是一个基于 NoneBot2 的 TRPG 骰娘机器人。NoneBot2 是一个现
 | QQ 客户端 | QQNT + LLOneBot | 新版 QQ 机器人客户端方案，使用 OneBot11 协议 |
 | LLOneBot 部署 | QQNT (本地) 或 Docker (服务器) | 可在本地 Windows 运行或服务器 Docker 部署 |
 
+### 关于 `cryptography` 依赖
+
+项目依赖 `cryptography>=42.0`（用于 Persona AI 的 API Key 加密）。该库在大多数常见平台上有预编译 wheel，通常无需额外工具链即可直接安装：
+
+- **Windows / Linux x86_64 / macOS**：`uv pip install` 或 Docker 构建时会自动下载预编译包。
+- **ARM 设备（如树莓派）或 Alpine Linux**：若预编译 wheel 不可用，需要本地 Rust 编译工具链，或手动安装系统预编译包（如 `apk add py3-cryptography` 后跳过 pip 安装）。
+- **Docker 部署**：官方镜像基于常规 Linux 发行版，构建时已处理该依赖，通常无需额外操作。
+
 ---
 
 ## 部署方式

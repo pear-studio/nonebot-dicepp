@@ -243,6 +243,9 @@ warmth_labels: ["漠然", "疏冷", "普通", "友好", "亲近", "心意相通"
 | `.ai admin whitelist remove <user_id>` | 移除指定用户 |
 | `.ai admin whitelist remove group <group_id>` | 移除指定群 |
 | `.ai admin whitelist clear` | 清空整个白名单（需二次确认） |
+| `.ai admin trace <user_id>` | 导出该用户最近 5 次 LLM 调用 trace（Phase 7a） |
+| `.ai admin stats` | 查看今日 LLM 调用统计（延迟、错误率、token 消耗）（Phase 7a） |
+| `.ai admin errors` | 查看最近 24h LLM 错误摘要（Phase 7a） |
 
 > 管理员身份通过 DicePP 已有的 `is_admin(user_id)` 鉴权，无需额外实现。
 
@@ -284,9 +287,9 @@ Phase 4: 成本与配置                                  约 2 天
 Phase 6: 深度人格（可选，约 5 天）
   6a 世界书引擎 — 关键词触发知识注入（优先）
   6b Drive 系统 — 5 维驱动 + 时间代谢（可选）
-  6c 偏好学习 — 分析用户倾向（可选）
 
-Phase 7: 发布（约 3 天）
+Phase 7: 发布与可观测性（约 5 天）
+  7a 调试数据与 LLM Trace — prompt/response/tool_calls 持久化与调试导出
   7b 敏感词过滤 — sensitive-word-filter
   7c 文档与测试
 ```
