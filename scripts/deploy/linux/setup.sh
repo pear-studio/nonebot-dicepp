@@ -115,6 +115,23 @@ step "5/6 构建 Docker 镜像..."
 $COMPOSE_CMD build
 success "Docker 镜像构建完成"
 
+# 5.5 检查必要配置
+step "检查必要配置..."
+ACCOUNT_CONFIG_COUNT=$(ls -1 "$PROJECT_ROOT/config/bots/"*.json 2>/dev/null | grep -v "_template.json" | wc -l)
+if [ "$ACCOUNT_CONFIG_COUNT" -eq 0 ]; then
+    warn "未找到账号配置文件"
+    info "请执行: cp config/bots/_template.json config/bots/你的QQ号.json"
+    info "然后编辑 config/bots/你的QQ号.json 设置 master 等字段"
+else
+    success "找到 $ACCOUNT_CONFIG_COUNT 个账号配置"
+fi
+
+if [ ! -f "$PROJECT_ROOT/config/secrets.json" ]; then
+    info "如需启用 Persona AI，请创建 config/secrets.json:"
+    info "  cp config/secrets.json.example config/secrets.json"
+    info "  然后编辑填写你的 API 密钥"
+fi
+
 # 5. 启动容器
 step "6/6 启动 DicePP 容器..."
 $COMPOSE_CMD up -d
