@@ -264,6 +264,13 @@ class PersonaCommand(UserCommandBase):
                 response = "请在私聊中使用此命令~"
             else:
                 response = await self._handle_mute(user_id, False)
+        elif content == "key" or content.startswith("key "):
+            # Phase 4: 用户 LLM Key 配置
+            if not is_private:
+                response = "请私聊配置"
+            else:
+                key_args = content[4:].strip() if content.startswith("key ") else ""
+                response = await self._handle_key_command(user_id, key_args)
         elif not content:
             if is_at_trigger:
                 response = await self._get_status(user_id, group_id, is_private)
@@ -1155,3 +1162,135 @@ class PersonaCommand(UserCommandBase):
         except Exception as e:
             dice_log(f"[Persona] tick_daily 失败: {e}")
             return []
+
+    # ── Phase 4: 用户 LLM Key 配置 ──
+
+    async def _handle_key_command(self, user_id: str, args: str) -> str:
+        """处理 .ai key 命令
+
+        Args:
+            user_id: 用户ID
+            args: 命令参数，如 "", "config", "config key: value", "clear"
+        """
+        if not self.data_store:
+            return "模块未初始化"
+
+        from .data.models import UserLLMConfig
+
+        # 检查加密密钥是否设置
+        if not PersonaDataStore._get_encryption_key():
+            return "DICE_PERSONA_SECRET 未设置，请联系管理员配置加密密钥"
+
+        parts = args.split(None, 1) if args else ["", ""]
+        subcmd = parts[0] if parts else ""
+        config_content = parts[1] if len(parts) > 1 else ""
+
+        # .ai key - 查看当前配置
+        if not subcmd:
+            config = await self.data_store.get_user_llm_config(user_id)
+            if not config:
+                return (
+                    "你还没有配置个人 API Key\n"
+                    "使用 `.ai key config` 进行配置\n"
+                    "格式示例:\n"
+                    "primary_key: sk-xxx\n"
+                    "primary_model: gpt-4o"
+                )
+
+            lines = ["你的 LLM 配置:"]
+            lines.append(f"主模型 Key: {PersonaDataStore.mask_sensitive_string(config.primary_api_key)}")
+            if config.primary_model:
+                lines.append(f"主模型: {config.primary_model}")
+            if config.primary_base_url:
+                lines.append(f"主模型 URL: {config.primary_base_url}")
+            if config.auxiliary_api_key:
+                lines.append(f"辅助模型 Key: {PersonaDataStore.mask_sensitive_string(config.auxiliary_api_key)}")
+            if config.auxiliary_model:
+                lines.append(f"辅助模型: {config.auxiliary_model}")
+            if config.auxiliary_base_url:
+                lines.append(f"辅助模型 URL: {config.auxiliary_base_url}")
+            lines.append("\n使用 `.ai key config` 修改配置")
+            lines.append("使用 `.ai key clear` 清除配置")
+            return "\n".join(lines)
+
+        # .ai key clear - 清除配置
+        if subcmd == "clear":
+            await self.data_store.clear_user_llm_config(user_id)
+            return "个人 LLM 配置已清除"
+
+        # .ai key config - 配置
+        if subcmd == "config":
+            if not config_content:
+                return (
+                    "请提供配置内容，格式示例:\n"
+                    ".ai key config\n"
+                    "primary_key: sk-xxx\n"
+                    "primary_model: gpt-4o\n"
+                    "primary_base_url: https://api.openai.com/v1\n"
+                    "\n可选字段:\n"
+                    "- primary_key: 主模型 API Key\n"
+                    "- primary_model: 主模型名称 (默认: gpt-4o)\n"
+                    "- primary_base_url: 主模型 Base URL\n"
+                    "- auxiliary_key: 辅助模型 API Key\n"
+                    "- auxiliary_model: 辅助模型名称\n"
+                    "- auxiliary_base_url: 辅助模型 Base URL"
+                )
+
+            # 解析配置内容（表单格式）
+            parsed = self._parse_key_config(config_content)
+            if not parsed:
+                return "配置格式错误，请使用 key: value 格式"
+
+            # 构建 UserLLMConfig
+            existing = await self.data_store.get_user_llm_config(user_id)
+            config = UserLLMConfig(
+                user_id=user_id,
+                primary_api_key=parsed.get("primary_key", existing.primary_api_key if existing else ""),
+                primary_base_url=parsed.get("primary_base_url", existing.primary_base_url if existing else ""),
+                primary_model=parsed.get("primary_model", existing.primary_model if existing else ""),
+                auxiliary_api_key=parsed.get("auxiliary_key", existing.auxiliary_api_key if existing else ""),
+                auxiliary_base_url=parsed.get("auxiliary_base_url", existing.auxiliary_base_url if existing else ""),
+                auxiliary_model=parsed.get("auxiliary_model", existing.auxiliary_model if existing else ""),
+            )
+
+            success = await self.data_store.save_user_llm_config(config)
+            if success:
+                return "配置已保存，你的个人 API Key 将用于后续对话"
+            else:
+                return "配置保存失败，请联系管理员"
+
+        return f"未知命令: {subcmd}\n可用命令: .ai key, .ai key config, .ai key clear"
+
+    # R11: 有效的配置 key 名白名单
+    _VALID_KEY_CONFIG_KEYS = {
+        "primary_key", "primary_model", "primary_base_url",
+        "auxiliary_key", "auxiliary_model", "auxiliary_base_url",
+    }
+
+    @classmethod
+    def _parse_key_config(cls, content: str) -> Dict[str, str]:
+        """解析 key config 内容（R11: 添加 key 名白名单和 URL 验证）
+
+        格式: key: value（每行一个）
+        """
+        result = {}
+        for line in content.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if ":" not in line:
+                continue  # 跳过无效行，而不是全部失败
+            key, value = line.split(":", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key or not value:
+                continue
+            # R11: 检查 key 名是否在白名单中
+            if key not in cls._VALID_KEY_CONFIG_KEYS:
+                continue
+            # R11: 对 URL 字段进行基础格式验证
+            if "base_url" in key and value:
+                if not value.startswith(("http://", "https://")):
+                    continue
+            result[key] = value
+        return result

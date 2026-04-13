@@ -160,6 +160,20 @@ CREATE TABLE IF NOT EXISTS persona_user_mute (
 );
 """
 
+# 用户 LLM 配置表 (Phase 4)
+CREATE_USER_LLM_CONFIG_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_user_llm_config (
+    user_id TEXT PRIMARY KEY,
+    primary_api_key_encrypted TEXT DEFAULT '',
+    primary_base_url TEXT DEFAULT '',
+    primary_model TEXT DEFAULT '',
+    auxiliary_api_key_encrypted TEXT DEFAULT '',
+    auxiliary_base_url TEXT DEFAULT '',
+    auxiliary_model TEXT DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 ALL_MIGRATIONS = [
     CREATE_MESSAGES_TABLE,
     CREATE_MESSAGES_INDEX,
@@ -175,4 +189,5 @@ ALL_MIGRATIONS = [
     CREATE_USER_RELATIONSHIPS_TABLE,
     CREATE_GROUP_ACTIVITY_TABLE,
     CREATE_USER_MUTE_TABLE,
+    CREATE_USER_LLM_CONFIG_TABLE,
 ]

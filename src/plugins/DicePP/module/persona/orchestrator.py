@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from core.bot import Bot
 from .character.loader import CharacterLoader
 from .character.models import Character, ScheduledEventConfig
-from .llm.router import LLMRouter
+from .llm.router import LLMRouter, QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent
 from .agents.scoring_agent import ScoringAgent
@@ -23,6 +23,9 @@ from .wall_clock import persona_wall_now
 from .proactive.character_life import CharacterLife, CharacterLifeConfig
 from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
 from .agents.event_agent import EventGenerationAgent
+
+# Phase 4: 掷骰工具
+from module.roll import exec_roll_exp, RollDiceError
 
 logger = logging.getLogger("persona.orchestrator")
 
@@ -105,6 +108,13 @@ class PersonaOrchestrator:
             )
             await self.data_store.ensure_tables()
             logger.info("数据存储已初始化")
+
+            # Phase 4: 设置 LLMRouter 的配额检查依赖
+            if self.llm_router:
+                self.llm_router.data_store = self.data_store
+                self.llm_router.config = self.config
+                self.llm_router.daily_limit = self.config.daily_limit
+                self.llm_router.quota_check_enabled = self.config.quota_check_enabled
 
             self.scoring_agent = ScoringAgent(self.llm_router)
             self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars, self.config.timezone)
@@ -251,6 +261,8 @@ class PersonaOrchestrator:
                 response = await self.llm_router.generate(
                     messages=messages,
                     model_tier=ModelTier.PRIMARY,
+                    user_id=user_id,
+                    group_id=group_id,
                 )
 
             await self.data_store.add_message(user_id, group_id, "user", message)
@@ -260,6 +272,14 @@ class PersonaOrchestrator:
             await self._update_interaction(user_id, group_id, message, response)
 
             return response
+
+        except QuotaExceeded as e:
+            # Phase 4: 配额超限，返回友好提示
+            logger.info(f"配额超限: user={user_id}, group={group_id}")
+            return (
+                f"{e}\n\n"
+                "使用 `.ai key config` 配置自己的 API Key 可解除限制"
+            )
 
         except Exception as e:
             logger.exception("对话处理失败")
@@ -305,6 +325,8 @@ class PersonaOrchestrator:
             tool_executor=tool_executor,
             model_tier=ModelTier.PRIMARY,
             max_tool_rounds=self.config.tools_max_rounds,
+            user_id=user_id,
+            group_id=group_id,
         )
 
         # 记录工具调用元数据便于调试
@@ -355,6 +377,24 @@ class PersonaOrchestrator:
                         "required": ["query"]
                     }
                 }
+            },
+            # Phase 4: 掷骰工具
+            {
+                "type": "function",
+                "function": {
+                    "name": "roll_dice",
+                    "description": "执行 TRPG 骰子表达式（如 1d20, 2d6+3, 1d20adv 等），返回掷骰结果",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "expression": {
+                                "type": "string",
+                                "description": "骰子表达式，如 '1d20'（掷一个d20）、'2d6+3'（掷两个d6加3）、'1d20adv'（优势掷骰）"
+                            }
+                        },
+                        "required": ["expression"]
+                    }
+                }
             }
         ]
 
@@ -389,7 +429,44 @@ class PersonaOrchestrator:
             )
             return result
 
+        # Phase 4: 掷骰工具
+        if tool_name == "roll_dice":
+            expression = args.get("expression", "")
+            return await self._handle_roll_dice(expression)
+
         return f"未知工具: {tool_name}"
+
+    async def _handle_roll_dice(self, expression: str) -> str:
+        """处理掷骰工具调用
+
+        Args:
+            expression: 骰子表达式，如 "1d20", "2d6+3"
+
+        Returns:
+            掷骰结果文本
+        """
+        if not expression or len(expression) > 100:
+            return "表达式无效或过长（最大100字符）"
+
+        try:
+            result = exec_roll_exp(expression)
+            # 构建结果文本
+            val = result.get_val()
+            info = result.get_info()
+            exp = result.get_exp()
+
+            if info and exp:
+                return f"掷骰: {exp} = {info} = {val}"
+            elif info:
+                return f"掷骰: {expression} = {info} = {val}"
+            else:
+                return f"掷骰: {expression} = {val}"
+        except RollDiceError as e:
+            return f"掷骰失败: {e}\n请使用有效格式，如 1d20, 2d6+3, 1d20adv"
+        except Exception as e:
+            # R9: 使用 logger.exception 记录完整堆栈，帮助排查未预期错误
+            logger.exception(f"掷骰工具执行失败: {expression}")
+            return "掷骰服务暂时不可用，请稍后再试"
 
     async def _update_interaction(self, user_id: str, group_id: str, user_msg: str, assistant_msg: str) -> None:
         if not self.data_store:

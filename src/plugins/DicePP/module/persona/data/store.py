@@ -6,13 +6,19 @@ Persona 数据存储层
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import json
+import os
+import base64
 import aiosqlite
+
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ..wall_clock import persona_wall_now
 
 from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
-    RelationshipState, Observation, DailyEvent, GroupActivity,
+    RelationshipState, Observation, DailyEvent, GroupActivity, UserLLMConfig,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -1284,3 +1290,153 @@ class PersonaDataStore:
                     content += "..."
                 results.append(f"[{date}] {content}")
             return results
+
+    # ========== Phase 4: 用户 LLM 配置 ==========
+
+    @staticmethod
+    def _get_encryption_key() -> Optional[bytes]:
+        """从环境变量获取加密密钥，返回 32 字节密钥或 None"""
+        secret = os.environ.get("DICE_PERSONA_SECRET")
+        if not secret:
+            return None
+        # 使用 PBKDF2 从密码派生密钥
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b"dicepp_persona_static_salt_v1",  # 固定 salt，保证可逆
+            iterations=100000,
+        )
+        key = kdf.derive(secret.encode("utf-8"))
+        return base64.urlsafe_b64encode(key)
+
+    @classmethod
+    def encrypt_api_key(cls, api_key: str) -> Optional[str]:
+        """加密 API Key，返回 base64 编码的密文或 None（密钥未设置时）"""
+        if not api_key:
+            return ""
+        key = cls._get_encryption_key()
+        if not key:
+            return None
+        f = Fernet(key)
+        encrypted = f.encrypt(api_key.encode("utf-8"))
+        return base64.urlsafe_b64encode(encrypted).decode("ascii")
+
+    @classmethod
+    def decrypt_api_key(cls, encrypted_key: str) -> Optional[str]:
+        """解密 API Key，返回明文或 None（解密失败时）"""
+        if not encrypted_key:
+            return ""
+        key = cls._get_encryption_key()
+        if not key:
+            return None
+        try:
+            f = Fernet(key)
+            encrypted_bytes = base64.urlsafe_b64decode(encrypted_key.encode("ascii"))
+            decrypted = f.decrypt(encrypted_bytes)
+            return decrypted.decode("utf-8")
+        except Exception:
+            return None
+
+    async def get_user_llm_config(self, user_id: str) -> Optional[UserLLMConfig]:
+        """获取用户 LLM 配置（自动解密 API Key）"""
+        async with self.db.execute(
+            """
+            SELECT user_id, primary_api_key_encrypted, primary_base_url, primary_model,
+                   auxiliary_api_key_encrypted, auxiliary_base_url, auxiliary_model, updated_at  -- 数据库字段保持加密存储
+            FROM persona_user_llm_config
+            WHERE user_id = ?
+            """,
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return None
+
+            # 解密 API Keys
+            primary_key = self.decrypt_api_key(row[1]) if row[1] else ""
+            auxiliary_key = self.decrypt_api_key(row[4]) if row[4] else ""
+
+            return UserLLMConfig(
+                user_id=row[0],
+                primary_api_key=primary_key or "",  # 已从数据库解密
+                primary_base_url=row[2] or "",
+                primary_model=row[3] or "",
+                auxiliary_api_key=auxiliary_key or "",  # 已从数据库解密
+                auxiliary_base_url=row[5] or "",
+                auxiliary_model=row[6] or "",
+                updated_at=datetime.fromisoformat(row[7]) if row[7] else None,
+            )
+
+    async def save_user_llm_config(self, config: UserLLMConfig) -> bool:
+        """保存用户 LLM 配置（自动加密 API Key）
+
+        Returns:
+            是否成功（加密密钥未设置时返回 False）
+        """
+        # 加密 API Keys（内存中为明文，存储前加密）
+        primary_encrypted = self.encrypt_api_key(config.primary_api_key)
+        if primary_encrypted is None and config.primary_api_key:
+            return False
+
+        auxiliary_encrypted = self.encrypt_api_key(config.auxiliary_api_key)
+        if auxiliary_encrypted is None and config.auxiliary_api_key:
+            return False
+
+        await self.db.execute(
+            """
+            INSERT INTO persona_user_llm_config
+            (user_id, primary_api_key_encrypted, primary_base_url, primary_model,
+             auxiliary_api_key_encrypted, auxiliary_base_url, auxiliary_model, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                primary_api_key_encrypted = excluded.primary_api_key_encrypted,
+                primary_base_url = excluded.primary_base_url,
+                primary_model = excluded.primary_model,
+                auxiliary_api_key_encrypted = excluded.auxiliary_api_key_encrypted,
+                auxiliary_base_url = excluded.auxiliary_base_url,
+                auxiliary_model = excluded.auxiliary_model,
+                updated_at = excluded.updated_at
+            """,
+            (
+                config.user_id,
+                primary_encrypted or "",
+                config.primary_base_url,
+                config.primary_model,
+                auxiliary_encrypted or "",
+                config.auxiliary_base_url,
+                config.auxiliary_model,
+                self._wall_now().isoformat(),
+            )
+        )
+        await self.db.commit()
+        return True
+
+    async def clear_user_llm_config(self, user_id: str) -> bool:
+        """清除用户 LLM 配置
+
+        Returns:
+            是否成功清除（配置不存在也返回 True）
+        """
+        await self.db.execute(
+            "DELETE FROM persona_user_llm_config WHERE user_id = ?",
+            (user_id,)
+        )
+        await self.db.commit()
+        return True
+
+    @staticmethod
+    def mask_sensitive_string(value: str, prefix_len: int = 3, suffix_len: int = 3) -> str:
+        """脱敏显示敏感字符串（R10: 可复用的脱敏工具函数）
+
+        Args:
+            value: 原始字符串
+            prefix_len: 前缀保留字符数
+            suffix_len: 后缀保留字符数
+
+        Returns:
+            脱敏后的字符串，如 "sk-***456"
+        """
+        if not value or len(value) < prefix_len + suffix_len + 1:
+            return "未设置"
+        masked_len = len(value) - prefix_len - suffix_len
+        return f"{value[:prefix_len]}{'*' * masked_len}{value[-suffix_len:]}"

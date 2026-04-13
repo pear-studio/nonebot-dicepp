@@ -9,9 +9,14 @@ import time
 import logging
 
 from .client import LLMClient
-from ..data.models import ModelTier
+from ..data.models import ModelTier, UserLLMConfig
 
 logger = logging.getLogger("persona.llm")
+
+
+class QuotaExceeded(Exception):
+    """配额超限异常"""
+    pass
 
 
 class LLMRouter:
@@ -27,10 +32,14 @@ class LLMRouter:
         auxiliary_model: str = "",
         max_concurrent: int = 2,
         timeout: int = 30,
+        daily_limit: int = 20,
+        quota_check_enabled: bool = True,
+        data_store: Any = None,
+        config: Any = None,
     ):
         """
         初始化 LLM 路由器
-        
+
         Args:
             primary_api_key: 主模型 API Key
             primary_base_url: 主模型 Base URL
@@ -40,6 +49,10 @@ class LLMRouter:
             auxiliary_model: 辅助模型名称
             max_concurrent: 最大并发数
             timeout: 默认超时时间
+            daily_limit: 每日配额限制
+            quota_check_enabled: 是否启用配额检查
+            data_store: 数据存储层（用于配额检查）
+            config: 配置对象（用于白名单检查）
         """
         # 主模型客户端
         self.primary_client = LLMClient(
@@ -47,27 +60,144 @@ class LLMRouter:
             base_url=primary_base_url,
             model=primary_model,
         )
-        
+
         # 辅助模型客户端（未配置则复用主模型）
         aux_key = auxiliary_api_key or primary_api_key
         aux_url = auxiliary_base_url or primary_base_url
         aux_model = auxiliary_model or primary_model
-        
+
         self.auxiliary_client = LLMClient(
             api_key=aux_key,
             base_url=aux_url,
             model=aux_model,
         )
-        
+
         # 并发控制
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.timeout = timeout
-        
+
+        # 配额控制（可在初始化后设置）
+        self.daily_limit = daily_limit
+        self.quota_check_enabled = quota_check_enabled
+        self.data_store: Optional[Any] = data_store
+        self.config: Optional[Any] = config
+
         # 统计
         self.stats = {
             "primary": {"requests": 0, "errors": 0},
             "auxiliary": {"requests": 0, "errors": 0},
         }
+
+    async def _check_quota(self, user_id: str, group_id: str) -> bool:
+        """检查配额是否超限
+
+        Returns:
+            True 表示通过检查（可以继续），False 表示超限或检查失败
+        """
+        try:
+            if not self.quota_check_enabled:
+                return True
+            if not self.data_store:
+                return True
+
+            # R7: 使用独立的豁免检查方法
+            if await self._is_exempt_from_quota(user_id, group_id):
+                return True
+
+            # 检查配额
+            from ..wall_clock import persona_wall_now
+            today = persona_wall_now(self.config.timezone if self.config else "Asia/Shanghai").strftime("%Y-%m-%d")
+            usage = await self.data_store.get_daily_usage(user_id, today)
+
+            if usage >= self.daily_limit:
+                logger.info(f"配额超限: user={user_id}, usage={usage}/{self.daily_limit}")
+                return False
+
+            return True
+        except Exception as e:
+            # R4: 配额检查异常时记录错误并拒绝请求（避免配额失控）
+            logger.error(f"配额检查失败: user={user_id}, error={e}")
+            return False
+
+    async def _is_exempt_from_quota(self, user_id: str, group_id: str) -> bool:
+        """检查用户/群是否豁免配额限制（R7: 解耦豁免逻辑）
+
+        Returns:
+            True 表示豁免（跳过配额检查），False 表示需要检查配额
+        """
+        if not self.data_store:
+            return False
+
+        try:
+            # 1. 检查用户是否有自定义 Key（豁免）
+            user_config = await self.data_store.get_user_llm_config(user_id)
+            if user_config and user_config.primary_api_key:
+                return True
+
+            # 2. 检查用户是否在白名单（豁免）
+            if self.config and self.config.whitelist_enabled:
+                if await self.data_store.is_user_whitelisted(user_id):
+                    return True
+
+            # 3. 检查群是否在白名单（豁免）
+            if group_id and self.config and self.config.whitelist_enabled:
+                if await self.data_store.is_group_whitelisted(group_id):
+                    return True
+
+            return False
+        except Exception as e:
+            logger.error(f"豁免检查失败: user={user_id}, error={e}")
+            return False  # 检查失败时保守处理（不豁免）
+
+    async def _increment_usage(self, user_id: str) -> None:
+        """增加用量计数"""
+        if not self.data_store:
+            return
+        from ..wall_clock import persona_wall_now
+        today = persona_wall_now(self.config.timezone if self.config else "Asia/Shanghai").strftime("%Y-%m-%d")
+        await self.data_store.increment_daily_usage(user_id, today)
+
+    def _get_client_for_tier(
+        self,
+        model_tier: ModelTier,
+        user_config: Optional[UserLLMConfig],
+    ) -> LLMClient:
+        """根据模型层级和用户配置获取对应的 LLMClient
+
+        Args:
+            model_tier: 模型层级
+            user_config: 用户自定义配置（可能为 None）
+
+        Returns:
+            对应的 LLMClient 实例
+        """
+        if model_tier == ModelTier.PRIMARY:
+            # 主模型：优先使用用户配置
+            if user_config and user_config.primary_api_key:
+                return LLMClient(
+                    api_key=user_config.primary_api_key,
+                    base_url=user_config.primary_base_url or self.primary_client.base_url,
+                    model=user_config.primary_model or self.primary_client.model,
+                )
+            return self.primary_client
+        else:
+            # 辅助模型：优先使用用户配置
+            if user_config:
+                # 如果用户配置了辅助模型 Key，使用它
+                if user_config.auxiliary_api_key:
+                    return LLMClient(
+                        api_key=user_config.auxiliary_api_key,
+                        base_url=user_config.auxiliary_base_url or user_config.primary_base_url or self.auxiliary_client.base_url,
+                        model=user_config.auxiliary_model or self.auxiliary_client.model,
+                    )
+                # 如果用户只配置了主模型 Key，使用主模型配置作为辅助模型
+                elif user_config.primary_api_key:
+                    return LLMClient(
+                        api_key=user_config.primary_api_key,
+                        base_url=user_config.primary_base_url or self.primary_client.base_url,
+                        model=user_config.primary_model or self.primary_client.model,
+                    )
+            return self.auxiliary_client
 
     async def generate(
         self,
@@ -75,54 +205,81 @@ class LLMRouter:
         model_tier: ModelTier = ModelTier.PRIMARY,
         timeout: Optional[int] = None,
         temperature: Optional[float] = None,
+        user_id: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> str:
         """
         生成回复
-        
+
         Args:
             messages: 消息列表
             model_tier: 模型层级（primary/auxiliary）
             timeout: 超时时间（覆盖默认）
             temperature: 采样温度；None 时使用服务端默认
-            
+            user_id: 用户ID（用于配额检查）
+            group_id: 群ID（用于配额检查）
+
         Returns:
             回复文本
+
+        Raises:
+            QuotaExceeded: 当配额超限时
         """
         timeout = timeout if timeout is not None else self.timeout
-        client = self.primary_client if model_tier == ModelTier.PRIMARY else self.auxiliary_client
         tier_name = "primary" if model_tier == ModelTier.PRIMARY else "auxiliary"
-        
+
+        # Phase 4: 检查用户自定义配置
+        user_config = None
+        if user_id and self.data_store:
+            user_config = await self.data_store.get_user_llm_config(user_id)
+
+        # 根据用户配置和模型层级选择客户端
+        client = self._get_client_for_tier(model_tier, user_config)
+
+        # Phase 4: 配额检查（仅主模型且用户没有自定义 Key）
+        if model_tier == ModelTier.PRIMARY and user_id:
+            # 如果用户有自定义 Key，跳过配额检查
+            if not (user_config and user_config.primary_api_key):
+                if not await self._check_quota(user_id, group_id or ""):
+                    # R8: 使用配置中的配额超限提示信息
+                    message = self.config.quota_exceeded_message.format(limit=self.daily_limit) if self.config else f"今日配额已用完（{self.daily_limit}次）"
+                    raise QuotaExceeded(message)
+
         async with self.semaphore:
             start_time = time.monotonic()
             self.stats[tier_name]["requests"] += 1
-            
+
             try:
                 content, metadata = await client.chat(
                     messages=messages,
                     timeout=timeout,
                     temperature=temperature,
                 )
-                
+
                 latency = time.monotonic() - start_time
-                
+
+                # Phase 4: 增加用量计数（仅主模型）
+                if model_tier == ModelTier.PRIMARY and user_id:
+                    await self._increment_usage(user_id)
+
                 # 记录日志
                 logger.info(
                     f"model={metadata['model']} tier={tier_name} "
                     f"latency={latency:.1f}s tokens_in={metadata['tokens_input']} "
                     f"tokens_out={metadata['tokens_output']} status=ok"
                 )
-                
+
                 return content
-                
+
             except Exception as e:
                 self.stats[tier_name]["errors"] += 1
                 latency = time.monotonic() - start_time
-                
+
                 logger.warning(
                     f"model={client.model} tier={tier_name} "
                     f"latency={latency:.1f}s status=error error={e}"
                 )
-                
+
                 raise
 
     # ── Phase 3: 工具调用
@@ -137,6 +294,8 @@ class LLMRouter:
         timeout: Optional[int] = None,
         temperature: Optional[float] = None,
         max_tool_rounds: int = 5,
+        user_id: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> tuple[str, dict]:
         """
         生成回复，支持工具调用（完整循环）
@@ -149,13 +308,33 @@ class LLMRouter:
             timeout: 超时时间
             temperature: 采样温度
             max_tool_rounds: 最多多少轮工具调用
+            user_id: 用户ID（用于配额检查）
+            group_id: 群ID（用于配额检查）
 
         Returns:
             (回复文本, 元数据字典)
+
+        Raises:
+            QuotaExceeded: 当配额超限时
         """
         timeout = timeout if timeout is not None else self.timeout
-        client = self.primary_client if model_tier == ModelTier.PRIMARY else self.auxiliary_client
         tier_name = "primary" if model_tier == ModelTier.PRIMARY else "auxiliary"
+
+        # Phase 4: 检查用户自定义配置
+        user_config = None
+        if user_id and self.data_store:
+            user_config = await self.data_store.get_user_llm_config(user_id)
+
+        # 根据用户配置和模型层级选择客户端
+        client = self._get_client_for_tier(model_tier, user_config)
+
+        # Phase 4: 配额检查（仅主模型且用户没有自定义 Key）
+        if model_tier == ModelTier.PRIMARY and user_id:
+            if not (user_config and user_config.primary_api_key):
+                if not await self._check_quota(user_id, group_id or ""):
+                    # R8: 使用配置中的配额超限提示信息
+                    message = self.config.quota_exceeded_message.format(limit=self.daily_limit) if self.config else f"今日配额已用完（{self.daily_limit}次）"
+                    raise QuotaExceeded(message)
 
         async with self.semaphore:
             start_time = time.monotonic()
@@ -172,6 +351,10 @@ class LLMRouter:
                 )
 
                 latency = time.monotonic() - start_time
+
+                # Phase 4: 增加用量计数（仅主模型）
+                if model_tier == ModelTier.PRIMARY and user_id:
+                    await self._increment_usage(user_id)
 
                 # 记录日志
                 tool_info = ""

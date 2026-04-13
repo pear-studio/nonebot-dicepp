@@ -168,6 +168,8 @@ class PersonaConfig(BaseModel):
     observe_max_buffer_size: int = 60
 
     daily_limit: int = 20
+    quota_check_enabled: bool = True
+    quota_exceeded_message: str = "今日配额已用完（{limit}次），请使用 `.ai key config` 配置自己的 API Key"
     allow_user_key: bool = True
 
     # ── Phase 2: 厌倦拒绝机制配置
