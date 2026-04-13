@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 
 from ..character.models import Character
 from ..data.models import UserProfile
+from ..wall_clock import persona_wall_now
 
 
 class ContextBuilder:
@@ -16,9 +17,11 @@ class ContextBuilder:
         self,
         character: Character,
         max_short_term_chars: int = 1500,
+        timezone: str = "Asia/Shanghai",
     ):
         self.character = character
         self.max_short_term_chars = max_short_term_chars
+        self.timezone = timezone
 
     def build(
         self,
@@ -65,6 +68,13 @@ class ContextBuilder:
         warmth_label: str = "友好",
     ) -> str:
         parts = []
+
+        # 添加当前时间（使用中文星期）
+        now = persona_wall_now(self.timezone)
+        weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        weekday = weekdays[now.weekday()]
+        time_str = now.strftime(f"%Y年%m月%d日 %H:%M {weekday}")
+        parts.append(f"当前时间: {time_str}")
 
         if self.character.system_prompt:
             parts.append(self.character.system_prompt)

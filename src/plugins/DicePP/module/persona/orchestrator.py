@@ -107,7 +107,7 @@ class PersonaOrchestrator:
             logger.info("数据存储已初始化")
 
             self.scoring_agent = ScoringAgent(self.llm_router)
-            self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars)
+            self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars, self.config.timezone)
 
             # 初始化衰减计算器
             self.decay_calculator = DecayCalculator(
@@ -636,7 +636,7 @@ class PersonaOrchestrator:
             self.character = new_character
 
             # 重新创建上下文构建器（因为角色变了）
-            self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars)
+            self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars, self.config.timezone)
 
             logger.info(f"角色卡已热重载: {self.character.name}")
             return True, f"角色卡已重载: {self.character.name}"
