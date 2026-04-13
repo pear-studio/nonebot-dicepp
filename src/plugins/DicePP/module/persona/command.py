@@ -17,9 +17,11 @@ from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FU
 from utils.logger import dice_log
 
 from .orchestrator import PersonaOrchestrator
+from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.persist_keys import PERSONA_SK_OBSERVATION_BUFFERS
 from .proactive.observation_buffer import ObservationBuffer
+from .utils.privacy import mask_sensitive_string
 
 
 @custom_user_command("PersonaAI", priority=DPP_COMMAND_PRIORITY_DEFAULT, flag=DPP_COMMAND_FLAG_FUN)
@@ -127,9 +129,11 @@ class PersonaCommand(UserCommandBase):
 
         # @bot 或 .ai 前缀触发
         if not meta.to_me and not msg.startswith(".ai") and not msg.startswith("。ai"):
-            # 群聊旁听模式（观察但不回复）
+            # 群聊旁听模式（观察但不回复）— 不应拦截其他命令
             if meta.group_id and self.config.observe_group_enabled:
-                return True, False, "observe"
+                await self._handle_group_observation(
+                    meta.group_id or "", meta.user_id, meta.nickname or "", msg_str
+                )
             return False, False, None
 
         # 提取命令内容
@@ -193,11 +197,6 @@ class PersonaCommand(UserCommandBase):
         group_id = meta.group_id or ""
         nickname = meta.nickname or ""
         is_private = not meta.group_id
-
-        # 处理群聊旁听（观察模式）
-        if hint == "observe" and group_id:
-            await self._handle_group_observation(group_id, user_id, nickname, msg_str)
-            return []
 
         # 提取命令内容
         msg = msg_str.strip()
@@ -278,12 +277,19 @@ class PersonaCommand(UserCommandBase):
                 response = self._get_introduction()
         elif is_at_trigger:
             if self.orchestrator and self.enabled:
-                response = await self.orchestrator.chat(
-                    user_id=user_id,
-                    group_id=group_id,
-                    message=content,
-                    nickname=nickname,
-                )
+                try:
+                    response = await self.orchestrator.chat(
+                        user_id=user_id,
+                        group_id=group_id,
+                        message=content,
+                        nickname=nickname,
+                    )
+                except QuotaExceeded as e:
+                    logger.info(f"配额超限: user={user_id}, group={group_id}")
+                    response = (
+                        f"{e}\n\n"
+                        "使用 `.ai key config` 配置自己的 API Key 可解除限制"
+                    )
             else:
                 response = "Persona AI 模块未启用或未初始化"
         else:
@@ -1198,13 +1204,15 @@ class PersonaCommand(UserCommandBase):
                 )
 
             lines = ["你的 LLM 配置:"]
-            lines.append(f"主模型 Key: {PersonaDataStore.mask_sensitive_string(config.primary_api_key)}")
+            if config.decrypt_failed:
+                lines.append("⚠️ 加密数据无法解密，请重新配置 API Key")
+            lines.append(f"主模型 Key: {mask_sensitive_string(config.primary_api_key)}")
             if config.primary_model:
                 lines.append(f"主模型: {config.primary_model}")
             if config.primary_base_url:
                 lines.append(f"主模型 URL: {config.primary_base_url}")
             if config.auxiliary_api_key:
-                lines.append(f"辅助模型 Key: {PersonaDataStore.mask_sensitive_string(config.auxiliary_api_key)}")
+                lines.append(f"辅助模型 Key: {mask_sensitive_string(config.auxiliary_api_key)}")
             if config.auxiliary_model:
                 lines.append(f"辅助模型: {config.auxiliary_model}")
             if config.auxiliary_base_url:
@@ -1237,9 +1245,12 @@ class PersonaCommand(UserCommandBase):
                 )
 
             # 解析配置内容（表单格式）
-            parsed = self._parse_key_config(config_content)
+            parsed, errors = self._parse_key_config(config_content)
             if not parsed:
-                return "配置格式错误，请使用 key: value 格式"
+                msg = "配置格式错误，请使用 key: value 格式"
+                if errors:
+                    msg += "\n\n注意:\n" + "\n".join(f"- {e}" for e in errors)
+                return msg
 
             # 构建 UserLLMConfig
             existing = await self.data_store.get_user_llm_config(user_id)
@@ -1255,7 +1266,10 @@ class PersonaCommand(UserCommandBase):
 
             success = await self.data_store.save_user_llm_config(config)
             if success:
-                return "配置已保存，你的个人 API Key 将用于后续对话"
+                reply = "配置已保存，你的个人 API Key 将用于后续对话"
+                if errors:
+                    reply += "\n\n以下行未保存:\n" + "\n".join(f"- {e}" for e in errors)
+                return reply
             else:
                 return "配置保存失败，请联系管理员"
 
@@ -1268,29 +1282,37 @@ class PersonaCommand(UserCommandBase):
     }
 
     @classmethod
-    def _parse_key_config(cls, content: str) -> Dict[str, str]:
+    def _parse_key_config(cls, content: str) -> tuple[Dict[str, str], List[str]]:
         """解析 key config 内容（R11: 添加 key 名白名单和 URL 验证）
 
         格式: key: value（每行一个）
+
+        Returns:
+            (解析结果字典, 错误/警告列表)
         """
-        result = {}
+        result: Dict[str, str] = {}
+        errors: List[str] = []
         for line in content.strip().split("\n"):
             line = line.strip()
             if not line:
                 continue
             if ":" not in line:
-                continue  # 跳过无效行，而不是全部失败
+                errors.append(f"无法识别的行: {line}")
+                continue
             key, value = line.split(":", 1)
             key = key.strip()
             value = value.strip()
             if not key or not value:
+                errors.append(f"key 或 value 为空: {line}")
                 continue
             # R11: 检查 key 名是否在白名单中
             if key not in cls._VALID_KEY_CONFIG_KEYS:
+                errors.append(f"未知的配置项: {key}")
                 continue
             # R11: 对 URL 字段进行基础格式验证
             if "base_url" in key and value:
                 if not value.startswith(("http://", "https://")):
+                    errors.append(f"{key} 须以 http:// 或 https:// 开头")
                     continue
             result[key] = value
-        return result
+        return result, errors

@@ -88,7 +88,12 @@ class LLMRouter:
             "auxiliary": {"requests": 0, "errors": 0},
         }
 
-    async def _check_quota(self, user_id: str, group_id: str) -> bool:
+    async def _check_quota(
+        self,
+        user_id: str,
+        group_id: str,
+        user_config: Optional[UserLLMConfig] = None,
+    ) -> bool:
         """检查配额是否超限
 
         Returns:
@@ -101,7 +106,7 @@ class LLMRouter:
                 return True
 
             # R7: 使用独立的豁免检查方法
-            if await self._is_exempt_from_quota(user_id, group_id):
+            if await self._is_exempt_from_quota(user_id, group_id, user_config=user_config):
                 return True
 
             # 检查配额
@@ -119,7 +124,12 @@ class LLMRouter:
             logger.error(f"配额检查失败: user={user_id}, error={e}")
             return False
 
-    async def _is_exempt_from_quota(self, user_id: str, group_id: str) -> bool:
+    async def _is_exempt_from_quota(
+        self,
+        user_id: str,
+        group_id: str,
+        user_config: Optional[UserLLMConfig] = None,
+    ) -> bool:
         """检查用户/群是否豁免配额限制（R7: 解耦豁免逻辑）
 
         Returns:
@@ -130,7 +140,8 @@ class LLMRouter:
 
         try:
             # 1. 检查用户是否有自定义 Key（豁免）
-            user_config = await self.data_store.get_user_llm_config(user_id)
+            if user_config is None:
+                user_config = await self.data_store.get_user_llm_config(user_id)
             if user_config and user_config.primary_api_key:
                 return True
 
@@ -199,6 +210,37 @@ class LLMRouter:
                     )
             return self.auxiliary_client
 
+    async def _prepare_request(
+        self,
+        model_tier: ModelTier,
+        user_id: Optional[str],
+        group_id: Optional[str],
+        timeout: Optional[int],
+    ) -> tuple[str, LLMClient, Optional[UserLLMConfig], int]:
+        """统一处理 Phase 4 前置逻辑：读取用户配置、选择客户端、配额检查
+
+        Returns:
+            (tier_name, client, user_config, actual_timeout)
+        """
+        actual_timeout = timeout if timeout is not None else self.timeout
+        tier_name = "primary" if model_tier == ModelTier.PRIMARY else "auxiliary"
+
+        user_config = None
+        if user_id and self.data_store:
+            user_config = await self.data_store.get_user_llm_config(user_id)
+
+        client = self._get_client_for_tier(model_tier, user_config)
+
+        # Phase 4: 配额检查（仅主模型且用户没有自定义 Key）
+        if model_tier == ModelTier.PRIMARY and user_id:
+            if not (user_config and user_config.primary_api_key):
+                if not await self._check_quota(user_id, group_id or "", user_config=user_config):
+                    msg_template = self.config.quota_exceeded_message if self.config else "今日配额已用完（{limit}次）"
+                    message = msg_template.replace("{limit}", str(self.daily_limit))
+                    raise QuotaExceeded(message)
+
+        return tier_name, client, user_config, actual_timeout
+
     async def generate(
         self,
         messages: List[Dict[str, str]],
@@ -225,25 +267,9 @@ class LLMRouter:
         Raises:
             QuotaExceeded: 当配额超限时
         """
-        timeout = timeout if timeout is not None else self.timeout
-        tier_name = "primary" if model_tier == ModelTier.PRIMARY else "auxiliary"
-
-        # Phase 4: 检查用户自定义配置
-        user_config = None
-        if user_id and self.data_store:
-            user_config = await self.data_store.get_user_llm_config(user_id)
-
-        # 根据用户配置和模型层级选择客户端
-        client = self._get_client_for_tier(model_tier, user_config)
-
-        # Phase 4: 配额检查（仅主模型且用户没有自定义 Key）
-        if model_tier == ModelTier.PRIMARY and user_id:
-            # 如果用户有自定义 Key，跳过配额检查
-            if not (user_config and user_config.primary_api_key):
-                if not await self._check_quota(user_id, group_id or ""):
-                    # R8: 使用配置中的配额超限提示信息
-                    message = self.config.quota_exceeded_message.format(limit=self.daily_limit) if self.config else f"今日配额已用完（{self.daily_limit}次）"
-                    raise QuotaExceeded(message)
+        tier_name, client, user_config, actual_timeout = await self._prepare_request(
+            model_tier, user_id, group_id, timeout
+        )
 
         async with self.semaphore:
             start_time = time.monotonic()
@@ -252,7 +278,7 @@ class LLMRouter:
             try:
                 content, metadata = await client.chat(
                     messages=messages,
-                    timeout=timeout,
+                    timeout=actual_timeout,
                     temperature=temperature,
                 )
 
@@ -317,24 +343,9 @@ class LLMRouter:
         Raises:
             QuotaExceeded: 当配额超限时
         """
-        timeout = timeout if timeout is not None else self.timeout
-        tier_name = "primary" if model_tier == ModelTier.PRIMARY else "auxiliary"
-
-        # Phase 4: 检查用户自定义配置
-        user_config = None
-        if user_id and self.data_store:
-            user_config = await self.data_store.get_user_llm_config(user_id)
-
-        # 根据用户配置和模型层级选择客户端
-        client = self._get_client_for_tier(model_tier, user_config)
-
-        # Phase 4: 配额检查（仅主模型且用户没有自定义 Key）
-        if model_tier == ModelTier.PRIMARY and user_id:
-            if not (user_config and user_config.primary_api_key):
-                if not await self._check_quota(user_id, group_id or ""):
-                    # R8: 使用配置中的配额超限提示信息
-                    message = self.config.quota_exceeded_message.format(limit=self.daily_limit) if self.config else f"今日配额已用完（{self.daily_limit}次）"
-                    raise QuotaExceeded(message)
+        tier_name, client, user_config, actual_timeout = await self._prepare_request(
+            model_tier, user_id, group_id, timeout
+        )
 
         async with self.semaphore:
             start_time = time.monotonic()
@@ -346,7 +357,7 @@ class LLMRouter:
                     tools=tools,
                     tool_executor=tool_executor,
                     max_tool_rounds=max_tool_rounds,
-                    timeout=timeout,
+                    timeout=actual_timeout,
                     temperature=temperature,
                 )
 

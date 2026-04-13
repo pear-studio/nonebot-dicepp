@@ -109,6 +109,7 @@ class UserLLMConfig(BaseModel):
     auxiliary_base_url: str = ""
     auxiliary_model: str = ""
     updated_at: Optional[datetime] = None
+    decrypt_failed: bool = False  # 数据库有加密数据但解密失败
 
 
 class Message(BaseModel):

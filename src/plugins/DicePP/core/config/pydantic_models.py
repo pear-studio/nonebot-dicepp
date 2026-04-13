@@ -105,6 +105,9 @@ class PersonaConfig(BaseModel):
     # ── Phase 3: 日记上下文长度限制
     max_diary_context_chars: int = 500  # 日记注入上下文的最大字符数
 
+    # ── Phase 5a: 世界书 Token 预算（当前为字符估算值，非精确 token）
+    lore_token_budget: int = 300  # 每次对话注入世界书的最大估算 token 数
+
     # ── Phase 4+: 群活跃度（影响主动消息频率，暂未启用）
     # group_activity_decay_days: List[int] = [1, 3, 7]
     # group_activity_decay_values: List[int] = [10, 30, 50]

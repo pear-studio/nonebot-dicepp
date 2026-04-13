@@ -6,19 +6,11 @@ Covers:
 - User LLM config (AES encryption, CRUD)
 - Roll dice tool
 """
-import os
-import sys
-import json
 import pytest
 from datetime import datetime
-from pathlib import Path
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "src" / "plugins" / "DicePP"
-if str(PLUGIN_ROOT) not in sys.path:
-    sys.path.insert(0, str(PLUGIN_ROOT))
-
-from module.persona.data.models import UserLLMConfig, DailyUsage
-from module.persona.data.store import PersonaDataStore
+from plugins.DicePP.module.persona.data.models import UserLLMConfig, DailyUsage
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -61,14 +53,14 @@ class TestAESEncryption:
         assert decrypted == original
 
     def test_encrypt_empty_string(self, mock_encryption_key):
-        """测试空字符串加密"""
+        """测试空字符串加密返回 None"""
         result = PersonaDataStore.encrypt_api_key("")
-        assert result == ""
+        assert result is None
 
     def test_decrypt_empty_string(self, mock_encryption_key):
-        """测试空字符串解密"""
+        """测试空字符串解密返回 None"""
         result = PersonaDataStore.decrypt_api_key("")
-        assert result == ""
+        assert result is None
 
     def test_encrypt_without_key(self, monkeypatch):
         """测试没有密钥时加密返回 None"""
@@ -316,7 +308,7 @@ class TestRollDiceTool:
     @pytest.mark.asyncio
     async def test_roll_dice_simple(self):
         """测试简单掷骰"""
-        from module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
 
         # 使用模拟的 orchestrator 来测试掷骰方法
         class MockOrchestrator:
@@ -325,14 +317,18 @@ class TestRollDiceTool:
         mock = MockOrchestrator()
         result = await mock._handle_roll_dice("1d20")
 
+        import re
         assert "掷骰" in result
-        # 结果应该包含一个 1-20 的数字
-        assert any(str(i) in result for i in range(1, 21))
+        # 用正则提取最终数值并做范围断言
+        match = re.search(r"=\s*(\d+)$", result)
+        assert match is not None, f"无法从结果中解析数值: {result}"
+        val = int(match.group(1))
+        assert 1 <= val <= 20, f"数值 {val} 不在 1-20 范围内: {result}"
 
     @pytest.mark.asyncio
     async def test_roll_dice_with_modifier(self):
         """测试带修饰符的掷骰"""
-        from module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
 
         class MockOrchestrator:
             _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
@@ -347,7 +343,7 @@ class TestRollDiceTool:
     @pytest.mark.asyncio
     async def test_roll_dice_invalid_expression(self):
         """测试无效表达式"""
-        from module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
 
         class MockOrchestrator:
             _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
@@ -360,7 +356,7 @@ class TestRollDiceTool:
     @pytest.mark.asyncio
     async def test_roll_dice_empty_expression(self):
         """测试空表达式"""
-        from module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
 
         class MockOrchestrator:
             _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
@@ -373,7 +369,7 @@ class TestRollDiceTool:
     @pytest.mark.asyncio
     async def test_roll_dice_too_long(self):
         """测试过长的表达式"""
-        from module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
 
         class MockOrchestrator:
             _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
@@ -393,7 +389,7 @@ class TestQuotaExemptions:
     async def test_whitelist_user_exempt_from_quota(self, tmp_path, monkeypatch):
         """测试白名单用户豁免配额"""
         import aiosqlite
-        from module.persona.llm.router import LLMRouter
+        from plugins.DicePP.module.persona.llm.router import LLMRouter
         from core.config.pydantic_models import PersonaConfig
 
         db_path = tmp_path / "test.db"
@@ -447,8 +443,8 @@ class TestUserKeyClientSelection:
 
     def test_primary_client_with_user_config(self):
         """测试主模型使用用户配置"""
-        from module.persona.llm.router import LLMRouter, ModelTier
-        from module.persona.data.models import UserLLMConfig
+        from plugins.DicePP.module.persona.llm.router import LLMRouter, ModelTier
+        from plugins.DicePP.module.persona.data.models import UserLLMConfig
 
         router = LLMRouter(
             primary_api_key="default-key",
@@ -474,7 +470,7 @@ class TestUserKeyClientSelection:
 
     def test_primary_client_without_user_config(self):
         """测试主模型没有用户配置时使用默认"""
-        from module.persona.llm.router import LLMRouter, ModelTier
+        from plugins.DicePP.module.persona.llm.router import LLMRouter, ModelTier
 
         router = LLMRouter(
             primary_api_key="default-key",
@@ -491,8 +487,8 @@ class TestUserKeyClientSelection:
 
     def test_auxiliary_client_fallback_to_primary(self):
         """测试辅助模型回退到主模型配置"""
-        from module.persona.llm.router import LLMRouter, ModelTier
-        from module.persona.data.models import UserLLMConfig
+        from plugins.DicePP.module.persona.llm.router import LLMRouter, ModelTier
+        from plugins.DicePP.module.persona.data.models import UserLLMConfig
 
         router = LLMRouter(
             primary_api_key="default-key",
@@ -522,7 +518,7 @@ class TestQuotaExceededException:
 
     def test_quota_exceeded_exception(self):
         """测试 QuotaExceeded 异常可被抛出和捕获"""
-        from module.persona.llm.router import QuotaExceeded
+        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
 
         with pytest.raises(QuotaExceeded) as exc_info:
             raise QuotaExceeded("今日配额已用完")
@@ -533,7 +529,7 @@ class TestQuotaExceededException:
     async def test_quota_exceeded_raised_when_limit_reached(self, tmp_path):
         """测试配额超限时抛出异常"""
         import aiosqlite
-        from module.persona.llm.router import LLMRouter, QuotaExceeded
+        from plugins.DicePP.module.persona.llm.router import LLMRouter, QuotaExceeded
 
         db_path = tmp_path / "test.db"
         async with aiosqlite.connect(str(db_path)) as db:

@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ..wall_clock import persona_wall_now
+from ..utils.privacy import mask_sensitive_string
 
 from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
@@ -1311,9 +1312,9 @@ class PersonaDataStore:
 
     @classmethod
     def encrypt_api_key(cls, api_key: str) -> Optional[str]:
-        """加密 API Key，返回 base64 编码的密文或 None（密钥未设置时）"""
+        """加密 API Key，返回 base64 编码的密文或 None（空输入/密钥未设置时）"""
         if not api_key:
-            return ""
+            return None
         key = cls._get_encryption_key()
         if not key:
             return None
@@ -1322,10 +1323,10 @@ class PersonaDataStore:
         return base64.urlsafe_b64encode(encrypted).decode("ascii")
 
     @classmethod
-    def decrypt_api_key(cls, encrypted_key: str) -> Optional[str]:
-        """解密 API Key，返回明文或 None（解密失败时）"""
+    def decrypt_api_key(cls, encrypted_key: Optional[str]) -> Optional[str]:
+        """解密 API Key，返回明文或 None（空输入/解密失败时）"""
         if not encrypted_key:
-            return ""
+            return None
         key = cls._get_encryption_key()
         if not key:
             return None
@@ -1335,6 +1336,7 @@ class PersonaDataStore:
             decrypted = f.decrypt(encrypted_bytes)
             return decrypted.decode("utf-8")
         except Exception:
+            logger.warning("API Key 解密失败", exc_info=True)
             return None
 
     async def get_user_llm_config(self, user_id: str) -> Optional[UserLLMConfig]:
@@ -1353,8 +1355,12 @@ class PersonaDataStore:
                 return None
 
             # 解密 API Keys
-            primary_key = self.decrypt_api_key(row[1]) if row[1] else ""
-            auxiliary_key = self.decrypt_api_key(row[4]) if row[4] else ""
+            primary_key = self.decrypt_api_key(row[1] if row[1] else None)
+            auxiliary_key = self.decrypt_api_key(row[4] if row[4] else None)
+
+            decrypt_failed = bool(
+                (row[1] and primary_key is None) or (row[4] and auxiliary_key is None)
+            )
 
             return UserLLMConfig(
                 user_id=row[0],
@@ -1365,6 +1371,7 @@ class PersonaDataStore:
                 auxiliary_base_url=row[5] or "",
                 auxiliary_model=row[6] or "",
                 updated_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                decrypt_failed=decrypt_failed,
             )
 
     async def save_user_llm_config(self, config: UserLLMConfig) -> bool:
@@ -1399,10 +1406,10 @@ class PersonaDataStore:
             """,
             (
                 config.user_id,
-                primary_encrypted or "",
+                primary_encrypted,
                 config.primary_base_url,
                 config.primary_model,
-                auxiliary_encrypted or "",
+                auxiliary_encrypted,
                 config.auxiliary_base_url,
                 config.auxiliary_model,
                 self._wall_now().isoformat(),
@@ -1424,19 +1431,3 @@ class PersonaDataStore:
         await self.db.commit()
         return True
 
-    @staticmethod
-    def mask_sensitive_string(value: str, prefix_len: int = 3, suffix_len: int = 3) -> str:
-        """脱敏显示敏感字符串（R10: 可复用的脱敏工具函数）
-
-        Args:
-            value: 原始字符串
-            prefix_len: 前缀保留字符数
-            suffix_len: 后缀保留字符数
-
-        Returns:
-            脱敏后的字符串，如 "sk-***456"
-        """
-        if not value or len(value) < prefix_len + suffix_len + 1:
-            return "未设置"
-        masked_len = len(value) - prefix_len - suffix_len
-        return f"{value[:prefix_len]}{'*' * masked_len}{value[-suffix_len:]}"

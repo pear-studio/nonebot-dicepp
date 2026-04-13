@@ -5,8 +5,7 @@
 import pytest
 import tempfile
 import os
-import sys
-sys.path.insert(0, "src")
+
 
 from plugins.DicePP.module.persona.character.models import (
     Character,
@@ -129,8 +128,123 @@ class TestCharacterBook:
             LoreEntry(keys=["猫"], content="有只橘猫"),
             LoreEntry(keys=["工作"], content="程序员"),
         ])
-        
+
         assert len(book.entries) == 2
+
+
+class TestSearchLoreEntries:
+    """测试 Character.search_lore_entries"""
+
+    def test_direct_match(self):
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[
+                LoreEntry(keys=["墨墨", "橘猫"], content="苏晓的猫叫墨墨。"),
+            ])
+        )
+        matched = char.search_lore_entries(["我今天看到了墨墨"])
+        assert len(matched) == 1
+        assert matched[0].content == "苏晓的猫叫墨墨。"
+
+    def test_no_match(self):
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[
+                LoreEntry(keys=["墨墨"], content="苏晓的猫叫墨墨。"),
+            ])
+        )
+        matched = char.search_lore_entries(["今天天气不错"])
+        assert matched == []
+
+    def test_selective_match(self):
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[
+                LoreEntry(
+                    keys=["出版社"],
+                    secondary_keys=["加班", "截稿"],
+                    selective=True,
+                    content="出版社在中关村。"
+                ),
+            ])
+        )
+        matched = char.search_lore_entries(["出版社又在加班了"])
+        assert len(matched) == 1
+
+    def test_selective_missing_secondary(self):
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[
+                LoreEntry(
+                    keys=["出版社"],
+                    secondary_keys=["加班", "截稿"],
+                    selective=True,
+                    content="出版社在中关村。"
+                ),
+            ])
+        )
+        matched = char.search_lore_entries(["我去出版社了"])
+        assert matched == []
+
+    def test_disabled_entry_ignored(self):
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[
+                LoreEntry(keys=["墨墨"], content="有只猫", enabled=False),
+            ])
+        )
+        matched = char.search_lore_entries(["墨墨"])
+        assert matched == []
+
+    def test_multiple_keys_same_entry_dedup_not_applied_here(self):
+        """search_lore_entries 扫描拼接后的文本，每个 entry 只会命中一次，无需额外去重"""
+        entry = LoreEntry(keys=["墨墨", "橘猫"], content="苏晓的猫叫墨墨。")
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[entry]),
+        )
+        matched = char.search_lore_entries(["墨墨和橘猫都在"])
+        assert len(matched) == 1
+
+    def test_without_character_book(self):
+        char = Character(name="测试")
+        assert char.search_lore_entries(["任意文本"]) == []
+
+    def test_exact_match_avoids_english_substring_false_positive(self):
+        """exact_match=True 时，英文 key 不应在更长单词中误触发"""
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[
+                LoreEntry(keys=["cat"], exact_match=True, content="有一只猫。"),
+            ])
+        )
+        # "cat" 在 "category" 中是子串，不应命中
+        assert char.search_lore_entries(["this is a category"]) == []
+        # 独立单词应命中
+        matched = char.search_lore_entries(["I have a cat"])
+        assert len(matched) == 1
+
+    def test_exact_match_chinese_still_works(self):
+        """exact_match 对中文按常规子串匹配处理，前后不要求非中文字符"""
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[
+                LoreEntry(keys=["加班"], exact_match=True, content="经常加班。"),
+            ])
+        )
+        matched = char.search_lore_entries(["今天又在加班，好累"])
+        assert len(matched) == 1
+
+    def test_min_match_length_filters_short_keys(self):
+        """min_match_length 可过滤过短的 key，减少误触"""
+        char = Character(
+            name="测试",
+            character_book=CharacterBook(entries=[
+                LoreEntry(keys=["猫"], min_match_length=2, content="有只猫。"),
+            ])
+        )
+        # "猫" 长度 1，小于 min_match_length=2，不应命中
+        assert char.search_lore_entries(["这里有猫"]) == []
 
 
 class TestCharacterLoader:

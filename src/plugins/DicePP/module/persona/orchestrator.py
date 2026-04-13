@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from core.bot import Bot
 from .character.loader import CharacterLoader
 from .character.models import Character, ScheduledEventConfig
-from .llm.router import LLMRouter, QuotaExceeded
+from .llm.router import LLMRouter
 from .data.store import PersonaDataStore
 from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent
 from .agents.scoring_agent import ScoringAgent
@@ -25,7 +25,7 @@ from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
 from .agents.event_agent import EventGenerationAgent
 
 # Phase 4: 掷骰工具
-from module.roll import exec_roll_exp, RollDiceError
+from .utils.roll_adapter import RollAdapter
 
 logger = logging.getLogger("persona.orchestrator")
 
@@ -48,6 +48,13 @@ class PersonaOrchestrator:
         self._pending_messages: Dict[str, List[Dict[str, str]]] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}  # key -> (message, timestamp)
 
+    def _create_context_builder(self, character: Character) -> ContextBuilder:
+        return ContextBuilder(
+            character,
+            max_short_term_chars=self.config.max_short_term_chars,
+            timezone=self.config.timezone,
+            lore_token_budget=self.config.lore_token_budget,
+        )
 
     async def initialize(self) -> bool:
         """
@@ -117,7 +124,7 @@ class PersonaOrchestrator:
                 self.llm_router.quota_check_enabled = self.config.quota_check_enabled
 
             self.scoring_agent = ScoringAgent(self.llm_router)
-            self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars, self.config.timezone)
+            self.context_builder = self._create_context_builder(self.character)
 
             # 初始化衰减计算器
             self.decay_calculator = DecayCalculator(
@@ -272,14 +279,6 @@ class PersonaOrchestrator:
             await self._update_interaction(user_id, group_id, message, response)
 
             return response
-
-        except QuotaExceeded as e:
-            # Phase 4: 配额超限，返回友好提示
-            logger.info(f"配额超限: user={user_id}, group={group_id}")
-            return (
-                f"{e}\n\n"
-                "使用 `.ai key config` 配置自己的 API Key 可解除限制"
-            )
 
         except Exception as e:
             logger.exception("对话处理失败")
@@ -445,28 +444,23 @@ class PersonaOrchestrator:
         Returns:
             掷骰结果文本
         """
-        if not expression or len(expression) > 100:
-            return "表达式无效或过长（最大100字符）"
+        result = RollAdapter.roll(expression)
+        if not result["success"]:
+            error = result["error"]
+            if "暂时不可用" in error:
+                logger.exception(f"掷骰工具执行失败: {expression}")
+            return error
 
-        try:
-            result = exec_roll_exp(expression)
-            # 构建结果文本
-            val = result.get_val()
-            info = result.get_info()
-            exp = result.get_exp()
+        val = result["value"]
+        info = result["info"]
+        exp = result["exp"]
 
-            if info and exp:
-                return f"掷骰: {exp} = {info} = {val}"
-            elif info:
-                return f"掷骰: {expression} = {info} = {val}"
-            else:
-                return f"掷骰: {expression} = {val}"
-        except RollDiceError as e:
-            return f"掷骰失败: {e}\n请使用有效格式，如 1d20, 2d6+3, 1d20adv"
-        except Exception as e:
-            # R9: 使用 logger.exception 记录完整堆栈，帮助排查未预期错误
-            logger.exception(f"掷骰工具执行失败: {expression}")
-            return "掷骰服务暂时不可用，请稍后再试"
+        if info and exp:
+            return f"掷骰: {exp} = {info} = {val}"
+        elif info:
+            return f"掷骰: {expression} = {info} = {val}"
+        else:
+            return f"掷骰: {expression} = {val}"
 
     async def _update_interaction(self, user_id: str, group_id: str, user_msg: str, assistant_msg: str) -> None:
         if not self.data_store:
@@ -713,7 +707,7 @@ class PersonaOrchestrator:
             self.character = new_character
 
             # 重新创建上下文构建器（因为角色变了）
-            self.context_builder = ContextBuilder(self.character, self.config.max_short_term_chars, self.config.timezone)
+            self.context_builder = self._create_context_builder(self.character)
 
             logger.info(f"角色卡已热重载: {self.character.name}")
             return True, f"角色卡已重载: {self.character.name}"
