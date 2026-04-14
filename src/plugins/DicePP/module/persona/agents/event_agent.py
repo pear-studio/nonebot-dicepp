@@ -66,7 +66,7 @@ class EventGenerationAgent:
 {context.permanent_state or "无特殊状态"}
 
 生成要求:
-1. 以第三人称客观描述发生了什么
+1. 以第一人称"我"描述正在做什么或刚做了什么
 2. 20-50字，简洁具体
 3. 符合世界观和场景设定
 4. 可以是日常琐事或有趣遭遇
@@ -111,7 +111,7 @@ class EventGenerationAgent:
         except Exception as e:
             logger.error(f"事件生成失败: {e}")
             # 返回默认事件
-            return f"{context.character_name}正在房间里休息。"
+            return f"我正在房间里休息。"
 
     async def generate_reaction(
         self,
