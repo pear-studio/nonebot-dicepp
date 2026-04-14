@@ -577,6 +577,7 @@ class PersonaDataStore:
         why_remember: str,
         source_messages_count: int = 0,
         extract_prompt_digest: str = "",
+        observed_at: Optional[str] = None,
     ) -> None:
         """添加观察记录"""
         await self.db.execute(
@@ -594,7 +595,7 @@ class PersonaDataStore:
                 why_remember,
                 source_messages_count,
                 extract_prompt_digest,
-                self._wall_now().isoformat(),
+                observed_at if observed_at is not None else self._wall_now().isoformat(),
             )
         )
         await self.db.commit()

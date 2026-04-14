@@ -314,11 +314,13 @@ class ObservationExtractor:
         self,
         event_agent: EventGenerationAgent,
         data_store: PersonaDataStore,
+        config,
         *,
         prune_observations_keep: int = 30,
     ):
         self.event_agent = event_agent
         self.data_store = data_store
+        self.config = config
         self._prune_observations_keep = prune_observations_keep
 
     async def extract_observations(

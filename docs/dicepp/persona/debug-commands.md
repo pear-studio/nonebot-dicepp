@@ -1,16 +1,16 @@
 # Persona AI 调试命令
 
-> `.pa` 命令详细使用说明
+> `.ai admin` 命令详细使用说明
 
 ## 命令概述
 
-`.pa` (Persona Admin) 命令仅管理员可用，用于调试和管理 Persona AI 系统。
+`.ai admin` 命令仅管理员可用，用于调试和管理 Persona AI 系统。
 
 ## 命令列表
 
 ### 基础调试
 
-#### `.pa debug` 或 `.pa`
+#### `.ai admin debug` 或 `.ai admin`
 查看当前上下文和系统状态。
 
 **输出示例：**
@@ -66,13 +66,13 @@
 
 ### 关系管理
 
-#### `.pa rel <用户ID> [群组ID]`
+#### `.ai admin rel <用户ID> [群组ID]`
 查看指定用户的好感度详情。
 
 **示例：**
 ```
-.pa rel 123456789
-.pa rel 123456789 987654321
+.ai admin rel 123456789
+.ai admin rel 123456789 987654321
 ```
 
 **输出示例：**
@@ -89,13 +89,13 @@
   等级: 3 (友好)
 ```
 
-#### `.pa setrel <用户ID> <综合分数> [群组ID]`
+#### `.ai admin setrel <用户ID> <综合分数> [群组ID]`
 手动设置用户的好感度。
 
 **示例：**
 ```
-.pa setrel 123456789 60
-.pa setrel 123456789 80 987654321
+.ai admin setrel 123456789 60
+.ai admin setrel 123456789 80 987654321
 ```
 
 **说明：**
@@ -106,7 +106,7 @@
 
 ### 系统管理
 
-#### `.pa reload`
+#### `.ai admin reload`
 热重新加载角色卡。
 
 **说明：**
@@ -114,7 +114,7 @@
 - 无需重启 Bot
 - 用于角色卡修改后的快速更新
 
-#### `.pa events`
+#### `.ai admin events`
 查看角色的事件配置。
 
 **输出示例：**
@@ -145,7 +145,7 @@
   80-100: 心意相通
 ```
 
-#### `.pa list`
+#### `.ai admin list`
 查看白名单列表。
 
 **输出示例：**
@@ -167,7 +167,7 @@
 
 ### 日记和事件查看
 
-#### `.pa today`
+#### `.ai admin today`
 查看今天的日记和事件。
 
 **输出示例：**
@@ -186,14 +186,14 @@
      反应: 很感动，觉得工作有意义
 ```
 
-#### `.pa yesterday`
+#### `.ai admin yesterday`
 查看昨天的日记和事件。
 
 ---
 
 ### 紧急控制
 
-#### `.pa pause`
+#### `.ai admin pause`
 暂停所有主动消息发送。
 
 **说明：**
@@ -201,7 +201,7 @@
 - 不影响被动响应（@bot 和 .ai 命令）
 - 用于紧急情况下停止打扰
 
-#### `.pa resume`
+#### `.ai admin resume`
 恢复主动消息发送。
 
 ---
@@ -211,45 +211,45 @@
 ### 场景1：调试好感度系统
 ```
 # 查看当前用户的好感度
-.pa debug
+.ai admin debug
 
 # 查看特定用户详情
-.pa rel 123456789
+.ai admin rel 123456789
 
 # 手动调整好感度测试不同区间
-.pa setrel 123456789 25  # 测试"普通"区间
-.pa setrel 123456789 55  # 测试"友好"区间
-.pa setrel 123456789 75  # 测试"亲近"区间
+.ai admin setrel 123456789 25  # 测试"普通"区间
+.ai admin setrel 123456789 55  # 测试"友好"区间
+.ai admin setrel 123456789 75  # 测试"亲近"区间
 ```
 
 ### 场景2：排查主动消息问题
 ```
 # 查看调度器状态
-.pa debug
+.ai admin debug
 
 # 查看今天生成的事件
-.pa today
+.ai admin today
 
 # 暂停主动消息（如果太频繁）
-.pa pause
+.ai admin pause
 
 # 恢复主动消息
-.pa resume
+.ai admin resume
 ```
 
 ### 场景3：更新角色卡
 ```
 # 修改角色卡文件后
-.pa reload
+.ai admin reload
 
 # 验证事件配置
-.pa events
+.ai admin events
 ```
 
 ---
 
 ## 注意事项
 
-1. **权限控制**：所有 `.pa` 命令仅对管理员（config.admin 或 config.master）有效
-2. **生产环境**：谨慎使用 `.pa setrel`，这会直接修改用户数据
-3. **调试开关**：`.pa pause/resume` 可以临时控制主动消息，但重启后会恢复配置文件的设置
+1. **权限控制**：所有 `.ai admin` 命令仅对管理员（config.admin 或 config.master）有效
+2. **生产环境**：谨慎使用 `.ai admin setrel`，这会直接修改用户数据
+3. **调试开关**：`.ai admin pause/resume` 可以临时控制主动消息，但重启后会恢复配置文件的设置
