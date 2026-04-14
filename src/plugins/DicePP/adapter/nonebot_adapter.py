@@ -343,8 +343,8 @@ else:
         await all_bots[bot.self_id].delay_init_command()
         # 设定Bot自己的昵称，供日志使用
         try:
-            all_bots[bot.self_id].update_nickname(bot.self_id, "origin", bot.self_id)
-            all_bots[bot.self_id].update_nickname(bot.self_id, "default", "骰娘")
+            await all_bots[bot.self_id].update_nickname(bot.self_id, "origin", bot.self_id)
+            await all_bots[bot.self_id].update_nickname(bot.self_id, "default", "骰娘")
         except Exception:
             pass
         dice_log(f"[NB Adapter] Bot {bot.self_id} Connected!")
