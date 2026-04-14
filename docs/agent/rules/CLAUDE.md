@@ -126,12 +126,11 @@ python -m DicePP.shell rm <scenario_name>
 
 - **Team 启动**：`TeamCreate` → `TaskCreate` → 分配给对应角色
 - **spawn subagent 时使用 `mode: "bypassPermissions"`** 继承当前权限
-- **并发控制**：同时只有 1 个 Programmer 在修改 `src/`
 - **工作流转**：
   1. Programmer 完成代码后 → 主动提交 Reviewer 审查
   2. Reviewer 独立运行 `uv run pytest` 验证 → 给出 PASS / NEEDS_FIX / REJECT
   3. Reviewer 通过后 → 上报 Leader，由 Leader 统一向用户汇报
-- **状态维护**：Leader 负责维护 `.claude/context/status.md`，记录当前任务、完成节点、阻塞项
+- **状态维护**：Leader 负责维护 `.temp/agents-team/<任务名称>/progress.md`，记录当前任务、完成节点、阻塞项
 
 ### 汇报关系
 
