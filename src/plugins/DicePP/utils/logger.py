@@ -8,10 +8,8 @@ def dice_log(*args, **kwargs):
     """
     记录Log信息
     """
-    if kwargs:
-        print("logger: ", *args, kwargs)
-    else:
-        print("logger: ", *args)
+    kwargs.pop("file", None)
+    print("logger: ", *args, file=sys.stderr, **kwargs)
 
 
 def get_exception_info() -> List[str]:

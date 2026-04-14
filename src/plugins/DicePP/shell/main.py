@@ -35,8 +35,9 @@ def _parse_dice_sequence(dice_str: str) -> list[int]:
 def cmd_start(args) -> None:
     """创建或进入会话"""
     try:
+        existed = session_exists(args.name)
         session_dir = create_session(args.name, group_id=args.group)
-        action = "Loaded existing" if session_exists(args.name) else "Created new"
+        action = "Loaded existing" if existed else "Created new"
         print(f"{action} session '{args.name}' at {session_dir}")
     except ValueError as e:
         _error(str(e))
@@ -68,22 +69,21 @@ def cmd_send(args) -> None:
     async def run():
         await runner.start()
         try:
-            result = await runner.send(
+            return await runner.send(
                 user_id=args.user,
                 nickname=args.nick or args.user,
                 msg=args.msg,
                 group_id=group_id,
                 dice_sequence=dice_seq,
             )
-
-            if args.json:
-                print(json.dumps(result, ensure_ascii=False, indent=2))
-            else:
-                print(result["text"])
         finally:
             await runner.stop()
 
-    asyncio.run(run())
+    result = asyncio.run(run())
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(result["text"])
 
 
 def cmd_list(args) -> None:
@@ -116,6 +116,14 @@ def cmd_rm(args) -> None:
 
 def main() -> None:
     """主入口"""
+    # 确保 Windows 终端使用 UTF-8 编码
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except Exception:
+                pass
+
     parser = argparse.ArgumentParser(
         prog="dicepp-shell",
         description="DicePP Shell - Interactive testing tool for DicePP bot",

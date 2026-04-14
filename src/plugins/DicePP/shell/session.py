@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 # 存储位置: 项目根目录下的 .dicepp-shell/
-SHELL_DIR = Path(".dicepp-shell")
+from utils.frozen import get_project_root
+
+SHELL_DIR = Path(get_project_root()) / ".dicepp-shell"
 
 
 def _validate_session_name(name: str) -> None:

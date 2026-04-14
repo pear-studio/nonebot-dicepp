@@ -1,45 +1,19 @@
 """Bot 运行包装器 - 管理 Bot 实例、捕获输出、控制骰子"""
 
 import asyncio
-import sys
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-# 添加源码路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from core.bot import Bot
-from core.communication import MessageMetaData, MessageSender, GroupInfo, GroupMemberInfo
-from adapter import ClientProxy
-from core.command import BotCommandBase, BotSendMsgCommand
-
-
-# 内联 SequenceRuntime，避免外部依赖
-class SequenceRuntime:
-    """Deterministic runtime backed by a fixed sequence.
-
-    Copied from tests/helpers/sequence_runtime.py to avoid import issues.
-    """
-
-    def __init__(self, seq):
-        self._seq = list(seq)
-        self._idx = 0
-
-    def roll(self, dice_type: int) -> int:
-        """Consume one value from sequence and normalize to dice range."""
-        assert dice_type > 0, f"dice_type must be positive, got {dice_type}"
-        if self._idx >= len(self._seq):
-            raise IndexError(
-                f"SequenceRuntime exhausted: requested roll #{self._idx + 1} "
-                f"but only {len(self._seq)} values available"
-            )
-        raw = self._seq[self._idx]
-        self._idx += 1
-        # Normalize into valid dice range [1, dice_type]
-        return ((int(raw) - 1) % dice_type) + 1
-
-
-# 导入 karma_runtime 的函数
+from ..core.bot import Bot
+from ..core.communication import MessageMetaData, MessageSender, GroupInfo, GroupMemberInfo
+from ..adapter import ClientProxy
+from ..core.command import BotCommandBase, BotSendMsgCommand
+from ..utils.sequence_runtime import SequenceRuntime
+# 注意：必须使用裸绝对导入 `module.roll.karma_runtime`，
+# 因为 Bot 内部大量使用该路径导入此模块。
+# 若使用相对导入 (`..module.roll.karma_runtime`)，会导致
+# `sys.modules` 中出现两个副本，ContextVar 的读写将分离，
+# 从而使 `--dice` 序列控制完全失效。
 from module.roll.karma_runtime import set_runtime, reset_runtime
 
 
@@ -187,7 +161,7 @@ class BotRunner:
 
         # 设置骰子序列
         token = None
-        dice_consumed = 0
+        runtime = None
         if dice_sequence:
             runtime = SequenceRuntime(dice_sequence)
             token = set_runtime(runtime)
@@ -205,15 +179,11 @@ class BotRunner:
             # 处理消息
             commands = await self.bot.process_message(msg, meta)
 
-            # 统计消耗的骰子数
-            if dice_sequence:
-                dice_consumed = len(dice_sequence)
-
             # 收集结果
             result = {
                 "text": self.proxy.get_display_text(),
                 "commands": self.proxy.to_dict_list(),
-                "dice_consumed": dice_consumed,
+                "dice_consumed": runtime.get_consumed_count() if runtime else 0,
                 "raw_command_count": len(commands),
             }
 

@@ -36,6 +36,9 @@ dependencies = [
     "websockets>=15.0.1",
 ]
 
+[project.scripts]
+dicepp-shell = "plugins.DicePP.shell.main:main"
+
 [dependency-groups]
 dev = [
     "pytest>=7.4",
