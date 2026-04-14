@@ -20,6 +20,7 @@ from ..utils.privacy import mask_sensitive_string
 from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
     RelationshipState, Observation, DailyEvent, GroupActivity, UserLLMConfig,
+    LLMTraceRecord,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -74,6 +75,9 @@ class PersonaDataStore:
         await self._ensure_group_activity_daily_columns()
         await self._ensure_group_activity_content_columns()
         await self._ensure_relationship_decay_watermark_column()
+        await self._ensure_score_history_conversation_digest()
+        await self._ensure_daily_events_debug_columns()
+        await self._ensure_observations_debug_columns()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
         """
@@ -115,6 +119,41 @@ class PersonaDataStore:
             await self.db.execute(
                 "ALTER TABLE persona_user_relationships "
                 "ADD COLUMN last_relationship_decay_applied_at TIMESTAMP"
+            )
+
+    async def _ensure_score_history_conversation_digest(self) -> None:
+        async with self.db.execute("PRAGMA table_info(persona_score_history)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        if "conversation_digest" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_score_history ADD COLUMN conversation_digest TEXT DEFAULT ''"
+            )
+
+    async def _ensure_daily_events_debug_columns(self) -> None:
+        async with self.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        if "system_prompt_digest" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_daily_events ADD COLUMN system_prompt_digest TEXT DEFAULT ''"
+            )
+        if "raw_response" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_daily_events ADD COLUMN raw_response TEXT DEFAULT ''"
+            )
+
+    async def _ensure_observations_debug_columns(self) -> None:
+        async with self.db.execute("PRAGMA table_info(persona_observations)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        if "source_messages_count" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_observations ADD COLUMN source_messages_count INTEGER DEFAULT 0"
+            )
+        if "extract_prompt_digest" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_observations ADD COLUMN extract_prompt_digest TEXT DEFAULT ''"
             )
 
     # ========== 消息相关 ==========
@@ -194,6 +233,112 @@ class PersonaDataStore:
             row = await cursor.fetchone()
             return row[0] if row else 0
 
+    # ========== LLM Trace 相关 (Phase 7a) ==========
+
+    async def add_llm_trace(self, trace: LLMTraceRecord) -> None:
+        created_at_str = (
+            trace.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            if trace.created_at
+            else self._wall_now().strftime("%Y-%m-%d %H:%M:%S")
+        )
+        await self.db.execute(
+            """
+            INSERT INTO persona_llm_traces (
+                session_id, user_id, group_id, model, tier,
+                messages, response, tool_calls, latency_ms,
+                tokens_in, tokens_out, temperature, status, error, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trace.session_id,
+                trace.user_id,
+                trace.group_id,
+                trace.model,
+                trace.tier,
+                trace.messages,
+                trace.response,
+                trace.tool_calls,
+                trace.latency_ms,
+                trace.tokens_in,
+                trace.tokens_out,
+                trace.temperature,
+                trace.status,
+                trace.error,
+                created_at_str,
+            ),
+        )
+        await self.db.commit()
+
+    async def get_llm_traces(
+        self,
+        user_id: str,
+        limit: int = 5,
+    ) -> List[LLMTraceRecord]:
+        async with self.db.execute(
+            """
+            SELECT id, session_id, user_id, group_id, model, tier,
+                   messages, response, tool_calls, latency_ms,
+                   tokens_in, tokens_out, temperature, status, error, created_at
+            FROM persona_llm_traces
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            traces: List[LLMTraceRecord] = []
+            for row in rows:
+                traces.append(LLMTraceRecord(
+                    id=row[0],
+                    session_id=row[1],
+                    user_id=row[2],
+                    group_id=row[3],
+                    model=row[4],
+                    tier=row[5],
+                    messages=row[6],
+                    response=row[7],
+                    tool_calls=row[8] or "",
+                    latency_ms=row[9],
+                    tokens_in=row[10] or 0,
+                    tokens_out=row[11] or 0,
+                    temperature=row[12],
+                    status=row[13],
+                    error=row[14] or "",
+                    created_at=datetime.fromisoformat(row[15]) if row[15] else None,
+                ))
+            return traces
+
+    async def prune_llm_traces(self, max_age_days: int) -> int:
+        cutoff = (self._wall_now() - timedelta(days=max_age_days)).strftime("%Y-%m-%d %H:%M:%S")
+        cursor = await self.db.execute(
+            "DELETE FROM persona_llm_traces WHERE created_at < ?",
+            (cutoff,),
+        )
+        await self.db.commit()
+        return cursor.rowcount
+
+    async def get_today_token_usage(self) -> tuple[Optional[int], Optional[int]]:
+        """返回今日 LLM trace 的 token 总消耗 (tokens_in, tokens_out)"""
+        today = self._wall_now().strftime("%Y-%m-%d")
+        async with self.db.execute(
+            "SELECT SUM(tokens_in), SUM(tokens_out) FROM persona_llm_traces WHERE date(created_at) = ?",
+            (today,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return row[0], row[1]
+            return None, None
+
+    async def get_error_summary_since(self, since_iso: str) -> list[tuple[str, int]]:
+        """返回自 since_iso 以来的错误统计 [(status, count), ...]"""
+        async with self.db.execute(
+            "SELECT status, COUNT(*) FROM persona_llm_traces WHERE datetime(created_at) > datetime(?) AND status != 'ok' GROUP BY status",
+            (since_iso,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [(status, count) for status, count in rows]
+
     async def get_earliest_message_time(self, user_id: str, group_id: str) -> Optional[datetime]:
         """获取最早消息时间"""
         async with self.db.execute(
@@ -215,7 +360,7 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT user_id, group_id, intimacy_delta, passion_delta, trust_delta, secureness_delta,
-                   composite_before, composite_after, reason, created_at
+                   composite_before, composite_after, reason, conversation_digest, created_at
             FROM persona_score_history
             WHERE user_id = ? AND group_id = ?
             ORDER BY created_at DESC
@@ -238,7 +383,8 @@ class PersonaDataStore:
                     composite_before=row[6],
                     composite_after=row[7],
                     reason=row[8],
-                    created_at=datetime.fromisoformat(row[9]) if row[9] else None
+                    conversation_digest=row[9] or "",
+                    created_at=datetime.fromisoformat(row[10]) if row[10] else None
                 ))
             return events
 
@@ -399,10 +545,10 @@ class PersonaDataStore:
         """添加评分事件"""
         await self.db.execute(
             """
-            INSERT INTO persona_score_history 
+            INSERT INTO persona_score_history
             (user_id, group_id, intimacy_delta, passion_delta, trust_delta, secureness_delta,
-             composite_before, composite_after, reason, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             composite_before, composite_after, reason, conversation_digest, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event.user_id,
@@ -414,7 +560,8 @@ class PersonaDataStore:
                 event.composite_before,
                 event.composite_after,
                 event.reason,
-                self._wall_now().isoformat()
+                event.conversation_digest,
+                event.created_at.isoformat() if event.created_at else self._wall_now().isoformat(),
             )
         )
         await self.db.commit()
@@ -427,14 +574,17 @@ class PersonaDataStore:
         participants: List[str],
         who_names: Dict[str, str],
         what: str,
-        why_remember: str
+        why_remember: str,
+        source_messages_count: int = 0,
+        extract_prompt_digest: str = "",
     ) -> None:
         """添加观察记录"""
         await self.db.execute(
             """
-            INSERT INTO persona_observations 
-            (group_id, participants, who_names, what, why_remember, observed_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO persona_observations
+            (group_id, participants, who_names, what, why_remember,
+             source_messages_count, extract_prompt_digest, observed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 group_id,
@@ -442,7 +592,9 @@ class PersonaDataStore:
                 json.dumps(who_names),
                 what,
                 why_remember,
-                self._wall_now().isoformat()
+                source_messages_count,
+                extract_prompt_digest,
+                self._wall_now().isoformat(),
             )
         )
         await self.db.commit()
@@ -451,7 +603,8 @@ class PersonaDataStore:
         """获取群的观察记录"""
         async with self.db.execute(
             """
-            SELECT group_id, participants, who_names, what, why_remember, observed_at
+            SELECT group_id, participants, who_names, what, why_remember,
+                   observed_at, source_messages_count, extract_prompt_digest
             FROM persona_observations
             WHERE group_id = ?
             ORDER BY observed_at DESC
@@ -468,6 +621,8 @@ class PersonaDataStore:
                     what=row[3],
                     why_remember=row[4],
                     observed_at=datetime.fromisoformat(row[5]) if row[5] else None,
+                    source_messages_count=row[6] or 0,
+                    extract_prompt_digest=row[7] or "",
                 )
                 for row in rows
             ]
@@ -514,14 +669,32 @@ class PersonaDataStore:
 
     # ========== 每日事件 ==========
 
-    async def add_daily_event(self, date: str, event_type: str, description: str, reaction: str = "") -> None:
+    async def add_daily_event(
+        self,
+        date: str,
+        event_type: str,
+        description: str,
+        reaction: str = "",
+        system_prompt_digest: str = "",
+        raw_response: str = "",
+    ) -> None:
         """添加每日事件"""
         await self.db.execute(
             """
-            INSERT INTO persona_daily_events (date, event_type, description, reaction, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO persona_daily_events (
+                date, event_type, description, reaction,
+                system_prompt_digest, raw_response, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (date, event_type, description, reaction, self._wall_now().isoformat())
+            (
+                date,
+                event_type,
+                description,
+                reaction,
+                system_prompt_digest,
+                raw_response,
+                self._wall_now().isoformat(),
+            )
         )
         await self.db.commit()
 
@@ -529,7 +702,8 @@ class PersonaDataStore:
         """获取某天的所有事件"""
         async with self.db.execute(
             """
-            SELECT event_type, description, reaction, created_at
+            SELECT event_type, description, reaction, created_at,
+                   system_prompt_digest, raw_response
             FROM persona_daily_events
             WHERE date = ?
             ORDER BY created_at
@@ -544,6 +718,8 @@ class PersonaDataStore:
                     description=row[1],
                     reaction=row[2],
                     created_at=datetime.fromisoformat(row[3]) if row[3] else None,
+                    system_prompt_digest=row[4] or "",
+                    raw_response=row[5] or "",
                 )
                 for row in rows
             ]

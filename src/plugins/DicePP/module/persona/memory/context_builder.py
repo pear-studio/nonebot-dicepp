@@ -4,7 +4,7 @@
 组装四层记忆到 LLM 消息列表
 """
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from ..character.models import Character
 from ..data.models import UserProfile
@@ -222,3 +222,30 @@ class ContextBuilder:
             total_chars += msg_chars
 
         return result
+
+    def build_debug_info(
+        self,
+        short_term_history: List[Dict[str, str]],
+        user_profile: Optional[UserProfile] = None,
+        diary_context: str = "",
+        warmth_label: str = "友好",
+        lore_sections: Optional[Dict[str, List[str]]] = None,
+    ) -> Dict[str, Any]:
+        truncated = self._truncate_by_turns(short_term_history, self.max_short_term_chars)
+        system_prompt = self._build_system_prompt(
+            user_profile=user_profile,
+            diary_context=diary_context,
+            warmth_label=warmth_label,
+            lore_sections=lore_sections or self._build_lore_text(short_term_history, ""),
+        )
+        short_term_text = self._format_short_term(truncated)
+        profile_text = ""
+        if user_profile and user_profile.facts:
+            profile_text = "\n".join([f"- {k}: {v}" for k, v in user_profile.facts.items()])
+        return {
+            "system_prompt_chars": len(system_prompt),
+            "short_term_chars": len(short_term_text),
+            "profile_chars": len(profile_text),
+            "diary_chars": len(diary_context),
+            "returned_message_count": 1 + len(truncated),  # system(1) + short_term(len(truncated))
+        }

@@ -31,6 +31,9 @@ logger = logging.getLogger("persona.orchestrator")
 
 
 class PersonaOrchestrator:
+    DIGEST_MAX_MESSAGES = 6
+    DIGEST_MAX_CHARS = 80
+
     def __init__(self, bot: Bot):
         self.bot = bot
         self.config = bot.config.persona_ai
@@ -55,6 +58,18 @@ class PersonaOrchestrator:
             timezone=self.config.timezone,
             lore_token_budget=self.config.lore_token_budget,
         )
+
+    @staticmethod
+    def _build_conversation_digest(history: List[Dict[str, str]]) -> str:
+        lines = []
+        prefix_map = {"user": "U", "assistant": "A", "tool": "T", "system": "S"}
+        for msg in history[-PersonaOrchestrator.DIGEST_MAX_MESSAGES:]:
+            prefix = prefix_map.get(msg.get("role"), "?")
+            text = msg.get("content", "")
+            if len(text) > PersonaOrchestrator.DIGEST_MAX_CHARS:
+                text = text[:PersonaOrchestrator.DIGEST_MAX_CHARS - 3] + "..."
+            lines.append(f"{prefix}: {text}")
+        return "; ".join(lines)
 
     async def initialize(self) -> bool:
         """
@@ -122,6 +137,8 @@ class PersonaOrchestrator:
                 self.llm_router.config = self.config
                 self.llm_router.daily_limit = self.config.daily_limit
                 self.llm_router.quota_check_enabled = self.config.quota_check_enabled
+                self.llm_router.trace_enabled = getattr(self.config, "trace_enabled", False)
+                self.llm_router.trace_max_age_days = getattr(self.config, "trace_max_age_days", 7)
 
             self.scoring_agent = ScoringAgent(self.llm_router)
             self.context_builder = self._create_context_builder(self.character)
@@ -485,6 +502,7 @@ class PersonaOrchestrator:
                     composite_before=composite_before,
                     composite_after=rel.composite_score,
                     reason=f"time_decay: {reason}",
+                    conversation_digest="",
                 )
 
         rel.last_interaction_at = now
@@ -545,7 +563,8 @@ class PersonaOrchestrator:
                 deltas=deltas,
                 composite_before=composite_before,
                 composite_after=rel.composite_score,
-                reason="批量评分"
+                reason="批量评分",
+                conversation_digest=self._build_conversation_digest(messages),
             )
             await self.data_store.add_score_event(event)
 
@@ -618,6 +637,17 @@ class PersonaOrchestrator:
             else:
                 diary_context = ""
 
+        if self.context_builder:
+            lore_sections = self.context_builder._build_lore_text(history_dicts, current_message)
+            debug_info = self.context_builder.build_debug_info(
+                short_term_history=history_dicts,
+                user_profile=profile,
+                diary_context=diary_context,
+                warmth_label=warmth_label,
+                lore_sections=lore_sections,
+            )
+            logger.debug(f"context_debug: {debug_info}")
+
         return self.context_builder.build(
             short_term_history=history_dicts,
             user_profile=profile,
@@ -679,6 +709,7 @@ class PersonaOrchestrator:
                         composite_before=composite_before,
                         composite_after=rel.composite_score,
                         reason=f"time_decay_batch: {reason}",
+                        conversation_digest="",
                     )
                 )
                 n += 1
@@ -757,18 +788,35 @@ class PersonaOrchestrator:
         Returns:
             生成的日记内容
         """
-        if not self._initialized or not self.character_life:
+        if not self._initialized:
             return None
 
         try:
+            await self._prune_traces()
+
+            if not self.character_life:
+                return None
+
             await self.apply_relationship_decay_batch()
             diary = await self.character_life.generate_diary()
             if diary:
                 logger.info(f"生成日记: {len(diary)} 字")
+
             return diary
         except Exception as e:
             logger.exception(f"日记生成失败: {e}")
             return None
+
+    async def _prune_traces(self) -> None:
+        """清理过期 LLM trace"""
+        if not self.config.trace_enabled or not self.data_store:
+            return
+        try:
+            deleted = await self.data_store.prune_llm_traces(self.config.trace_max_age_days)
+            if deleted:
+                logger.info(f"清理了 {deleted} 条过期 LLM trace")
+        except Exception as e:
+            logger.warning(f"清理 LLM trace 失败: {e}")
 
     async def generate_daily_event(self) -> Optional[dict]:
         """

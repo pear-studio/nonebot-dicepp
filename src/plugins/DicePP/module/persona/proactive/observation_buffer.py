@@ -351,12 +351,21 @@ class ObservationExtractor:
                 participants = list(set(msg.user_id for msg in messages))
                 who_names = {msg.user_id: msg.nickname for msg in messages}
 
+                raw_digest = messages_text[:200]
+                if getattr(self.config, "observation_store_raw_digest", False):
+                    digest_value = raw_digest
+                else:
+                    import hashlib
+                    digest_value = hashlib.sha256(raw_digest.encode("utf-8")).hexdigest()[:32]
+
                 await self.data_store.add_observation(
                     group_id=group_id,
                     participants=participants,
                     who_names=who_names,
                     what=obs.get("what", ""),
                     why_remember=obs.get("why", ""),
+                    source_messages_count=len(messages),
+                    extract_prompt_digest=digest_value,
                 )
                 results.append(obs)
 

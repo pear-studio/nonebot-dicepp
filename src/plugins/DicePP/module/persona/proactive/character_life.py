@@ -189,6 +189,8 @@ class CharacterLife:
                 event_type="scheduled",
                 description=event_desc,
                 reaction=reaction,
+                system_prompt_digest="",
+                raw_response="",
             )
 
             logger.info(f"生成生活事件: {event_desc[:50]}...")

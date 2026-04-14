@@ -361,7 +361,11 @@ class PersonaCommand(UserCommandBase):
                 ".ai admin whitelist add group <group_id> - 添加群到白名单\n"
                 ".ai admin whitelist remove <user_id> - 移除用户\n"
                 ".ai admin whitelist remove group <group_id> - 移除群\n"
-                ".ai admin whitelist clear - 清空白名单"
+                ".ai admin whitelist clear - 清空白名单\n"
+                ".ai admin trace <user_id> - 导出最近 5 次 LLM trace\n"
+                ".ai admin trace <user_id> full - 导出最近 1 次完整 trace\n"
+                ".ai admin stats - 查看今日 LLM 调用统计\n"
+                ".ai admin errors - 查看最近 24h 错误摘要"
             )
         
         subcmd = args[0]
@@ -452,8 +456,122 @@ class PersonaCommand(UserCommandBase):
                 else:
                     self._whitelist_confirm_pending.pop(user_id, None)
                     return "没有待确认的清空操作（可能已超时）"
-        
+
+        # trace 子命令
+        if subcmd == "trace":
+            return await self._handle_admin_trace(user_id, args)
+
+        # stats 子命令
+        if subcmd == "stats":
+            return await self._handle_admin_stats(user_id)
+
+        # errors 子命令
+        if subcmd == "errors":
+            return await self._handle_admin_errors(user_id)
+
         return "未知的管理员命令"
+
+    async def _handle_admin_trace(self, user_id: str, args: List[str]) -> str:
+        if not self._is_admin(user_id):
+            return "权限不足"
+        if not self.data_store or not self.orchestrator.llm_router:
+            return "模块未初始化"
+        if len(args) < 2:
+            return "用法: .ai admin trace <user_id> [full]"
+        target_user = args[1]
+        full_mode = len(args) >= 3 and args[2] == "full"
+        limit = 1 if full_mode else 5
+        traces = await self.data_store.get_llm_traces(target_user, limit=limit)
+        if not traces:
+            return f"用户 {target_user} 暂无 trace 记录"
+        lines = [f"用户 {target_user} 的 LLM trace:"]
+        for i, t in enumerate(traces, 1):
+            latency_str = f"{t.latency_ms}ms" if t.latency_ms is not None else "N/A"
+            resp_preview = t.response[:200] + "..." if len(t.response) > 200 else t.response
+            lines.append(
+                f"\n[{i}] {t.created_at} | model={t.model} tier={t.tier} "
+                f"latency={latency_str} status={t.status}\n"
+                f"response: {resp_preview}"
+            )
+            if full_mode:
+                try:
+                    msgs = json.loads(t.messages)
+                    visible_msgs = [m for m in msgs if m.get("role") != "system"]
+                    msgs_preview = json.dumps(visible_msgs, ensure_ascii=False, indent=None)
+                    if len(msgs_preview) > 2000:
+                        msgs_preview = msgs_preview[:2000] + "..."
+                    lines.append(f"messages: {msgs_preview}")
+                except json.JSONDecodeError:
+                    lines.append("messages: (invalid json)")
+                except Exception as e:
+                    lines.append(f"messages: (parse failed: {type(e).__name__})")
+                resp_full = t.response[:1000]
+                if len(t.response) > 1000:
+                    resp_full += "..."
+                lines.append(f"response_full: {resp_full}")
+        return "\n".join(lines)
+
+    async def _handle_admin_stats(self, user_id: str) -> str:
+        if not self._is_admin(user_id):
+            return "权限不足"
+        if not self.orchestrator.llm_router:
+            return "模块未初始化"
+        stats = self.orchestrator.llm_router.get_stats()
+        p_percentiles = self.orchestrator.llm_router.get_latency_percentiles("primary")
+        a_percentiles = self.orchestrator.llm_router.get_latency_percentiles("auxiliary")
+
+        token_in_total: Optional[int] = None
+        token_out_total: Optional[int] = None
+        if self.data_store and getattr(self.config, "trace_enabled", False):
+            token_in_total, token_out_total = await self.data_store.get_today_token_usage()
+            token_in_total = token_in_total or 0
+            token_out_total = token_out_total or 0
+
+        primary_requests = stats["primary"]["requests"]
+        primary_errors = stats["primary"]["errors"]
+        aux_requests = stats["auxiliary"]["requests"]
+        aux_errors = stats["auxiliary"]["errors"]
+
+        primary_error_rate = f"{(primary_errors / max(1, primary_requests) * 100):.1f}%" if primary_requests else "0.0%"
+        aux_error_rate = f"{(aux_errors / max(1, aux_requests) * 100):.1f}%" if aux_requests else "0.0%"
+
+        p50 = p_percentiles["p50"] / 1000.0
+        p90 = p_percentiles["p90"] / 1000.0
+        p99 = p_percentiles["p99"] / 1000.0
+        a50 = a_percentiles["p50"] / 1000.0
+        a90 = a_percentiles["p90"] / 1000.0
+        a99 = a_percentiles["p99"] / 1000.0
+
+        token_str = (
+            f"Token 消耗: 输入 {token_in_total} / 输出 {token_out_total}"
+            if token_in_total is not None
+            else "Token 消耗: 输入 N/A / 输出 N/A"
+        )
+
+        return (
+            f"今日调用: {primary_requests + aux_requests} 次\n"
+            f"主模型: {primary_requests} 次, 错误率 {primary_error_rate}, "
+            f"p50/p90/p99={p50:.1f}s/{p90:.1f}s/{p99:.1f}s\n"
+            f"辅助模型: {aux_requests} 次, 错误率 {aux_error_rate}, "
+            f"p50/p90/p99={a50:.1f}s/{a90:.1f}s/{a99:.1f}s\n"
+            f"{token_str}"
+        )
+
+    async def _handle_admin_errors(self, user_id: str) -> str:
+        if not self._is_admin(user_id):
+            return "权限不足"
+        if not self.data_store:
+            return "模块未初始化"
+        from .wall_clock import persona_wall_now
+        since = (persona_wall_now(self.config.timezone) - timedelta(hours=24)).isoformat()
+        rows = await self.data_store.get_error_summary_since(since)
+        if not rows:
+            return "最近 24h 没有错误记录"
+        total = sum(count for _, count in rows)
+        lines = [f"最近 24h 错误: {total} 次"]
+        for status, count in rows:
+            lines.append(f"- {status}: {count} 次")
+        return "\n".join(lines)
 
     async def _handle_mute(self, user_id: str, mute: bool) -> str:
         """处理 mute/unmute 命令"""

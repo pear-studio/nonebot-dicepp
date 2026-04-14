@@ -4,8 +4,11 @@ LLM 路由器
 多模型路由 + 并发控制 + 配额管理
 """
 import asyncio
+from collections import deque
+import json
 from typing import List, Dict, Any, Optional, Callable, Awaitable
 import time
+import uuid
 import logging
 
 from .client import LLMClient
@@ -36,6 +39,8 @@ class LLMRouter:
         quota_check_enabled: bool = True,
         data_store: Any = None,
         config: Any = None,
+        trace_enabled: bool = False,
+        trace_max_age_days: int = 7,
     ):
         """
         初始化 LLM 路由器
@@ -53,6 +58,8 @@ class LLMRouter:
             quota_check_enabled: 是否启用配额检查
             data_store: 数据存储层（用于配额检查）
             config: 配置对象（用于白名单检查）
+            trace_enabled: 是否启用 trace 记录
+            trace_max_age_days: trace 保留天数
         """
         # 主模型客户端
         self.primary_client = LLMClient(
@@ -87,6 +94,15 @@ class LLMRouter:
             "primary": {"requests": 0, "errors": 0},
             "auxiliary": {"requests": 0, "errors": 0},
         }
+
+        # Phase 7a: sliding-window latency stats per tier (maxlen=100)
+        self._latency_window: Dict[str, deque] = {
+            "primary": deque(maxlen=100),
+            "auxiliary": deque(maxlen=100),
+        }
+        self.trace_enabled = trace_enabled
+        self.trace_max_age_days = trace_max_age_days
+        self._trace_tasks: set[asyncio.Task] = set()
 
     async def _check_quota(
         self,
@@ -241,6 +257,94 @@ class LLMRouter:
 
         return tier_name, client, user_config, actual_timeout
 
+    async def _execute_and_trace(
+        self,
+        client: LLMClient,
+        tier_name: str,
+        call_coro: Awaitable[tuple[str, dict]],
+        *,
+        session_id: str,
+        user_id: Optional[str],
+        group_id: Optional[str],
+        messages: List[Dict],
+        temperature: Optional[float],
+        model_tier: ModelTier,
+        is_tools: bool = False,
+    ) -> tuple[str, dict]:
+        """执行 LLM 调用并统一记录 trace"""
+        status = "ok"
+        error_str = ""
+        response_text = ""
+        tokens_in = 0
+        tokens_out = 0
+        metadata: Dict[str, Any] = {}
+        start_time = time.monotonic()
+
+        try:
+            content, metadata = await call_coro
+            response_text = content
+            tokens_in = metadata.get("tokens_input", 0)
+            tokens_out = metadata.get("tokens_output", 0)
+            latency = time.monotonic() - start_time
+
+            # Phase 4: 增加用量计数（仅主模型）
+            if model_tier == ModelTier.PRIMARY and user_id:
+                await self._increment_usage(user_id)
+
+            # 记录日志
+            if is_tools:
+                tool_info = ""
+                if metadata.get("tool_names"):
+                    tool_info = f" tools={metadata['tool_names']}"
+                logger.info(
+                    f"model={metadata.get('model', client.model)} tier={tier_name} "
+                    f"latency={latency:.1f}s tools_rounds={metadata.get('tool_rounds', 0)}{tool_info} "
+                    f"cached={metadata.get('cached_tokens', 0)} status=ok"
+                )
+            else:
+                logger.info(
+                    f"model={metadata.get('model', client.model)} tier={tier_name} "
+                    f"latency={latency:.1f}s tokens_in={tokens_in} "
+                    f"tokens_out={tokens_out} status=ok"
+                )
+
+            return content, metadata
+
+        except Exception as e:
+            self.stats[tier_name]["errors"] += 1
+            status = self._classify_error(e)
+            error_str = str(e)
+            latency = time.monotonic() - start_time
+
+            logger.warning(
+                f"model={client.model} tier={tier_name} "
+                f"latency={latency:.1f}s status=error error={e}"
+            )
+
+            raise
+        finally:
+            latency_ms = int((time.monotonic() - start_time) * 1000)
+            self._latency_window[tier_name].append(latency_ms)
+            tool_calls_for_trace: List[Dict] = []
+            if is_tools and metadata and metadata.get("tool_names"):
+                tool_calls_for_trace = [{"name": n} for n in metadata["tool_names"]]
+            self._maybe_record_trace(
+                session_id=session_id,
+                user_id=user_id,
+                group_id=group_id,
+                model=client.model,
+                tier=tier_name,
+                messages=messages,
+                response=response_text,
+                tool_calls=tool_calls_for_trace,
+                latency_ms=latency_ms,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                temperature=temperature,
+                status=status,
+                error=error_str,
+            )
+
     async def generate(
         self,
         messages: List[Dict[str, str]],
@@ -271,42 +375,27 @@ class LLMRouter:
             model_tier, user_id, group_id, timeout
         )
 
-        async with self.semaphore:
-            start_time = time.monotonic()
-            self.stats[tier_name]["requests"] += 1
+        session_id = f"{user_id or ''}:{group_id or ''}:{uuid.uuid4().hex[:16]}"
 
-            try:
-                content, metadata = await client.chat(
+        async with self.semaphore:
+            self.stats[tier_name]["requests"] += 1
+            content, _ = await self._execute_and_trace(
+                client,
+                tier_name,
+                client.chat(
                     messages=messages,
                     timeout=actual_timeout,
                     temperature=temperature,
-                )
-
-                latency = time.monotonic() - start_time
-
-                # Phase 4: 增加用量计数（仅主模型）
-                if model_tier == ModelTier.PRIMARY and user_id:
-                    await self._increment_usage(user_id)
-
-                # 记录日志
-                logger.info(
-                    f"model={metadata['model']} tier={tier_name} "
-                    f"latency={latency:.1f}s tokens_in={metadata['tokens_input']} "
-                    f"tokens_out={metadata['tokens_output']} status=ok"
-                )
-
-                return content
-
-            except Exception as e:
-                self.stats[tier_name]["errors"] += 1
-                latency = time.monotonic() - start_time
-
-                logger.warning(
-                    f"model={client.model} tier={tier_name} "
-                    f"latency={latency:.1f}s status=error error={e}"
-                )
-
-                raise
+                ),
+                session_id=session_id,
+                user_id=user_id,
+                group_id=group_id,
+                messages=messages,
+                temperature=temperature,
+                model_tier=model_tier,
+                is_tools=False,
+            )
+            return content
 
     # ── Phase 3: 工具调用
     async def generate_with_tools(
@@ -347,49 +436,30 @@ class LLMRouter:
             model_tier, user_id, group_id, timeout
         )
 
-        async with self.semaphore:
-            start_time = time.monotonic()
-            self.stats[tier_name]["requests"] += 1
+        session_id = f"{user_id or ''}:{group_id or ''}:{uuid.uuid4().hex[:16]}"
 
-            try:
-                content, metadata = await client.chat_with_tools(
+        async with self.semaphore:
+            self.stats[tier_name]["requests"] += 1
+            content, metadata = await self._execute_and_trace(
+                client,
+                tier_name,
+                client.chat_with_tools(
                     messages=messages,
                     tools=tools,
                     tool_executor=tool_executor,
                     max_tool_rounds=max_tool_rounds,
                     timeout=actual_timeout,
                     temperature=temperature,
-                )
-
-                latency = time.monotonic() - start_time
-
-                # Phase 4: 增加用量计数（仅主模型）
-                if model_tier == ModelTier.PRIMARY and user_id:
-                    await self._increment_usage(user_id)
-
-                # 记录日志
-                tool_info = ""
-                if metadata.get("tool_names"):
-                    tool_info = f" tools={metadata['tool_names']}"
-
-                logger.info(
-                    f"model={metadata.get('model', client.model)} tier={tier_name} "
-                    f"latency={latency:.1f}s tools_rounds={metadata.get('tool_rounds', 0)}{tool_info} "
-                    f"cached={metadata.get('cached_tokens', 0)} status=ok"
-                )
-
-                return content, metadata
-
-            except Exception as e:
-                self.stats[tier_name]["errors"] += 1
-                latency = time.monotonic() - start_time
-
-                logger.warning(
-                    f"model={client.model} tier={tier_name} "
-                    f"latency={latency:.1f}s status=error error={e}"
-                )
-
-                raise
+                ),
+                session_id=session_id,
+                user_id=user_id,
+                group_id=group_id,
+                messages=messages,
+                temperature=temperature,
+                model_tier=model_tier,
+                is_tools=True,
+            )
+            return content, metadata
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
@@ -397,3 +467,100 @@ class LLMRouter:
             "primary": self.stats["primary"].copy(),
             "auxiliary": self.stats["auxiliary"].copy(),
         }
+
+    _RATE_LIMIT_KEYWORDS = ("rate limit", "rate_limit_error", "ratelimitreached", "insufficient_quota", "429")
+    _AUTH_KEYWORDS = ("authentication", "unauthorized", "401", "403")
+    _CONTENT_FILTER_KEYWORDS = ("content_filter", "moderation", "content policy")
+
+    @staticmethod
+    def _classify_error(e: Exception) -> str:
+        # TODO: 长期应由 LLMClient 层返回结构化错误码，减少字符串匹配依赖
+        msg = str(e).lower()
+        if isinstance(e, asyncio.TimeoutError):
+            return "timeout"
+        if any(k in msg for k in LLMRouter._RATE_LIMIT_KEYWORDS):
+            return "rate_limit"
+        if any(k in msg for k in LLMRouter._AUTH_KEYWORDS):
+            return "auth_error"
+        if any(k in msg for k in LLMRouter._CONTENT_FILTER_KEYWORDS):
+            return "content_filter"
+        return "unknown"
+
+    def get_latency_percentiles(self, tier: str = "primary") -> Dict[str, float]:
+        window = self._latency_window.get(tier)
+        if not window:
+            return {"p50": 0.0, "p90": 0.0, "p99": 0.0}
+        sorted_vals = sorted(window)
+        n = len(sorted_vals)
+
+        def _p(p: float) -> float:
+            # Excel PERCENTILE.INC: rank = (n - 1) * p + 1, 线性插值
+            if n == 1:
+                return float(sorted_vals[0])
+            rank = (n - 1) * p + 1
+            k = int(rank)
+            d = rank - k
+            if k >= n:
+                return float(sorted_vals[-1])
+            if d == 0:
+                return float(sorted_vals[k - 1])
+            return sorted_vals[k - 1] * (1 - d) + sorted_vals[k] * d
+
+        return {"p50": _p(0.5), "p90": _p(0.9), "p99": _p(0.99)}
+
+    def get_error_summary(self) -> Dict[str, int]:
+        return {
+            "primary_errors": self.stats["primary"]["errors"],
+            "auxiliary_errors": self.stats["auxiliary"]["errors"],
+        }
+
+    def _maybe_record_trace(
+        self,
+        session_id: str,
+        user_id: Optional[str],
+        group_id: Optional[str],
+        model: str,
+        tier: str,
+        messages: List[Dict],
+        response: str,
+        tool_calls: List[Dict],
+        latency_ms: int,
+        tokens_in: int,
+        tokens_out: int,
+        temperature: Optional[float],
+        status: str,
+        error: str,
+    ) -> None:
+        if not getattr(self, "trace_enabled", False):
+            return
+        if not self.data_store:
+            return
+        from ..data.models import LLMTraceRecord
+
+        trace = LLMTraceRecord(
+            session_id=session_id,
+            user_id=user_id or "",
+            group_id=group_id or "",
+            model=model,
+            tier=tier,
+            messages=json.dumps(messages, ensure_ascii=False, default=str),
+            response=response,
+            tool_calls=json.dumps(tool_calls, ensure_ascii=False, default=str),
+            latency_ms=latency_ms,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            temperature=temperature,
+            status=status,
+            error=error,
+        )
+        # fire-and-forget; failure must not disturb the conversation
+        task = asyncio.create_task(self._write_trace(trace))
+        self._trace_tasks.add(task)
+        task.add_done_callback(self._trace_tasks.discard)
+
+    async def _write_trace(self, trace: Any) -> None:
+        try:
+            if self.data_store:
+                await self.data_store.add_llm_trace(trace)
+        except Exception as e:
+            logger.warning(f"写入 LLM trace 失败: {e}")

@@ -174,6 +174,41 @@ CREATE TABLE IF NOT EXISTS persona_user_llm_config (
 );
 """
 
+# LLM Trace 表 (Phase 7a)
+CREATE_LLM_TRACES_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_llm_traces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    user_id TEXT DEFAULT '',
+    group_id TEXT DEFAULT '',
+    model TEXT NOT NULL,
+    tier TEXT NOT NULL,
+    messages TEXT NOT NULL,
+    response TEXT NOT NULL,
+    tool_calls TEXT DEFAULT '',
+    latency_ms INTEGER,
+    tokens_in INTEGER DEFAULT 0,
+    tokens_out INTEGER DEFAULT 0,
+    temperature REAL,
+    status TEXT NOT NULL,
+    error TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+# 为未来按 session 调试预留的索引
+CREATE_LLM_TRACES_INDEX_SESSION = """
+CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_session ON persona_llm_traces(session_id, created_at DESC);
+"""
+
+CREATE_LLM_TRACES_INDEX_USER = """
+CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_user ON persona_llm_traces(user_id, created_at DESC);
+"""
+
+CREATE_LLM_TRACES_INDEX_CREATED_AT = """
+CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_created_at ON persona_llm_traces(created_at);
+"""
+
 ALL_MIGRATIONS = [
     CREATE_MESSAGES_TABLE,
     CREATE_MESSAGES_INDEX,
@@ -190,4 +225,8 @@ ALL_MIGRATIONS = [
     CREATE_GROUP_ACTIVITY_TABLE,
     CREATE_USER_MUTE_TABLE,
     CREATE_USER_LLM_CONFIG_TABLE,
+    CREATE_LLM_TRACES_TABLE,
+    CREATE_LLM_TRACES_INDEX_SESSION,
+    CREATE_LLM_TRACES_INDEX_USER,
+    CREATE_LLM_TRACES_INDEX_CREATED_AT,
 ]

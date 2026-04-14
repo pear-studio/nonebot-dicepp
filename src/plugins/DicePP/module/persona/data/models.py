@@ -144,6 +144,7 @@ class ScoreEvent(BaseModel):
     composite_before: float
     composite_after: float
     reason: str = ""  # 评分原因/摘要
+    conversation_digest: str = ""  # Phase 7a
     created_at: Optional[datetime] = None
 
 
@@ -161,6 +162,8 @@ class DailyEvent(BaseModel):
     event_type: str  # "system" | "scheduled"
     description: str  # 事件描述
     reaction: str = ""  # 角色反应
+    system_prompt_digest: str = ""  # Phase 7a
+    raw_response: str = ""  # Phase 7a
     created_at: Optional[datetime] = None
 
 
@@ -172,6 +175,8 @@ class Observation(BaseModel):
     who_names: Dict[str, str]  # user_id -> nickname
     what: str  # 发生了什么
     why_remember: str  # 为什么值得记住
+    source_messages_count: int = 0   # Phase 7a
+    extract_prompt_digest: str = "" # Phase 7a
     observed_at: Optional[datetime] = None
 
 
@@ -188,3 +193,23 @@ class GroupActivity(BaseModel):
     last_interaction_at: Optional[datetime] = None  # 最后互动时间（@bot/AI回复）
     last_content_at: Optional[datetime] = None      # 最后内容时间（群聊观察触发）
     content_count_today: int = 0                     # 今日内容计数（自然日）
+
+
+class LLMTraceRecord(BaseModel):
+    """LLM 调用 Trace 记录"""
+    id: Optional[int] = None
+    session_id: str
+    user_id: str = ""
+    group_id: str = ""
+    model: str
+    tier: str
+    messages: str  # JSON
+    response: str
+    tool_calls: str = ""  # JSON
+    latency_ms: Optional[int] = None
+    tokens_in: int = 0
+    tokens_out: int = 0
+    temperature: Optional[float] = None
+    status: str
+    error: str = ""
+    created_at: Optional[datetime] = None

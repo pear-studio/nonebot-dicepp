@@ -175,6 +175,11 @@ class PersonaConfig(BaseModel):
     quota_exceeded_message: str = "今日配额已用完（{limit}次），请使用 `.ai key config` 配置自己的 API Key"
     allow_user_key: bool = True
 
+    # ── Phase 7a: LLM Trace & Observability
+    trace_enabled: bool = False
+    trace_max_age_days: int = 7
+    observation_store_raw_digest: bool = False
+
     # ── Phase 2: 厌倦拒绝机制配置
     relationship_refuse_enabled: bool = True      # 是否开启好感度低时的拒绝回复
     relationship_refuse_prob_base: float = 0.5    # 拒绝概率基础值（默认50%）
