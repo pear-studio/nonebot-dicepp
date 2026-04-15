@@ -575,6 +575,68 @@ class PersonaOrchestrator:
             new_profile = UserProfile(user_id=user_id, facts=new_facts)
             await self.data_store.save_user_profile(new_profile)
 
+    async def _fetch_short_term_history(
+        self,
+        user_id: str,
+        group_id: str,
+        limit: int = 15,
+    ) -> List[Dict[str, str]]:
+        """获取并格式化近期对话历史"""
+        history = await self.data_store.get_recent_messages(user_id, group_id, limit=limit)
+        return [{"role": msg.role, "content": msg.content} for msg in history]
+
+    def _resolve_warmth_label(self, user_id: str, rel: Optional[RelationshipState]) -> str:
+        """根据关系状态（含衰减计算）解析温暖度标签"""
+        initial = float(self.character.extensions.initial_relationship)
+
+        if rel:
+            if self.decay_calculator:
+                rel = self.decay_calculator.effective_relationship(rel, initial)
+            _, warmth_label = rel.get_warmth_level(self.character.get_warmth_labels())
+        else:
+            temp_rel = RelationshipState(
+                user_id=user_id, intimacy=initial, passion=initial,
+                trust=initial, secureness=initial
+            )
+            _, warmth_label = temp_rel.get_warmth_level(self.character.get_warmth_labels())
+
+        return warmth_label
+
+    async def _build_diary_context(self) -> str:
+        """构建日记/事件上下文：优先今日事件，fallback 昨日日记"""
+        wall = persona_wall_now(self.config.timezone)
+        today = wall.strftime("%Y-%m-%d")
+        yesterday = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
+        max_diary_len = self.config.max_diary_context_chars
+
+        events = await self.data_store.get_daily_events(today)
+        if events:
+            valid_events = [e for e in events if e.description and e.description.strip()]
+            valid_events.sort(key=lambda e: e.created_at or datetime.min, reverse=True)
+
+            if valid_events:
+                descriptions = [e.description for e in valid_events]
+                diary_context = "今天发生的事：" + "；".join(descriptions)
+                if len(diary_context) > max_diary_len:
+                    diary_context = diary_context[:max_diary_len].rsplit('；', 1)[0] + "..."
+                return diary_context
+
+        diary = await self.data_store.get_diary(yesterday)
+        if diary:
+            if len(diary) > max_diary_len:
+                diary = diary[:max_diary_len] + "..."
+            return "昨天的日记：" + diary
+
+        return ""
+
+    def _build_lore_sections(
+        self,
+        history_dicts: List[Dict[str, str]],
+        current_message: str,
+    ) -> Dict[str, List[str]]:
+        """构建世界书 lore 段落"""
+        return self.context_builder._build_lore_text(history_dicts, current_message)
+
     async def _build_messages(
         self,
         user_id: str,
@@ -584,61 +646,14 @@ class PersonaOrchestrator:
         if not self.data_store or not self.character or not self.context_builder:
             return [{"role": "user", "content": current_message}]
 
-        history = await self.data_store.get_recent_messages(user_id, group_id, limit=15)
-        history_dicts = [{"role": msg.role, "content": msg.content} for msg in history]
+        history_dicts = await self._fetch_short_term_history(user_id, group_id)
         profile = await self.data_store.get_user_profile(user_id)
         rel = await self.data_store.get_relationship(user_id, group_id)
-
-        warmth_label = "友好"
-        if rel:
-            initial = float(self.character.extensions.initial_relationship)
-            if self.decay_calculator:
-                rel = self.decay_calculator.effective_relationship(rel, initial)
-            _, warmth_label = rel.get_warmth_level(self.character.get_warmth_labels())
-        else:
-            initial = float(self.character.extensions.initial_relationship)
-            temp_rel = RelationshipState(
-                user_id=user_id, intimacy=initial, passion=initial,
-                trust=initial, secureness=initial
-            )
-            _, warmth_label = temp_rel.get_warmth_level(self.character.get_warmth_labels())
-
-        # 获取今日生活事件或昨日日记
-        wall = persona_wall_now(self.config.timezone)
-        today = wall.strftime("%Y-%m-%d")
-        yesterday = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
-
-        events = await self.data_store.get_daily_events(today)
-        if events:
-            # 过滤空描述并按时间排序（最新的在前）
-            valid_events = [e for e in events if e.description and e.description.strip()]
-            valid_events.sort(key=lambda e: e.created_at or datetime.min, reverse=True)
-
-            if valid_events:
-                descriptions = [e.description for e in valid_events]
-                diary_context = "今天发生的事：" + "；".join(descriptions)
-
-                # 统一截断逻辑
-                max_diary_len = self.config.max_diary_context_chars
-                if len(diary_context) > max_diary_len:
-                    # 从最后一个完整事件处截断
-                    diary_context = diary_context[:max_diary_len].rsplit('；', 1)[0] + "..."
-            else:
-                diary_context = ""
-        else:
-            # 获取昨天日记
-            diary = await self.data_store.get_diary(yesterday)
-            if diary:
-                # 限制日记长度避免超出上下文预算
-                max_diary_len = self.config.max_diary_context_chars
-                if len(diary) > max_diary_len:
-                    diary = diary[:max_diary_len] + "..."
-                diary_context = "昨天的日记：" + diary
-            else:
-                diary_context = ""
+        warmth_label = self._resolve_warmth_label(user_id, rel)
+        diary_context = await self._build_diary_context()
+        lore_sections = self._build_lore_sections(history_dicts, current_message)
 
         if self.context_builder:
-            lore_sections = self.context_builder._build_lore_text(history_dicts, current_message)
             debug_info = self.context_builder.build_debug_info(
                 short_term_history=history_dicts,
                 user_profile=profile,
