@@ -98,47 +98,6 @@ python -m DicePP.shell rm <scenario_name>
 
 ---
 
-## Agent Team 架构
-
-**所有非平凡任务必须以 Agent Team 为执行单位。**
-
-```
-用户
- │
- └── Leader（项目负责人）— 统筹、决策、统一汇报窗口
-      │
-      ├── Designer（设计主管）— 需求分析、方案设计
-      ├── Programmer（开发主管）— 代码实现、技术决策
-      ├── QA（测试主管）— 测试质量、验证闭环
-      └── Reviewer（审查专员）— 审查实现、触发验证、督促质量
-```
-
-### 角色职责与边界
-
-| 角色 | 职责 | 可操作 | 不可操作 |
-|------|------|--------|----------|
-| **Leader** | 目标管理、进度统筹、资源协调、决策拍板、**统一对外汇报** | 读一切、写状态文件、协调任务 | 不直接修改代码 |
-| **Designer** | 需求分析、方案设计、架构规划 | `docs/`、设计文档、接口定义 | `src/`、`tests/` |
-| **Programmer** | 代码实现、技术决策、自测验证 | `src/`、`pyproject.toml`、工具脚本 | `tests/`（由 QA 负责） |
-| **QA** | 测试质量把关、测试路径覆盖、验证闭环 | `tests/`、测试配置 | `src/`、测试框架本身 |
-| **Reviewer** | 审查实现结果、触发验证、督促质量 | 读一切、写 `.agent/` 审查报告 | **任何代码文件** |
-
-### 执行规则
-
-- **Team 启动**：`TeamCreate` → `TaskCreate` → 分配给对应角色
-- **spawn subagent 时使用 `mode: "bypassPermissions"`** 继承当前权限
-- **工作流转**：
-  1. Programmer 完成代码后 → 主动提交 Reviewer 审查
-  2. Reviewer 独立运行 `uv run pytest` 验证 → 给出 PASS / NEEDS_FIX / REJECT
-  3. Reviewer 通过后 → 上报 Leader，由 Leader 统一向用户汇报
-- **状态维护**：Leader 负责维护 `.temp/agents-team/<任务名称>/progress.md`，记录当前任务、完成节点、阻塞项
-
-### 汇报关系
-
-- **Leader 是唯一对用户的直接接口**
-- Designer、Programmer、QA、Reviewer 统一向 Leader 汇报
-- 各角色不要直接向用户发送碎片化的进度消息
-
 ### 严禁行为（全员适用）
 
 1. **禁止绕过问题**：不可用临时补丁、注释逻辑、防御性空检查、空 catch 块来回避根因。
