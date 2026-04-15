@@ -134,9 +134,13 @@ class PersonaConfig(BaseModel):
     proactive_max_shares: int = 10
     # 生活事件加入分享队列后，仅在此时间窗口内继续选取并发送（与 implementation.md 一致）
     proactive_share_time_window_minutes: int = 15
+    proactive_event_share_delay_min: int = 1
+    proactive_event_share_delay_max: int = 5
+    proactive_event_share_threshold: float = 0.5
     proactive_miss_enabled: bool = True
     proactive_miss_min_hours: int = 72
     proactive_miss_min_score: float = 40.0
+    # DEPRECATED: 定时事件配置已迁移到角色卡 extensions.scheduled_events
     proactive_greeting_schedule: List[ProactiveGreetingEntry] = Field(
         default_factory=_default_proactive_greeting_schedule
     )

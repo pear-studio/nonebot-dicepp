@@ -402,6 +402,48 @@ class LLMRouter:
             )
             return content
 
+    async def generate_with_forced_tool(
+        self,
+        messages: List[Dict],
+        tools: List[Dict],
+        tool_name: str,
+        model_tier: ModelTier = ModelTier.AUXILIARY,
+        timeout: Optional[int] = None,
+        temperature: Optional[float] = None,
+        user_id: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> tuple[str, dict]:
+        """
+        强制调用指定工具，只发一轮请求。
+        """
+        tier_name, client, user_config, actual_timeout = await self._prepare_request(
+            model_tier, user_id, group_id, timeout
+        )
+
+        session_id = f"{user_id or ''}:{group_id or ''}:{uuid.uuid4().hex[:16]}"
+
+        async with self.semaphore:
+            self.stats[tier_name]["requests"] += 1
+            content, metadata = await self._execute_and_trace(
+                client,
+                tier_name,
+                client.generate_with_forced_tool(
+                    messages=messages,
+                    tools=tools,
+                    tool_name=tool_name,
+                    timeout=actual_timeout,
+                    temperature=temperature,
+                ),
+                session_id=session_id,
+                user_id=user_id,
+                group_id=group_id,
+                messages=messages,
+                temperature=temperature,
+                model_tier=model_tier,
+                is_tools=True,
+            )
+            return content, metadata
+
     # ── Phase 3: 工具调用
     async def generate_with_tools(
         self,

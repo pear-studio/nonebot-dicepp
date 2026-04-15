@@ -76,7 +76,6 @@ class PersonaDataStore:
         await self._ensure_group_activity_content_columns()
         await self._ensure_relationship_decay_watermark_column()
         await self._ensure_score_history_conversation_digest()
-        await self._ensure_daily_events_debug_columns()
         await self._ensure_observations_debug_columns()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
@@ -128,19 +127,6 @@ class PersonaDataStore:
         if "conversation_digest" not in col_names:
             await self.db.execute(
                 "ALTER TABLE persona_score_history ADD COLUMN conversation_digest TEXT DEFAULT ''"
-            )
-
-    async def _ensure_daily_events_debug_columns(self) -> None:
-        async with self.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "system_prompt_digest" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_daily_events ADD COLUMN system_prompt_digest TEXT DEFAULT ''"
-            )
-        if "raw_response" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_daily_events ADD COLUMN raw_response TEXT DEFAULT ''"
             )
 
     async def _ensure_observations_debug_columns(self) -> None:
@@ -676,6 +662,8 @@ class PersonaDataStore:
         event_type: str,
         description: str,
         reaction: str = "",
+        share_desire: float = 0.0,
+        duration_minutes: int = 0,
         system_prompt_digest: str = "",
         raw_response: str = "",
     ) -> None:
@@ -684,14 +672,17 @@ class PersonaDataStore:
             """
             INSERT INTO persona_daily_events (
                 date, event_type, description, reaction,
+                share_desire, duration_minutes,
                 system_prompt_digest, raw_response, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 date,
                 event_type,
                 description,
                 reaction,
+                share_desire,
+                duration_minutes,
                 system_prompt_digest,
                 raw_response,
                 self._wall_now().isoformat(),
@@ -703,7 +694,8 @@ class PersonaDataStore:
         """获取某天的所有事件"""
         async with self.db.execute(
             """
-            SELECT event_type, description, reaction, created_at,
+            SELECT event_type, description, reaction, share_desire,
+                   duration_minutes, created_at,
                    system_prompt_digest, raw_response
             FROM persona_daily_events
             WHERE date = ?
@@ -718,9 +710,11 @@ class PersonaDataStore:
                     event_type=row[0],
                     description=row[1],
                     reaction=row[2],
-                    created_at=datetime.fromisoformat(row[3]) if row[3] else None,
-                    system_prompt_digest=row[4] or "",
-                    raw_response=row[5] or "",
+                    share_desire=row[3] if row[3] is not None else 0.0,
+                    duration_minutes=row[4] if row[4] is not None else 0,
+                    created_at=datetime.fromisoformat(row[5]) if row[5] else None,
+                    system_prompt_digest=row[6] or "",
+                    raw_response=row[7] or "",
                 )
                 for row in rows
             ]

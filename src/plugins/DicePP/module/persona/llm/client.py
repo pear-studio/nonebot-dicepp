@@ -141,6 +141,84 @@ class LLMClient:
         # 所有重试都失败了
         raise last_error or Exception("LLM request failed after retries")
 
+    async def generate_with_forced_tool(
+        self,
+        messages: List[Dict],
+        tools: List[Dict],
+        tool_name: str,
+        timeout: int = 30,
+        temperature: Optional[float] = None,
+        max_retries: int = 3,
+    ) -> tuple[str, dict]:
+        """
+        强制调用指定工具，只发一轮请求，直接返回工具参数 JSON 字符串。
+        """
+        client = self._get_client()
+        last_error = None
+        retry_delay = 2
+
+        for attempt in range(max_retries + 1):
+            try:
+                start_time = time.monotonic()
+                create_kwargs: Dict[str, Any] = {
+                    "model": self.model,
+                    "messages": messages,
+                    "tools": tools,
+                    "tool_choice": {"type": "function", "function": {"name": tool_name}},
+                }
+                if temperature is not None:
+                    create_kwargs["temperature"] = temperature
+
+                response = await asyncio.wait_for(
+                    client.chat.completions.create(**create_kwargs),
+                    timeout=timeout
+                )
+                latency = time.monotonic() - start_time
+
+                message = response.choices[0].message
+                if message.tool_calls:
+                    tc = message.tool_calls[0]
+                    args = tc.function.arguments
+                    metadata = {
+                        "latency": latency,
+                        "model": self.model,
+                        "tool_name": tc.function.name,
+                        "tool_names": [tc.function.name],
+                        "tokens_input": response.usage.prompt_tokens if response.usage else 0,
+                        "tokens_output": response.usage.completion_tokens if response.usage else 0,
+                    }
+                    return args, metadata
+
+                # 如果没有 tool_calls，返回空 JSON 让上层降级
+                return "{}", {
+                    "latency": latency,
+                    "model": self.model,
+                    "tokens_input": response.usage.prompt_tokens if response.usage else 0,
+                    "tokens_output": response.usage.completion_tokens if response.usage else 0,
+                }
+
+            except asyncio.TimeoutError as e:
+                last_error = e
+                if attempt < max_retries:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                continue
+            except Exception as e:
+                last_error = e
+                error_msg = str(e).lower()
+                retryable = any(keyword in error_msg for keyword in [
+                    "rate limit", "429", "service unavailable", "503",
+                    "timeout", "connection", "temporarily"
+                ])
+                if retryable and attempt < max_retries:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    raise
+
+        raise last_error or Exception("LLM forced tool request failed after retries")
+
     # ── Phase 3: 工具调用
     async def chat_with_tools(
         self,

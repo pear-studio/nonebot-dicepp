@@ -5,6 +5,7 @@
 """
 import logging
 import random
+from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -12,9 +13,16 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("persona.character")
 
 
+class SharePolicy(str, Enum):
+    REQUIRED = "required"
+    OPTIONAL = "optional"
+    NEVER = "never"
+
+
 class ScheduledEventConfig(BaseModel):
     type: str
     time_range: str
+    share: SharePolicy = SharePolicy.OPTIONAL
 
 
 class PersonaExtensions(BaseModel):

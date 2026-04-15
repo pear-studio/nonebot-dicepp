@@ -102,6 +102,10 @@ CREATE TABLE IF NOT EXISTS persona_daily_events (
     event_type TEXT NOT NULL,
     description TEXT NOT NULL,
     reaction TEXT DEFAULT '',
+    share_desire REAL DEFAULT 0.0,
+    duration_minutes INTEGER DEFAULT 0,
+    system_prompt_digest TEXT DEFAULT '',
+    raw_response TEXT DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """

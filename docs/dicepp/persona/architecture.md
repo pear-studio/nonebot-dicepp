@@ -106,7 +106,7 @@ Command.tick() 每秒调用
       - 存入 persona_daily_events
       - 将事件加入 ProactiveScheduler 分享队列
     → ProactiveScheduler.tick()（60秒节流）
-      - _check_scheduled_events(): 定时问候/作息事件
+      - _check_scheduled_events(): 按角色卡 `scheduled_events` 配置触发的定时事件（问候/作息等）
       - _check_missed_users(): 想念触发（≥3天未互动）
       - 按好感度优先级选择分享目标
       - 生成主动消息并返回
@@ -147,7 +147,7 @@ Command.tick_daily() 每天调用
 #### 模型
 
 - **`Character`**：完整角色卡模型，包含 SillyTavern V2 标准字段 + `extensions.persona` 扩展
-- **`PersonaExtensions`**：控制好感度系统与生活模拟的参数（初始值、标签、事件时间分布等）
+- **`PersonaExtensions`**：控制好感度系统与生活模拟的参数（初始值、标签、事件时间分布、`scheduled_events` 分享策略等）
 - **`CharacterBook` / `LoreEntry`**：世界书引擎，支持关键词触发、selective 二次筛选、优先级排序、token 预算控制
 
 #### 加载
@@ -220,7 +220,7 @@ Command.tick_daily() 每天调用
 | `persona_user_profiles` | 用户档案（跨群共享）| `UserProfile` |
 | `persona_user_relationships` | 四维好感度 | `RelationshipState` |
 | `persona_score_history` | 评分审计日志 | `ScoreEvent` |
-| `persona_daily_events` | 当日生活事件 | `DailyEvent` |
+| `persona_daily_events` | 当日生活事件（含 `share_desire`、`duration_minutes`） | `DailyEvent` |
 | `persona_diary` | 每日日记 | `DiaryEntry` |
 | `persona_character_state` | 角色永久状态（LLM 维护的文本）| `CharacterState` |
 | `persona_observations` | 群聊观察记录 | `Observation` |
@@ -235,6 +235,7 @@ Command.tick_daily() 每天调用
 - `migrations.py` 中定义所有 `CREATE TABLE/INDEX` 语句
 - `ALL_MIGRATIONS` 列表在 `PersonaDataStore.ensure_tables()` 中顺序执行
 - 对已存在数据库的条件 `ALTER` 放在 `PersonaDataStore._apply_runtime_schema_patches()` 中
+- **禁止在 `store.py` 中为尚未上线的表添加运行时 patch**：新表 schema 变更只通过 `migrations.py` 完成
 - **两处须同步维护**
 
 ---
@@ -281,6 +282,7 @@ Command.tick_daily() 每天调用
 - 每个槽位 ±`event_jitter_minutes` 随机抖动
 - `tick()` 中当前时间与计划槽位差 ≤ `character_life_jitter_minutes` 时触发
 - 事件生成后调用 `ProactiveScheduler.add_event_to_share()` 入队
+- 事件包含 `share_desire`（分享欲望 0~1）和 `duration_minutes`（持续时间，0 表示瞬时）
 
 #### `ObservationBuffer`
 
@@ -304,11 +306,11 @@ Command.tick_daily() 每天调用
 #### `EventGenerationAgent`
 
 包含三种生成任务：
-- `generate_event()`: System Agent，生成客观生活事件（20-50字）
-- `generate_reaction()`: Character Agent，生成角色内心反应（30-80字）
+- `generate_event_result(context)`: System Agent，通过 `record_event` 强制工具调用生成结构化事件，返回 `EventGenerationResult`（含 `description` 和 `duration_minutes`）
+- `generate_event_reaction(event, character_name, character_description, share_policy)`: Character Agent，通过 `record_reaction` 强制工具调用生成结构化反应，返回 `EventReactionResult`（含 `reaction` 和 `share_desire`）
 - `generate_diary()`: Character Agent，总结全天事件为日记（100-300字）
 
-均使用辅助模型，失败时返回安全兜底文本。
+旧方法 `generate_event()` 和 `generate_reaction()` 已标记为 DEPRECATED，保留兼容直至所有调用方迁移完成。均使用辅助模型，失败时返回安全兜底文本。
 
 ---
 
@@ -362,7 +364,7 @@ Persona 模块采用 **naive local datetime** 策略：
 | 角色卡格式 | YAML，兼容 SillyTavern V2 | 手写友好，可复用社区生态 |
 | 好感度计算 | 四维加权 + 六区间标签 | 自然渐变，标签由角色卡定义 |
 | 时间衰减 | 惰性计算 + 每日批处理 | 避免每次对话都写库 |
-| 主动消息触发 | 生活事件驱动 + 想念触发 + 定时问候 | 有"由头"更自然 |
+| 主动消息触发 | 生活事件驱动 + 想念触发 + 角色卡定时事件 | 有"由头"更自然 |
 | 群聊观察 | 动态阈值 + 批量提取 | 适应跑团消息波动，节省 API 成本 |
 | LLM 容错 | 3 级 JSON 解析 + zero-delta 兜底 | 提高系统鲁棒性 |
 | 并发控制 | asyncio.Semaphore | 便宜模型通常并发低，排队比报错好 |

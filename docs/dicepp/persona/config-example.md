@@ -65,7 +65,10 @@
 | `proactive_miss_min_hours` | int | 72 | 想念触发最小空闲时间 |
 | `proactive_miss_min_score` | float | 40.0 | 想念触发最小好感度 |
 | `proactive_share_time_window_minutes` | int | 15 | 生活事件入队后仅在此窗口内继续分享 |
-| `proactive_greeting_schedule` | list | 见 `global.json` | 定时问候：`event_type` 为日内去重键；`time_range` 为**同一自然日内** `HH:MM-HH:MM`（闭区间），**不支持跨午夜**，跨日请拆成多条 |
+| `proactive_event_share_delay_min` | int | 1 | 事件分享延迟的最小值（分钟） |
+| `proactive_event_share_delay_max` | int | 5 | 事件分享延迟的最大值（分钟） |
+| `proactive_event_share_threshold` | float | 0.5 | 事件分享欲望阈值，大于等于该值的事件才会被分享（`share_desire`） |
+| `proactive_greeting_schedule` | list | 见 `global.json` | **已弃用（DEPRECATED）**。定时事件配置已迁移到角色卡 `extensions.persona.scheduled_events`，该字段被调度器 redesign 忽略 |
 
 ---
 

@@ -64,10 +64,11 @@ warmth_labels: ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
 
 用于配置"一定触发"的日常事件（如问候、作息）。每个条目包含：
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `type` | string | 事件类型标识，用于日内去重。 |
-| `time_range` | string | `HH:MM-HH:MM` 格式，闭区间，表示事件可能触发的时间段。**不支持跨午夜**。 |
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `type` | string | - | 事件类型标识，用于日内去重。 |
+| `time_range` | string | - | `HH:MM-HH:MM` 格式，闭区间，表示事件可能触发的时间段。**不支持跨午夜**。 |
+| `share` | string | `optional` | 事件分享策略：`required`（必须分享）、`optional`（按分享欲望和阈值判断是否分享）、`never`（不分享）。 |
 
 #### `refuse_messages` 拒绝回复语
 
@@ -149,14 +150,19 @@ extensions:
     scheduled_events:
       - type: "wake_up"
         time_range: "07:00-07:30"
+        share: "optional"
       - type: "morning_greeting"
         time_range: "08:00-08:30"
+        share: "required"
       - type: "lunch_break"
         time_range: "12:00-13:00"
+        share: "optional"
       - type: "off_work"
         time_range: "18:00-19:00"
+        share: "optional"
       - type: "night_reading"
         time_range: "21:00-22:00"
+        share: "never"
 
     # 好感度极低时的拒绝回复语（可选）
     # refuse_messages:

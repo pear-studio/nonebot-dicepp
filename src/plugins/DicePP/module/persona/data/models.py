@@ -162,6 +162,8 @@ class DailyEvent(BaseModel):
     event_type: str  # "system" | "scheduled"
     description: str  # 事件描述
     reaction: str = ""  # 角色反应
+    share_desire: float = 0.0  # 分享欲望值 0~1
+    duration_minutes: int = 0  # 持续时间（分钟），0 表示瞬时
     system_prompt_digest: str = ""  # Phase 7a
     raw_response: str = ""  # Phase 7a
     created_at: Optional[datetime] = None

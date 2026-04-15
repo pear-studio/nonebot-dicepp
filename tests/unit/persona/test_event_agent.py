@@ -16,6 +16,8 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.agents.event_agent import (
     EventGenerationAgent,
     EventContext,
+    EventGenerationResult,
+    EventReactionResult,
 )
 from plugins.DicePP.module.persona.data.models import ModelTier
 
@@ -290,6 +292,245 @@ class TestEventGenerationAgent:
             )
 
             assert result == "今天没什么特别的事发生。"
+
+
+class TestGenerateEventResult:
+    """测试 generate_event_result Function Calling 路径"""
+
+    @pytest.fixture
+    def mock_llm_router_forced(self):
+        router = MagicMock()
+        router.generate_with_forced_tool = AsyncMock()
+        return router
+
+    @pytest.fixture
+    def agent_forced(self, mock_llm_router_forced):
+        return EventGenerationAgent(mock_llm_router_forced)
+
+    @pytest.mark.asyncio
+    async def test_generate_event_result_success(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"description": "窗外下雨了", "duration_minutes": 30}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_result(
+            EventContext(
+                character_name="小雨",
+                character_description="温柔的少女",
+                world="",
+                scenario="",
+                recent_diaries=[],
+                today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
+            )
+        )
+
+        assert result.description == "窗外下雨了"
+        assert result.duration_minutes == 30
+        mock_llm_router_forced.generate_with_forced_tool.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_generate_event_result_fallback(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.side_effect = Exception("forced tool error")
+
+        result = await agent_forced.generate_event_result(
+            EventContext(
+                character_name="小雨",
+                character_description="温柔的少女",
+                world="",
+                scenario="",
+                recent_diaries=[],
+                today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
+            )
+        )
+
+        assert "休息" in result.description
+        assert result.duration_minutes == 0
+
+    @pytest.mark.asyncio
+    async def test_generate_event_result_clamp_duration_max(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"description": "测试中", "duration_minutes": 3000}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_result(
+            EventContext(
+                character_name="小雨",
+                character_description="温柔的少女",
+                world="",
+                scenario="",
+                recent_diaries=[],
+                today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
+            )
+        )
+
+        assert result.duration_minutes == 2880
+
+    @pytest.mark.asyncio
+    async def test_generate_event_result_clamp_duration_min(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"description": "测试中", "duration_minutes": -10}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_result(
+            EventContext(
+                character_name="小雨",
+                character_description="温柔的少女",
+                world="",
+                scenario="",
+                recent_diaries=[],
+                today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
+            )
+        )
+
+        assert result.duration_minutes == 0
+
+    @pytest.mark.asyncio
+    async def test_generate_event_result_empty_description_fallback(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"description": "", "duration_minutes": 0}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_result(
+            EventContext(
+                character_name="小雨",
+                character_description="温柔的少女",
+                world="",
+                scenario="",
+                recent_diaries=[],
+                today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
+            )
+        )
+
+        assert "休息" in result.description
+        assert result.duration_minutes == 0
+
+
+class TestGenerateEventReaction:
+    """测试 generate_event_reaction Function Calling 路径"""
+
+    @pytest.fixture
+    def mock_llm_router_forced(self):
+        router = MagicMock()
+        router.generate_with_forced_tool = AsyncMock()
+        return router
+
+    @pytest.fixture
+    def agent_forced(self, mock_llm_router_forced):
+        return EventGenerationAgent(mock_llm_router_forced)
+
+    @pytest.mark.asyncio
+    async def test_generate_event_reaction_success(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"reaction": "真开心~", "share_desire": 0.8}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_reaction(
+            event="窗外下雨了",
+            character_name="小雨",
+            character_description="温柔的少女",
+        )
+
+        assert result.reaction == "真开心~"
+        assert result.share_desire == 0.8
+        mock_llm_router_forced.generate_with_forced_tool.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_generate_event_reaction_fallback_required(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.side_effect = Exception("tool error")
+
+        result = await agent_forced.generate_event_reaction(
+            event="窗外下雨了",
+            character_name="小雨",
+            character_description="温柔的少女",
+            share_policy="required",
+        )
+
+        assert result.share_desire == 1.0
+
+    @pytest.mark.asyncio
+    async def test_generate_event_reaction_fallback_never(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.side_effect = Exception("tool error")
+
+        result = await agent_forced.generate_event_reaction(
+            event="窗外下雨了",
+            character_name="小雨",
+            character_description="温柔的少女",
+            share_policy="never",
+        )
+
+        assert result.share_desire == 0.0
+
+    @pytest.mark.asyncio
+    async def test_generate_event_reaction_fallback_optional(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.side_effect = Exception("tool error")
+
+        result = await agent_forced.generate_event_reaction(
+            event="窗外下雨了",
+            character_name="小雨",
+            character_description="温柔的少女",
+            share_policy="optional",
+        )
+
+        assert result.share_desire == 0.5
+
+    @pytest.mark.asyncio
+    async def test_generate_event_reaction_clamp_share_desire_max(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"reaction": "开心", "share_desire": 1.5}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_reaction(
+            event="窗外下雨了",
+            character_name="小雨",
+            character_description="温柔的少女",
+        )
+
+        assert result.reaction == "开心"
+        assert result.share_desire == 1.0
+
+    @pytest.mark.asyncio
+    async def test_generate_event_reaction_clamp_share_desire_min(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"reaction": "开心", "share_desire": -0.3}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_reaction(
+            event="窗外下雨了",
+            character_name="小雨",
+            character_description="温柔的少女",
+        )
+
+        assert result.reaction == "开心"
+        assert result.share_desire == 0.0
+
+    @pytest.mark.asyncio
+    async def test_generate_event_reaction_empty_reaction_fallback(self, agent_forced, mock_llm_router_forced):
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"reaction": "", "share_desire": 0.5}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_reaction(
+            event="窗外下雨了",
+            character_name="小雨",
+            character_description="温柔的少女",
+        )
+
+        assert "小雨" in result.reaction
+        assert "默默地想着" in result.reaction
+        assert result.share_desire == 0.5
 
 
 if __name__ == "__main__":
