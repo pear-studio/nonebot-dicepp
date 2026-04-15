@@ -170,9 +170,6 @@ class PersonaOrchestrator:
             logger.info("角色生活模拟已初始化")
 
             # 初始化主动消息调度器
-            greeting_schedule = [
-                (e.event_type, e.time_range) for e in self.config.proactive_greeting_schedule
-            ]
             scheduler_config = ProactiveConfig(
                 enabled=self.config.proactive_enabled,
                 min_interval_hours=self.config.proactive_min_interval_hours,
@@ -181,14 +178,15 @@ class PersonaOrchestrator:
                 miss_enabled=self.config.proactive_miss_enabled,
                 miss_min_hours=self.config.proactive_miss_min_hours,
                 miss_min_score=self.config.proactive_miss_min_score,
-                greeting_schedule=greeting_schedule,
                 greeting_phrases=dict(self.config.proactive_greeting_phrases),
                 timezone=self.config.timezone,
+                share_threshold=self.config.proactive_event_share_threshold,
             )
             self.scheduler = ProactiveScheduler(
                 config=scheduler_config,
                 data_store=self.data_store,
                 character=self.character,
+                event_agent=self.event_agent,
                 bot=self.bot,
                 decay_calculator=self.decay_calculator,
             )

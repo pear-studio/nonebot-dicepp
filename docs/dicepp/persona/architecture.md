@@ -112,7 +112,11 @@ Command.tick() 每秒调用
       - 将事件加入 DelayedTaskQueue（延迟 1~5 分钟后分享）
     → ProactiveScheduler.tick()（60秒节流）
       - _check_scheduled_events(): 按角色卡 `scheduled_events` 配置触发的定时事件（问候/作息等）
+        - 命中时间窗口后，由 EventAgent 现场生成事件描述和反应
+        - 保存到 persona_daily_events，并标记 event_type 为今日已触发（解耦生成与发送）
+        - 根据 `share` 策略（required/optional/never）和 `share_desire` 决定是否发送
       - _check_missed_users(): 想念触发（≥3天未互动）
+        - 从当日 daily_events 中随机选取素材，不再依赖 pending_shares
       - 生成主动消息并返回
     → DelayedTaskQueue.tick()
       - 扫描到期的 pending 任务
@@ -281,7 +285,11 @@ Command.tick_daily() 每天调用
 - **安静时段**：可配置（默认 23:00-07:00），期间不发送
 - **最小间隔**：同一用户两次主动消息之间的最小间隔
 - **定时事件**：按角色卡 `scheduled_events` 配置触发
+  - 命中时间窗口后，由 `EventGenerationAgent` 现场生成事件描述和反应
+  - 保存到 `persona_daily_events`，并将 `event_type` 标记为今日已触发（发送失败不影响此状态）
+  - 根据 `share` 策略（`required`/`optional`/`never`）和 `share_desire` 阈值决定是否发送
 - **想念触发**：≥`miss_min_hours` 未互动 + 好感度 ≥`miss_min_score`，概率发送
+  - 素材从当日 `persona_daily_events` 中随机选取，不再依赖 `_pending_shares`
 - **目标选择**：按好感度优先级选择私聊用户和活跃群聊
 
 #### `CharacterLife`

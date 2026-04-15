@@ -16,6 +16,7 @@ from ..data.models import RelationshipState
 from ..character.models import Character
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now
+from ..agents.event_agent import EventGenerationAgent
 
 logger = logging.getLogger("persona.scheduler")
 
@@ -32,9 +33,9 @@ class ProactiveConfig:
         miss_enabled: bool = True,
         miss_min_hours: int = 72,
         miss_min_score: float = 40.0,
-        greeting_schedule: Optional[List[Tuple[str, str]]] = None,
         greeting_phrases: Optional[Dict[str, List[str]]] = None,
         timezone: str = "Asia/Shanghai",
+        share_threshold: float = 0.5,
     ):
         self.enabled = enabled
         self.min_interval_hours = min_interval_hours
@@ -43,9 +44,9 @@ class ProactiveConfig:
         self.miss_enabled = miss_enabled
         self.miss_min_hours = miss_min_hours
         self.miss_min_score = miss_min_score
-        self.greeting_schedule = list(greeting_schedule or [])
         self.greeting_phrases: Dict[str, List[str]] = dict(greeting_phrases or {})
         self.timezone = timezone
+        self.share_threshold = share_threshold
 
 
 class ShareTarget:
@@ -90,12 +91,14 @@ class ProactiveScheduler:
         config: ProactiveConfig,
         data_store: PersonaDataStore,
         character: Character,
+        event_agent: Optional[EventGenerationAgent] = None,
         bot=None,
         decay_calculator: Optional[DecayCalculator] = None,
     ):
         self.config = config
         self.data_store = data_store
         self.character = character
+        self.event_agent = event_agent
         self.bot = bot
         self._decay_calculator = decay_calculator
 
@@ -266,43 +269,123 @@ class ProactiveScheduler:
         return messages
 
     async def _check_scheduled_events(self) -> List[Dict]:
-        """检查并触发定时事件"""
+        """检查并触发定时事件（从角色卡 scheduled_events 读取）"""
         messages = []
         now = self._now()
         current_time = now.strftime("%H:%M")
 
-        for event_type, time_range in self.config.greeting_schedule:
+        from plugins.DicePP.module.persona.character.models import SharePolicy
+
+        scheduled_events = self.character.extensions.scheduled_events or []
+        for event_config in scheduled_events:
+            event_type = event_config.type
+            time_range = event_config.time_range
+            raw_share = getattr(event_config, "share", SharePolicy.OPTIONAL)
+            share_policy = raw_share if isinstance(raw_share, SharePolicy) else SharePolicy(raw_share)
+
             if event_type in self._scheduled_events_today:
                 continue
 
-            if self._is_in_time_range(current_time, time_range):
-                # 触发事件
-                self._scheduled_events_today.add(event_type)
+            if not self._is_in_time_range(current_time, time_range):
+                continue
 
-                # 获取一个未分享的生活事件作为内容
-                event = await self._get_unshared_event()
-                if event:
-                    targets = await self._select_share_targets()
-                    for target in targets[: self.config.max_shares_per_event]:
-                        if not self._can_send_to_user(target.user_id):
-                            continue
-                        # Phase 3: 检查用户是否关闭了主动消息
-                        if await self.data_store.is_user_muted(target.user_id):
-                            continue
+            # 现场生成事件
+            event_desc = await self._generate_scheduled_event_description(event_type)
+            if not event_desc:
+                # 生成失败：不标记为已触发，允许下次再试
+                continue
 
-                        msg = await self._create_proactive_message(
-                            target, event, event_type
-                        )
-                        if msg:
-                            messages.append(msg)
-                            self._last_proactive_time[target.user_id] = now
-                            # 使用锁保护对 shared_with 的修改
-                            async with self._get_share_lock():
-                                event.shared_with.add(target.user_id)
+            reaction_result = None
+            if self.event_agent:
+                reaction_result = await self.event_agent.generate_event_reaction(
+                    event=event_desc,
+                    character_name=self.character.name,
+                    character_description=self.character.description,
+                    share_policy=share_policy.value,
+                )
 
-                break  # 每次 tick 只触发一个定时事件
+            if reaction_result:
+                reaction = reaction_result.reaction
+                share_desire = reaction_result.share_desire
+            else:
+                reaction = ""
+                if share_policy == SharePolicy.REQUIRED:
+                    share_desire = 1.0
+                elif share_policy == SharePolicy.NEVER:
+                    share_desire = 0.0
+                else:
+                    share_desire = 0.5
+
+            # 保存到数据库
+            today = self._get_today_str()
+            await self.data_store.add_daily_event(
+                date=today,
+                event_type=event_type,
+                description=event_desc,
+                reaction=reaction,
+                share_desire=share_desire,
+            )
+
+            # 生成成功并保存后，标记为今天已触发
+            self._scheduled_events_today.add(event_type)
+
+            # 判断是否发送（发送失败不影响已触发状态）
+            should_send = False
+            if share_policy == SharePolicy.REQUIRED:
+                should_send = True
+            elif share_policy == SharePolicy.OPTIONAL and share_desire >= self.config.share_threshold:
+                should_send = True
+            # SharePolicy.NEVER 不发送
+
+            if should_send:
+                targets = await self._select_share_targets()
+                for target in targets[: self.config.max_shares_per_event]:
+                    if not self._can_send_to_user(target.user_id):
+                        continue
+                    if await self.data_store.is_user_muted(target.user_id):
+                        continue
+
+                    msg = await self._create_proactive_message(
+                        target, event_desc, event_type
+                    )
+                    if msg:
+                        messages.append(msg)
+                        self._last_proactive_time[target.user_id] = now
+
+            break  # 每次 tick 只触发一个定时事件
 
         return messages
+
+    async def _generate_scheduled_event_description(self, event_type: str) -> str:
+        """System Agent 根据 event_type 和当前上下文生成事件描述"""
+        if not self.event_agent:
+            # 兜底：使用预设短语 + 事件类型
+            return f"我正在{event_type}。"
+
+        today = self._get_today_str()
+        today_events = await self.data_store.get_daily_events(today)
+
+        now = self._now()
+        from ..agents.event_agent import EventContext
+        context = EventContext(
+            character_name=self.character.name,
+            character_description=self.character.description,
+            world=self.character.extensions.world,
+            scenario=self.character.scenario,
+            recent_diaries=[],
+            today_events=[{"description": e.description} for e in today_events],
+            permanent_state=f"当前定时事件类型: {event_type}",
+            current_time=now,
+        )
+        # 使用 generate_event_result 获取结构化事件数据
+        try:
+            result = await self.event_agent.generate_event_result(context)
+            return result.description
+        except Exception as e:
+            if isinstance(e, (AttributeError, TypeError)):
+                raise
+            logger.error(f"定时事件生成失败: {e}")
+            return f"我正在{event_type}。"
 
     def _is_in_time_range(self, current_time: str, time_range: str) -> bool:
         """检查当前时间是否在时间范围内"""
@@ -354,26 +437,26 @@ class ProactiveScheduler:
                 if random.random() > probability:
                     continue
 
-                # 获取未分享事件
-                event = await self._get_unshared_event()
-                if not event:
+                # 获取今天的一个事件作为素材（不再依赖 _pending_shares）
+                today = self._get_today_str()
+                today_events = await self.data_store.get_daily_events(today)
+                if not today_events:
                     continue
+                event = random.choice(today_events)
+                event_desc = event.description
 
                 # 生成想念消息
                 target = ShareTarget(
                     user_id=user_id,
-                    group_id=rel.group_id,
+                    group_id="",  # 想念消息只发私聊
                     priority=int(eff.composite_score),
                     score=eff.composite_score,
                 )
 
-                msg = await self._create_miss_you_message(target, event)
+                msg = await self._create_miss_you_message(target, event_desc)
                 if msg:
                     messages.append(msg)
                     self._last_proactive_time[user_id] = now
-                    # 使用锁保护对 shared_with 的修改
-                    async with self._get_share_lock():
-                        event.shared_with.add(user_id)
 
                     # 限制每次 tick 只发送一条想念消息
                     break
@@ -506,7 +589,7 @@ class ProactiveScheduler:
     async def _create_proactive_message(
         self,
         target: ShareTarget,
-        event: PendingShare,
+        event_description: str,
         event_type: str,
     ) -> Optional[Dict]:
         """创建主动消息"""
@@ -515,7 +598,7 @@ class ProactiveScheduler:
             greeting = random.choice(phrases)
 
             # 根据事件内容自然引入话题
-            content = f"{greeting} {event.event_description}"
+            content = f"{greeting} {event_description}"
 
             return {
                 "user_id": target.user_id,
@@ -531,11 +614,10 @@ class ProactiveScheduler:
     async def _create_miss_you_message(
         self,
         target: ShareTarget,
-        event: PendingShare,
+        event_description: str,
     ) -> Optional[Dict]:
         """创建想念消息"""
         try:
-            # 基于未分享事件生成想念消息
             intros = [
                 "好久不见，想你啦~",
                 "最近忙什么呢？",
@@ -544,7 +626,7 @@ class ProactiveScheduler:
             ]
 
             intro = random.choice(intros)
-            content = f"{intro} {event.event_description}"
+            content = f"{intro} {event_description}"
 
             return {
                 "user_id": target.user_id,

@@ -21,6 +21,10 @@ def _make_mock_character():
     char.extensions.initial_relationship = 50
     char.extensions.event_day_start_hour = 8
     char.extensions.event_day_end_hour = 22
+    from plugins.DicePP.module.persona.character.models import ScheduledEventConfig, SharePolicy
+    char.extensions.scheduled_events = [
+        ScheduledEventConfig(type="morning", time_range="08:00-09:00", share=SharePolicy.REQUIRED),
+    ]
     return char
 
 
@@ -52,9 +56,9 @@ class TestProactiveSchedulerBasics:
             miss_enabled=True,
             miss_min_hours=72,
             miss_min_score=40.0,
-            greeting_schedule=[("morning", "08:00-09:00")],
             greeting_phrases={"morning": ["早上好~", "早安~"]},
             timezone="Asia/Shanghai",
+            share_threshold=0.5,
         )
 
     @pytest.fixture
@@ -309,9 +313,9 @@ class TestProactiveSchedulerEventSharing:
             miss_enabled=True,
             miss_min_hours=72,
             miss_min_score=40.0,
-            greeting_schedule=[("morning", "08:00-09:00")],
             greeting_phrases={"morning": ["早上好~"]},
             timezone="Asia/Shanghai",
+            share_threshold=0.5,
         )
 
     @pytest.fixture
@@ -420,9 +424,9 @@ class TestProactiveSchedulerScheduledEvents:
             min_interval_hours=0,
             max_shares_per_event=3,
             share_time_window_minutes=15,
-            greeting_schedule=[("morning", "08:00-09:00")],
             greeting_phrases={"morning": ["早上好~"]},
             timezone="Asia/Shanghai",
+            share_threshold=0.5,
         )
         s = ProactiveScheduler(
             config=config,
@@ -438,16 +442,26 @@ class TestProactiveSchedulerScheduledEvents:
             "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
             lambda tz: fake_now,
         )
-        scheduler._pending_shares.append(
-            PendingShare(
-                event_id="evt_1",
-                event_description="吃了蛋糕",
-                created_at=fake_now,
-            )
-        )
+        # Mock event_agent
+        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
+        mock_agent = MagicMock()
+        mock_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(description="起床了，阳光真好", duration_minutes=0))
+        mock_agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(reaction="心情不错", share_desire=0.9))
+        scheduler.event_agent = mock_agent
+
+        scheduler.data_store.get_daily_events = AsyncMock(return_value=[])
+        scheduler.data_store.add_daily_event = AsyncMock()
+        scheduler.data_store.get_top_relationships = AsyncMock(return_value=[])
+
         msgs = await scheduler.tick()
-        assert len(msgs) == 0  # 没有目标用户
+        assert len(msgs) == 0  # 没有目标用户，但事件应生成并保存
         assert "morning" in scheduler._scheduled_events_today
+        mock_agent.generate_event_result.assert_called_once()
+        scheduler.data_store.add_daily_event.assert_called_once()
+        call_kwargs = scheduler.data_store.add_daily_event.call_args.kwargs
+        assert call_kwargs["event_type"] == "morning"
+        assert call_kwargs["description"] == "起床了，阳光真好"
+        assert call_kwargs["share_desire"] == 0.9
 
     @pytest.mark.asyncio
     async def test_scheduled_event_only_once_per_day(self, scheduler, monkeypatch):
@@ -457,9 +471,39 @@ class TestProactiveSchedulerScheduledEvents:
             lambda tz: fake_now,
         )
         scheduler._scheduled_events_today.add("morning")
+        scheduler._last_event_date = "2024-01-01"
         msgs = await scheduler.tick()
         assert "morning" in scheduler._scheduled_events_today
         assert len(msgs) == 0
+
+    @pytest.mark.asyncio
+    async def test_scheduled_event_generated_on_the_fly(self, scheduler, monkeypatch):
+        fake_now = datetime(2024, 1, 1, 8, 30, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        # Mock event_agent
+        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
+        mock_agent = MagicMock()
+        mock_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(description="起床了，阳光真好", duration_minutes=0))
+        mock_agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(reaction="心情不错", share_desire=0.9))
+        scheduler.event_agent = mock_agent
+
+        scheduler.data_store.get_daily_events = AsyncMock(return_value=[])
+        scheduler.data_store.add_daily_event = AsyncMock()
+        scheduler.data_store.get_top_relationships = AsyncMock(return_value=[])
+
+        msgs = await scheduler.tick()
+        # REQUIRED 策略 + 高 share_desire 仍返回 0 条，是因为没有 targets
+        assert len(msgs) == 0  # no targets, but event should be generated and saved
+        mock_agent.generate_event_result.assert_called_once()
+        scheduler.data_store.add_daily_event.assert_called_once()
+        call_kwargs = scheduler.data_store.add_daily_event.call_args.kwargs
+        assert call_kwargs["event_type"] == "morning"
+        assert call_kwargs["description"] == "起床了，阳光真好"
+        assert call_kwargs["share_desire"] == 0.9
+        assert "morning" in scheduler._scheduled_events_today
 
 
 class TestProactiveSchedulerMissYou:
@@ -472,6 +516,7 @@ class TestProactiveSchedulerMissYou:
         store.set_setting = AsyncMock()
         store.is_user_muted = AsyncMock(return_value=False)
         store.list_active_relationships = AsyncMock(return_value=[])
+        store.get_daily_events = AsyncMock(return_value=[])
         return store
 
     @pytest.fixture
@@ -488,7 +533,6 @@ class TestProactiveSchedulerMissYou:
             miss_enabled=True,
             miss_min_hours=72,
             miss_min_score=40.0,
-            greeting_schedule=[],
             greeting_phrases={},
             timezone="Asia/Shanghai",
         )
@@ -587,7 +631,6 @@ class TestProactiveSchedulerSelectTargets:
         config = ProactiveConfig(
             enabled=True,
             max_shares_per_event=3,
-            greeting_schedule=[],
             greeting_phrases={},
             timezone="Asia/Shanghai",
         )
@@ -698,12 +741,7 @@ class TestProactiveSchedulerMessageCreation:
     async def test_create_proactive_message(self, scheduler, monkeypatch):
         from plugins.DicePP.module.persona.proactive.scheduler import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
-        event = PendingShare(
-            event_id="evt_1",
-            event_description="吃了蛋糕",
-            created_at=datetime.now(),
-        )
-        msg = await scheduler._create_proactive_message(target, event, "morning")
+        msg = await scheduler._create_proactive_message(target, "吃了蛋糕", "morning")
         assert msg["user_id"] == "u1"
         assert "吃了蛋糕" in msg["content"]
         assert msg["type"] == "morning"
@@ -712,12 +750,7 @@ class TestProactiveSchedulerMessageCreation:
     async def test_create_miss_you_message(self, scheduler):
         from plugins.DicePP.module.persona.proactive.scheduler import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
-        event = PendingShare(
-            event_id="evt_1",
-            event_description="吃了蛋糕",
-            created_at=datetime.now(),
-        )
-        msg = await scheduler._create_miss_you_message(target, event)
+        msg = await scheduler._create_miss_you_message(target, "吃了蛋糕")
         assert msg["user_id"] == "u1"
         assert msg["group_id"] == ""
         assert msg["type"] == "miss_you"
