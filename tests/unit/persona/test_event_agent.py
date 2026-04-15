@@ -102,7 +102,7 @@ class TestEventGenerationAgent:
 
             result = await agent.generate_event(event_context)
 
-            assert "我正在房间里休息" in result
+            assert "我正在房间里休息。" in result
 
         async def test_generate_event_with_empty_context(self, agent, mock_llm_router):
             """测试空上下文的处理"""
