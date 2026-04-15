@@ -181,3 +181,6 @@ nul
 
 # DicePP Shell 会话数据
 .dicepp-shell/
+
+# 本地 superpowers 文档
+docs/superpowers/

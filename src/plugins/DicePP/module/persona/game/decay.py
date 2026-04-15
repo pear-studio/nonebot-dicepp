@@ -149,7 +149,7 @@ class DecayCalculator:
         deltas, _ = self.calculate_decay(relationship, initial_score, now)
         out = relationship.model_copy(deep=True)
         if abs(deltas.intimacy) > 0.01:
-            out.apply_deltas(deltas)
+            out.apply_deltas(deltas, updated_at=self._resolve_now(now))
         return out
 
     def should_apply_decay(

@@ -33,7 +33,7 @@ def test_decay_incremental_same_moment_no_double_apply():
     )
     d1, _ = calc.calculate_decay(rel, 30.0, now=t_batch)
     assert d1.intimacy < -0.01
-    rel.apply_deltas(d1)
+    rel.apply_deltas(d1, updated_at=t_batch)
     rel.last_relationship_decay_applied_at = t_batch
 
     d2, _ = calc.calculate_decay(rel, 30.0, now=t_batch)
@@ -65,7 +65,7 @@ def test_decay_incremental_after_batch_user_message_only_new_idle():
         last_relationship_decay_applied_at=None,
     )
     d_batch, _ = calc.calculate_decay(rel, 30.0, now=t_batch)
-    rel.apply_deltas(d_batch)
+    rel.apply_deltas(d_batch, updated_at=t_batch)
     rel.last_relationship_decay_applied_at = t_batch
 
     d_chat, _ = calc.calculate_decay(rel, 30.0, now=t_msg)

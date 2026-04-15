@@ -35,7 +35,7 @@ class EventContext:
         self.recent_diaries = recent_diaries
         self.today_events = today_events
         self.permanent_state = permanent_state
-        self.current_time = current_time or datetime.now()
+        self.current_time = current_time
 
 
 class EventGenerationAgent:

@@ -70,13 +70,13 @@ class RelationshipState(BaseModel):
         else:
             return 5, labels[5] if len(labels) > 5 else "亲密"
     
-    def apply_deltas(self, deltas: ScoreDeltas) -> None:
+    def apply_deltas(self, deltas: ScoreDeltas, updated_at: datetime) -> None:
         """应用好感度变化"""
         self.intimacy = max(0.0, min(100.0, self.intimacy + deltas.intimacy))
         self.passion = max(0.0, min(100.0, self.passion + deltas.passion))
         self.trust = max(0.0, min(100.0, self.trust + deltas.trust))
         self.secureness = max(0.0, min(100.0, self.secureness + deltas.secureness))
-        self.updated_at = datetime.now()
+        self.updated_at = updated_at
 
 
 class UserProfile(BaseModel):
@@ -85,7 +85,7 @@ class UserProfile(BaseModel):
     facts: Dict[str, Any] = Field(default_factory=dict)
     updated_at: Optional[datetime] = None
     
-    def merge_facts(self, new_facts: Dict[str, Any]) -> None:
+    def merge_facts(self, new_facts: Dict[str, Any], updated_at: datetime) -> None:
         """合并新事实（增量更新，不覆盖）"""
         for key, value in new_facts.items():
             if key not in self.facts:
@@ -96,7 +96,7 @@ class UserProfile(BaseModel):
                 for v in value:
                     if str(v) not in existing:
                         self.facts[key].append(v)
-        self.updated_at = datetime.now()
+        self.updated_at = updated_at
 
 
 class UserLLMConfig(BaseModel):

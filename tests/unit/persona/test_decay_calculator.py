@@ -200,7 +200,7 @@ class TestDecayCalculatorEdgeCases:
         )
         d1, _ = calc.calculate_decay(rel, initial_score=30.0, now=now)
         assert d1.intimacy < -20.0
-        rel.apply_deltas(d1)
+        rel.apply_deltas(d1, updated_at=now)
         rel.last_relationship_decay_applied_at = now
 
         d2, reason = calc.calculate_decay(rel, initial_score=30.0, now=now)

@@ -78,11 +78,9 @@ class ObservationBuffer:
         self._last_trigger_time: Optional[datetime] = None
 
     def _wall_now(self) -> datetime:
-        if self._timezone:
-            from ..wall_clock import persona_wall_now
+        from ..wall_clock import persona_wall_now
 
-            return persona_wall_now(self._timezone)
-        return datetime.now()
+        return persona_wall_now(self._timezone)
 
     def _is_pure_emoji(self, content: str) -> bool:
         """

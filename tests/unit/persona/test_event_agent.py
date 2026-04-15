@@ -113,6 +113,7 @@ class TestEventGenerationAgent:
                 scenario="",
                 recent_diaries=[],
                 today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
             )
             mock_llm_router.generate.return_value = "测试事件"
 

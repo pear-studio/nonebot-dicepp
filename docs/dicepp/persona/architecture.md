@@ -342,7 +342,18 @@ Command.tick_daily() 每天调用
 
 ---
 
-## 五、关键设计决策
+## 五、时间处理策略
+
+Persona 模块采用 **naive local datetime** 策略：
+
+- 所有业务时间统一通过 `wall_clock.persona_wall_now(timezone)` 获取
+- 返回值为**不带 `tzinfo` 的本地时间**，与 SQLite `fromisoformat` 存储行为保持一致
+- 禁止在业务代码中直接使用 `datetime.now()` 或 `datetime.min`，以防止 naive/aware 混用导致的 `TypeError`
+- 排序或兜底场景使用安全的 naive 基准时间（如 `datetime(2000, 1, 1)`）代替 `datetime.min`
+
+> 当前未迁移到 `tzinfo-aware` datetime，该方向涉及衰减、日记、trace、调度器等多个子系统，回归面较大，如需切换应作为独立变更推进。
+
+## 六、关键设计决策
 
 | 决策 | 结论 | 理由 |
 |------|------|------|

@@ -2,6 +2,8 @@
 单元测试: Persona 数据模型
 """
 
+from datetime import datetime
+
 import pytest
 
 
@@ -84,8 +86,8 @@ class TestRelationshipState:
         rel = RelationshipState(user_id="test", intimacy=30, passion=30, trust=30, secureness=30)
         deltas = ScoreDeltas(intimacy=10, passion=-5, trust=0, secureness=100)
         
-        rel.apply_deltas(deltas)
-        
+        rel.apply_deltas(deltas, updated_at=datetime(2026, 1, 1, 12, 0, 0))
+
         assert rel.intimacy == 40.0
         assert rel.passion == 25.0
         assert rel.trust == 30.0
@@ -95,14 +97,14 @@ class TestRelationshipState:
         """测试好感度边界"""
         rel = RelationshipState(user_id="test", intimacy=95)
         deltas = ScoreDeltas(intimacy=10)
-        
-        rel.apply_deltas(deltas)
+
+        rel.apply_deltas(deltas, updated_at=datetime(2026, 1, 1, 12, 0, 0))
         assert rel.intimacy == 100.0  # 不超过100
-        
+
         rel2 = RelationshipState(user_id="test", intimacy=5)
         deltas2 = ScoreDeltas(intimacy=-10)
-        
-        rel2.apply_deltas(deltas2)
+
+        rel2.apply_deltas(deltas2, updated_at=datetime(2026, 1, 1, 12, 0, 0))
         assert rel2.intimacy == 0.0  # 不低于0
 
 
@@ -119,8 +121,8 @@ class TestUserProfile:
             "hobbies": ["游戏", "读书"]  # 合并列表，去重
         }
         
-        profile.merge_facts(new_facts)
-        
+        profile.merge_facts(new_facts, updated_at=datetime(2026, 1, 1, 12, 0, 0))
+
         assert profile.facts["name"] == "张三"  # 保持原值
         assert profile.facts["age"] == 25      # 新增
         assert set(profile.facts["hobbies"]) == {"读书", "游戏"}  # 合并去重

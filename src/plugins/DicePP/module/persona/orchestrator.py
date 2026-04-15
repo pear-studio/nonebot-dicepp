@@ -19,7 +19,7 @@ from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent
 from .agents.scoring_agent import ScoringAgent
 from .memory.context_builder import ContextBuilder
 from .game.decay import DecayCalculator, DecayConfig
-from .wall_clock import persona_wall_now
+from .wall_clock import persona_wall_now, PERSONA_EPOCH
 from .proactive.character_life import CharacterLife, CharacterLifeConfig
 from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
 from .agents.event_agent import EventGenerationAgent
@@ -493,7 +493,7 @@ class PersonaOrchestrator:
             deltas, reason = self.decay_calculator.calculate_decay(rel, initial, now)
             if abs(deltas.intimacy) > 0.01:
                 composite_before = rel.composite_score
-                rel.apply_deltas(deltas)
+                rel.apply_deltas(deltas, updated_at=now)
                 decay_event = ScoreEvent(
                     user_id=user_id,
                     group_id=group_id,
@@ -551,9 +551,10 @@ class PersonaOrchestrator:
             relationship=rel_for_scoring,
         )
 
+        now = persona_wall_now(self.config.timezone)
         if rel:
             composite_before = rel.composite_score
-            rel.apply_deltas(deltas)
+            rel.apply_deltas(deltas, updated_at=now)
             await self.data_store.update_relationship(rel)
 
             event = ScoreEvent(
@@ -568,7 +569,7 @@ class PersonaOrchestrator:
             await self.data_store.add_score_event(event)
 
         if new_facts and profile:
-            profile.merge_facts(new_facts)
+            profile.merge_facts(new_facts, updated_at=now)
             await self.data_store.save_user_profile(profile)
         elif new_facts:
             new_profile = UserProfile(user_id=user_id, facts=new_facts)
@@ -611,7 +612,7 @@ class PersonaOrchestrator:
         events = await self.data_store.get_daily_events(today)
         if events:
             valid_events = [e for e in events if e.description and e.description.strip()]
-            valid_events.sort(key=lambda e: e.created_at or datetime.min, reverse=True)
+            valid_events.sort(key=lambda e: e.created_at or PERSONA_EPOCH, reverse=True)
 
             if valid_events:
                 descriptions = [e.description for e in valid_events]
@@ -713,7 +714,7 @@ class PersonaOrchestrator:
                 if abs(deltas.intimacy) <= 0.01:
                     continue  # 无实际衰减，不写库
                 composite_before = rel.composite_score
-                rel.apply_deltas(deltas)
+                rel.apply_deltas(deltas, updated_at=now)
                 await self.data_store.update_relationship(rel)
                 await self.data_store.add_score_event(
                     ScoreEvent(
