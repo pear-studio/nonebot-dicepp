@@ -95,8 +95,14 @@
     "timeout": 30,
     "timezone": "Asia/Shanghai",
 
-    "max_short_term_chars": 3000,
-    "max_messages": 200,
+    "max_short_term_chars": 1500,
+    "max_messages": 15,
+
+    "tools_enabled": true,
+    "tools_max_rounds": 5,
+
+    "max_diary_context_chars": 500,
+    "lore_token_budget": 300,
 
     "game_enabled": true,
     "scoring_interval": 5,
@@ -115,6 +121,9 @@
     "proactive_min_interval_hours": 4,
     "proactive_max_shares": 10,
     "proactive_share_time_window_minutes": 15,
+    "proactive_event_share_delay_min": 1,
+    "proactive_event_share_delay_max": 5,
+    "proactive_event_share_threshold": 0.5,
     "proactive_miss_enabled": true,
     "proactive_miss_min_hours": 72,
     "proactive_miss_min_score": 40.0,
@@ -128,6 +137,8 @@
 
     "group_activity_enabled": true,
     "group_activity_decay_per_day": 10.0,
+    "group_activity_decay_with_content": 5.0,
+    "group_activity_content_window_hours": 24.0,
     "group_activity_add_per_interaction": 2.0,
     "group_activity_max_daily_add": 20.0,
     "group_activity_min_threshold": 60.0,
@@ -136,7 +147,7 @@
     "group_chat_enabled": true,
     "group_simple_scoring": true,
 
-    "observe_group": true,
+    "observe_group_enabled": true,
     "observe_min_length": 5,
     "observe_max_length": 500,
     "observe_initial_threshold": 20,
@@ -146,6 +157,16 @@
     "observe_max_buffer_size": 60,
 
     "daily_limit": 20,
-    "allow_user_key": true
+    "quota_check_enabled": true,
+    "quota_exceeded_message": "今日配额已用完（{limit}次），请使用 `.ai key config` 配置自己的 API Key",
+    "allow_user_key": true,
+
+    "relationship_refuse_enabled": true,
+    "relationship_refuse_prob_base": 0.5,
+    "relationship_refuse_prob_max": 0.9,
+
+    "trace_enabled": true,
+    "trace_max_age_days": 7,
+    "observation_store_raw_digest": true
   }
 }

@@ -274,7 +274,7 @@ class ProactiveScheduler:
         now = self._now()
         current_time = now.strftime("%H:%M")
 
-        from plugins.DicePP.module.persona.character.models import SharePolicy
+        from ..character.models import SharePolicy
 
         scheduled_events = self.character.extensions.scheduled_events or []
         for event_config in scheduled_events:

@@ -77,6 +77,7 @@ class PersonaDataStore:
         await self._ensure_relationship_decay_watermark_column()
         await self._ensure_score_history_conversation_digest()
         await self._ensure_observations_debug_columns()
+        await self._ensure_daily_events_share_columns()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
         """
@@ -140,6 +141,20 @@ class PersonaDataStore:
         if "extract_prompt_digest" not in col_names:
             await self.db.execute(
                 "ALTER TABLE persona_observations ADD COLUMN extract_prompt_digest TEXT DEFAULT ''"
+            )
+
+    async def _ensure_daily_events_share_columns(self) -> None:
+        """为每日事件表增加 share_desire 和 duration_minutes 列（Function Calling 结构化输出用）。"""
+        async with self.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        if "share_desire" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_daily_events ADD COLUMN share_desire REAL DEFAULT 0.0"
+            )
+        if "duration_minutes" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_daily_events ADD COLUMN duration_minutes INTEGER DEFAULT 0"
             )
 
     # ========== 消息相关 ==========
