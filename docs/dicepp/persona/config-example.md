@@ -64,10 +64,10 @@
 | `proactive_miss_enabled` | bool | true | 是否启用想念触发 |
 | `proactive_miss_min_hours` | int | 72 | 想念触发最小空闲时间 |
 | `proactive_miss_min_score` | float | 40.0 | 想念触发最小好感度 |
-| `proactive_share_time_window_minutes` | int | 15 | 生活事件入队后仅在此窗口内继续分享 |
-| `proactive_event_share_delay_min` | int | 1 | 事件分享延迟的最小值（分钟） |
-| `proactive_event_share_delay_max` | int | 5 | 事件分享延迟的最大值（分钟） |
-| `proactive_event_share_threshold` | float | 0.5 | 事件分享欲望阈值，大于等于该值的事件才会被分享（`share_desire`） |
+| `proactive_share_time_window_minutes` | int | 15 | 已弃用（DEPRECATED）。生活事件分享已迁移到 `DelayedTaskQueue`，不再使用 scheduler 的旧窗口 |
+| `proactive_event_share_delay_min` | int | 1 | 事件进入 `DelayedTaskQueue` 后的最小延迟（分钟） |
+| `proactive_event_share_delay_max` | int | 5 | 事件进入 `DelayedTaskQueue` 后的最大延迟（分钟） |
+| `proactive_event_share_threshold` | float | 0.5 | 事件分享欲望阈值，`share_desire` ≥ 该值时延迟队列到期后才会执行分享 |
 | `proactive_greeting_schedule` | list | 见 `global.json` | **已弃用（DEPRECATED）**。定时事件配置已迁移到角色卡 `extensions.persona.scheduled_events`，该字段被调度器 redesign 忽略 |
 
 ---

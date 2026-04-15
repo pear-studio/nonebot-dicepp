@@ -20,7 +20,7 @@ from ..utils.privacy import mask_sensitive_string
 from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
     RelationshipState, Observation, DailyEvent, GroupActivity, UserLLMConfig,
-    LLMTraceRecord,
+    LLMTraceRecord, DelayedTask,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -1601,4 +1601,78 @@ class PersonaDataStore:
         )
         await self.db.commit()
         return True
+
+    # ========== 延迟任务队列 ==========
+
+    async def add_delayed_task(
+        self,
+        task_type: str,
+        payload: Dict[str, Any],
+        scheduled_at: datetime,
+    ) -> int:
+        """添加延迟任务"""
+        cursor = await self.db.execute(
+            """
+            INSERT INTO persona_delayed_tasks (task_type, payload, scheduled_at, status, created_at)
+            VALUES (?, ?, ?, 'pending', ?)
+            """,
+            (task_type, json.dumps(payload, ensure_ascii=False), scheduled_at.isoformat(), self._wall_now().isoformat()),
+        )
+        await self.db.commit()
+        return cursor.lastrowid
+
+    async def poll_delayed_tasks(
+        self,
+        limit: int = 10,
+    ) -> List[DelayedTask]:
+        """拉取已到期的 pending 任务"""
+        now = self._wall_now().isoformat()
+        async with self.db.execute(
+            """
+            SELECT id, task_type, payload, scheduled_at, status, retry_count, created_at
+            FROM persona_delayed_tasks
+            WHERE status = 'pending' AND scheduled_at <= ?
+            ORDER BY scheduled_at ASC
+            LIMIT ?
+            """,
+            (now, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                DelayedTask(
+                    id=row[0],
+                    task_type=row[1],
+                    payload=json.loads(row[2]) if row[2] else {},
+                    scheduled_at=datetime.fromisoformat(row[3]),
+                    status=row[4],
+                    retry_count=row[5],
+                    created_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                )
+                for row in rows
+            ]
+
+    async def complete_delayed_task(self, task_id: int) -> None:
+        await self.db.execute(
+            "UPDATE persona_delayed_tasks SET status = 'completed' WHERE id = ?",
+            (task_id,),
+        )
+        await self.db.commit()
+
+    async def fail_delayed_task(self, task_id: int, max_retries: int = 3) -> None:
+        async with self.db.execute(
+            "SELECT retry_count FROM persona_delayed_tasks WHERE id = ?",
+            (task_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row and row[0] >= max_retries:
+            await self.db.execute(
+                "UPDATE persona_delayed_tasks SET status = 'failed' WHERE id = ?",
+                (task_id,),
+            )
+        else:
+            await self.db.execute(
+                "UPDATE persona_delayed_tasks SET retry_count = retry_count + 1, scheduled_at = ? WHERE id = ?",
+                (self._wall_now().isoformat(), task_id),
+            )
+        await self.db.commit()
 

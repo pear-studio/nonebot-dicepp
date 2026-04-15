@@ -178,6 +178,24 @@ CREATE TABLE IF NOT EXISTS persona_user_llm_config (
 );
 """
 
+# 延迟任务队列表 (Phase 3)
+CREATE_DELAYED_TASKS_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_delayed_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    scheduled_at TIMESTAMP NOT NULL,
+    status TEXT DEFAULT 'pending',
+    retry_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+CREATE_DELAYED_TASKS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_delayed_tasks_scheduled_status
+ON persona_delayed_tasks(scheduled_at, status);
+"""
+
 # LLM Trace 表 (Phase 7a)
 CREATE_LLM_TRACES_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_llm_traces (
@@ -229,6 +247,8 @@ ALL_MIGRATIONS = [
     CREATE_GROUP_ACTIVITY_TABLE,
     CREATE_USER_MUTE_TABLE,
     CREATE_USER_LLM_CONFIG_TABLE,
+    CREATE_DELAYED_TASKS_TABLE,
+    CREATE_DELAYED_TASKS_INDEX,
     CREATE_LLM_TRACES_TABLE,
     CREATE_LLM_TRACES_INDEX_SESSION,
     CREATE_LLM_TRACES_INDEX_USER,

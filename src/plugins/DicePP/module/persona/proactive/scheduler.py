@@ -475,6 +475,34 @@ class ProactiveScheduler:
 
         return targets[: self.config.max_shares_per_event]
 
+    async def share_event_to_targets(self, description: str, max_shares: int) -> List[Dict]:
+        """
+        将事件分享给符合条件的分享目标。
+
+        封装目标选择、可发送检查、mute 检查、throttle 时间更新，
+        供 Orchestrator / DelayedTaskQueue 调用。
+
+        Returns:
+            成功创建的消息列表
+        """
+        targets = await self._select_share_targets()
+        now = self._now()
+        messages = []
+        for target in targets[:max_shares]:
+            if not self._can_send_to_user(target.user_id):
+                continue
+            if await self.data_store.is_user_muted(target.user_id):
+                continue
+            msg = {
+                "user_id": target.user_id,
+                "group_id": target.group_id,
+                "content": description,
+                "type": "random_event",
+            }
+            self._last_proactive_time[target.user_id] = now
+            messages.append(msg)
+        return messages
+
     async def _create_proactive_message(
         self,
         target: ShareTarget,

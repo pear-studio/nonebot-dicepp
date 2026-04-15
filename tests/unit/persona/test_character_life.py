@@ -18,9 +18,12 @@ class TestCharacterLifeBasics:
 
     @pytest.fixture
     def mock_event_agent(self):
+        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
         agent = MagicMock()
         agent.generate_event = AsyncMock(return_value="窗外下起了小雨")
         agent.generate_reaction = AsyncMock(return_value="喜欢听雨声")
+        agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(description="窗外下起了小雨", duration_minutes=60))
+        agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(reaction="喜欢听雨声", share_desire=0.6))
         agent.generate_diary = AsyncMock(return_value="今天很充实")
         return agent
 
@@ -132,6 +135,22 @@ class TestCharacterLifeBasics:
         result = await life.tick()
         assert result is None
         mock_event_agent.generate_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ongoing_activities_persisted(self, life, monkeypatch):
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        life._slot_minutes_today = [10 * 60]
+        life._fired_slot_indices = set()
+        life._last_event_date = "2024-01-01"
+        result = await life.tick()
+        assert result is not None
+        assert result["duration_minutes"] == 60
+        assert len(life._ongoing_activities) == 1
+        assert life._ongoing_activities[0].duration_minutes == 60
 
 
 class TestCharacterLifePersistence:

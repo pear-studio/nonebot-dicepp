@@ -22,6 +22,7 @@ from .game.decay import DecayCalculator, DecayConfig
 from .wall_clock import persona_wall_now, PERSONA_EPOCH
 from .proactive.character_life import CharacterLife, CharacterLifeConfig
 from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
+from .proactive.delayed_task_queue import DelayedTaskQueue
 from .agents.event_agent import EventGenerationAgent
 
 # Phase 4: 掷骰工具
@@ -47,6 +48,7 @@ class PersonaOrchestrator:
         self.character_life: Optional[CharacterLife] = None
         self.event_agent: Optional[EventGenerationAgent] = None
         self.scheduler: Optional[ProactiveScheduler] = None
+        self.delayed_task_queue: Optional[DelayedTaskQueue] = None
         self._initialized = False
         self._pending_messages: Dict[str, List[Dict[str, str]]] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}  # key -> (message, timestamp)
@@ -192,6 +194,13 @@ class PersonaOrchestrator:
             )
             await self.scheduler.load_persistent_state()
             logger.info("主动消息调度器已初始化")
+
+            self.delayed_task_queue = DelayedTaskQueue(
+                data_store=self.data_store,
+                share_threshold=self.config.proactive_event_share_threshold,
+                timezone=self.config.timezone,
+            )
+            logger.info("延迟任务队列已初始化")
 
             logger.info("评分 Agent 和上下文构建器已初始化")
 
@@ -776,19 +785,40 @@ class PersonaOrchestrator:
         messages = []
 
         try:
-            # 尝试生成生活事件
+            # 尝试生成生活事件（随机槽位）
             if self.character_life:
                 event = await self.character_life.tick()
                 if event:
                     logger.info(f"角色生活事件: {event.get('description', '')[:50]}...")
-                    # 将事件添加到调度器的分享队列
-                    if self.scheduler:
-                        await self.scheduler.add_event_to_share(event.get('description', ''))
+                    # 随机事件进入延迟队列
+                    if self.delayed_task_queue and event.get("share_desire", 0.0) >= self.config.proactive_event_share_threshold:
+                        import random
+                        delay = random.randint(
+                            self.config.proactive_event_share_delay_min,
+                            self.config.proactive_event_share_delay_max,
+                        )
+                        await self.delayed_task_queue.enqueue_event_share(
+                            event_id=event.get("event_id", ""),
+                            event_description=event.get("description", ""),
+                            share_desire=event.get("share_desire", 0.0),
+                            delay_minutes=delay,
+                        )
 
-            # 运行主动消息调度器
+            # 运行主动消息调度器（定时事件 + 想念触发）
             if self.scheduler:
                 proactive_msgs = await self.scheduler.tick()
                 messages.extend(proactive_msgs)
+
+            # 处理延迟队列中的随机事件分享
+            if self.delayed_task_queue and self.scheduler:
+                async def _on_share(description: str, share_desire: float) -> List[Dict]:
+                    return await self.scheduler.share_event_to_targets(
+                        description,
+                        self.scheduler.config.max_shares_per_event,
+                    )
+
+                delayed_msgs = await self.delayed_task_queue.tick(on_share=_on_share)
+                messages.extend(delayed_msgs)
 
         except Exception as e:
             logger.warning(f"tick 处理失败: {e}")

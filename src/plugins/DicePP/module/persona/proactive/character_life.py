@@ -8,14 +8,26 @@ from typing import List, Optional, Dict, Any, Set
 from datetime import datetime, timedelta
 import json
 import logging
+import uuid
+from dataclasses import dataclass, asdict
 
-from ..agents.event_agent import EventGenerationAgent, EventContext
+from ..agents.event_agent import EventGenerationAgent, EventContext, EventGenerationResult, EventReactionResult
 from ..character.models import Character
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
 from ..wall_clock import persona_wall_now
 
 logger = logging.getLogger("persona.character_life")
+
+
+@dataclass
+class OngoingActivity:
+    description: str
+    started_at: datetime
+    duration_minutes: int
+
+    def is_expired(self, now: datetime) -> bool:
+        return now >= self.started_at + timedelta(minutes=self.duration_minutes)
 
 
 class CharacterLifeConfig:
@@ -56,6 +68,7 @@ class CharacterLife:
         self._slot_minutes_today: Optional[List[int]] = None
         self._fired_slot_indices: Set[int] = set()
         self._last_event_date: Optional[str] = None
+        self._ongoing_activities: List[OngoingActivity] = []
 
     def _get_today_str(self) -> str:
         return self.config.now().strftime("%Y-%m-%d")
@@ -75,6 +88,27 @@ class CharacterLife:
         self._regenerate_slots_for_today()
         self._last_event_date = today
         logger.debug("重置每日事件状态: %s", today)
+
+    def _cleanup_expired_activities(self) -> None:
+        now = self.config.now()
+        before = len(self._ongoing_activities)
+        self._ongoing_activities = [a for a in self._ongoing_activities if not a.is_expired(now)]
+        if before != len(self._ongoing_activities):
+            logger.debug(f"清理过期活动: {before - len(self._ongoing_activities)} 个")
+
+    def get_ongoing_activities(self) -> List[OngoingActivity]:
+        self._cleanup_expired_activities()
+        return list(self._ongoing_activities)
+
+    def _add_ongoing_activity(self, description: str, duration_minutes: int) -> None:
+        if duration_minutes > 0:
+            self._ongoing_activities.append(
+                OngoingActivity(
+                    description=description,
+                    started_at=self.config.now(),
+                    duration_minutes=duration_minutes,
+                )
+            )
 
     async def load_persistent_state(self) -> None:
         raw = await self.data_store.get_setting(PERSONA_SK_CHARACTER_LIFE)
@@ -99,6 +133,20 @@ class CharacterLife:
             self._fired_slot_indices = {int(x) for x in fired if x is not None}
         else:
             self._fired_slot_indices = set()
+        self._ongoing_activities = []
+        activities = data.get("ongoing_activities")
+        if isinstance(activities, list):
+            for a in activities:
+                try:
+                    self._ongoing_activities.append(
+                        OngoingActivity(
+                            description=a["description"],
+                            started_at=datetime.fromisoformat(a["started_at"]),
+                            duration_minutes=int(a["duration_minutes"]),
+                        )
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
 
     async def save_persistent_state(self) -> None:
         today = self._get_today_str()
@@ -108,13 +156,21 @@ class CharacterLife:
             "date": self._last_event_date or today,
             "slot_minutes": list(self._slot_minutes_today or []),
             "fired": sorted(self._fired_slot_indices),
+            "ongoing_activities": [
+                {
+                    "description": a.description,
+                    "started_at": a.started_at.isoformat(),
+                    "duration_minutes": a.duration_minutes,
+                }
+                for a in self._ongoing_activities
+            ],
         }
         await self.data_store.set_setting(
             PERSONA_SK_CHARACTER_LIFE,
             json.dumps(payload, ensure_ascii=False),
         )
 
-    async def tick(self) -> Optional[Dict[str, str]]:
+    async def tick(self) -> Optional[Dict[str, Any]]:
         """
         检查是否需要生成事件
 
@@ -126,6 +182,7 @@ class CharacterLife:
 
         old_date = self._last_event_date
         self._reset_daily_state()
+        self._cleanup_expired_activities()
         if old_date != self._last_event_date:  # 移除 None 检查，确保首次运行也保存
             await self.save_persistent_state()
 
@@ -150,17 +207,20 @@ class CharacterLife:
 
         return None
 
-    async def _generate_daily_event(self) -> Optional[Dict[str, str]]:
-        """生成每日生活事件"""
+    async def _generate_daily_event(self) -> Optional[Dict[str, Any]]:
+        """生成每日生活事件（随机事件槽位）"""
         try:
             today = self._get_today_str()
 
-            # 获取上下文数据
             recent_diaries = await self._get_recent_diaries(3)
             today_events = await self._get_today_events()
             permanent_state = await self.data_store.get_character_state()
 
-            # 构建上下文
+            ongoing = self.get_ongoing_activities()
+            ongoing_context = "\n".join(
+                f"- 进行中: {a.description}" for a in ongoing
+            ) if ongoing else ""
+
             context = EventContext(
                 character_name=self.character.name,
                 character_description=self.character.description,
@@ -168,36 +228,43 @@ class CharacterLife:
                 scenario=self.character.scenario,
                 recent_diaries=recent_diaries,
                 today_events=[{"description": e.description} for e in today_events],
-                permanent_state=permanent_state,
+                permanent_state=permanent_state + ("\n" + ongoing_context if ongoing_context else ""),
                 current_time=self.config.now(),
             )
 
-            # 生成事件
-            event_desc = await self.event_agent.generate_event(context)
+            event_result = await self.event_agent.generate_event_result(context)
 
-            # 生成反应
-            reaction = await self.event_agent.generate_reaction(
-                event=event_desc,
+            reaction_result = await self.event_agent.generate_event_reaction(
+                event=event_result.description,
                 character_name=self.character.name,
                 character_description=self.character.description,
+                share_policy="optional",
                 today_events=[{"description": e.description} for e in today_events],
             )
 
-            # 保存到数据库
             await self.data_store.add_daily_event(
                 date=today,
-                event_type="scheduled",
-                description=event_desc,
-                reaction=reaction,
+                event_type="system",
+                description=event_result.description,
+                reaction=reaction_result.reaction,
+                share_desire=reaction_result.share_desire,
+                duration_minutes=event_result.duration_minutes,
                 system_prompt_digest="",
                 raw_response="",
             )
 
-            logger.info(f"生成生活事件: {event_desc[:50]}...")
+            if event_result.duration_minutes > 0:
+                self._add_ongoing_activity(event_result.description, event_result.duration_minutes)
 
+            logger.info(f"生成生活事件: {event_result.description[:50]}...")
+
+            # event_id 是运行时生成的队列标识，仅用于 DelayedTaskQueue 去重/追踪，不与数据库 DailyEvent.id 关联
             return {
-                "description": event_desc,
-                "reaction": reaction,
+                "event_id": f"evt_{self.config.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}",
+                "description": event_result.description,
+                "reaction": reaction_result.reaction,
+                "share_desire": reaction_result.share_desire,
+                "duration_minutes": event_result.duration_minutes,
                 "time": self.config.now().strftime("%H:%M"),
             }
 

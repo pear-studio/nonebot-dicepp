@@ -29,7 +29,11 @@
       │            │    │    │           │
    ┌──▼──┐    ┌───▼──┐ │ ┌──▼───┐   ┌───▼────┐
    │ game │    │agents│ │ │proactive│   │utils   │
-   └─────┘    └──────┘ │ └───────┘   └────────┘
+   └─────┘    └──────┘ │ └──┬────┘   └────────┘
+                         │
+                  ┌──────▼──────┐
+                  │DelayedTaskQueue
+                  └─────────────┘
 ```
 
 ### 1.1 模块分层职责
@@ -43,7 +47,7 @@
 | **记忆层** | `memory/` | 将四层记忆组装为 LLM messages 列表 |
 | **数据层** | `data/` | Pydantic 模型、SQLite 存储访问、迁移脚本 |
 | **游戏层** | `game/` | 四维好感度模型、时间衰减计算 |
-| **主动层** | `proactive/` | 主动消息调度、角色生活模拟、群聊观察缓冲 |
+| **主动层** | `proactive/` | 主动消息调度、角色生活模拟、延迟任务队列、群聊观察缓冲 |
 | **Agent 层** | `agents/` | 评分 Agent（批量分析）、事件 Agent（生活事件生成） |
 | **工具层** | `utils/` | 隐私脱敏、掷骰适配器、其他辅助函数 |
 
@@ -101,14 +105,19 @@ Command.tick() 每秒调用
   → Orchestrator.tick()
     → CharacterLife.tick() 生成生活事件
       - 按角色卡配置的事件时间槽触发
-      - System Agent 生成客观事件
-      - Character Agent 生成角色反应
+      - System Agent 生成客观事件（含 duration_minutes）
+      - Character Agent 生成角色反应（含 share_desire）
       - 存入 persona_daily_events
-      - 将事件加入 ProactiveScheduler 分享队列
+      - 持续时间 > 0 的事件加入 _ongoing_activities
+      - 将事件加入 DelayedTaskQueue（延迟 1~5 分钟后分享）
     → ProactiveScheduler.tick()（60秒节流）
       - _check_scheduled_events(): 按角色卡 `scheduled_events` 配置触发的定时事件（问候/作息等）
       - _check_missed_users(): 想念触发（≥3天未互动）
-      - 按好感度优先级选择分享目标
+      - 生成主动消息并返回
+    → DelayedTaskQueue.tick()
+      - 扫描到期的 pending 任务
+      - share_desire ≥ proactive_event_share_threshold 才执行分享
+      - 按好感度优先级选择分享目标（复用 scheduler 目标选择）
       - 生成主动消息并返回
 ```
 
@@ -228,6 +237,7 @@ Command.tick_daily() 每天调用
 | `persona_usage` | 每日主模型用量 | `DailyUsage` |
 | `persona_user_llm_config` | 用户自带 Key（加密存储）| `UserLLMConfig` |
 | `persona_user_mute` | 用户主动消息静音开关 | - |
+| `persona_delayed_tasks` | 延迟任务队列（random event share 等） | `DelayedTask` |
 | `persona_llm_traces` | LLM 调用完整 trace | `LLMTraceRecord` |
 
 #### 迁移机制
@@ -272,7 +282,7 @@ Command.tick_daily() 每天调用
 - **最小间隔**：同一用户两次主动消息之间的最小间隔
 - **定时事件**：按角色卡 `scheduled_events` 配置触发
 - **想念触发**：≥`miss_min_hours` 未互动 + 好感度 ≥`miss_min_score`，概率发送
-- **事件分享**：生活事件生成后，按好感度优先级分发给私聊用户和活跃群聊
+- **目标选择**：按好感度优先级选择私聊用户和活跃群聊
 
 #### `CharacterLife`
 
@@ -281,8 +291,18 @@ Command.tick_daily() 每天调用
 - `event_day_start_hour` ~ `event_day_end_hour` 窗口内均分 `daily_events_count` 个槽位
 - 每个槽位 ±`event_jitter_minutes` 随机抖动
 - `tick()` 中当前时间与计划槽位差 ≤ `character_life_jitter_minutes` 时触发
-- 事件生成后调用 `ProactiveScheduler.add_event_to_share()` 入队
+- 事件生成后调用 `EventGenerationAgent.generate_event_result()` 和 `generate_event_reaction()`
 - 事件包含 `share_desire`（分享欲望 0~1）和 `duration_minutes`（持续时间，0 表示瞬时）
+- `duration_minutes > 0` 的事件会加入 `_ongoing_activities`，在后续事件生成时作为上下文注入
+
+#### `DelayedTaskQueue`
+
+通用延迟任务队列（SQLite 持久化）：
+- 承载 random event share 等异步延迟任务
+- `enqueue_event_share()`: 将生活事件按配置延迟（默认 1~5 分钟）入队
+- `tick()`: 扫描并处理到期的 `pending` 任务，支持 `share_desire` 阈值过滤
+- 任务处理成功后标记为 `completed`，失败则按 `max_retries` 重试，超限标记 `failed`
+- 与 `ProactiveScheduler` 解耦：Orchestrator 负责将 scheduler 的目标选择能力注入 `on_share` 回调
 
 #### `ObservationBuffer`
 

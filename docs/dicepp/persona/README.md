@@ -40,7 +40,7 @@ src/plugins/DicePP/module/persona/
 ├── memory/             # 上下文构建器
 ├── data/               # 数据模型、存储层、迁移脚本
 ├── game/               # 好感度系统、时间衰减
-├── proactive/          # 主动消息调度、角色生活模拟
+├── proactive/          # 主动消息调度、角色生活模拟、延迟任务队列
 ├── agents/             # 评分 Agent、事件 Agent
 └── utils/              # 工具函数（隐私脱敏、掷骰适配等）
 ```

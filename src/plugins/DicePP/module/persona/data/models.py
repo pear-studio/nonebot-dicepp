@@ -197,6 +197,17 @@ class GroupActivity(BaseModel):
     content_count_today: int = 0                     # 今日内容计数（自然日）
 
 
+class DelayedTask(BaseModel):
+    """延迟任务"""
+    id: Optional[int] = None
+    task_type: str  # "event_share"
+    payload: Dict[str, Any]  # 包含 event_id, description, share_desire 等
+    scheduled_at: datetime
+    status: str = "pending"  # pending | completed | failed
+    retry_count: int = 0
+    created_at: Optional[datetime] = None
+
+
 class LLMTraceRecord(BaseModel):
     """LLM 调用 Trace 记录"""
     id: Optional[int] = None
