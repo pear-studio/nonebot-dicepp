@@ -15,6 +15,15 @@ from plugins.DicePP.module.persona.proactive.scheduler import (
 from plugins.DicePP.module.persona.data.models import RelationshipState
 
 
+def _make_mock_character():
+    char = MagicMock()
+    char.extensions = MagicMock()
+    char.extensions.initial_relationship = 50
+    char.extensions.event_day_start_hour = 8
+    char.extensions.event_day_end_hour = 22
+    return char
+
+
 class TestProactiveSchedulerBasics:
     """测试调度器基础行为"""
 
@@ -31,16 +40,12 @@ class TestProactiveSchedulerBasics:
 
     @pytest.fixture
     def mock_character(self):
-        char = MagicMock()
-        char.extensions = MagicMock()
-        char.extensions.initial_relationship = 50
-        return char
+        return _make_mock_character()
 
     @pytest.fixture
     def config(self):
         return ProactiveConfig(
             enabled=True,
-            quiet_hours=(23, 7),
             min_interval_hours=4,
             max_shares_per_event=3,
             share_time_window_minutes=15,
@@ -73,7 +78,7 @@ class TestProactiveSchedulerBasics:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_quiet_hours_blocks_messages(self, scheduler, monkeypatch):
+    async def test_inactive_hours_blocks_messages(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 2, 0, 0)
         monkeypatch.setattr(
             "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
@@ -81,6 +86,78 @@ class TestProactiveSchedulerBasics:
         )
         result = await scheduler.tick()
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_character_active_hours(self, scheduler, monkeypatch):
+        # 07:00 不活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 7, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+        # 10:00 活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+        # 23:00 不活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 23, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+    @pytest.mark.asyncio
+    async def test_character_active_hours_overnight(self, scheduler, monkeypatch):
+        """测试跨天活跃时段（防御性分支）"""
+        scheduler.character.extensions.event_day_start_hour = 22
+        scheduler.character.extensions.event_day_end_hour = 8
+
+        # 23:00 活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 23, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+        # 02:00 活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+        # 10:00 不活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+    @pytest.mark.asyncio
+    async def test_pending_shares_preserved_during_inactive_hours(self, scheduler, monkeypatch):
+        """非活跃时段 tick 不清理 pending_shares"""
+        fake_now = datetime(2024, 1, 1, 21, 55, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        event_id = await scheduler.add_event_to_share("吃了好吃的蛋糕")
+        assert len(scheduler._pending_shares) == 1
+
+        # 切换到非活跃时段 22:00
+        fake_now = datetime(2024, 1, 1, 22, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        result = await scheduler.tick()
+        assert result == []
+        assert len(scheduler._pending_shares) == 1
+        assert scheduler._pending_shares[0].event_id == event_id
 
     @pytest.mark.asyncio
     async def test_can_send_to_user_respects_interval(self, scheduler, monkeypatch):
@@ -128,10 +205,7 @@ class TestProactiveSchedulerPersistence:
 
     @pytest.fixture
     def mock_character(self):
-        char = MagicMock()
-        char.extensions = MagicMock()
-        char.extensions.initial_relationship = 50
-        return char
+        return _make_mock_character()
 
     @pytest.fixture
     def scheduler(self, mock_data_store, mock_character):
@@ -223,16 +297,12 @@ class TestProactiveSchedulerEventSharing:
 
     @pytest.fixture
     def mock_character(self):
-        char = MagicMock()
-        char.extensions = MagicMock()
-        char.extensions.initial_relationship = 50
-        return char
+        return _make_mock_character()
 
     @pytest.fixture
     def config(self):
         return ProactiveConfig(
             enabled=True,
-            quiet_hours=(23, 7),
             min_interval_hours=0,
             max_shares_per_event=3,
             share_time_window_minutes=15,
@@ -341,16 +411,12 @@ class TestProactiveSchedulerScheduledEvents:
 
     @pytest.fixture
     def mock_character(self):
-        char = MagicMock()
-        char.extensions = MagicMock()
-        char.extensions.initial_relationship = 50
-        return char
+        return _make_mock_character()
 
     @pytest.fixture
     def scheduler(self, mock_data_store, mock_character):
         config = ProactiveConfig(
             enabled=True,
-            quiet_hours=(23, 7),
             min_interval_hours=0,
             max_shares_per_event=3,
             share_time_window_minutes=15,
@@ -410,16 +476,12 @@ class TestProactiveSchedulerMissYou:
 
     @pytest.fixture
     def mock_character(self):
-        char = MagicMock()
-        char.extensions = MagicMock()
-        char.extensions.initial_relationship = 50
-        return char
+        return _make_mock_character()
 
     @pytest.fixture
     def scheduler(self, mock_data_store, mock_character):
         config = ProactiveConfig(
             enabled=True,
-            quiet_hours=(23, 7),
             min_interval_hours=0,
             max_shares_per_event=3,
             share_time_window_minutes=15,
@@ -518,10 +580,7 @@ class TestProactiveSchedulerSelectTargets:
 
     @pytest.fixture
     def mock_character(self):
-        char = MagicMock()
-        char.extensions = MagicMock()
-        char.extensions.initial_relationship = 50
-        return char
+        return _make_mock_character()
 
     @pytest.fixture
     def scheduler(self, mock_data_store, mock_character):
@@ -620,10 +679,7 @@ class TestProactiveSchedulerMessageCreation:
 
     @pytest.fixture
     def mock_character(self):
-        char = MagicMock()
-        char.extensions = MagicMock()
-        char.extensions.initial_relationship = 50
-        return char
+        return _make_mock_character()
 
     @pytest.fixture
     def scheduler(self, mock_character):
@@ -676,4 +732,5 @@ class TestProactiveSchedulerMessageCreation:
         )
         status = scheduler.get_status()
         assert status["enabled"] is True
+        assert status["is_character_active"] is True
         assert status["pending_shares"] == 0

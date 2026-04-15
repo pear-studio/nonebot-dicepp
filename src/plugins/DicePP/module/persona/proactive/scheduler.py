@@ -26,7 +26,6 @@ class ProactiveConfig:
     def __init__(
         self,
         enabled: bool = True,
-        quiet_hours: Tuple[int, int] = (23, 7),
         min_interval_hours: int = 4,
         max_shares_per_event: int = 10,
         share_time_window_minutes: int = 15,
@@ -38,7 +37,6 @@ class ProactiveConfig:
         timezone: str = "Asia/Shanghai",
     ):
         self.enabled = enabled
-        self.quiet_hours = quiet_hours  # (start, end)
         self.min_interval_hours = min_interval_hours
         self.max_shares_per_event = max_shares_per_event
         self.share_time_window_minutes = share_time_window_minutes
@@ -198,15 +196,17 @@ class ProactiveScheduler:
             self._last_event_date = today
             logger.debug(f"重置每日调度状态: {today}")
 
-    def _is_quiet_hours(self) -> bool:
-        """检查是否在安静时段"""
+    def _is_character_active(self) -> bool:
+        """检查当前是否在角色活跃时间"""
         now = self._now()
         hour = now.hour
-        start, end = self.config.quiet_hours
+        start = self.character.extensions.event_day_start_hour
+        end = self.character.extensions.event_day_end_hour
 
         if start < end:
             return start <= hour < end
-        else:  # 跨天，如 23:00-07:00
+        else:
+            # start == end 时视为全天活跃（hour >= start or hour < end 恒为 True）
             return hour >= start or hour < end
 
     def _can_send_to_user(self, user_id: str) -> bool:
@@ -237,8 +237,8 @@ class ProactiveScheduler:
         self._last_tick = now
         self._reset_daily_state()
 
-        # 安静时段不发送
-        if self._is_quiet_hours():
+        # 非活跃时段不发送，但不清理 pending_shares
+        if not self._is_character_active():
             await self.persist_state()
             return []
 
@@ -566,8 +566,7 @@ class ProactiveScheduler:
         """获取调度器状态（用于调试）"""
         return {
             "enabled": self.config.enabled,
-            "quiet_hours": self.config.quiet_hours,
-            "is_quiet_hours": self._is_quiet_hours(),
+            "is_character_active": self._is_character_active(),
             "pending_shares": len(self._pending_shares),
             "scheduled_today": list(self._scheduled_events_today),
             "last_proactive_count": len(self._last_proactive_time),

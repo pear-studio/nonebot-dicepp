@@ -173,7 +173,6 @@ class PersonaOrchestrator:
             ]
             scheduler_config = ProactiveConfig(
                 enabled=self.config.proactive_enabled,
-                quiet_hours=(self.config.proactive_quiet_start, self.config.proactive_quiet_end),
                 min_interval_hours=self.config.proactive_min_interval_hours,
                 max_shares_per_event=self.config.proactive_max_shares,
                 share_time_window_minutes=self.config.proactive_share_time_window_minutes,

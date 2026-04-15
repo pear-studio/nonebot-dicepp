@@ -39,7 +39,7 @@ class ProactiveGreetingEntry(BaseModel):
 
 def _default_proactive_greeting_schedule() -> List[ProactiveGreetingEntry]:
     return [
-        ProactiveGreetingEntry(event_type="wake_up", time_range="07:00-08:00"),
+        ProactiveGreetingEntry(event_type="wake_up", time_range="08:00-09:00"),
         ProactiveGreetingEntry(event_type="lunch", time_range="11:30-13:00"),
         ProactiveGreetingEntry(event_type="afternoon", time_range="14:00-15:00"),
         ProactiveGreetingEntry(event_type="dinner", time_range="17:30-19:00"),
@@ -130,8 +130,6 @@ class PersonaConfig(BaseModel):
 
     # ── Phase 2: 主动消息
     proactive_enabled: bool = True
-    proactive_quiet_start: int = 23  # 安静时段开始
-    proactive_quiet_end: int = 7     # 安静时段结束
     proactive_min_interval_hours: int = 4
     proactive_max_shares: int = 10
     # 生活事件加入分享队列后，仅在此时间窗口内继续选取并发送（与 implementation.md 一致）

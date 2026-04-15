@@ -112,8 +112,6 @@
     "character_life_diary_time": "23:30",
 
     "proactive_enabled": true,
-    "proactive_quiet_start": 23,
-    "proactive_quiet_end": 7,
     "proactive_min_interval_hours": 4,
     "proactive_max_shares": 10,
     "proactive_share_time_window_minutes": 15,
@@ -121,7 +119,7 @@
     "proactive_miss_min_hours": 72,
     "proactive_miss_min_score": 40.0,
     "proactive_greeting_schedule": [
-      {"event_type": "wake_up", "time_range": "07:00-08:00"},
+      {"event_type": "wake_up", "time_range": "08:00-09:00"},
       {"event_type": "lunch", "time_range": "11:30-13:00"},
       {"event_type": "afternoon", "time_range": "14:00-15:00"},
       {"event_type": "dinner", "time_range": "17:30-19:00"},

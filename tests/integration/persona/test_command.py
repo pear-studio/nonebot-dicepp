@@ -201,7 +201,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         self.cmd.orchestrator.character.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.orchestrator.get_character_info.return_value = {"name": "TestChar"}
         self.cmd.orchestrator.scheduler = MagicMock()
-        self.cmd.orchestrator.scheduler.get_status.return_value = {"pending_shares": 0, "scheduled_today": [], "is_quiet_hours": False}
+        self.cmd.orchestrator.scheduler.get_status.return_value = {"pending_shares": 0, "scheduled_today": [], "is_character_active": True}
         self.cmd.orchestrator.llm_router = MagicMock()
         self.cmd.orchestrator.llm_router.get_stats.return_value = {
             "primary": {"requests": 1, "errors": 0},

@@ -508,7 +508,7 @@ class PersonaCommand(UserCommandBase):
             lines.append(f"\n[调度器状态]")
             lines.append(f"  待分享: {scheduler_status.get('pending_shares', 0)}")
             lines.append(f"  今日触发: {len(scheduler_status.get('scheduled_today', []))}")
-            lines.append(f"  安静时段: {'是' if scheduler_status.get('is_quiet_hours') else '否'}")
+            lines.append(f"  角色活跃中: {'是' if scheduler_status.get('is_character_active') else '否'}")
         tick_p = self._async_tick_task is not None and not self._async_tick_task.done()
         daily_p = (
             self._async_tick_daily_task is not None and not self._async_tick_daily_task.done()

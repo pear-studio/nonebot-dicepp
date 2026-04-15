@@ -59,8 +59,6 @@
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `proactive_enabled` | bool | true | 是否启用主动消息 |
-| `proactive_quiet_start` | int | 23 | 安静时段开始（小时） |
-| `proactive_quiet_end` | int | 7 | 安静时段结束（小时） |
 | `proactive_min_interval_hours` | int | 4 | 最小发送间隔（小时） |
 | `proactive_max_shares` | int | 10 | 每事件最多分享数 |
 | `proactive_miss_enabled` | bool | true | 是否启用想念触发 |
