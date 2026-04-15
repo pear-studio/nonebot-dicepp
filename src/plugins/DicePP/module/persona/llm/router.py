@@ -3,16 +3,21 @@ LLM 路由器
 
 多模型路由 + 并发控制 + 配额管理
 """
+from __future__ import annotations
+
 import asyncio
 from collections import deque
 import json
-from typing import List, Dict, Any, Optional, Callable, Awaitable
+from typing import List, Dict, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 import time
 import uuid
 import logging
 
 from .client import LLMClient
 from ..data.models import ModelTier, UserLLMConfig
+
+if TYPE_CHECKING:
+    from ...core.config.pydantic_models import PersonaConfig
 
 logger = logging.getLogger("persona.llm")
 
@@ -38,7 +43,7 @@ class LLMRouter:
         daily_limit: int = 20,
         quota_check_enabled: bool = True,
         data_store: Any = None,
-        config: Any = None,
+        config: Optional[PersonaConfig] = None,
         trace_enabled: bool = False,
         trace_max_age_days: int = 7,
     ):
@@ -87,7 +92,7 @@ class LLMRouter:
         self.daily_limit = daily_limit
         self.quota_check_enabled = quota_check_enabled
         self.data_store: Optional[Any] = data_store
-        self.config: Optional[Any] = config
+        self.config: Optional[PersonaConfig] = config
 
         # 统计
         self.stats = {
@@ -531,7 +536,7 @@ class LLMRouter:
         status: str,
         error: str,
     ) -> None:
-        if not getattr(self, "trace_enabled", False):
+        if not self.trace_enabled:
             return
         if not self.data_store:
             return

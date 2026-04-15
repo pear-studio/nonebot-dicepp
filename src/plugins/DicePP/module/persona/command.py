@@ -727,7 +727,7 @@ class PersonaCommand(UserCommandBase):
 
         token_in_total: Optional[int] = None
         token_out_total: Optional[int] = None
-        if self.data_store and getattr(self.config, "trace_enabled", False):
+        if self.data_store and self.config.trace_enabled:
             token_in_total, token_out_total = await self.data_store.get_today_token_usage()
             token_in_total = token_in_total or 0
             token_out_total = token_out_total or 0

@@ -137,8 +137,8 @@ class PersonaOrchestrator:
                 self.llm_router.config = self.config
                 self.llm_router.daily_limit = self.config.daily_limit
                 self.llm_router.quota_check_enabled = self.config.quota_check_enabled
-                self.llm_router.trace_enabled = getattr(self.config, "trace_enabled", False)
-                self.llm_router.trace_max_age_days = getattr(self.config, "trace_max_age_days", 7)
+                self.llm_router.trace_enabled = self.config.trace_enabled
+                self.llm_router.trace_max_age_days = self.config.trace_max_age_days
 
             self.scoring_agent = ScoringAgent(self.llm_router)
             self.context_builder = self._create_context_builder(self.character)

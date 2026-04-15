@@ -354,7 +354,7 @@ class ObservationExtractor:
                 who_names = {msg.user_id: msg.nickname for msg in messages}
 
                 raw_digest = messages_text[:200]
-                if getattr(self.config, "observation_store_raw_digest", False):
+                if self.config.observation_store_raw_digest:
                     digest_value = raw_digest
                 else:
                     import hashlib
