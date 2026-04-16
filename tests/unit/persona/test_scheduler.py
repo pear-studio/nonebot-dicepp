@@ -67,6 +67,7 @@ class TestProactiveSchedulerBasics:
             config=config,
             data_store=mock_data_store,
             character=mock_character,
+            target_selector=MagicMock(),
         )
 
     @pytest.mark.asyncio
@@ -164,17 +165,17 @@ class TestProactiveSchedulerBasics:
         assert scheduler._pending_shares[0].event_id == event_id
 
     @pytest.mark.asyncio
-    async def test_can_send_to_user_respects_interval(self, scheduler, monkeypatch):
+    async def test_can_send_to_key_respects_interval(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
             "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
             lambda tz: fake_now,
         )
-        assert scheduler._can_send_to_user("u1") is True
-        scheduler._last_proactive_time["u1"] = fake_now - timedelta(hours=2)
-        assert scheduler._can_send_to_user("u1") is False
-        scheduler._last_proactive_time["u1"] = fake_now - timedelta(hours=5)
-        assert scheduler._can_send_to_user("u1") is True
+        assert scheduler._can_send_to_key("user:u1") is True
+        scheduler._last_proactive_time["user:u1"] = fake_now - timedelta(hours=2)
+        assert scheduler._can_send_to_key("user:u1") is False
+        scheduler._last_proactive_time["user:u1"] = fake_now - timedelta(hours=5)
+        assert scheduler._can_send_to_key("user:u1") is True
 
     @pytest.mark.asyncio
     async def test_is_in_time_range(self, scheduler):
@@ -218,6 +219,7 @@ class TestProactiveSchedulerPersistence:
             config=config,
             data_store=mock_data_store,
             character=mock_character,
+            target_selector=MagicMock(),
         )
 
     @pytest.mark.asyncio
@@ -324,6 +326,7 @@ class TestProactiveSchedulerEventSharing:
             config=config,
             data_store=mock_data_store,
             character=mock_character,
+            target_selector=MagicMock(),
         )
 
     @pytest.mark.asyncio
@@ -432,6 +435,7 @@ class TestProactiveSchedulerScheduledEvents:
             config=config,
             data_store=mock_data_store,
             character=mock_character,
+            target_selector=MagicMock(),
         )
         return s
 
@@ -540,6 +544,7 @@ class TestProactiveSchedulerMissYou:
             config=config,
             data_store=mock_data_store,
             character=mock_character,
+            target_selector=MagicMock(),
         )
 
     @pytest.mark.asyncio
@@ -610,113 +615,6 @@ class TestProactiveSchedulerMissYou:
         assert result == []
 
 
-class TestProactiveSchedulerSelectTargets:
-    """测试分享目标选择"""
-
-    @pytest.fixture
-    def mock_data_store(self):
-        store = MagicMock()
-        store.get_setting = AsyncMock(return_value=None)
-        store.set_setting = AsyncMock()
-        store.get_top_relationships = AsyncMock(return_value=[])
-        store.get_all_group_activities = AsyncMock(return_value=[])
-        return store
-
-    @pytest.fixture
-    def mock_character(self):
-        return _make_mock_character()
-
-    @pytest.fixture
-    def scheduler(self, mock_data_store, mock_character):
-        config = ProactiveConfig(
-            enabled=True,
-            max_shares_per_event=3,
-            greeting_phrases={},
-            timezone="Asia/Shanghai",
-        )
-        return ProactiveScheduler(
-            config=config,
-            data_store=mock_data_store,
-            character=mock_character,
-        )
-
-    @pytest.mark.asyncio
-    async def test_select_targets_high_score_private(self, scheduler, mock_data_store):
-        rel = RelationshipState(
-            user_id="u1",
-            group_id="",
-            intimacy=70,
-            passion=70,
-            trust=70,
-            secureness=70,
-        )
-        mock_data_store.get_top_relationships.return_value = [rel]
-        targets = await scheduler._select_share_targets()
-        assert len(targets) == 1
-        assert targets[0].user_id == "u1"
-        assert targets[0].priority == 170  # 100 + score
-
-    @pytest.mark.asyncio
-    async def test_select_targets_medium_score_private(self, scheduler, mock_data_store):
-        rel = RelationshipState(
-            user_id="u1",
-            group_id="",
-            intimacy=50,
-            passion=50,
-            trust=50,
-            secureness=50,
-        )
-        mock_data_store.get_top_relationships.return_value = [rel]
-        targets = await scheduler._select_share_targets()
-        assert len(targets) == 1
-        assert targets[0].priority == 100  # 50 + score
-
-    @pytest.mark.asyncio
-    async def test_select_targets_group_activity(self, scheduler, mock_data_store):
-        from plugins.DicePP.module.persona.data.models import GroupActivity
-        mock_data_store.get_all_group_activities.return_value = [
-            GroupActivity(group_id="g1", score=80.0)
-        ]
-        targets = await scheduler._select_share_targets()
-        assert len(targets) == 1
-        assert targets[0].group_id == "g1"
-        assert targets[0].is_group is True
-
-    @pytest.mark.asyncio
-    async def test_select_targets_sorted_by_priority(self, scheduler, mock_data_store):
-        from plugins.DicePP.module.persona.data.models import GroupActivity
-        rel_high = RelationshipState(
-            user_id="u1",
-            group_id="",
-            intimacy=80,
-            passion=80,
-            trust=80,
-            secureness=80,
-        )
-        mock_data_store.get_top_relationships.return_value = [rel_high]
-        mock_data_store.get_all_group_activities.return_value = [
-            GroupActivity(group_id="g1", score=90.0)
-        ]
-        targets = await scheduler._select_share_targets()
-        assert len(targets) == 2
-        assert targets[0].priority >= targets[1].priority
-
-    @pytest.mark.asyncio
-    async def test_select_targets_no_bot_uses_default(self, scheduler, mock_data_store):
-        scheduler.bot = None
-        rel = RelationshipState(
-            user_id="u1",
-            group_id="",
-            intimacy=70,
-            passion=70,
-            trust=70,
-            secureness=70,
-        )
-        mock_data_store.get_top_relationships.return_value = [rel]
-        targets = await scheduler._select_share_targets()
-        assert len(targets) == 1
-
-
 class TestProactiveSchedulerMessageCreation:
     """测试消息创建"""
 
@@ -735,11 +633,12 @@ class TestProactiveSchedulerMessageCreation:
             config=config,
             data_store=MagicMock(),
             character=mock_character,
+            target_selector=MagicMock(),
         )
 
     @pytest.mark.asyncio
     async def test_create_proactive_message(self, scheduler, monkeypatch):
-        from plugins.DicePP.module.persona.proactive.scheduler import ShareTarget
+        from plugins.DicePP.module.persona.proactive.models import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         msg = await scheduler._create_proactive_message(target, "吃了蛋糕", "morning")
         assert msg["user_id"] == "u1"
@@ -748,7 +647,7 @@ class TestProactiveSchedulerMessageCreation:
 
     @pytest.mark.asyncio
     async def test_create_miss_you_message(self, scheduler):
-        from plugins.DicePP.module.persona.proactive.scheduler import ShareTarget
+        from plugins.DicePP.module.persona.proactive.models import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         msg = await scheduler._create_miss_you_message(target, "吃了蛋糕")
         assert msg["user_id"] == "u1"

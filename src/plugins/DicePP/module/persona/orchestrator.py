@@ -22,6 +22,7 @@ from .game.decay import DecayCalculator, DecayConfig
 from .wall_clock import persona_wall_now, PERSONA_EPOCH
 from .proactive.character_life import CharacterLife, CharacterLifeConfig
 from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
+from .proactive.target_selector import TargetSelector
 from .proactive.delayed_task_queue import DelayedTaskQueue
 from .agents.event_agent import EventGenerationAgent
 
@@ -170,6 +171,12 @@ class PersonaOrchestrator:
             logger.info("角色生活模拟已初始化")
 
             # 初始化主动消息调度器
+            target_selector = TargetSelector(
+                data_store=self.data_store,
+                bot_config=self.config,
+                decay_calculator=self.decay_calculator,
+                character=self.character,
+            )
             scheduler_config = ProactiveConfig(
                 enabled=self.config.proactive_enabled,
                 min_interval_hours=self.config.proactive_min_interval_hours,
@@ -189,6 +196,7 @@ class PersonaOrchestrator:
                 event_agent=self.event_agent,
                 bot=self.bot,
                 decay_calculator=self.decay_calculator,
+                target_selector=target_selector,
             )
             await self.scheduler.load_persistent_state()
             logger.info("主动消息调度器已初始化")

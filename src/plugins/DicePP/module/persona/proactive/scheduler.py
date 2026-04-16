@@ -17,6 +17,8 @@ from ..character.models import Character
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now
 from ..agents.event_agent import EventGenerationAgent
+from .models import ShareTarget
+from .utils import effective_for_proactive
 
 logger = logging.getLogger("persona.scheduler")
 
@@ -49,24 +51,6 @@ class ProactiveConfig:
         self.share_threshold = share_threshold
 
 
-class ShareTarget:
-    """分享目标"""
-
-    def __init__(
-        self,
-        user_id: str,
-        group_id: str = "",
-        is_group: bool = False,
-        priority: int = 0,
-        score: float = 0.0,
-    ):
-        self.user_id = user_id
-        self.group_id = group_id
-        self.is_group = is_group
-        self.priority = priority
-        self.score = score
-
-
 class PendingShare:
     """待分享的事件"""
 
@@ -91,6 +75,7 @@ class ProactiveScheduler:
         config: ProactiveConfig,
         data_store: PersonaDataStore,
         character: Character,
+        target_selector: "TargetSelector",
         event_agent: Optional[EventGenerationAgent] = None,
         bot=None,
         decay_calculator: Optional[DecayCalculator] = None,
@@ -101,12 +86,13 @@ class ProactiveScheduler:
         self.event_agent = event_agent
         self.bot = bot
         self._decay_calculator = decay_calculator
+        self.target_selector = target_selector
 
         self._last_tick: Optional[datetime] = None
         self._tick_interval = timedelta(seconds=60)  # 60秒节流
 
         self._pending_shares: List[PendingShare] = []
-        self._last_proactive_time: Dict[str, datetime] = {}  # user_id -> last_time
+        self._last_proactive_time: Dict[str, datetime] = {}  # target_key -> last_time
 
         self._scheduled_events_today: Set[str] = set()  # 今天已触发的定时事件类型
         self._last_event_date: Optional[str] = None
@@ -122,13 +108,6 @@ class ProactiveScheduler:
 
     def _now(self) -> datetime:
         return persona_wall_now(self.config.timezone)
-
-    def _effective_for_proactive(self, rel: RelationshipState) -> RelationshipState:
-        """与对话侧一致：阈值/概率按惰性时间衰减后的综合分（不写库）。"""
-        if not self._decay_calculator:
-            return rel
-        initial = float(self.character.extensions.initial_relationship)
-        return self._decay_calculator.effective_relationship(rel, initial)
 
     def _get_today_str(self) -> str:
         return self._now().strftime("%Y-%m-%d")
@@ -212,14 +191,24 @@ class ProactiveScheduler:
             # start == end 时视为全天活跃（hour >= start or hour < end 恒为 True）
             return hour >= start or hour < end
 
-    def _can_send_to_user(self, user_id: str) -> bool:
-        """检查是否可以向用户发送主动消息（最小间隔）"""
-        last_time = self._last_proactive_time.get(user_id)
+    def _target_key(self, target: ShareTarget) -> str:
+        return f"group:{target.group_id}" if target.is_group else f"user:{target.user_id}"
+
+    def _can_send_to_key(self, key: str) -> bool:
+        """检查是否可以对指定目标发送主动消息（最小间隔）"""
+        last_time = self._last_proactive_time.get(key)
         if not last_time:
             return True
 
         min_interval = timedelta(hours=self.config.min_interval_hours)
         return self._now() - last_time >= min_interval
+
+    async def _can_send_to_target(self, target: ShareTarget) -> bool:
+        if target.policy != "force" and not self._can_send_to_key(self._target_key(target)):
+            return False
+        if not target.is_group and await self.data_store.is_user_muted(target.user_id):
+            return False
+        return True
 
     async def tick(self) -> List[Dict]:
         """
@@ -338,11 +327,9 @@ class ProactiveScheduler:
             # SharePolicy.NEVER 不发送
 
             if should_send:
-                targets = await self._select_share_targets()
+                targets = await self.target_selector.select_share_targets()
                 for target in targets[: self.config.max_shares_per_event]:
-                    if not self._can_send_to_user(target.user_id):
-                        continue
-                    if await self.data_store.is_user_muted(target.user_id):
+                    if not await self._can_send_to_target(target):
                         continue
 
                     msg = await self._create_proactive_message(
@@ -350,7 +337,7 @@ class ProactiveScheduler:
                     )
                     if msg:
                         messages.append(msg)
-                        self._last_proactive_time[target.user_id] = now
+                        self._last_proactive_time[self._target_key(target)] = now
 
             break  # 每次 tick 只触发一个定时事件
 
@@ -411,7 +398,7 @@ class ProactiveScheduler:
             relationships = await self._get_active_relationships()
 
             for rel in relationships:
-                eff = self._effective_for_proactive(rel)
+                eff = effective_for_proactive(rel, self._decay_calculator, self.character)
                 # 检查最小好感度（与对话展示一致）
                 if eff.composite_score < self.config.miss_min_score:
                     continue
@@ -426,7 +413,7 @@ class ProactiveScheduler:
 
                 # 检查最小间隔
                 user_id = rel.user_id
-                if not self._can_send_to_user(user_id):
+                if not self._can_send_to_key(f"user:{user_id}"):
                     continue
                 # Phase 3: 检查用户是否关闭了主动消息
                 if await self.data_store.is_user_muted(user_id):
@@ -451,12 +438,13 @@ class ProactiveScheduler:
                     group_id="",  # 想念消息只发私聊
                     priority=int(eff.composite_score),
                     score=eff.composite_score,
+                    policy="normal",
                 )
 
                 msg = await self._create_miss_you_message(target, event_desc)
                 if msg:
                     messages.append(msg)
-                    self._last_proactive_time[user_id] = now
+                    self._last_proactive_time[f"user:{user_id}"] = now
 
                     # 限制每次 tick 只发送一条想念消息
                     break
@@ -492,72 +480,6 @@ class ProactiveScheduler:
                 return event
         return None
 
-    async def _select_share_targets(self) -> List[ShareTarget]:
-        """
-        选择分享目标
-        优先级：
-        1. 私聊高好感度用户 (>=60)
-        2. 私聊中等好感度用户 (40-60)
-        3. 探索配额用户 (20-40, 7天内有互动)
-        4. 群聊 (活跃度>=60)
-        """
-        targets = []
-
-        try:
-            # 获取高好感度用户
-            high_score = await self.data_store.get_top_relationships(limit=20)
-            for rel in high_score:
-                eff = self._effective_for_proactive(rel)
-                if eff.composite_score >= 60 and not rel.group_id:
-                    targets.append(
-                        ShareTarget(
-                            user_id=rel.user_id,
-                            priority=100 + int(eff.composite_score),
-                            score=eff.composite_score,
-                        )
-                    )
-                elif 40 <= eff.composite_score < 60 and not rel.group_id:
-                    targets.append(
-                        ShareTarget(
-                            user_id=rel.user_id,
-                            priority=50 + int(eff.composite_score),
-                            score=eff.composite_score,
-                        )
-                    )
-
-            # 获取活跃群聊
-            try:
-                # 安全地获取配置值（self.bot 可能为 None）
-                if self.bot and hasattr(self.bot, 'config') and hasattr(self.bot.config, 'persona_ai'):
-                    min_activity = getattr(
-                        self.bot.config.persona_ai, 'group_activity_min_threshold', 60
-                    )
-                else:
-                    min_activity = 60  # 默认值
-                group_activities = await self.data_store.get_all_group_activities(
-                    min_score=min_activity
-                )
-                for activity in group_activities:
-                    targets.append(
-                        ShareTarget(
-                            user_id="",
-                            group_id=activity.group_id,
-                            is_group=True,
-                            priority=int(activity.score),
-                            score=activity.score,
-                        )
-                    )
-            except Exception as e:
-                logger.debug(f"获取群活跃度失败: {e}")
-
-            # 按优先级排序
-            targets.sort(key=lambda x: x.priority, reverse=True)
-
-        except Exception as e:
-            logger.error(f"选择分享目标失败: {e}")
-
-        return targets[: self.config.max_shares_per_event]
-
     async def share_event_to_targets(self, description: str, max_shares: int) -> List[Dict]:
         """
         将事件分享给符合条件的分享目标。
@@ -568,13 +490,14 @@ class ProactiveScheduler:
         Returns:
             成功创建的消息列表
         """
-        targets = await self._select_share_targets()
+        if not self.config.enabled:
+            return []
+
+        targets = await self.target_selector.select_share_targets()
         now = self._now()
         messages = []
         for target in targets[:max_shares]:
-            if not self._can_send_to_user(target.user_id):
-                continue
-            if await self.data_store.is_user_muted(target.user_id):
+            if not await self._can_send_to_target(target):
                 continue
             msg = {
                 "user_id": target.user_id,
@@ -582,7 +505,7 @@ class ProactiveScheduler:
                 "content": description,
                 "type": "random_event",
             }
-            self._last_proactive_time[target.user_id] = now
+            self._last_proactive_time[self._target_key(target)] = now
             messages.append(msg)
         return messages
 

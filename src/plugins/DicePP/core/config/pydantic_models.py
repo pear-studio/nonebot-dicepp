@@ -147,6 +147,14 @@ class PersonaConfig(BaseModel):
     proactive_greeting_phrases: Dict[str, List[str]] = Field(
         default_factory=_default_proactive_greeting_phrases
     )
+    proactive_always_send_users: List[str] = Field(
+        default_factory=list,
+        description="必定接收主动消息的私聊用户 ID 列表（绕过 min_interval 与好感度阈值）",
+    )
+    proactive_always_send_groups: List[str] = Field(
+        default_factory=list,
+        description="必定接收主动消息的群聊 ID 列表（绕过 min_interval 与活跃度阈值）",
+    )
 
     # ── Phase 2: 群活跃度
     group_activity_enabled: bool = True
