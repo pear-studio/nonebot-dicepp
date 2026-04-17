@@ -205,8 +205,14 @@ class ProactiveScheduler:
 
     async def _can_send_to_target(self, target: ShareTarget) -> bool:
         if target.policy != "force" and not self._can_send_to_key(self._target_key(target)):
+            logger.debug(
+                f"主动消息跳过(间隔): user={target.user_id}, group={target.group_id}"
+            )
             return False
         if not target.is_group and await self.data_store.is_user_muted(target.user_id):
+            logger.debug(
+                f"主动消息跳过(静音): user={target.user_id}, group={target.group_id}"
+            )
             return False
         return True
 
@@ -273,14 +279,21 @@ class ProactiveScheduler:
             share_policy = raw_share if isinstance(raw_share, SharePolicy) else SharePolicy(raw_share)
 
             if event_type in self._scheduled_events_today:
+                logger.debug(f"定时事件已触发过: {event_type}")
                 continue
 
             if not self._is_in_time_range(current_time, time_range):
                 continue
 
+            logger.info(
+                f"定时事件触发: type={event_type}, time={current_time}, "
+                f"share_policy={share_policy.value}"
+            )
+
             # 现场生成事件
             event_desc = await self._generate_scheduled_event_description(event_type)
             if not event_desc:
+                logger.warning(f"定时事件生成失败, 下次重试: {event_type}")
                 # 生成失败：不标记为已触发，允许下次再试
                 continue
 
@@ -305,6 +318,11 @@ class ProactiveScheduler:
                 else:
                     share_desire = 0.5
 
+            logger.debug(
+                f"定时事件生成完成: type={event_type}, desc={event_desc[:40]}, "
+                f"share_desire={share_desire:.2f}"
+            )
+
             # 保存到数据库
             today = self._get_today_str()
             await self.data_store.add_daily_event(
@@ -328,6 +346,7 @@ class ProactiveScheduler:
 
             if should_send:
                 targets = await self.target_selector.select_share_targets()
+                sent_count = 0
                 for target in targets[: self.config.max_shares_per_event]:
                     if not await self._can_send_to_target(target):
                         continue
@@ -338,6 +357,19 @@ class ProactiveScheduler:
                     if msg:
                         messages.append(msg)
                         self._last_proactive_time[self._target_key(target)] = now
+                        sent_count += 1
+                        logger.info(
+                            f"主动消息发送: target={target.user_id}, "
+                            f"group={target.group_id}, is_group={target.is_group}, "
+                            f"event_type={event_type}, score={target.score:.1f}"
+                        )
+                if not sent_count:
+                    logger.debug(f"定时事件无可发送目标: {event_type}")
+            else:
+                logger.debug(
+                    f"定时事件跳过发送: {event_type}, policy={share_policy.value}, "
+                    f"desire={share_desire:.2f}, threshold={self.config.share_threshold:.2f}"
+                )
 
             break  # 每次 tick 只触发一个定时事件
 
@@ -368,9 +400,9 @@ class ProactiveScheduler:
         try:
             result = await self.event_agent.generate_event_result(context)
             return result.description
+        except (AttributeError, TypeError):
+            raise
         except Exception as e:
-            if isinstance(e, (AttributeError, TypeError)):
-                raise
             logger.error(f"定时事件生成失败: {e}")
             return f"我正在{event_type}。"
 
@@ -396,11 +428,16 @@ class ProactiveScheduler:
 
         try:
             relationships = await self._get_active_relationships()
+            logger.debug(f"想念检查: 活跃关系数={len(relationships)}")
 
             for rel in relationships:
                 eff = effective_for_proactive(rel, self._decay_calculator, self.character)
                 # 检查最小好感度（与对话展示一致）
                 if eff.composite_score < self.config.miss_min_score:
+                    logger.debug(
+                        f"想念跳过(好感度低): user={rel.user_id}, "
+                        f"score={eff.composite_score:.1f}"
+                    )
                     continue
 
                 # 检查空闲时间
@@ -408,26 +445,36 @@ class ProactiveScheduler:
                     continue
 
                 idle_time = now - rel.last_interaction_at
+                idle_hours = idle_time.total_seconds() / 3600
                 if idle_time < min_idle:
+                    logger.debug(
+                        f"想念跳过(空闲短): user={rel.user_id}, idle={idle_hours:.1f}h"
+                    )
                     continue
 
                 # 检查最小间隔
                 user_id = rel.user_id
                 if not self._can_send_to_key(f"user:{user_id}"):
+                    logger.debug(f"想念跳过(间隔): user={user_id}")
                     continue
                 # Phase 3: 检查用户是否关闭了主动消息
                 if await self.data_store.is_user_muted(user_id):
+                    logger.debug(f"想念跳过(静音): user={user_id}")
                     continue
 
                 # 检查概率 P = 0.40 + 0.40 * (score/100)
                 probability = 0.40 + 0.40 * (eff.composite_score / 100)
                 if random.random() > probability:
+                    logger.debug(
+                        f"想念跳过(概率): user={user_id}, p={probability:.2f}"
+                    )
                     continue
 
                 # 获取今天的一个事件作为素材（不再依赖 _pending_shares）
                 today = self._get_today_str()
                 today_events = await self.data_store.get_daily_events(today)
                 if not today_events:
+                    logger.debug(f"想念跳过(无事件): user={user_id}")
                     continue
                 event = random.choice(today_events)
                 event_desc = event.description
@@ -445,6 +492,10 @@ class ProactiveScheduler:
                 if msg:
                     messages.append(msg)
                     self._last_proactive_time[f"user:{user_id}"] = now
+                    logger.info(
+                        f"想念触发: user={user_id}, idle={idle_hours:.1f}h, "
+                        f"score={eff.composite_score:.1f}, event={event_desc[:40]}"
+                    )
 
                     # 限制每次 tick 只发送一条想念消息
                     break

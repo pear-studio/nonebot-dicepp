@@ -294,8 +294,10 @@ class PersonaOrchestrator:
 
             # Phase 3: 工具调用
             if self.config.tools_enabled:
+                logger.debug(f"对话走 tools 路径: user={user_id}, tools_enabled=true")
                 response = await self._chat_with_tools(user_id, group_id, messages)
             else:
+                logger.debug(f"对话走普通路径: user={user_id}, tools_enabled=false")
                 response = await self.llm_router.generate(
                     messages=messages,
                     model_tier=ModelTier.PRIMARY,

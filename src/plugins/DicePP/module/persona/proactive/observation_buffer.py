@@ -335,6 +335,10 @@ class ObservationExtractor:
         if not messages:
             return []
 
+        logger.debug(
+            f"观察提取触发: group={group_id}, messages={len(messages)}"
+        )
+
         try:
             # 构建消息文本
             messages_text = "\n".join(

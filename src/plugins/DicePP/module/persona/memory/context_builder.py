@@ -65,6 +65,14 @@ class ContextBuilder:
             # 如果发生了截断（返回的历史比原历史短），添加省略标记
             if len(truncated_history) < len(short_term_history):
                 short_term_text = "...（前文省略）\n" + short_term_text
+                original_chars = sum(len(m.get("content", "")) for m in short_term_history)
+                kept_chars = sum(len(m.get("content", "")) for m in truncated_history)
+                logger.debug(
+                    f"history_truncated turns_before={len(short_term_history)} "
+                    f"turns_after={len(truncated_history)} "
+                    f"content_chars_before={original_chars} "
+                    f"content_chars_after={kept_chars}"
+                )
 
             system_parts.append(f"近期对话:\n{short_term_text}")
 

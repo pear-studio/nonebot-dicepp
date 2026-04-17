@@ -310,7 +310,8 @@ class LLMRouter:
                 logger.info(
                     f"model={metadata.get('model', client.model)} tier={tier_name} "
                     f"latency={latency:.1f}s tokens_in={tokens_in} "
-                    f"tokens_out={tokens_out} status=ok"
+                    f"tokens_out={tokens_out} "
+                    f"cached={metadata.get('cached_tokens', 0)} status=ok"
                 )
 
             return content, metadata
