@@ -73,6 +73,94 @@ scripts\dev\run.bat
 
 ---
 
+## 方式一（替代）：Linux 服务器本地开发
+
+适用于在 Linux 服务器上进行开发。与 Docker 部署不同，此方式直接在宿主机运行 Python，便于快速迭代和调试。
+
+### 1. 安装 uv
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# 将 uv 加入 PATH（当前会话）
+export PATH="$HOME/.local/bin:$PATH"
+# 验证
+uv --version
+```
+
+> 建议将 `export PATH="$HOME/.local/bin:$PATH"` 写入 `~/.bashrc`，避免每次手动添加。
+
+### 2. 克隆项目并安装依赖
+
+```bash
+git clone https://github.com/pear-studio/nonebot-dicepp.git
+cd nonebot-dicepp
+
+# 安装运行时依赖
+make install
+# 或: uv sync
+
+# 安装开发依赖（含 pytest、pytest-cov）
+make install-dev
+# 或: uv sync --group dev
+```
+
+`uv sync` 会自动创建 `.venv` 虚拟环境并安装依赖。`uv.lock` 锁定文件确保所有环境依赖版本一致。
+
+### 3. 配置环境
+
+复制环境变量模板并调整端口（避免与生产环境冲突）：
+
+```bash
+cp .env .env.dev
+# 编辑 .env.dev，将 PORT 改为 8081
+```
+
+### 4. 运行测试验证
+
+```bash
+make test
+# 或: uv run pytest
+
+# 运行指定模块
+uv run pytest tests/module/roll/ -v
+```
+
+### 5. 开发工作流（Git Worktree）
+
+如果 `master` 分支正在运行生产机器人，建议使用 **Git Worktree** 隔离开发空间：
+
+```bash
+# 在主仓库创建 dev 分支和 worktree
+git branch dev
+git worktree add /home/ubuntu/dev/dicepp dev
+
+# 进入开发目录
+cd /home/ubuntu/dev/dicepp
+
+# 复用主仓库的虚拟环境和密钥
+ln -s /home/ubuntu/nonebot-dicepp/.venv .venv
+ln -s /home/ubuntu/nonebot-dicepp/config/secrets.json config/secrets.json
+
+# 配置开发环境变量
+cp .env .env.dev
+# 修改 PORT 为 8081
+```
+
+worktree 与主仓库共用同一个 `.git`，但代码文件完全隔离：
+- 主仓库 `master`：运行生产机器人，保持干净
+- worktree `dev`：开发、测试，修改不影响生产
+
+### 6. 启动 Bot（开发模式）
+
+```bash
+# 使用开发配置
+uv run python bot.py
+```
+
+> 注意：开发模式启动 Bot 前，确保 LLOneBot 的反向 WebSocket 地址指向开发端口（如 `ws://服务器IP:8081/onebot/v11/ws`），或临时断开 LLOneBot 避免消息误发到生产实例。
+
+---
+
 ## 方式二：Linux/WSL Docker 部署（推荐）
 
 适用于生产服务器，完全容器化部署。
@@ -210,6 +298,8 @@ docker network create dice-net  # 如不存在则手动创建
 
 ### 日常操作
 
+#### Docker 部署环境
+
 ```bash
 # DicePP 控制
 make start           # 启动
@@ -228,6 +318,24 @@ make llbot-logs      # 查看日志
 # 全部服务
 make start-all       # 启动全部
 make stop-all        # 停止全部
+```
+
+#### 本地开发环境
+
+```bash
+# 环境管理
+make install         # 安装运行时依赖（uv sync）
+make install-dev     # 安装开发依赖（uv sync --group dev）
+make clean           # 清理临时文件
+
+# 测试
+make test            # 运行全部测试
+make test-cov        # 运行测试（带覆盖率报告）
+
+# 运行
+make run             # 本地启动 Bot
+uv run pytest        # 直接运行 pytest
+uv run python bot.py # 直接启动 Bot
 
 # 帮助
 make help            # 显示所有命令

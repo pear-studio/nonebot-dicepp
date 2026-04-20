@@ -10,12 +10,10 @@
 
 # ── 环境安装 ─────────────────────────────────────────────────────────────────
 install:  ## 安装运行时依赖
-	uv venv .venv
-	uv pip install . --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+	uv sync
 
-install-dev:  ## 安装开发依赖
-	uv venv .venv
-	uv pip install ".[dev]" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+install-dev:  ## 安装开发依赖（含 pytest、pytest-cov、pyinstaller）
+	uv sync --group dev
 
 # ── 测试 ─────────────────────────────────────────────────────────────────────
 test:  ## 运行测试
