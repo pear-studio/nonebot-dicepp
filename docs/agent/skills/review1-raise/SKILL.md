@@ -58,8 +58,9 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 5. 整理问题列表，按 `R1, R2...` 编号
 6. **一次性写入**：将完整文档内容写入 `.temp/review_draft_tmp.txt`，然后调用脚本创建文档（**仅允许这一次写入操作**，脚本执行后会自动清理临时文件）：
    ```bash
-   python .claude/skills/review1-raise/review_record.py create review-YYMMDD-HHMM-<主题>.md --file .temp/review_draft_tmp.txt
+   python .claude/skills/review1-raise/review_record.py create <主题slug> --file .temp/review_draft_tmp.txt
    ```
+   脚本自动生成时间戳，输出完整文件路径（如 `.temp/review-260420-1530-<主题>.md`），后续步骤使用此路径。
 
 ## 文档格式
 

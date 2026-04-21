@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Force UTF-8 encoding for stdout/stderr on Windows to avoid garbled Chinese characters
@@ -23,13 +24,21 @@ REVIEW_DIR = Path(".temp")
 
 def get_path(filename: str) -> Path:
     path = Path(filename)
-    if not path.is_absolute():
-        path = REVIEW_DIR / path
-    return path
+    if path.is_absolute():
+        return path
+    if REVIEW_DIR in path.parents or path.parts[:1] == (REVIEW_DIR.name,):
+        return path
+    return REVIEW_DIR / path
 
 
 def cmd_create(args):
-    path = get_path(args.filename)
+    filename = args.filename
+    # If filename looks like a topic slug (no date pattern), auto-generate timestamped name
+    if not re.match(r"review-\d{6}-\d{4}-", filename):
+        slug = filename.rstrip(".md")
+        timestamp = datetime.now().strftime("%y%m%d-%H%M")
+        filename = f"review-{timestamp}-{slug}.md"
+    path = get_path(filename)
     path.parent.mkdir(parents=True, exist_ok=True)
     if args.file:
         tmp = Path(args.file)
@@ -43,6 +52,22 @@ def cmd_create(args):
     path.write_text(content, encoding="utf-8")
     if tmp is not None:
         tmp.unlink(missing_ok=True)
+    print(path)
+
+
+def cmd_append(args):
+    path = get_path(args.filename)
+    if not path.exists():
+        print(f"File not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    if args.file:
+        tmp = Path(args.file)
+        content = tmp.read_text(encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+    else:
+        content = args.content
+    existing = path.read_text(encoding="utf-8")
+    path.write_text(existing.rstrip("\n") + "\n\n" + content.strip("\n") + "\n", encoding="utf-8")
     print(path)
 
 
@@ -80,6 +105,12 @@ def main():
     p_create.add_argument("--file", "-f", help="Path to a file containing the document content")
     p_create.set_defaults(func=cmd_create)
 
+    p_append = sub.add_parser("append", help="Append raw markdown content to an existing review doc")
+    p_append.add_argument("filename")
+    p_append.add_argument("content", nargs="?", help="Content to append (or use --file)")
+    p_append.add_argument("--file", "-f", help="Path to a file containing content to append")
+    p_append.set_defaults(func=cmd_append)
+
     p_read = sub.add_parser("read", help="Read a review doc")
     p_read.add_argument("filename")
     p_read.set_defaults(func=cmd_read)
@@ -87,7 +118,7 @@ def main():
     p_update = sub.add_parser("update", help="Update a section of an Rn block")
     p_update.add_argument("filename")
     p_update.add_argument("rn", help="e.g. R1")
-    p_update.add_argument("section", choices=["Review", "Reply", "Confirm", "Accept"])
+    p_update.add_argument("section", choices=["Review", "Reply", "Confirm", "Accept", "用户明确"])
     p_update.add_argument("content")
     p_update.set_defaults(func=cmd_update)
 
@@ -159,7 +190,7 @@ def cmd_batch_update(args):
 
 
 def _apply_update(text: str, rn: str, section: str, content: str) -> str:
-    pattern = re.compile(r"(### R\d+ — .*?\n)(.*?)(?=\n### R\d+ — |\Z)", re.DOTALL)
+    pattern = re.compile(r"^(### R\d+ — .*?\n)(.*?)(?=^### R\d+ — |\Z)", re.DOTALL | re.MULTILINE)
 
     def replacer(m):
         header = m.group(1)
@@ -169,7 +200,7 @@ def _apply_update(text: str, rn: str, section: str, content: str) -> str:
 
         sec_header = f"**{section}**"
         sec_pattern = re.compile(
-            rf"(\n{re.escape(sec_header)}\n)(.*?)(?=\n\*\*(?:Review|Reply|Confirm|Accept)\*\*\n|\Z)",
+            rf"(\n{re.escape(sec_header)}\n)(.*?)(?=\n\*\*(?:Review|Reply|Confirm|Accept|用户明确)\*\*\n|\Z)",
             re.DOTALL,
         )
         sec_match = sec_pattern.search(body)
