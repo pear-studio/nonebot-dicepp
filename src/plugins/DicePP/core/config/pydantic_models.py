@@ -47,17 +47,6 @@ def _default_proactive_greeting_schedule() -> List[ProactiveGreetingEntry]:
     ]
 
 
-def _default_proactive_greeting_phrases() -> Dict[str, List[str]]:
-    """与默认 `proactive_greeting_schedule` 的 event_type 键一致；可在配置中覆盖。"""
-    return {
-        "wake_up": ["早上好！", "早安~", "起床啦~"],
-        "lunch": ["中午好~", "午饭吃了吗？", "午休时间~"],
-        "afternoon": ["下午好", "下午过得怎么样？", "下午有空吗？"],
-        "dinner": ["晚上好~", "吃晚饭了吗？", "晚上有空聊天吗？"],
-        "good_night": ["晚安", "早点休息~", "好梦~"],
-    }
-
-
 # ── Phase 4+: 主动消息配置（暂未启用）
 # class ProactiveConfig(BaseModel):
 #     enabled: bool = True
@@ -158,12 +147,10 @@ class PersonaConfig(BaseModel):
     proactive_miss_enabled: bool = True
     proactive_miss_min_hours: int = 72
     proactive_miss_min_score: float = 40.0
-    # DEPRECATED: 定时事件配置已迁移到角色卡 extensions.scheduled_events
+    # DEPRECATED: 已被 LLM 生成分享消息取代，计划移除
+    # 定时事件配置已迁移到角色卡 extensions.scheduled_events
     proactive_greeting_schedule: List[ProactiveGreetingEntry] = Field(
         default_factory=_default_proactive_greeting_schedule
-    )
-    proactive_greeting_phrases: Dict[str, List[str]] = Field(
-        default_factory=_default_proactive_greeting_phrases
     )
     proactive_always_send_users: List[str] = Field(
         default_factory=list,
@@ -172,6 +159,27 @@ class PersonaConfig(BaseModel):
     proactive_always_send_groups: List[str] = Field(
         default_factory=list,
         description="必定接收主动消息的群聊 ID 列表（绕过 min_interval 与活跃度阈值）",
+    )
+    proactive_share_message_concurrent: int = Field(
+        default=3, ge=1, description="并发生成分享消息的最大 LLM 调用数"
+    )
+    proactive_share_max_chars: int = Field(
+        default=200, ge=10, description="分享消息硬截断上限（包含省略号）"
+    )
+    proactive_share_context_history_limit: int = Field(
+        default=5, ge=0, description="分享消息构建时读取的最近对话轮数"
+    )
+    proactive_share_max_retries: int = Field(
+        default=2, ge=0, description="分享消息生成失败后的最大重试次数"
+    )
+    proactive_share_timeout_seconds: int = Field(
+        default=60, ge=5, description="单次分享消息 LLM 调用超时（秒）"
+    )
+    proactive_share_backoff_base_seconds: int = Field(
+        default=2, ge=1, description="分享消息重试的指数退避基数（秒）"
+    )
+    proactive_max_scheduled_events_per_tick: int = Field(
+        default=3, ge=0, description="每轮 tick 最多处理的定时事件数"
     )
 
     # ── Phase 2: 群活跃度

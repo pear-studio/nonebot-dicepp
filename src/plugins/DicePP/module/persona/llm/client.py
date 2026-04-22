@@ -13,6 +13,11 @@ ToolExecutor = Callable[[List[Dict]], Awaitable[List[Dict]]]
 
 logger = logging.getLogger("persona.llm")
 
+_RETRYABLE_KEYWORDS = (
+    "rate limit", "429", "service unavailable", "503",
+    "timeout", "connection", "temporarily", "529", "overloaded",
+)
+
 
 class LLMClient:
     """异步 LLM 客户端"""
@@ -126,10 +131,7 @@ class LLMClient:
                 error_msg = str(e).lower()
                 
                 # 检查是否需要重试的错误
-                retryable = any(keyword in error_msg for keyword in [
-                    "rate limit", "429", "service unavailable", "503", 
-                    "timeout", "connection", "temporarily"
-                ])
+                retryable = any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
                 
                 if retryable and attempt < max_retries:
                     await asyncio.sleep(retry_delay)
@@ -206,10 +208,7 @@ class LLMClient:
             except Exception as e:
                 last_error = e
                 error_msg = str(e).lower()
-                retryable = any(keyword in error_msg for keyword in [
-                    "rate limit", "429", "service unavailable", "503",
-                    "timeout", "connection", "temporarily"
-                ])
+                retryable = any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
                 if retryable and attempt < max_retries:
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
@@ -375,10 +374,7 @@ class LLMClient:
             except Exception as e:
                 error_msg = str(e).lower()
                 # 检查是否需要重试的错误
-                retryable = any(keyword in error_msg for keyword in [
-                    "rate limit", "429", "service unavailable", "503",
-                    "timeout", "connection", "temporarily"
-                ])
+                retryable = any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
 
                 if not retryable or retry_count >= 3:  # 最多重试 3 次
                     raise

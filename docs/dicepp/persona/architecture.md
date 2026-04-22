@@ -282,7 +282,7 @@ Command.tick_daily() 每天调用
 #### `ProactiveScheduler`
 
 管理所有主动消息的发送策略：
-- **安静时段**：可配置（默认 23:00-07:00），期间不发送
+- **活跃时段**：复用角色卡 `event_day_start_hour` ~ `event_day_end_hour`，非活跃期间不发送主动消息
 - **最小间隔**：同一用户两次主动消息之间的最小间隔
 - **定时事件**：按角色卡 `scheduled_events` 配置触发
   - 命中时间窗口后，由 `EventGenerationAgent` 现场生成事件描述和反应
@@ -306,10 +306,10 @@ Command.tick_daily() 每天调用
 #### `DelayedTaskQueue`
 
 通用延迟任务队列（SQLite 持久化）：
-- 承载 random event share 等异步延迟任务
-- `enqueue_event_share()`: 将生活事件按配置延迟（默认 1~5 分钟）入队
+- 当前仅支持 `event_share` 类型任务；非 `event_share` 类型会被直接标记为 `completed`（后续扩展需修改 `tick()` 分发逻辑）
+- `enqueue_event_share()`: 将生活事件按配置延迟（由调用方决定，如 1~5 分钟）入队
 - `tick()`: 扫描并处理到期的 `pending` 任务，支持 `share_desire` 阈值过滤
-- 任务处理成功后标记为 `completed`，失败则按 `max_retries` 重试，超限标记 `failed`
+- 任务处理成功后标记为 `completed`，失败则按 `max_retries` 重试，超限标记为 `failed`
 - 与 `ProactiveScheduler` 解耦：Orchestrator 负责将 scheduler 的目标选择能力注入 `on_share` 回调
 
 #### `ObservationBuffer`

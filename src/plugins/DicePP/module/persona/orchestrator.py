@@ -24,7 +24,7 @@ from utils.string import estimate_tokens
 from .proactive.character_life import CharacterLife, CharacterLifeConfig
 from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
 from .proactive.target_selector import TargetSelector
-from .proactive.delayed_task_queue import DelayedTaskQueue
+from .proactive.delayed_task_queue import EventShareTaskQueue
 from .agents.event_agent import EventGenerationAgent
 
 # Phase 4: 掷骰工具
@@ -50,7 +50,7 @@ class PersonaOrchestrator:
         self.character_life: Optional[CharacterLife] = None
         self.event_agent: Optional[EventGenerationAgent] = None
         self.scheduler: Optional[ProactiveScheduler] = None
-        self.delayed_task_queue: Optional[DelayedTaskQueue] = None
+        self.delayed_task_queue: Optional[EventShareTaskQueue] = None
         self._initialized = False
         self._pending_messages: Dict[str, List[Dict[str, str]]] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}  # key -> (message, timestamp)
@@ -156,7 +156,7 @@ class PersonaOrchestrator:
             logger.info("衰减计算器已初始化")
 
             # 初始化角色生活模拟
-            self.event_agent = EventGenerationAgent(self.llm_router)
+            self.event_agent = EventGenerationAgent(self.llm_router, config=self.config)
             life_config = CharacterLifeConfig(
                 enabled=self.config.character_life_enabled,
                 slot_match_window_minutes=self.config.character_life_jitter_minutes,
@@ -187,9 +187,14 @@ class PersonaOrchestrator:
                 miss_enabled=self.config.proactive_miss_enabled,
                 miss_min_hours=self.config.proactive_miss_min_hours,
                 miss_min_score=self.config.proactive_miss_min_score,
-                greeting_phrases=dict(self.config.proactive_greeting_phrases),
                 timezone=self.config.timezone,
                 share_threshold=self.config.proactive_event_share_threshold,
+                share_message_concurrent=self.config.proactive_share_message_concurrent,
+                share_max_chars=self.config.proactive_share_max_chars,
+                share_context_history_limit=self.config.proactive_share_context_history_limit,
+                max_scheduled_events_per_tick=getattr(
+                    self.config, "proactive_max_scheduled_events_per_tick", 3
+                ),
             )
             self.scheduler = ProactiveScheduler(
                 config=scheduler_config,
@@ -203,7 +208,7 @@ class PersonaOrchestrator:
             await self.scheduler.load_persistent_state()
             logger.info("主动消息调度器已初始化")
 
-            self.delayed_task_queue = DelayedTaskQueue(
+            self.delayed_task_queue = EventShareTaskQueue(
                 data_store=self.data_store,
                 share_threshold=self.config.proactive_event_share_threshold,
                 timezone=self.config.timezone,
@@ -1082,7 +1087,6 @@ class PersonaOrchestrator:
                     logger.info(f"角色生活事件: {event.get('description', '')[:50]}...")
                     # 随机事件进入延迟队列
                     if self.delayed_task_queue and event.get("share_desire", 0.0) >= self.config.proactive_event_share_threshold:
-                        import random
                         delay = random.randint(
                             self.config.proactive_event_share_delay_min,
                             self.config.proactive_event_share_delay_max,
@@ -1090,6 +1094,7 @@ class PersonaOrchestrator:
                         await self.delayed_task_queue.enqueue_event_share(
                             event_id=event.get("event_id", ""),
                             event_description=event.get("description", ""),
+                            reaction=event.get("reaction", ""),
                             share_desire=event.get("share_desire", 0.0),
                             delay_minutes=delay,
                         )
@@ -1101,9 +1106,10 @@ class PersonaOrchestrator:
 
             # 处理延迟队列中的随机事件分享
             if self.delayed_task_queue and self.scheduler:
-                async def _on_share(description: str, share_desire: float) -> List[Dict]:
+                async def _on_share(description: str, reaction: str, share_desire: float) -> List[Dict]:
                     return await self.scheduler.share_event_to_targets(
                         description,
+                        reaction,
                         self.scheduler.config.max_shares_per_event,
                     )
 

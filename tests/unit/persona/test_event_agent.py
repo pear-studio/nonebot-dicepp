@@ -51,146 +51,6 @@ class TestEventGenerationAgent:
             current_time=datetime(2024, 1, 1, 10, 0),
         )
 
-    class TestGenerateEvent:
-        """测试 generate_event 方法"""
-
-        async def test_generate_event_success(self, agent, mock_llm_router, event_context):
-            """测试正常生成事件"""
-            mock_llm_router.generate.return_value = "  窗外下起了小雨，雨滴轻轻敲打着窗户。  "
-
-            result = await agent.generate_event(event_context)
-
-            # 验证返回值被正确清理（strip）
-            assert result == "窗外下起了小雨，雨滴轻轻敲打着窗户。"
-            # 验证 LLM 被调用
-            mock_llm_router.generate.assert_called_once()
-            call_kwargs = mock_llm_router.generate.call_args.kwargs
-            # 验证参数
-            assert call_kwargs["model_tier"] == ModelTier.AUXILIARY
-            assert call_kwargs["temperature"] == 0.8
-            assert "messages" in call_kwargs
-
-        async def test_generate_event_strip_quotes(self, agent, mock_llm_router, event_context):
-            """测试生成的内容去除引号"""
-            mock_llm_router.generate.return_value = '"带引号的事件内容"'
-
-            result = await agent.generate_event(event_context)
-
-            assert result == "带引号的事件内容"
-            assert '"' not in result
-
-        async def test_generate_event_strip_single_quotes(self, agent, mock_llm_router, event_context):
-            """测试生成的内容去除单引号"""
-            mock_llm_router.generate.return_value = "'带单引号的事件内容'"
-
-            result = await agent.generate_event(event_context)
-
-            assert result == "带单引号的事件内容"
-            assert "'" not in result
-
-        async def test_generate_event_truncate_long(self, agent, mock_llm_router, event_context):
-            """测试超长内容被截断"""
-            long_text = "这是一个超长的事件描述" * 10  # 超过100字
-            mock_llm_router.generate.return_value = long_text
-
-            result = await agent.generate_event(event_context)
-
-            assert len(result) <= 100
-            assert result.endswith("...")
-
-        async def test_generate_event_fallback_on_exception(self, agent, mock_llm_router, event_context):
-            """测试异常时返回默认兜底文本"""
-            mock_llm_router.generate.side_effect = Exception("LLM 调用失败")
-
-            result = await agent.generate_event(event_context)
-
-            assert "我正在房间里休息。" in result
-
-        async def test_generate_event_with_empty_context(self, agent, mock_llm_router):
-            """测试空上下文的处理"""
-            context = EventContext(
-                character_name="角色A",
-                character_description="",
-                world="",
-                scenario="",
-                recent_diaries=[],
-                today_events=[],
-                current_time=datetime(2024, 1, 1, 10, 0),
-            )
-            mock_llm_router.generate.return_value = "测试事件"
-
-            result = await agent.generate_event(context)
-
-            assert result == "测试事件"
-            # 验证 prompt 中包含了默认值
-            call_args = mock_llm_router.generate.call_args.kwargs
-            messages = call_args["messages"]
-            assert "现代日常世界" in messages[0]["content"]  # world 默认值
-            assert "日常生活" in messages[0]["content"]  # scenario 默认值
-
-    class TestGenerateReaction:
-        """测试 generate_reaction 方法"""
-
-        async def test_generate_reaction_success(self, agent, mock_llm_router):
-            """测试正常生成反应"""
-            mock_llm_router.generate.return_value = "  这真是一件有趣的事情呢！  "
-
-            result = await agent.generate_reaction(
-                event="收到了一份神秘的礼物",
-                character_name="苏晓",
-                character_description="一个温柔体贴的AI助手",
-            )
-
-            assert result == "这真是一件有趣的事情呢！"
-            mock_llm_router.generate.assert_called_once()
-            call_kwargs = mock_llm_router.generate.call_args.kwargs
-            assert call_kwargs["temperature"] == 0.9
-            assert call_kwargs["model_tier"] == ModelTier.AUXILIARY
-
-        async def test_generate_reaction_truncate_long(self, agent, mock_llm_router):
-            """测试超长反应被截断"""
-            long_reaction = "我真的很开心" * 30  # 超过150字
-            mock_llm_router.generate.return_value = long_reaction
-
-            result = await agent.generate_reaction(
-                event="测试事件",
-                character_name="角色",
-                character_description="描述",
-            )
-
-            assert len(result) <= 150
-            assert result.endswith("...")
-
-        async def test_generate_reaction_fallback_on_exception(self, agent, mock_llm_router):
-            """测试异常时返回默认兜底文本"""
-            mock_llm_router.generate.side_effect = Exception("LLM 错误")
-
-            result = await agent.generate_reaction(
-                event="测试事件",
-                character_name="小明",
-                character_description="描述",
-            )
-
-            assert "小明" in result
-            assert "默默地想着" in result
-
-        async def test_generate_reaction_prompt_contains_character_info(self, agent, mock_llm_router):
-            """测试 prompt 中包含角色信息"""
-            mock_llm_router.generate.return_value = "反应内容"
-
-            await agent.generate_reaction(
-                event="发生了某事",
-                character_name="特定角色名",
-                character_description="特定的角色描述",
-            )
-
-            call_args = mock_llm_router.generate.call_args.kwargs
-            messages = call_args["messages"]
-            system_prompt = messages[0]["content"]
-            assert "特定角色名" in system_prompt
-            assert "特定的角色描述" in system_prompt
-            assert "发生了某事" in messages[1]["content"]
-
     class TestGenerateDiary:
         """测试 generate_diary 方法"""
 
@@ -412,6 +272,53 @@ class TestGenerateEventResult:
 
         assert "休息" in result.description
         assert result.duration_minutes == 0
+
+    @pytest.mark.asyncio
+    async def test_generate_event_result_truncate_long_description(self, agent_forced, mock_llm_router_forced):
+        """超长描述被截断到 _EVENT_DESCRIPTION_MAX_LEN 并加省略号"""
+        long_desc = "窗外" * 50  # 100 字，超过 60
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            f'{{"description": "{long_desc}", "duration_minutes": 0}}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_result(
+            EventContext(
+                character_name="小雨",
+                character_description="温柔的少女",
+                world="",
+                scenario="",
+                recent_diaries=[],
+                today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
+            )
+        )
+
+        assert len(result.description) <= 60
+        assert result.description.endswith("...")
+
+    @pytest.mark.asyncio
+    async def test_generate_event_result_empty_context(self, agent_forced, mock_llm_router_forced):
+        """空上下文（recent_diaries/today_events 均为空）时正常生成"""
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            '{"description": "正在休息", "duration_minutes": 15}',
+            {}
+        )
+
+        result = await agent_forced.generate_event_result(
+            EventContext(
+                character_name="小雨",
+                character_description="温柔的少女",
+                world="",
+                scenario="",
+                recent_diaries=[],
+                today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
+            )
+        )
+
+        assert result.description == "正在休息"
+        assert result.duration_minutes == 15
 
 
 class TestGenerateEventReaction:

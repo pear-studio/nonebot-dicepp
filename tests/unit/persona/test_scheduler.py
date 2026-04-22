@@ -10,7 +10,6 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.proactive.scheduler import (
     ProactiveScheduler,
     ProactiveConfig,
-    PendingShare,
 )
 from plugins.DicePP.module.persona.data.models import RelationshipState
 
@@ -56,7 +55,6 @@ class TestProactiveSchedulerBasics:
             miss_enabled=True,
             miss_min_hours=72,
             miss_min_score=40.0,
-            greeting_phrases={"morning": ["早上好~", "早安~"]},
             timezone="Asia/Shanghai",
             share_threshold=0.5,
         )
@@ -143,28 +141,6 @@ class TestProactiveSchedulerBasics:
         assert scheduler._is_character_active() is False
 
     @pytest.mark.asyncio
-    async def test_pending_shares_preserved_during_inactive_hours(self, scheduler, monkeypatch):
-        """非活跃时段 tick 不清理 pending_shares"""
-        fake_now = datetime(2024, 1, 1, 21, 55, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        event_id = await scheduler.add_event_to_share("吃了好吃的蛋糕")
-        assert len(scheduler._pending_shares) == 1
-
-        # 切换到非活跃时段 22:00
-        fake_now = datetime(2024, 1, 1, 22, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        result = await scheduler.tick()
-        assert result == []
-        assert len(scheduler._pending_shares) == 1
-        assert scheduler._pending_shares[0].event_id == event_id
-
-    @pytest.mark.asyncio
     async def test_can_send_to_key_respects_interval(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -226,7 +202,7 @@ class TestProactiveSchedulerPersistence:
     async def test_load_empty_state(self, scheduler, mock_data_store):
         mock_data_store.get_setting.return_value = None
         await scheduler.load_persistent_state()
-        assert scheduler._pending_shares == []
+        assert scheduler._scheduled_events_today == set()
 
     @pytest.mark.asyncio
     async def test_load_and_save_state(self, scheduler, mock_data_store, monkeypatch):
@@ -250,8 +226,6 @@ class TestProactiveSchedulerPersistence:
         mock_data_store.get_setting.return_value = raw
         await scheduler.load_persistent_state()
         assert "morning" in scheduler._scheduled_events_today
-        assert len(scheduler._pending_shares) == 1
-        assert scheduler._pending_shares[0].event_id == "evt_1"
 
         # 修改状态确保 persist_state 会实际写入
         scheduler._scheduled_events_today.add("evening")
@@ -267,7 +241,7 @@ class TestProactiveSchedulerPersistence:
     async def test_load_invalid_json_ignored(self, scheduler, mock_data_store):
         mock_data_store.get_setting.return_value = "not-json"
         await scheduler.load_persistent_state()
-        assert scheduler._pending_shares == []
+        assert scheduler._scheduled_events_today == set()
 
     @pytest.mark.asyncio
     async def test_load_old_date_clears_scheduled(self, scheduler, mock_data_store, monkeypatch):
@@ -285,122 +259,6 @@ class TestProactiveSchedulerPersistence:
         await scheduler.load_persistent_state()
         assert "morning" not in scheduler._scheduled_events_today
         assert scheduler._last_event_date == "2024-01-02"
-
-
-class TestProactiveSchedulerEventSharing:
-    """测试事件分享逻辑"""
-
-    @pytest.fixture
-    def mock_data_store(self):
-        store = MagicMock()
-        store.get_setting = AsyncMock(return_value=None)
-        store.set_setting = AsyncMock()
-        store.is_user_muted = AsyncMock(return_value=False)
-        store.get_top_relationships = AsyncMock(return_value=[])
-        store.get_all_group_activities = AsyncMock(return_value=[])
-        store.list_active_relationships = AsyncMock(return_value=[])
-        return store
-
-    @pytest.fixture
-    def mock_character(self):
-        return _make_mock_character()
-
-    @pytest.fixture
-    def config(self):
-        return ProactiveConfig(
-            enabled=True,
-            min_interval_hours=0,
-            max_shares_per_event=3,
-            share_time_window_minutes=15,
-            miss_enabled=True,
-            miss_min_hours=72,
-            miss_min_score=40.0,
-            greeting_phrases={"morning": ["早上好~"]},
-            timezone="Asia/Shanghai",
-            share_threshold=0.5,
-        )
-
-    @pytest.fixture
-    def scheduler(self, config, mock_data_store, mock_character):
-        return ProactiveScheduler(
-            config=config,
-            data_store=mock_data_store,
-            character=mock_character,
-            target_selector=MagicMock(),
-        )
-
-    @pytest.mark.asyncio
-    async def test_add_event_to_share(self, scheduler, monkeypatch):
-        fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        event_id = await scheduler.add_event_to_share("吃了好吃的蛋糕")
-        assert event_id.startswith("evt_")
-        assert len(scheduler._pending_shares) == 1
-        assert scheduler._pending_shares[0].event_description == "吃了好吃的蛋糕"
-
-    @pytest.mark.asyncio
-    async def test_cleanup_old_events(self, scheduler, monkeypatch):
-        fake_now = datetime(2024, 1, 2, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        old_event = PendingShare(
-            event_id="evt_old",
-            event_description="old",
-            created_at=fake_now - timedelta(hours=25),
-        )
-        new_event = PendingShare(
-            event_id="evt_new",
-            event_description="new",
-            created_at=fake_now - timedelta(hours=1),
-        )
-        scheduler._pending_shares = [old_event, new_event]
-        scheduler._cleanup_old_events()
-        assert len(scheduler._pending_shares) == 1
-        assert scheduler._pending_shares[0].event_id == "evt_new"
-
-    @pytest.mark.asyncio
-    async def test_get_unshared_event_respects_window(self, scheduler, monkeypatch):
-        fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        old_event = PendingShare(
-            event_id="evt_old",
-            event_description="old",
-            created_at=fake_now - timedelta(minutes=20),
-        )
-        new_event = PendingShare(
-            event_id="evt_new",
-            event_description="new",
-            created_at=fake_now - timedelta(minutes=5),
-        )
-        scheduler._pending_shares = [old_event, new_event]
-        result = await scheduler._get_unshared_event()
-        assert result is not None
-        assert result.event_id == "evt_new"
-
-    @pytest.mark.asyncio
-    async def test_get_unshared_event_respects_max_shares(self, scheduler, monkeypatch):
-        fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        event = PendingShare(
-            event_id="evt_1",
-            event_description="test",
-            created_at=fake_now - timedelta(minutes=5),
-            shared_with={"u1", "u2", "u3"},
-        )
-        scheduler._pending_shares = [event]
-        result = await scheduler._get_unshared_event()
-        assert result is None
 
 
 class TestProactiveSchedulerScheduledEvents:
@@ -427,7 +285,6 @@ class TestProactiveSchedulerScheduledEvents:
             min_interval_hours=0,
             max_shares_per_event=3,
             share_time_window_minutes=15,
-            greeting_phrases={"morning": ["早上好~"]},
             timezone="Asia/Shanghai",
             share_threshold=0.5,
         )
@@ -537,7 +394,6 @@ class TestProactiveSchedulerMissYou:
             miss_enabled=True,
             miss_min_hours=72,
             miss_min_score=40.0,
-            greeting_phrases={},
             timezone="Asia/Shanghai",
         )
         return ProactiveScheduler(
@@ -626,12 +482,15 @@ class TestProactiveSchedulerMessageCreation:
     def scheduler(self, mock_character):
         config = ProactiveConfig(
             enabled=True,
-            greeting_phrases={"morning": ["早上好~"]},
             timezone="Asia/Shanghai",
         )
+        store = AsyncMock()
+        store.get_relationship = AsyncMock(return_value=None)
+        store.get_user_profile = AsyncMock(return_value=None)
+        store.get_recent_messages = AsyncMock(return_value=[])
         return ProactiveScheduler(
             config=config,
-            data_store=MagicMock(),
+            data_store=store,
             character=mock_character,
             target_selector=MagicMock(),
         )
@@ -640,7 +499,10 @@ class TestProactiveSchedulerMessageCreation:
     async def test_create_proactive_message(self, scheduler, monkeypatch):
         from plugins.DicePP.module.persona.proactive.models import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
-        msg = await scheduler._create_proactive_message(target, "吃了蛋糕", "morning")
+        mock_agent = AsyncMock()
+        mock_agent.generate_share_message = AsyncMock(return_value="吃了蛋糕，真好吃~")
+        scheduler.event_agent = mock_agent
+        msg = await scheduler._create_proactive_message(target, "吃了蛋糕", "morning", "")
         assert msg["user_id"] == "u1"
         assert "吃了蛋糕" in msg["content"]
         assert msg["type"] == "morning"
@@ -649,11 +511,14 @@ class TestProactiveSchedulerMessageCreation:
     async def test_create_miss_you_message(self, scheduler):
         from plugins.DicePP.module.persona.proactive.models import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
-        msg = await scheduler._create_miss_you_message(target, "吃了蛋糕")
+        mock_agent = AsyncMock()
+        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+        scheduler.event_agent = mock_agent
+        msg = await scheduler._create_miss_you_message(target, "吃了蛋糕", "")
         assert msg["user_id"] == "u1"
         assert msg["group_id"] == ""
         assert msg["type"] == "miss_you"
-        assert "吃了蛋糕" in msg["content"]
+        assert "有点想你了呢~" in msg["content"]
 
     @pytest.mark.asyncio
     async def test_get_status(self, scheduler, monkeypatch):
@@ -665,4 +530,3 @@ class TestProactiveSchedulerMessageCreation:
         status = scheduler.get_status()
         assert status["enabled"] is True
         assert status["is_character_active"] is True
-        assert status["pending_shares"] == 0

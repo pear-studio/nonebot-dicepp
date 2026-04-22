@@ -1,8 +1,7 @@
 """
-通用延迟任务队列
+随机事件分享的延迟任务队列
 
-管理异步延迟任务的持久化、扫描和状态转换。
-当前主要承载 random event share 任务。
+管理异步延迟任务（当前仅支持 event_share 类型）的持久化、扫描和状态转换。
 """
 from typing import List, Dict, Any, Callable, Awaitable
 from datetime import timedelta
@@ -15,10 +14,10 @@ from ..wall_clock import persona_wall_now
 logger = logging.getLogger("persona.delayed_task_queue")
 
 
-class DelayedTaskQueue:
-    """延迟任务队列
+class EventShareTaskQueue:
+    """随机事件分享的延迟队列
 
-    当前主要承载 random event share 任务，但 schema 和接口已为后续扩展预留。
+    当前仅支持 event_share 一种任务类型。
     """
 
     def __init__(
@@ -37,16 +36,19 @@ class DelayedTaskQueue:
         self,
         event_id: str,
         event_description: str,
+        reaction: str,
         share_desire: float,
         delay_minutes: int,
     ) -> int:
         """将随机事件加入延迟分享队列"""
+        delay_minutes = max(0, delay_minutes)
         scheduled_at = persona_wall_now(self.timezone) + timedelta(minutes=delay_minutes)
         task_id = await self.data_store.add_delayed_task(
             task_type="event_share",
             payload={
                 "event_id": event_id,
                 "event_description": event_description,
+                "reaction": reaction,
                 "share_desire": share_desire,
             },
             scheduled_at=scheduled_at,
@@ -56,13 +58,13 @@ class DelayedTaskQueue:
 
     async def tick(
         self,
-        on_share: Callable[[str, float], Awaitable[List[Dict]]],
+        on_share: Callable[[str, str, float], Awaitable[List[Dict]]],
     ) -> List[Dict]:
         """
         扫描并处理到期的延迟任务。
 
         Args:
-            on_share: async callback(event_description, share_desire) -> list of message dicts
+            on_share: async callback(event_description, reaction, share_desire) -> list of message dicts
 
         Returns:
             成功发送的消息列表
@@ -83,10 +85,9 @@ class DelayedTaskQueue:
                 continue
 
             try:
-                msg_list = await on_share(
-                    payload.get("event_description", ""),
-                    share_desire,
-                )
+                description = payload.get("event_description", "")
+                reaction = payload.get("reaction", "")
+                msg_list = await on_share(description, reaction, share_desire)
                 if msg_list:
                     messages.extend(msg_list)
                 await self.data_store.complete_delayed_task(task.id)
