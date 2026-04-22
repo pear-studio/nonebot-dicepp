@@ -43,6 +43,14 @@ nonebot-dicepp/
 | 数据层（SQLite） | `src/plugins/DicePP/core/data/database.py` |
 | 完整架构文档 | `docs/dicepp/README.md` |
 
+## Agent Team 协作规范
+
+> **触发条件**：以下规范仅在**用户明确提到组建团队 / 使用 agent team / 多角色协作**时生效。普通单轮任务不强制走此流程。
+
+详见 `docs/agent/agents/leader.md`，该文件为 Agent Team 的单一事实来源。
+
+---
+
 ## 开发命令
 
 ```bash
@@ -95,6 +103,20 @@ python -m DicePP.shell rm <scenario_name>
 | 测试配置 | `pyproject.toml` `[tool.pytest.ini_options]` |
 | 覆盖率配置 | `.coveragerc` |
 | 环境变量 | `.env` |
+
+## Persona AI 测试 key
+
+开发分支测试 persona 模块时，直接在 `config/secrets.json` 的 `persona_ai.primary_api_key` 字段填入测试 API Key（复用已有配置字段，不新增配置项）。
+
+```json
+{
+  "persona_ai": {
+    "primary_api_key": "sk-test-xxx"
+  }
+}
+```
+
+**用量约束**：测试 key 按量计费，单次全量跑测建议控制在 10 次 LLM 调用以内。如当前环境未配置测试 key，可向用户索取。
 
 ---
 
