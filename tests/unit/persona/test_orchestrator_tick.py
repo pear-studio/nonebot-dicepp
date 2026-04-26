@@ -25,11 +25,11 @@ class TestOrchestratorTickPartial:
         orch.config.proactive_event_share_threshold = 0.5
 
         orch.character_life = MagicMock()
-        orch.character_life.tick = AsyncMock(return_value={
+        orch.character_life.tick = AsyncMock(return_value=[{
             "event_id": "evt_1",
             "description": "下雨了",
             "share_desire": 0.8,
-        })
+        }])
 
         orch.delayed_task_queue = MagicMock()
         orch.delayed_task_queue.enqueue_event_share = AsyncMock(return_value=1)

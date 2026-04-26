@@ -24,9 +24,12 @@ def _make_mock_character():
 @pytest.fixture
 def mock_data_store():
     store = MagicMock()
+    from plugins.DicePP.module.persona.data.models import CharacterState
     store.get_user_profile = AsyncMock(return_value=None)
     store.get_relationship = AsyncMock(return_value=None)
     store.get_recent_messages = AsyncMock(return_value=[])
+    store.get_character_state = AsyncMock(return_value=CharacterState())
+    store.get_daily_events = AsyncMock(return_value=[])
     return store
 
 

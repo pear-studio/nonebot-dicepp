@@ -18,6 +18,7 @@ from ..character.models import Character
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now
 from ..agents.event_agent import EventGenerationAgent, ShareMessageContext
+from .protocols import BoundaryReceiver
 from .models import ShareTarget
 from .utils import effective_for_proactive
 
@@ -41,7 +42,6 @@ class ProactiveConfig:
         share_message_concurrent: int = 3,
         share_max_chars: int = 200,
         share_context_history_limit: int = 5,
-        max_scheduled_events_per_tick: int = 3,
     ):
         self.enabled = enabled
         self.min_interval_hours = min_interval_hours
@@ -55,10 +55,9 @@ class ProactiveConfig:
         self.share_message_concurrent = share_message_concurrent
         self.share_max_chars = share_max_chars
         self.share_context_history_limit = share_context_history_limit
-        self.max_scheduled_events_per_tick = max_scheduled_events_per_tick
 
 
-class ProactiveScheduler:
+class ProactiveScheduler(BoundaryReceiver):
     """主动消息调度器"""
 
     def __init__(
@@ -84,13 +83,21 @@ class ProactiveScheduler:
 
         self._last_proactive_time: Dict[str, datetime] = {}  # target_key -> last_time
 
-        self._scheduled_events_today: Set[str] = set()  # 今天已触发的定时事件类型
         self._last_event_date: Optional[str] = None
         self._pending_targets: Set[str] = set()  # 当前正在处理的目标（防并发重复）
 
         # 在首次异步使用时再创建，避免绑定到错误的事件循环
         self._share_lock: Optional[asyncio.Lock] = None
         self._last_persisted_scheduler_blob: Optional[str] = None
+
+        # jittered 活跃边界（由 CharacterLife 同步，优先于角色卡原始小时）
+        self._jittered_start_minute: Optional[int] = None
+        self._jittered_end_minute: Optional[int] = None
+
+    def set_jittered_boundaries(self, start_minute: int, end_minute: int) -> None:
+        """由 CharacterLife 调用，同步今日波动后的活跃边界。"""
+        self._jittered_start_minute = start_minute
+        self._jittered_end_minute = end_minute
 
     def _get_share_lock(self) -> asyncio.Lock:
         if self._share_lock is None:
@@ -112,12 +119,7 @@ class ProactiveScheduler:
         except json.JSONDecodeError:
             return
         today = self._get_today_str()
-        if data.get("date") == today:
-            self._scheduled_events_today = set(data.get("scheduled", []))
-            self._last_event_date = today
-        else:
-            self._scheduled_events_today.clear()
-            self._last_event_date = today
+        self._last_event_date = today
         old_pending = data.get("pending")
         if old_pending:
             logger.warning(
@@ -131,7 +133,6 @@ class ProactiveScheduler:
     def _scheduler_payload_dict(self) -> Dict[str, Any]:
         return {
             "date": self._get_today_str(),
-            "scheduled": sorted(self._scheduled_events_today),
         }
 
     async def persist_state(self) -> None:
@@ -146,24 +147,38 @@ class ProactiveScheduler:
         """重置每日状态"""
         today = self._get_today_str()
         if self._last_event_date != today:
-            self._scheduled_events_today.clear()
             self._last_event_date = today
             logger.debug(f"重置每日调度状态: {today}")
 
     def _is_character_active(self) -> bool:
-        """检查当前是否在角色活跃时间"""
-        now = self._now()
-        hour = now.hour
-        start = self.character.extensions.event_day_start_hour
-        end = self.character.extensions.event_day_end_hour
+        """检查当前是否在角色活跃时间
 
-        if start < end:
-            return start <= hour < end
-        elif start > end:
-            # 跨午夜时段，如 start=22, end=6
-            return hour >= start or hour < end
+        优先使用 CharacterLife 同步的 jittered 边界（分钟级精度），
+        未同步时回退到角色卡原始小时边界。
+        """
+        now = self._now()
+        now_m = now.hour * 60 + now.minute
+
+        if self._jittered_start_minute is not None and self._jittered_end_minute is not None:
+            start = self._jittered_start_minute
+            end = self._jittered_end_minute
+            if start < end:
+                return start <= now_m < end
+            elif start > end:
+                return now_m >= start or now_m < end
+            else:
+                return True
+
+        # 回退：角色卡原始小时边界
+        hour = now.hour
+        start_h = self.character.extensions.event_day_start_hour
+        end_h = self.character.extensions.event_day_end_hour
+
+        if start_h < end_h:
+            return start_h <= hour < end_h
+        elif start_h > end_h:
+            return hour >= start_h or hour < end_h
         else:
-            # start == end，视为全天活跃
             return True
 
     def _target_key(self, target: ShareTarget) -> str:
@@ -224,11 +239,6 @@ class ProactiveScheduler:
         messages = []
 
         try:
-            # 检查定时事件（问候/作息等）
-            scheduled = await self._check_scheduled_events()
-            if scheduled:
-                messages.extend(scheduled)
-
             # 检查想念触发
             miss_you = await self._check_missed_users()
             if miss_you:
@@ -243,153 +253,6 @@ class ProactiveScheduler:
                 logger.exception("调度器状态持久化失败")
 
         return messages
-
-    async def _check_scheduled_events(self) -> List[Dict]:
-        """检查并触发定时事件（从角色卡 scheduled_events 读取）"""
-        messages = []
-        now = self._now()
-        current_time = now.strftime("%H:%M")
-        processed = 0
-        max_per_tick = self.config.max_scheduled_events_per_tick
-
-        from ..character.models import SharePolicy
-
-        scheduled_events = self.character.extensions.scheduled_events or []
-        for event_config in scheduled_events:
-            event_type = event_config.type
-            time_range = event_config.time_range
-            raw_share = getattr(event_config, "share", SharePolicy.OPTIONAL)
-            share_policy = raw_share if isinstance(raw_share, SharePolicy) else SharePolicy(raw_share)
-
-            if event_type in self._scheduled_events_today:
-                logger.debug(f"定时事件已触发过: {event_type}")
-                continue
-
-            if not self._is_in_time_range(current_time, time_range):
-                continue
-
-            logger.info(
-                f"定时事件触发: type={event_type}, time={current_time}, "
-                f"share_policy={share_policy.value}"
-            )
-
-            # 现场生成事件
-            event_desc = await self._generate_scheduled_event_description(event_type)
-            if not event_desc:
-                logger.warning(f"定时事件生成失败, 下次重试: {event_type}")
-                # 生成失败：不标记为已触发，允许下次再试
-                continue
-
-            reaction_result = None
-            if self.event_agent:
-                reaction_result = await self.event_agent.generate_event_reaction(
-                    event=event_desc,
-                    character_name=self.character.name,
-                    character_description=self.character.description,
-                    share_policy=share_policy.value,
-                )
-
-            if reaction_result:
-                reaction = reaction_result.reaction
-                share_desire = reaction_result.share_desire
-            else:
-                reaction = ""
-                if share_policy == SharePolicy.REQUIRED:
-                    share_desire = 1.0
-                elif share_policy == SharePolicy.NEVER:
-                    share_desire = 0.0
-                else:
-                    share_desire = 0.5
-
-            logger.debug(
-                f"定时事件生成完成: type={event_type}, desc={event_desc[:40]}, "
-                f"share_desire={share_desire:.2f}"
-            )
-
-            # 保存到数据库
-            today = self._get_today_str()
-            await self.data_store.add_daily_event(
-                date=today,
-                event_type=event_type,
-                description=event_desc,
-                reaction=reaction,
-                share_desire=share_desire,
-            )
-
-            # 生成成功并保存后，标记为今天已触发
-            self._scheduled_events_today.add(event_type)
-
-            # 判断是否发送（发送失败不影响已触发状态）
-            should_send = False
-            if share_policy == SharePolicy.REQUIRED:
-                should_send = True
-            elif share_policy == SharePolicy.OPTIONAL and share_desire >= self.config.share_threshold:
-                should_send = True
-            # SharePolicy.NEVER 不发送
-
-            if should_send:
-                targets = await self.target_selector.select_share_targets()
-                sent_count = 0
-                for target in targets[: self.config.max_shares_per_event]:
-                    if not await self._can_send_to_target(target):
-                        continue
-
-                    msg = await self._create_proactive_message(
-                        target, event_desc, event_type, reaction
-                    )
-                    if msg:
-                        messages.append(msg)
-                        self._last_proactive_time[self._target_key(target)] = now
-                        sent_count += 1
-                        logger.info(
-                            f"主动消息发送: target={target.user_id}, "
-                            f"group={target.group_id}, is_group={target.is_group}, "
-                            f"event_type={event_type}, score={target.score:.1f}"
-                        )
-                if not sent_count:
-                    logger.debug(f"定时事件无可发送目标: {event_type}")
-            else:
-                logger.debug(
-                    f"定时事件跳过发送: {event_type}, policy={share_policy.value}, "
-                    f"desire={share_desire:.2f}, threshold={self.config.share_threshold:.2f}"
-                )
-
-            processed += 1
-            if processed >= max_per_tick:
-                break  # 本次 tick 已达到上限，剩余事件留到下次
-
-        return messages
-
-    async def _generate_scheduled_event_description(self, event_type: str) -> str:
-        """System Agent 根据 event_type 和当前上下文生成事件描述"""
-        if not self.event_agent:
-            # 兜底：使用预设短语 + 事件类型
-            return f"我正在{event_type}。"
-
-        today = self._get_today_str()
-        today_events = await self.data_store.get_daily_events(today)
-
-        now = self._now()
-        from ..agents.event_agent import EventContext
-        context = EventContext(
-            character_name=self.character.name,
-            character_description=self.character.description,
-            world=self.character.extensions.world,
-            scenario=self.character.scenario,
-            recent_diaries=[],
-            today_events=[{"description": e.description} for e in today_events],
-            permanent_state=f"当前定时事件类型: {event_type}",
-            current_time=now,
-        )
-        # 使用 generate_event_result 获取结构化事件数据
-        try:
-            result = await self.event_agent.generate_event_result(context)
-            return result.description
-        except (AttributeError, TypeError):
-            raise
-        except Exception as e:
-            logger.error(f"定时事件生成失败: {e}")
-            return f"我正在{event_type}。"
 
     def _is_in_time_range(self, current_time: str, time_range: str) -> bool:
         """检查当前时间是否在时间范围内"""
@@ -584,6 +447,15 @@ class ProactiveScheduler:
 
             share_examples = self.character.extensions.share_message_examples
 
+            # 获取角色当前状态与今日事件（Phase 2 prompt 注入）
+            character_state = await self.data_store.get_character_state()
+            today = self._get_today_str()
+            today_db_events = await self.data_store.get_daily_events(today)
+            today_events = []
+            for e in today_db_events:
+                evt_time = e.created_at.strftime("%H:%M") if e.created_at else "??:??"
+                today_events.append({"description": e.description, "time": evt_time})
+
             context = ShareMessageContext(
                 event_description=event_description,
                 reaction=reaction,
@@ -597,6 +469,11 @@ class ProactiveScheduler:
                 message_type=message_type,
                 environment=environment,
                 share_message_examples=share_examples,
+                energy=character_state.energy if character_state else None,
+                mood=character_state.mood if character_state else None,
+                health=character_state.health if character_state else None,
+                today_events=today_events if today_events else None,
+                current_intention=character_state.current_intention if character_state else None,
             )
 
             message = await self.event_agent.generate_share_message(context)
@@ -681,27 +558,6 @@ class ProactiveScheduler:
 
         return messages
 
-    async def _create_proactive_message(
-        self,
-        target: ShareTarget,
-        event_description: str,
-        event_type: str,
-        reaction: str,
-    ) -> Optional[Dict]:
-        """创建主动消息（定时事件）"""
-        try:
-            msg_dict = await self._build_and_generate_share_message(
-                target=target,
-                event_description=event_description,
-                reaction=reaction,
-                message_type=event_type,
-                environment="group" if target.is_group else "private",
-            )
-            return msg_dict
-        except Exception as e:
-            logger.error(f"创建主动消息失败: {e}")
-            return None
-
     async def _create_miss_you_message(
         self,
         target: ShareTarget,
@@ -727,6 +583,5 @@ class ProactiveScheduler:
         return {
             "enabled": self.config.enabled,
             "is_character_active": self._is_character_active(),
-            "scheduled_today": list(self._scheduled_events_today),
             "last_proactive_count": len(self._last_proactive_time),
         }

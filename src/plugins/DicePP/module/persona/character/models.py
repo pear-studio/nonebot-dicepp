@@ -19,12 +19,6 @@ class SharePolicy(str, Enum):
     NEVER = "never"
 
 
-class ScheduledEventConfig(BaseModel):
-    type: str
-    time_range: str
-    share: SharePolicy = SharePolicy.OPTIONAL
-
-
 class PersonaExtensions(BaseModel):
     initial_relationship: int = 30
     warmth_labels: List[str] = Field(default_factory=list)
@@ -33,7 +27,8 @@ class PersonaExtensions(BaseModel):
     event_day_start_hour: int = 8
     event_day_end_hour: int = 22
     event_jitter_minutes: int = 60
-    scheduled_events: List[ScheduledEventConfig] = Field(default_factory=list)
+    event_day_start_jitter_minutes: int = 30
+    event_day_end_jitter_minutes: int = 30
     # Phase 3: 好感度低时的拒绝回复语（可选，不配置则使用系统默认）
     # 语义说明：
     # - None（或未配置）：使用系统默认拒绝语
@@ -48,17 +43,24 @@ class PersonaExtensions(BaseModel):
     # - ["...", "..."]（非空列表）：使用自定义示例
     share_message_examples: Optional[List[str]] = Field(default=None)
 
-    def generate_event_times(self, count: Optional[int] = None) -> List[int]:
+    def generate_event_times(
+        self,
+        count: Optional[int] = None,
+        start_minute: Optional[int] = None,
+        end_minute: Optional[int] = None,
+        rng: Optional[random.Random] = None,
+    ) -> List[int]:
         n = count if count is not None else self.daily_events_count
         if n <= 0:
             return []
-        start = self.event_day_start_hour * 60
-        end = self.event_day_end_hour * 60
+        start = start_minute if start_minute is not None else self.event_day_start_hour * 60
+        end = end_minute if end_minute is not None else self.event_day_end_hour * 60
         interval = (end - start) / n
         result = []
+        _rng = rng if rng is not None else random
         for i in range(n):
             base = start + int(i * interval + interval / 2)
-            jitter = random.randint(-self.event_jitter_minutes, self.event_jitter_minutes)
+            jitter = _rng.randint(-self.event_jitter_minutes, self.event_jitter_minutes)
             result.append(max(start, min(end - 1, base + jitter)))
         return sorted(result)
 

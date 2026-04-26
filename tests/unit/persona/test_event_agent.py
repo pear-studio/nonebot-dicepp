@@ -439,6 +439,48 @@ class TestGenerateEventReaction:
         assert "默默地想着" in result.reaction
         assert result.share_desire == 0.5
 
+    @pytest.mark.asyncio
+    async def test_share_message_prompt_injection(self, caplog):
+        """验证分享消息 prompt 注入状态/事件/意向（3.3.2 / 3.3.3）"""
+        import logging
+        from plugins.DicePP.module.persona.agents.event_agent import ShareMessageContext
+
+        # 创建真实 EventGenerationAgent，mock llm_router
+        mock_router = MagicMock()
+        mock_router.generate_with_forced_tool = AsyncMock(return_value=('{"message": "茶很好喝哦"}', {}))
+        agent = EventGenerationAgent(llm_router=mock_router)
+
+        context = ShareMessageContext(
+            event_description="泡了茶",
+            reaction="很香",
+            character_name="测试角色",
+            character_description="一个喜欢阅读和咖啡的温柔女孩",
+            target_user_id="u1",
+            relationship_score=70.0,
+            warmth_label="友好",
+            user_profile_facts="（无）",
+            recent_history="（无）",
+            message_type="random_event",
+            environment="private",
+            energy=60,
+            mood=70,
+            health=55,
+            today_events=[{"description": "泡了茶", "time": "09:00"}],
+            current_intention="想喝茶",
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="persona.event_agent"):
+            message = await agent.generate_share_message(context)
+
+        assert message == "茶很好喝哦"
+
+        # 验证分享消息 prompt 注入
+        assert "[prompt:system_share]" in caplog.text
+        assert "[prompt:user_share]" in caplog.text
+        assert "体力: 60/100" in caplog.text
+        assert "当前惦记的事: 想喝茶" in caplog.text
+        assert "泡了茶" in caplog.text
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

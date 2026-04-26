@@ -653,9 +653,6 @@ class PersonaCommand(UserCommandBase):
         lines.append(f"  每日事件数: {ext.daily_events_count}")
         lines.append(f"  活动时段: {ext.event_day_start_hour}:00 - {ext.event_day_end_hour}:00")
         lines.append(f"  时间抖动: ±{ext.event_jitter_minutes} 分钟")
-        lines.append(f"\n[定时事件]")
-        for evt in ext.scheduled_events:
-            lines.append(f"  {evt.type}: {evt.time_range}")
         if ext.world:
             lines.append(f"\n[世界观]")
             lines.append(f"  {ext.world}")

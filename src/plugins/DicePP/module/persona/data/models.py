@@ -4,7 +4,7 @@ Persona 模块数据模型
 定义所有 Pydantic 数据模型，包括配置、角色卡、用户档案等
 """
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from enum import Enum
 
@@ -193,9 +193,16 @@ class Observation(BaseModel):
 
 
 class CharacterState(BaseModel):
-    """角色永久状态"""
-    text: str = ""  # 自由文本格式，由 LLM 维护
-    updated_at: Optional[datetime] = None
+    """角色永久状态（忽略未知字段，store 层负责旧数据迁移）"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    text: str = ""  # 自由文本格式，由 LLM 维护（保留向后兼容）
+    energy: Optional[int] = None  # None 表示尚未初始化（旧版纯文本迁移兼容）
+    mood: Optional[int] = None
+    health: Optional[int] = None
+    current_intention: Optional[str] = None
+    intention_created_at: Optional[datetime] = None
 
 
 class GroupActivity(BaseModel):

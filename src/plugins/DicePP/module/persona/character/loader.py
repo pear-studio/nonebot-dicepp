@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 import yaml
 
-from .models import Character, CharacterBook, LoreEntry, PersonaExtensions, ScheduledEventConfig
+from .models import Character, CharacterBook, LoreEntry, PersonaExtensions
 
 logger = logging.getLogger("persona.character")
 
@@ -52,14 +52,6 @@ class CharacterLoader:
         extensions_data = data.get("extensions", {})
         persona_data = extensions_data.get("persona", {})
         
-        # 解析 scheduled_events
-        scheduled_events = []
-        for event in persona_data.get("scheduled_events", []):
-            scheduled_events.append(ScheduledEventConfig(
-                type=event.get("type", ""),
-                time_range=event.get("time_range", "")
-            ))
-        
         extensions = PersonaExtensions(
             initial_relationship=persona_data.get("initial_relationship", 30),
             warmth_labels=persona_data.get("warmth_labels", []),
@@ -68,7 +60,6 @@ class CharacterLoader:
             event_day_start_hour=persona_data.get("event_day_start_hour", 8),
             event_day_end_hour=persona_data.get("event_day_end_hour", 22),
             event_jitter_minutes=persona_data.get("event_jitter_minutes", 60),
-            scheduled_events=scheduled_events
         )
         
         # 解析 character_book

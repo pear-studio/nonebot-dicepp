@@ -1,5 +1,7 @@
 """
-单元测试: CharacterLife 角色生活模拟
+单元测试: CharacterLife 核心功能
+
+职责范围：槽位匹配与生成、事件-反应链、边界事件、日记生成、ongoing activities、跨天恢复与状态持久化。
 """
 
 import pytest
@@ -27,10 +29,12 @@ class TestCharacterLifeBasics:
 
     @pytest.fixture
     def mock_data_store(self):
+        from plugins.DicePP.module.persona.data.models import CharacterState
         store = MagicMock()
         store.get_setting = AsyncMock(return_value=None)
         store.set_setting = AsyncMock()
-        store.get_character_state = AsyncMock(return_value="")
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
         store.get_recent_diaries = AsyncMock(return_value=[])
         store.get_daily_events = AsyncMock(return_value=[])
         store.add_daily_event = AsyncMock()
@@ -62,6 +66,7 @@ class TestCharacterLifeBasics:
             slot_match_window_minutes=15,
             diary_time="23:30",
             timezone="Asia/Shanghai",
+            chain_force_extend_once_prob=0.0,
         )
 
     @pytest.fixture
@@ -89,7 +94,8 @@ class TestCharacterLifeBasics:
         life.character.extensions.daily_events_count = 2
         result = await life.tick()
         assert life._slot_minutes_today is not None
-        assert len(life._slot_minutes_today) == 2
+        # wake_up + 2 system + good_night = 4
+        assert len(life._slot_minutes_today) == 4
 
     @pytest.mark.asyncio
     async def test_tick_triggers_event_when_time_matches(self, life, mock_event_agent, mock_data_store, monkeypatch):
@@ -98,12 +104,12 @@ class TestCharacterLifeBasics:
             "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
-        life._slot_minutes_today = [10 * 60]  # 10:00
+        life._slot_minutes_today = [(10 * 60, "system")]  # 10:00
         life._last_event_date = "2024-01-01"
         result = await life.tick()
         assert result is not None
-        assert result["description"] == "窗外下起了小雨"
-        assert result["reaction"] == "喜欢听雨声"
+        assert result[0]["description"] == "窗外下起了小雨"
+        assert result[0]["reaction"] == "喜欢听雨声"
         assert 0 in life._fired_slot_indices
         mock_data_store.add_daily_event.assert_called_once()
 
@@ -114,7 +120,7 @@ class TestCharacterLifeBasics:
             "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
-        life._slot_minutes_today = [10 * 60]
+        life._slot_minutes_today = [(10 * 60, "system")]
         life._last_event_date = "2024-01-01"
         life._fired_slot_indices.add(0)
         result = await life.tick()
@@ -128,7 +134,7 @@ class TestCharacterLifeBasics:
             "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
-        life._slot_minutes_today = [12 * 60]  # 12:00, diff=120min > 15
+        life._slot_minutes_today = [(12 * 60, "system")]  # 12:00, diff=120min > 15
         life._last_event_date = "2024-01-01"
         result = await life.tick()
         assert result is None
@@ -141,12 +147,12 @@ class TestCharacterLifeBasics:
             "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
-        life._slot_minutes_today = [10 * 60]
+        life._slot_minutes_today = [(10 * 60, "system")]
         life._fired_slot_indices = set()
         life._last_event_date = "2024-01-01"
         result = await life.tick()
         assert result is not None
-        assert result["duration_minutes"] == 60
+        assert result[0]["duration_minutes"] == 60
         assert len(life._ongoing_activities) == 1
         assert life._ongoing_activities[0].duration_minutes == 60
 
@@ -160,9 +166,12 @@ class TestCharacterLifePersistence:
 
     @pytest.fixture
     def mock_data_store(self):
+        from plugins.DicePP.module.persona.data.models import CharacterState
         store = MagicMock()
         store.get_setting = AsyncMock(return_value=None)
         store.set_setting = AsyncMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
         return store
 
     @pytest.fixture
@@ -202,7 +211,7 @@ class TestCharacterLifePersistence:
         raw = '{"date": "2024-01-01", "slot_minutes": [480, 720, 960], "fired": [0]}'
         mock_data_store.get_setting.return_value = raw
         await life.load_persistent_state()
-        assert life._slot_minutes_today == [480, 720, 960]
+        assert life._slot_minutes_today == [(480, "system"), (720, "system"), (960, "system")]
         assert life._fired_slot_indices == {0}
         assert life._last_event_date == "2024-01-01"
 
@@ -225,7 +234,7 @@ class TestCharacterLifePersistence:
             "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
-        life._slot_minutes_today = [480, 720]
+        life._slot_minutes_today = [(480, "system"), (720, "system")]
         life._fired_slot_indices = {0}
         life._last_event_date = "2024-01-01"
         await life.save_persistent_state()
@@ -234,7 +243,7 @@ class TestCharacterLifePersistence:
         import json
         data = json.loads(payload)
         assert data["date"] == "2024-01-01"
-        assert data["slot_minutes"] == [480, 720]
+        assert data["slot_minutes"] == [[480, "system"], [720, "system"]]
         assert data["fired"] == [0]
 
 
@@ -253,12 +262,16 @@ class TestCharacterLifeDiary:
         store = MagicMock()
         store.get_setting = AsyncMock(return_value=None)
         store.set_setting = AsyncMock()
+        from plugins.DicePP.module.persona.data.models import CharacterState
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
         store.get_daily_events = AsyncMock(return_value=[
-            SimpleNamespace(description="早上喝咖啡", reaction="很香"),
+            SimpleNamespace(description="早上喝咖啡", reaction="很香", created_at=datetime(2024, 1, 1, 9, 0)),
         ])
         store.get_diary = AsyncMock(return_value="昨天去了公园")
         store.save_diary = AsyncMock()
         store.clear_daily_events = AsyncMock()
+        store.prune_daily_events = AsyncMock(return_value=0)
         store.prune_diaries = AsyncMock(return_value=0)
         return store
 
@@ -300,7 +313,7 @@ class TestCharacterLifeDiary:
         assert result == "今天过得很充实"
         mock_event_agent.generate_diary.assert_called_once()
         mock_data_store.save_diary.assert_called_once()
-        mock_data_store.clear_daily_events.assert_called_once()
+        mock_data_store.prune_daily_events.assert_called_once_with(30)
         mock_data_store.prune_diaries.assert_called_once_with(30)
 
     @pytest.mark.asyncio
@@ -342,12 +355,12 @@ class TestCharacterLifeStatus:
             "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
-        life._slot_minutes_today = [480, 720]
+        life._slot_minutes_today = [(480, "system"), (720, "system")]
         life._fired_slot_indices = {0}
         life._last_event_date = "2024-01-01"
         status = life.get_event_status()
         assert status["enabled"] is True
-        assert status["slot_minutes"] == [480, 720]
+        assert status["slot_minutes"] == [(480, "system"), (720, "system")]
         assert status["fired_slot_indices"] == [0]
         assert status["today"] == "2024-01-01"
         assert status["daily_events_count"] == 3

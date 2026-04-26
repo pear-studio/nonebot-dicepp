@@ -20,10 +20,6 @@ def _make_mock_character():
     char.extensions.initial_relationship = 50
     char.extensions.event_day_start_hour = 8
     char.extensions.event_day_end_hour = 22
-    from plugins.DicePP.module.persona.character.models import ScheduledEventConfig, SharePolicy
-    char.extensions.scheduled_events = [
-        ScheduledEventConfig(type="morning", time_range="08:00-09:00", share=SharePolicy.REQUIRED),
-    ]
     return char
 
 
@@ -166,10 +162,8 @@ class TestProactiveSchedulerBasics:
             "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
             lambda tz: fake_now,
         )
-        scheduler._scheduled_events_today.add("morning")
         scheduler._last_event_date = "2024-01-01"
         scheduler._reset_daily_state()
-        assert "morning" not in scheduler._scheduled_events_today
         assert scheduler._last_event_date == "2024-01-02"
 
 
@@ -202,7 +196,6 @@ class TestProactiveSchedulerPersistence:
     async def test_load_empty_state(self, scheduler, mock_data_store):
         mock_data_store.get_setting.return_value = None
         await scheduler.load_persistent_state()
-        assert scheduler._scheduled_events_today == set()
 
     @pytest.mark.asyncio
     async def test_load_and_save_state(self, scheduler, mock_data_store, monkeypatch):
@@ -213,7 +206,6 @@ class TestProactiveSchedulerPersistence:
         )
         raw = json.dumps({
             "date": "2024-01-01",
-            "scheduled": ["morning"],
             "pending": [
                 {
                     "event_id": "evt_1",
@@ -225,26 +217,23 @@ class TestProactiveSchedulerPersistence:
         })
         mock_data_store.get_setting.return_value = raw
         await scheduler.load_persistent_state()
-        assert "morning" in scheduler._scheduled_events_today
 
-        # 修改状态确保 persist_state 会实际写入
-        scheduler._scheduled_events_today.add("evening")
+        # 强制触发写入（状态未变时 persist_state 会跳过）
+        scheduler._last_persisted_scheduler_blob = None
         await scheduler.persist_state()
         mock_data_store.set_setting.assert_called()
         call_args = mock_data_store.set_setting.call_args[0]
         assert call_args[0] == "persona_scheduler"
         saved = json.loads(call_args[1])
         assert saved["date"] == "2024-01-01"
-        assert "evening" in saved["scheduled"]
 
     @pytest.mark.asyncio
     async def test_load_invalid_json_ignored(self, scheduler, mock_data_store):
         mock_data_store.get_setting.return_value = "not-json"
         await scheduler.load_persistent_state()
-        assert scheduler._scheduled_events_today == set()
 
     @pytest.mark.asyncio
-    async def test_load_old_date_clears_scheduled(self, scheduler, mock_data_store, monkeypatch):
+    async def test_load_old_date_updates_date(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
             "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
@@ -252,119 +241,11 @@ class TestProactiveSchedulerPersistence:
         )
         raw = json.dumps({
             "date": "2024-01-01",
-            "scheduled": ["morning"],
             "pending": [],
         })
         mock_data_store.get_setting.return_value = raw
         await scheduler.load_persistent_state()
-        assert "morning" not in scheduler._scheduled_events_today
         assert scheduler._last_event_date == "2024-01-02"
-
-
-class TestProactiveSchedulerScheduledEvents:
-    """测试定时事件触发"""
-
-    @pytest.fixture
-    def mock_data_store(self):
-        store = MagicMock()
-        store.get_setting = AsyncMock(return_value=None)
-        store.set_setting = AsyncMock()
-        store.is_user_muted = AsyncMock(return_value=False)
-        store.get_top_relationships = AsyncMock(return_value=[])
-        store.get_all_group_activities = AsyncMock(return_value=[])
-        return store
-
-    @pytest.fixture
-    def mock_character(self):
-        return _make_mock_character()
-
-    @pytest.fixture
-    def scheduler(self, mock_data_store, mock_character):
-        config = ProactiveConfig(
-            enabled=True,
-            min_interval_hours=0,
-            max_shares_per_event=3,
-            share_time_window_minutes=15,
-            timezone="Asia/Shanghai",
-            share_threshold=0.5,
-        )
-        s = ProactiveScheduler(
-            config=config,
-            data_store=mock_data_store,
-            character=mock_character,
-            target_selector=MagicMock(),
-        )
-        return s
-
-    @pytest.mark.asyncio
-    async def test_scheduled_event_triggered(self, scheduler, monkeypatch):
-        fake_now = datetime(2024, 1, 1, 8, 30, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        # Mock event_agent
-        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
-        mock_agent = MagicMock()
-        mock_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(description="起床了，阳光真好", duration_minutes=0))
-        mock_agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(reaction="心情不错", share_desire=0.9))
-        scheduler.event_agent = mock_agent
-
-        scheduler.data_store.get_daily_events = AsyncMock(return_value=[])
-        scheduler.data_store.add_daily_event = AsyncMock()
-        scheduler.data_store.get_top_relationships = AsyncMock(return_value=[])
-
-        msgs = await scheduler.tick()
-        assert len(msgs) == 0  # 没有目标用户，但事件应生成并保存
-        assert "morning" in scheduler._scheduled_events_today
-        mock_agent.generate_event_result.assert_called_once()
-        scheduler.data_store.add_daily_event.assert_called_once()
-        call_kwargs = scheduler.data_store.add_daily_event.call_args.kwargs
-        assert call_kwargs["event_type"] == "morning"
-        assert call_kwargs["description"] == "起床了，阳光真好"
-        assert call_kwargs["share_desire"] == 0.9
-
-    @pytest.mark.asyncio
-    async def test_scheduled_event_only_once_per_day(self, scheduler, monkeypatch):
-        fake_now = datetime(2024, 1, 1, 8, 30, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        scheduler._scheduled_events_today.add("morning")
-        scheduler._last_event_date = "2024-01-01"
-        msgs = await scheduler.tick()
-        assert "morning" in scheduler._scheduled_events_today
-        assert len(msgs) == 0
-
-    @pytest.mark.asyncio
-    async def test_scheduled_event_generated_on_the_fly(self, scheduler, monkeypatch):
-        fake_now = datetime(2024, 1, 1, 8, 30, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
-            lambda tz: fake_now,
-        )
-        # Mock event_agent
-        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
-        mock_agent = MagicMock()
-        mock_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(description="起床了，阳光真好", duration_minutes=0))
-        mock_agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(reaction="心情不错", share_desire=0.9))
-        scheduler.event_agent = mock_agent
-
-        scheduler.data_store.get_daily_events = AsyncMock(return_value=[])
-        scheduler.data_store.add_daily_event = AsyncMock()
-        scheduler.data_store.get_top_relationships = AsyncMock(return_value=[])
-
-        msgs = await scheduler.tick()
-        # REQUIRED 策略 + 高 share_desire 仍返回 0 条，是因为没有 targets
-        assert len(msgs) == 0  # no targets, but event should be generated and saved
-        mock_agent.generate_event_result.assert_called_once()
-        scheduler.data_store.add_daily_event.assert_called_once()
-        call_kwargs = scheduler.data_store.add_daily_event.call_args.kwargs
-        assert call_kwargs["event_type"] == "morning"
-        assert call_kwargs["description"] == "起床了，阳光真好"
-        assert call_kwargs["share_desire"] == 0.9
-        assert "morning" in scheduler._scheduled_events_today
 
 
 class TestProactiveSchedulerMissYou:
@@ -496,18 +377,6 @@ class TestProactiveSchedulerMessageCreation:
         )
 
     @pytest.mark.asyncio
-    async def test_create_proactive_message(self, scheduler, monkeypatch):
-        from plugins.DicePP.module.persona.proactive.models import ShareTarget
-        target = ShareTarget(user_id="u1", priority=100, score=70.0)
-        mock_agent = AsyncMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="吃了蛋糕，真好吃~")
-        scheduler.event_agent = mock_agent
-        msg = await scheduler._create_proactive_message(target, "吃了蛋糕", "morning", "")
-        assert msg["user_id"] == "u1"
-        assert "吃了蛋糕" in msg["content"]
-        assert msg["type"] == "morning"
-
-    @pytest.mark.asyncio
     async def test_create_miss_you_message(self, scheduler):
         from plugins.DicePP.module.persona.proactive.models import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
@@ -530,3 +399,83 @@ class TestProactiveSchedulerMessageCreation:
         status = scheduler.get_status()
         assert status["enabled"] is True
         assert status["is_character_active"] is True
+
+    @pytest.mark.asyncio
+    async def test_jittered_boundaries_active_time(self, scheduler, monkeypatch):
+        """验证设置 jittered 边界后活跃时间判定正确（含跨午夜场景）"""
+        # 设置波动边界 09:15 - 21:45
+        scheduler.set_jittered_boundaries(9 * 60 + 15, 21 * 60 + 45)
+
+        # 10:00 活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+        # 22:00 不活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 22, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+        # 08:00 不活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 8, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+        # 跨午夜场景：22:00 -> 08:00
+        scheduler.set_jittered_boundaries(22 * 60, 8 * 60)
+
+        # 23:00 活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 23, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+        # 02:00 活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+        # 10:00 不活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+        # start == end 时始终活跃
+        scheduler.set_jittered_boundaries(12 * 60, 12 * 60)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 3, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+    @pytest.mark.asyncio
+    async def test_jittered_overrides_raw_hours(self, scheduler, monkeypatch):
+        """验证设置 jittered 后不再使用原始小时边界"""
+        # 原始小时边界：08:00-22:00，10:00 应该活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+        # 设置 jittered 边界 12:00-14:00，10:00 应该不活跃
+        scheduler.set_jittered_boundaries(12 * 60, 14 * 60)
+        assert scheduler._is_character_active() is False
+
+        # 13:00 在 jittered 范围内，应该活跃
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            lambda tz: datetime(2024, 1, 1, 13, 0, 0),
+        )
+        assert scheduler._is_character_active() is True

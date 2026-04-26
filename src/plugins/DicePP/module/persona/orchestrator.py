@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from core.bot import Bot
 from .character.loader import CharacterLoader
-from .character.models import Character, ScheduledEventConfig
+from .character.models import Character
 from .llm.router import LLMRouter
 from .data.store import PersonaDataStore
 from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent, GroupConversation
@@ -162,6 +162,15 @@ class PersonaOrchestrator:
                 slot_match_window_minutes=self.config.character_life_jitter_minutes,
                 diary_time=self.config.character_life_diary_time,
                 timezone=self.config.timezone,
+                min_event_interval_minutes=self.config.character_life_min_event_interval_minutes,
+                chain_max_depth=self.config.character_life_chain_max_depth,
+                chain_force_extend_once_prob=self.config.character_life_chain_force_extend_once_prob,
+                default_energy=self.config.character_life_default_energy,
+                default_mood=self.config.character_life_default_mood,
+                default_health=self.config.character_life_default_health,
+                recovery_energy=self.config.character_life_recovery_energy,
+                recovery_mood=self.config.character_life_recovery_mood,
+                recovery_health=self.config.character_life_recovery_health,
             )
             self.character_life = CharacterLife(
                 config=life_config,
@@ -192,9 +201,7 @@ class PersonaOrchestrator:
                 share_message_concurrent=self.config.proactive_share_message_concurrent,
                 share_max_chars=self.config.proactive_share_max_chars,
                 share_context_history_limit=self.config.proactive_share_context_history_limit,
-                max_scheduled_events_per_tick=getattr(
-                    self.config, "proactive_max_scheduled_events_per_tick", 3
-                ),
+                # scheduled_events 已移除，由 CharacterLife 边界事件和槽位系统覆盖
             )
             self.scheduler = ProactiveScheduler(
                 config=scheduler_config,
@@ -207,6 +214,9 @@ class PersonaOrchestrator:
             )
             await self.scheduler.load_persistent_state()
             logger.info("主动消息调度器已初始化")
+
+            # CharacterLife 同步波动边界到 scheduler（用于活跃时间判定）
+            self.character_life.boundary_notifier = self.scheduler
 
             self.delayed_task_queue = EventShareTaskQueue(
                 data_store=self.data_store,
@@ -1080,22 +1090,23 @@ class PersonaOrchestrator:
         messages = []
 
         try:
-            # 尝试生成生活事件（随机槽位）
+            # 尝试生成生活事件（统一槽位，含边界事件和日常事件）
             if self.character_life:
-                event = await self.character_life.tick()
-                if event:
-                    logger.info(f"角色生活事件: {event.get('description', '')[:50]}...")
-                    # 随机事件进入延迟队列
-                    if self.delayed_task_queue and event.get("share_desire", 0.0) >= self.config.proactive_event_share_threshold:
+                event_chain = await self.character_life.tick()
+                if event_chain:
+                    logger.info(f"角色生活事件: {event_chain[0].get('description', '')[:50]}...")
+                    # 选择 share_desire 最高的一个事件进入分享流程
+                    best_event = max(event_chain, key=lambda e: e.get("share_desire", 0.0))
+                    if self.delayed_task_queue and best_event.get("share_desire", 0.0) >= self.config.proactive_event_share_threshold:
                         delay = random.randint(
                             self.config.proactive_event_share_delay_min,
                             self.config.proactive_event_share_delay_max,
                         )
                         await self.delayed_task_queue.enqueue_event_share(
-                            event_id=event.get("event_id", ""),
-                            event_description=event.get("description", ""),
-                            reaction=event.get("reaction", ""),
-                            share_desire=event.get("share_desire", 0.0),
+                            event_id=best_event.get("event_id", ""),
+                            event_description=best_event.get("description", ""),
+                            reaction=best_event.get("reaction", ""),
+                            share_desire=best_event.get("share_desire", 0.0),
                             delay_minutes=delay,
                         )
 

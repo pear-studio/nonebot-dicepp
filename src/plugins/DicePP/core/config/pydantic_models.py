@@ -134,6 +134,21 @@ class PersonaConfig(BaseModel):
     # 生活事件时刻由角色卡 extensions.persona（generate_event_times）决定；此处仅控制触发容差
     character_life_jitter_minutes: int = 15
     character_life_diary_time: str = "23:30"
+    # 事件-反应链配置
+    character_life_chain_max_depth: int = 3
+    character_life_chain_force_extend_once_prob: float = Field(
+        default=0.0,
+        description="仅在当天首次事件后、action_tendency 为空时触发一次保底续写的概率，保证链深度至少为 2",
+    )
+    character_life_min_event_interval_minutes: int = 5
+    # 跨天恢复数值配置
+    character_life_recovery_energy: int = 20
+    character_life_recovery_mood: int = 10
+    character_life_recovery_health: int = 5
+    # 旧版纯文本状态迁移默认值
+    character_life_default_energy: int = 50
+    character_life_default_mood: int = 50
+    character_life_default_health: int = 50
 
     # ── Phase 2: 主动消息
     proactive_enabled: bool = True
@@ -178,9 +193,7 @@ class PersonaConfig(BaseModel):
     proactive_share_backoff_base_seconds: int = Field(
         default=2, ge=1, description="分享消息重试的指数退避基数（秒）"
     )
-    proactive_max_scheduled_events_per_tick: int = Field(
-        default=3, ge=0, description="每轮 tick 最多处理的定时事件数"
-    )
+    # 已移除: scheduled_events 功能由 CharacterLife 边界事件和槽位系统覆盖
 
     # ── Phase 2: 群活跃度
     group_activity_enabled: bool = True

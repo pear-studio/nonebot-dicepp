@@ -9,6 +9,7 @@ import json
 import os
 import base64
 import aiosqlite
+from pydantic import ValidationError
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -20,7 +21,7 @@ from ..utils.privacy import mask_sensitive_string
 from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
     RelationshipState, Observation, DailyEvent, GroupActivity, UserLLMConfig,
-    LLMTraceRecord, DelayedTask, GroupConversation,
+    LLMTraceRecord, DelayedTask, GroupConversation, CharacterState,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -906,24 +907,55 @@ class PersonaDataStore:
         )
         await self.db.commit()
 
+    async def prune_daily_events(self, keep_days: int) -> int:
+        """清理 keep_days 天之前的每日事件"""
+        cutoff_date = (self._wall_now() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
+        cursor = await self.db.execute(
+            "DELETE FROM persona_daily_events WHERE date < ?",
+            (cutoff_date,)
+        )
+        await self.db.commit()
+        return cursor.rowcount
+
     # ========== 角色状态 ==========
 
-    async def get_character_state(self) -> str:
-        """获取角色永久状态"""
+    async def get_character_state(self) -> CharacterState:
+        """获取角色永久状态（结构化，兼容旧版纯文本格式）"""
         async with self.db.execute(
             "SELECT text FROM persona_character_state WHERE id = 1"
         ) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else ""
+            raw = row[0] if row else ""
 
-    async def update_character_state(self, text: str) -> None:
+        if not raw:
+            return CharacterState()
+
+        # 尝试解析新版 JSON 格式
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                try:
+                    return CharacterState.model_validate(data)
+                except ValidationError as ve:
+                    logger.warning(
+                        "CharacterState JSON 字段验证失败，降级为纯文本: %s 异常类型: %s 原始数据: %s",
+                        str(ve), type(ve).__name__, raw[:500],
+                    )
+        except json.JSONDecodeError:
+            pass
+
+        # 旧版纯文本格式：作为 text 字段返回，energy/mood/health 保持 None
+        return CharacterState(text=raw)
+
+    async def update_character_state(self, state: CharacterState) -> None:
+        """更新角色永久状态（结构化 JSON 存储）"""
         await self.db.execute(
             """
-            INSERT INTO persona_character_state (id, text, updated_at)
-            VALUES (1, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at
+            INSERT INTO persona_character_state (id, text)
+            VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET text = excluded.text
             """,
-            (text, self._wall_now().isoformat())
+            (state.model_dump_json(),)
         )
         await self.db.commit()
 
