@@ -1,6 +1,16 @@
 from typing import List, Iterable
 
 
+def estimate_tokens(text: str) -> float:
+    """基于字符统计的 token 估算策略，为性能考虑不引入真实 tokenizer。
+    中文字符按 1 token，其余按每 4 字符 1 token。
+    所有调用方均通过本函数估算，调整策略时只需修改此处即可。
+    """
+    cn_chars = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    other_chars = len(text) - cn_chars
+    return cn_chars + other_chars / 4
+
+
 def to_english_str(input_str: str) -> str:
     """
     将字符串中的中文符号与全角字符转为英文

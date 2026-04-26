@@ -2,7 +2,7 @@ import os
 import asyncio
 import datetime
 import random
-from typing import List, Optional, Dict, Callable, Union, Set
+from typing import List, Optional, Dict, Callable, Union, Set, Awaitable
 from random import choice
 
 from utils.logger import dice_log, get_exception_info
@@ -78,6 +78,11 @@ class Bot:
         self._delay_init_lock = asyncio.Lock()
         self._delay_init_done: bool = False
 
+        # 消息发送后跨模块通知 hook 列表
+        # 设计意图：adapter 层发送群/私聊消息后，允许各模块订阅并记录。
+        # 长期路径：引入轻量级事件总线彻底解耦。
+        self._post_send_hooks: List[Callable[[str, str, str, str, str], Awaitable[None]]] = []
+
         self.start_up(readonly=readonly)
 
     def set_client_proxy(self, proxy):
@@ -86,6 +91,24 @@ class Bot:
             self.proxy = proxy
         else:
             raise TypeError("Incorrect Client Proxy!")
+
+    def add_post_send_hook(
+        self,
+        hook: Callable[[str, str, str, str, str], Awaitable[None]],
+    ) -> Callable[[], None]:
+        """注册消息发送后跨模块通知 hook
+
+        回调签名: (group_id, user_id, role, content, display_name) -> Awaitable[None]
+        返回注销函数，调用即可移除该 hook。
+        """
+        if hook not in self._post_send_hooks:
+            self._post_send_hooks.append(hook)
+
+        def unregister() -> None:
+            if hook in self._post_send_hooks:
+                self._post_send_hooks.remove(hook)
+
+        return unregister
 
     def start_up(self, readonly: bool = False):
         self.register_command()

@@ -98,6 +98,24 @@ class PersonaConfig(BaseModel):
     max_short_term_chars: int = 1500  # 从 3000 改为 1500（配合工具调用）
     max_messages: int = 15  # 从 200 改为 15（约 7-8 轮对话）
 
+    # ── 群聊共享历史限制（token-based 动态窗口）
+    # 群聊使用 token 估算（与 LLM 上下文窗口对齐），私聊使用字符数（max_short_term_chars）。
+    # 两者计量单位不同，token 估算基于字符统计，为性能考虑不引入真实 tokenizer。
+    group_max_messages: int = 40  # 群聊数据库保留条数上限
+    group_max_age_minutes: int = 10  # 群聊时间窗口上限（分钟）
+    group_context_budget_tokens: int = Field(
+        default=1600,
+        description="群聊上下文 token 总预算（基于字符统计的估算值，不引入真实 tokenizer，建议按实际需求的 70% 配置）",
+    )
+    group_single_message_max_tokens: int = Field(
+        default=180,
+        description="单条消息 token 上限（基于字符统计的估算值，超长先截断）",
+    )
+    search_chat_history_max_chars: int = Field(
+        default=180,
+        description="search_chat_history 工具返回内容的最大字符数（超出截断）",
+    )
+
     # ── Phase 3: 工具调用
     tools_enabled: bool = True
     tools_max_rounds: int = 5  # 工具调用最大轮次

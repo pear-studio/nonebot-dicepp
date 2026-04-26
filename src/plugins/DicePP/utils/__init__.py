@@ -21,6 +21,8 @@ import utils.string
 import utils.data
 import utils.cq_code
 
+from utils.string import estimate_tokens
+
 # 导出列表，方便 IDE 自动补全和静态分析
 __all__ = [
     # JSON 操作
@@ -35,4 +37,6 @@ __all__ = [
     "format_worksheet",
     # 文件系统操作
     "create_parent_dir",
+    # Token 估算
+    "estimate_tokens",
 ]
