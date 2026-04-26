@@ -20,7 +20,7 @@ from ..utils.privacy import mask_sensitive_string
 from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
     RelationshipState, Observation, DailyEvent, GroupActivity, UserLLMConfig,
-    LLMTraceRecord, DelayedTask,
+    LLMTraceRecord, DelayedTask, GroupConversation,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -42,6 +42,7 @@ class PersonaDataStore:
         group_activity_decay_with_content: float = 5.0,  # 有内容时衰减减半
         group_activity_content_window_hours: float = 24.0,  # 内容保护时间窗口
         timezone: str = "Asia/Shanghai",
+        group_max_messages: int = 40,
     ):
         self.db = db_connection
         self._group_activity_decay_per_day = group_activity_decay_per_day
@@ -49,6 +50,7 @@ class PersonaDataStore:
         self._group_activity_decay_with_content = group_activity_decay_with_content
         self._group_activity_content_window_hours = group_activity_content_window_hours
         self._timezone = timezone
+        self._group_max_messages = group_max_messages
 
     def _wall_now(self) -> datetime:
         """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
@@ -233,6 +235,168 @@ class PersonaDataStore:
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+    # ========== 群聊共享历史 ==========
+
+    async def add_group_conversation(
+        self,
+        group_id: str,
+        user_id: str,
+        role: str,
+        content: str,
+        display_name: str = "",
+    ) -> None:
+        """添加群聊消息并在同一事务中执行群级裁剪
+
+        群聊历史按 group_id 共享，私聊历史继续使用 persona_messages 按 user_id+group_id 隔离。
+        """
+        now_iso = self._wall_now().isoformat()
+        await self.db.execute("BEGIN")
+        try:
+            await self.db.execute(
+                """
+                INSERT INTO persona_group_conversations
+                (group_id, user_id, role, content, display_name, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (group_id, user_id, role, content, display_name, now_iso),
+            )
+            # 同一事务内执行裁剪
+            await self.db.execute(
+                """
+                DELETE FROM persona_group_conversations
+                WHERE group_id = ?
+                  AND id NOT IN (
+                    SELECT id FROM persona_group_conversations
+                    WHERE group_id = ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                )
+                """,
+                (group_id, group_id, self._group_max_messages),
+            )
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+
+    async def get_group_conversations(
+        self,
+        group_id: str,
+        limit: Optional[int] = None,
+    ) -> List[GroupConversation]:
+        """获取群聊历史，按时间升序返回
+
+        群聊历史按 group_id 共享，私聊历史继续使用 persona_messages 按 user_id+group_id 隔离。
+        """
+        sql = """
+            SELECT id, group_id, user_id, role, content, display_name, created_at
+            FROM persona_group_conversations
+            WHERE group_id = ?
+            ORDER BY created_at DESC
+        """
+        params: List[Any] = [group_id]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+
+        async with self.db.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+            messages: List[GroupConversation] = []
+            rows_list: List[Any] = list(rows)
+            for row in reversed(rows_list):
+                messages.append(GroupConversation(
+                    id=row[0],
+                    group_id=row[1],
+                    user_id=row[2],
+                    role=row[3],
+                    content=row[4],
+                    display_name=row[5] or "",
+                    created_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                ))
+            return messages
+
+    async def prune_group_conversations(self, group_id: str, keep: int) -> None:
+        """保留最近 N 条群聊消息，删除旧的"""
+        await self.db.execute(
+            """
+            DELETE FROM persona_group_conversations
+            WHERE group_id = ?
+              AND id NOT IN (
+                SELECT id FROM persona_group_conversations
+                WHERE group_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+            )
+            """,
+            (group_id, group_id, keep),
+        )
+        await self.db.commit()
+
+    async def search_group_conversations(
+        self,
+        group_id: str,
+        keyword: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        hours_back: Optional[int] = None,
+        limit: int = 5,
+    ) -> List[GroupConversation]:
+        """搜索群聊历史，按时间升序返回
+
+        注意：content LIKE 搜索依赖 SQLite 全表扫描，高并发大数据量场景下性能有限。
+        群聊历史按 group_id 共享，私聊历史继续使用 persona_messages 按 user_id+group_id 隔离。
+
+        参数优先级：hours_back 与 start_time/end_time 互斥，同时传入时抛出 ValueError。
+        """
+        if hours_back is not None and (start_time is not None or end_time is not None):
+            raise ValueError("hours_back 与 start_time/end_time 不能同时使用")
+
+        if (start_time is None) != (end_time is None):
+            raise ValueError("start_time 和 end_time 必须同时提供或同时省略")
+
+        conditions = ["group_id = ?"]
+        params: List[Any] = [group_id]
+
+        if keyword:
+            safe_query = self._sanitize_search_query(keyword)
+            conditions.append("content LIKE ? ESCAPE '\\'")
+            params.append(f"%{safe_query}%")
+
+        if hours_back is not None:
+            cutoff = self._wall_now() - timedelta(hours=hours_back)
+            conditions.append("created_at >= ?")
+            params.append(cutoff.isoformat())
+        elif start_time is not None and end_time is not None:
+            conditions.append("created_at >= ? AND created_at <= ?")
+            params.append(start_time.isoformat())
+            params.append(end_time.isoformat())
+
+        where_clause = " AND ".join(conditions)
+        sql = f"""
+            SELECT id, group_id, user_id, role, content, display_name, created_at
+            FROM persona_group_conversations
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
+        async with self.db.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+            messages: List[GroupConversation] = []
+            rows_list: List[Any] = list(rows)
+            for row in reversed(rows_list):
+                messages.append(GroupConversation(
+                    id=row[0],
+                    group_id=row[1],
+                    user_id=row[2],
+                    role=row[3],
+                    content=row[4],
+                    display_name=row[5] or "",
+                    created_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                ))
+            return messages
 
     # ========== LLM Trace 相关 (Phase 7a) ==========
 

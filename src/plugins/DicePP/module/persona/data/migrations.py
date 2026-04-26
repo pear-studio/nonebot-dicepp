@@ -164,6 +164,29 @@ CREATE TABLE IF NOT EXISTS persona_user_mute (
 );
 """
 
+# 群聊对话历史表（群共享短期历史）
+CREATE_GROUP_CONVERSATIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_group_conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    display_name TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+CREATE_GROUP_CONVERSATIONS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_pgc_group_created
+ON persona_group_conversations(group_id, created_at DESC);
+"""
+
+CREATE_GROUP_CONVERSATIONS_USER_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_pgc_group_user_created
+ON persona_group_conversations(group_id, user_id, created_at DESC);
+"""
+
 # 用户 LLM 配置表 (Phase 4)
 CREATE_USER_LLM_CONFIG_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_user_llm_config (
@@ -253,4 +276,7 @@ ALL_MIGRATIONS = [
     CREATE_LLM_TRACES_INDEX_SESSION,
     CREATE_LLM_TRACES_INDEX_USER,
     CREATE_LLM_TRACES_INDEX_CREATED_AT,
+    CREATE_GROUP_CONVERSATIONS_TABLE,
+    CREATE_GROUP_CONVERSATIONS_INDEX,
+    CREATE_GROUP_CONVERSATIONS_USER_INDEX,
 ]

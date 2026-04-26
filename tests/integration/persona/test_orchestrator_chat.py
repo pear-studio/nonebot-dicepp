@@ -51,6 +51,7 @@ def _make_mock_bot(persona_config=None):
     bot = MagicMock()
     cfg = persona_config or _default_persona_config()
     bot.config.persona_ai = cfg
+    bot._post_send_hooks = []
     # Provide a real aiosqlite connection via temp_db is handled in fixture,
     # but here we need bot.db._db to be the connection.
     # The fixture will inject it.
@@ -167,13 +168,13 @@ class TestOrchestratorChatNormalFlow:
         orch, mock_client = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
 
         # Seed first message so it's not treated as first contact
-        await orch.data_store.add_message("u1", "g1", "user", "prev")
-        await orch.data_store.add_message("u1", "g1", "assistant", "ok")
+        await orch.data_store.add_message("u1", "", "user", "prev")
+        await orch.data_store.add_message("u1", "", "assistant", "ok")
 
-        response = await orch.chat("u1", "g1", "今天天气不错", nickname="User")
+        response = await orch.chat("u1", "", "今天天气不错", nickname="User")
         assert response == "Mocked LLM response"
 
-        msgs = await orch.data_store.get_recent_messages("u1", "g1", limit=10)
+        msgs = await orch.data_store.get_recent_messages("u1", "", limit=10)
         assert len(msgs) == 4
         assert msgs[-1].role == "assistant"
         assert msgs[-1].content == "Mocked LLM response"
@@ -183,8 +184,8 @@ class TestOrchestratorChatNormalFlow:
         orch, mock_client = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
 
         # Seed history
-        await orch.data_store.add_message("u1", "g1", "user", "prev")
-        await orch.data_store.add_message("u1", "g1", "assistant", "ok")
+        await orch.data_store.add_group_conversation("g1", "u1", "user", "prev")
+        await orch.data_store.add_group_conversation("g1", "u1", "assistant", "ok")
 
         r1 = await orch.chat("u1", "g1", "same", nickname="User")
         r2 = await orch.chat("u1", "g1", "same", nickname="User")
@@ -202,8 +203,8 @@ class TestOrchestratorChatRelationshipRefuse:
         orch.config.relationship_refuse_enabled = True
 
         # Seed history so not first message
-        await orch.data_store.add_message("u1", "g1", "user", "prev")
-        await orch.data_store.add_message("u1", "g1", "assistant", "ok")
+        await orch.data_store.add_group_conversation("g1", "u1", "user", "prev")
+        await orch.data_store.add_group_conversation("g1", "u1", "assistant", "ok")
 
         # Insert a very low relationship
         rel = RelationshipState(
@@ -234,8 +235,8 @@ class TestOrchestratorChatRelationshipRefuse:
         orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
         orch.config.relationship_refuse_enabled = False
 
-        await orch.data_store.add_message("u1", "g1", "user", "prev")
-        await orch.data_store.add_message("u1", "g1", "assistant", "ok")
+        await orch.data_store.add_group_conversation("g1", "u1", "user", "prev")
+        await orch.data_store.add_group_conversation("g1", "u1", "assistant", "ok")
 
         rel = RelationshipState(
             user_id="u1",
@@ -256,8 +257,8 @@ class TestOrchestratorChatRelationshipRefuse:
         orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
         orch.config.relationship_refuse_enabled = True
 
-        await orch.data_store.add_message("u1", "g1", "user", "prev")
-        await orch.data_store.add_message("u1", "g1", "assistant", "ok")
+        await orch.data_store.add_group_conversation("g1", "u1", "user", "prev")
+        await orch.data_store.add_group_conversation("g1", "u1", "assistant", "ok")
 
         rel = RelationshipState(
             user_id="u1",
@@ -294,8 +295,8 @@ class TestOrchestratorChatDecayApplication:
         )
 
         # Seed history
-        await orch.data_store.add_message("u1", "g1", "user", "prev")
-        await orch.data_store.add_message("u1", "g1", "assistant", "ok")
+        await orch.data_store.add_group_conversation("g1", "u1", "user", "prev")
+        await orch.data_store.add_group_conversation("g1", "u1", "assistant", "ok")
 
         t0 = datetime.now() - timedelta(hours=5)
         rel = RelationshipState(
@@ -329,8 +330,8 @@ class TestOrchestratorChatToolsEnabled:
         orch.config.tools_enabled = True
 
         # Seed history
-        await orch.data_store.add_message("u1", "g1", "user", "prev")
-        await orch.data_store.add_message("u1", "g1", "assistant", "ok")
+        await orch.data_store.add_group_conversation("g1", "u1", "user", "prev")
+        await orch.data_store.add_group_conversation("g1", "u1", "assistant", "ok")
 
         # When tools are enabled, LLM is called via generate_with_tools.
         # Our mock client returns no tool_calls, so it should behave like normal chat.
@@ -352,3 +353,244 @@ class TestOrchestratorChatInitializationGuard:
         # Do not initialize
         response = await orch.chat("u1", "g1", "hello", nickname="User")
         assert "未初始化" in response
+
+
+from plugins.DicePP.module.persona.data.models import GroupConversation
+
+
+def _make_gc(role, content, display_name, created_at=None):
+    """辅助构造 GroupConversation（测试用）"""
+    return GroupConversation(
+        group_id="", user_id="", role=role, content=content,
+        display_name=display_name, created_at=created_at,
+    )
+
+
+class TestOrchestratorTokenWindow:
+    """测试群聊 Token-based 动态窗口 (fix-persona-group-history-context)"""
+
+    @pytest.mark.asyncio
+    async def test_apply_token_window_respects_budget(self, temp_db, monkeypatch):
+        """8.4: token budget limits window size"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+        orch.config.group_context_budget_tokens = 50
+        orch.config.group_max_messages = 100
+        orch.config.group_max_age_minutes = 100
+        orch.config.group_single_message_max_tokens = 100
+
+        now = datetime.now()
+        history = [
+            _make_gc("user", "short", "A", now),
+            _make_gc("user", "another short", "B", now),
+            _make_gc("assistant", "reply", "我", now),
+        ]
+        result, _ = orch._apply_token_window(history)
+        # 预算 50 足够容纳这些短消息
+        assert len(result) == 3
+
+    @pytest.mark.asyncio
+    async def test_apply_token_window_truncate_long_message(self, temp_db, monkeypatch):
+        """8.4 / 6.5: single message exceeding max_tokens is truncated"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+        orch.config.group_single_message_max_tokens = 10
+        orch.config.group_context_budget_tokens = 1000
+        orch.config.group_max_messages = 100
+        orch.config.group_max_age_minutes = 100
+
+        now = datetime.now()
+        long_msg = "这是一段非常非常非常长的消息内容"
+        history = [
+            _make_gc("user", long_msg, "A", now),
+        ]
+        result, _ = orch._apply_token_window(history)
+        assert len(result) == 1
+        # 消息应被截断
+        assert len(result[0]["content"]) < len(long_msg)
+
+    @pytest.mark.asyncio
+    async def test_apply_token_window_time_window(self, temp_db, monkeypatch):
+        """8.4: time window excludes old messages"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+        orch.config.group_max_age_minutes = 10
+        orch.config.group_context_budget_tokens = 1000
+        orch.config.group_max_messages = 100
+        orch.config.group_single_message_max_tokens = 100
+
+        now = datetime.now()
+        history = [
+            _make_gc("user", "old msg", "A", now - timedelta(minutes=15)),
+            _make_gc("user", "recent msg", "B", now - timedelta(minutes=5)),
+        ]
+        result, _ = orch._apply_token_window(history)
+        assert len(result) == 1
+        assert result[0]["content"] == "recent msg"
+
+    @pytest.mark.asyncio
+    async def test_apply_token_window_speaker_name(self, temp_db, monkeypatch):
+        """6.6: returns unified dict with speaker_name"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+        now = datetime.now()
+        history = [
+            _make_gc("user", "hello", "小明", now),
+            _make_gc("assistant", "hi", "我", now),
+        ]
+        result, _ = orch._apply_token_window(history)
+        assert len(result) == 2
+        assert result[0]["speaker_name"] == "小明"
+        assert result[1]["speaker_name"] == "我"
+        assert result[0]["role"] == "user"
+        assert result[1]["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_apply_token_window_keeps_at_least_one(self, temp_db, monkeypatch):
+        """8.4: single message exceeding single_max is truncated but still kept"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+        orch.config.group_context_budget_tokens = 5
+        orch.config.group_max_messages = 100
+        orch.config.group_max_age_minutes = 100
+        orch.config.group_single_message_max_tokens = 5  # 小于消息 token 数，触发单条截断
+
+        now = datetime.now()
+        long_msg = "这是一段非常非常非常长的消息内容"
+        history = [
+            _make_gc("user", long_msg, "A", now),
+        ]
+        result, _ = orch._apply_token_window(history)
+        assert len(result) == 1
+        assert len(result[0]["content"]) < len(long_msg)  # 确认被截断
+
+    @pytest.mark.asyncio
+    async def test_group_chat_recorder_works(self, temp_db, monkeypatch):
+        """8.9: _post_send_hooks can be registered and invoked correctly"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        # 注册 hook（模拟 PersonaCommand.delay_init 中的行为）
+        async def recorder(group_id, user_id, role, content, display_name):
+            await orch.data_store.add_group_conversation(
+                group_id=group_id,
+                user_id=user_id,
+                role=role,
+                content=content,
+                display_name=display_name,
+            )
+
+        orch.bot._post_send_hooks.append(recorder)
+        assert len(orch.bot._post_send_hooks) > 0
+
+        # 验证回调实际功能：调用后数据库中应写入记录
+        hook = orch.bot._post_send_hooks[0]
+        await hook("g1", "bot", "assistant", "test message", "我")
+
+        history = await orch.data_store.get_group_conversations("g1")
+        assert any(h.content == "test message" for h in history)
+
+
+class TestOrchestratorGroupSharedHistory:
+    """测试群聊共享历史集成 (fix-persona-group-history-context)"""
+
+    @pytest.mark.asyncio
+    async def test_group_history_shared_across_users(self, temp_db, monkeypatch):
+        """8.6: group chat history is shared across users"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        # 用户 A 和 B 在群 g1 中发消息
+        await orch.data_store.add_group_conversation("g1", "uA", "user", "A 的消息", "Alice")
+        await orch.data_store.add_group_conversation("g1", "uB", "user", "B 的消息", "Bob")
+
+        # 用户 A 触发对话，历史应包含 B 的消息
+        history, _ = await orch._fetch_short_term_history("uA", "g1")
+        contents = {h["content"] for h in history}
+        assert "A 的消息" in contents
+        assert "B 的消息" in contents
+
+    @pytest.mark.asyncio
+    async def test_private_history_remains_isolated(self, temp_db, monkeypatch):
+        """8.7: private chat history remains isolated"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        await orch.data_store.add_message("uA", "", "user", "A 的私聊")
+        await orch.data_store.add_message("uB", "", "user", "B 的私聊")
+
+        history, _ = await orch._fetch_short_term_history("uA", "")
+        contents = {h["content"] for h in history}
+        assert "A 的私聊" in contents
+        assert "B 的私聊" not in contents
+
+    @pytest.mark.asyncio
+    async def test_search_chat_history_tool_format(self, temp_db, monkeypatch):
+        """8.8: search_chat_history tool returns correct format"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        await orch.data_store.add_group_conversation("g1", "u1", "user", "奈雪的茶", "小明")
+        await orch.data_store.add_group_conversation("g1", "bot", "assistant", "我也喜欢奈雪", "我")
+
+        result = await orch._execute_search_chat_history(
+            {"keyword": "奈雪", "limit": 5},
+            group_id="g1",
+        )
+        assert "参与者:" in result
+        assert "assistant -> 我" in result
+        assert "奈雪的茶" in result
+        assert "我也喜欢奈雪" in result
+
+    @pytest.mark.asyncio
+    async def test_search_chat_history_param_validation(self, temp_db, monkeypatch):
+        """6.8 / 8.8: parameter validation for conflicting time params"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        # 同时提供 hours_back 和 start_time
+        result = await orch._execute_search_chat_history(
+            {"hours_back": 2, "start_time": "2026-04-18T10:00:00", "end_time": "2026-04-18T12:00:00"},
+            group_id="g1",
+        )
+        assert "参数错误" in result
+        assert "不能同时使用" in result
+
+        # 只提供 start_time 不提供 end_time
+        result = await orch._execute_search_chat_history(
+            {"start_time": "2026-04-18T10:00:00"},
+            group_id="g1",
+        )
+        assert "参数错误" in result
+        assert "必须成对提供" in result
+
+    @pytest.mark.asyncio
+    async def test_search_chat_history_no_matches(self, temp_db, monkeypatch):
+        """8.8: no matches returns clear message"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        result = await orch._execute_search_chat_history(
+            {"keyword": "不存在的词"},
+            group_id="g1",
+        )
+        assert result == "未找到匹配的历史消息"
+
+    @pytest.mark.asyncio
+    async def test_private_chat_fetch_includes_speaker_name(self, temp_db, monkeypatch):
+        """6.6: private path returns speaker_name"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        await orch.data_store.add_message("u1", "", "user", "hello")
+        await orch.data_store.add_message("u1", "", "assistant", "hi")
+
+        history, _ = await orch._fetch_short_term_history("u1", "")
+        assert len(history) == 2
+        assert history[0]["speaker_name"] == "你"
+        assert history[1]["speaker_name"] == "我"
+
+    @pytest.mark.asyncio
+    async def test_group_chat_end_to_end(self, temp_db, monkeypatch):
+        """群聊端到端：用户A发消息 -> bot回复 -> 用户B@bot -> 上下文包含用户A消息"""
+        orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        # 用户 A 在群 g1 发消息
+        await orch.data_store.add_group_conversation("g1", "uA", "user", "A 的消息", "Alice")
+        # 模拟 bot 回复
+        await orch.data_store.add_group_conversation("g1", "bot", "assistant", "Bot 回复", "我")
+
+        # 用户 B 在群 g1 @bot，触发对话
+        messages = await orch._build_messages("uB", "g1", "B 的消息")
+
+        # 验证 system 消息中包含群聊共享历史
+        system_msg = messages[0]
+        assert "Alice" in system_msg["content"] or "A 的消息" in system_msg["content"]

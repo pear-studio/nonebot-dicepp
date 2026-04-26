@@ -69,29 +69,65 @@ class PersonaCommand(UserCommandBase):
         self.config = self.bot.config.persona_ai
         config = self.config
         self.enabled = config.enabled
-        
+
         if not self.enabled:
             return ["Persona AI 模块已禁用"]
-        
+
         # 创建 orchestrator（但不立即初始化，因为需要异步）
         self.orchestrator = PersonaOrchestrator(self.bot)
-        
+
         # 注册异步初始化任务
         async def init_orchestrator():
             success = await self.orchestrator.initialize()
             if success:
                 self.data_store = self.orchestrator.data_store
                 await self._ensure_observation_buffers_loaded()
+                # 注册消息发送后跨模块通知 hook（先注销旧 hook 再注册，防止热重载后重复）
+                if hasattr(self, "_post_send_hook_unregister"):
+                    self._post_send_hook_unregister()
+                self._post_send_hook_unregister = self.bot.add_post_send_hook(self._group_chat_recorder)
                 dice_log(f"[Persona] 模块初始化成功: {config.character_name}")
             else:
                 dice_log(f"[Persona] 模块初始化失败")
                 self.enabled = False
             return []
-        
+
         self._register_admin_handlers()
         self.bot.register_task(init_orchestrator, is_async=True, timeout=30)
 
         return [f"Persona AI 模块加载中 (角色: {config.character_name})"]
+
+    @staticmethod
+    def _is_persona_trigger(meta: MessageMetaData, msg: str) -> bool:
+        """判断消息是否为 persona 触发（@bot 或 .ai/。ai 前缀）"""
+        return meta.to_me or msg.strip().startswith(".ai") or msg.strip().startswith("。ai")
+
+    @staticmethod
+    def _resolve_display_name(meta: MessageMetaData) -> str:
+        """统一解析用户显示名称（优先级：群名片 > 昵称 > user_id）"""
+        return meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
+
+    async def _group_chat_recorder(
+        self,
+        group_id: str,
+        user_id: str,
+        role: str,
+        content: str,
+        display_name: str,
+    ) -> None:
+        """群聊消息记录器回调（跨模块 bot 回复统一入流）"""
+        if not self.data_store:
+            return
+        try:
+            await self.data_store.add_group_conversation(
+                group_id=group_id,
+                user_id=user_id,
+                role=role,
+                content=content,
+                display_name=display_name,
+            )
+        except Exception as e:
+            dice_log(f"[Persona] 群聊记录器写入失败: {e}")
 
     def _is_admin(self, user_id: str) -> bool:
         """检查用户是否是管理员"""
@@ -152,11 +188,11 @@ class PersonaCommand(UserCommandBase):
             return False, False, None
 
         # @bot 或 .ai 前缀触发
-        if not meta.to_me and not msg.startswith(".ai") and not msg.startswith("。ai"):
+        if not self._is_persona_trigger(meta, msg):
             # 群聊旁听模式（观察但不回复）— 不应拦截其他命令
             if meta.group_id and self.config.observe_group_enabled:
                 await self._handle_group_observation(
-                    meta.group_id or "", meta.user_id, meta.nickname or "", msg_str
+                    meta.group_id or "", meta.user_id, self._resolve_display_name(meta), msg_str
                 )
             return False, False, None
 
@@ -214,6 +250,21 @@ class PersonaCommand(UserCommandBase):
         group_id = meta.group_id or ""
         nickname = meta.nickname or ""
         is_private = not meta.group_id
+
+        # 群聊消息写入共享历史（触发消息直接入流；非触发消息由旁听模式处理，避免重复）
+        is_trigger = self._is_persona_trigger(meta, msg_str)
+        if group_id and self.data_store and (is_trigger or not self.config.observe_group_enabled):
+            display_name = self._resolve_display_name(meta)
+            try:
+                await self.data_store.add_group_conversation(
+                    group_id=group_id,
+                    user_id=user_id,
+                    role="user",
+                    content=msg_str,
+                    display_name=display_name,
+                )
+            except Exception as e:
+                dice_log(f"[Persona] 群聊用户消息写入失败: {e}")
 
         # 提取命令内容
         msg = msg_str.strip()
@@ -1024,11 +1075,23 @@ class PersonaCommand(UserCommandBase):
         self._observation_persist_monotonic = now_m
 
     async def _handle_group_observation(
-        self, group_id: str, user_id: str, nickname: str, msg_str: str
+        self, group_id: str, user_id: str, display_name: str, msg_str: str
     ) -> None:
         """处理群聊观察"""
         if not self.config.observe_group_enabled or not self.data_store:
             return
+
+        # 旁听模式群消息也写入共享历史
+        try:
+            await self.data_store.add_group_conversation(
+                group_id=group_id,
+                user_id=user_id,
+                role="user",
+                content=msg_str,
+                display_name=display_name,
+            )
+        except Exception as e:
+            dice_log(f"[Persona] 旁听群消息写入失败: {e}")
 
         try:
             await self._ensure_observation_buffers_loaded()
@@ -1047,7 +1110,7 @@ class PersonaCommand(UserCommandBase):
 
             should_extract = buffer.add_message(
                 user_id=user_id,
-                nickname=nickname,
+                nickname=display_name,
                 content=msg_str,
             )
 

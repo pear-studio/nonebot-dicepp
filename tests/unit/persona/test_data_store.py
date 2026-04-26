@@ -510,3 +510,134 @@ class TestCharacterStateCRUD:
         assert await store.get_character_state() == "Feeling happy"
         await store.update_character_state("Feeling tired")
         assert await store.get_character_state() == "Feeling tired"
+
+
+class TestGroupConversationCRUD:
+    """测试群聊共享历史 CRUD (fix-persona-group-history-context)"""
+
+    @pytest.mark.asyncio
+    async def test_add_and_get_group_conversations(self, temp_db):
+        """8.1: add_group_conversation and get_group_conversations"""
+        store = temp_db
+        await store.add_group_conversation("g1", "u1", "user", "hello", "Alice")
+        await store.add_group_conversation("g1", "u2", "user", "hi", "Bob")
+        await store.add_group_conversation("g1", "bot", "assistant", "welcome", "我")
+
+        msgs = await store.get_group_conversations("g1", limit=10)
+        assert len(msgs) == 3
+        assert msgs[0].content == "hello"
+        assert msgs[0].display_name == "Alice"
+        assert msgs[1].content == "hi"
+        assert msgs[1].display_name == "Bob"
+        assert msgs[2].content == "welcome"
+        assert msgs[2].display_name == "我"
+
+    @pytest.mark.asyncio
+    async def test_get_group_conversations_isolation(self, temp_db):
+        """群聊历史按 group_id 隔离"""
+        store = temp_db
+        await store.add_group_conversation("g1", "u1", "user", "g1-msg", "A")
+        await store.add_group_conversation("g2", "u1", "user", "g2-msg", "B")
+
+        g1_msgs = await store.get_group_conversations("g1")
+        assert len(g1_msgs) == 1
+        assert g1_msgs[0].content == "g1-msg"
+
+        g2_msgs = await store.get_group_conversations("g2")
+        assert len(g2_msgs) == 1
+        assert g2_msgs[0].content == "g2-msg"
+
+    @pytest.mark.asyncio
+    async def test_prune_group_conversations(self, temp_db):
+        """8.2: prune_group_conversations keeps recent N messages"""
+        store = temp_db
+        for i in range(5):
+            await store.add_group_conversation("g1", "u1", "user", f"msg{i}", "A")
+
+        await store.prune_group_conversations("g1", keep=2)
+        msgs = await store.get_group_conversations("g1", limit=10)
+        assert len(msgs) == 2
+        assert msgs[0].content == "msg3"
+        assert msgs[1].content == "msg4"
+
+    @pytest.mark.asyncio
+    async def test_add_group_conversation_auto_prune(self, temp_db):
+        """1.7: write+prune happens in a single transaction via add_group_conversation"""
+        store = temp_db
+        store._group_max_messages = 3
+        for i in range(5):
+            await store.add_group_conversation("g1", "u1", "user", f"msg{i}", "A")
+
+        msgs = await store.get_group_conversations("g1", limit=10)
+        assert len(msgs) == 3
+        assert msgs[0].content == "msg2"
+        assert msgs[1].content == "msg3"
+        assert msgs[2].content == "msg4"
+
+    @pytest.mark.asyncio
+    async def test_search_group_conversations_keyword(self, temp_db):
+        """8.3: search with keyword filter"""
+        store = temp_db
+        await store.add_group_conversation("g1", "u1", "user", "奈雪的茶很好喝", "A")
+        await store.add_group_conversation("g1", "u2", "user", "今天天气不错", "B")
+        await store.add_group_conversation("g1", "bot", "assistant", "我也喜欢奈雪", "我")
+
+        results = await store.search_group_conversations("g1", keyword="奈雪", limit=10)
+        assert len(results) == 2
+        contents = {r.content for r in results}
+        assert "奈雪的茶很好喝" in contents
+        assert "我也喜欢奈雪" in contents
+
+    @pytest.mark.asyncio
+    async def test_search_group_conversations_time_filter(self, temp_db):
+        """8.3: search with time filter"""
+        store = temp_db
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        # 通过直接操作数据库插入不同时间的历史
+        await store.add_group_conversation("g1", "u1", "user", "recent", "A")
+
+        # hours_back 过滤
+        results = await store.search_group_conversations("g1", hours_back=1, limit=10)
+        assert len(results) >= 1
+        assert results[0].content == "recent"
+
+        # 久远时间过滤
+        old = now - timedelta(hours=3)
+        results = await store.search_group_conversations(
+            "g1", start_time=old, end_time=now - timedelta(hours=2), limit=10
+        )
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_search_group_conversations_limit(self, temp_db):
+        """8.3: search respects limit"""
+        store = temp_db
+        for i in range(5):
+            await store.add_group_conversation("g1", "u1", "user", f"msg{i}", "A")
+
+        results = await store.search_group_conversations("g1", limit=3)
+        assert len(results) == 3
+
+    @pytest.mark.asyncio
+    async def test_search_group_conversations_escape_wildcards(self, temp_db):
+        """8.3: keyword search escapes LIKE wildcards % _ and backslash"""
+        store = temp_db
+        await store.add_group_conversation("g1", "u1", "user", "100% complete", "A")
+        await store.add_group_conversation("g1", "u2", "user", "under_score", "B")
+        await store.add_group_conversation("g1", "u3", "user", "path\\to\\file", "C")
+
+        # % 应被转义为字面量，而不是通配符
+        results = await store.search_group_conversations("g1", keyword="100%", limit=10)
+        assert len(results) == 1
+        assert results[0].content == "100% complete"
+
+        # _ 应被转义为字面量
+        results = await store.search_group_conversations("g1", keyword="under_score", limit=10)
+        assert len(results) == 1
+        assert results[0].content == "under_score"
+
+        # \ 应被转义为字面量
+        results = await store.search_group_conversations("g1", keyword="path\\to", limit=10)
+        assert len(results) == 1
+        assert "path\\to\\file" in results[0].content

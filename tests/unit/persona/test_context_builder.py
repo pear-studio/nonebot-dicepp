@@ -140,5 +140,85 @@ class TestContextBuilderCharacterBook:
         assert "x" * 60 in system_content
 
 
+class TestContextBuilderSpeakerPrefix:
+    """测试 _format_short_term 称呼前缀 (fix-persona-group-history-context)"""
+
+    def _make_character(self):
+        return Character(
+            name="苏晓",
+            description="一个温柔的AI伴侣",
+        )
+
+    def test_private_chat_speaker_prefix(self):
+        """8.5: 私聊 formatting 使用 [你] 和 [我]"""
+        char = self._make_character()
+        builder = ContextBuilder(char)
+        history = [
+            {"role": "user", "content": "你好", "speaker_name": "你"},
+            {"role": "assistant", "content": "你好呀", "speaker_name": "我"},
+        ]
+        text = builder._format_short_term(history)
+        assert "[你] 你好" in text
+        assert "[我] 你好呀" in text
+
+    def test_group_chat_speaker_prefix(self):
+        """8.5: 群聊 formatting 使用 [display_name]"""
+        char = self._make_character()
+        builder = ContextBuilder(char)
+        history = [
+            {"role": "user", "content": "大家好", "speaker_name": "小明"},
+            {"role": "user", "content": "嗨", "speaker_name": "小红"},
+            {"role": "assistant", "content": "你们好", "speaker_name": "我"},
+        ]
+        text = builder._format_short_term(history)
+        assert "[小明] 大家好" in text
+        assert "[小红] 嗨" in text
+        assert "[我] 你们好" in text
+
+    def test_group_chat_fallback_speaker_name(self):
+        """8.5: 群聊 display_name 缺失时回退到 [群友]"""
+        char = self._make_character()
+        builder = ContextBuilder(char)
+        history = [
+            {"role": "user", "content": "test", "speaker_name": "群友"},
+        ]
+        text = builder._format_short_term(history)
+        assert "[群友] test" in text
+
+    def test_build_skips_truncate_when_disabled(self):
+        """7.2: build 信任传入的 short_term_history，不做额外截断"""
+        char = self._make_character()
+        builder = ContextBuilder(char, max_short_term_chars=10)
+        history = [
+            {"role": "user", "content": "这是一段非常长的群聊消息内容", "speaker_name": "小明"},
+            {"role": "assistant", "content": "回复", "speaker_name": "我"},
+        ]
+        messages = builder.build(
+            short_term_history=history,
+            current_message="新消息",
+        )
+        system_content = messages[0]["content"]
+        # 传入的历史完整保留
+        assert "这是一段非常长的群聊消息内容" in system_content
+
+    def test_build_keeps_truncated_history(self):
+        """传入已截断的历史，build 不做额外处理"""
+        char = self._make_character()
+        builder = ContextBuilder(char, max_short_term_chars=10)
+        history = [
+            {"role": "user", "content": "很长很长的私聊消息内容在这里", "speaker_name": "你"},
+            {"role": "assistant", "content": "回复", "speaker_name": "我"},
+        ]
+        # 模拟 orchestrator 层预先截断
+        truncated = builder._truncate_by_turns(history, max_chars=10)
+        messages = builder.build(
+            short_term_history=truncated,
+            current_message="新消息",
+        )
+        system_content = messages[0]["content"]
+        # 截断后的历史被正确格式化
+        assert "[你]" in system_content or "[我]" in system_content
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

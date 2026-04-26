@@ -15,11 +15,12 @@ from .character.loader import CharacterLoader
 from .character.models import Character, ScheduledEventConfig
 from .llm.router import LLMRouter
 from .data.store import PersonaDataStore
-from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent
+from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent, GroupConversation
 from .agents.scoring_agent import ScoringAgent
 from .memory.context_builder import ContextBuilder
 from .game.decay import DecayCalculator, DecayConfig
 from .wall_clock import persona_wall_now, PERSONA_EPOCH
+from utils.string import estimate_tokens
 from .proactive.character_life import CharacterLife, CharacterLifeConfig
 from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
 from .proactive.target_selector import TargetSelector
@@ -130,6 +131,7 @@ class PersonaOrchestrator:
                 group_activity_decay_with_content=self.config.group_activity_decay_with_content,
                 group_activity_content_window_hours=self.config.group_activity_content_window_hours,
                 timezone=self.config.timezone,
+                group_max_messages=self.config.group_max_messages,
             )
             await self.data_store.ensure_tables()
             logger.info("数据存储已初始化")
@@ -237,7 +239,10 @@ class PersonaOrchestrator:
         self._last_messages[dedup_key] = (message, now)
 
         try:
-            history = await self.data_store.get_recent_messages(user_id, group_id, limit=1)
+            if group_id:
+                history = await self.data_store.get_group_conversations(group_id, limit=1)
+            else:
+                history = await self.data_store.get_recent_messages(user_id, group_id, limit=1)
             is_first = len(history) == 0
 
             if is_first and self.character.first_mes:
@@ -285,8 +290,24 @@ class PersonaOrchestrator:
                                     f"p_refuse={p_refuse:.2%}"
                                 )
                                 # 记录用户消息和拒绝回复
-                                await self.data_store.add_message(user_id, group_id, "user", message)
-                                await self.data_store.add_message(user_id, group_id, "assistant", refuse_response)
+                                if not group_id:
+                                    await self.data_store.add_message(user_id, group_id, "user", message)
+                                    await self.data_store.add_message(user_id, group_id, "assistant", refuse_response)
+                                else:
+                                    await self.data_store.add_group_conversation(
+                                        group_id=group_id,
+                                        user_id=user_id,
+                                        role="user",
+                                        content=message,
+                                        display_name=nickname or "",
+                                    )
+                                    await self.data_store.add_group_conversation(
+                                        group_id=group_id,
+                                        user_id=str(self.bot.account),
+                                        role="assistant",
+                                        content=refuse_response,
+                                        display_name="我",
+                                    )
                                 return refuse_response
                             # 空列表表示明确不拒绝，继续正常对话
 
@@ -305,9 +326,12 @@ class PersonaOrchestrator:
                     group_id=group_id,
                 )
 
-            await self.data_store.add_message(user_id, group_id, "user", message)
-            await self.data_store.add_message(user_id, group_id, "assistant", response)
-            await self.data_store.prune_old_messages(user_id, group_id, self.config.max_messages)
+            if not group_id:
+                # 私聊：写入私聊历史表
+                await self.data_store.add_message(user_id, group_id, "user", message)
+                await self.data_store.add_message(user_id, group_id, "assistant", response)
+                await self.data_store.prune_old_messages(user_id, group_id, self.config.max_messages)
+            # 群聊：user 消息已由 command.py 写入群聊表，assistant 消息由 adapter recorder 写入群聊表
 
             await self._update_interaction(user_id, group_id, message, response)
 
@@ -427,6 +451,42 @@ class PersonaOrchestrator:
                         "required": ["expression"]
                     }
                 }
+            },
+            # 群聊历史检索工具
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_chat_history",
+                    "description": "检索群聊历史记录，支持关键词、时间范围、返回条数过滤。用于回答【刚才谁说了什么】类问题",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "keyword": {
+                                "type": "string",
+                                "description": "搜索关键词（可选）"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "最多返回几条结果（默认5，上限20）",
+                                "default": 5,
+                                "minimum": 1,
+                                "maximum": 20
+                            },
+                            "hours_back": {
+                                "type": "integer",
+                                "description": "检索最近 N 小时内的消息（与 start_time/end_time 二选一）"
+                            },
+                            "start_time": {
+                                "type": "string",
+                                "description": "开始时间，ISO8601 格式如 2026-04-18T10:00:00（必须与 end_time 成对使用）"
+                            },
+                            "end_time": {
+                                "type": "string",
+                                "description": "结束时间，ISO8601 格式如 2026-04-18T12:00:00（必须与 start_time 成对使用）"
+                            }
+                        }
+                    }
+                }
             }
         ]
 
@@ -466,7 +526,137 @@ class PersonaOrchestrator:
             expression = args.get("expression", "")
             return await self._handle_roll_dice(expression)
 
+        # 群聊历史检索工具
+        if tool_name == "search_chat_history":
+            return await self._execute_search_chat_history(args, group_id)
+
         return f"未知工具: {tool_name}"
+
+    def _validate_search_chat_history_params(
+        self,
+        args: Dict[str, Any],
+        group_id: str,
+    ) -> Optional[str]:
+        """校验 search_chat_history 工具参数
+
+        Returns: 错误信息或 None
+        """
+        if not self.data_store:
+            return "数据存储未初始化"
+
+        if not group_id:
+            return "私聊场景不支持检索群聊历史"
+
+        limit = args.get("limit", 5)
+        if not isinstance(limit, int) or not (1 <= limit <= 20):
+            return "参数错误：limit 必须在 1-20 之间"
+        hours_back = args.get("hours_back")
+        if hours_back is not None and (not isinstance(hours_back, int) or hours_back < 0):
+            return "参数错误：hours_back 不能为负数"
+        start_time_str = args.get("start_time")
+        end_time_str = args.get("end_time")
+
+        has_hours_back = hours_back is not None
+        has_start = start_time_str is not None
+        has_end = end_time_str is not None
+
+        if has_hours_back and (has_start or has_end):
+            return "参数错误：hours_back 与 start_time/end_time 不能同时使用，请只选择一种时间过滤方式"
+
+        if (has_start and not has_end) or (has_end and not has_start):
+            return "参数错误：start_time 和 end_time 必须成对提供"
+
+        if has_start and has_end:
+            try:
+                datetime.fromisoformat(start_time_str)
+                datetime.fromisoformat(end_time_str)
+            except ValueError:
+                return "时间格式错误，请使用 ISO8601 格式（如 2026-04-18T10:00:00）"
+
+        return None
+
+    async def _execute_search_chat_history(
+        self,
+        args: Dict[str, Any],
+        group_id: str,
+    ) -> str:
+        """执行群聊历史检索工具
+
+        参数校验与格式化规则（见 design.md 4.1/4.2）:
+        - hours_back 与 start_time/end_time 互斥
+        - start_time 与 end_time 必须成对出现
+        - limit 越界隐式修正
+        - 时间参数按 naive local datetime 处理
+        """
+        error = self._validate_search_chat_history_params(args, group_id)
+        if error:
+            return error
+
+        keyword = args.get("keyword")
+        limit = max(1, min(20, args.get("limit", 5)))
+        hours_back = args.get("hours_back")
+        start_time_str = args.get("start_time")
+        end_time_str = args.get("end_time")
+
+        start_time: Optional[datetime] = None
+        end_time: Optional[datetime] = None
+        if start_time_str is not None and end_time_str is not None:
+            start_time = datetime.fromisoformat(start_time_str)
+            end_time = datetime.fromisoformat(end_time_str)
+
+        # 调用数据层检索
+        results = await self.data_store.search_group_conversations(
+            group_id=group_id,
+            keyword=keyword,
+            start_time=start_time,
+            end_time=end_time,
+            hours_back=hours_back,
+            limit=limit,
+        )
+
+        if not results:
+            return "未找到匹配的历史消息"
+
+        # 格式化输出
+        return self._format_search_chat_history_results(results)
+
+    def _format_search_chat_history_results(
+        self,
+        results: List[GroupConversation],
+    ) -> str:
+        """格式化检索结果为纯文本（设计见 design.md 4.2）"""
+        max_chars = self.config.search_chat_history_max_chars
+        # 构建参与者映射（用匿名标识替换真实 user_id；基于 user_id 排序保证确定性）
+        participants: Dict[str, str] = {}
+        uids = sorted({msg.user_id for msg in results if msg.role != "assistant"})
+        anon_map: Dict[str, str] = {uid: f"用户{i + 1}" for i, uid in enumerate(uids)}
+        for msg in results:
+            if msg.role == "assistant":
+                participants["assistant"] = "我"
+            else:
+                participants[anon_map[msg.user_id]] = msg.display_name or msg.user_id
+
+        lines = ["参与者:"]
+        for uid, name in participants.items():
+            lines.append(f"{uid} -> {name}")
+        lines.append("")
+
+        # 按时间升序排列（results 已从 store 层升序返回）
+        for msg in results:
+            time_str = msg.created_at.strftime("%Y-%m-%d %H:%M:%S") if msg.created_at else ""
+            if msg.role == "assistant":
+                speaker = "我"
+            else:
+                speaker = msg.display_name or msg.user_id
+
+            # 内容摘要截断
+            content = msg.content
+            if len(content) > max_chars:
+                content = content[:max_chars] + "..."
+
+            lines.append(f"[{time_str}] [{speaker}] {content}")
+
+        return "\n".join(lines)
 
     async def _handle_roll_dice(self, expression: str) -> str:
         """处理掷骰工具调用
@@ -597,10 +787,102 @@ class PersonaOrchestrator:
         user_id: str,
         group_id: str,
         limit: int = 15,
-    ) -> List[Dict[str, str]]:
-        """获取并格式化近期对话历史"""
-        history = await self.data_store.get_recent_messages(user_id, group_id, limit=limit)
-        return [{"role": msg.role, "content": msg.content} for msg in history]
+    ) -> Tuple[List[Dict[str, str]], bool]:
+        """获取并格式化近期对话历史
+
+        Returns: (history_dicts, was_truncated)
+        """
+        if not self.data_store:
+            return [], False
+
+        # 私聊路径：获取并截断
+        if not group_id:
+            history = await self.data_store.get_recent_messages(user_id, group_id, limit=limit)
+            history_dicts = [
+                {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我"}
+                for msg in history
+            ]
+            if self.context_builder:
+                truncated = self.context_builder._truncate_by_turns(history_dicts, self.config.max_short_term_chars)
+                return truncated, len(truncated) < len(history_dicts)
+            return history_dicts, False
+
+        # 群聊路径：群共享历史 + token 动态窗口
+        history = await self.data_store.get_group_conversations(group_id, limit=None)
+        return self._apply_token_window(history)
+
+    def _apply_token_window(
+        self,
+        history: List[GroupConversation],
+    ) -> Tuple[List[Dict[str, str]], bool]:
+        """群聊 Token-based 动态窗口（从新到旧收集，升序输出）
+
+        Args:
+            history: 必须按时间升序排列（最旧在前），此约束由 get_group_conversations 保证。
+
+        Returns: (history_dicts, was_truncated)
+        """
+        if not history:
+            return [], False
+
+        original_count = len(history)
+
+        now = persona_wall_now(self.config.timezone)
+        max_age = timedelta(minutes=self.config.group_max_age_minutes)
+        budget = self.config.group_context_budget_tokens
+        max_msgs = self.config.group_max_messages
+        single_max = self.config.group_single_message_max_tokens
+
+        result: List[Dict[str, str]] = []
+        total_tokens = 0.0
+
+        # 从新到旧遍历（history 为升序，因此 reversed 为新到旧）
+        for msg in reversed(history):
+            # 条数上限
+            if len(result) >= max_msgs:
+                break
+
+            # 时间窗口
+            if msg.created_at and (now - msg.created_at) > max_age:
+                break
+
+            # 仅处理文本消息（V1 忽略图片等非文本载荷）
+            content = msg.content
+            if not content:
+                continue
+
+            # 单条截断
+            content_tokens = estimate_tokens(content)
+            if content_tokens > single_max:
+                ratio = single_max / content_tokens
+                max_chars = max(1, int(len(content) * ratio))
+                content = content[:max_chars]
+                # 重新估算并二次校验（token-字符非线性关系可能导致偏差）
+                while len(content) > 1 and estimate_tokens(content) > single_max:
+                    content = content[:-1]
+
+            # speaker_name
+            if msg.role == "assistant":
+                speaker_name = "我"
+            else:
+                speaker_name = msg.display_name or "群友"
+
+            # 总成本 = 格式化后完整字符串的 token 估算
+            formatted = f"[{speaker_name}] {content}"
+            msg_cost = estimate_tokens(formatted)
+
+            # 至少保留一条消息，即使单条即超预算
+            if total_tokens + msg_cost > budget and result:
+                break
+
+            result.insert(0, {
+                "role": msg.role,
+                "content": content,
+                "speaker_name": speaker_name,
+            })
+            total_tokens += msg_cost
+
+        return result, len(result) < original_count
 
     def _resolve_warmth_label(self, user_id: str, rel: Optional[RelationshipState]) -> str:
         """根据关系状态（含衰减计算）解析温暖度标签"""
@@ -663,7 +945,7 @@ class PersonaOrchestrator:
         if not self.data_store or not self.character or not self.context_builder:
             return [{"role": "user", "content": current_message}]
 
-        history_dicts = await self._fetch_short_term_history(user_id, group_id)
+        history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
         profile = await self.data_store.get_user_profile(user_id)
         rel = await self.data_store.get_relationship(user_id, group_id)
         warmth_label = self._resolve_warmth_label(user_id, rel)
@@ -685,7 +967,7 @@ class PersonaOrchestrator:
             user_profile=profile,
             diary_context=diary_context,
             current_message=current_message,
-            warmth_label=warmth_label
+            warmth_label=warmth_label,
         )
 
     async def clear_history(self, user_id: str, group_id: str) -> None:

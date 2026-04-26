@@ -4,20 +4,15 @@
 组装四层记忆到 LLM 消息列表
 """
 import logging
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
+
+from utils.string import estimate_tokens
 
 from ..character.models import Character
 from ..data.models import UserProfile
 from ..wall_clock import persona_wall_now
 
 logger = logging.getLogger("persona.context_builder")
-
-
-def _estimate_tokens(text: str) -> float:
-    """粗略估算 token 数：中文字符按 1 token，其余按每 4 字符 1 token"""
-    cn_chars = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
-    other_chars = len(text) - cn_chars
-    return cn_chars + other_chars / 4
 
 
 class ContextBuilder:
@@ -58,22 +53,8 @@ class ContextBuilder:
             example = self.character.format_mes_example()
             system_parts.append(f"示例对话:\n{example}")
 
-        # 按对话轮次截断，保留完整的 user-assistant 对
-        truncated_history = self._truncate_by_turns(short_term_history, self.max_short_term_chars)
-        short_term_text = self._format_short_term(truncated_history)
+        short_term_text = self._format_short_term(short_term_history)
         if short_term_text:
-            # 如果发生了截断（返回的历史比原历史短），添加省略标记
-            if len(truncated_history) < len(short_term_history):
-                short_term_text = "...（前文省略）\n" + short_term_text
-                original_chars = sum(len(m.get("content", "")) for m in short_term_history)
-                kept_chars = sum(len(m.get("content", "")) for m in truncated_history)
-                logger.debug(
-                    f"history_truncated turns_before={len(short_term_history)} "
-                    f"turns_after={len(truncated_history)} "
-                    f"content_chars_before={original_chars} "
-                    f"content_chars_after={kept_chars}"
-                )
-
             system_parts.append(f"近期对话:\n{short_term_text}")
 
         # 合并为单条 system 消息
@@ -111,12 +92,12 @@ class ContextBuilder:
         # 按优先级降序排列，数值越高越优先注入
         matched.sort(key=lambda e: e.order, reverse=True)
 
-        # Token 预算控制（当前为字符估算值，非精确 token）
+        # Token 预算控制（基于字符统计的估算值，不引入真实 tokenizer）
         budget = self.lore_token_budget
         total_tokens = 0.0
         selected = []
         for entry in matched:
-            cost = _estimate_tokens(entry.content)
+            cost = estimate_tokens(entry.content)
             if total_tokens + cost > budget:
                 break
             total_tokens += cost
@@ -202,11 +183,11 @@ class ContextBuilder:
         return "\n\n".join(parts)
 
     def _format_short_term(self, history: List[Dict[str, str]]) -> str:
-        """格式化短期记忆"""
+        """格式化短期记忆，根据 speaker_name 生成称呼前缀"""
         lines = []
         for msg in history:
-            role = "用户" if msg["role"] == "user" else self.character.name
-            lines.append(f"{role}: {msg['content']}")
+            speaker_name = msg.get("speaker_name") or ("你" if msg["role"] == "user" else "我")
+            lines.append(f"[{speaker_name}] {msg['content']}")
         return "\n".join(lines)
 
     def _truncate_by_turns(self, history: List[Dict[str, str]], max_chars: int) -> List[Dict[str, str]]:
@@ -239,14 +220,13 @@ class ContextBuilder:
         warmth_label: str = "友好",
         lore_sections: Optional[Dict[str, List[str]]] = None,
     ) -> Dict[str, Any]:
-        truncated = self._truncate_by_turns(short_term_history, self.max_short_term_chars)
         system_prompt = self._build_system_prompt(
             user_profile=user_profile,
             diary_context=diary_context,
             warmth_label=warmth_label,
             lore_sections=lore_sections or self._build_lore_text(short_term_history, ""),
         )
-        short_term_text = self._format_short_term(truncated)
+        short_term_text = self._format_short_term(short_term_history)
         profile_text = ""
         if user_profile and user_profile.facts:
             profile_text = "\n".join([f"- {k}: {v}" for k, v in user_profile.facts.items()])
@@ -255,5 +235,5 @@ class ContextBuilder:
             "short_term_chars": len(short_term_text),
             "profile_chars": len(profile_text),
             "diary_chars": len(diary_context),
-            "returned_message_count": 1 + len(truncated),  # system(1) + short_term(len(truncated))
+            "returned_message_count": 1 + len(short_term_history),
         }

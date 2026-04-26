@@ -113,13 +113,23 @@ class UserLLMConfig(BaseModel):
 
 
 class Message(BaseModel):
-    """对话消息"""
+    """历史消息表模型；group_id='' 表示私聊场景"""
     id: Optional[int] = None
     user_id: str
     group_id: str = ""  # 空字符串表示私聊
     role: str  # "user" | "assistant" | "system"
     content: str
     created_at: Optional[datetime] = None
+
+
+class GroupConversation(Message):
+    """群聊共享历史表模型
+
+    继承 Message 复用基类字段，仅增加群聊特有的 display_name。
+    display_name 为入库时快照，不随用户改名更新。
+    """
+    group_id: str  # 覆盖基类默认值，群聊场景下必传
+    display_name: str = ""
 
 
 class WhitelistEntry(BaseModel):
