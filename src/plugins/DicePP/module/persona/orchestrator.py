@@ -260,7 +260,7 @@ class PersonaOrchestrator:
                 history = await self.data_store.get_recent_messages(user_id, group_id, limit=1)
             is_first = len(history) == 0
 
-            if is_first and self.character.first_mes:
+            if is_first and not group_id and self.character.first_mes:
                 await self.data_store.add_message(user_id, group_id, "user", message)
                 await self.data_store.add_message(user_id, group_id, "assistant", self.character.first_mes)
                 return self.character.first_mes

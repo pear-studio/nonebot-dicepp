@@ -145,19 +145,30 @@ class TestOrchestratorChatFirstMessage:
     """测试首次消息返回 first_mes"""
 
     @pytest.mark.asyncio
-    async def test_first_message_returns_first_mes(self, temp_db, monkeypatch):
+    async def test_first_message_returns_first_mes_in_private(self, temp_db, monkeypatch):
+        """私聊首次互动应返回 first_mes"""
         orch, _ = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
 
-        response = await orch.chat("u1", "g1", "你好", nickname="User")
+        response = await orch.chat("u1", "", "你好", nickname="User")
         assert response == "你好呀，我是测试角色~"
 
         # Verify message persistence
-        msgs = await orch.data_store.get_recent_messages("u1", "g1", limit=5)
+        msgs = await orch.data_store.get_recent_messages("u1", "", limit=5)
         assert len(msgs) == 2
         assert msgs[0].role == "user"
         assert msgs[0].content == "你好"
         assert msgs[1].role == "assistant"
         assert msgs[1].content == "你好呀，我是测试角色~"
+
+    @pytest.mark.asyncio
+    async def test_first_message_no_first_mes_in_group(self, temp_db, monkeypatch):
+        """群聊首次互动不应返回 first_mes，应走正常 LLM 流程"""
+        orch, mock_client = await _build_orchestrator_with_mock_llm(temp_db, monkeypatch)
+
+        response = await orch.chat("u1", "g1", "你好", nickname="User")
+        # 群聊首次互动不走 first_mes，应返回 LLM 生成的回复
+        assert response == "Mocked LLM response"
+        assert response != "你好呀，我是测试角色~"
 
 
 class TestOrchestratorChatNormalFlow:
