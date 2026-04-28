@@ -597,6 +597,9 @@ class EventGenerationAgent:
 - "冷淡" / "陌生"：简短、礼貌、不过界
 - "一般" / "友好"：自然、可带轻微关心
 - "亲近" / "亲密"：放松、可撒娇、可调侃、可分享糗事
+
+输出方式：
+你必须调用 record_share_message 工具来输出消息，不要直接回复文本。
 {few_shot_block}"""
 
         # 构建状态信息
@@ -649,7 +652,7 @@ class EventGenerationAgent:
 消息类型: {context.message_type}
 当前环境: {context.environment}
 
-请写一条你要发给对方的消息。只输出消息内容，不要解释。"""
+请调用 record_share_message 工具，传入你要发给对方的消息。"""
 
         logger.debug("[prompt:system_share]\n%s", system_prompt)
         logger.debug("[prompt:user_share]\n%s", user_prompt)
@@ -659,7 +662,7 @@ class EventGenerationAgent:
                 "type": "function",
                 "function": {
                     "name": "record_share_message",
-                    "description": "记录为指定用户生成的分享消息。20-60字的第一人称口语消息，禁止出现角色名和第三人称描写",
+                    "description": "调用此工具输出你要发给对方的分享消息。20-60字的第一人称口语消息，禁止出现角色名和第三人称描写。不要直接回复文本，必须通过此工具输出。",
                     "parameters": {
                         "type": "object",
                         "properties": {
