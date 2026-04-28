@@ -1,6 +1,7 @@
 import os
 import asyncio
 import datetime
+import inspect
 import random
 from typing import List, Optional, Dict, Callable, Union, Set, Awaitable
 from random import choice
@@ -324,7 +325,10 @@ class Bot:
         # 调用每个command的tick_daily方法
         for command in self.command_dict.values():
             try:
-                bot_commands += command.tick_daily()
+                daily_result = command.tick_daily()
+                if inspect.isawaitable(daily_result):
+                    daily_result = await daily_result
+                bot_commands += daily_result
             except (AttributeError, TypeError, KeyError, RuntimeError):
                 dice_log(str(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111")[0]))
         # 给Master发送每日更新通知
