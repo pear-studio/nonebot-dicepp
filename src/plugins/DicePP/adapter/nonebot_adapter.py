@@ -73,7 +73,7 @@ class NoneBotClientProxy(ClientProxy):
                         await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
                         # 记录到群日志
                         try:
-                            append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", command.msg)
+                            append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", command.msg)
                         except Exception:
                             pass
                         # 触发消息发送后跨模块通知 hook
@@ -101,7 +101,7 @@ class NoneBotClientProxy(ClientProxy):
                         # 合并转发中的每条子消息分别记录（保持原顺序）
                         try:
                             for sub_msg in command.msg:
-                                append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", sub_msg)
+                                append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", sub_msg)
                         except Exception:
                             pass
                 except:
@@ -111,7 +111,7 @@ class NoneBotClientProxy(ClientProxy):
                             for msg in command.msg:
                                 await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(msg))
                                 try:
-                                    append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", msg)
+                                    append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", msg)
                                 except Exception:
                                     pass
                     else:
@@ -167,7 +167,7 @@ class NoneBotClientProxy(ClientProxy):
                                     dice_log(f"[OneBot][Upload][FallbackFail] group={target.group_id} file={real_name} err={e2}")
                         if primary_done:
                             try:
-                                append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", f"[文件]{real_name}")
+                                append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", f"[文件]{real_name}")
                             except Exception:
                                 pass
                         else:
