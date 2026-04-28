@@ -13,6 +13,7 @@ from plugins.DicePP.module.persona.agents.event_agent import (
     ShareMessageContext,
 )
 from plugins.DicePP.module.persona.data.models import ModelTier
+from plugins.DicePP.module.persona.llm import ForcedToolError
 
 
 class MockConfig:
@@ -131,6 +132,33 @@ async def test_generate_share_message_json_decode_retry(agent, mock_llm_router, 
 
     assert result == "第二次成功了"
     assert mock_llm_router.generate_with_forced_tool.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_share_message_forced_tool_error_retry(agent, mock_llm_router, base_context):
+    """ForcedToolError 时 event_agent 层重试"""
+    mock_llm_router.generate_with_forced_tool.side_effect = [
+        ForcedToolError("模型未调用工具", raw_content="raw"),
+        ('{"message": "第二次成功了"}', {}),
+    ]
+
+    result = await agent.generate_share_message(base_context)
+
+    assert result == "第二次成功了"
+    assert mock_llm_router.generate_with_forced_tool.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_generate_share_message_forced_tool_error_exhausted(agent, mock_llm_router, base_context):
+    """ForcedToolError 耗尽重试次数后返回 None"""
+    mock_llm_router.generate_with_forced_tool.side_effect = ForcedToolError(
+        "模型未调用工具", raw_content="raw"
+    )
+
+    result = await agent.generate_share_message(base_context)
+
+    assert result is None
+    assert mock_llm_router.generate_with_forced_tool.call_count == 3  # 1 + max_retries(2)
 
 
 @pytest.mark.asyncio

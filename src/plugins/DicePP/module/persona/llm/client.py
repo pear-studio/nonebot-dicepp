@@ -19,6 +19,14 @@ _RETRYABLE_KEYWORDS = (
 )
 
 
+class ForcedToolError(Exception):
+    """LLM 未按 tool_choice 要求调用指定工具"""
+
+    def __init__(self, message: str, raw_content: str = ""):
+        super().__init__(message)
+        self.raw_content = raw_content
+
+
 class LLMClient:
     """异步 LLM 客户端"""
 
@@ -191,13 +199,15 @@ class LLMClient:
                     }
                     return args, metadata
 
-                # 如果没有 tool_calls，返回空 JSON 让上层降级
-                return "{}", {
-                    "latency": latency,
-                    "model": self.model,
-                    "tokens_input": response.usage.prompt_tokens if response.usage else 0,
-                    "tokens_output": response.usage.completion_tokens if response.usage else 0,
-                }
+                # LLM 未按 tool_choice 调用指定工具。此类错误在下方 except 块中
+                # 会被识别为 ForcedToolError 并触发重试（max_retries 次）。
+                raw_content = getattr(message, "content", "") or ""
+                content_preview = raw_content[:200]
+                raise ForcedToolError(
+                    f"模型未按 tool_choice 调用强制工具 '{tool_name}'，"
+                    f"返回内容: {content_preview!r}",
+                    raw_content=raw_content,
+                )
 
             except asyncio.TimeoutError as e:
                 last_error = e
@@ -208,7 +218,10 @@ class LLMClient:
             except Exception as e:
                 last_error = e
                 error_msg = str(e).lower()
-                retryable = any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
+                retryable = (
+                    any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
+                    or isinstance(e, ForcedToolError)
+                )
                 if retryable and attempt < max_retries:
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2

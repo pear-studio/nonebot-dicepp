@@ -11,6 +11,7 @@ from datetime import datetime
 import json
 import logging
 
+from ..llm import ForcedToolError
 from ..llm.router import LLMRouter
 from ..data.models import ModelTier
 
@@ -685,17 +686,27 @@ class EventGenerationAgent:
         max_chars = max(10, max_chars)
 
         for attempt in range(1, max_retries + 2):  # 原始 + max_retries 次重试
-            content, metadata = await self.llm_router.generate_with_forced_tool(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                tools=tools,
-                tool_name="record_share_message",
-                model_tier=ModelTier.AUXILIARY,
-                temperature=0.85,
-                timeout=timeout_seconds,
-            )
+            try:
+                content, metadata = await self.llm_router.generate_with_forced_tool(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    tools=tools,
+                    tool_name="record_share_message",
+                    model_tier=ModelTier.AUXILIARY,
+                    temperature=0.85,
+                    timeout=timeout_seconds,
+                )
+            except ForcedToolError as e:
+                logger.warning(
+                    f"分享消息强制工具调用失败（第{attempt}次）: {e}"
+                )
+                if attempt < max_retries + 1:
+                    backoff = backoff_base ** attempt
+                    await asyncio.sleep(backoff)
+                continue
+
             try:
                 args = json.loads(content)
             except json.JSONDecodeError as je:

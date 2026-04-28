@@ -9,7 +9,7 @@ import asyncio
 from typing import List, Dict, Any
 from unittest.mock import Mock, AsyncMock
 
-from plugins.DicePP.module.persona.llm.client import LLMClient
+from plugins.DicePP.module.persona.llm.client import LLMClient, ForcedToolError
 from plugins.DicePP.module.persona.llm.router import LLMRouter
 
 
@@ -241,6 +241,38 @@ class TestChatWithTools:
 
         assert "工具执行失败" in content
         assert "数据库连接失败" in metadata["error"]
+
+    @pytest.mark.asyncio
+    async def test_generate_with_forced_tool_no_tool_calls_raises(self):
+        """强制工具调用时 LLM 未返回 tool_calls，应抛出 ForcedToolError"""
+        client = LLMClient(
+            api_key="test_key",
+            base_url="https://api.test.com/v1",
+            model="gpt-4o"
+        )
+
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message = Mock()
+        mock_response.choices[0].message.content = "我没有调用工具"
+        mock_response.choices[0].message.tool_calls = None
+        mock_response.usage = Mock()
+        mock_response.usage.prompt_tokens = 50
+        mock_response.usage.completion_tokens = 10
+
+        mock_openai_client = Mock()
+        mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        client._client = mock_openai_client
+
+        with pytest.raises(ForcedToolError) as exc_info:
+            await client.generate_with_forced_tool(
+                messages=[{"role": "user", "content": "test"}],
+                tools=[{"type": "function", "function": {"name": "test_tool"}}],
+                tool_name="test_tool",
+            )
+
+        assert "test_tool" in str(exc_info.value)
+        assert exc_info.value.raw_content == "我没有调用工具"
 
     @pytest.mark.asyncio
     async def test_max_tool_rounds_exceeded(self):
