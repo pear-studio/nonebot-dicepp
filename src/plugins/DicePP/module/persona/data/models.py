@@ -176,6 +176,9 @@ class DailyEvent(BaseModel):
     duration_minutes: int = 0  # 持续时间（分钟），0 表示瞬时
     system_prompt_digest: str = ""  # Phase 7a
     raw_response: str = ""  # Phase 7a
+    energy_delta: Optional[int] = None
+    mood_delta: Optional[int] = None
+    health_delta: Optional[int] = None
     created_at: Optional[datetime] = None
 
 

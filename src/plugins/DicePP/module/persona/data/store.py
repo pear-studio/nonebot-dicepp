@@ -81,6 +81,7 @@ class PersonaDataStore:
         await self._ensure_score_history_conversation_digest()
         await self._ensure_observations_debug_columns()
         await self._ensure_daily_events_share_columns()
+        await self._ensure_daily_events_delta_columns()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
         """
@@ -158,6 +159,24 @@ class PersonaDataStore:
         if "duration_minutes" not in col_names:
             await self.db.execute(
                 "ALTER TABLE persona_daily_events ADD COLUMN duration_minutes INTEGER DEFAULT 0"
+            )
+
+    async def _ensure_daily_events_delta_columns(self) -> None:
+        """为每日事件表增加 energy_delta、mood_delta、health_delta 列。"""
+        async with self.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        if "energy_delta" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_daily_events ADD COLUMN energy_delta INTEGER"
+            )
+        if "mood_delta" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_daily_events ADD COLUMN mood_delta INTEGER"
+            )
+        if "health_delta" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_daily_events ADD COLUMN health_delta INTEGER"
             )
 
     # ========== 消息相关 ==========
@@ -846,6 +865,9 @@ class PersonaDataStore:
         duration_minutes: int = 0,
         system_prompt_digest: str = "",
         raw_response: str = "",
+        energy_delta: Optional[int] = None,
+        mood_delta: Optional[int] = None,
+        health_delta: Optional[int] = None,
     ) -> None:
         """添加每日事件"""
         await self.db.execute(
@@ -853,8 +875,9 @@ class PersonaDataStore:
             INSERT INTO persona_daily_events (
                 date, event_type, description, reaction,
                 share_desire, duration_minutes,
-                system_prompt_digest, raw_response, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                system_prompt_digest, raw_response,
+                energy_delta, mood_delta, health_delta, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 date,
@@ -865,6 +888,9 @@ class PersonaDataStore:
                 duration_minutes,
                 system_prompt_digest,
                 raw_response,
+                energy_delta,
+                mood_delta,
+                health_delta,
                 self._wall_now().isoformat(),
             )
         )
@@ -876,7 +902,8 @@ class PersonaDataStore:
             """
             SELECT event_type, description, reaction, share_desire,
                    duration_minutes, created_at,
-                   system_prompt_digest, raw_response
+                   system_prompt_digest, raw_response,
+                   energy_delta, mood_delta, health_delta
             FROM persona_daily_events
             WHERE date = ?
             ORDER BY created_at
@@ -895,6 +922,9 @@ class PersonaDataStore:
                     created_at=datetime.fromisoformat(row[5]) if row[5] else None,
                     system_prompt_digest=row[6] or "",
                     raw_response=row[7] or "",
+                    energy_delta=row[8],
+                    mood_delta=row[9],
+                    health_delta=row[10],
                 )
                 for row in rows
             ]
@@ -953,7 +983,8 @@ class PersonaDataStore:
             """
             INSERT INTO persona_character_state (id, text)
             VALUES (1, ?)
-            ON CONFLICT(id) DO UPDATE SET text = excluded.text
+            ON CONFLICT(id) DO UPDATE SET text = excluded.text,
+                                          updated_at = CURRENT_TIMESTAMP
             """,
             (state.model_dump_json(),)
         )

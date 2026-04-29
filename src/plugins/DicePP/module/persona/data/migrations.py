@@ -106,6 +106,9 @@ CREATE TABLE IF NOT EXISTS persona_daily_events (
     duration_minutes INTEGER DEFAULT 0,
     system_prompt_digest TEXT DEFAULT '',
     raw_response TEXT DEFAULT '',
+    energy_delta INTEGER,
+    mood_delta INTEGER,
+    health_delta INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
