@@ -19,6 +19,9 @@ async def test_add_and_get_daily_event_with_new_fields(tmp_path):
         reaction="不错",
         share_desire=0.75,
         duration_minutes=30,
+        energy_delta=3,
+        mood_delta=-2,
+        health_delta=1,
     )
 
     events = await store.get_daily_events("2024-01-01")
@@ -29,5 +32,8 @@ async def test_add_and_get_daily_event_with_new_fields(tmp_path):
     assert ev.description == "测试中"
     assert ev.reaction == "不错"
     assert ev.event_type == "scheduled"
+    assert ev.energy_delta == 3
+    assert ev.mood_delta == -2
+    assert ev.health_delta == 1
 
     await db.close()

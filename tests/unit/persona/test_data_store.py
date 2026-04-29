@@ -316,6 +316,62 @@ class TestDiaryAndDailyEventsCRUD:
         assert events[1].description == "Event B"
 
     @pytest.mark.asyncio
+    async def test_add_and_get_daily_events_with_deltas(self, temp_db):
+        """delta 字段（energy_delta/mood_delta/health_delta）应正确存取。"""
+        store = temp_db
+        await store.add_daily_event(
+            "2026-04-14", "system", "Event A",
+            energy_delta=5, mood_delta=-3, health_delta=0,
+        )
+
+        events = await store.get_daily_events("2026-04-14")
+        assert len(events) == 1
+        assert events[0].energy_delta == 5
+        assert events[0].mood_delta == -3
+        assert events[0].health_delta == 0
+
+    @pytest.mark.asyncio
+    async def test_update_character_state_updates_timestamp(self, temp_db):
+        """update_character_state 应同时更新 updated_at 字段。"""
+        from plugins.DicePP.module.persona.data.models import CharacterState
+        store = temp_db
+
+        # 先插入一条旧记录
+        await store.db.execute(
+            "INSERT OR REPLACE INTO persona_character_state (id, text, updated_at) VALUES (1, ?, ?)",
+            ("old", "2024-01-01T00:00:00"),
+        )
+        await store.db.commit()
+
+        # 更新状态
+        state = CharacterState(text="new", energy=50)
+        await store.update_character_state(state)
+
+        # 验证 updated_at 被更新
+        async with store.db.execute(
+            "SELECT updated_at FROM persona_character_state WHERE id = 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            updated_at = datetime.fromisoformat(row[0])
+            # 应该是最近的时间，而不是 2024-01-01
+            assert updated_at.year >= 2026
+
+    @pytest.mark.asyncio
+    async def test_get_daily_events_preserves_none_deltas(self, temp_db):
+        """delta 为 None 时不应被覆盖为默认值。"""
+        store = temp_db
+        await store.add_daily_event(
+            "2026-04-14", "system", "Event A",
+            energy_delta=None, mood_delta=None, health_delta=None,
+        )
+
+        events = await store.get_daily_events("2026-04-14")
+        assert len(events) == 1
+        assert events[0].energy_delta is None
+        assert events[0].mood_delta is None
+        assert events[0].health_delta is None
+
+    @pytest.mark.asyncio
     async def test_clear_daily_events(self, temp_db):
         store = temp_db
         await store.add_daily_event("2026-04-14", "system", "Event A")

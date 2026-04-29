@@ -7,6 +7,7 @@
 - generate_diary: 生成日记总结
 """
 
+import json
 import pytest
 
 from datetime import datetime
@@ -188,6 +189,13 @@ class TestGenerateEventResult:
 
         assert result.description == "窗外下雨了"
         assert result.duration_minutes == 30
+        # raw_response 和 system_prompt_digest 必须保存原始 LLM 输出
+        assert result.raw_response != ""
+        raw = json.loads(result.raw_response)
+        assert raw["description"] == "窗外下雨了"
+        assert raw["duration_minutes"] == 30
+        assert result.system_prompt_digest != ""
+        assert "世界观设定专家" in result.system_prompt_digest
         mock_llm_router_forced.generate_with_forced_tool.assert_called_once()
 
     @pytest.mark.asyncio
@@ -349,6 +357,11 @@ class TestGenerateEventReaction:
 
         assert result.reaction == "真开心~"
         assert result.share_desire == 0.8
+        # raw_response 必须保存原始 LLM 输出
+        assert result.raw_response != ""
+        raw = json.loads(result.raw_response)
+        assert raw["reaction"] == "真开心~"
+        assert raw["share_desire"] == 0.8
         mock_llm_router_forced.generate_with_forced_tool.assert_called_once()
 
     @pytest.mark.asyncio

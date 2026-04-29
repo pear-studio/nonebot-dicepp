@@ -35,6 +35,8 @@ class EventGenerationResult:
     energy_delta: Optional[int] = None
     mood_delta: Optional[int] = None
     health_delta: Optional[int] = None
+    raw_response: str = ""  # LLM 原始工具调用参数 JSON
+    system_prompt_digest: str = ""  # 生成时使用的 system_prompt
 
 
 @dataclass
@@ -43,6 +45,7 @@ class EventReactionResult:
     share_desire: float = 0.0
     follow_up_action: Optional[str] = None  # None=无后续行动, 非空字符串=续写, 空字符串=不续写
     pending_plan: Optional[str] = None  # None=保持, ""=清空, 非空=更新
+    raw_response: str = ""  # LLM 原始工具调用参数 JSON
 
 
 @dataclass
@@ -297,6 +300,8 @@ class EventGenerationAgent:
                 energy_delta=energy_delta,
                 mood_delta=mood_delta,
                 health_delta=health_delta,
+                raw_response=json.dumps(args, ensure_ascii=False),
+                system_prompt_digest=system_prompt,
             )
 
         except Exception as e:
@@ -432,6 +437,7 @@ class EventGenerationAgent:
                 share_desire=share_desire,
                 follow_up_action=follow_up_action,
                 pending_plan=pending_plan,
+                raw_response=json.dumps(args, ensure_ascii=False),
             )
 
         except Exception as e:

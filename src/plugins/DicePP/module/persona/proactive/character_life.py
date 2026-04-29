@@ -480,6 +480,20 @@ class CharacterLife:
                     character_state.intention_created_at = now
                     await self.data_store.update_character_state(character_state)
 
+                # 合并 event + reaction 的原始 LLM 输出
+                raw_parts: Dict[str, Any] = {}
+                if event_result.raw_response:
+                    try:
+                        raw_parts["event"] = json.loads(event_result.raw_response)
+                    except json.JSONDecodeError:
+                        raw_parts["event"] = event_result.raw_response
+                if reaction_result.raw_response:
+                    try:
+                        raw_parts["reaction"] = json.loads(reaction_result.raw_response)
+                    except json.JSONDecodeError:
+                        raw_parts["reaction"] = reaction_result.raw_response
+                combined_raw = json.dumps(raw_parts, ensure_ascii=False) if raw_parts else ""
+
                 # 保存事件到数据库
                 await self.data_store.add_daily_event(
                     date=today,
@@ -488,8 +502,11 @@ class CharacterLife:
                     reaction=reaction_result.reaction,
                     share_desire=reaction_result.share_desire,
                     duration_minutes=event_result.duration_minutes,
-                    system_prompt_digest="",
-                    raw_response="",
+                    system_prompt_digest=event_result.system_prompt_digest,
+                    raw_response=combined_raw,
+                    energy_delta=event_result.energy_delta,
+                    mood_delta=event_result.mood_delta,
+                    health_delta=event_result.health_delta,
                 )
 
                 if event_result.duration_minutes > 0:
