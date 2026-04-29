@@ -152,7 +152,7 @@ config/secrets.json
 config/bots/*.json
 !config/bots/_template.json
 config/personas/*.local.json
-data/
+/data/
 content/**
 !content/**/
 !content/**/.gitkeep
