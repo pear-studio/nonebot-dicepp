@@ -554,7 +554,10 @@ class CharacterLife:
 
     async def generate_diary(self) -> Optional[str]:
         """
-        生成今天的日记
+        生成昨天的日记
+
+        tick_daily 在 00:00 执行，此时新的一天尚无事件，
+        因此用昨天的事件生成昨天的日记。
 
         Returns:
             日记内容，如果失败则返回 None
@@ -563,17 +566,17 @@ class CharacterLife:
             return None
 
         try:
-            today = self._get_today_str()
+            diary_date = (self.config.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-            # 获取今天的事件
-            events = await self._get_today_events()
+            # 获取昨天的事件
+            events = await self.data_store.get_daily_events(diary_date)
             if not events:
-                logger.debug("今天没有事件，跳过日记生成")
+                logger.debug("昨天没有事件，跳过日记生成")
                 return None
 
-            # 获取昨天的日记作为上下文
-            yesterday = (self.config.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-            yesterday_diary = await self.data_store.get_diary(yesterday)
+            # 获取前天的日记作为上下文
+            prev_date = (self.config.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+            prev_diary = await self.data_store.get_diary(prev_date)
 
             # 获取当前状态
             character_state = await self.data_store.get_character_state()
@@ -593,7 +596,7 @@ class CharacterLife:
                 events=events_dict,
                 character_name=self.character.name,
                 character_description=self.character.description,
-                yesterday_diary=yesterday_diary,
+                yesterday_diary=prev_diary,
                 energy=character_state.energy if character_state else None,
                 mood=character_state.mood if character_state else None,
                 health=character_state.health if character_state else None,
@@ -601,7 +604,7 @@ class CharacterLife:
             )
 
             # 保存日记
-            await self.data_store.save_diary(today, diary_content)
+            await self.data_store.save_diary(diary_date, diary_content)
 
             # 保留当天事件（供历史查询），只清理 30 天前的事件
             await self._prune_old_daily_events(30)

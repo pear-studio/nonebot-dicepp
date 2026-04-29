@@ -327,6 +327,24 @@ class TestCharacterLifeDiary:
         call_kwargs = mock_event_agent.generate_diary.call_args.kwargs
         assert call_kwargs["yesterday_diary"] == "昨天去了公园"
 
+    @pytest.mark.asyncio
+    async def test_generate_diary_uses_yesterday_events_at_midnight(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """
+        tick_daily 在 00:00 执行，此时新的一天尚无事件，
+        generate_diary 必须获取昨天的事件、前天的日记上下文，
+        并将日记保存到昨天。
+        """
+        fake_now = datetime(2024, 1, 2, 0, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        result = await life.generate_diary()
+        assert result == "今天过得很充实"
+        mock_data_store.get_daily_events.assert_called_once_with("2024-01-01")
+        mock_data_store.get_diary.assert_called_once_with("2023-12-31")
+        mock_data_store.save_diary.assert_called_once_with("2024-01-01", "今天过得很充实")
+
 
 class TestCharacterLifeStatus:
     """测试状态查询"""
