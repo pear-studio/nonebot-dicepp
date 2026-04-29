@@ -193,6 +193,11 @@ class PersonaConfig(BaseModel):
     proactive_share_backoff_base_seconds: int = Field(
         default=2, ge=1, description="分享消息重试的指数退避基数（秒）"
     )
+
+    # ── LLM 调用协调器配置
+    proactive_coordinator_max_failures: int = Field(default=3, ge=0, description="coordinator 连续失败上限")
+    proactive_coordinator_max_iterations: int = Field(default=5, ge=1, description="coordinator 单次 submit 最大迭代次数（防刷屏）")
+
     # 已移除: scheduled_events 功能由 CharacterLife 边界事件和槽位系统覆盖
 
     # ── Phase 2: 群活跃度

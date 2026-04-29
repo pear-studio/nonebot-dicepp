@@ -24,6 +24,7 @@ class BotSendMsgCommand(BotCommandBase):
         self.bot_id = bot_id
         self.msg = msg
         self.targets = targets
+        self.skip_history_record: bool = False
 
     def __str__(self):
         def handle_base64img(match):  # 如果是base64编码就不要显示了

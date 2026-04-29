@@ -85,6 +85,9 @@
 
     "whitelist_enabled": true,
 
+    "proactive_coordinator_max_failures": 3,
+    "proactive_coordinator_max_iterations": 5,
+
     "primary_base_url": "https://api.minimaxi.com/v1",
     "primary_model": "MiniMax-M2.7",
     "auxiliary_api_key": "",
