@@ -195,6 +195,21 @@ def load_json_fixture(fixtures_path):
 
 
 @pytest.fixture
+def mock_coordinator():
+    """创建模拟的 LLMCallCoordinator"""
+    from plugins.DicePP.module.persona.proactive.llm_call_coordinator import SubmitResult
+
+    async def mock_submit(key, message, call_fn, continue_on_buffered=True, on_exhausted=None, on_result=None):
+        messages = [] if message is None else [message]
+        result = await call_fn(messages)
+        return SubmitResult.success(result)
+
+    coordinator = AsyncMock()
+    coordinator.submit = mock_submit
+    return coordinator
+
+
+@pytest.fixture
 def mock_client_proxy():
     """创建模拟的 ClientProxy"""
     proxy = MagicMock(spec=ClientProxy)

@@ -57,12 +57,13 @@ def config():
 
 
 @pytest.fixture
-def scheduler(config, mock_data_store, mock_character):
+def scheduler(config, mock_data_store, mock_character, mock_coordinator):
     return ProactiveScheduler(
         config=config,
         data_store=mock_data_store,
         character=mock_character,
         target_selector=MagicMock(),
+        coordinator=mock_coordinator,
     )
 
 

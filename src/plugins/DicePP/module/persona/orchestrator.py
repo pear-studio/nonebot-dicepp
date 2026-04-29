@@ -4,6 +4,7 @@ Persona Orchestrator - 核心编排层
 协调各组件完成对话流程
 """
 from typing import List, Dict, Optional, Any, Tuple, Set
+import asyncio
 import json
 import logging
 import time
@@ -11,9 +12,11 @@ import random
 from datetime import datetime, timedelta
 
 from core.bot import Bot
+from core.command.bot_cmd import BotSendMsgCommand
+from core.communication import GroupMessagePort, PrivateMessagePort
 from .character.loader import CharacterLoader
 from .character.models import Character
-from .llm.router import LLMRouter
+from .llm.router import LLMRouter, QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent, GroupConversation
 from .agents.scoring_agent import ScoringAgent
@@ -23,6 +26,7 @@ from .wall_clock import persona_wall_now, PERSONA_EPOCH
 from utils.string import estimate_tokens
 from .proactive.character_life import CharacterLife, CharacterLifeConfig
 from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
+from .proactive.llm_call_coordinator import LLMCallCoordinator, SubmitResult
 from .proactive.target_selector import TargetSelector
 from .proactive.delayed_task_queue import EventShareTaskQueue
 from .agents.event_agent import EventGenerationAgent
@@ -203,6 +207,12 @@ class PersonaOrchestrator:
                 share_context_history_limit=self.config.proactive_share_context_history_limit,
                 # scheduled_events 已移除，由 CharacterLife 边界事件和槽位系统覆盖
             )
+            self.coordinator = LLMCallCoordinator(
+                max_failures=self.config.proactive_coordinator_max_failures,
+                max_iterations=self.config.proactive_coordinator_max_iterations,
+            )
+            logger.info("LLM 调用协调器已初始化")
+
             self.scheduler = ProactiveScheduler(
                 config=scheduler_config,
                 data_store=self.data_store,
@@ -211,6 +221,7 @@ class PersonaOrchestrator:
                 bot=self.bot,
                 decay_calculator=self.decay_calculator,
                 target_selector=target_selector,
+                coordinator=self.coordinator,
             )
             await self.scheduler.load_persistent_state()
             logger.info("主动消息调度器已初始化")
@@ -233,6 +244,26 @@ class PersonaOrchestrator:
         except Exception as e:
             logger.exception("初始化失败")
             return False
+
+    async def _persist_assistant_message(
+        self, user_id: str, group_id: str, content: str, display_name: str = "我"
+    ) -> None:
+        if not self.data_store:
+            return
+        if not group_id:
+            await self.data_store.add_message(user_id, group_id, "assistant", content)
+        else:
+            await self.data_store.add_group_conversation(
+                group_id=group_id,
+                user_id=str(self.bot.account),
+                role="assistant",
+                content=content,
+                display_name=display_name,
+            )
+
+    async def _charge_usage(self, user_id: str) -> None:
+        if self.llm_router and user_id:
+            await self.llm_router.increment_usage(user_id)
 
     async def chat(
         self,
@@ -262,52 +293,44 @@ class PersonaOrchestrator:
 
             if is_first and not group_id and self.character.first_mes:
                 await self.data_store.add_message(user_id, group_id, "user", message)
-                await self.data_store.add_message(user_id, group_id, "assistant", self.character.first_mes)
+                await self._persist_assistant_message(user_id, group_id, self.character.first_mes)
                 return self.character.first_mes
 
             # Phase 3d: 厌倦拒绝机制
-            # 只在非首次对话且是聊天消息（非骰子/AI指令）时检查
-            # 反向排除：只有纯聊天消息和 .ai 命令才检查拒绝，所有 . 开头指令视为骰子指令
             is_chat_message = not message.startswith(".") or message.lower().startswith(".ai")
             if self.config.relationship_refuse_enabled and not is_first and is_chat_message:
                 rel = await self.data_store.get_relationship(user_id, group_id)
                 if rel:
-                    # 应用时间衰减获取有效关系状态
                     if self.decay_calculator:
                         initial = float(self.character.extensions.initial_relationship)
                         rel = self.decay_calculator.effective_relationship(rel, initial)
                     warmth_level, _ = rel.get_warmth_level(self.character.get_warmth_labels())
                     if warmth_level == 0:
-                        # 厌倦区间（0-10分），计算拒绝概率
                         score = rel.composite_score
                         base = self.config.relationship_refuse_prob_base
                         max_p = self.config.relationship_refuse_prob_max
                         p_refuse = base + (max_p - base) * (1 - score / 10)
                         if random.random() < p_refuse:
-                            # 随机选择拒绝语：优先使用角色卡配置，回退到系统默认
                             default_refuse_messages = [
                                 "...（对方似乎没有兴趣理你）",
                                 "...（已读不回）",
                                 "嗯。",
                             ]
                             char_refuse = self.character.extensions.refuse_messages
-                            # None 表示未配置（使用默认），空列表表示明确不拒绝
                             if char_refuse is None:
                                 refuse_messages = default_refuse_messages
                             else:
-                                refuse_messages = char_refuse  # 空列表也表示明确配置
+                                refuse_messages = char_refuse
 
                             if refuse_messages:
-                                # 非空列表才执行拒绝
                                 refuse_response = random.choice(refuse_messages)
                                 logger.info(
                                     f"厌倦拒绝触发: user={user_id}, score={score:.2f}, "
                                     f"p_refuse={p_refuse:.2%}"
                                 )
-                                # 记录用户消息和拒绝回复
                                 if not group_id:
                                     await self.data_store.add_message(user_id, group_id, "user", message)
-                                    await self.data_store.add_message(user_id, group_id, "assistant", refuse_response)
+                                    await self._persist_assistant_message(user_id, group_id, refuse_response)
                                 else:
                                     await self.data_store.add_group_conversation(
                                         group_id=group_id,
@@ -316,45 +339,140 @@ class PersonaOrchestrator:
                                         content=message,
                                         display_name=nickname or "",
                                     )
-                                    await self.data_store.add_group_conversation(
-                                        group_id=group_id,
-                                        user_id=str(self.bot.account),
-                                        role="assistant",
-                                        content=refuse_response,
-                                        display_name="我",
-                                    )
+                                    await self._persist_assistant_message(user_id, group_id, refuse_response)
                                 return refuse_response
-                            # 空列表表示明确不拒绝，继续正常对话
 
-            messages = await self._build_messages(user_id, group_id, message)
+            # LLM 路径：通过 coordinator 串行化调用
+            target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
 
-            # Phase 3: 工具调用
-            if self.config.tools_enabled:
-                logger.debug(f"对话走 tools 路径: user={user_id}, tools_enabled=true")
-                response = await self._chat_with_tools(user_id, group_id, messages)
-            else:
-                logger.debug(f"对话走普通路径: user={user_id}, tools_enabled=false")
-                response = await self.llm_router.generate(
-                    messages=messages,
-                    model_tier=ModelTier.PRIMARY,
-                    user_id=user_id,
-                    group_id=group_id,
-                )
-
+            # 私聊：在进入 coordinator 前写入 user 消息
             if not group_id:
-                # 私聊：写入私聊历史表
                 await self.data_store.add_message(user_id, group_id, "user", message)
-                await self.data_store.add_message(user_id, group_id, "assistant", response)
-                await self.data_store.prune_old_messages(user_id, group_id, self.config.max_messages)
-            # 群聊：user 消息已由 command.py 写入群聊表，assistant 消息由 adapter recorder 写入群聊表
 
-            await self._update_interaction(user_id, group_id, message, response)
-
+            response = await self._chat_via_coordinator(user_id, group_id, message, target_key)
             return response
 
-        except Exception as e:
+        except asyncio.CancelledError:
+            raise
+        except Exception:
             logger.exception("对话处理失败")
             return "抱歉，我出错了，请稍后再试..."
+
+    # ── R15: coordinator 回调提取为私有方法 ──
+
+    async def _coordinator_chat_call_fn(
+        self, user_id: str, group_id: str, messages: List[str]
+    ) -> str:
+        """coordinator chat 路径的单轮 LLM 调用。"""
+        current_message = "\n".join(messages) if messages else ""
+
+        messages_for_llm = await self._build_messages(user_id, group_id, current_message)
+        if self.config.tools_enabled:
+            logger.debug(f"对话走 tools 路径: user={user_id}, tools_enabled=true")
+            response = await self._chat_with_tools(user_id, group_id, messages_for_llm)
+        else:
+            logger.debug(f"对话走普通路径: user={user_id}, tools_enabled=false")
+            response = await self.llm_router.generate(
+                messages=messages_for_llm,
+                model_tier=ModelTier.PRIMARY,
+                user_id=user_id,
+                group_id=group_id,
+            )
+
+        # R4: 统一持久化（私聊+群聊）
+        await self._persist_assistant_message(user_id, group_id, response)
+        if not group_id:
+            await self.data_store.prune_old_messages(user_id, group_id, self.config.max_messages)
+        await self._update_interaction(user_id, group_id, current_message, response)
+        return response
+
+    async def _coordinator_on_exhausted(
+        self,
+        user_id: str,
+        group_id: str,
+        current_message: str,
+        last_exception: Optional[Exception] = None,
+    ) -> str:
+        """coordinator 耗尽时的兜底回复。"""
+        if isinstance(last_exception, QuotaExceeded):
+            fallback_response = (
+                f"{last_exception}\n\n"
+                "使用 `.ai key config` 配置自己的 API Key 可解除限制"
+            )
+        else:
+            fallback_response = "LLM服务暂时不可用，请稍后再试"
+        await self._persist_assistant_message(user_id, group_id, fallback_response)
+        await self._update_interaction(user_id, group_id, current_message, fallback_response)
+        return fallback_response
+
+    async def _coordinator_on_result(
+        self, user_id: str, group_id: str, result: str
+    ) -> None:
+        """中间轮结果：发送、持久化并扣减额度。"""
+        if not self.bot or not self.bot.proxy:
+            logger.warning(
+                f"_coordinator_on_result: bot 或 bot.proxy 为 None，"
+                f"消息无法发送 (user={user_id}, group={group_id})"
+            )
+            return
+        port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
+        cmd = BotSendMsgCommand(self.bot.account, result, [port])
+        # R4: 群聊消息已由 orchestrator 持久化，跳过 adapter recorder
+        if group_id:
+            cmd.skip_history_record = True
+        sent = False
+        for attempt in range(3):
+            try:
+                await self.bot.proxy.process_bot_command_list([cmd])
+                sent = True
+                break
+            except Exception:
+                logger.exception(f"中间轮消息发送失败(attempt={attempt + 1})")
+                if attempt < 2:
+                    await asyncio.sleep(1)
+        if sent:
+            await self._persist_assistant_message(user_id, group_id, result)
+            await self._charge_usage(user_id)
+        else:
+            logger.error(
+                f"中间轮消息发送彻底失败，跳过持久化与扣费 "
+                f"(user={user_id}, group={group_id})"
+            )
+
+    async def _chat_via_coordinator(
+        self, user_id: str, group_id: str, message: str, target_key: str
+    ) -> Optional[str]:
+        fallback_response: Optional[str] = None
+        current_message_for_exhausted = message
+
+        async def chat_call_fn(messages: List[str]) -> str:
+            nonlocal current_message_for_exhausted
+            current_message = "\n".join(messages) if messages else message
+            current_message_for_exhausted = current_message
+            return await self._coordinator_chat_call_fn(user_id, group_id, messages)
+
+        async def on_exhausted(last_exception: Optional[Exception] = None):
+            nonlocal fallback_response
+            fallback_response = await self._coordinator_on_exhausted(
+                user_id, group_id, current_message_for_exhausted, last_exception
+            )
+
+        async def _on_result(result: str):
+            await self._coordinator_on_result(user_id, group_id, result)
+
+        result = await self.coordinator.submit(
+            target_key,
+            message,
+            chat_call_fn,
+            continue_on_buffered=True,
+            on_exhausted=on_exhausted,
+            on_result=_on_result,
+        )
+        if result.status == "success":
+            await self._charge_usage(user_id)
+            return result.value
+        # buffered: 已由 coordinator 代理发送；failed: on_exhausted 已处理
+        return fallback_response if fallback_response is not None else None
 
     # ========== Phase 3: 工具调用 ==========
 

@@ -5,5 +5,12 @@ Persona AI Proactive 模块
 """
 from .character_life import CharacterLife, CharacterLifeConfig
 from .scheduler import ProactiveScheduler, ProactiveConfig
+from .llm_call_coordinator import LLMCallCoordinator
 
-__all__ = ["CharacterLife", "CharacterLifeConfig", "ProactiveScheduler", "ProactiveConfig"]
+__all__ = [
+    "CharacterLife",
+    "CharacterLifeConfig",
+    "ProactiveScheduler",
+    "ProactiveConfig",
+    "LLMCallCoordinator",
+]

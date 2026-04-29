@@ -56,12 +56,13 @@ class TestProactiveSchedulerBasics:
         )
 
     @pytest.fixture
-    def scheduler(self, config, mock_data_store, mock_character):
+    def scheduler(self, config, mock_data_store, mock_character, mock_coordinator):
         return ProactiveScheduler(
             config=config,
             data_store=mock_data_store,
             character=mock_character,
             target_selector=MagicMock(),
+            coordinator=mock_coordinator,
         )
 
     @pytest.mark.asyncio
@@ -183,13 +184,14 @@ class TestProactiveSchedulerPersistence:
         return _make_mock_character()
 
     @pytest.fixture
-    def scheduler(self, mock_data_store, mock_character):
+    def scheduler(self, mock_data_store, mock_character, mock_coordinator):
         config = ProactiveConfig(enabled=True, timezone="Asia/Shanghai")
         return ProactiveScheduler(
             config=config,
             data_store=mock_data_store,
             character=mock_character,
             target_selector=MagicMock(),
+            coordinator=mock_coordinator,
         )
 
     @pytest.mark.asyncio
@@ -266,7 +268,7 @@ class TestProactiveSchedulerMissYou:
         return _make_mock_character()
 
     @pytest.fixture
-    def scheduler(self, mock_data_store, mock_character):
+    def scheduler(self, mock_data_store, mock_character, mock_coordinator):
         config = ProactiveConfig(
             enabled=True,
             min_interval_hours=0,
@@ -282,6 +284,7 @@ class TestProactiveSchedulerMissYou:
             data_store=mock_data_store,
             character=mock_character,
             target_selector=MagicMock(),
+            coordinator=mock_coordinator,
         )
 
     @pytest.mark.asyncio
@@ -360,7 +363,7 @@ class TestProactiveSchedulerMessageCreation:
         return _make_mock_character()
 
     @pytest.fixture
-    def scheduler(self, mock_character):
+    def scheduler(self, mock_character, mock_coordinator):
         config = ProactiveConfig(
             enabled=True,
             timezone="Asia/Shanghai",
@@ -374,6 +377,7 @@ class TestProactiveSchedulerMessageCreation:
             data_store=store,
             character=mock_character,
             target_selector=MagicMock(),
+            coordinator=mock_coordinator,
         )
 
     @pytest.mark.asyncio

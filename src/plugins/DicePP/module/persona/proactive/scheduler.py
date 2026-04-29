@@ -66,6 +66,7 @@ class ProactiveScheduler(BoundaryReceiver):
         data_store: PersonaDataStore,
         character: Character,
         target_selector: "TargetSelector",
+        coordinator: "LLMCallCoordinator",
         event_agent: Optional[EventGenerationAgent] = None,
         bot=None,
         decay_calculator: Optional[DecayCalculator] = None,
@@ -77,6 +78,7 @@ class ProactiveScheduler(BoundaryReceiver):
         self.bot = bot
         self._decay_calculator = decay_calculator
         self.target_selector = target_selector
+        self.coordinator = coordinator
 
         self._last_tick: Optional[datetime] = None
         self._tick_interval = timedelta(seconds=60)  # 60秒节流
@@ -84,10 +86,10 @@ class ProactiveScheduler(BoundaryReceiver):
         self._last_proactive_time: Dict[str, datetime] = {}  # target_key -> last_time
 
         self._last_event_date: Optional[str] = None
-        self._pending_targets: Set[str] = set()  # 当前正在处理的目标（防并发重复）
 
         # 在首次异步使用时再创建，避免绑定到错误的事件循环
         self._share_lock: Optional[asyncio.Lock] = None
+        self._llm_semaphore: Optional[asyncio.Semaphore] = None
         self._last_persisted_scheduler_blob: Optional[str] = None
 
         # jittered 活跃边界（由 CharacterLife 同步，优先于角色卡原始小时）
@@ -103,6 +105,13 @@ class ProactiveScheduler(BoundaryReceiver):
         if self._share_lock is None:
             self._share_lock = asyncio.Lock()
         return self._share_lock
+
+    def _get_llm_semaphore(self) -> asyncio.Semaphore:
+        if self._llm_semaphore is None:
+            self._llm_semaphore = asyncio.Semaphore(
+                self.config.share_message_concurrent
+            )
+        return self._llm_semaphore
 
     def _now(self) -> datetime:
         return persona_wall_now(self.config.timezone)
@@ -195,11 +204,6 @@ class ProactiveScheduler(BoundaryReceiver):
 
     async def _can_send_to_target(self, target: ShareTarget) -> bool:
         key = self._target_key(target)
-        if key in self._pending_targets:
-            logger.debug(
-                f"主动消息跳过(处理中): user={target.user_id}, group={target.group_id}"
-            )
-            return False
         if target.policy != "force" and not self._can_send_to_key(key):
             logger.debug(
                 f"主动消息跳过(间隔): user={target.user_id}, group={target.group_id}"
@@ -338,9 +342,11 @@ class ProactiveScheduler(BoundaryReceiver):
                 )
 
                 msg = await self._create_miss_you_message(target, event_desc, event_reaction)
+                # R9: buffered 意味着消息已排队，也应 break（避免同一 tick 触发多条）
+                if msg and msg.get("__coordinator_buffered"):
+                    break
                 if msg:
                     messages.append(msg)
-                    self._last_proactive_time[f"user:{user_id}"] = now
                     logger.info(
                         f"想念触发: user={user_id}, idle={idle_hours:.1f}h, "
                         f"score={eff.composite_score:.1f}, event={event_desc[:40]}"
@@ -526,14 +532,11 @@ class ProactiveScheduler(BoundaryReceiver):
 
         logger.debug(f"本次事件将触发 {len(valid_targets)} 次 LLM 调用生成分享消息")
 
-        # 并发生成分享消息，限制并发数
-        semaphore = asyncio.Semaphore(self.config.share_message_concurrent)
-
         async def _gen_for_target(target: ShareTarget) -> Optional[Dict]:
             key = self._target_key(target)
-            self._pending_targets.add(key)
-            try:
-                async with semaphore:
+
+            async def share_call_fn(_messages: List[str]):
+                async with self._get_llm_semaphore():
                     msg_dict = await self._build_and_generate_share_message(
                         target=target,
                         event_description=description,
@@ -541,11 +544,16 @@ class ProactiveScheduler(BoundaryReceiver):
                         message_type="random_event",
                         environment="group" if target.is_group else "private",
                     )
-                    if msg_dict:
-                        self._last_proactive_time[key] = now
-                    return msg_dict
-            finally:
-                self._pending_targets.discard(key)
+                if msg_dict:
+                    self._last_proactive_time[key] = now
+                return msg_dict
+
+            result = await self.coordinator.submit(
+                key, None, share_call_fn, continue_on_buffered=False
+            )
+            if result.status == "success":
+                return result.value
+            return None
 
         results = await asyncio.gather(
             *[_gen_for_target(t) for t in valid_targets],
@@ -564,16 +572,33 @@ class ProactiveScheduler(BoundaryReceiver):
         event_description: str,
         reaction: str,
     ) -> Optional[Dict]:
-        """创建想念消息"""
-        try:
-            msg_dict = await self._build_and_generate_share_message(
-                target=target,
-                event_description=event_description,
-                reaction=reaction,
-                message_type="miss_you",
-                environment="private",
-            )
+        """创建想念消息，通过 coordinator 串行化 LLM 调用。"""
+        key = self._target_key(target)
+        now = self._now()
+
+        async def miss_call_fn(_messages: List[str]):
+            async with self._get_llm_semaphore():
+                msg_dict = await self._build_and_generate_share_message(
+                    target=target,
+                    event_description=event_description,
+                    reaction=reaction,
+                    message_type="miss_you",
+                    environment="private",
+                )
+            if msg_dict:
+                self._last_proactive_time[key] = now
             return msg_dict
+
+        try:
+            result = await self.coordinator.submit(
+                key, None, miss_call_fn, continue_on_buffered=False
+            )
+            if result.status == "success":
+                return result.value
+            if result.status == "buffered":
+                # R9: buffered 意味着消息已排队，应 break 外层循环
+                return {"__coordinator_buffered": True}
+            return None
         except Exception as e:
             logger.error(f"创建想念消息失败: {e}")
             return None
