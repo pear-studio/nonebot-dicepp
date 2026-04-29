@@ -1,6 +1,7 @@
 """Bot 运行包装器 - 管理 Bot 实例、捕获输出、控制骰子"""
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -90,6 +91,9 @@ class CaptureProxy(ClientProxy):
 class BotRunner:
     """管理单个 Bot 实例的生命周期和交互"""
 
+    TODO_MAX_WAIT_ITERATIONS = 30
+    TODO_POLL_INTERVAL = 0.5
+
     def __init__(self, session_dir: Path):
         self.session_dir = session_dir
         self.bot: Optional[Bot] = None
@@ -117,6 +121,20 @@ class BotRunner:
 
             # 初始化
             await self.bot.delay_init_command()
+
+            # no_tick=True 时 tick_loop 不运行，需要手动处理待办任务（如 persona 异步初始化）
+            if self.bot._no_tick and self.bot.todo_tasks:
+                completed = False
+                for _ in range(BotRunner.TODO_MAX_WAIT_ITERATIONS):  # 最多等待 30 秒
+                    await self.bot.process_async_task([], BotRunner.TODO_POLL_INTERVAL, asyncio.get_running_loop())
+                    if not self.bot.todo_tasks:
+                        completed = True
+                        break
+                    await asyncio.sleep(BotRunner.TODO_POLL_INTERVAL)
+                if completed:
+                    logging.info("todo_tasks 处理完成")
+                else:
+                    logging.warning("todo_tasks 等待超时（30s），仍有未完成任务")
 
             self._started = True
         finally:
