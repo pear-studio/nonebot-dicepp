@@ -47,8 +47,8 @@ def cmd_create(args):
         tmp = None
         content = args.content
     else:
-        print("Error: must provide either content or --file", file=sys.stderr)
-        sys.exit(1)
+        tmp = None
+        content = sys.stdin.read()
     path.write_text(content, encoding="utf-8")
     if tmp is not None:
         tmp.unlink(missing_ok=True)
@@ -122,14 +122,55 @@ def main():
     p_update.add_argument("content")
     p_update.set_defaults(func=cmd_update)
 
-    p_batch = sub.add_parser("batch-update", help="Batch update sections for multiple Rn blocks from JSON")
+    p_batch = sub.add_parser("batch-update", help="Batch update sections for multiple Rn blocks from JSON or plain text")
     p_batch.add_argument("filename")
-    p_batch.add_argument("json_payload", nargs="?", help='JSON list (or use --file)')
-    p_batch.add_argument("--file", "-f", help="Path to a JSON file containing the batch payload")
+    p_batch.add_argument("payload", nargs="?", help='Payload (JSON list or plain text, or use --file)')
+    p_batch.add_argument("--file", "-f", help="Path to a file containing the batch payload")
+    p_batch.add_argument("--format", choices=["json", "plain"], default="json", help="Payload format (default: json)")
     p_batch.set_defaults(func=cmd_batch_update)
 
     args = parser.parse_args()
     args.func(args)
+
+
+def _parse_plain_payload(text: str) -> list[dict]:
+    items = []
+    blocks = re.split(r'(?m)^<<<END>>>\s*$', text)
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        lines = block.splitlines()
+        rn = None
+        section = None
+        content_lines = []
+        state = "header"
+
+        for line in lines:
+            if state == "header":
+                if line.startswith("Rn:"):
+                    rn = line[3:].strip()
+                elif line.startswith("Section:"):
+                    section = line[8:].strip()
+                elif line.startswith("Content:"):
+                    state = "content"
+                    remainder = line[8:].strip()
+                    if remainder:
+                        content_lines.append(remainder)
+            else:
+                content_lines.append(line)
+
+        if rn and section:
+            while content_lines and content_lines[0].strip() == "":
+                content_lines.pop(0)
+            while content_lines and content_lines[-1].strip() == "":
+                content_lines.pop()
+            items.append({
+                "rn": rn,
+                "section": section,
+                "content": "\n".join(content_lines)
+            })
+    return items
 
 
 def cmd_batch_update(args):
@@ -140,23 +181,29 @@ def cmd_batch_update(args):
 
     if args.file:
         tmp = Path(args.file)
-        json_payload = tmp.read_text(encoding="utf-8")
-    elif args.json_payload is not None:
+        payload_text = tmp.read_text(encoding="utf-8")
+    elif args.payload is not None:
         tmp = None
-        json_payload = args.json_payload
+        payload_text = args.payload
     else:
-        print("Error: must provide either json_payload or --file", file=sys.stderr)
-        sys.exit(1)
+        tmp = None
+        payload_text = sys.stdin.read()
 
-    try:
-        items = json.loads(json_payload)
-    except json.JSONDecodeError as e:
-        print(f"Invalid JSON payload: {e}", file=sys.stderr)
-        sys.exit(1)
+    if args.format == "plain":
+        items = _parse_plain_payload(payload_text)
+        if not items:
+            print("Error: no valid items found in plain payload", file=sys.stderr)
+            sys.exit(1)
+    else:
+        try:
+            items = json.loads(payload_text)
+        except json.JSONDecodeError as e:
+            print(f"Invalid JSON payload: {e}", file=sys.stderr)
+            sys.exit(1)
 
-    if not isinstance(items, list):
-        print("JSON payload must be a list", file=sys.stderr)
-        sys.exit(1)
+        if not isinstance(items, list):
+            print("JSON payload must be a list", file=sys.stderr)
+            sys.exit(1)
 
     text = path.read_text(encoding="utf-8")
     original_text = text

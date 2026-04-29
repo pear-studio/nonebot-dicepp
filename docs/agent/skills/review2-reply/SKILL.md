@@ -31,10 +31,24 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    python .claude/skills/review1-raise/review_record.py read <filename>
    ```
 2. 扫描所有 `Rn`，识别哪些已有 `Reply`、哪些还没有（包括上一轮标为 `需补充回复` 的条目）
-3. 对**未回复或需补充回复**的条目逐条评估，在上下文中构造完整 JSON payload
-4. **一次性写入**：将 JSON payload 写入临时文件，然后**仅调用一次** `batch-update --file`（禁止逐条多次调用 `update`）：
+3. 对**未回复或需补充回复**的条目逐条评估，在上下文中构造完整 payload
+4. **一次性写入**：通过 heredoc 直接传入 payload，**仅调用一次** `batch-update --format plain`（禁止逐条多次调用 `update`）：
    ```bash
-   python .claude/skills/review1-raise/review_record.py batch-update <filename> --file <json_file>
+   python .claude/skills/review1-raise/review_record.py batch-update <filename> --format plain <<'EOF'
+   Rn: R1
+   Section: Reply
+   Content:
+   - 评估: 采纳
+   - 理由: ...
+   - 拟执行改动: ...
+   <<<END>>>
+   Rn: R2
+   Section: Reply
+   Content:
+   - 评估: 不采纳
+   - 理由: ...
+   <<<END>>>
+   EOF
    ```
 
 ## Reply 子块格式

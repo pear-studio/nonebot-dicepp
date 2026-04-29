@@ -36,10 +36,24 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    ```
 3. 筛选需验收的 Rn：`共识状态` 为 `已共识·实施` 的条目（`已共识·存档` 无需验收）
 4. 逐条比对：实际 diff 是否覆盖了约定的具体改点？是否有超出约定的额外改动？
-5. 构造 JSON payload 时，对**已有 Accept 块**的 Rn（即重新验收），须先读取原有 `退回记录` 字段，将本次退回理由**追加**进去，而不是清空重写；验收通过的条目也同样携带历史退回记录（作为过程留档）
-6. 在上下文中构造完整 JSON payload，**一次性写入**：
+5. 构造 payload 时，对**已有 Accept 块**的 Rn（即重新验收），须先读取原有 `退回记录` 字段，将本次退回理由**追加**进去，而不是清空重写；验收通过的条目也同样携带历史退回记录（作为过程留档）
+6. 在上下文中构造完整 payload，**一次性写入**：
    ```bash
-   python .claude/skills/review1-raise/review_record.py batch-update <filename> --file <json_file>
+   python .claude/skills/review1-raise/review_record.py batch-update <filename> --format plain <<'EOF'
+   Rn: R1
+   Section: Accept
+   Content:
+   - 验收结论: 验收通过
+   - 说明: ...
+   <<<END>>>
+   Rn: R2
+   Section: Accept
+   Content:
+   - 验收结论: 验收退回
+   - 说明: ...
+   - 退回记录: ...
+   <<<END>>>
+   EOF
    ```
 
 ## Accept 子块格式
@@ -67,7 +81,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 
 ## 输出
 
-验收全部通过时，向用户报告 **评审闭环完成**，并打印最终统计：
+验收全部通过时，向用户报告 **评审闭环完成** 即可，**无需再修改 review 文档**，直接打印最终统计：
 
 ```
 评审闭环完成

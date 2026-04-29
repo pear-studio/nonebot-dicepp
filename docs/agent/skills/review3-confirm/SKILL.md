@@ -47,10 +47,24 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - 在 Confirm 块中提供澄清内容，标 `需补充回复`
    - **不做最终裁定**——等 Defender 看到澄清后重新回复
 
-4. 所有 Rn 处理完毕后，在上下文中构造完整 JSON payload
-5. **一次性写入**：将 JSON payload 写入临时文件，然后**仅调用一次** `batch-update --file`：
+4. 所有 Rn 处理完毕后，在上下文中构造完整 payload
+5. **一次性写入**：通过 heredoc 直接传入 payload，**仅调用一次** `batch-update --format plain`：
    ```bash
-   python .claude/skills/review1-raise/review_record.py batch-update <filename> --file <json_file>
+   python .claude/skills/review1-raise/review_record.py batch-update <filename> --format plain <<'EOF'
+   Rn: R1
+   Section: Confirm
+   Content:
+   - 评估: 接受
+   - 共识状态: 已共识·实施
+   <<<END>>>
+   Rn: R2
+   Section: Confirm
+   Content:
+   - 评估: 用户裁决
+   - 裁决记录: ...
+   - 共识状态: 已共识·存档
+   <<<END>>>
+   EOF
    ```
 6. 写入完成后，检查是否存在 `需补充回复` 条目：
    - **有** → 向用户明确报告哪些 Rn 需 Defender 补充回复，提示运行 `review2-reply`，**本轮到此为止**
