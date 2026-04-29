@@ -35,8 +35,6 @@ class EventGenerationResult:
     energy_delta: Optional[int] = None
     mood_delta: Optional[int] = None
     health_delta: Optional[int] = None
-    raw_response: str = ""  # LLM 原始工具调用参数 JSON
-    system_prompt_digest: str = ""  # 生成时使用的 system_prompt
 
 
 @dataclass
@@ -45,7 +43,6 @@ class EventReactionResult:
     share_desire: float = 0.0
     follow_up_action: Optional[str] = None  # None=无后续行动, 非空字符串=续写, 空字符串=不续写
     pending_plan: Optional[str] = None  # None=保持, ""=清空, 非空=更新
-    raw_response: str = ""  # LLM 原始工具调用参数 JSON
 
 
 @dataclass
@@ -191,8 +188,9 @@ class EventGenerationAgent:
 3. 不包含心理活动、情绪评价、内心独白
 4. 不使用"觉得""认为""感到"等主观动词
 5. 20-60字，简洁具体
-6. 符合世界观和场景设定
-7. 同时给出该事件对角色体力/心情/健康的影响（delta，可选整数，范围-20~+20）
+6. 符合世界观和场景设定，但场景中的具体动作是参考而非约束
+7. 避免与今天已发生事件在具体内容上高度重复，优先描述不同的事
+8. 同时给出该事件对角色体力/心情/健康的影响（delta，可选整数，范围-20~+20）
 
 你必须通过调用 record_event 工具来输出结果。"""
 
@@ -210,7 +208,13 @@ class EventGenerationAgent:
                 time_str = e.get("time", "??:??")
                 desc = e.get("description", "")
                 events_lines.append(f"- [{time_str}] {desc}")
-            events_context = "\n今天已发生事件:\n" + "\n".join(events_lines)
+            events_context = (
+                "\n\n今天已经做过的事：\n"
+                + "\n".join(events_lines)
+                + "\n\n角色的一天还在继续。请生成一件不同的事——"
+                "可以外出到其他场景、与其他角色互动、遭遇突发小意外、做不同的日常琐事，或只是休息。"
+                "同一场景内也可以有各种不同的行为、互动或细节，不必拘泥于上述记录。"
+            )
 
         user_prompt = f"当前时间: {context.current_time.strftime('%H:%M')}{intention_text}{diary_context}{events_context}\n\n请生成一个符合世界观的生活事件，并通过 record_event 工具记录:"
 
@@ -265,7 +269,7 @@ class EventGenerationAgent:
                 tools=tools,
                 tool_name="record_event",
                 model_tier=ModelTier.AUXILIARY,
-                temperature=0.8,
+                temperature=0.9,
             )
 
             args = json.loads(content)
@@ -300,8 +304,6 @@ class EventGenerationAgent:
                 energy_delta=energy_delta,
                 mood_delta=mood_delta,
                 health_delta=health_delta,
-                raw_response=json.dumps(args, ensure_ascii=False),
-                system_prompt_digest=system_prompt,
             )
 
         except Exception as e:
@@ -437,7 +439,6 @@ class EventGenerationAgent:
                 share_desire=share_desire,
                 follow_up_action=follow_up_action,
                 pending_plan=pending_plan,
-                raw_response=json.dumps(args, ensure_ascii=False),
             )
 
         except Exception as e:
