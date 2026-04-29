@@ -187,9 +187,9 @@ class TestIncrementUsage:
         router.config = mock_config
 
         today = datetime.now().strftime("%Y-%m-%d")
-        await router._increment_usage("u1")
+        await router.increment_usage("u1")
         assert await mock_store.get_daily_usage("u1", today) == 1
-        await router._increment_usage("u1")
+        await router.increment_usage("u1")
         assert await mock_store.get_daily_usage("u1", today) == 2
 
     @pytest.mark.asyncio
@@ -197,7 +197,7 @@ class TestIncrementUsage:
         router = LLMRouter("fake", "http://localhost", "fake", max_concurrent=1)
         router.data_store = None
         # 不应抛出异常
-        await router._increment_usage("u1")
+        await router.increment_usage("u1")
 
 
 class TestErrorClassification:

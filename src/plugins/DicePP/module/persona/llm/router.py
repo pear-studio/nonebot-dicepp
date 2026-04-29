@@ -27,6 +27,11 @@ class QuotaExceeded(Exception):
     pass
 
 
+class NonRetryableError(Exception):
+    """不可重试的 LLM 错误（认证失败、内容过滤等）"""
+    pass
+
+
 class LLMRouter:
     """LLM 路由器 - 管理主模型和辅助模型"""
 
@@ -181,7 +186,7 @@ class LLMRouter:
             logger.error(f"豁免检查失败: user={user_id}, error={e}")
             return False  # 检查失败时保守处理（不豁免）
 
-    async def _increment_usage(self, user_id: str) -> None:
+    async def increment_usage(self, user_id: str) -> None:
         """增加用量计数"""
         if not self.data_store:
             return
@@ -292,10 +297,6 @@ class LLMRouter:
             tokens_out = metadata.get("tokens_output", 0)
             latency = time.monotonic() - start_time
 
-            # Phase 4: 增加用量计数（仅主模型）
-            if model_tier == ModelTier.PRIMARY and user_id:
-                await self._increment_usage(user_id)
-
             # 记录日志
             if is_tools:
                 tool_info = ""
@@ -327,6 +328,8 @@ class LLMRouter:
                 f"latency={latency:.1f}s status=error error={e}"
             )
 
+            if status in ("auth_error", "content_filter"):
+                raise NonRetryableError(str(e)) from e
             raise
         finally:
             latency_ms = int((time.monotonic() - start_time) * 1000)
