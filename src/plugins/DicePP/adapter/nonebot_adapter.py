@@ -77,19 +77,20 @@ class NoneBotClientProxy(ClientProxy):
                         except Exception:
                             pass
                         # 触发消息发送后跨模块通知 hook
-                        bot_obj = all_bots.get(self.bot.self_id)
-                        hooks = getattr(bot_obj, "_post_send_hooks", []) if bot_obj else []
-                        for hook in hooks:
-                            try:
-                                await hook(
-                                    group_id=target.group_id,
-                                    user_id=str(self.bot.self_id),
-                                    role="assistant",
-                                    content=command.msg,
-                                    display_name="我",
-                                )
-                            except Exception as e:
-                                dice_log(f"[PostSendHook] 记录失败: {e}")
+                        if not getattr(command, "skip_history_record", False):
+                            bot_obj = all_bots.get(self.bot.self_id)
+                            hooks = getattr(bot_obj, "_post_send_hooks", []) if bot_obj else []
+                            for hook in hooks:
+                                try:
+                                    await hook(
+                                        group_id=target.group_id,
+                                        user_id=str(self.bot.self_id),
+                                        role="assistant",
+                                        content=command.msg,
+                                        display_name="我",
+                                    )
+                                except Exception as e:
+                                    dice_log(f"[PostSendHook] 记录失败: {e}")
                     else:
                         await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
             elif isinstance(command, BotLeaveGroupCommand):

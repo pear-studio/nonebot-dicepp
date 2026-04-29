@@ -375,7 +375,11 @@ class PersonaCommand(UserCommandBase):
                 dice_log(f"[Persona] 群活跃度更新失败（已忽略）: {e}")
 
         port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
-        return [BotSendMsgCommand(self.bot.account, response, [port])]
+        cmd = BotSendMsgCommand(self.bot.account, response, [port])
+        # R4: 群聊 @触发 的 assistant 消息已由 orchestrator 持久化，跳过 adapter recorder
+        if group_id:
+            cmd.skip_history_record = True
+        return [cmd]
 
     async def _handle_join(self, user_id: str, args: List[str]) -> str:
         """处理 join 命令（用户加入白名单）"""
