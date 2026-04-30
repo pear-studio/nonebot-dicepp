@@ -45,6 +45,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
     "pyinstaller>=6.0",
+    "bump-my-version>=0.28",
 ]
 
 [tool.uv]
@@ -96,3 +97,21 @@ omit = [
 
 [tool.coverage.report]
 show_missing = true
+
+# ── 版本号自动递增 ────────────────────────────────────────────────────────────
+# 使用: uv run bump-my-version bump patch/minor/major
+# 仅开发环境安装 (dependency-groups.dev)，不会进入生产部署
+[tool.bumpversion]
+current_version = "3.0.0"
+commit = true
+tag = true
+message = "Bump version: {current_version} → {new_version}"
+tag_name = "v{new_version}"
+parse = """(?P<major>0|[1-9]\\d*)\\.(?P<minor>0|[1-9]\\d*)\\.(?P<patch>0|[1-9]\\d*)
+"""
+serialize = ["{major}.{minor}.{patch}"]
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'

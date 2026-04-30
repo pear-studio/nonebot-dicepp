@@ -7,6 +7,7 @@
 .PHONY: deploy start stop restart logs update status
 .PHONY: setup-llbot llbot-start llbot-stop llbot-restart llbot-logs
 .PHONY: start-all stop-all
+.PHONY: bump-patch bump-minor bump-major
 
 # ── 环境安装 ─────────────────────────────────────────────────────────────────
 install:  ## 安装运行时依赖
@@ -116,12 +117,26 @@ stop-all:  ## 停止全部服务（先 DicePP，再 LLOneBot）
 	fi
 	@echo "===== 全部服务已停止 ====="
 
+# ── 版本号递增 ────────────────────────────────────────────────────────────────
+bump-patch:  ## 递增 patch 版本 (3.0.0 → 3.0.1)
+	uv run bump-my-version bump patch
+
+bump-minor:  ## 递增 minor 版本 (3.0.0 → 3.1.0)
+	uv run bump-my-version bump minor
+
+bump-major:  ## 递增 major 版本 (3.0.0 → 4.0.0)
+	uv run bump-my-version bump major
+
 # ── 帮助 ──────────────────────────────────────────────────────────────────────
 help:  ## 显示帮助信息
 	@echo "DicePP 命令集"
 	@echo ""
 	@echo "开发命令 (Windows/本地):"
 	@grep -E '^(install|install-dev|test|test-cov|run|clean):.*?##' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
+	@echo ""
+	@echo "版本管理:"
+	@grep -E '^(bump-patch|bump-minor|bump-major):.*?##' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "部署命令 (Linux/WSL Docker):"
