@@ -11,6 +11,43 @@
 - 功能完成后通过 Pull Request 合并到 `master`
 - 没有 `dev` 分支
 
+## 本地环境结构
+
+项目采用 **bare repo + worktree** 的本地部署模式：
+
+```
+/home/ubuntu/dicepp/
+├── .bare/                  # bare 仓库（所有 worktree 共享）
+├── dev/                    # master 分支，基础工作区 + .venv
+├── prod/                   # prod 本地分支（跟踪 origin/master），生产环境
+└── worktrees/              # feature worktree 目录
+    ├── feature-roll/       # feature/roll 分支
+    └── ...
+```
+
+| 目录 | 分支 | 用途 | 操作原则 |
+|------|------|------|---------|
+| `dev/` | `master` | 基础工作区 | 存放共享的 `.venv`，不直接开发 |
+| `prod/` | `prod`（跟踪 `origin/master`）| 生产环境 | 只 pull 更新，不直接开发 |
+| `worktrees/*/` | `feature/xxx` | 功能开发 | 每个功能独立的 worktree，共享 dev 的 `.venv` |
+
+**为什么选择 worktree？**
+
+- dev 和 prod 共享同一个 git 数据库，不重复克隆
+- 每个 feature 有独立的目录，互不干扰
+- `.venv` 符号链接共享，避免重复安装依赖
+- prod 本地分支独立命名，避免与 master 冲突
+
+### .venv 共享机制
+
+所有 feature worktree 通过符号链接共享 dev 的 `.venv`：
+
+```
+worktrees/feature-xxx/.venv -> /home/ubuntu/dicepp/dev/.venv
+```
+
+新增依赖时，在任意 worktree（包括 dev）中运行 `uv sync` 即可同步到全部 worktree。
+
 ## 分支规范
 
 | 分支类型 | 命名 | 说明 |
@@ -26,22 +63,31 @@
 
 ## 开发流程
 
-### 1. 开始开发
+### 1. 创建功能 worktree
+
+使用 Claude Code 的 `start-worktree` skill：
+
+```
+/start-worktree
+```
+
+或手动：
 
 ```bash
-# 确保本地 master 最新
-git checkout master
-git pull origin master
-
-# 创建功能分支
-git checkout -b feature/xxx-master
+cd /home/ubuntu/dicepp/dev
+git fetch origin master
+git branch feature/xxx origin/master
+git worktree add /home/ubuntu/dicepp/worktrees/feature-xxx feature/xxx
+cd /home/ubuntu/dicepp/worktrees/feature-xxx
+ln -s /home/ubuntu/dicepp/dev/.venv .venv
 ```
 
 ### 2. 开发与提交
 
-在功能分支上开发，按 [DicePP 开发规范](../.claude/CLAUDE.md) 提交代码。
+在 feature worktree 中开发：
 
 ```bash
+cd /home/ubuntu/dicepp/worktrees/feature-xxx
 git add .
 git commit -m "feat: xxx"
 ```
@@ -51,6 +97,7 @@ git commit -m "feat: xxx"
 如果 `master` 有更新，先同步：
 
 ```bash
+cd /home/ubuntu/dicepp/worktrees/feature-xxx
 git fetch origin
 git rebase origin/master
 git push --force-with-lease
@@ -67,7 +114,7 @@ git push --force-with-lease
 或手动：
 
 ```bash
-git push origin feature/xxx-master
+git push origin feature/xxx
 gh pr create --title "feat: xxx" --body "xxx" --base master
 ```
 
@@ -98,11 +145,20 @@ Review 通过后，选择合并方式：
 gh pr merge <pr_number> --squash
 ```
 
-合并后删除功能分支：
+### 7. 清理 worktree
+
+合并后删除 feature worktree：
 
 ```bash
-git branch -d feature/xxx-master
-git push origin --delete feature/xxx-master
+# 先切走当前分支
+cd /home/ubuntu/dicepp/worktrees/feature-xxx
+git checkout master
+
+# 删除 worktree 和分支
+cd /home/ubuntu/dicepp/dev
+git worktree remove /home/ubuntu/dicepp/worktrees/feature-xxx
+git branch -d feature/xxx
+git push origin --delete feature/xxx
 ```
 
 ## 发版流程
@@ -120,6 +176,13 @@ git push origin --delete feature/xxx-master
 4. 执行 `bump-my-version`，自动 commit + tag
 5. 自动 push `master` 和 tag 到远端
 
+发版后更新生产环境：
+
+```bash
+cd /home/ubuntu/dicepp/prod
+git pull origin master
+```
+
 ## 分支保护规则
 
 `master` 分支已配置以下保护：
@@ -136,6 +199,7 @@ git push origin --delete feature/xxx-master
 
 | Skill | 触发方式 | 用途 |
 |-------|---------|------|
+| `start-worktree` | `/start-worktree` | 创建 feature worktree 并共享 .venv |
 | `create-pr` | `/create-pr` | 从当前 feature 分支创建 PR |
 | `review-pr` | `/review-pr <number>` | Review PR diff 并执行 approve/merge |
 | `bump-version` | `/bump-version` | 递增版本号、打 tag、推送 |
@@ -147,3 +211,4 @@ git push origin --delete feature/xxx-master
 3. **feature 分支命名要清晰**。让别人一眼知道这是做什么的。
 4. **合并前确保 CI 通过**。虽然保护规则未强制要求，但应作为自觉。
 5. **发版前跑测试**。`uv run pytest` 通过后再 bump version。
+6. **及时清理已合并的 worktree**。避免磁盘堆积。
