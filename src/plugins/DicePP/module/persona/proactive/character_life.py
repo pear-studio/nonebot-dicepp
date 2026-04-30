@@ -571,10 +571,11 @@ class CharacterLife:
 
     async def generate_diary(self) -> Optional[str]:
         """
-        生成昨天的日记
+        生成日记。
 
-        tick_daily 在 00:00 执行，此时新的一天尚无事件，
-        因此用昨天的事件生成昨天的日记。
+        根据当前时间与 diary_time 的关系判断该取哪天的事件：
+        - 当前时间 >= diary_time：今天已结束，取当天事件生成当天日记
+        - 当前时间 < diary_time：今天刚开始，取昨天事件生成昨天日记
 
         Returns:
             日记内容，如果失败则返回 None
@@ -583,16 +584,27 @@ class CharacterLife:
             return None
 
         try:
-            diary_date = (self.config.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            now = self.config.now()
 
-            # 获取昨天的事件
+            # 解析 diary_time（HH:MM）并判断该取哪天
+            diary_hour, diary_minute = map(int, self.config.diary_time.split(":"))
+            diary_minutes = diary_hour * 60 + diary_minute
+            now_minutes = now.hour * 60 + now.minute
+
+            if now_minutes >= diary_minutes:
+                # 今天已结束，取当天事件，昨天日记作为上下文
+                diary_date = now.strftime("%Y-%m-%d")
+                prev_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                # 今天刚开始，取昨天事件，前天日记作为上下文
+                diary_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+                prev_date = (now - timedelta(days=2)).strftime("%Y-%m-%d")
+
             events = await self.data_store.get_daily_events(diary_date)
             if not events:
-                logger.debug("昨天没有事件，跳过日记生成")
+                logger.debug("没有事件，跳过日记生成")
                 return None
 
-            # 获取前天的日记作为上下文
-            prev_date = (self.config.now() - timedelta(days=2)).strftime("%Y-%m-%d")
             prev_diary = await self.data_store.get_diary(prev_date)
 
             # 获取当前状态
