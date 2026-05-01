@@ -346,7 +346,7 @@ class LLMClient:
                         current_messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": "[System note: Memory search is temporarily unavailable, please respond without using this information]"
+                            "content": "[System note: Tool execution is temporarily unavailable, please respond without using this information]"
                         })
                     continue  # 继续循环，让 LLM 基于错误信息生成合适的回复
 

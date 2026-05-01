@@ -1,12 +1,9 @@
-from dataclasses import dataclass
-from typing import Literal
+import warnings
+warnings.warn(
+    "proactive.models 已迁移到 life.models，请更新 import（将在重构任务三完成后移除）",
+    DeprecationWarning, stacklevel=2,
+)
 
-
-@dataclass(eq=False)
-class ShareTarget:
-    user_id: str
-    group_id: str = ""
-    is_group: bool = False
-    priority: int = 0
-    score: float = 0.0
-    policy: Literal["force", "normal"] = "normal"
+from ..life.models import (  # noqa: F401
+    ShareTarget,
+)

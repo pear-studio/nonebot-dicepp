@@ -20,8 +20,8 @@ from .orchestrator import PersonaOrchestrator
 from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.persist_keys import PERSONA_SK_OBSERVATION_BUFFERS
-from .proactive.observation_buffer import ObservationBuffer
-from .utils.privacy import mask_sensitive_string
+from .life.observation import ObservationBuffer
+from .llm.privacy import mask_sensitive_string
 
 
 @custom_user_command("PersonaAI", priority=DPP_COMMAND_PRIORITY_DEFAULT, flag=DPP_COMMAND_FLAG_FUN)
@@ -561,8 +561,7 @@ class PersonaCommand(UserCommandBase):
         if self.orchestrator and self.orchestrator.scheduler:
             scheduler_status = self.orchestrator.scheduler.get_status()
             lines.append(f"\n[调度器状态]")
-            lines.append(f"  待分享: {scheduler_status.get('pending_shares', 0)}")
-            lines.append(f"  今日触发: {len(scheduler_status.get('scheduled_today', []))}")
+            lines.append(f"  上次主动数: {scheduler_status.get('last_proactive_count', 0)}")
             lines.append(f"  角色活跃中: {'是' if scheduler_status.get('is_character_active') else '否'}")
         tick_p = self._async_tick_task is not None and not self._async_tick_task.done()
         daily_p = (
@@ -1047,7 +1046,6 @@ class PersonaCommand(UserCommandBase):
                     max_threshold=self.config.observe_max_threshold,
                     min_threshold=self.config.observe_min_threshold,
                     max_buffer_size=self.config.observe_max_buffer_size,
-                    max_records_per_group=self.config.observe_max_records,
                     timezone=self.config.timezone,
                 )
             except Exception:
@@ -1103,7 +1101,6 @@ class PersonaCommand(UserCommandBase):
                     max_threshold=self.config.observe_max_threshold,
                     min_threshold=self.config.observe_min_threshold,
                     max_buffer_size=self.config.observe_max_buffer_size,
-                    max_records_per_group=self.config.observe_max_records,
                     timezone=self.config.timezone,
                 )
 

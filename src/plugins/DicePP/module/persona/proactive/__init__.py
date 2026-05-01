@@ -4,7 +4,7 @@ Persona AI Proactive 模块
 包含主动消息调度、角色生活模拟等功能
 """
 from .character_life import CharacterLife, CharacterLifeConfig
-from .scheduler import ProactiveScheduler, ProactiveConfig
+from ..life.proactive import ProactiveScheduler, ProactiveConfig, EventShareTaskQueue
 from .llm_call_coordinator import LLMCallCoordinator
 
 __all__ = [
@@ -12,5 +12,6 @@ __all__ = [
     "CharacterLifeConfig",
     "ProactiveScheduler",
     "ProactiveConfig",
+    "EventShareTaskQueue",
     "LLMCallCoordinator",
 ]

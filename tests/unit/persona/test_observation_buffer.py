@@ -31,7 +31,7 @@ def buffer() -> ObservationBuffer:
         max_threshold=60,
         min_threshold=5,
         max_buffer_size=60,
-        max_records_per_group=30,
+
         timezone="",  # 使用本地时间
     )
 
@@ -45,7 +45,7 @@ def buffer_with_small_threshold() -> ObservationBuffer:
         max_threshold=60,
         min_threshold=5,
         max_buffer_size=60,
-        max_records_per_group=30,
+
         timezone="",
     )
 
@@ -363,7 +363,7 @@ class TestBufferSizeLimit:
             max_threshold=60,
             min_threshold=5,
             max_buffer_size=10,  # 小缓冲区方便测试
-            max_records_per_group=30,
+
             timezone="",
         )
 
@@ -453,7 +453,7 @@ class TestPersistence:
             max_threshold=60,
             min_threshold=5,
             max_buffer_size=60,
-            max_records_per_group=30,
+
             timezone="",
         )
 
@@ -484,7 +484,7 @@ class TestPersistence:
             max_threshold=60,
             min_threshold=5,
             max_buffer_size=60,
-            max_records_per_group=30,
+
             timezone="",
         )
 
@@ -514,7 +514,7 @@ class TestPersistence:
             max_threshold=60,
             min_threshold=5,
             max_buffer_size=60,
-            max_records_per_group=30,
+
             timezone="",
         )
 
@@ -547,7 +547,7 @@ class TestPersistence:
             max_threshold=60,
             min_threshold=5,
             max_buffer_size=10,  # 小于消息数量
-            max_records_per_group=30,
+
             timezone="",
         )
 
@@ -574,7 +574,7 @@ class TestPersistence:
             max_threshold=60,
             min_threshold=5,
             max_buffer_size=60,
-            max_records_per_group=30,
+
             timezone="",
         )
 
