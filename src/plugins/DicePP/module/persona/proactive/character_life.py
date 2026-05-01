@@ -13,7 +13,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set
 
-from ..agents.event_agent import EventGenerationAgent, EventContext, EventGenerationResult, EventReactionResult
+from ..life.event_agent import EventGenerationAgent, EventContext, EventGenerationResult, EventReactionResult
 from ..character.models import Character
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE

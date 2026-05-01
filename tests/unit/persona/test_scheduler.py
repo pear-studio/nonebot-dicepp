@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.proactive.scheduler import (
+from plugins.DicePP.module.persona.life.proactive import (
     ProactiveScheduler,
     ProactiveConfig,
 )
@@ -81,7 +81,7 @@ class TestProactiveSchedulerBasics:
     async def test_inactive_hours_blocks_messages(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 2, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         result = await scheduler.tick()
@@ -91,21 +91,21 @@ class TestProactiveSchedulerBasics:
     async def test_character_active_hours(self, scheduler, monkeypatch):
         # 07:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 7, 0, 0),
         )
         assert scheduler._is_character_active() is False
 
         # 10:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 10, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 23:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 23, 0, 0),
         )
         assert scheduler._is_character_active() is False
@@ -118,21 +118,21 @@ class TestProactiveSchedulerBasics:
 
         # 23:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 23, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 02:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 2, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 10:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 10, 0, 0),
         )
         assert scheduler._is_character_active() is False
@@ -141,7 +141,7 @@ class TestProactiveSchedulerBasics:
     async def test_can_send_to_key_respects_interval(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         assert scheduler._can_send_to_key("user:u1") is True
@@ -151,16 +151,10 @@ class TestProactiveSchedulerBasics:
         assert scheduler._can_send_to_key("user:u1") is True
 
     @pytest.mark.asyncio
-    async def test_is_in_time_range(self, scheduler):
-        assert scheduler._is_in_time_range("08:30", "08:00-09:00") is True
-        assert scheduler._is_in_time_range("07:30", "08:00-09:00") is False
-        assert scheduler._is_in_time_range("08:30", "invalid") is False
-
-    @pytest.mark.asyncio
     async def test_reset_daily_state(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         scheduler._last_event_date = "2024-01-01"
@@ -203,7 +197,7 @@ class TestProactiveSchedulerPersistence:
     async def test_load_and_save_state(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         raw = json.dumps({
@@ -238,7 +232,7 @@ class TestProactiveSchedulerPersistence:
     async def test_load_old_date_updates_date(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         raw = json.dumps({
@@ -297,7 +291,7 @@ class TestProactiveSchedulerMissYou:
     async def test_miss_respects_min_score(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 4, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         rel = RelationshipState(
@@ -317,7 +311,7 @@ class TestProactiveSchedulerMissYou:
     async def test_miss_respects_idle_time(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 4, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         rel = RelationshipState(
@@ -337,7 +331,7 @@ class TestProactiveSchedulerMissYou:
     async def test_miss_muted_user_skipped(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 4, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         rel = RelationshipState(
@@ -397,7 +391,7 @@ class TestProactiveSchedulerMessageCreation:
     async def test_get_status(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: fake_now,
         )
         status = scheduler.get_status()
@@ -412,21 +406,21 @@ class TestProactiveSchedulerMessageCreation:
 
         # 10:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 10, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 22:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 22, 0, 0),
         )
         assert scheduler._is_character_active() is False
 
         # 08:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 8, 0, 0),
         )
         assert scheduler._is_character_active() is False
@@ -436,21 +430,21 @@ class TestProactiveSchedulerMessageCreation:
 
         # 23:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 23, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 02:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 2, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 10:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 10, 0, 0),
         )
         assert scheduler._is_character_active() is False
@@ -458,7 +452,7 @@ class TestProactiveSchedulerMessageCreation:
         # start == end 时始终活跃
         scheduler.set_jittered_boundaries(12 * 60, 12 * 60)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 3, 0, 0),
         )
         assert scheduler._is_character_active() is True
@@ -468,7 +462,7 @@ class TestProactiveSchedulerMessageCreation:
         """验证设置 jittered 后不再使用原始小时边界"""
         # 原始小时边界：08:00-22:00，10:00 应该活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 10, 0, 0),
         )
         assert scheduler._is_character_active() is True
@@ -479,7 +473,7 @@ class TestProactiveSchedulerMessageCreation:
 
         # 13:00 在 jittered 范围内，应该活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive.persona_wall_now",
             lambda tz: datetime(2024, 1, 1, 13, 0, 0),
         )
         assert scheduler._is_character_active() is True

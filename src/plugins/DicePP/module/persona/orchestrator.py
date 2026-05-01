@@ -19,20 +19,19 @@ from .character.models import Character
 from .llm.router import LLMRouter, QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.models import ModelTier, UserProfile, RelationshipState, ScoreEvent, GroupConversation
-from .agents.scoring_agent import ScoringAgent
-from .memory.context_builder import ContextBuilder
+from .chat.scoring import ScoringAgent
+from .chat.context import ContextBuilder
 from .game.decay import DecayCalculator, DecayConfig
 from .wall_clock import persona_wall_now, PERSONA_EPOCH
 from utils.string import estimate_tokens
 from .proactive.character_life import CharacterLife, CharacterLifeConfig
-from .proactive.scheduler import ProactiveScheduler, ProactiveConfig
+from .life.proactive import ProactiveScheduler, ProactiveConfig, EventShareTaskQueue
 from .proactive.llm_call_coordinator import LLMCallCoordinator, SubmitResult
-from .proactive.target_selector import TargetSelector
-from .proactive.delayed_task_queue import EventShareTaskQueue
-from .agents.event_agent import EventGenerationAgent
+from .life.target import TargetSelector
+from .life.event_agent import EventGenerationAgent
 
 # Phase 4: 掷骰工具
-from .utils.roll_adapter import RollAdapter
+from .tools.roll_dice import RollAdapter
 
 logger = logging.getLogger("persona.orchestrator")
 
@@ -530,7 +529,11 @@ class PersonaOrchestrator:
         return content
 
     def _get_tools(self) -> List[Dict]:
-        """获取工具定义"""
+        """获取工具定义
+
+        TODO: 任务二接入 ToolRegistry 后删除此内联定义，
+        改为从 ToolRegistry.get_definitions_for("chat") 获取。
+        """
         return [
             {
                 "type": "function",
@@ -630,7 +633,11 @@ class PersonaOrchestrator:
         user_id: str,
         group_id: str,
     ) -> str:
-        """执行工具调用"""
+        """执行工具调用
+
+        TODO: 任务二接入 ToolRegistry 后删除此内联实现，
+        改为通过 ToolRegistry.make_executor_for("chat", ctx=ctx) 执行。
+        """
         try:
             args = json.loads(arguments)
         except json.JSONDecodeError:
@@ -681,7 +688,7 @@ class PersonaOrchestrator:
             return "私聊场景不支持检索群聊历史"
 
         limit = args.get("limit", 5)
-        if not isinstance(limit, int) or not (1 <= limit <= 20):
+        if not isinstance(limit, (int, float)) or not (1 <= int(limit) <= 20):
             return "参数错误：limit 必须在 1-20 之间"
         hours_back = args.get("hours_back")
         if hours_back is not None and (not isinstance(hours_back, int) or hours_back < 0):
