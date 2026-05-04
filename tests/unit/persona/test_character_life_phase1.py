@@ -13,7 +13,7 @@ import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.proactive.character_life import (
+from plugins.DicePP.module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
 )
@@ -66,19 +66,21 @@ class TestCharacterLifePhase1:
         return CharacterLifeConfig(
             enabled=True,
             slot_match_window_minutes=15,
-            diary_time="23:30",
             timezone="Asia/Shanghai",
             min_event_interval_minutes=5,
         )
 
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character):
-        return CharacterLife(
+        from unittest.mock import MagicMock
+        life = CharacterLife(
             config=config,
             event_agent=mock_event_agent,
             data_store=mock_data_store,
             character=character,
         )
+        life.boundary_notifier = MagicMock()
+        return life
 
     # ── 1.3 活跃时间波动 ──────────────────────────
 
@@ -86,7 +88,7 @@ class TestCharacterLifePhase1:
         """同一天多次计算波动边界结果一致"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         start1, end1, rng1 = life._compute_daily_boundaries()
@@ -100,13 +102,13 @@ class TestCharacterLifePhase1:
         fake_now2 = datetime(2024, 1, 2, 10, 0, 0)
 
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now1,
         )
         start1, end1, rng1 = life._compute_daily_boundaries()
 
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now2,
         )
         start2, end2, rng2 = life._compute_daily_boundaries()
@@ -118,7 +120,7 @@ class TestCharacterLifePhase1:
         """波动边界在合理范围内"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         start, end, rng = life._compute_daily_boundaries()
@@ -133,7 +135,7 @@ class TestCharacterLifePhase1:
         """当前时间未到起床时间时跳过所有槽位"""
         fake_now = datetime(2024, 1, 1, 7, 0, 0)  # 7:00，假设起床时间约 8:00
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         # 强制设置波动边界为 8:15
@@ -152,7 +154,7 @@ class TestCharacterLifePhase1:
         """起床边界槽位在窗口内触发"""
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._today_jittered_start = 8 * 60 + 15
@@ -170,7 +172,7 @@ class TestCharacterLifePhase1:
         """睡觉边界槽位在窗口内触发"""
         fake_now = datetime(2024, 1, 1, 21, 50, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._today_jittered_start = 8 * 60 + 15
@@ -187,7 +189,7 @@ class TestCharacterLifePhase1:
         """边界槽位当天不重复触发（通过 _fired_slot_indices）"""
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._today_jittered_start = 8 * 60 + 15
@@ -205,7 +207,7 @@ class TestCharacterLifePhase1:
         """日常槽位生成在约束区间内，与边界保持间隔"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         # 波动边界 8:00-22:00，日常槽位在 constrained_start/end 内
@@ -228,7 +230,7 @@ class TestCharacterLifePhase1:
 
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         # 昨天没有任何事件
@@ -252,7 +254,7 @@ class TestCharacterLifePhase1:
         """跨天且昨晚有 good_night 事件时不触发兜底"""
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         # DB 返回昨晚有 good_night 事件

@@ -12,10 +12,30 @@ class SendAction:
     group_id: str
     content: str
     delay_seconds: float = 0.0  # Pipeline 可设置, Port._execute_background 读取并执行
+    skip_history_record: bool = False  # 是否跳过 adapter 层历史记录
 
 
 class MessageStage(ABC):
-    """转换 SendAction 元数据, 不执行 I/O"""
+    """转换 SendAction 元数据, 不执行 I/O
+
+    实现样例：
+
+        class TokenBudgetStage(MessageStage):
+            def __init__(self, max_tokens: int):
+                self.max_tokens = max_tokens
+
+            async def process(self, actions):
+                for a in actions:
+                    while estimate_tokens(a.content) > self.max_tokens:
+                        a.content = a.content[:-1]
+                return actions
+
+    阶段约束：
+      - 不做 I/O（不发消息、不读数据库），只修改 ``SendAction`` 字段
+      - 必须就地或返回新列表，不抛异常打断流水线
+      - 阶段之间无显式协议依赖，但写入 ``content`` / ``delay_seconds``
+        / ``skip_history_record`` 时应能容忍前序阶段已修改
+    """
 
     @abstractmethod
     async def process(self, actions: List[SendAction]) -> List[SendAction]:

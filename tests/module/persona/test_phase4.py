@@ -308,14 +308,11 @@ class TestRollDiceTool:
     @pytest.mark.asyncio
     async def test_roll_dice_simple(self):
         """测试简单掷骰"""
-        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
+        from plugins.DicePP.module.persona.tools.context import ToolContext
 
-        # 使用模拟的 orchestrator 来测试掷骰方法
-        class MockOrchestrator:
-            _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
-
-        mock = MockOrchestrator()
-        result = await mock._handle_roll_dice("1d20")
+        ctx = ToolContext(user_id="u1", group_id="")
+        result = await roll_dice_executor({"expression": "1d20"}, ctx)
 
         import re
         assert "掷骰" in result
@@ -328,13 +325,11 @@ class TestRollDiceTool:
     @pytest.mark.asyncio
     async def test_roll_dice_with_modifier(self):
         """测试带修饰符的掷骰"""
-        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
+        from plugins.DicePP.module.persona.tools.context import ToolContext
 
-        class MockOrchestrator:
-            _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
-
-        mock = MockOrchestrator()
-        result = await mock._handle_roll_dice("2d6+3")
+        ctx = ToolContext(user_id="u1", group_id="")
+        result = await roll_dice_executor({"expression": "2d6+3"}, ctx)
 
         assert "掷骰" in result
         # 结果应该包含计算后的值（5-15）
@@ -343,39 +338,33 @@ class TestRollDiceTool:
     @pytest.mark.asyncio
     async def test_roll_dice_invalid_expression(self):
         """测试无效表达式"""
-        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
+        from plugins.DicePP.module.persona.tools.context import ToolContext
 
-        class MockOrchestrator:
-            _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
-
-        mock = MockOrchestrator()
-        result = await mock._handle_roll_dice("invalid")
+        ctx = ToolContext(user_id="u1", group_id="")
+        result = await roll_dice_executor({"expression": "invalid"}, ctx)
 
         assert "失败" in result or "无效" in result
 
     @pytest.mark.asyncio
     async def test_roll_dice_empty_expression(self):
         """测试空表达式"""
-        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
+        from plugins.DicePP.module.persona.tools.context import ToolContext
 
-        class MockOrchestrator:
-            _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
-
-        mock = MockOrchestrator()
-        result = await mock._handle_roll_dice("")
+        ctx = ToolContext(user_id="u1", group_id="")
+        result = await roll_dice_executor({"expression": ""}, ctx)
 
         assert "无效" in result or "失败" in result
 
     @pytest.mark.asyncio
     async def test_roll_dice_too_long(self):
         """测试过长的表达式"""
-        from plugins.DicePP.module.persona.orchestrator import PersonaOrchestrator
+        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
+        from plugins.DicePP.module.persona.tools.context import ToolContext
 
-        class MockOrchestrator:
-            _handle_roll_dice = PersonaOrchestrator._handle_roll_dice
-
-        mock = MockOrchestrator()
-        result = await mock._handle_roll_dice("1d20" * 50)  # 很长的表达式
+        ctx = ToolContext(user_id="u1", group_id="")
+        result = await roll_dice_executor({"expression": "1d20" * 50}, ctx)
 
         assert "过长" in result
 

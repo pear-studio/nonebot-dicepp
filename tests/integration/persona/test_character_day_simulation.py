@@ -11,9 +11,10 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
 
-from plugins.DicePP.module.persona.proactive.character_life import (
+from plugins.DicePP.module.persona.life.character_life import (
     CharacterLife, CharacterLifeConfig,
 )
+from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.data.models import CharacterState
@@ -131,7 +132,7 @@ def config():
     return CharacterLifeConfig(
         enabled=True,
         slot_match_window_minutes=15,
-        diary_time="23:30",
+        
         timezone="Asia/Shanghai",
         min_event_interval_minutes=5,
         chain_max_depth=3,
@@ -141,12 +142,15 @@ def config():
 
 @pytest.fixture
 def life(temp_db, mock_event_agent, character, config):
-    return CharacterLife(
+    from unittest.mock import MagicMock
+    life = CharacterLife(
         config=config,
         event_agent=mock_event_agent,
         data_store=temp_db,
         character=character,
     )
+    life.boundary_notifier = MagicMock()
+    return life
 
 
 class TestCharacterDaySimulation:
@@ -165,7 +169,7 @@ class TestCharacterDaySimulation:
         # ── 07:00 起床前，无事件 ──
         fake_now = datetime(2024, 1, 1, 7, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         result = await life.tick()
@@ -220,7 +224,18 @@ class TestCharacterDaySimulation:
         # ── 23:30 日记生成 ──
         fake_now = datetime(2024, 1, 1, 23, 30, 0)
         monkeypatch.setattr(life.data_store, "_wall_now", lambda: fake_now)
-        diary = await life.generate_diary()
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.diary.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        diary_generator = DiaryGenerator(
+            store=life.data_store,
+            event_agent=mock_event_agent,
+            character_name=life.character.name,
+            character_description=life.character.description,
+            config=DiaryConfig( timezone="Asia/Shanghai"),
+        )
+        diary = await diary_generator.generate_diary()
 
         assert diary is not None
         assert "今天喝了咖啡" in diary
@@ -258,7 +273,7 @@ class TestCharacterDaySimulation:
         """跨天且无睡觉事件时触发兜底恢复"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
 

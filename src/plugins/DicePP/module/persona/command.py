@@ -1,22 +1,27 @@
 """
 Persona AI 命令入口
 
-集成 orchestrator 完成对话功能
+集成 persona 模块完成对话功能
 支持白名单访问控制
 """
-from typing import List, Dict, Tuple, Any, Optional
+from typing import List, Dict, Tuple, Any, Optional, Callable
 import json
 import time
 import asyncio
+import logging
+from datetime import timedelta
 
 from core.bot import Bot
 from core.command.user_cmd import UserCommandBase, custom_user_command
-from core.command.bot_cmd import BotSendMsgCommand, BotCommandBase
-from core.communication import PrivateMessagePort, GroupMessagePort, MessageMetaData
+from core.command.bot_cmd import BotCommandBase
+from core.communication import MessageMetaData
 from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FUN
 from utils.logger import dice_log
 
-from .orchestrator import PersonaOrchestrator
+logger = logging.getLogger("persona.command")
+
+from .factory import PersonaApp, create_persona
+from .exceptions import PersonaInitError
 from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.persist_keys import PERSONA_SK_OBSERVATION_BUFFERS
@@ -31,17 +36,24 @@ class PersonaCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)
         self.enabled: bool = False
-        self.orchestrator: PersonaOrchestrator = None
-        self.data_store: PersonaDataStore = None
+        self.app: Optional[PersonaApp] = None
+        self.data_store: Optional[PersonaDataStore] = None
+        self.init_error: Optional[str] = None  # create_persona 抛出的具名异常文本，供 _admin_debug 展示
         self._whitelist_confirm_pending: Dict[str, float] = {}  # user_id -> timestamp
         self._observation_buffers: Dict[str, ObservationBuffer] = {}  # group_id -> buffer
         self._observation_buffers_loaded: bool = False
-        # 主循环在 async 中调用同步 tick() 时，单槽异步任务（避免 orchestrator.tick 慢于 1s 时堆积）
+        # 主循环在 async 中调用同步 tick() 时，单槽异步任务（避免 life.tick 慢于 1s 时堆积）
         self._async_tick_task: Optional[asyncio.Task] = None
         self._async_tick_daily_task: Optional[asyncio.Task] = None
         self._observation_persist_monotonic: float = 0.0
         # 管理员子命令分发器（在 delay_init 后由外部补齐）
         self._admin_handlers: Dict[str, Callable] = {}
+
+    def _require_app(self) -> Optional[str]:
+        """检查 app 和 data_store 是否已初始化，返回错误信息或 None"""
+        if self.app is None or self.data_store is None:
+            return "Persona 模块未初始化"
+        return None
 
     def _register_admin_handlers(self) -> None:
         """注册管理员子命令处理器（在 delay_init 后调用）"""
@@ -73,14 +85,19 @@ class PersonaCommand(UserCommandBase):
         if not self.enabled:
             return ["Persona AI 模块已禁用"]
 
-        # 创建 orchestrator（但不立即初始化，因为需要异步）
-        self.orchestrator = PersonaOrchestrator(self.bot)
-
         # 注册异步初始化任务
-        async def init_orchestrator():
-            success = await self.orchestrator.initialize()
-            if success:
-                self.data_store = self.orchestrator.data_store
+        async def init_persona():
+            try:
+                self.app = await create_persona(self.bot)
+            except PersonaInitError as e:
+                self.init_error = f"{type(e).__name__}: {e}"
+                dice_log(f"[Persona] 模块初始化失败: {self.init_error}")
+                self.app = None
+                self.data_store = None
+                self.enabled = False
+                return []
+            if self.app:
+                self.data_store = self.app.store
                 await self._ensure_observation_buffers_loaded()
                 # 注册消息发送后跨模块通知 hook（先注销旧 hook 再注册，防止热重载后重复）
                 if hasattr(self, "_post_send_hook_unregister"):
@@ -88,12 +105,13 @@ class PersonaCommand(UserCommandBase):
                 self._post_send_hook_unregister = self.bot.add_post_send_hook(self._group_chat_recorder)
                 dice_log(f"[Persona] 模块初始化成功: {config.character_name}")
             else:
-                dice_log(f"[Persona] 模块初始化失败")
+                # config.enabled=False 走这里：禁用而非失败
+                dice_log("[Persona] 模块未启用")
                 self.enabled = False
             return []
 
         self._register_admin_handlers()
-        self.bot.register_task(init_orchestrator, is_async=True, timeout=30)
+        self.bot.register_task(init_persona, is_async=True, timeout=30)
 
         return [f"Persona AI 模块加载中 (角色: {config.character_name})"]
 
@@ -137,33 +155,33 @@ class PersonaCommand(UserCommandBase):
     async def _check_whitelist(self, user_id: str, group_id: str, is_private: bool) -> bool:
         """
         检查用户/群是否在白名单中
-        
+
         Returns:
             True = 允许访问，False = 拒绝访问
         """
         config = self.bot.config.persona_ai
-        
+
         # 白名单功能未启用，允许所有人
         if not config.whitelist_enabled:
             return True
-        
+
         if not self.data_store:
             return False
-        
+
         # 检查是否设置了口令
         code = await self.data_store.get_setting("code")
         if not code:
             # 未设置口令，白名单不激活，允许所有人
             return True
-        
+
         # 私聊：检查用户白名单
         if is_private:
             return await self.data_store.is_user_whitelisted(user_id)
-        
+
         # 群聊：检查群白名单
         if group_id:
             return await self.data_store.is_group_whitelisted(group_id)
-        
+
         return False
 
     async def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
@@ -173,7 +191,7 @@ class PersonaCommand(UserCommandBase):
             if msg_str.strip() == ".ai" or msg_str.strip().startswith(".ai "):
                 return True, False, "status"
             return False, False, None
-        
+
         msg = msg_str.strip()
 
         # 过滤掉单独的 "." 或 "。"（可能是输错了指令）
@@ -201,11 +219,11 @@ class PersonaCommand(UserCommandBase):
             content = msg[3:].strip()
         else:
             content = msg
-        
+
         # 解析命令
         parts = content.split()
         cmd = parts[0] if parts else ""
-        
+
         # .ai join 命令：任何人可在私聊执行
         if cmd == "join":
             if not meta.group_id:  # 仅私聊
@@ -213,7 +231,7 @@ class PersonaCommand(UserCommandBase):
             else:
                 # 群聊中提示私聊
                 return True, False, "join_group_hint"
-        
+
         # .ai admin 命令：仅管理员
         if cmd == "admin":
             if self._is_admin(meta.user_id):
@@ -237,11 +255,11 @@ class PersonaCommand(UserCommandBase):
         # 其余 .ai 命令（含未知子命令 → 自我介绍）：检查白名单
         is_private = not meta.group_id
         whitelisted = await self._check_whitelist(meta.user_id, meta.group_id or "", is_private)
-        
+
         if not whitelisted:
             # 不在白名单，静默忽略（不干扰 TRPG 流程）
             return False, False, None
-        
+
         return True, False, None
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
@@ -276,40 +294,42 @@ class PersonaCommand(UserCommandBase):
         # 特殊提示：群聊中发送 join
         if hint == "join_group_hint":
             response = "请私聊发送此命令"
-            port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
-            return [BotSendMsgCommand(self.bot.account, response, [port])]
-        
+            await self._send(user_id, group_id, response)
+            return []
+
         # 解析命令
         parts = content.split()
         cmd = parts[0] if parts else ""
         args = parts[1:] if len(parts) > 1 else []
-        
+
         # 处理 join 命令
         if cmd == "join" or hint == "join":
             response = await self._handle_join(user_id, args)
-            port = PrivateMessagePort(user_id)
-            return [BotSendMsgCommand(self.bot.account, response, [port])]
-        
+            await self._send(user_id, group_id, response)
+            return []
+
         # 处理 admin 命令
         if cmd == "admin" or hint == "admin":
             response = await self._handle_admin(user_id, group_id, args)
-            port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
-            return [BotSendMsgCommand(self.bot.account, response, [port])]
+            await self._send(user_id, group_id, response)
+            return []
 
         # 处理 profile 命令
         if cmd == "profile":
             response = await self._handle_profile(user_id, group_id)
-            port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
-            return [BotSendMsgCommand(self.bot.account, response, [port])]
-        
+            await self._send(user_id, group_id, response)
+            return []
+
         # 特殊命令处理
         is_at_trigger = meta.to_me and not msg_str.strip().startswith(".ai")
+
+        response = None
 
         if content == "ping":
             response = "pong"
         elif content == "clear":
-            if self.orchestrator:
-                await self.orchestrator.clear_history(user_id, group_id)
+            if self.app:
+                await self.app.chat.clear_history(user_id, group_id)
                 response = "对话历史已清空"
             else:
                 response = "模块未初始化"
@@ -338,9 +358,9 @@ class PersonaCommand(UserCommandBase):
             else:
                 response = self._get_introduction()
         elif is_at_trigger:
-            if self.orchestrator and self.enabled:
+            if self.app and self.enabled:
                 try:
-                    response = await self.orchestrator.chat(
+                    response = await self.app.chat.chat(
                         user_id=user_id,
                         group_id=group_id,
                         message=content,
@@ -356,7 +376,7 @@ class PersonaCommand(UserCommandBase):
                 response = "Persona AI 模块未启用或未初始化"
         else:
             response = self._get_introduction()
-        
+
         # 发送回复（去重命中时 response 为 None，静默不发送）
         if not response:
             return []
@@ -374,41 +394,51 @@ class PersonaCommand(UserCommandBase):
             except Exception as e:
                 dice_log(f"[Persona] 群活跃度更新失败（已忽略）: {e}")
 
-        port = GroupMessagePort(group_id) if group_id else PrivateMessagePort(user_id)
-        cmd = BotSendMsgCommand(self.bot.account, response, [port])
-        # R4: 群聊 @触发 的 assistant 消息已由 orchestrator 持久化，跳过 adapter recorder
-        if group_id:
-            cmd.skip_history_record = True
-        return [cmd]
+        await self._send(user_id, group_id, response)
+        return []
+
+    async def _send(self, user_id: str, group_id: str, content: str) -> None:
+        """通过 MessagePort 发送单条消息"""
+        if self.app and self.app.port:
+            await self.app.port.send_segmented(
+                user_id,
+                group_id,
+                [{"content": content, "skip_history_record": bool(group_id)}],
+            )
+        else:
+            dice_log(
+                f"[Persona] MessagePort 未初始化，丢弃消息: "
+                f"user={user_id}, group={group_id}, content={content[:30]}..."
+            )
 
     async def _handle_join(self, user_id: str, args: List[str]) -> str:
         """处理 join 命令（用户加入白名单）"""
         if not self.data_store:
             return "模块未初始化，请稍后再试"
-        
+
         config = self.bot.config.persona_ai
-        
+
         # 检查白名单功能是否启用
         if not config.whitelist_enabled:
             return "AI 功能暂未开放，请联系管理员"
-        
+
         # 检查是否设置了口令
         code = await self.data_store.get_setting("code")
         if not code:
             return "AI 功能暂未开放，请联系管理员"
-        
+
         # 检查是否已在白名单
         if await self.data_store.is_user_whitelisted(user_id):
             return "你已经在啦~"
-        
+
         # 检查口令
         if not args:
             return "请输入口令: .ai join <口令>"
-        
+
         input_code = args[0]
         if input_code != code:
             return "口令不对哦~"
-        
+
         # 加入白名单
         await self.data_store.add_user_to_whitelist(user_id)
         return "已开启 AI 对话，开始聊天吧！"
@@ -445,6 +475,8 @@ class PersonaCommand(UserCommandBase):
                 ".ai admin pause - 暂停主动消息\n"
                 ".ai admin resume - 恢复主动消息"
             )
+        if err := self._require_app():
+            return err
         subcmd = args[0]
         handler = self._admin_handlers.get(subcmd)
         if handler:
@@ -522,11 +554,13 @@ class PersonaCommand(UserCommandBase):
 
     async def _admin_debug(self, user_id: str, group_id: str, args: List[str]) -> str:
         lines = ["=== Persona AI 调试信息 ==="]
+        if self.init_error:
+            lines.append(f"\n[初始化失败] {self.init_error}")
+        if not self.app:
+            lines.append("\n[状态] 模块未初始化")
+            return "\n".join(lines)
         profile = await self.data_store.get_user_profile(user_id)
-        if self.orchestrator:
-            rel = await self.orchestrator.get_relationship_for_display(user_id, group_id)
-        else:
-            rel = await self.data_store.get_relationship(user_id, group_id)
+        rel = await self._get_relationship_for_display(user_id, group_id)
         lines.append(f"\n当前用户: {user_id}")
         if group_id:
             lines.append(f"当前群组: {group_id}")
@@ -558,8 +592,8 @@ class PersonaCommand(UserCommandBase):
             lines.append(f"  免衰减期: {config.decay_grace_period_hours}h")
             lines.append(f"  衰减率: {config.decay_rate_per_hour}/h")
             lines.append(f"  每日上限: {config.decay_daily_cap}")
-        if self.orchestrator and self.orchestrator.scheduler:
-            scheduler_status = self.orchestrator.scheduler.get_status()
+        if self.app and self.app.life.scheduler:
+            scheduler_status = self.app.life.scheduler.get_status()
             lines.append(f"\n[调度器状态]")
             lines.append(f"  上次主动数: {scheduler_status.get('last_proactive_count', 0)}")
             lines.append(f"  角色活跃中: {'是' if scheduler_status.get('is_character_active') else '否'}")
@@ -592,18 +626,15 @@ class PersonaCommand(UserCommandBase):
             return "用法: .ai admin rel <用户ID> [群组ID]"
         target_user = rel_args[0]
         target_group = rel_args[1] if len(rel_args) > 1 else group_id
-        if self.orchestrator:
-            rel = await self.orchestrator.get_relationship_for_display(target_user, target_group)
-        else:
-            rel = await self.data_store.get_relationship(target_user, target_group)
+        rel = await self._get_relationship_for_display(target_user, target_group)
         profile = await self.data_store.get_user_profile(target_user)
         lines = [f"=== 用户 {target_user} 的关系详情 ==="]
         if target_group:
             lines.append(f"群组: {target_group}")
         if rel:
             lines.extend(self._format_relationship_base(rel))
-            if self.orchestrator and self.orchestrator.character:
-                level, label = rel.get_warmth_level(self.orchestrator.character.get_warmth_labels())
+            if self.app and self.app.chat.character:
+                level, label = rel.get_warmth_level(self.app.chat.character.get_warmth_labels())
                 lines.append(f"  等级: {level} ({label})")
         else:
             lines.append("\n暂无关系记录")
@@ -631,7 +662,10 @@ class PersonaCommand(UserCommandBase):
         target_group = setrel_args[2] if len(setrel_args) > 2 else group_id
         rel = await self.data_store.get_relationship(target_user, target_group)
         if not rel:
-            initial = self.orchestrator.character.extensions.initial_relationship if self.orchestrator and self.orchestrator.character else 30.0
+            initial = (
+                self.app.chat.character.extensions.initial_relationship
+                if self.app and self.app.chat.character else 30.0
+            )
             rel = await self.data_store.init_relationship(target_user, target_group, initial)
         rel.intimacy = new_score
         rel.passion = new_score
@@ -641,15 +675,25 @@ class PersonaCommand(UserCommandBase):
         return f"已设置用户 {target_user} 的好感度为 {new_score:.2f}"
 
     async def _admin_reload(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not self.orchestrator:
+        if not self.app:
             return "模块未初始化"
-        success, msg = await self.orchestrator.reload_character()
-        return f"重载{'成功' if success else '失败'}: {msg}"
+        try:
+            from .character.loader import CharacterLoader
+            new_character = CharacterLoader(self.bot.config.persona_ai.character_path).load(
+                self.bot.config.persona_ai.character_name
+            )
+            if not new_character:
+                return f"无法加载角色卡: {self.bot.config.persona_ai.character_name}"
+            await self.app.update_character(new_character)
+            return f"角色卡已重载: {new_character.name}"
+        except Exception as e:
+            logger.exception("角色卡重载失败")
+            return f"重载失败: {e}"
 
     async def _admin_events(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not self.orchestrator or not self.orchestrator.character:
+        if not self.app or not self.app.chat.character:
             return "角色未加载"
-        char = self.orchestrator.character
+        char = self.app.chat.character
         ext = char.extensions
         lines = [f"=== {char.name} 的事件配置 ==="]
         lines.append(f"\n[基础设置]")
@@ -683,7 +727,6 @@ class PersonaCommand(UserCommandBase):
         return "\n".join(lines)
 
     async def _admin_diary(self, user_id: str, group_id: str, args: List[str]) -> str:
-        from datetime import timedelta
         from .wall_clock import persona_wall_now
         subcmd = args[0]
         wall = persona_wall_now(self.config.timezone)
@@ -712,21 +755,21 @@ class PersonaCommand(UserCommandBase):
         return "\n".join(lines)
 
     async def _admin_pause(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if self.orchestrator and self.orchestrator.scheduler:
-            self.orchestrator.scheduler.config.enabled = False
+        if self.app and self.app.life.scheduler:
+            self.app.life.scheduler.config.enabled = False
             return "已暂停主动消息发送"
         return "调度器未初始化"
 
     async def _admin_resume(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if self.orchestrator and self.orchestrator.scheduler:
-            self.orchestrator.scheduler.config.enabled = True
+        if self.app and self.app.life.scheduler:
+            self.app.life.scheduler.config.enabled = True
             return "已恢复主动消息发送"
         return "调度器未初始化"
 
-    async def _handle_admin_trace(self, user_id: str, args: List[str]) -> str:
+    async def _handle_admin_trace(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self._is_admin(user_id):
             return "权限不足"
-        if not self.data_store or not self.orchestrator.llm_router:
+        if not self.data_store or not self.app.chat.router:
             return "模块未初始化"
         if len(args) < 2:
             return "用法: .ai admin trace <user_id> [full]"
@@ -767,14 +810,14 @@ class PersonaCommand(UserCommandBase):
                 lines.append(f"response_full: {resp_full}")
         return "\n".join(lines)
 
-    async def _handle_admin_stats(self, user_id: str) -> str:
+    async def _handle_admin_stats(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self._is_admin(user_id):
             return "权限不足"
-        if not self.orchestrator.llm_router:
+        if not self.app.chat.router:
             return "模块未初始化"
-        stats = self.orchestrator.llm_router.get_stats()
-        p_percentiles = self.orchestrator.llm_router.get_latency_percentiles("primary")
-        a_percentiles = self.orchestrator.llm_router.get_latency_percentiles("auxiliary")
+        stats = self.app.chat.router.get_stats()
+        p_percentiles = self.app.chat.router.get_latency_percentiles("primary")
+        a_percentiles = self.app.chat.router.get_latency_percentiles("auxiliary")
 
         token_in_total: Optional[int] = None
         token_out_total: Optional[int] = None
@@ -813,7 +856,7 @@ class PersonaCommand(UserCommandBase):
             f"{token_str}"
         )
 
-    async def _handle_admin_errors(self, user_id: str) -> str:
+    async def _handle_admin_errors(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self._is_admin(user_id):
             return "权限不足"
         if not self.data_store:
@@ -841,6 +884,18 @@ class PersonaCommand(UserCommandBase):
         lines.append(f"  最后互动: {rel.last_interaction_at.strftime('%Y-%m-%d %H:%M') if rel.last_interaction_at else '无'}")
         return lines
 
+    async def _get_relationship_for_display(
+        self, user_id: str, group_id: str
+    ) -> Optional[Any]:
+        """读取关系并应用惰性时间衰减（展示用，不写库）"""
+        if not self.data_store:
+            return None
+        rel = await self.data_store.get_relationship(user_id, group_id)
+        if not rel or not self.app or not self.app.chat.decay_calculator or not self.app.chat.character:
+            return rel
+        initial = float(self.app.chat.character.extensions.initial_relationship)
+        return self.app.chat.decay_calculator.effective_relationship(rel, initial)
+
     async def _handle_mute(self, user_id: str, mute: bool) -> str:
         """处理 mute/unmute 命令"""
         if not self.data_store:
@@ -864,25 +919,20 @@ class PersonaCommand(UserCommandBase):
             return "模块未初始化"
 
         profile = await self.data_store.get_user_profile(user_id)
-        if self.orchestrator:
-            rel = await self.orchestrator.get_relationship_for_display(user_id, group_id)
-        else:
-            rel = await self.data_store.get_relationship(user_id, group_id)
+        rel = await self._get_relationship_for_display(user_id, group_id)
 
         lines = ["你的档案"]
 
         if rel:
-            # Get warmth level label
             warmth_level = 0
             warmth_label = "未知"
-            if self.orchestrator and self.orchestrator.character:
-                warmth_level, warmth_label = rel.get_warmth_level(self.orchestrator.character.get_warmth_labels())
+            if self.app and self.app.chat.character:
+                warmth_level, warmth_label = rel.get_warmth_level(self.app.chat.character.get_warmth_labels())
 
             lines.append(f"\n好感度: {warmth_label} (区间 {warmth_level}/6)")
             base_lines = self._format_relationship_base(rel, precision=1)
             lines.extend(base_lines[1:])  # 去掉 [好感度] 标题
 
-            # Calculate trend from recent score events
             try:
                 recent_events = await self.data_store.get_recent_score_events(user_id, group_id, limit=2)
                 if len(recent_events) >= 2:
@@ -902,7 +952,6 @@ class PersonaCommand(UserCommandBase):
             except Exception:
                 lines.append(f"  趋势: → (计算失败)")
 
-            # Calculate days known from earliest message
             try:
                 earliest_time = await self.data_store.get_earliest_message_time(user_id, group_id)
                 if earliest_time:
@@ -915,7 +964,6 @@ class PersonaCommand(UserCommandBase):
             except Exception:
                 lines.append(f"  认识: 1 天")
 
-            # Count interactions
             try:
                 message_count = await self.data_store.count_messages(user_id, group_id)
                 lines.append(f"  互动: {message_count} 次")
@@ -934,10 +982,10 @@ class PersonaCommand(UserCommandBase):
         return "\n".join(lines)
 
     def _get_introduction(self) -> str:
-        if not self.orchestrator or not self.orchestrator.character:
+        if not self.app or not self.app.chat.character:
             char_name = self.bot.config.persona_ai.character_name
             return f"你好，我是 {char_name}。（@ 我来聊天，.ai status 查看状态）"
-        char = self.orchestrator.character
+        char = self.app.chat.character
         parts = [f"你好，我是 {char.name}。"]
         if char.description:
             parts.append(char.description)
@@ -948,13 +996,13 @@ class PersonaCommand(UserCommandBase):
         """获取状态信息"""
         if not self.enabled:
             return "Persona AI 状态: 未启用\n在配置中设置 persona_ai.enabled = true 来启用"
-        
-        if not self.orchestrator:
+
+        if not self.app:
             return "Persona AI 状态: 初始化中..."
-        
+
         config = self.bot.config.persona_ai
-        char_info = self.orchestrator.get_character_info()
-        
+        char = self.app.chat.character
+
         # 检查白名单状态
         whitelist_status = ""
         if config.whitelist_enabled and self.data_store:
@@ -964,18 +1012,18 @@ class PersonaCommand(UserCommandBase):
                 whitelist_status = f"\n白名单: {'已通过' if whitelisted else '未加入（发送 .ai join <口令> 加入）'}"
             else:
                 whitelist_status = "\n白名单: 未激活（所有人可用）"
-        
-        if not char_info:
+
+        if not char:
             return (
                 f"Persona AI 状态: 初始化中...\n"
                 f"角色: {config.character_name}\n"
                 f"主模型: {config.primary_model}"
                 f"{whitelist_status}"
             )
-        
+
         base = (
             f"Persona AI 状态: 已启用\n"
-            f"角色: {char_info.get('name', '未知')}\n"
+            f"角色: {char.name}\n"
             f"主模型: {config.primary_model}\n"
             f"辅助模型: {config.auxiliary_model or config.primary_model}"
             f"{whitelist_status}\n"
@@ -984,8 +1032,8 @@ class PersonaCommand(UserCommandBase):
             f".ai clear - 清空对话历史"
         )
 
-        if self._is_admin(user_id) and self.orchestrator.llm_router:
-            stats = self.orchestrator.llm_router.get_stats()
+        if self._is_admin(user_id) and self.app.chat.router:
+            stats = self.app.chat.router.get_stats()
             p = stats["primary"]
             a = stats["auxiliary"]
             base += (
@@ -1006,7 +1054,6 @@ class PersonaCommand(UserCommandBase):
                 ".ai profile - 查看你的档案",
                 ".ai join <口令> - 加入白名单（私聊）",
             ]
-            # 管理员额外显示调试命令
             if self._is_admin(meta.user_id):
                 lines.append("")
                 lines.append("[管理员调试]")
@@ -1113,13 +1160,17 @@ class PersonaCommand(UserCommandBase):
             )
 
             if should_extract:
-                from .proactive.observation_buffer import ObservationExtractor
+                from .life.observation import ObservationExtractor
 
                 messages = buffer.get_messages_for_extraction()
 
-                if self.orchestrator and self.orchestrator.event_agent:
+                event_agent = None
+                if self.app and self.app.life.scheduler:
+                    event_agent = self.app.life.scheduler.event_agent
+
+                if event_agent:
                     extractor = ObservationExtractor(
-                        event_agent=self.orchestrator.event_agent,
+                        event_agent=event_agent,
                         data_store=self.data_store,
                         config=self.config,
                         prune_observations_keep=self.config.observe_max_records,
@@ -1142,21 +1193,6 @@ class PersonaCommand(UserCommandBase):
         """获取命令描述"""
         return "Persona AI 对话" if self.enabled else "Persona AI 对话（已禁用）"
 
-    def _proactive_messages_to_commands(self, messages: List[Dict]) -> List[BotCommandBase]:
-        cmds: List[BotCommandBase] = []
-        for msg in messages:
-            user_id = msg.get("user_id", "")
-            group_id = msg.get("group_id", "")
-            content = msg.get("content", "")
-
-            if group_id:
-                port = GroupMessagePort(group_id)
-            else:
-                port = PrivateMessagePort(user_id)
-
-            cmds.append(BotSendMsgCommand(self.bot.account, content, [port]))
-        return cmds
-
     def tick(self) -> List[BotCommandBase]:
         """
         每秒调用，驱动主动消息调度器。
@@ -1166,22 +1202,21 @@ class PersonaCommand(UserCommandBase):
 
         语义为 **at-most-once / 单槽**：同一时刻最多一个未完成的异步 tick；更强投递保证需另行设计（如发件箱）。
         """
-        if not self.enabled or not self.orchestrator:
+        if not self.enabled or not self.app:
             return []
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
-            async def _run_tick() -> List[BotCommandBase]:
-                raw = await self.orchestrator.tick()
-                return self._proactive_messages_to_commands(raw)
+            async def _run_tick() -> None:
+                await self.app.life.tick()
 
-            out: List[BotCommandBase] = []
+            # 清理已完成的任务（消费结果，不返回命令）
             t = self._async_tick_task
             if t is not None and t.done():
                 try:
                     if not t.cancelled():
-                        out.extend(t.result())
+                        t.result()
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
@@ -1191,28 +1226,31 @@ class PersonaCommand(UserCommandBase):
 
             if loop.is_running():
                 if self._async_tick_task is None or self._async_tick_task.done():
-                    self._async_tick_task = asyncio.create_task(_run_tick())
-                return out
+                    new_task = asyncio.create_task(_run_tick())
+                    new_task.add_done_callback(self._on_tick_done)
+                    self._async_tick_task = new_task
+                return []
 
-            messages = loop.run_until_complete(self.orchestrator.tick())
-            return self._proactive_messages_to_commands(messages)
+            loop.run_until_complete(self.app.life.tick())
+            return []
         except Exception as e:
             dice_log(f"[Persona] tick 失败: {e}")
             return []
 
     def tick_daily(self) -> List[BotCommandBase]:
         """每天调用，生成日记（异步逻辑通过任务队列在运行中的事件循环里执行）。"""
-        if not self.enabled or not self.orchestrator:
+        if not self.enabled or not self.app:
             return []
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             async def _run_daily() -> None:
-                diary = await self.orchestrator.tick_daily()
+                diary = await self.app.life.tick_daily()
                 if diary:
                     dice_log(f"[Persona] 生成日记: {len(diary)} 字")
 
+            # 清理已完成的任务
             dt = self._async_tick_daily_task
             if dt is not None and dt.done():
                 try:
@@ -1227,16 +1265,42 @@ class PersonaCommand(UserCommandBase):
 
             if loop.is_running():
                 if self._async_tick_daily_task is None or self._async_tick_daily_task.done():
-                    self._async_tick_daily_task = asyncio.create_task(_run_daily())
+                    new_task = asyncio.create_task(_run_daily())
+                    new_task.add_done_callback(self._on_tick_daily_done)
+                    self._async_tick_daily_task = new_task
                 return []
 
-            diary = loop.run_until_complete(self.orchestrator.tick_daily())
+            diary = loop.run_until_complete(self.app.life.tick_daily())
             if diary:
                 dice_log(f"[Persona] 生成日记: {len(diary)} 字")
             return []
         except Exception as e:
             dice_log(f"[Persona] tick_daily 失败: {e}")
             return []
+
+    @staticmethod
+    def _on_tick_done(task: "asyncio.Task") -> None:
+        """tick 任务完成回调：立刻消费 result，缩短异常感知链路。
+
+        完成回调与下一轮 tick 中的 ``done()`` 清理是双保险：
+          - 回调先触发，第一时间记录异常；
+          - 下一轮 tick 仍负责把 ``self._async_tick_task`` 置回 None，
+            释放单槽给新任务。
+        """
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            dice_log(f"[Persona] tick 异步任务失败: {exc}")
+
+    @staticmethod
+    def _on_tick_daily_done(task: "asyncio.Task") -> None:
+        """tick_daily 任务完成回调，语义同 _on_tick_done。"""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            dice_log(f"[Persona] tick_daily 异步任务失败: {exc}")
 
     # ── Phase 4: 用户 LLM Key 配置 ──
 

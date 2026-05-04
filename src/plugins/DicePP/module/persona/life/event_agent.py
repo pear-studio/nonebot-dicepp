@@ -6,7 +6,7 @@ Character Agent: 生成角色对事件的反应
 """
 import asyncio
 from dataclasses import dataclass
-from typing import List, Literal, Optional, TYPE_CHECKING
+from typing import List, Literal, Optional
 from datetime import datetime
 import json
 import logging
@@ -14,15 +14,11 @@ import logging
 from ..llm import ForcedToolError
 from ..llm.router import LLMRouter
 from ..data.models import ModelTier
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
 
-# 模块级默认值常量（与 PersonaConfig 同步）
-_DEFAULT_SHARE_RETRIES = 2
-_DEFAULT_SHARE_TIMEOUT = 60
-_DEFAULT_SHARE_BACKOFF_BASE = 2  # 指数退避基数，用于高峰期 API 限流时降低重试频率
-_DEFAULT_SHARE_MAX_CHARS = 200
 _EVENT_DESCRIPTION_MAX_LEN = 60
 
 logger = logging.getLogger("persona.event_agent")
@@ -275,6 +271,8 @@ class EventGenerationAgent:
                 temperature=0.9,
             )
 
+            # tool-call 输出（generate_with_forced_tool）：args 已是合法 JSON，
+            # 解析失败属真异常，由外层 except 捕获走 fallback。
             args = json.loads(content)
             description = str(args.get("description", "")).strip().strip('"').strip("'")
             if not description:
@@ -415,6 +413,8 @@ class EventGenerationAgent:
                 temperature=0.9,
             )
 
+            # tool-call 输出（generate_with_forced_tool）：args 已是合法 JSON，
+            # 解析失败属真异常，由外层 except 捕获走 fallback。
             args = json.loads(content)
             reaction = str(args.get("reaction", "")).strip().strip('"').strip("'")
             if not reaction:
@@ -691,10 +691,10 @@ class EventGenerationAgent:
             }
         ]
 
-        max_retries = getattr(self.config, 'proactive_share_max_retries', _DEFAULT_SHARE_RETRIES) if self.config else _DEFAULT_SHARE_RETRIES
-        timeout_seconds = getattr(self.config, 'proactive_share_timeout_seconds', _DEFAULT_SHARE_TIMEOUT) if self.config else _DEFAULT_SHARE_TIMEOUT
-        backoff_base = getattr(self.config, 'proactive_share_backoff_base_seconds', _DEFAULT_SHARE_BACKOFF_BASE) if self.config else _DEFAULT_SHARE_BACKOFF_BASE
-        max_chars = getattr(self.config, 'proactive_share_max_chars', _DEFAULT_SHARE_MAX_CHARS) if self.config else _DEFAULT_SHARE_MAX_CHARS
+        max_retries = getattr(self.config, "proactive_share_max_retries", 3) if self.config else 3
+        timeout_seconds = getattr(self.config, "proactive_share_timeout_seconds", 60) if self.config else 60
+        backoff_base = getattr(self.config, "proactive_share_backoff_base_seconds", 2) if self.config else 2
+        max_chars = getattr(self.config, "proactive_share_max_chars", 200) if self.config else 200
 
         max_chars = max(10, max_chars)
 

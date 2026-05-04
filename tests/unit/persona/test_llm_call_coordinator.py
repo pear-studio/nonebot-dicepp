@@ -577,8 +577,8 @@ class TestLLMCallCoordinatorBasics:
         assert r2.value == "r2"
 
     @pytest.mark.asyncio
-    async def test_iteration_exhaustion_calls_on_exhausted(self, coordinator):
-        """超过 MAX_ITERATIONS 后强制退出并调用 on_exhausted"""
+    async def test_iteration_exhaustion_does_not_call_on_exhausted_when_had_success(self, coordinator):
+        """超过 MAX_ITERATIONS 且 had_success=True 时不应调用 on_exhausted"""
         call_count = 0
         on_exhausted_called = False
 
@@ -597,7 +597,39 @@ class TestLLMCallCoordinatorBasics:
             "user:1", "msg", call_fn, continue_on_buffered=True, on_exhausted=on_exhausted
         )
         assert call_count == 5
-        assert on_exhausted_called is True
+        assert on_exhausted_called is False
         # 超过 max_iterations 后仍返回最后一次 call_fn 的结果（last_result_sent=False）
         assert result.status == "success"
         assert result.value == "result_5"
+
+    @pytest.mark.asyncio
+    async def test_on_result_exception_treated_as_sent_to_avoid_duplicate(self, coordinator):
+        """on_result 抛异常时应将 last_result_sent 置 True，
+        避免 max_iterations 强制退出时重复投递（保守策略）。"""
+        call_count = 0
+
+        async def call_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            coordinator._has_buffered["user:dup"] = True
+            return f"result_{call_count}"
+
+        async def on_result(value):
+            raise RuntimeError(f"投递失败 for {value}")
+
+        async def on_exhausted(last_exception=None):
+            return None
+
+        result = await coordinator.submit(
+            "user:dup",
+            "msg",
+            call_fn,
+            continue_on_buffered=True,
+            on_exhausted=on_exhausted,
+            on_result=on_result,
+        )
+        # on_result 始终抛异常，但保守策略下视为已发送，因此最终强制退出时返回 None
+        # （SubmitResult: result is None → status="failed", value=None，避免重复投递）
+        assert call_count == 5
+        assert result.status == "failed"
+        assert result.value is None

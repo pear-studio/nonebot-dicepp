@@ -1,11 +1,12 @@
 """记忆搜索工具"""
 from .context import ToolContext
+from .registry import ToolDef
 
 
-SEARCH_MEMORY_TOOL = {
-    "name": "search_memory",
-    "description": "搜索关于用户或特定话题的记忆，包括用户档案、群聊观察记录、日记等",
-    "parameters": {
+SEARCH_MEMORY_TOOL = ToolDef(
+    name="search_memory",
+    description="搜索关于用户或特定话题的记忆，包括用户档案、群聊观察记录、日记等",
+    parameters={
         "type": "object",
         "properties": {
             "query": {
@@ -33,7 +34,7 @@ SEARCH_MEMORY_TOOL = {
         },
         "required": ["query"],
     },
-}
+)
 
 
 async def search_memory_executor(args: dict, ctx: ToolContext) -> str:

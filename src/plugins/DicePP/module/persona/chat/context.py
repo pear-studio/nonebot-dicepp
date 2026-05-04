@@ -30,6 +30,10 @@ class ContextBuilder:
         self.timezone = timezone
         self.lore_token_budget = lore_token_budget
 
+    def update_character(self, character: Character) -> None:
+        """同步新的角色卡引用"""
+        self.character = character
+
     def build(
         self,
         short_term_history: List[Dict[str, str]],
@@ -44,7 +48,7 @@ class ContextBuilder:
         system_parts = []
 
         # 世界书扫描（按位置分类，为后续 LoreEntry.position 扩展留接口）
-        lore_sections = self._build_lore_text(short_term_history, current_message)
+        lore_sections = self.build_lore_text(short_term_history, current_message)
 
         system_prompt = self._build_system_prompt(user_profile, diary_context, warmth_label, lore_sections)
         system_parts.append(system_prompt)
@@ -65,7 +69,7 @@ class ContextBuilder:
 
         return messages
 
-    def _build_lore_text(
+    def build_lore_text(
         self,
         short_term_history: List[Dict[str, str]],
         current_message: str,
@@ -190,7 +194,7 @@ class ContextBuilder:
             lines.append(f"[{speaker_name}] {msg['content']}")
         return "\n".join(lines)
 
-    def _truncate_by_turns(self, history: List[Dict[str, str]], max_chars: int) -> List[Dict[str, str]]:
+    def truncate_by_turns(self, history: List[Dict[str, str]], max_chars: int) -> List[Dict[str, str]]:
         """按对话轮次截断，从后往前保留完整的 user-assistant 对
 
         避免截断在对话中间，保持上下文完整性。
@@ -224,7 +228,7 @@ class ContextBuilder:
             user_profile=user_profile,
             diary_context=diary_context,
             warmth_label=warmth_label,
-            lore_sections=lore_sections or self._build_lore_text(short_term_history, ""),
+            lore_sections=lore_sections or self.build_lore_text(short_term_history, ""),
         )
         short_term_text = self._format_short_term(short_term_history)
         profile_text = ""
