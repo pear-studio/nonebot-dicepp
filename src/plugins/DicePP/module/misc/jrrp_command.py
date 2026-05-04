@@ -29,8 +29,8 @@ class JrrpCommand(UserCommandBase):
         bot.loc_helper.register_loc_text(LOC_JRRP_LOWER, "\n人品比昨天下降了{delta_percent}%呢...", ".jrrp比昨天值更低时追加的内容,{zrrp}:昨日人品值,{delta}:差值,{delta_percent}:百分比差值")
         bot.loc_helper.register_loc_text(LOC_JRRP_SAME, "\n人品与昨天相同呢。", ".jrrp和昨天相同时追加的内容,{zrrp}:昨日人品值")
         bot.loc_helper.register_loc_text(LOC_JRRP_HIGHER, "\n人品比昨天上升了{delta_percent}%！", ".jrrp比昨天值更低时追加的内容,{zrrp}:昨日人品值,{delta}:差值,{delta_percent}:百分比差值")
-        bot.loc_helper.register_loc_text(LOC_JRRP_MIN, "{name}的今日人品是...你确定要听么..是大凶的{jrrp}哦...", ".jrrp出最小值时返回的内容,{name}:用户名,{jrrp}:今日人品值.")
-        bot.loc_helper.register_loc_text(LOC_JRRP_MAX, "{name}的今日人品是...这是！这是大吉的{jrrp}哦！", ".jrrp出最大值时返回的内容,{name}:用户名,{jrrp}:今日人品值.")
+        bot.loc_helper.register_loc_text(LOC_JRRP_MIN, "{name}的今日人品是:...你确定要听么..是大凶的{jrrp}哦...", ".jrrp出最小值时返回的内容,{name}:用户名,{jrrp}:今日人品值.")
+        bot.loc_helper.register_loc_text(LOC_JRRP_MAX, "{name}的今日人品是:...这是！这是大吉的{jrrp}哦！", ".jrrp出最大值时返回的内容,{name}:用户名,{jrrp}:今日人品值.")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         parse = _JRRP_PARSER.parse(msg_str)
