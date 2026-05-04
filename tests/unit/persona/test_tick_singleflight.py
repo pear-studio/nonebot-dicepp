@@ -18,7 +18,8 @@ async def test_tick_single_flight_does_not_stack_tasks():
 
     cmd = PersonaCommand(bot)
     cmd.enabled = True
-    cmd.orchestrator = MagicMock()
+    cmd.app = MagicMock()
+    cmd.app.life = MagicMock()
 
     started = asyncio.Event()
 
@@ -27,7 +28,7 @@ async def test_tick_single_flight_does_not_stack_tasks():
         await asyncio.sleep(0.2)
         return []
 
-    cmd.orchestrator.tick = slow_tick
+    cmd.app.life.tick = slow_tick
 
     loop = asyncio.get_running_loop()
     assert loop.is_running()
@@ -52,14 +53,15 @@ async def test_tick_daily_single_flight():
 
     cmd = PersonaCommand(bot)
     cmd.enabled = True
-    cmd.orchestrator = MagicMock()
+    cmd.app = MagicMock()
+    cmd.app.life = MagicMock()
 
     gate = asyncio.Event()
 
     async def slow_daily():
         await gate.wait()
 
-    cmd.orchestrator.tick_daily = slow_daily
+    cmd.app.life.tick_daily = slow_daily
 
     cmd.tick_daily()
     await asyncio.sleep(0.05)

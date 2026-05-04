@@ -8,10 +8,11 @@ import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.proactive.character_life import (
+from plugins.DicePP.module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
 )
+from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 
 
@@ -64,19 +65,20 @@ class TestCharacterLifeBasics:
         return CharacterLifeConfig(
             enabled=True,
             slot_match_window_minutes=15,
-            diary_time="23:30",
             timezone="Asia/Shanghai",
             chain_force_extend_once_prob=0.0,
         )
 
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character):
-        return CharacterLife(
+        life = CharacterLife(
             config=config,
             event_agent=mock_event_agent,
             data_store=mock_data_store,
             character=character,
         )
+        life.boundary_notifier = MagicMock()
+        return life
 
     @pytest.mark.asyncio
     async def test_tick_disabled_returns_none(self, life):
@@ -88,7 +90,7 @@ class TestCharacterLifeBasics:
     async def test_tick_generates_slots_on_first_run(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life.character.extensions.daily_events_count = 2
@@ -101,7 +103,7 @@ class TestCharacterLifeBasics:
     async def test_tick_triggers_event_when_time_matches(self, life, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]  # 10:00
@@ -117,7 +119,7 @@ class TestCharacterLifeBasics:
     async def test_tick_no_double_trigger_same_slot(self, life, mock_event_agent, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -131,7 +133,7 @@ class TestCharacterLifeBasics:
     async def test_tick_time_not_match_skips(self, life, mock_event_agent, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(12 * 60, "system")]  # 12:00, diff=120min > 15
@@ -144,7 +146,7 @@ class TestCharacterLifeBasics:
     async def test_ongoing_activities_persisted(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -205,7 +207,7 @@ class TestCharacterLifePersistence:
     async def test_load_state_same_day(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         raw = '{"date": "2024-01-01", "slot_minutes": [480, 720, 960], "fired": [0]}'
@@ -219,7 +221,7 @@ class TestCharacterLifePersistence:
     async def test_load_state_old_day_regenerates(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         raw = '{"date": "2024-01-01", "slot_minutes": [480], "fired": [0]}'
@@ -231,7 +233,7 @@ class TestCharacterLifePersistence:
     async def test_save_state(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(480, "system"), (720, "system")]
@@ -248,7 +250,7 @@ class TestCharacterLifePersistence:
 
 
 class TestCharacterLifeDiary:
-    """测试日记生成"""
+    """测试日记生成（DiaryGenerator —— CharacterLife 已不持有日记逻辑）"""
 
     @pytest.fixture
     def mock_event_agent(self):
@@ -276,40 +278,29 @@ class TestCharacterLifeDiary:
         return store
 
     @pytest.fixture
-    def character(self):
-        ext = PersonaExtensions(initial_relationship=50)
-        return Character(name="测试角色", extensions=ext)
-
-    @pytest.fixture
-    def life(self, mock_event_agent, mock_data_store, character):
-        config = CharacterLifeConfig(enabled=True, timezone="Asia/Shanghai")
-        return CharacterLife(
-            config=config,
+    def diary_generator(self, mock_event_agent, mock_data_store):
+        return DiaryGenerator(
+            store=mock_data_store,
             event_agent=mock_event_agent,
-            data_store=mock_data_store,
-            character=character,
+            character_name="测试角色",
+            character_description="一个温柔的角色",
+            config=DiaryConfig(diary_time="23:30", timezone="Asia/Shanghai"),
         )
 
     @pytest.mark.asyncio
-    async def test_generate_diary_disabled(self, life):
-        life.config.enabled = False
-        result = await life.generate_diary()
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_generate_diary_no_events_skips(self, life, mock_data_store):
+    async def test_generate_diary_no_events_skips(self, diary_generator, mock_data_store):
         mock_data_store.get_daily_events.return_value = []
-        result = await life.generate_diary()
+        result = await diary_generator.generate_diary()
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_generate_diary_success(self, life, mock_event_agent, mock_data_store, monkeypatch):
+    async def test_generate_diary_success(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 23, 30, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.diary.persona_wall_now",
             lambda tz: fake_now,
         )
-        result = await life.generate_diary()
+        result = await diary_generator.generate_diary()
         assert result == "今天过得很充实"
         mock_event_agent.generate_diary.assert_called_once()
         mock_data_store.save_diary.assert_called_once()
@@ -317,29 +308,28 @@ class TestCharacterLifeDiary:
         mock_data_store.prune_diaries.assert_called_once_with(30)
 
     @pytest.mark.asyncio
-    async def test_generate_diary_includes_yesterday_context(self, life, mock_event_agent, mock_data_store, monkeypatch):
+    async def test_generate_diary_includes_yesterday_context(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 23, 30, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.diary.persona_wall_now",
             lambda tz: fake_now,
         )
-        await life.generate_diary()
+        await diary_generator.generate_diary()
         call_kwargs = mock_event_agent.generate_diary.call_args.kwargs
         assert call_kwargs["yesterday_diary"] == "昨天去了公园"
 
     @pytest.mark.asyncio
-    async def test_generate_diary_uses_yesterday_events_at_midnight(self, life, mock_event_agent, mock_data_store, monkeypatch):
+    async def test_generate_diary_uses_yesterday_events_at_midnight(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
         """
         tick_daily 在 00:00 执行，此时新的一天尚无事件，
-        generate_diary 必须获取昨天的事件、前天的日记上下文，
-        并将日记保存到昨天。
+        diary 必须获取昨天的事件、前天的日记上下文，并将日记保存到昨天。
         """
         fake_now = datetime(2024, 1, 2, 0, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.diary.persona_wall_now",
             lambda tz: fake_now,
         )
-        result = await life.generate_diary()
+        result = await diary_generator.generate_diary()
         assert result == "今天过得很充实"
         mock_data_store.get_daily_events.assert_called_once_with("2024-01-01")
         mock_data_store.get_diary.assert_called_once_with("2023-12-31")
@@ -370,7 +360,7 @@ class TestCharacterLifeStatus:
     def test_get_event_status(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(480, "system"), (720, "system")]

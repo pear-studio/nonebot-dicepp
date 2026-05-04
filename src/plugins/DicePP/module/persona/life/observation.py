@@ -18,6 +18,7 @@ import logging
 
 from .event_agent import EventGenerationAgent
 from ..data.store import PersonaDataStore
+from ..utils.json_helpers import safe_json_loads
 
 logger = logging.getLogger("persona.observation")
 
@@ -423,74 +424,14 @@ class ObservationExtractor:
                 temperature=0.7,
             )
 
-            # 解析 JSON 响应（3 级容错，与 scoring_agent 对齐）
-            # TODO: 待提取统一 JSON 容错解析函数到公共模块。
-            # 当前实现已处理字符串转义（in_string/escape 状态跟踪），
-            # 提取统一函数时应以此版本为准。
-            import json
-            import re
-
-            # 尝试 1：直接解析
-            try:
-                observations = json.loads(response.strip())
-                if isinstance(observations, list):
-                    return observations
-                elif isinstance(observations, dict):
-                    return [observations]
-                else:
-                    logger.warning(f"LLM 返回了非列表/字典格式: {response[:100]}")
-                    return []
-            except json.JSONDecodeError:
-                pass
-
-            # 尝试 2：去除 markdown 围栏后解析
-            try:
-                cleaned = re.sub(r'```json\s*|\s*```', '', response, flags=re.DOTALL)
-                cleaned = re.sub(r'^[\s\n]*json\s*', '', cleaned, flags=re.DOTALL)
-                cleaned = cleaned.strip()
-                observations = json.loads(cleaned)
-                if isinstance(observations, list):
-                    return observations
-                elif isinstance(observations, dict):
-                    return [observations]
-            except json.JSONDecodeError:
-                pass
-
-            # 尝试 3：括号计数提取第一个完整 JSON 对象/数组
-            try:
-                for start_char, end_char in [('[', ']'), ('{', '}')]:
-                    start = response.find(start_char)
-                    if start >= 0:
-                        depth = 0
-                        in_string = False
-                        escape = False
-                        for i in range(start, len(response)):
-                            ch = response[i]
-                            if escape:
-                                escape = False
-                                continue
-                            if ch == '\\':
-                                escape = True
-                                continue
-                            if ch == '"':
-                                in_string = not in_string
-                                continue
-                            if not in_string:
-                                if ch == start_char:
-                                    depth += 1
-                                elif ch == end_char:
-                                    depth -= 1
-                                    if depth == 0:
-                                        observations = json.loads(response[start:i+1])
-                                        if isinstance(observations, list):
-                                            return observations
-                                        elif isinstance(observations, dict):
-                                            return [observations]
-                                        break
-            except json.JSONDecodeError:
-                pass
-
-            logger.warning(f"无法解析 LLM 响应为 JSON, 响应: {response[:200]}")
+            # 解析 JSON 响应：自由文本可能含 markdown 围栏，走统一容错
+            observations = safe_json_loads(response, fallback=None, log_prefix="观察提取")
+            if isinstance(observations, list):
+                return observations
+            if isinstance(observations, dict):
+                return [observations]
+            if observations is not None:
+                logger.warning(f"LLM 返回了非列表/字典格式: {response[:100]}")
             return []
 
         except Exception as e:

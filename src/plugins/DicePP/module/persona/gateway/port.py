@@ -1,5 +1,6 @@
 """唯一消息发送出口"""
 import asyncio
+import logging
 from typing import Optional, Callable, List, Dict
 
 from core.bot import Bot
@@ -10,12 +11,14 @@ from .pipeline import MessagePipeline, SendAction
 from ..tools.context import SendPort
 from ..life.protocols import EventSharePort
 
+logger = logging.getLogger("persona.port")
 
-class MessagePort(SendPort, EventSharePort):
+
+class MessagePort(EventSharePort):
     """唯一消息发送出口 — 同时满足 SendPort (tools) 和 EventSharePort (life)
 
-    注意：SendPort 与 EventSharePort 的 send_segmented 签名必须保持同步。
-    修改任一 Protocol 前需同时更新另一个，否则 MessagePort 的行为将取决于 MRO 顺序。
+    EventSharePort 已继承 SendPort，确保工具域与生活域的 send_segmented
+    签名始终一致，消除 MRO 风险。
     """
 
     def __init__(
@@ -38,6 +41,7 @@ class MessagePort(SendPort, EventSharePort):
                 group_id=group_id,
                 content=s["content"],
                 delay_seconds=s.get("delay", 0),
+                skip_history_record=s.get("skip_history_record", False),
             )
             for s in segments
         ]
@@ -55,11 +59,13 @@ class MessagePort(SendPort, EventSharePort):
             if action.delay_seconds > 0:
                 await asyncio.sleep(action.delay_seconds)
             try:
-                await self._send(action.user_id, action.group_id, action.content)
+                await self._send(
+                    action.user_id,
+                    action.group_id,
+                    action.content,
+                    skip_history_record=action.skip_history_record,
+                )
             except Exception as e:
-                import logging
-
-                logger = logging.getLogger("persona.port")
                 logger.exception("后台发送失败")
                 if self._on_delivery_failed:
                     await self._on_delivery_failed(
@@ -69,19 +75,19 @@ class MessagePort(SendPort, EventSharePort):
                         error=str(e),
                     )
 
-    async def _send(self, user_id: str, group_id: str, content: str) -> None:
+    async def _send(
+        self, user_id: str, group_id: str, content: str, skip_history_record: bool = False
+    ) -> None:
+        proxy = getattr(self._bot, "proxy", None)
+        if proxy is None:
+            logger.error("Bot.proxy 未配置，丢弃消息: user=%s group=%s", user_id, group_id)
+            return
+
         if group_id:
             port = GroupMessagePort(group_id)
-            cmd = BotSendMsgCommand(
-                port=port,
-                msg=content,
-                at_list=[],
-            )
         else:
             port = PrivateMessagePort(user_id)
-            cmd = BotSendMsgCommand(
-                port=port,
-                msg=content,
-                at_list=[],
-            )
-        await self._bot.send_command(cmd)
+        cmd = BotSendMsgCommand(self._bot.account, content, [port])
+        if skip_history_record:
+            cmd.skip_history_record = True
+        await proxy.process_bot_command(cmd)

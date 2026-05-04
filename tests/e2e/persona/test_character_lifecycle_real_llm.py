@@ -53,10 +53,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "sr
 
 from DicePP.module.persona.llm.router import LLMRouter
 from DicePP.module.persona.agents.event_agent import EventGenerationAgent
-from DicePP.module.persona.proactive.character_life import (
+from DicePP.module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
 )
+from DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
 from DicePP.module.persona.character.models import Character, PersonaExtensions
 from DicePP.module.persona.data.store import PersonaDataStore
 from DicePP.module.persona.data.models import CharacterState
@@ -77,7 +78,8 @@ def _set_fake_time(hour: int, minute: int) -> None:
     global _fake_now
     _fake_now = datetime(2024, 1, 1, hour, minute, 0)
 
-    import DicePP.module.persona.proactive.character_life as cl
+    import DicePP.module.persona.life.character_life as life_cl
+    import DicePP.module.persona.life.diary as life_diary
     import DicePP.module.persona.proactive.scheduler as sch
     import DicePP.module.persona.proactive.delayed_task_queue as dtq
     import DicePP.module.persona.proactive.observation_buffer as ob
@@ -86,7 +88,7 @@ def _set_fake_time(hour: int, minute: int) -> None:
     import DicePP.module.persona.memory.context_builder as cb
     import DicePP.module.persona.wall_clock as wc
 
-    for mod in (cl, sch, dtq, ob, ds, lr, cb, wc):
+    for mod in (life_cl, life_diary, sch, dtq, ob, ds, lr, cb, wc):
         if hasattr(mod, "persona_wall_now"):
             mod.persona_wall_now = _patched_wall_now
 
@@ -169,17 +171,26 @@ async def _run_full_day_lifecycle() -> dict:
         config = CharacterLifeConfig(
             enabled=True,
             slot_match_window_minutes=15,
-            diary_time="23:30",
+            
             timezone="Asia/Shanghai",
             min_event_interval_minutes=5,
             chain_max_depth=3,
             chain_force_extend_once_prob=0.0,
         )
+        from unittest.mock import MagicMock
         life = CharacterLife(
             config=config,
             event_agent=agent,
             data_store=store,
             character=character,
+        )
+        life.boundary_notifier = MagicMock()
+        diary_generator = DiaryGenerator(
+            store=store,
+            event_agent=agent,
+            character_name=character.name,
+            character_description=character.description,
+            config=DiaryConfig( timezone="Asia/Shanghai"),
         )
 
         # 先触发一次 tick 生成槽位（时间设为边界前，不会触发事件）
@@ -212,7 +223,7 @@ async def _run_full_day_lifecycle() -> dict:
             _set_fake_time(hour, minute)
 
             if desc == "日记生成":
-                diary = await life.generate_diary()
+                diary = await diary_generator.generate_diary()
                 results["diary"] = diary
             else:
                 result = await life.tick()

@@ -210,7 +210,7 @@ class TestContextBuilderSpeakerPrefix:
             {"role": "assistant", "content": "回复", "speaker_name": "我"},
         ]
         # 模拟 orchestrator 层预先截断
-        truncated = builder._truncate_by_turns(history, max_chars=10)
+        truncated = builder.truncate_by_turns(history, max_chars=10)
         messages = builder.build(
             short_term_history=truncated,
             current_message="新消息",

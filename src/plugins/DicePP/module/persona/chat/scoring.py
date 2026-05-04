@@ -4,12 +4,12 @@
 从对话中提取用户档案和好感度变化
 """
 import json
-import re
 from typing import List, Dict, Any, Optional
 import logging
 
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState, ModelTier
 from ..llm.router import LLMRouter
+from ..utils.json_helpers import safe_json_loads
 
 logger = logging.getLogger("persona.scoring")
 
@@ -99,55 +99,11 @@ class ScoringAgent:
         return prompt
 
     def _parse_response(self, response: str) -> tuple[ScoreDeltas, Dict[str, Any]]:
-        """
-        解析 LLM 响应
-
-        TODO: 待提取统一 JSON 容错解析函数到公共模块。
-        当前实现（尝试 3 括号计数）未处理字符串转义，若 JSON 值中包含 '}' 字符
-        会导致计数提前归零、提取截断。life/observation.py 的同名逻辑已处理转义，
-        提取统一函数时应采用带转义处理的版本。
-
-        使用 3 级容错策略：
-        1. 直接解析 JSON
-        2. 去除 markdown 围栏后重试
-        3. 正则提取第一个 {...} 块
-        """
-        # 尝试 1：直接解析
-        try:
-            data = json.loads(response)
-            return self._extract_result(data)
-        except json.JSONDecodeError:
-            pass
-        
-        # 尝试 2：去除 markdown 围栏
-        try:
-            cleaned = re.sub(r'```json\s*|\s*```', '', response, flags=re.DOTALL)
-            cleaned = re.sub(r'^[\s\n]*json\s*', '', cleaned, flags=re.DOTALL)
-            cleaned = cleaned.strip()
-            data = json.loads(cleaned)
-            return self._extract_result(data)
-        except json.JSONDecodeError:
-            pass
-        
-        # 尝试 3：括号计数提取第一个完整 JSON 对象
-        try:
-            start = response.find('{')
-            if start >= 0:
-                depth = 0
-                for i in range(start, len(response)):
-                    if response[i] == '{':
-                        depth += 1
-                    elif response[i] == '}':
-                        depth -= 1
-                        if depth == 0:
-                            data = json.loads(response[start:i+1])
-                            return self._extract_result(data)
-        except json.JSONDecodeError:
-            pass
-        
-        # 全部失败，返回零值
-        logger.warning(f"评分解析失败，返回 zero-delta. raw={response[:200]}")
-        return ScoreDeltas(), {}
+        """解析 LLM 响应（统一走 safe_json_loads 容错）"""
+        data = safe_json_loads(response, fallback=None, log_prefix="评分解析")
+        if not isinstance(data, dict):
+            return ScoreDeltas(), {}
+        return self._extract_result(data)
 
     @staticmethod
     def _safe_float(value: Any, default: float = 0.0) -> float:

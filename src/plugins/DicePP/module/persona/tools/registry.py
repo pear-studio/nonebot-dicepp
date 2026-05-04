@@ -1,8 +1,19 @@
 """工具注册表 — 按 domain 注册/查找/执行"""
+import json
+import logging
 from typing import Dict, List, Callable, Set, Any
 from dataclasses import dataclass
 
 from .context import ToolContext
+
+logger = logging.getLogger("persona.tools")
+
+
+class ToolDomain:
+    """工具域常量"""
+
+    CHAT = "chat"
+    LIFE = "life"
 
 
 @dataclass
@@ -25,7 +36,26 @@ class ToolDef:
 
 
 class ToolRegistry:
-    """工具注册表 — 按 domain 注册，按需注入 LLM 调用"""
+    """工具注册表 — 按 domain 注册，按需注入 LLM 调用
+
+    Domain 语义
+    -----------
+    domain 是一个**调用上下文标签**，用于回答："这个工具应该在什么场景被
+    LLM 看到？"目前的取值：
+
+      - ``chat``  ：用户消息处理路径（``ChatSession._chat_with_tools``）
+        可注入的工具集；典型成员有 ``search_memory``、``search_history``、
+        ``roll_dice``——它们让模型在回复用户时能查档案、查历史、掷骰。
+      - 未来可能扩展 ``life`` / ``proactive`` 等域，区分主动事件路径下
+        允许的工具子集。
+
+    一个工具可以注册到多个域（例如某天 ``roll_dice`` 也想给 life 用），
+    但目前每个工具只在 ``chat`` 域。
+
+    Domain 不是权限边界——执行时不会再校验调用方是否"属于该 domain"，
+    它只是 *声明* 哪些工具会被打包给某条 LLM 路径。权限/安全检查应在
+    executor 内部完成。
+    """
 
     def __init__(self):
         self._tools: Dict[str, ToolDef] = {}  # name → ToolDef
@@ -58,8 +88,6 @@ class ToolRegistry:
         LLMRouter 内部将不同厂商的 tool call 响应标准化为以上格式后再调用
         tool_executor。ToolRegistry 不感知厂商差异。
         """
-        import json
-
         names: Set[str] = set()
         for d in domains:
             names.update(self._domains.get(d, []))
@@ -68,10 +96,30 @@ class ToolRegistry:
             results = []
             for tc in tool_calls:
                 name = tc["name"]
-                if name in names and name in self._executors:
-                    args = json.loads(tc.get("arguments", "{}"))
-                    result = await self._executors[name](args, ctx)
-                    results.append({"tool_call_id": tc["id"], "content": str(result)})
+                if name not in names or name not in self._executors:
+                    logger.warning(
+                        f"工具 {name} 不在请求 domain 或未注册，返回降级响应 "
+                        f"(domains={list(names)[:5]}...)"
+                    )
+                    results.append({
+                        "tool_call_id": tc["id"],
+                        "content": f"工具 {name} 不可用",
+                    })
+                    continue
+                raw_args = tc.get("arguments", "{}")
+                try:
+                    args = json.loads(raw_args)
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        f"工具 {name} 参数解析失败: {e}, raw={str(raw_args)[:200]}"
+                    )
+                    results.append({
+                        "tool_call_id": tc["id"],
+                        "content": "参数解析失败，请重试或检查参数格式",
+                    })
+                    continue
+                result = await self._executors[name](args, ctx)
+                results.append({"tool_call_id": tc["id"], "content": str(result)})
             return results
 
         return executor

@@ -13,7 +13,7 @@ import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock, call
 
-from plugins.DicePP.module.persona.proactive.character_life import (
+from plugins.DicePP.module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
 )
@@ -74,7 +74,7 @@ class TestCharacterLifePhase2:
         return CharacterLifeConfig(
             enabled=True,
             slot_match_window_minutes=15,
-            diary_time="23:30",
+            
             timezone="Asia/Shanghai",
             min_event_interval_minutes=5,
             chain_max_depth=3,
@@ -83,12 +83,15 @@ class TestCharacterLifePhase2:
 
     @pytest.fixture
     def life(self, config, mock_event_agent, mock_data_store, character):
-        return CharacterLife(
+        from unittest.mock import MagicMock
+        life = CharacterLife(
             config=config,
             event_agent=mock_event_agent,
             data_store=mock_data_store,
             character=character,
         )
+        life.boundary_notifier = MagicMock()
+        return life
 
     # ── 2.3 事件-反应链 ──────────────────────────
 
@@ -97,7 +100,7 @@ class TestCharacterLifePhase2:
         """follow_up_action 为空时只生成一个事件"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -115,7 +118,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -139,7 +142,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -168,7 +171,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life.config.chain_force_extend_once_prob = 1.0
@@ -193,7 +196,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life.config.chain_force_extend_once_prob = 1.0
@@ -217,7 +220,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life.config.chain_force_extend_once_prob = 1.0
@@ -243,7 +246,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -271,7 +274,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -298,7 +301,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -323,7 +326,7 @@ class TestCharacterLifePhase2:
         """跨天时意向自动清空"""
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -351,7 +354,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -376,7 +379,7 @@ class TestCharacterLifePhase2:
         """min_event_interval 过大时仅生成边界槽位（wake_up / good_night）"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         # 波动边界约 8:00-22:00，设置 min_interval 为 800 分钟（远超区间长度）
@@ -394,7 +397,7 @@ class TestCharacterLifePhase2:
         """跨天恢复数据库异常时不阻断 tick 继续生成事件（R2 容错路径）"""
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.proactive.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
         # 模拟跨天：last_event_date 是昨天

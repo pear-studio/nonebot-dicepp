@@ -49,7 +49,6 @@ def config():
         miss_min_hours=72,
         miss_min_score=40.0,
         timezone="Asia/Shanghai",
-        share_threshold=0.5,
         share_message_concurrent=3,
         share_max_chars=200,
         share_context_history_limit=5,

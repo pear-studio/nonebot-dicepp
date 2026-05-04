@@ -3,15 +3,17 @@
 
 组合 force / normal 策略生成候选目标；最终发送前的 mute 与最小间隔检查由调度器负责。
 """
-from typing import List, Optional, Set
+from typing import TYPE_CHECKING, List, Optional, Set
 import logging
 
 from .models import ShareTarget
 from ..data.store import PersonaDataStore
 from ..game.decay import DecayCalculator
 from ..character.models import Character
-from core.config.pydantic_models import PersonaConfig
 from .utils import effective_for_proactive
+
+if TYPE_CHECKING:
+    from core.config.pydantic_models import PersonaConfig
 
 logger = logging.getLogger("persona.target_selector")
 
@@ -25,13 +27,17 @@ class TargetSelector:
     def __init__(
         self,
         data_store: PersonaDataStore,
-        bot_config: PersonaConfig,
+        bot_config: "PersonaConfig",
         decay_calculator: Optional[DecayCalculator] = None,
         character: Optional[Character] = None,
     ):
         self.data_store = data_store
         self.bot_config = bot_config
         self._decay_calculator = decay_calculator
+        self._character = character
+
+    def update_character(self, character: Optional[Character]) -> None:
+        """同步新的角色卡引用"""
         self._character = character
         total_force = len(bot_config.proactive_always_send_users) + len(bot_config.proactive_always_send_groups)
         if total_force > FORCE_LIST_WARNING_THRESHOLD:
