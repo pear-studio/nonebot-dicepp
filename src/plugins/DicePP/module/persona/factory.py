@@ -55,23 +55,8 @@ class PersonaApp:
         self.life.update_character(character)
 
 
-async def create_persona(bot: Bot) -> Optional[PersonaApp]:
-    """从 Bot 组装 Persona 模块所有组件
-
-    Returns:
-        PersonaApp 实例；模块禁用时返回 ``None``。
-
-    Raises:
-        PersonaCharacterLoadError: 角色卡加载失败。
-        PersonaConfigError: 必填配置（如 ``primary_api_key``）缺失。
-        PersonaStorageError: 数据库句柄不可用。
-    """
-    config = bot.config.persona_ai
-    if not config.enabled:
-        logger.info("Persona AI 模块已禁用")
-        return None
-
-    # 1. 加载角色卡
+def _load_character(config) -> Character:
+    """加载角色卡"""
     character_loader = CharacterLoader(config.character_path)
     character = character_loader.load(config.character_name)
     if not character:
@@ -79,24 +64,11 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
             f"无法加载角色卡: {config.character_name} (path={config.character_path})"
         )
     logger.info(f"角色卡已加载: {character.name}")
+    return character
 
-    # 2. 初始化 LLM 路由器
-    if not config.primary_api_key:
-        raise PersonaConfigError("未配置主模型 API Key (persona_ai.primary_api_key)")
 
-    llm_router = LLMRouter(
-        primary_api_key=config.primary_api_key,
-        primary_base_url=config.primary_base_url,
-        primary_model=config.primary_model,
-        auxiliary_api_key=config.auxiliary_api_key,
-        auxiliary_base_url=config.auxiliary_base_url,
-        auxiliary_model=config.auxiliary_model,
-        max_concurrent=config.max_concurrent_requests,
-        timeout=config.timeout,
-    )
-    logger.info("LLM 路由器已初始化")
-
-    # 3. 初始化数据存储
+async def _build_store(bot: Bot, config) -> PersonaDataStore:
+    """初始化数据存储"""
     raw_db = getattr(getattr(bot, "db", None), "_db", None)
     if raw_db is None:
         raise PersonaStorageError("数据库未初始化（bot.db 或 bot.db._db 为 None）")
@@ -115,65 +87,84 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     except Exception as e:
         raise PersonaStorageError(f"数据库表初始化失败: {e}") from e
     logger.info("数据存储已初始化")
+    return store
 
-    # 4. 设置 LLMRouter 配额检查依赖
-    llm_router.data_store = store
-    llm_router.config = config
-    llm_router.daily_limit = config.daily_limit
-    llm_router.quota_check_enabled = config.quota_check_enabled
-    llm_router.trace_enabled = config.trace_enabled
-    llm_router.trace_max_age_days = config.trace_max_age_days
 
-    # 5. 评分和上下文构建
-    scoring_agent = ScoringAgent(llm_router)
+def _build_router(config, store: PersonaDataStore) -> LLMRouter:
+    """初始化 LLM 路由器（依赖 store 做配额检查）"""
+    llm_router = LLMRouter(
+        primary_api_key=config.primary_api_key,
+        primary_base_url=config.primary_base_url,
+        primary_model=config.primary_model,
+        auxiliary_api_key=config.auxiliary_api_key,
+        auxiliary_base_url=config.auxiliary_base_url,
+        auxiliary_model=config.auxiliary_model,
+        max_concurrent=config.max_concurrent_requests,
+        timeout=config.timeout,
+        daily_limit=config.daily_limit,
+        quota_check_enabled=config.quota_check_enabled,
+        data_store=store,
+        config=config,
+        trace_enabled=config.trace_enabled,
+        trace_max_age_days=config.trace_max_age_days,
+    )
+    logger.info("LLM 路由器已初始化")
+    return llm_router
+
+
+def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
+    """初始化消息发送端口"""
+    pipeline = MessagePipeline()
+    pipeline.add(TruncateStage(max_chars=2000))
+    port = MessagePort(bot, pipeline=pipeline, on_delivery_failed=store.record_delivery_failure)
+    logger.info("消息发送端口已初始化")
+    return port
+
+
+def _build_chat(
+    store: PersonaDataStore,
+    router: LLMRouter,
+    tool_registry: ToolRegistry,
+    coordinator: LLMCallCoordinator,
+    character: Character,
+    config,
+    decay_calculator: DecayCalculator,
+    port: MessagePort,
+) -> ChatSession:
+    """组装 ChatSession"""
+    scoring_agent = ScoringAgent(router)
     context_builder = ContextBuilder(
         character,
         max_short_term_chars=config.max_short_term_chars,
         timezone=config.timezone,
         lore_token_budget=config.lore_token_budget,
     )
-    logger.info("评分 Agent 和上下文构建器已初始化")
-
-    # 6. 衰减计算器
-    decay_calculator = DecayCalculator(
-        DecayConfig.from_persona(config),
-        timezone_name=config.timezone,
+    chat_config = ChatConfig.from_persona(config)
+    return ChatSession(
+        store=store,
+        router=router,
+        tool_registry=tool_registry,
+        coordinator=coordinator,
+        character=character,
+        config=chat_config,
+        scoring_agent=scoring_agent,
+        context_builder=context_builder,
+        decay_calculator=decay_calculator,
+        port=port,
     )
-    logger.info("衰减计算器已初始化")
 
-    # 7. 工具注册表
-    tool_registry = ToolRegistry()
-    tool_registry.register(ToolDomain.CHAT, SEARCH_MEMORY_TOOL, search_memory_executor)
-    tool_registry.register(
-        ToolDomain.CHAT,
-        SEARCH_HISTORY_TOOL,
-        make_search_history_executor(config.search_chat_history_max_chars),
-    )
-    tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
-    logger.info("工具注册表已初始化")
 
-    # 8. MessagePort（on_delivery_failed 写入聊天记录）
-    pipeline = MessagePipeline()
-    pipeline.add(TruncateStage(max_chars=2000))
-
-    async def on_delivery_failed(user_id, group_id, content, error):
-        try:
-            await store.add_message(user_id, group_id, "assistant", f"[发送失败] {content}")
-        except Exception:
-            logger.exception("on_delivery_failed 二次入库失败")
-
-    port = MessagePort(bot, pipeline=pipeline, on_delivery_failed=on_delivery_failed)
-    logger.info("消息发送端口已初始化")
-
-    # 9. coordinator（chat 和 scheduler 共享）
-    coordinator = LLMCallCoordinator(
-        max_failures=config.proactive_coordinator_max_failures,
-        max_iterations=config.proactive_coordinator_max_iterations,
-    )
-    logger.info("LLM 调用协调器已初始化")
-
-    # 10. 角色生活模拟
-    event_agent = EventGenerationAgent(llm_router, config=config)
+async def _build_life(
+    store: PersonaDataStore,
+    character: Character,
+    config,
+    coordinator: LLMCallCoordinator,
+    port: MessagePort,
+    decay_calculator: DecayCalculator,
+    router: LLMRouter,
+) -> LifeSimulator:
+    """组装 LifeSimulator 及其全部子组件"""
+    event_agent = EventGenerationAgent(router, config=config)
     life_config = CharacterLifeConfig.from_persona(config)
     character_life = CharacterLife(
         config=life_config,
@@ -182,7 +173,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         character=character,
     )
 
-    # 11. 主动消息调度器
     target_selector = TargetSelector(
         data_store=store,
         bot_config=config,
@@ -202,12 +192,10 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     await scheduler.load_persistent_state()
     logger.info("主动消息调度器已初始化")
 
-    # 12. 同步波动边界后加载持久状态
     character_life.set_boundary_receiver(scheduler)
     await character_life.load_persistent_state()
     logger.info("角色生活模拟已初始化")
 
-    # 13. 延迟任务队列
     event_share_queue = EventShareTaskQueue(
         data_store=store,
         share_threshold=config.proactive_event_share_threshold,
@@ -216,7 +204,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("延迟任务队列已初始化")
 
-    # 14. 日记生成器
     diary_config = DiaryConfig(
         diary_time=config.character_life_diary_time,
         timezone=config.timezone,
@@ -228,24 +215,8 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         config=diary_config,
     )
 
-    # 15. ChatSession
-    chat_config = ChatConfig.from_persona(config)
-    chat = ChatSession(
-        store=store,
-        router=llm_router,
-        tool_registry=tool_registry,
-        coordinator=coordinator,
-        character=character,
-        config=chat_config,
-        scoring_agent=scoring_agent,
-        context_builder=context_builder,
-        decay_calculator=decay_calculator,
-        port=port,
-    )
-
-    # 16. LifeSimulator
     life_config_obj = LifeConfig.from_persona(config)
-    life = LifeSimulator(
+    return LifeSimulator(
         store=store,
         character_life=character_life,
         scheduler=scheduler,
@@ -256,6 +227,58 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         port=port,
         decay_calculator=decay_calculator,
     )
+
+
+async def create_persona(bot: Bot) -> Optional[PersonaApp]:
+    """从 Bot 组装 Persona 模块所有组件
+
+    Returns:
+        PersonaApp 实例；模块禁用时返回 ``None``。
+
+    Raises:
+        PersonaCharacterLoadError: 角色卡加载失败。
+        PersonaConfigError: 必填配置（如 ``primary_api_key``）缺失。
+        PersonaStorageError: 数据库句柄不可用。
+    """
+    config = bot.config.persona_ai
+    if not config.enabled:
+        logger.info("Persona AI 模块已禁用")
+        return None
+
+    character = _load_character(config)
+
+    # API Key 前置检查（在 store 初始化之前，保持异常契约）
+    if not config.primary_api_key:
+        raise PersonaConfigError("未配置主模型 API Key (persona_ai.primary_api_key)")
+
+    store = await _build_store(bot, config)
+    router = _build_router(config, store)
+
+    tool_registry = ToolRegistry()
+    tool_registry.register(ToolDomain.CHAT, SEARCH_MEMORY_TOOL, search_memory_executor)
+    tool_registry.register(
+        ToolDomain.CHAT,
+        SEARCH_HISTORY_TOOL,
+        make_search_history_executor(config.search_chat_history_max_chars),
+    )
+    tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
+    logger.info("工具注册表已初始化")
+
+    coordinator = LLMCallCoordinator(
+        max_failures=config.proactive_coordinator_max_failures,
+        max_iterations=config.proactive_coordinator_max_iterations,
+    )
+    logger.info("LLM 调用协调器已初始化")
+
+    decay_calculator = DecayCalculator(
+        DecayConfig.from_persona(config),
+        timezone_name=config.timezone,
+    )
+    logger.info("衰减计算器已初始化")
+
+    port = _build_port(bot, store)
+    chat = _build_chat(store, router, tool_registry, coordinator, character, config, decay_calculator, port)
+    life = await _build_life(store, character, config, coordinator, port, decay_calculator, router)
 
     logger.info("Persona 模块初始化完成")
     return PersonaApp(chat=chat, life=life, store=store, port=port)
