@@ -45,7 +45,7 @@ class DecayConfig:
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "DecayConfig":
-        """从机器人 Persona 配置构造，避免 orchestrator 里手写字段映射。"""
+        """从机器人 Persona 配置构造。"""
         return cls(
             enabled=persona.decay_enabled,
             grace_period_hours=persona.decay_grace_period_hours,

@@ -28,7 +28,7 @@ async def test_tick_single_flight_does_not_stack_tasks():
         await asyncio.sleep(0.2)
         return []
 
-    cmd.app.life.tick = slow_tick
+    cmd.app.tick = slow_tick
 
     loop = asyncio.get_running_loop()
     assert loop.is_running()
@@ -61,7 +61,7 @@ async def test_tick_daily_single_flight():
     async def slow_daily():
         await gate.wait()
 
-    cmd.app.life.tick_daily = slow_daily
+    cmd.app.tick_daily = slow_daily
 
     cmd.tick_daily()
     await asyncio.sleep(0.05)

@@ -24,16 +24,16 @@ from .factory import PersonaApp, create_persona
 from .exceptions import PersonaInitError
 from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
-from .data.persist_keys import PERSONA_SK_OBSERVATION_BUFFERS
-from .life.observation import ObservationBuffer
+from .data.observation_buffer_repository import ObservationBufferRepository
 from .utils.privacy import mask_sensitive_string
-from .gateway.pipeline import make_segment
 from .admin import AdminDispatcher
 
 
 @custom_user_command("PersonaAI", priority=DPP_COMMAND_PRIORITY_DEFAULT, flag=DPP_COMMAND_FLAG_FUN)
 class PersonaCommand(UserCommandBase):
     """Persona AI 命令处理器"""
+
+    _format_relationship_base = staticmethod(AdminDispatcher._format_relationship_base)
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
@@ -42,12 +42,10 @@ class PersonaCommand(UserCommandBase):
         self.data_store: Optional[PersonaDataStore] = None
         self.init_error: Optional[str] = None  # create_persona 抛出的具名异常文本，供 _admin_debug 展示
         self._whitelist_confirm_pending: Dict[str, float] = {}  # user_id -> timestamp
-        self._observation_buffers: Dict[str, ObservationBuffer] = {}  # group_id -> buffer
-        self._observation_buffers_loaded: bool = False
+        self._observation_repo: Optional[ObservationBufferRepository] = None
         # 主循环在 async 中调用同步 tick() 时，单槽异步任务（避免 life.tick 慢于 1s 时堆积）
         self._async_tick_task: Optional[asyncio.Task] = None
         self._async_tick_daily_task: Optional[asyncio.Task] = None
-        self._observation_persist_monotonic: float = 0.0
         # 管理员子命令分发器（在 delay_init 后由外部补齐）
         self._admin_handlers: Dict[str, Callable] = {}
 
@@ -88,7 +86,7 @@ class PersonaCommand(UserCommandBase):
                 return []
             if self.app:
                 self.data_store = self.app.store
-                await self._ensure_observation_buffers_loaded()
+                self._observation_repo = ObservationBufferRepository(self.data_store, config)
                 # 注册消息发送后跨模块通知 hook（先注销旧 hook 再注册，防止热重载后重复）
                 if hasattr(self, "_post_send_hook_unregister"):
                     self._post_send_hook_unregister()
@@ -198,9 +196,13 @@ class PersonaCommand(UserCommandBase):
         # @bot 或 .ai 前缀触发
         if not self._is_persona_trigger(meta, msg):
             # 群聊旁听模式（观察但不回复）— 不应拦截其他命令
-            if meta.group_id and self.config.observe_group_enabled:
-                await self._handle_group_observation(
-                    meta.group_id or "", meta.user_id, self._resolve_display_name(meta), msg_str
+            if meta.group_id and self._observation_repo:
+                await self._observation_repo.handle_observation(
+                    group_id=meta.group_id or "",
+                    user_id=meta.user_id,
+                    display_name=self._resolve_display_name(meta),
+                    msg_str=msg_str,
+                    event_agent=self.app.get_scheduler_event_agent() if self.app else None,
                 )
             return False, False, None
 
@@ -319,7 +321,7 @@ class PersonaCommand(UserCommandBase):
             response = "pong"
         elif content == "clear":
             if self.app:
-                await self.app.chat.clear_history(user_id, group_id)
+                await self.app.clear_chat_history(user_id, group_id)
                 response = "对话历史已清空"
             else:
                 response = "模块未初始化"
@@ -350,7 +352,7 @@ class PersonaCommand(UserCommandBase):
         elif is_at_trigger:
             if self.app and self.enabled:
                 try:
-                    response = await self.app.chat.chat(
+                    response = await self.app.chat_with_user(
                         user_id=user_id,
                         group_id=group_id,
                         message=content,
@@ -389,12 +391,8 @@ class PersonaCommand(UserCommandBase):
 
     async def _send(self, user_id: str, group_id: str, content: str) -> None:
         """通过 MessagePort 发送单条消息"""
-        if self.app and self.app.port:
-            await self.app.port.send_segmented(
-                user_id,
-                group_id,
-                [make_segment(content, group_id)],
-            )
+        if self.app:
+            await self.app.send_message(user_id, group_id, content)
         else:
             dice_log(
                 f"[Persona] MessagePort 未初始化，丢弃消息: "
@@ -443,9 +441,7 @@ class PersonaCommand(UserCommandBase):
             daily_p = (
                 self._async_tick_daily_task is not None and not self._async_tick_daily_task.done()
             )
-            obs_status = None
-            if group_id and group_id in self._observation_buffers:
-                obs_status = self._observation_buffers[group_id].get_status()
+            obs_status = self._observation_repo.get_status(group_id) if self._observation_repo and group_id else None
             return await self.admin_dispatcher._admin_debug(
                 user_id, group_id, args,
                 tick_pending=tick_p, daily_pending=daily_p, observation_status=obs_status,
@@ -482,8 +478,8 @@ class PersonaCommand(UserCommandBase):
         if rel:
             warmth_level = 0
             warmth_label = "未知"
-            if self.app and self.app.chat.character:
-                warmth_level, warmth_label = rel.get_warmth_level(self.app.chat.character.get_warmth_labels())
+            if self.app and self.app.get_character():
+                warmth_level, warmth_label = rel.get_warmth_level(self.app.get_warmth_labels())
 
             lines.append(f"\n好感度: {warmth_label} (区间 {warmth_level}/6)")
             base_lines = self._format_relationship_base(rel, precision=1)
@@ -538,10 +534,10 @@ class PersonaCommand(UserCommandBase):
         return "\n".join(lines)
 
     def _get_introduction(self) -> str:
-        if not self.app or not self.app.chat.character:
+        if not self.app or not self.app.get_character():
             char_name = self.bot.config.persona_ai.character_name
             return f"你好，我是 {char_name}。（@ 我来聊天，.ai status 查看状态）"
-        char = self.app.chat.character
+        char = self.app.get_character()
         parts = [f"你好，我是 {char.name}。"]
         if char.description:
             parts.append(char.description)
@@ -557,7 +553,7 @@ class PersonaCommand(UserCommandBase):
             return "Persona AI 状态: 初始化中..."
 
         config = self.bot.config.persona_ai
-        char = self.app.chat.character
+        char = self.app.get_character()
 
         # 检查白名单状态
         whitelist_status = ""
@@ -588,8 +584,8 @@ class PersonaCommand(UserCommandBase):
             f".ai clear - 清空对话历史"
         )
 
-        if self._is_admin(user_id) and self.app.chat.router:
-            stats = self.app.chat.router.get_stats()
+        if self._is_admin(user_id) and self.app.get_router():
+            stats = self.app.get_router_stats()
             p = stats["primary"]
             a = stats["auxiliary"]
             base += (
@@ -627,129 +623,6 @@ class PersonaCommand(UserCommandBase):
         """.pa 命令已废弃，请使用 .ai admin 子命令"""
         return ".pa 命令已废弃，请使用 .ai admin 子命令"
 
-    async def _ensure_observation_buffers_loaded(self) -> None:
-        if self._observation_buffers_loaded or not self.data_store:
-            return
-        try:
-            raw = await self.data_store.get_setting(PERSONA_SK_OBSERVATION_BUFFERS)
-            if not raw:
-                return
-            try:
-                blob = json.loads(raw)
-            except json.JSONDecodeError:
-                return
-            for gid, payload in blob.items():
-                if not isinstance(payload, dict):
-                    continue
-                try:
-                    self._observation_buffers[gid] = ObservationBuffer.from_persist_dict(
-                        gid,
-                        payload,
-                        initial_threshold=self.config.observe_initial_threshold,
-                        max_threshold=self.config.observe_max_threshold,
-                        min_threshold=self.config.observe_min_threshold,
-                        max_buffer_size=self.config.observe_max_buffer_size,
-                        timezone=self.config.timezone,
-                    )
-                except Exception:
-                    continue
-        finally:
-            self._observation_buffers_loaded = True
-
-    async def _persist_observation_buffers_to_store(self) -> None:
-        if not self.data_store:
-            return
-        data = {gid: buf.to_persist_dict() for gid, buf in self._observation_buffers.items()}
-        await self.data_store.set_setting(
-            PERSONA_SK_OBSERVATION_BUFFERS,
-            json.dumps(data, ensure_ascii=False),
-        )
-
-    async def _maybe_persist_observation_buffers(self, *, force: bool = False) -> None:
-        """节流整表 blob 写入；提取观察后应 force=True。"""
-        interval = 5.0
-        now_m = time.monotonic()
-        if (
-            not force
-            and self._observation_persist_monotonic
-            and (now_m - self._observation_persist_monotonic) < interval
-        ):
-            return
-        await self._persist_observation_buffers_to_store()
-        self._observation_persist_monotonic = now_m
-
-    async def _handle_group_observation(
-        self, group_id: str, user_id: str, display_name: str, msg_str: str
-    ) -> None:
-        """处理群聊观察"""
-        if not self.config.observe_group_enabled or not self.data_store:
-            return
-
-        # 旁听模式群消息也写入共享历史
-        try:
-            await self.data_store.add_group_conversation(
-                group_id=group_id,
-                user_id=user_id,
-                role="user",
-                content=msg_str,
-                display_name=display_name,
-            )
-        except Exception as e:
-            dice_log(f"[Persona] 旁听群消息写入失败: {e}")
-
-        try:
-            await self._ensure_observation_buffers_loaded()
-            should_extract = False
-            try:
-                if group_id not in self._observation_buffers:
-                    self._observation_buffers[group_id] = ObservationBuffer(
-                        group_id=group_id,
-                        initial_threshold=self.config.observe_initial_threshold,
-                        max_threshold=self.config.observe_max_threshold,
-                        min_threshold=self.config.observe_min_threshold,
-                        max_buffer_size=self.config.observe_max_buffer_size,
-                        timezone=self.config.timezone,
-                    )
-
-                buffer = self._observation_buffers[group_id]
-
-                should_extract = buffer.add_message(
-                    user_id=user_id,
-                    nickname=display_name,
-                    content=msg_str,
-                )
-
-                if should_extract:
-                    from .life.observation import ObservationExtractor
-
-                    messages = buffer.get_messages_for_extraction()
-
-                    event_agent = None
-                    if self.app and self.app.life.scheduler:
-                        event_agent = self.app.life.scheduler.event_agent
-
-                    if event_agent:
-                        extractor = ObservationExtractor(
-                            event_agent=event_agent,
-                            data_store=self.data_store,
-                            config=self.config,
-                            prune_observations_keep=self.config.observe_max_records,
-                        )
-                        await extractor.extract_observations(group_id, messages)
-
-                    # 观察触发提取时，更新群内容活跃度（减缓衰减）
-                    if self.config.group_activity_enabled:
-                        try:
-                            await self.data_store.update_group_content(group_id)
-                        except Exception as e:
-                            dice_log(f"[Persona] 群内容活跃度更新失败: {e}")
-
-            finally:
-                await self._maybe_persist_observation_buffers(force=should_extract)
-
-        except Exception as e:
-            dice_log(f"[Persona] 群聊观察失败: {e}")
-
     def get_description(self) -> str:
         """获取命令描述"""
         return "Persona AI 对话" if self.enabled else "Persona AI 对话（已禁用）"
@@ -770,7 +643,7 @@ class PersonaCommand(UserCommandBase):
             loop = asyncio.get_running_loop()
 
             async def _run_tick() -> None:
-                await self.app.life.tick()
+                await self.app.tick()
 
             # 清理已完成的任务（消费结果，不返回命令）
             t = self._async_tick_task
@@ -790,7 +663,7 @@ class PersonaCommand(UserCommandBase):
                     self._async_tick_task = asyncio.create_task(_run_tick())
                 return []
 
-            loop.run_until_complete(self.app.life.tick())
+            loop.run_until_complete(self.app.tick())
             return []
         except Exception as e:
             dice_log(f"[Persona] tick 失败: {e}")
@@ -805,7 +678,7 @@ class PersonaCommand(UserCommandBase):
             loop = asyncio.get_running_loop()
 
             async def _run_daily() -> None:
-                diary = await self.app.life.tick_daily()
+                diary = await self.app.tick_daily()
                 if diary:
                     dice_log(f"[Persona] 生成日记: {len(diary)} 字")
 
@@ -827,7 +700,7 @@ class PersonaCommand(UserCommandBase):
                     self._async_tick_daily_task = asyncio.create_task(_run_daily())
                 return []
 
-            diary = loop.run_until_complete(self.app.life.tick_daily())
+            diary = loop.run_until_complete(self.app.tick_daily())
             if diary:
                 dice_log(f"[Persona] 生成日记: {len(diary)} 字")
             return []
