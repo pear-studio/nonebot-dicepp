@@ -82,7 +82,7 @@ metadata:
    基于: origin/master (<commit_hash>)
    当前分支已切换到: <branch_name>
 
-   可以开始开发了。开发完成后用 /create-pr 创建 Pull Request。
+   可以开始开发了。开发完成后用 /pr-create 创建 Pull Request。
    ```
 
 **Important Notes**
