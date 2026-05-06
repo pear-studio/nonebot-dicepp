@@ -24,15 +24,6 @@ def _cleanup_test_app_dir() -> None:
 
 atexit.register(_cleanup_test_app_dir)
 
-# 跳过旧 orchestrator 集成测试（将在重构任务三迁移到新架构后恢复）
-collect_ignore = [
-    "integration/persona/test_coordinator_e2e.py",
-    "integration/persona/test_orchestrator_chat.py",
-    "integration/persona/test_orchestrator_lifecycle.py",
-    "unit/persona/test_orchestrator_context_builder.py",
-    "unit/persona/test_orchestrator_tick.py",
-]
-
 # Add DicePP source path to sys.path
 dicepp_path = Path(__file__).parent.parent / "src" / "plugins" / "DicePP"
 if str(dicepp_path) not in sys.path:
