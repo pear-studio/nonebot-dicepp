@@ -37,7 +37,7 @@ from ..tools.registry import ToolRegistry, ToolDomain
 from ..tools.context import ToolContext
 from ..llm.coordinator import LLMCallCoordinator
 from ..gateway.port import MessagePort
-from .hooks import ChatHooks
+from ..gateway.pipeline import make_segment
 from .billing import BillingPolicy
 
 if TYPE_CHECKING:
@@ -88,8 +88,6 @@ class ChatConfig:
 class ChatSession:
     """对话会话管理器 — 负责单轮/多轮对话、工具调用、评分、关系更新
 
-    钩子契约与设计权衡（包括为何 life 域不开放钩子）见
-    ``chat/hooks.py`` 文件头 docstring。
     """
 
     DIGEST_MAX_MESSAGES = 6
@@ -107,7 +105,6 @@ class ChatSession:
         context_builder: ContextBuilder,
         decay_calculator: Optional[DecayCalculator] = None,
         port: Optional[MessagePort] = None,
-        hooks: Optional[ChatHooks] = None,
     ):
         self.store = store
         self.router = router
@@ -119,7 +116,6 @@ class ChatSession:
         self.context_builder = context_builder
         self.decay_calculator = decay_calculator
         self.port = port
-        self.hooks = hooks or ChatHooks()
         self._pending_messages: Dict[str, deque] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}
         self._billing = BillingPolicy(router)
@@ -151,11 +147,6 @@ class ChatSession:
         expired = [k for k, v in self._last_messages.items() if now - v[1] > 60]
         for k in expired:
             self._last_messages.pop(k, None)
-
-        # 钩子：前置拦截
-        hook_result = await self.hooks.on_before_chat(user_id, group_id, message)
-        if hook_result is not None:
-            return hook_result
 
         try:
             if group_id:
@@ -223,8 +214,7 @@ class ChatSession:
             raise
         except Exception as exc:
             logger.exception("对话处理失败")
-            error_reply = await self.hooks.on_error(user_id, group_id, exc)
-            return error_reply or "抱歉，我出错了，请稍后再试..."
+            return "抱歉，我出错了，请稍后再试..."
 
     async def clear_history(self, user_id: str, group_id: str) -> None:
         """清空对话历史"""
@@ -239,11 +229,6 @@ class ChatSession:
         current_message = "\n".join(messages) if messages else ""
 
         messages_for_llm = await self._build_messages(user_id, group_id, current_message)
-
-        # 钩子：上下文构建后
-        messages_for_llm = await self.hooks.on_after_context_built(
-            user_id, group_id, messages_for_llm
-        )
 
         if self.config.tools_enabled:
             logger.debug(f"对话走 tools 路径: user={user_id}, tools_enabled=true")
@@ -288,7 +273,7 @@ class ChatSession:
             await self.port.send_segmented(
                 user_id,
                 group_id,
-                [{"content": result, "skip_history_record": bool(group_id)}],
+                [make_segment(result, group_id)],
             )
         else:
             logger.warning(
@@ -330,15 +315,7 @@ class ChatSession:
         if result.status == "success":
             # 最终轮计费：on_result 只覆盖中间轮，最终轮通过 success 路径扣费。
             await self._billing.charge(user_id)
-            # 钩子：发送前
-            final = await self.hooks.on_before_send(user_id, group_id, result.value)
-            if final is None:
-                logger.info(
-                    f"on_before_send 返回 None，跳过默认发送 "
-                    f"(user={user_id}, group={group_id})"
-                )
-                return None  # 钩子已处理，不再走默认发送
-            return final
+            return result.value
         return fallback_response if fallback_response is not None else None
 
     # ── 工具调用 ──────────────────────────────────────────────

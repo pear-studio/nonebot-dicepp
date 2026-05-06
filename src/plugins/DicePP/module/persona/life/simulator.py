@@ -13,6 +13,7 @@ from ..data.models import RelationshipState, ScoreEvent
 from ..character.models import Character
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now
+from ..gateway.pipeline import make_segment
 from .proactive_scheduler import ProactiveScheduler
 from .event_share_queue import EventShareTaskQueue
 from .protocols import EventSharePort
@@ -231,5 +232,5 @@ class LifeSimulator:
         await self.port.send_segmented(
             user_id,
             group_id,
-            [{"content": content, "skip_history_record": bool(group_id)}],
+            [make_segment(content, group_id)],
         )
