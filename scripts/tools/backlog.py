@@ -74,12 +74,10 @@ class BacklogItem:
 
 
 def _resolve_path(path: Path | str | None) -> Path:
+    """Return backlog path. Relative paths are resolved against cwd."""
     if path is None:
         return BACKLOG_PATH
-    p = Path(path)
-    if p.is_absolute():
-        return p
-    return p
+    return Path(path)
 
 
 def _today() -> str:
@@ -87,6 +85,8 @@ def _today() -> str:
 
 
 def _gen_id(module: str, title: str, problem: str) -> str:
+    """Generate a backlog ID. Collision is possible if the same module/title/problem
+    is added within the same second; the duplicate guard in cmd_add handles this."""
     timestamp = datetime.now(timezone.utc).strftime("%y%m%d%H%M%S")
     payload = f"{module}:{title}:{problem}:{timestamp}"
     h = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:6]
@@ -288,7 +288,10 @@ def cmd_batch_add(args):
     path = _resolve_path(args.file)
 
     if args.payload_file:
-        payload_text = Path(args.payload_file).read_text(encoding="utf-8")
+        if args.payload_file == "-":
+            payload_text = sys.stdin.read()
+        else:
+            payload_text = Path(args.payload_file).read_text(encoding="utf-8")
     elif args.payload:
         payload_text = args.payload
     else:

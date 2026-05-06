@@ -86,34 +86,6 @@ class TestAdd:
 
 
 class TestBatchAdd:
-    def test_batch_add(self, tmp_dir):
-        backlog = tmp_dir / "backlog.md"
-        payload = """Module: roll
-Title: Batch A
-Source: review-260506-0000-roll.md / R2
-Problem: p1
-Trigger: t1
-Reason: r1
-<<<<END>>>
-Module: persona
-Title: Batch B
-Source: chat
-Problem: p2
-Trigger: t2
-Reason: r2
-<<<<END>>>
-"""
-        rc, out, err = run(
-            "--file", str(backlog),
-            "batch-add",
-            "--payload-file", "-",
-            input_text=payload,
-        )
-        # Note: subprocess input only works when stdin is explicitly wired,
-        # our run() helper supports input_text.
-        # But argparse nargs='?' for payload may read stdin directly,
-        # so let's use a temp file instead to be safe.
-
     def test_batch_add_via_file(self, tmp_dir):
         backlog = tmp_dir / "backlog.md"
         payload_file = tmp_dir / "payload.txt"
