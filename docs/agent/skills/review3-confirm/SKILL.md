@@ -33,14 +33,15 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    **分支 A — 正常回复（采纳/部分采纳/不采纳）**
    - Reviewer 可自行裁定时：
      - Defender 采纳/部分采纳 → `已共识·实施`
-     - Defender 不采纳且理由成立 → `已共识·存档`（无需代码改动）
+     - Defender 不采纳且理由成立，且该问题**永远不需要做** → `已共识·否决`（无需代码改动）
+     - Defender 不采纳且理由成立，但该问题**当前 scope 不做、将来要做** → `已共识·延后`（无需代码改动，归档到 backlog）
      - Defender 不采纳但理由不足 → 进入分支 B
    - Reviewer 无法自行裁定时 → 进入分支 B
 
    **分支 B — 真实分歧，当场向用户发起仲裁**，不得跳过：
    1. 向用户展示：Reviewer 立场 / Defender 立场 / 分歧焦点（一句话）
    2. 请用户表态：支持 Reviewer / 支持 Defender / 自定义方案
-   3. 等待用户回复，记入 `裁决记录`，按用户决定标 `已共识·实施` 或 `已共识·存档`
+   3. 等待用户回复，记入 `裁决记录`，按用户决定标 `已共识·实施`、`已共识·否决` 或 `已共识·延后`
 
    **分支 C — Reply 评估为 `待澄清`**
    - Defender 表示看不懂该 Review，需要更多背景
@@ -62,13 +63,32 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    Content:
    - 评估: 用户裁决
    - 裁决记录: ...
-   - 共识状态: 已共识·存档
+   - 共识状态: 已共识·延后
+   - 触发条件: 当 X 重构时一并处理
+   - 暂缓原因: 当前 PR scope 外
    <<<END>>>
    EOF
    ```
-6. 写入完成后，检查是否存在 `需补充回复` 条目：
+6. 自动归档 `已共识·延后` 条目到 backlog：
+   - 扫描所有 `共识状态: 已共识·延后`（含 review0 产出的"用户明确·延后"）的 Rn
+   - 提取 module（从 review 文档名推断）、title、source、problem、trigger、reason
+   - 在上下文中构造 payload，**一次**调用 `backlog.py batch-add`：
+     ```bash
+     python scripts/tools/backlog.py batch-add <<'EOF'
+     Module: persona
+     Title: ...
+     Source: review-yymmdd-hhmm-slug.md / Rn
+     Problem: ...
+     Trigger: ...
+     Reason: ...
+     <<<END>>>
+     EOF
+     ```
+   - 用返回的 ID 列表，**一次** `review_record.py batch-update` 把 `已归档: B-...` 写回每个对应 Rn 的 Confirm 块
+7. 写入完成后，检查是否存在 `需补充回复` 条目：
    - **有** → 向用户明确报告哪些 Rn 需 Defender 补充回复，提示运行 `review2-reply`，**本轮到此为止**
    - **无** → 提示下一步：`review4-execute <文件名>`
+   - 同时汇报本次归档结果：`归档 N 条到 backlog: B-...`
 
 ## Confirm 子块格式
 
@@ -78,15 +98,20 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 - 补充意见: ...（可选）
 - 澄清内容: ...（仅 待澄清 时：针对 Defender 困惑点的解答，供其重新回复）
 - 裁决记录: ...（仅用户裁决时：用户决定及简要理由）
-- 共识状态: 已共识·实施 / 已共识·存档 / 需补充回复
+- 共识状态: 已共识·实施 / 已共识·延后 / 已共识·否决 / 需补充回复
+- 触发条件: ...（仅 已共识·延后 必填）
+- 暂缓原因: ...（仅 已共识·延后 必填）
+- 已归档: B-...（仅 已共识·延后，由脚本自动回填）
 ```
 
 ## 约束
 
 - 只修改 review 文档，不改业务代码
-- 本阶段输出的 `共识状态` 只允许三种值：`已共识·实施` / `已共识·存档` / `需补充回复`，禁止输出旧的 `已共识` 或 `待裁决`
+- 本阶段输出的 `共识状态` 只允许四种值：`已共识·实施` / `已共识·延后` / `已共识·否决` / `需补充回复`，禁止输出旧的 `已共识` 或 `待裁决`
+- `已共识·延后` 必须填写 `触发条件` 和 `暂缓原因`，缺一不可
 - `需补充回复` 条目不得进入 review4-execute，必须通知用户让 Defender 先补充回复
 - 分歧仲裁必须当场闭环，不得遗留
+- `已共识·延后` 必须在本阶段自动归档到 backlog，不得遗留到 review5
 
 ## 输出
 
