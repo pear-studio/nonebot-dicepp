@@ -53,6 +53,8 @@ class AdminDispatcher:
         handler = getattr(self, f"_admin_{subcmd}", None)
         if handler is None and subcmd in ("trace", "stats", "errors"):
             handler = getattr(self, f"_handle_admin_{subcmd}", None)
+        if handler is None and subcmd in ("today", "yesterday", "diary"):
+            handler = getattr(self, "_admin_diary", None)
         if handler:
             return await handler(user_id, group_id, args)
         return "未知的管理员命令"
@@ -205,8 +207,8 @@ class AdminDispatcher:
             lines.append(f"  免衰减期: {config.decay_grace_period_hours}h")
             lines.append(f"  衰减率: {config.decay_rate_per_hour}/h")
             lines.append(f"  每日上限: {config.decay_daily_cap}")
-        if self.app and self.app.life.scheduler:
-            scheduler_status = self.app.life.scheduler.get_status()
+        if self.app and self.app.get_scheduler():
+            scheduler_status = self.app.get_scheduler_status()
             lines.append(f"\n[调度器状态]")
             lines.append(f"  上次主动数: {scheduler_status.get('last_proactive_count', 0)}")
             lines.append(f"  角色活跃中: {'是' if scheduler_status.get('is_character_active') else '否'}")
@@ -240,8 +242,8 @@ class AdminDispatcher:
             lines.append(f"群组: {target_group}")
         if rel:
             lines.extend(self._format_relationship_base(rel))
-            if self.app and self.app.chat.character:
-                level, label = rel.get_warmth_level(self.app.chat.character.get_warmth_labels())
+            if self.app and self.app.get_character():
+                level, label = rel.get_warmth_level(self.app.get_warmth_labels())
                 lines.append(f"  等级: {level} ({label})")
         else:
             lines.append("\n暂无关系记录")
@@ -268,10 +270,7 @@ class AdminDispatcher:
         target_group = setrel_args[2] if len(setrel_args) > 2 else group_id
         rel = await self.data_store.get_relationship(target_user, target_group)
         if not rel:
-            initial = (
-                self.app.chat.character.extensions.initial_relationship
-                if self.app and self.app.chat.character else 30.0
-            )
+            initial = self.app.get_initial_relationship() if self.app else 30.0
             rel = await self.data_store.init_relationship(target_user, target_group, initial)
         rel.intimacy = new_score
         rel.passion = new_score
@@ -297,9 +296,9 @@ class AdminDispatcher:
             return f"重载失败: {e}"
 
     async def _admin_events(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not self.app or not self.app.chat.character:
+        if not self.app or not self.app.get_character():
             return "角色未加载"
-        char = self.app.chat.character
+        char = self.app.get_character()
         ext = char.extensions
         lines = [f"=== {char.name} 的事件配置 ==="]
         lines.append(f"\n[基础设置]")
@@ -361,21 +360,21 @@ class AdminDispatcher:
         return "\n".join(lines)
 
     async def _admin_pause(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if self.app and self.app.life.scheduler:
-            self.app.life.scheduler.config.enabled = False
+        if self.app and self.app.get_scheduler():
+            self.app.pause_scheduler()
             return "已暂停主动消息发送"
         return "调度器未初始化"
 
     async def _admin_resume(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if self.app and self.app.life.scheduler:
-            self.app.life.scheduler.config.enabled = True
+        if self.app and self.app.get_scheduler():
+            self.app.resume_scheduler()
             return "已恢复主动消息发送"
         return "调度器未初始化"
 
     async def _handle_admin_trace(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self._is_admin(user_id):
             return "权限不足"
-        if not self.data_store or not self.app.chat.router:
+        if not self.data_store or not self.app.get_router():
             return "模块未初始化"
         if len(args) < 2:
             return "用法: .ai admin trace <user_id> [full]"
@@ -419,11 +418,11 @@ class AdminDispatcher:
     async def _handle_admin_stats(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self._is_admin(user_id):
             return "权限不足"
-        if not self.app.chat.router:
+        if not self.app.get_router():
             return "模块未初始化"
-        stats = self.app.chat.router.get_stats()
-        p_percentiles = self.app.chat.router.get_latency_percentiles("primary")
-        a_percentiles = self.app.chat.router.get_latency_percentiles("auxiliary")
+        stats = self.app.get_router_stats()
+        p_percentiles = self.app.get_router_latency_percentiles("primary")
+        a_percentiles = self.app.get_router_latency_percentiles("auxiliary")
 
         token_in_total: Optional[int] = None
         token_out_total: Optional[int] = None
@@ -500,7 +499,7 @@ class AdminDispatcher:
         if not self.data_store:
             return None
         rel = await self.data_store.get_relationship(user_id, group_id)
-        if not rel or not self.app or not self.app.chat.decay_calculator or not self.app.chat.character:
+        if not rel or not self.app or not self.app.get_decay_calculator() or not self.app.get_character():
             return rel
-        initial = float(self.app.chat.character.extensions.initial_relationship)
-        return self.app.chat.decay_calculator.effective_relationship(rel, initial)
+        initial = self.app.get_initial_relationship()
+        return self.app.effective_relationship(rel, initial)

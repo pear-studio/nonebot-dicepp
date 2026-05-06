@@ -79,7 +79,7 @@ def _validate_params(args: dict, group_id: str) -> Optional[str]:
 
 
 def _format_results(results, max_chars: int = 200) -> str:
-    """格式化检索结果为纯文本（与 orchestrator 等价）"""
+    """格式化检索结果为纯文本"""
     # 构建参与者映射（用匿名标识替换真实 user_id；基于 user_id 排序保证确定性）
     participants: Dict[str, str] = {}
     uids = sorted({msg.user_id for msg in results if msg.role != "assistant"})

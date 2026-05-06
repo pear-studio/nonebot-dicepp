@@ -2,7 +2,7 @@
 
 负责从 Bot 组装所有依赖，创建 ChatSession / LifeSimulator / MessagePort。
 """
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 import logging
 
@@ -20,7 +20,7 @@ from .exceptions import (
     PersonaStorageError,
 )
 from .game.decay import DecayCalculator, DecayConfig
-from .gateway.pipeline import MessagePipeline, TruncateStage
+from .gateway.pipeline import MessagePipeline, TruncateStage, make_segment
 from .gateway.port import MessagePort
 from .life.character_life import CharacterLife, CharacterLifeConfig
 from .life.diary import DiaryGenerator, DiaryConfig
@@ -49,10 +49,95 @@ class PersonaApp:
     store: PersonaDataStore
     port: MessagePort
 
+    # ── 角色卡 ────────────────────────────────────────────────
+
     async def update_character(self, character: Character) -> None:
         """统一传播新的角色卡到所有子系统。"""
         self.chat.update_character(character)
         self.life.update_character(character)
+
+    def get_character(self) -> Optional[Character]:
+        return self.chat.character
+
+    def get_warmth_labels(self) -> List[str]:
+        char = self.chat.character
+        return char.get_warmth_labels() if char else []
+
+    def get_initial_relationship(self) -> float:
+        char = self.chat.character
+        if char and char.extensions:
+            return float(char.extensions.initial_relationship)
+        return 30.0
+
+    # ── 对话 ──────────────────────────────────────────────────
+
+    async def clear_chat_history(self, user_id: str, group_id: str) -> None:
+        await self.chat.clear_history(user_id, group_id)
+
+    async def chat_with_user(
+        self, user_id: str, group_id: str, message: str, nickname: str
+    ) -> str:
+        return await self.chat.chat(user_id, group_id, message, nickname)
+
+    # ── 消息发送 ──────────────────────────────────────────────
+
+    async def send_message(self, user_id: str, group_id: str, content: str) -> None:
+        await self.port.send_segmented(
+            user_id, group_id, [make_segment(content, group_id)]
+        )
+
+    # ── LLM 路由器 ────────────────────────────────────────────
+
+    def get_router(self) -> Optional[LLMRouter]:
+        return self.chat.router
+
+    def get_router_stats(self) -> Dict[str, Any]:
+        router = self.chat.router
+        return router.get_stats() if router else {}
+
+    def get_router_latency_percentiles(self, tier: str) -> Dict[str, float]:
+        router = self.chat.router
+        return router.get_latency_percentiles(tier) if router else {}
+
+    # ── 调度器 ────────────────────────────────────────────────
+
+    def get_scheduler(self) -> Optional[ProactiveScheduler]:
+        return self.life.scheduler
+
+    def get_scheduler_status(self) -> Dict[str, Any]:
+        scheduler = self.life.scheduler
+        return scheduler.get_status() if scheduler else {}
+
+    def get_scheduler_event_agent(self) -> Optional[Any]:
+        scheduler = self.life.scheduler
+        return scheduler.event_agent if scheduler else None
+
+    def pause_scheduler(self) -> None:
+        scheduler = self.life.scheduler
+        if scheduler:
+            scheduler.config.enabled = False
+
+    def resume_scheduler(self) -> None:
+        scheduler = self.life.scheduler
+        if scheduler:
+            scheduler.config.enabled = True
+
+    # ── 衰减计算 ──────────────────────────────────────────────
+
+    def get_decay_calculator(self) -> Optional[DecayCalculator]:
+        return self.chat.decay_calculator
+
+    def effective_relationship(self, rel, initial: float) -> Any:
+        calc = self.chat.decay_calculator
+        return calc.effective_relationship(rel, initial) if calc else rel
+
+    # ── 生命周期驱动 ──────────────────────────────────────────
+
+    async def tick(self) -> None:
+        await self.life.tick()
+
+    async def tick_daily(self) -> Optional[str]:
+        return await self.life.tick_daily()
 
 
 def _load_character(config) -> Character:

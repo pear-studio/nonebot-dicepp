@@ -211,6 +211,9 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         self.cmd.app.chat.character.extensions = MagicMock()
         self.cmd.app.chat.character.extensions.initial_relationship = 30.0
         self.cmd.app.chat.character.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
+        self.cmd.app.get_character.return_value = self.cmd.app.chat.character
+        self.cmd.app.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
+        self.cmd.app.get_initial_relationship.return_value = 30.0
 
         self.cmd.app.life = MagicMock()
         self.cmd.app.life.scheduler = MagicMock()
@@ -227,8 +230,14 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         }
         self.cmd.app.chat.router.get_latency_percentiles.return_value = {"p50": 100, "p90": 200, "p99": 300}
 
-        # _get_relationship_for_display 是 command.py 自己的方法，直接 mock
+        # AdminDispatcher 在 _make_cmd 中初始化时 app/data_store 为 None，
+        # 后续赋值后需同步更新 dispatcher 引用。
+        self.cmd.admin_dispatcher.app = self.cmd.app
+        self.cmd.admin_dispatcher.data_store = self.store
+
+        # _get_relationship_for_display 已移至 AdminDispatcher，两边都 mock
         self.cmd._get_relationship_for_display = AsyncMock(return_value=None)
+        self.cmd.admin_dispatcher._get_relationship_for_display = AsyncMock(return_value=None)
         self.cmd.app.update_character = AsyncMock()
 
         self.user_id = "master_user"
@@ -360,10 +369,12 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         self.cmd.app.chat.character.name = "TestChar"
         self.cmd.app.chat.character.description = "A test char"
         self.cmd.app.chat.character.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
+        self.cmd.app.get_character.return_value = self.cmd.app.chat.character
+        self.cmd.app.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
 
         self.cmd._get_relationship_for_display = AsyncMock(return_value=None)
-        self.cmd.app.chat.clear_history = AsyncMock()
-        self.cmd.app.chat.chat = AsyncMock(return_value="你好呀")
+        self.cmd.app.clear_chat_history = AsyncMock()
+        self.cmd.app.chat_with_user = AsyncMock(return_value="你好呀")
 
     async def test_ping(self):
         meta = _make_private_meta(".ai ping")
@@ -453,11 +464,12 @@ class TestEdgeAndExceptionPaths(IsolatedAsyncioTestCase):
         self.cmd.app.chat.character = MagicMock()
         self.cmd.app.chat.character.name = "TestChar"
         self.cmd.app.chat.character.description = "A test char"
-        self.cmd.app.chat.chat = AsyncMock(return_value="你好呀")
+        self.cmd.app.get_character.return_value = self.cmd.app.chat.character
+        self.cmd.app.chat_with_user = AsyncMock(return_value="你好呀")
 
     async def test_quota_exceeded(self):
         from plugins.DicePP.module.persona.llm.router import QuotaExceeded
-        self.cmd.app.chat.chat = AsyncMock(side_effect=QuotaExceeded("配额超限"))
+        self.cmd.app.chat_with_user = AsyncMock(side_effect=QuotaExceeded("配额超限"))
         meta = _make_private_meta("你好")
         meta.to_me = True
         await self.cmd.process_msg("你好", meta, None)
