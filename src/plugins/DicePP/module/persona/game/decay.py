@@ -134,7 +134,7 @@ class DecayCalculator:
             f"下限保护后 {actual_decay:.2f} (下限 {floor:.1f})"
         )
 
-        logger.debug("Decay calculated for {}s: {}", relationship.user_id, reason)
+        logger.debug("Decay calculated for {}: {}", relationship.user_id, reason)
         return deltas, reason
 
     def effective_relationship(

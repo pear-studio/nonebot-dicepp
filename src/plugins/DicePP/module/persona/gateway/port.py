@@ -78,7 +78,7 @@ class MessagePort(EventSharePort):
     ) -> None:
         proxy = getattr(self._bot, "proxy", None)
         if proxy is None:
-            logger.error("Bot.proxy 未配置，丢弃消息: user={}s group={}", user_id, group_id)
+            logger.error("Bot.proxy 未配置，丢弃消息: user={} group={}", user_id, group_id)
             return
 
         if group_id:

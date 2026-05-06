@@ -31,8 +31,8 @@ import nonebot
 from nonebot.log import logger, default_format
 from nonebot.adapters.onebot.v11 import Adapter as OneBot_V11_Adapter
 
-# 日志配置：控制台显示 INFO 及以上（可通过 PERSONA_LOG_LEVEL=DEBUG 调低），错误写入文件
-_log_level = os.environ.get("PERSONA_LOG_LEVEL", "INFO").upper()
+# 日志配置：控制台显示 INFO 及以上（可通过 LOG_LEVEL=DEBUG 调低），错误写入文件
+_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 logger.remove()
 logger.add(sys.stderr,
            level=_log_level,
