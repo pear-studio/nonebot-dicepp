@@ -7,10 +7,8 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.life.proactive import (
-    ProactiveScheduler,
-    ProactiveConfig,
-)
+from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
+from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 from plugins.DicePP.module.persona.data.models import RelationshipState
 
 
@@ -375,7 +373,7 @@ class TestProactiveSchedulerMessageCreation:
 
     @pytest.mark.asyncio
     async def test_create_miss_you_message(self, scheduler):
-        from plugins.DicePP.module.persona.proactive.models import ShareTarget
+        from plugins.DicePP.module.persona.life.models import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         mock_agent = AsyncMock()
         mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")

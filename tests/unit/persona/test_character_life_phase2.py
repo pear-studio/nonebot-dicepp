@@ -26,7 +26,7 @@ class TestCharacterLifePhase2:
 
     @pytest.fixture
     def mock_event_agent(self):
-        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
         agent = MagicMock()
         agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
             description="测试事件", duration_minutes=0,
@@ -90,8 +90,20 @@ class TestCharacterLifePhase2:
             data_store=mock_data_store,
             character=character,
         )
-        life.boundary_notifier = MagicMock()
+        life.boundary_receiver = MagicMock()
         return life
+
+    def test_boundary_receiver_synced_on_slot_generation(self, life, monkeypatch):
+        """槽位生成时波动边界正确同步到 boundary_receiver"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        life._regenerate_slots_for_today()
+        start = life._today_jittered_start
+        end = life._today_jittered_end
+        life.boundary_receiver.set_jittered_boundaries.assert_called_once_with(start, end)
 
     # ── 2.3 事件-反应链 ──────────────────────────
 
@@ -114,7 +126,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_depth_three_with_tendency(self, life, mock_event_agent, monkeypatch):
         """follow_up_action 非空时链式续写到 max_depth"""
-        from plugins.DicePP.module.persona.agents.event_agent import EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -138,7 +150,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_delta_clamped(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """单事件 delta 硬约束：超出 ±20 被钳制"""
-        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -167,7 +179,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_fallback_triggers(self, life, mock_event_agent, monkeypatch):
         """保底概率 1.0 时一定触发保底续写"""
-        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -192,7 +204,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_fallback_disabled_after_chain_triggered(self, life, mock_event_agent, monkeypatch):
         """今天已触发过链式（深度>=2）后保底概率降为 0"""
-        from plugins.DicePP.module.persona.agents.event_agent import EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -216,7 +228,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_chain_fallback_empty_tendency_to_system(self, life, mock_event_agent, monkeypatch):
         """保底时 System Agent 的 follow_up_action 留空（自主续写）"""
-        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -242,7 +254,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_intention_preserved_when_none(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """pending_plan=None 时保持当前意向不变"""
-        from plugins.DicePP.module.persona.agents.event_agent import EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -270,7 +282,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_intention_cleared_when_empty(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """pending_plan='' 时清空意向"""
-        from plugins.DicePP.module.persona.agents.event_agent import EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -297,7 +309,7 @@ class TestCharacterLifePhase2:
     @pytest.mark.asyncio
     async def test_intention_updated_when_non_empty(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """pending_plan 非空时更新意向和时间戳"""
-        from plugins.DicePP.module.persona.agents.event_agent import EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
@@ -350,7 +362,7 @@ class TestCharacterLifePhase2:
     async def test_chain_debug_trace_logged(self, life, mock_event_agent, monkeypatch, caplog):
         """每次链式步骤输出 debug 级 trace"""
         import logging
-        from plugins.DicePP.module.persona.agents.event_agent import EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(

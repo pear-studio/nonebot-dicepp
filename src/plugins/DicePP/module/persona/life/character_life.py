@@ -118,12 +118,19 @@ class CharacterLife:
         self._chain_triggered_today: bool = False
         # 上次执行跨天恢复的日期（防止无 good_night 时每日重复恢复）
         self._day_transition_recovered_date: Optional[str] = None
-        # 可选的边界通知器，用于同步波动边界和标记边界事件
-        self.boundary_notifier: Optional[BoundaryReceiver] = None
+        # 可选的边界接收器，用于同步波动边界和标记边界事件
+        self.boundary_receiver: Optional[BoundaryReceiver] = None
+        self._boundaries_loaded = False
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
         self.character = character
+
+    def set_boundary_receiver(self, receiver: Optional[BoundaryReceiver]) -> None:
+        """仅在装配阶段调用一次，不支持运行时替换。"""
+        if self._boundaries_loaded:
+            raise RuntimeError("必须在 load_persistent_state 之前注入 boundary_receiver")
+        self.boundary_receiver = receiver
 
     def _get_today_str(self) -> str:
         return self.config.now().strftime("%Y-%m-%d")
@@ -155,11 +162,11 @@ class CharacterLife:
         start, end, rng = self._compute_daily_boundaries()
         self._today_jittered_start = start
         self._today_jittered_end = end
-        # 同步波动边界到 notifier，确保活跃时间判定一致
-        if self.boundary_notifier is not None:
-            self.boundary_notifier.set_jittered_boundaries(start, end)
+        # 同步波动边界到 receiver，确保活跃时间判定一致
+        if self.boundary_receiver is not None:
+            self.boundary_receiver.set_jittered_boundaries(start, end)
         else:
-            logger.debug("boundary_notifier 未注入，跳过波动边界同步")
+            logger.debug("boundary_receiver 未注入，跳过波动边界同步")
         min_interval = self.config.min_event_interval_minutes
         # 前置约束：调整可用区间以避开边界区域
         constrained_start = start + min_interval
@@ -224,6 +231,7 @@ class CharacterLife:
             )
 
     async def load_persistent_state(self) -> None:
+        self._boundaries_loaded = True
         raw = await self.data_store.get_setting(PERSONA_SK_CHARACTER_LIFE)
         if not raw:
             return

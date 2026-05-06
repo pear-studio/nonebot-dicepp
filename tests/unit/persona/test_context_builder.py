@@ -6,7 +6,7 @@ import pytest
 
 from plugins.DicePP.module.persona.character.models import Character, CharacterBook, LoreEntry
 from plugins.DicePP.module.persona.data.models import UserProfile
-from plugins.DicePP.module.persona.memory.context_builder import ContextBuilder
+from plugins.DicePP.module.persona.chat.context import ContextBuilder
 
 
 class TestContextBuilderCharacterBook:

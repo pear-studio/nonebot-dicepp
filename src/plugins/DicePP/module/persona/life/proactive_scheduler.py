@@ -473,7 +473,7 @@ class ProactiveScheduler(BoundaryReceiver):
         将事件分享给符合条件的分享目标。
 
         封装目标选择、可发送检查、mute 检查、throttle 时间更新，
-        供 Orchestrator / EventShareTaskQueue 调用。
+        供 LifeSimulator / EventShareTaskQueue 调用。
 
         Returns:
             成功创建的消息列表

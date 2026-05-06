@@ -26,7 +26,7 @@ from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.persist_keys import PERSONA_SK_OBSERVATION_BUFFERS
 from .life.observation import ObservationBuffer
-from .llm.privacy import mask_sensitive_string
+from .utils.privacy import mask_sensitive_string
 
 
 @custom_user_command("PersonaAI", priority=DPP_COMMAND_PRIORITY_DEFAULT, flag=DPP_COMMAND_FLAG_FUN)
@@ -640,7 +640,6 @@ class PersonaCommand(UserCommandBase):
             lines.append("\n暂无关系记录")
         if profile:
             lines.append(f"\n[画像]")
-            lines.append(f"  创建时间: {profile.created_at.strftime('%Y-%m-%d') if profile.created_at else '未知'}")
             lines.append(f"  更新时间: {profile.updated_at.strftime('%Y-%m-%d') if profile.updated_at else '未知'}")
             if profile.facts:
                 lines.append(f"  已知信息 ({len(profile.facts)}条):")

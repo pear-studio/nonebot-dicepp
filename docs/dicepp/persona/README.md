@@ -34,15 +34,16 @@
 ```
 src/plugins/DicePP/module/persona/
 ├── command.py          # DicePP 命令入口（@bot / .ai / .ai admin）
-├── orchestrator.py     # 核心编排层
+├── factory.py          # 工厂函数：组装 ChatSession / LifeSimulator / MessagePort
 ├── character/          # 角色卡加载与模型
-├── llm/                # LLM 客户端与路由
-├── memory/             # 上下文构建器
+├── chat/               # 对话会话、评分、上下文构建
+├── llm/                # LLM 客户端与路由、调用协调器
 ├── data/               # 数据模型、存储层、迁移脚本
 ├── game/               # 好感度系统、时间衰减
-├── proactive/          # 主动消息调度、角色生活模拟、延迟任务队列
-├── agents/             # 评分 Agent、事件 Agent
-└── utils/              # 工具函数（隐私脱敏、掷骰适配等）
+├── life/               # 角色生活模拟、主动消息调度、日记生成
+├── gateway/            # 消息发送管道与端口
+├── tools/              # 工具注册表与具体工具实现
+└── utils/              # 工具函数（JSON 辅助等）
 ```
 
 ---

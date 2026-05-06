@@ -8,6 +8,7 @@ import logging
 from datetime import timedelta
 
 from ..data.store import PersonaDataStore
+from ..character.models import Character
 from ..life.event_agent import EventGenerationAgent
 from ..wall_clock import persona_wall_now
 
@@ -29,20 +30,19 @@ class DiaryGenerator:
         self,
         store: PersonaDataStore,
         event_agent: EventGenerationAgent,
-        character_name: str,
-        character_description: str,
+        character: Character,
         config: DiaryConfig,
     ):
         self.store = store
         self.event_agent = event_agent
-        self.character_name = character_name
-        self.character_description = character_description
+        self.character_name = character.name
+        self.character_description = character.description
         self.config = config
 
-    def update_character(self, character_name: str, character_description: str) -> None:
+    def update_character(self, character: Character) -> None:
         """同步新的角色卡信息"""
-        self.character_name = character_name
-        self.character_description = character_description
+        self.character_name = character.name
+        self.character_description = character.description
 
     async def generate_diary(self) -> Optional[str]:
         """

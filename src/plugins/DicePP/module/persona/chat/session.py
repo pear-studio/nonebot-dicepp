@@ -1,6 +1,6 @@
 """对话会话管理器
 
-承接原 orchestrator.chat() 及所有对话私有方法，
+负责构造 LLM 上下文、调用 router、处理工具回调、执行评分。
 通过依赖注入接收 store/router/tool_registry 等，零外部 import。
 
 计费统一走 ``BillingPolicy.charge()``，由 ``_coordinator_on_result``

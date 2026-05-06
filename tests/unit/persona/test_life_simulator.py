@@ -3,9 +3,9 @@
 LifeSimulator 是 tick / tick_daily 的薄编排层，关键行为：
 
 1. tick() 调用 character_life.tick；若链中最高 share_desire 达阈值，
-   则调用 delayed_task_queue.enqueue_event_share 入队
+   则调用 event_share_queue.enqueue_event_share 入队
 2. tick() 调用 scheduler.tick，将返回的消息逐条 send 出去
-3. tick() 调用 delayed_task_queue.tick，将到期消息 send 出去
+3. tick() 调用 event_share_queue.tick，将到期消息 send 出去
 4. tick() 内部异常不向上抛（保护调度器）
 5. tick_daily() 依次 prune_traces → decay_batch → diary，返回 diary
 6. tick_daily() 内部异常返回 None
@@ -41,9 +41,9 @@ def _make_simulator(
     scheduler.config.max_shares_per_event = 1
     scheduler.share_event_to_targets = AsyncMock(return_value=[])
 
-    delayed_task_queue = MagicMock()
-    delayed_task_queue.enqueue_event_share = AsyncMock()
-    delayed_task_queue.tick = AsyncMock(return_value=delayed_msgs or [])
+    event_share_queue = MagicMock()
+    event_share_queue.enqueue_event_share = AsyncMock()
+    event_share_queue.tick = AsyncMock(return_value=delayed_msgs or [])
 
     diary_generator = MagicMock()
     diary_generator.generate_diary = AsyncMock(return_value=diary)
@@ -66,7 +66,7 @@ def _make_simulator(
         store=store,
         character_life=character_life,
         scheduler=scheduler,
-        delayed_task_queue=delayed_task_queue,
+        event_share_queue=event_share_queue,
         diary_generator=diary_generator,
         character=character,
         config=config,
@@ -78,7 +78,7 @@ def _make_simulator(
 
 @pytest.mark.asyncio
 async def test_tick_with_high_share_desire_enqueues_delayed_share():
-    """share_desire >= 阈值 → 进入 delayed_task_queue"""
+    """share_desire >= 阈值 → 进入 event_share_queue"""
     sim = _make_simulator(
         event_chain=[
             {"event_id": "e1", "description": "喝咖啡", "reaction": "很香", "share_desire": 0.8},
@@ -86,8 +86,8 @@ async def test_tick_with_high_share_desire_enqueues_delayed_share():
         share_threshold=0.5,
     )
     await sim.tick()
-    sim.delayed_task_queue.enqueue_event_share.assert_called_once()
-    kwargs = sim.delayed_task_queue.enqueue_event_share.call_args.kwargs
+    sim.event_share_queue.enqueue_event_share.assert_called_once()
+    kwargs = sim.event_share_queue.enqueue_event_share.call_args.kwargs
     assert kwargs["event_id"] == "e1"
     assert kwargs["share_desire"] == 0.8
 
@@ -102,7 +102,7 @@ async def test_tick_below_threshold_does_not_enqueue():
         share_threshold=0.5,
     )
     await sim.tick()
-    sim.delayed_task_queue.enqueue_event_share.assert_not_called()
+    sim.event_share_queue.enqueue_event_share.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -117,8 +117,8 @@ async def test_tick_picks_max_share_desire_from_chain():
         share_threshold=0.5,
     )
     await sim.tick()
-    sim.delayed_task_queue.enqueue_event_share.assert_called_once()
-    kwargs = sim.delayed_task_queue.enqueue_event_share.call_args.kwargs
+    sim.event_share_queue.enqueue_event_share.assert_called_once()
+    kwargs = sim.event_share_queue.enqueue_event_share.call_args.kwargs
     assert kwargs["event_id"] == "e2"
 
 
@@ -138,7 +138,7 @@ async def test_tick_sends_proactive_messages():
 
 @pytest.mark.asyncio
 async def test_tick_processes_delayed_share():
-    """delayed_task_queue.tick 返回的消息应被发送"""
+    """event_share_queue.tick 返回的消息应被发送"""
     sim = _make_simulator(
         delayed_msgs=[
             {"user_id": "u2", "group_id": "g1", "content": "share"},
@@ -208,3 +208,29 @@ async def test_send_msg_with_user_only_still_sends():
     sim = _make_simulator()
     await sim._send_msg({"user_id": "u1", "group_id": "", "content": "hi"})
     sim.port.send_segmented.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_tick_daily_applies_relationship_decay():
+    """decay_calculator 非 None 时 tick_daily 应用关系衰减并写库"""
+    from plugins.DicePP.module.persona.data.models import RelationshipState, ScoreDeltas
+
+    sim = _make_simulator()
+
+    decay_calc = MagicMock()
+    decay_calc.should_apply_decay = MagicMock(return_value=True)
+    decay_calc.calculate_decay = MagicMock(return_value=(
+        ScoreDeltas(intimacy=-5.0),
+        "超过3天未互动",
+    ))
+    sim.decay_calculator = decay_calc
+
+    rel = RelationshipState(user_id="u1", group_id="")
+    sim.store.list_all_relationships_raw = AsyncMock(return_value=[rel])
+
+    await sim.tick_daily()
+
+    decay_calc.should_apply_decay.assert_called_once()
+    decay_calc.calculate_decay.assert_called_once()
+    sim.store.update_relationship.assert_awaited_once()
+    sim.store.add_score_event.assert_awaited_once()

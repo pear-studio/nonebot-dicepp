@@ -12,7 +12,7 @@ import pytest
 from datetime import datetime, timedelta
 from typing import List
 
-from src.plugins.DicePP.module.persona.proactive.observation_buffer import (
+from plugins.DicePP.module.persona.life.observation import (
     ObservationBuffer,
     BufferedMessage,
 )

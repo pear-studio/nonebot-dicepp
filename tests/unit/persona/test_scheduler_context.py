@@ -7,7 +7,8 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.proactive.scheduler import ProactiveScheduler, ProactiveConfig
+from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
+from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 from plugins.DicePP.module.persona.data.models import RelationshipState
 
 
@@ -72,7 +73,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_defaults_when_no_data(self, scheduler, mock_data_store):
         """当 rel=None, user_profile=None, recent_msgs=[] 时使用默认值"""
-        from plugins.DicePP.module.persona.proactive.models import ShareTarget
+        from plugins.DicePP.module.persona.life.models import ShareTarget
 
         mock_agent = MagicMock()
         mock_agent.generate_share_message = AsyncMock(return_value="默认消息")
@@ -102,7 +103,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_with_relationship(self, scheduler, mock_data_store):
         """当有关系记录时 warmth_label 和 score 正确解析"""
-        from plugins.DicePP.module.persona.proactive.models import ShareTarget
+        from plugins.DicePP.module.persona.life.models import ShareTarget
 
         rel = RelationshipState(user_id="u1", group_id="", intimacy=65.0, passion=60.0, trust=70.0, secureness=60.0)
         mock_data_store.get_relationship = AsyncMock(return_value=rel)
@@ -128,7 +129,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_returns_none_on_agent_failure(self, scheduler):
         """generate_share_message 返回 None 时 _build_and_generate_share_message 也返回 None"""
-        from plugins.DicePP.module.persona.proactive.models import ShareTarget
+        from plugins.DicePP.module.persona.life.models import ShareTarget
 
         mock_agent = MagicMock()
         mock_agent.generate_share_message = AsyncMock(return_value=None)
@@ -148,7 +149,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_no_agent(self, scheduler):
         """event_agent 为 None 时返回 None"""
-        from plugins.DicePP.module.persona.proactive.models import ShareTarget
+        from plugins.DicePP.module.persona.life.models import ShareTarget
 
         scheduler.event_agent = None
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
@@ -164,7 +165,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_db_error(self, scheduler, mock_data_store):
         """数据库查询异常时返回 None 并记录 warning"""
-        from plugins.DicePP.module.persona.proactive.models import ShareTarget
+        from plugins.DicePP.module.persona.life.models import ShareTarget
 
         mock_data_store.get_user_profile = AsyncMock(side_effect=Exception("db error"))
 
