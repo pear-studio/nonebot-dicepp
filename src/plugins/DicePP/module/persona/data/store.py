@@ -6,6 +6,7 @@ Persona 数据存储层
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import json
+import logging
 import os
 import base64
 import aiosqlite
@@ -24,6 +25,8 @@ from .models import (
     LLMTraceRecord, DelayedTask, GroupConversation, CharacterState,
 )
 from .migrations import ALL_MIGRATIONS
+
+logger = logging.getLogger("persona.store")
 
 
 class PersonaDataStore:
@@ -191,6 +194,15 @@ class PersonaDataStore:
             (user_id, group_id, role, content, self._wall_now().isoformat())
         )
         await self.db.commit()
+
+    async def record_delivery_failure(
+        self, user_id: str, group_id: str, content: str, error: Optional[str] = None
+    ) -> None:
+        """记录发送失败的消息（供 MessagePort on_delivery_failed 回调使用）"""
+        try:
+            await self.add_message(user_id, group_id, "assistant", f"[发送失败] {content}")
+        except Exception:
+            logger.exception("on_delivery_failed 二次入库失败")
 
     async def get_recent_messages(
         self,
