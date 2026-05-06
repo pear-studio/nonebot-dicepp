@@ -13,11 +13,9 @@ buffered merge-retry 状态机：``pending_consumed`` 标记最近一轮 result
 from dataclasses import dataclass
 from typing import Dict, Optional, Callable, Any, Awaitable, TypeVar, Generic, List, Literal
 import asyncio
-import logging
-
+from nonebot.log import logger
 from .router import QuotaExceeded, NonRetryableError
 
-logger = logging.getLogger("persona.llm_call_coordinator")
 
 NON_RETRYABLE_EXCEPTIONS = (QuotaExceeded, NonRetryableError)
 

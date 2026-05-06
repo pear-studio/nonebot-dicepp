@@ -11,7 +11,7 @@ from typing import List, Dict, Optional, Any, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 import asyncio
 import json
-import logging
+from nonebot.log import logger
 import time
 import random
 from collections import deque
@@ -42,8 +42,6 @@ from .billing import BillingPolicy
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
-
-logger = logging.getLogger("persona.chat_session")
 
 
 @dataclass

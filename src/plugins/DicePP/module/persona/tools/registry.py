@@ -1,12 +1,10 @@
 """工具注册表 — 按 domain 注册/查找/执行"""
 import json
-import logging
+from nonebot.log import logger
 from typing import Dict, List, Callable, Set, Any
 from dataclasses import dataclass
 
 from .context import ToolContext
-
-logger = logging.getLogger("persona.tools")
 
 
 class ToolDomain:

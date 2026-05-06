@@ -4,14 +4,13 @@ LLM 客户端封装
 基于 AsyncOpenAI 的异步客户端，支持超时和错误处理
 """
 import asyncio
-import logging
+from nonebot.log import logger
 from typing import List, Dict, Optional, Any, Callable, Awaitable
 import time
 
 # 工具执行器类型别名
 ToolExecutor = Callable[[List[Dict]], Awaitable[List[Dict]]]
 
-logger = logging.getLogger("persona.llm")
 
 _RETRYABLE_KEYWORDS = (
     "rate limit", "429", "service unavailable", "503",

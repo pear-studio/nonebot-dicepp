@@ -6,7 +6,7 @@ Persona 数据存储层
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import json
-import logging
+from nonebot.log import logger
 import os
 import base64
 import aiosqlite
@@ -25,8 +25,6 @@ from .models import (
     LLMTraceRecord, DelayedTask, GroupConversation, CharacterState,
 )
 from .migrations import ALL_MIGRATIONS
-
-logger = logging.getLogger("persona.store")
 
 
 class PersonaDataStore:

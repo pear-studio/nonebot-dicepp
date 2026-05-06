@@ -8,10 +8,9 @@
 
 from __future__ import annotations
 
-import logging
+from nonebot.log import logger
 from datetime import datetime
 
-logger = logging.getLogger("persona.wall_clock")
 
 PERSONA_EPOCH = datetime(2000, 1, 1)
 

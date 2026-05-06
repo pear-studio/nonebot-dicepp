@@ -3,14 +3,12 @@
 
 从 YAML 文件加载角色卡
 """
-import logging
+from nonebot.log import logger
 from pathlib import Path
 from typing import Optional
 import yaml
 
 from .models import Character, CharacterBook, LoreEntry, PersonaExtensions
-
-logger = logging.getLogger("persona.character")
 
 
 class CharacterLoader:

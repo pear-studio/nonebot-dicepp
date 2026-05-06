@@ -5,13 +5,10 @@
 """
 import json
 from typing import List, Dict, Any, Optional
-import logging
-
+from nonebot.log import logger
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState, ModelTier
 from ..llm.router import LLMRouter
 from ..utils.json_helpers import safe_json_loads
-
-logger = logging.getLogger("persona.scoring")
 
 
 class ScoringAgent:

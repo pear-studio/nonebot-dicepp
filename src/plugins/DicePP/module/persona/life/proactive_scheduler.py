@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import asyncio
 import json
 import random
-import logging
+from nonebot.log import logger
 import re
 
 from ..data.store import PersonaDataStore
@@ -25,8 +25,6 @@ from .proactive_config import ProactiveConfig
 if TYPE_CHECKING:
     from .target import TargetSelector
     from ..llm.coordinator import LLMCallCoordinator
-
-logger = logging.getLogger("persona.scheduler")
 
 
 class ProactiveScheduler(BoundaryReceiver):

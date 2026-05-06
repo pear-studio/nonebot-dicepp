@@ -359,9 +359,10 @@ class TestCharacterLifePhase2:
     # ── 2.6 debug 日志 ───────────────────────────
 
     @pytest.mark.asyncio
-    async def test_chain_debug_trace_logged(self, life, mock_event_agent, monkeypatch, caplog):
+    async def test_chain_debug_trace_logged(self, life, mock_event_agent, monkeypatch):
         """每次链式步骤输出 debug 级 trace"""
-        import logging
+        from io import StringIO
+        from loguru import logger
         from plugins.DicePP.module.persona.life.event_agent import EventReactionResult
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
@@ -377,13 +378,18 @@ class TestCharacterLifePhase2:
             follow_up_action="想继续", pending_plan="新意向",
         ))
 
-        with caplog.at_level(logging.DEBUG, logger="persona.character_life"):
+        output = StringIO()
+        handler_id = logger.add(output, level="DEBUG", format="{message}")
+        try:
             await life.tick()
+        finally:
+            logger.remove(handler_id)
 
-        assert "[chain]" in caplog.text
-        assert "depth=1" in caplog.text
-        assert "follow_up=" in caplog.text
-        assert "pending_plan=" in caplog.text
+        logs = output.getvalue()
+        assert "[chain]" in logs
+        assert "depth=1" in logs
+        assert "follow_up=" in logs
+        assert "pending_plan=" in logs
 
     # ── 边界测试补充（R14-2 / R14-3） ─────────────
 

@@ -22,11 +22,9 @@ r"""LLM 响应 JSON 解析的统一容错实现
 from __future__ import annotations
 
 import json
-import logging
+from nonebot.log import logger
 import re
 from typing import Any, Optional
-
-logger = logging.getLogger("persona.json_helpers")
 
 
 def _strip_markdown_fence(text: str) -> str:
