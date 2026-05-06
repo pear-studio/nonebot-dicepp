@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from plugins.DicePP.module.persona.proactive.target_selector import TargetSelector
-from plugins.DicePP.module.persona.proactive.models import ShareTarget
+from plugins.DicePP.module.persona.life.target import TargetSelector
+from plugins.DicePP.module.persona.life.models import ShareTarget
 
 
 @pytest.fixture

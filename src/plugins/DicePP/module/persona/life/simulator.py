@@ -1,6 +1,6 @@
 """生活模拟器
 
-承接原 orchestrator.tick() / tick_daily() 及 character_life 事件链核心，
+驱动角色生活事件、主动消息调度、日记生成。
 编排 CharacterLife、ProactiveScheduler、EventShareTaskQueue、DiaryGenerator。
 """
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
@@ -56,7 +56,7 @@ class LifeSimulator:
         store: PersonaDataStore,
         character_life: CharacterLife,
         scheduler: ProactiveScheduler,
-        delayed_task_queue: EventShareTaskQueue,
+        event_share_queue: EventShareTaskQueue,
         diary_generator: DiaryGenerator,
         character: Character,
         config: LifeConfig,
@@ -66,7 +66,7 @@ class LifeSimulator:
         self.store = store
         self.character_life = character_life
         self.scheduler = scheduler
-        self.delayed_task_queue = delayed_task_queue
+        self.event_share_queue = event_share_queue
         self.diary_generator = diary_generator
         self.character = character
         self.config = config
@@ -80,6 +80,8 @@ class LifeSimulator:
             self.character_life.update_character(character)
         if self.scheduler is not None:
             self.scheduler.update_character(character)
+        if self.diary_generator is not None:
+            self.diary_generator.update_character(character)
 
     async def tick(self) -> None:
         """定时调用 — 驱动角色生活事件和主动消息调度"""
@@ -93,7 +95,7 @@ class LifeSimulator:
                     )
                     best_event = max(event_chain, key=lambda e: e.get("share_desire", 0.0))
                     if (
-                        self.delayed_task_queue
+                        self.event_share_queue
                         and best_event.get("share_desire", 0.0)
                         >= self.config.proactive_event_share_threshold
                     ):
@@ -101,7 +103,7 @@ class LifeSimulator:
                             self.config.proactive_event_share_delay_min,
                             self.config.proactive_event_share_delay_max,
                         )
-                        await self.delayed_task_queue.enqueue_event_share(
+                        await self.event_share_queue.enqueue_event_share(
                             event_id=best_event.get("event_id", ""),
                             event_description=best_event.get("description", ""),
                             reaction=best_event.get("reaction", ""),
@@ -121,9 +123,9 @@ class LifeSimulator:
                 logger.exception("tick: 主动消息调度失败")
 
         # 处理延迟队列中的事件分享
-        if self.delayed_task_queue and self.scheduler:
+        if self.event_share_queue and self.scheduler:
             try:
-                delayed_msgs = await self.delayed_task_queue.tick(
+                delayed_msgs = await self.event_share_queue.tick(
                     on_share=self._run_due_share
                 )
                 for msg in delayed_msgs:

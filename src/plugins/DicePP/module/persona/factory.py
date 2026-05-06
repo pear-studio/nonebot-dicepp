@@ -53,9 +53,6 @@ class PersonaApp:
         """统一传播新的角色卡到所有子系统。"""
         self.chat.update_character(character)
         self.life.update_character(character)
-        diary_generator = getattr(self.life, "diary_generator", None)
-        if diary_generator is not None:
-            diary_generator.update_character(character.name, character.description)
 
 
 async def create_persona(bot: Bot) -> Optional[PersonaApp]:
@@ -205,13 +202,13 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     await scheduler.load_persistent_state()
     logger.info("主动消息调度器已初始化")
 
-    # 12. 同步波动边界（必须在 character_life.load_persistent_state 之前注入）
-    character_life.boundary_notifier = scheduler
+    # 12. 同步波动边界后加载持久状态
+    character_life.set_boundary_receiver(scheduler)
     await character_life.load_persistent_state()
     logger.info("角色生活模拟已初始化")
 
     # 13. 延迟任务队列
-    delayed_task_queue = EventShareTaskQueue(
+    event_share_queue = EventShareTaskQueue(
         data_store=store,
         share_threshold=config.proactive_event_share_threshold,
         max_retries=config.proactive_share_max_retries,
@@ -227,8 +224,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     diary_generator = DiaryGenerator(
         store=store,
         event_agent=event_agent,
-        character_name=character.name,
-        character_description=character.description,
+        character=character,
         config=diary_config,
     )
 
@@ -253,7 +249,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         store=store,
         character_life=character_life,
         scheduler=scheduler,
-        delayed_task_queue=delayed_task_queue,
+        event_share_queue=event_share_queue,
         diary_generator=diary_generator,
         character=character,
         config=life_config_obj,

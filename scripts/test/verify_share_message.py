@@ -18,7 +18,7 @@ from typing import List, Optional
 
 sys.path.insert(0, "src/plugins")
 
-from DicePP.module.persona.agents.event_agent import EventGenerationAgent, ShareMessageContext
+from DicePP.module.persona.life.event_agent import EventGenerationAgent, ShareMessageContext
 from DicePP.module.persona.llm.router import LLMRouter
 from DicePP.module.persona.data.models import ModelTier
 

@@ -18,7 +18,7 @@ from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.data.models import CharacterState
-from plugins.DicePP.module.persona.agents.event_agent import (
+from plugins.DicePP.module.persona.life.event_agent import (
     EventGenerationAgent, EventGenerationResult, EventReactionResult,
 )
 
@@ -149,7 +149,7 @@ def life(temp_db, mock_event_agent, character, config):
         data_store=temp_db,
         character=character,
     )
-    life.boundary_notifier = MagicMock()
+    life.boundary_receiver = MagicMock()
     return life
 
 
@@ -231,8 +231,7 @@ class TestCharacterDaySimulation:
         diary_generator = DiaryGenerator(
             store=life.data_store,
             event_agent=mock_event_agent,
-            character_name=life.character.name,
-            character_description=life.character.description,
+            character=life.character,
             config=DiaryConfig( timezone="Asia/Shanghai"),
         )
         diary = await diary_generator.generate_diary()

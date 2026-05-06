@@ -8,7 +8,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.agents.event_agent import (
+from plugins.DicePP.module.persona.life.event_agent import (
     EventGenerationAgent,
     ShareMessageContext,
 )

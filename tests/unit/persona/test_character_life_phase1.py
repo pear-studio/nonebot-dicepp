@@ -26,7 +26,7 @@ class TestCharacterLifePhase1:
 
     @pytest.fixture
     def mock_event_agent(self):
-        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
         agent = MagicMock()
         agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(description="测试事件", duration_minutes=0))
         agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(reaction="测试反应", share_desire=0.5))
@@ -79,7 +79,7 @@ class TestCharacterLifePhase1:
             data_store=mock_data_store,
             character=character,
         )
-        life.boundary_notifier = MagicMock()
+        life.boundary_receiver = MagicMock()
         return life
 
     # ── 1.3 活跃时间波动 ──────────────────────────

@@ -5,7 +5,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock
 
-from plugins.DicePP.module.persona.proactive.llm_call_coordinator import (
+from plugins.DicePP.module.persona.llm.coordinator import (
     LLMCallCoordinator,
     SubmitResult,
 )
@@ -575,6 +575,37 @@ class TestLLMCallCoordinatorBasics:
         assert r1.value == "r1"
         assert r2.status == "success"
         assert r2.value == "r2"
+
+    @pytest.mark.asyncio
+    async def test_chat_blocks_share_on_same_target(self):
+        """同一 target 上 share 执行中时，chat submit 应被 queued（buffered）"""
+        coordinator = LLMCallCoordinator()
+        barrier = asyncio.Event()
+        execution_started = asyncio.Event()
+
+        async def slow_share_fn(messages):
+            execution_started.set()
+            await barrier.wait()
+            return "share_msg"
+
+        # 先启动 share
+        share_task = asyncio.create_task(
+            coordinator.submit("user:1", None, slow_share_fn)
+        )
+        await execution_started.wait()
+
+        # 同一 target 启动 chat
+        chat_task = asyncio.create_task(
+            coordinator.submit("user:1", "msg", AsyncMock(return_value="chat_reply"))
+        )
+        chat_result = await chat_task
+        assert chat_result.status == "buffered"
+        assert coordinator._has_buffered.get("user:1") is True
+
+        barrier.set()
+        share_result = await share_task
+        assert share_result.status == "success"
+        assert share_result.value == "share_msg"
 
     @pytest.mark.asyncio
     async def test_iteration_exhaustion_does_not_call_on_exhausted_when_had_success(self, coordinator):

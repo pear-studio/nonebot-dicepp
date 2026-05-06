@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timedelta
 
 from module.persona.llm.router import LLMRouter
-from module.persona.memory.context_builder import ContextBuilder
+from module.persona.chat.context import ContextBuilder
 from module.persona.character.models import Character
 from module.persona.data.store import PersonaDataStore
 from module.persona.data.models import LLMTraceRecord

@@ -8,6 +8,7 @@
 """
 
 import random
+from datetime import datetime, timedelta
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -60,6 +61,7 @@ def _make_session(
         relationship_refuse_prob_base=0.3,
         relationship_refuse_prob_max=0.9,
         scoring_interval=999,
+        timezone="",  # 解耦时区，与测试构造的 datetime.now() 对齐
     )
 
     context_builder = MagicMock()
@@ -182,3 +184,146 @@ async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch):
     result = await session.chat("u1", "", "你好")
 
     assert result != "...（已读不回）"
+
+
+class TestApplyTokenWindow:
+    """_apply_token_window 行为测试"""
+
+    def _make_gc(self, content, created_at, role="user", display_name="群友"):
+        from plugins.DicePP.module.persona.data.models import GroupConversation
+        return GroupConversation(
+            user_id="u1",
+            role=role,
+            content=content,
+            created_at=created_at,
+            group_id="g1",
+            display_name=display_name,
+        )
+
+    def test_empty_history(self):
+        session = _make_session()
+        result, truncated = session._apply_token_window([])
+        assert result == []
+        assert truncated is False
+
+    def test_token_budget_limits_messages(self):
+        """总 token 超过 budget 时停止收集（已收集的非空时）"""
+        session = _make_session()
+        session.config.group_context_budget_tokens = 10
+        session.config.group_single_message_max_tokens = 100
+        session.config.group_max_messages = 100
+        session.config.group_max_age_minutes = 1000
+
+        now = datetime.now()
+        history = [
+            self._make_gc("短消息1", now),
+            self._make_gc("短消息2", now),
+            self._make_gc("短消息3", now),
+        ]
+        result, truncated = session._apply_token_window(history)
+        assert len(result) >= 1
+        assert len(result) < len(history)
+        assert truncated is True
+
+    def test_long_message_truncated_to_single_max(self):
+        """单条消息超过 single_max 会被截断"""
+        session = _make_session()
+        session.config.group_context_budget_tokens = 10000
+        session.config.group_single_message_max_tokens = 5
+        session.config.group_max_messages = 100
+        session.config.group_max_age_minutes = 1000
+
+        now = datetime.now()
+        long_msg = "这是一个非常长的消息内容用于测试截断"
+        history = [self._make_gc(long_msg, now)]
+        result, truncated = session._apply_token_window(history)
+        assert len(result) == 1
+        assert len(result[0]["content"]) < len(long_msg)
+
+    def test_time_window_filters_old_messages(self):
+        """超过 max_age 的消息被过滤（reversed 遍历，遇到超时就 break）"""
+        session = _make_session()
+        session.config.group_context_budget_tokens = 10000
+        session.config.group_single_message_max_tokens = 100
+        session.config.group_max_messages = 100
+        session.config.group_max_age_minutes = 10
+
+        now = datetime.now()
+        # 列表按时间升序排列（老在前），reversed 后从新到旧遍历
+        history = [
+            self._make_gc("老消息", now - timedelta(minutes=20)),
+            self._make_gc("新消息", now),
+        ]
+        result, truncated = session._apply_token_window(history)
+        assert len(result) == 1
+        assert result[0]["content"] == "新消息"
+
+    def test_speaker_name_injected(self):
+        """speaker_name 根据 role 和 display_name 正确注入"""
+        session = _make_session()
+        session.config.group_context_budget_tokens = 10000
+        session.config.group_single_message_max_tokens = 100
+        session.config.group_max_messages = 100
+        session.config.group_max_age_minutes = 1000
+
+        now = datetime.now()
+        history = [
+            self._make_gc("用户消息", now, role="user", display_name="小明"),
+            self._make_gc("机器人回复", now, role="assistant", display_name=""),
+        ]
+        result, truncated = session._apply_token_window(history)
+        assert len(result) == 2
+        assert result[0]["speaker_name"] == "小明"
+        assert result[1]["speaker_name"] == "我"
+
+    def test_keeps_at_least_one(self):
+        """即使 budget 极小，也保底保留 1 条"""
+        session = _make_session()
+        session.config.group_context_budget_tokens = 1
+        session.config.group_single_message_max_tokens = 100
+        session.config.group_max_messages = 100
+        session.config.group_max_age_minutes = 1000
+
+        now = datetime.now()
+        history = [
+            self._make_gc("消息1", now),
+            self._make_gc("消息2", now),
+        ]
+        result, truncated = session._apply_token_window(history)
+        # 第一条因 result 为空而不被 budget break，保底保留 1 条
+        assert len(result) == 1
+        assert truncated is True
+
+
+class TestDecayInChatSession:
+    """_update_interaction 中的惰性 decay 路径测试"""
+
+    @pytest.mark.asyncio
+    async def test_update_interaction_applies_decay_when_due(self):
+        """decay_calculator.should_apply_decay=True 时惰性应用衰减并写入 score_event"""
+        from plugins.DicePP.module.persona.data.models import RelationshipState, ScoreDeltas
+
+        session = _make_session()
+
+        decay_calc = MagicMock()
+        decay_calc.should_apply_decay = MagicMock(return_value=True)
+        decay_calc.calculate_decay = MagicMock(return_value=(
+            ScoreDeltas(intimacy=-3.0),
+            "超过7天未互动",
+        ))
+        session.decay_calculator = decay_calc
+
+        rel = RelationshipState(user_id="u1", group_id="")
+        session.store.get_relationship = AsyncMock(return_value=rel)
+        session.store.update_relationship = AsyncMock()
+        session.store.add_score_event = AsyncMock()
+        session.store.init_relationship = AsyncMock(return_value=rel)
+
+        await session._update_interaction("u1", "", "user_msg", "assistant_msg")
+
+        decay_calc.should_apply_decay.assert_called_once()
+        decay_calc.calculate_decay.assert_called_once()
+        session.store.add_score_event.assert_awaited_once()
+        # 验证写入的 score_event 包含 decay 原因
+        event = session.store.add_score_event.call_args[0][0]
+        assert "time_decay" in event.reason

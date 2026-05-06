@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.proactive.delayed_task_queue import EventShareTaskQueue
+from plugins.DicePP.module.persona.life.event_share_queue import EventShareTaskQueue
 
 
 @pytest.fixture

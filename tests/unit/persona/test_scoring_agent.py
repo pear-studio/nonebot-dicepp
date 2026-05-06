@@ -5,7 +5,7 @@
 import pytest
 
 
-from plugins.DicePP.module.persona.agents.scoring_agent import ScoringAgent
+from plugins.DicePP.module.persona.chat.scoring import ScoringAgent
 from plugins.DicePP.module.persona.data.models import ScoreDeltas, UserProfile
 
 

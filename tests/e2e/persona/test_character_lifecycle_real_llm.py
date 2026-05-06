@@ -52,7 +52,7 @@ logging.getLogger("persona.event_agent").setLevel(logging.DEBUG)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "plugins"))
 
 from DicePP.module.persona.llm.router import LLMRouter
-from DicePP.module.persona.agents.event_agent import EventGenerationAgent
+from DicePP.module.persona.life.event_agent import EventGenerationAgent
 from DicePP.module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
@@ -80,15 +80,13 @@ def _set_fake_time(hour: int, minute: int) -> None:
 
     import DicePP.module.persona.life.character_life as life_cl
     import DicePP.module.persona.life.diary as life_diary
-    import DicePP.module.persona.proactive.scheduler as sch
-    import DicePP.module.persona.proactive.delayed_task_queue as dtq
-    import DicePP.module.persona.proactive.observation_buffer as ob
+    import DicePP.module.persona.life.observation as ob
     import DicePP.module.persona.data.store as ds
     import DicePP.module.persona.llm.router as lr
-    import DicePP.module.persona.memory.context_builder as cb
+    import DicePP.module.persona.chat.context as cb
     import DicePP.module.persona.wall_clock as wc
 
-    for mod in (life_cl, life_diary, sch, dtq, ob, ds, lr, cb, wc):
+    for mod in (life_cl, life_diary, ob, ds, lr, cb, wc):
         if hasattr(mod, "persona_wall_now"):
             mod.persona_wall_now = _patched_wall_now
 
@@ -184,12 +182,11 @@ async def _run_full_day_lifecycle() -> dict:
             data_store=store,
             character=character,
         )
-        life.boundary_notifier = MagicMock()
+        life.boundary_receiver = MagicMock()
         diary_generator = DiaryGenerator(
             store=store,
             event_agent=agent,
-            character_name=character.name,
-            character_description=character.description,
+            character=character,
             config=DiaryConfig( timezone="Asia/Shanghai"),
         )
 

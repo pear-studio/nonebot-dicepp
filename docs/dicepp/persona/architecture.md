@@ -18,21 +18,21 @@
               └──────────┬──────────┘
                          │
               ┌──────────▼──────────┐
-              │  PersonaOrchestrator│  核心编排层：调度各子系统
+              │     PersonaApp      │  入口 dataclass：chat / life / store / port
               └────┬────┬────┬─────┘
                    │    │    │
       ┌────────────┼────┼────┼────────────┐
       │            │    │    │            │
    ┌──▼──┐    ┌───▼──┐ │ ┌──▼───┐   ┌───▼────┐
-   │character│ │  llm │ │ │ memory│   │  data  │
+   │character│ │  llm │ │ │ chat │   │  data  │
    └──┬────┘   └───┬──┘ │ └──┬───┘   └───┬────┘
       │            │    │    │           │
    ┌──▼──┐    ┌───▼──┐ │ ┌──▼───┐   ┌───▼────┐
-   │ game │    │agents│ │ │proactive│   │utils   │
-   └─────┘    └──────┘ │ └──┬────┘   └────────┘
+   │ game │    │tools │ │ │ life │   │gateway │
+   └─────┘    └──────┘ │ └──┬───┘   └────────┘
                          │
                   ┌──────▼──────┐
-                  │DelayedTaskQueue
+                  │EventShareTaskQueue
                   └─────────────┘
 ```
 
@@ -41,15 +41,16 @@
 | 层级 | 目录 | 核心职责 |
 |------|------|----------|
 | **入口层** | `command.py` | 消息路由、命令解析、白名单检查、权限控制 |
-| **编排层** | `orchestrator.py` | 初始化各组件、编排对话流程、驱动定时任务 |
+| **工厂层** | `factory.py` | 从 Bot 组装 ChatSession / LifeSimulator / MessagePort |
 | **角色系统** | `character/` | 角色卡 YAML 加载、SillyTavern V2 模型、世界书匹配 |
-| **LLM 层** | `llm/` | 多模型客户端封装、路由与配额管理、trace 记录 |
-| **记忆层** | `memory/` | 将四层记忆组装为 LLM messages 列表 |
+| **LLM 层** | `llm/` | 多模型客户端封装、路由与配额管理、trace 记录、调用协调器 |
+| **对话层** | `chat/` | 对话会话管理、评分 Agent、上下文构建器 |
 | **数据层** | `data/` | Pydantic 模型、SQLite 存储访问、迁移脚本 |
 | **游戏层** | `game/` | 四维好感度模型、时间衰减计算 |
-| **主动层** | `proactive/` | 主动消息调度、角色生活模拟、延迟任务队列、群聊观察缓冲 |
-| **Agent 层** | `agents/` | 评分 Agent（批量分析）、事件 Agent（生活事件生成） |
-| **工具层** | `utils/` | 隐私脱敏、掷骰适配器、其他辅助函数 |
+| **生活层** | `life/` | 角色生活模拟、主动消息调度、延迟任务队列、日记生成 |
+| **网关层** | `gateway/` | 消息发送管道与端口 |
+| **工具层** | `tools/` | 工具注册表、search_memory / search_history / roll_dice |
+| **辅助层** | `utils/` | JSON 辅助函数等 |
 
 ---
 
@@ -62,7 +63,7 @@
   → 白名单检查 → 权限检查 → 命令分发
 
 PersonaCommand.process_msg() / 聊天触发
-  → PersonaOrchestrator.chat()
+  → PersonaApp.chat.chat()
     → 5秒消息去重
     → 首次对话：返回 first_mes
     → 厌倦拒绝检查（好感度 0-10 区间概率拒绝）
@@ -102,14 +103,14 @@ _update_interaction() 中消息数达到 scoring_interval * 2 时
 ```
 Command.tick() 每秒调用
   → 单槽异步任务限制（at-most-once）
-  → Orchestrator.tick()
+  → PersonaApp.life.tick()
     → CharacterLife.tick() 生成生活事件
       - 按角色卡配置的事件时间槽触发
       - System Agent 生成客观事件（含 duration_minutes）
       - Character Agent 生成角色反应（含 share_desire）
       - 存入 persona_daily_events
       - 持续时间 > 0 的事件加入 _ongoing_activities
-      - 将事件加入 DelayedTaskQueue（延迟 1~5 分钟后分享）
+      - `LifeSimulator.tick()` 选择事件后将其加入 EventShareTaskQueue（延迟 1~5 分钟后分享）
     → ProactiveScheduler.tick()（60秒节流）
       - _check_scheduled_events(): 按角色卡 `scheduled_events` 配置触发的定时事件（问候/作息等）
         - 命中时间窗口后，由 EventAgent 现场生成事件描述和反应
@@ -118,7 +119,7 @@ Command.tick() 每秒调用
       - _check_missed_users(): 想念触发（≥3天未互动）
         - 从当日 daily_events 中随机选取素材，不再依赖 pending_shares
       - 生成主动消息并返回
-    → DelayedTaskQueue.tick()
+    → EventShareTaskQueue.tick()
       - 扫描到期的 pending 任务
       - share_desire ≥ proactive_event_share_threshold 才执行分享
       - 按好感度优先级选择分享目标（复用 scheduler 目标选择）
@@ -129,9 +130,9 @@ Command.tick() 每秒调用
 
 ```
 Command.tick_daily() 每天调用
-  → Orchestrator.tick_daily()
+  → PersonaApp.life.tick_daily()
     → apply_relationship_decay_batch(): 批量写回长时间未互动用户的衰减
-    → CharacterLife.generate_diary()
+    → DiaryGenerator.generate_diary()
       - 读取当日所有 events + reactions
       - Character Agent 总结为日记（100-300字）
       - 存入 persona_diary
@@ -196,7 +197,15 @@ Command.tick_daily() 每天调用
 
 ---
 
-### 3.3 记忆层（`memory/`）
+### 3.3 对话层（`chat/`）
+
+#### `ChatSession`
+
+对话入口，负责构造 LLM 上下文、调用 router、处理工具回调、执行评分：
+- 消息去重、首次对话 first_mes、厌倦拒绝检查
+- 通过 `LLMCallCoordinator` 串行化同一 target 的 LLM 调用
+- 支持工具调用路径（`tools_enabled=True`）
+- 计费走 `BillingPolicy`
 
 #### `ContextBuilder`
 
@@ -277,7 +286,7 @@ Command.tick_daily() 每天调用
 
 ---
 
-### 3.6 主动层（`proactive/`）
+### 3.6 生活层（`life/`）
 
 #### `ProactiveScheduler`
 
@@ -303,14 +312,14 @@ Command.tick_daily() 每天调用
 - 事件包含 `share_desire`（分享欲望 0~1）和 `duration_minutes`（持续时间，0 表示瞬时）
 - `duration_minutes > 0` 的事件会加入 `_ongoing_activities`，在后续事件生成时作为上下文注入
 
-#### `DelayedTaskQueue`
+#### `EventShareTaskQueue`
 
 通用延迟任务队列（SQLite 持久化）：
 - 当前仅支持 `event_share` 类型任务；非 `event_share` 类型会被直接标记为 `completed`（后续扩展需修改 `tick()` 分发逻辑）
 - `enqueue_event_share()`: 将生活事件按配置延迟（由调用方决定，如 1~5 分钟）入队
 - `tick()`: 扫描并处理到期的 `pending` 任务，支持 `share_desire` 阈值过滤
 - 任务处理成功后标记为 `completed`，失败则按 `max_retries` 重试，超限标记为 `failed`
-- 与 `ProactiveScheduler` 解耦：Orchestrator 负责将 scheduler 的目标选择能力注入 `on_share` 回调
+- 与 `ProactiveScheduler` 解耦：`LifeSimulator` 负责将 scheduler 的目标选择能力注入 `on_share` 回调
 
 #### `ObservationBuffer`
 
@@ -321,31 +330,39 @@ Command.tick_daily() 每天调用
 
 ---
 
-### 3.7 Agent 层（`agents/`）
+### 3.7 跨域 Agent 索引
 
-#### `ScoringAgent`
+Agent 已按功能归属分散到对应域，本节仅作跨域索引：
 
-批量分析对话，输出：
-- `ScoreDeltas`：四维好感度变化（范围 -5.0 ~ +5.0）
-- `facts`：从对话中提取的用户结构化信息
-
-使用辅助模型，prompt 中注入当前关系状态和已知用户档案。
-
-#### `EventGenerationAgent`
+#### `EventGenerationAgent`（`life/event_agent.py`）
 
 包含三种生成任务：
 - `generate_event_result(context)`: System Agent，通过 `record_event` 强制工具调用生成结构化事件，返回 `EventGenerationResult`（含 `description` 和 `duration_minutes`）
 - `generate_event_reaction(event, character_name, character_description, share_policy)`: Character Agent，通过 `record_reaction` 强制工具调用生成结构化反应，返回 `EventReactionResult`（含 `reaction` 和 `share_desire`）
 - `generate_diary()`: Character Agent，总结全天事件为日记（100-300字）
 
-旧方法 `generate_event()` 和 `generate_reaction()` 已标记为 DEPRECATED，保留兼容直至所有调用方迁移完成。均使用辅助模型，失败时返回安全兜底文本。
+均使用辅助模型，失败时返回安全兜底文本。
 
 ---
 
-### 3.8 工具层（`utils/`）
+### 3.8 工具层（`tools/`）
 
-- **`privacy.py`**: `mask_sensitive_string()` 用于日志中脱敏 API Key
-- **`roll_adapter.py`**: `RollAdapter` 桥接 DicePP 掷骰引擎，为 `roll_dice` 工具提供支持
+- **`registry.py`**: 按域 key 注册工具（`chat` / `life`），返回 OpenAI function-calling 格式
+- **`search_memory` / `search_history` / `roll_dice`**: 三个已实现的 chat 域工具
+
+---
+
+### 3.9 网关层（`gateway/`）
+
+- **`port.py`**: `MessagePort` 统一消息发送出口
+- **`pipeline.py`**: `MessagePipeline` 支持分阶段处理（如 `TruncateStage`）
+
+---
+
+### 3.10 辅助层（`utils/`）
+
+- **`json_helpers.py`**: `safe_json_loads()` 等 JSON 容错辅助函数
+- **`privacy.py`**: `mask_sensitive_string()` 用于日志/配置字段中脱敏 API Key
 
 ---
 
@@ -353,11 +370,11 @@ Command.tick_daily() 每天调用
 
 ### 4.1 新增工具
 
-在 `orchestrator.py` 的 `_get_tools()` 中定义工具 schema，在 `_execute_tool()` 中实现执行逻辑。
+在 `tools/` 中注册工具定义与执行器，通过 `ToolRegistry.register(domain, name, schema, executor)` 注册。`ChatSession` 构造时传入 `tool_registry`。
 
 ### 4.2 新增 Agent
 
-创建 `agents/{name}_agent.py`，在 `orchestrator.initialize()` 中初始化，通过 `orchestrator` 暴露方法供 `command.py` 调用。
+按功能归属放到 `chat/` 或 `life/` 域，在 `factory.py` 的 `create_persona()` 中初始化并注入到对应组件。
 
 ### 4.3 新增数据表
 

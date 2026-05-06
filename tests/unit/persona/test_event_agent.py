@@ -14,7 +14,7 @@ from datetime import datetime
 from unittest.mock import MagicMock, AsyncMock
 
 
-from plugins.DicePP.module.persona.agents.event_agent import (
+from plugins.DicePP.module.persona.life.event_agent import (
     EventGenerationAgent,
     EventContext,
     EventGenerationResult,
@@ -456,7 +456,7 @@ class TestGenerateEventReaction:
     async def test_share_message_prompt_injection(self, caplog):
         """验证分享消息 prompt 注入状态/事件/意向（3.3.2 / 3.3.3）"""
         import logging
-        from plugins.DicePP.module.persona.agents.event_agent import ShareMessageContext
+        from plugins.DicePP.module.persona.life.event_agent import ShareMessageContext
 
         # 创建真实 EventGenerationAgent，mock llm_router
         mock_router = MagicMock()

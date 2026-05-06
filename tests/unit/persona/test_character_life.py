@@ -21,7 +21,7 @@ class TestCharacterLifeBasics:
 
     @pytest.fixture
     def mock_event_agent(self):
-        from plugins.DicePP.module.persona.agents.event_agent import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
         agent = MagicMock()
         agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(description="窗外下起了小雨", duration_minutes=60))
         agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(reaction="喜欢听雨声", share_desire=0.6))
@@ -77,7 +77,7 @@ class TestCharacterLifeBasics:
             data_store=mock_data_store,
             character=character,
         )
-        life.boundary_notifier = MagicMock()
+        life.boundary_receiver = MagicMock()
         return life
 
     @pytest.mark.asyncio
@@ -279,11 +279,12 @@ class TestCharacterLifeDiary:
 
     @pytest.fixture
     def diary_generator(self, mock_event_agent, mock_data_store):
+        from plugins.DicePP.module.persona.character.models import Character
+        character = Character(name="测试角色", description="一个温柔的角色")
         return DiaryGenerator(
             store=mock_data_store,
             event_agent=mock_event_agent,
-            character_name="测试角色",
-            character_description="一个温柔的角色",
+            character=character,
             config=DiaryConfig(diary_time="23:30", timezone="Asia/Shanghai"),
         )
 

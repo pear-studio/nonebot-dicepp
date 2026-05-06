@@ -2,11 +2,9 @@ import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from plugins.DicePP.module.persona.proactive.scheduler import (
-    ProactiveScheduler,
-    ProactiveConfig,
-)
-from plugins.DicePP.module.persona.proactive.models import ShareTarget
+from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
+from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
+from plugins.DicePP.module.persona.life.models import ShareTarget
 
 
 @pytest.fixture
