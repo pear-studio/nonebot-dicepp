@@ -4,15 +4,13 @@
 """
 from typing import Optional, List
 from dataclasses import dataclass
-import logging
+from nonebot.log import logger
 from datetime import timedelta
 
 from ..data.store import PersonaDataStore
 from ..character.models import Character
 from ..life.event_agent import EventGenerationAgent
 from ..wall_clock import persona_wall_now
-
-logger = logging.getLogger("persona.diary")
 
 
 @dataclass

@@ -14,13 +14,10 @@ import re
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Set, Any
 from datetime import datetime, timedelta
-import logging
-
+from nonebot.log import logger
 from .event_agent import EventGenerationAgent
 from ..data.store import PersonaDataStore
 from ..utils.json_helpers import safe_json_loads
-
-logger = logging.getLogger("persona.observation")
 
 
 @dataclass

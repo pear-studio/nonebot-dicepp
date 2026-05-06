@@ -453,9 +453,10 @@ class TestGenerateEventReaction:
         assert result.share_desire == 0.5
 
     @pytest.mark.asyncio
-    async def test_share_message_prompt_injection(self, caplog):
+    async def test_share_message_prompt_injection(self):
         """验证分享消息 prompt 注入状态/事件/意向（3.3.2 / 3.3.3）"""
-        import logging
+        from io import StringIO
+        from loguru import logger
         from plugins.DicePP.module.persona.life.event_agent import ShareMessageContext
 
         # 创建真实 EventGenerationAgent，mock llm_router
@@ -482,17 +483,22 @@ class TestGenerateEventReaction:
             current_intention="想喝茶",
         )
 
-        with caplog.at_level(logging.DEBUG, logger="persona.event_agent"):
+        output = StringIO()
+        handler_id = logger.add(output, level="DEBUG", format="{message}")
+        try:
             message = await agent.generate_share_message(context)
+        finally:
+            logger.remove(handler_id)
 
         assert message == "茶很好喝哦"
 
         # 验证分享消息 prompt 注入
-        assert "[prompt:system_share]" in caplog.text
-        assert "[prompt:user_share]" in caplog.text
-        assert "体力: 60/100" in caplog.text
-        assert "当前惦记的事: 想喝茶" in caplog.text
-        assert "泡了茶" in caplog.text
+        logs = output.getvalue()
+        assert "[prompt:system_share]" in logs
+        assert "[prompt:user_share]" in logs
+        assert "体力: 60/100" in logs
+        assert "当前惦记的事: 想喝茶" in logs
+        assert "泡了茶" in logs
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
 事件触发时刻由角色卡 PersonaExtensions.generate_event_times() 决定（日内分钟槽位）。
 """
 import json
-import logging
+from nonebot.log import logger
 import random
 import uuid
 from dataclasses import dataclass
@@ -22,8 +22,6 @@ from .protocols import BoundaryReceiver
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
-
-logger = logging.getLogger("persona.character_life")
 
 
 @dataclass
@@ -207,7 +205,7 @@ class CharacterLife:
         self._today_jittered_end = None
         self._regenerate_slots_for_today()
         self._last_event_date = today
-        logger.debug("重置每日事件状态: %s", today)
+        logger.debug("重置每日事件状态: {}", today)
 
     def _cleanup_expired_activities(self) -> None:
         now = self.config.now()
@@ -411,7 +409,7 @@ class CharacterLife:
                     character_state.current_intention = None
                     character_state.intention_created_at = None
                     await self.data_store.update_character_state(character_state)
-                    logger.debug("跨天空清意向: %s", today)
+                    logger.debug("跨天空清意向: {}", today)
             else:
                 character_state = CharacterState(
                     energy=self.config.default_energy,
@@ -568,8 +566,8 @@ class CharacterLife:
 
                 # debug trace
                 logger.debug(
-                    "[chain] %s @ %s depth=%d energy=%d(%+d) mood=%d(%+d) health=%d(%+d) "
-                    "follow_up=%r pending_plan=%r fallback=%s",
+                    "[chain] {} @ {} depth={} energy={}({:+d}) mood={}({:+d}) health={}({:+d}) "
+                    "follow_up={!r} pending_plan={!r} fallback={}",
                     self.character.name, time_str, chain_depth + 1,
                     character_state.energy, ed,
                     character_state.mood, md,
@@ -594,14 +592,14 @@ class CharacterLife:
                 if chain_depth == 1 and not self._chain_triggered_today and not is_fallback:
                     if random.random() < self.config.chain_force_extend_once_prob:
                         is_fallback = True
-                        logger.info("[chain] 触发保底续写: %s", self.character.name)
+                        logger.info("[chain] 触发保底续写: {}", self.character.name)
                         continue
 
                 break
 
             if event_chain:
                 logger.info(
-                    "生成生活事件链: %s... (深度=%d, 保底=%s)",
+                    "生成生活事件链: {}... (深度={}, 保底={})",
                     event_chain[0]["description"][:50],
                     chain_depth,
                     is_fallback,
@@ -609,7 +607,7 @@ class CharacterLife:
             return event_chain
 
         except Exception as e:
-            logger.exception("生成生活事件失败: %s", e)
+            logger.exception("生成生活事件失败: {}", e)
             return []
 
     async def _get_recent_diaries(self, days: int) -> List[str]:

@@ -6,8 +6,7 @@
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from dataclasses import dataclass
 import random
-import logging
-
+from nonebot.log import logger
 from ..data.store import PersonaDataStore
 from ..data.models import RelationshipState, ScoreEvent
 from ..character.models import Character
@@ -20,7 +19,6 @@ from .protocols import EventSharePort
 from .diary import DiaryGenerator
 from .character_life import CharacterLife
 
-logger = logging.getLogger("persona.life_simulator")
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig

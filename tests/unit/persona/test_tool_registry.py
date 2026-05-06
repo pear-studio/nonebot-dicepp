@@ -22,23 +22,27 @@ def _make_registry_with_echo_tool():
 
 
 @pytest.mark.asyncio
-async def test_invalid_json_returns_fallback_result(caplog):
+async def test_invalid_json_returns_fallback_result():
     """非法 JSON 不应让整轮 tool execution 崩溃"""
+    from io import StringIO
+    from loguru import logger
     registry = _make_registry_with_echo_tool()
     ctx = ToolContext(user_id="u1", group_id="g1")
     executor = registry.make_executor_for("chat", ctx=ctx)
 
     tool_calls = [{"id": "call_1", "name": "echo", "arguments": "{not valid json"}]
 
-    with caplog.at_level(logging.WARNING, logger="persona.tools"):
+    output = StringIO()
+    handler_id = logger.add(output, level="WARNING", format="{message}")
+    try:
         results = await executor(tool_calls)
+    finally:
+        logger.remove(handler_id)
 
     assert len(results) == 1
     assert results[0]["tool_call_id"] == "call_1"
     assert "参数解析失败" in results[0]["content"]
-    assert any(
-        "echo 参数解析失败" in record.message for record in caplog.records
-    )
+    assert "echo 参数解析失败" in output.getvalue()
 
 
 @pytest.mark.asyncio
@@ -57,8 +61,10 @@ async def test_valid_json_executes_normally():
 
 
 @pytest.mark.asyncio
-async def test_invalid_json_does_not_block_subsequent_calls(caplog):
+async def test_invalid_json_does_not_block_subsequent_calls():
     """前一个 call 解析失败不应影响后续 call 执行"""
+    from io import StringIO
+    from loguru import logger
     registry = _make_registry_with_echo_tool()
     ctx = ToolContext(user_id="u1", group_id="g1")
     executor = registry.make_executor_for("chat", ctx=ctx)
@@ -68,8 +74,12 @@ async def test_invalid_json_does_not_block_subsequent_calls(caplog):
         {"id": "good", "name": "echo", "arguments": '{"x": 1}'},
     ]
 
-    with caplog.at_level(logging.WARNING, logger="persona.tools"):
+    output = StringIO()
+    handler_id = logger.add(output, level="WARNING", format="{message}")
+    try:
         results = await executor(tool_calls)
+    finally:
+        logger.remove(handler_id)
 
     assert len(results) == 2
     assert results[0]["tool_call_id"] == "bad"

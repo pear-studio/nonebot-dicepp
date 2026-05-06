@@ -1,6 +1,6 @@
 """唯一消息发送出口"""
 import asyncio
-import logging
+from nonebot.log import logger
 from typing import Optional, Callable, List, Dict
 
 from core.bot import Bot
@@ -10,8 +10,6 @@ from core.communication import GroupMessagePort, PrivateMessagePort
 from .pipeline import MessagePipeline, SendAction
 from ..tools.context import SendPort
 from ..life.protocols import EventSharePort
-
-logger = logging.getLogger("persona.port")
 
 
 class MessagePort(EventSharePort):
@@ -80,7 +78,7 @@ class MessagePort(EventSharePort):
     ) -> None:
         proxy = getattr(self._bot, "proxy", None)
         if proxy is None:
-            logger.error("Bot.proxy 未配置，丢弃消息: user=%s group=%s", user_id, group_id)
+            logger.error("Bot.proxy 未配置，丢弃消息: user={}s group={}", user_id, group_id)
             return
 
         if group_id:

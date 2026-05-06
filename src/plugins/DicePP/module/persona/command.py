@@ -8,7 +8,7 @@ from typing import List, Dict, Tuple, Any, Optional, Callable
 import json
 import time
 import asyncio
-import logging
+from nonebot.log import logger
 from datetime import timedelta
 
 from core.bot import Bot
@@ -18,7 +18,6 @@ from core.communication import MessageMetaData
 from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FUN
 from utils.logger import dice_log
 
-logger = logging.getLogger("persona.command")
 
 from .factory import PersonaApp, create_persona
 from .exceptions import PersonaInitError

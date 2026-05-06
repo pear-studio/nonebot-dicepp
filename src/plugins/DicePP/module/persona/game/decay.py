@@ -5,12 +5,10 @@
 """
 from typing import Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
-import logging
-
+from nonebot.log import logger
 from ..data.models import RelationshipState, ScoreDeltas
 from ..wall_clock import persona_wall_now
 
-logger = logging.getLogger("persona.decay")
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
@@ -136,7 +134,7 @@ class DecayCalculator:
             f"下限保护后 {actual_decay:.2f} (下限 {floor:.1f})"
         )
 
-        logger.debug("Decay calculated for %s: %s", relationship.user_id, reason)
+        logger.debug("Decay calculated for {}s: {}", relationship.user_id, reason)
         return deltas, reason
 
     def effective_relationship(

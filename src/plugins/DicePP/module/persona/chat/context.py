@@ -3,7 +3,7 @@
 
 组装四层记忆到 LLM 消息列表
 """
-import logging
+from nonebot.log import logger
 from typing import List, Dict, Optional, Any, Tuple
 
 from utils.string import estimate_tokens
@@ -11,8 +11,6 @@ from utils.string import estimate_tokens
 from ..character.models import Character
 from ..data.models import UserProfile
 from ..wall_clock import persona_wall_now
-
-logger = logging.getLogger("persona.context_builder")
 
 
 class ContextBuilder:

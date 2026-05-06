@@ -4,12 +4,9 @@
 """
 from typing import List, Dict, Callable, Awaitable
 from datetime import timedelta
-import logging
-
+from nonebot.log import logger
 from ..data.store import PersonaDataStore
 from ..wall_clock import persona_wall_now
-
-logger = logging.getLogger("persona.scheduler")
 
 
 class EventShareTaskQueue:

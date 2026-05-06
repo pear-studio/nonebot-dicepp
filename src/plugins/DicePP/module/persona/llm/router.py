@@ -11,15 +11,12 @@ import json
 from typing import List, Dict, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 import time
 import uuid
-import logging
-
+from nonebot.log import logger
 from .client import LLMClient
 from ..data.models import ModelTier, UserLLMConfig
 
 if TYPE_CHECKING:
     from ...core.config.pydantic_models import PersonaConfig
-
-logger = logging.getLogger("persona.llm")
 
 
 class QuotaExceeded(Exception):

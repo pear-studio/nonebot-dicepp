@@ -9,8 +9,7 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional
 from datetime import datetime
 import json
-import logging
-
+from nonebot.log import logger
 from ..llm import ForcedToolError
 from ..llm.router import LLMRouter
 from ..data.models import ModelTier
@@ -20,8 +19,6 @@ if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
 
 _EVENT_DESCRIPTION_MAX_LEN = 60
-
-logger = logging.getLogger("persona.event_agent")
 
 
 @dataclass
@@ -217,8 +214,8 @@ class EventGenerationAgent:
 
         user_prompt = f"当前时间: {context.current_time.strftime('%H:%M')}{intention_text}{diary_context}{events_context}\n\n请生成一个符合世界观的生活事件，并通过 record_event 工具记录:"
 
-        logger.debug("[prompt:system_event]\n%s", system_prompt)
-        logger.debug("[prompt:user_event]\n%s", user_prompt)
+        logger.debug("[prompt:system_event]\n{}", system_prompt)
+        logger.debug("[prompt:user_event]\n{}", user_prompt)
 
         tools = [
             {
@@ -364,8 +361,8 @@ class EventGenerationAgent:
 
         user_prompt = f"{today_context}{intention_text}\n\n当前事件: {event}\n\n请先思考，然后通过 record_reaction 工具记录你的内心反应、分享欲望、跟进动作和待办计划。"
 
-        logger.debug("[prompt:system_reaction]\n%s", system_prompt)
-        logger.debug("[prompt:user_reaction]\n%s", user_prompt)
+        logger.debug("[prompt:system_reaction]\n{}", system_prompt)
+        logger.debug("[prompt:user_reaction]\n{}", user_prompt)
 
         tools = [
             {
@@ -534,8 +531,8 @@ class EventGenerationAgent:
 
 请写一篇日记总结今天:"""
 
-        logger.debug("[prompt:system_diary]\n%s", system_prompt)
-        logger.debug("[prompt:user_diary]\n%s", user_prompt)
+        logger.debug("[prompt:system_diary]\n{}", system_prompt)
+        logger.debug("[prompt:user_diary]\n{}", user_prompt)
 
         try:
             response = await self.llm_router.generate(
@@ -668,8 +665,8 @@ class EventGenerationAgent:
 
 请调用 record_share_message 工具，传入你要发给对方的消息。"""
 
-        logger.debug("[prompt:system_share]\n%s", system_prompt)
-        logger.debug("[prompt:user_share]\n%s", user_prompt)
+        logger.debug("[prompt:system_share]\n{}", system_prompt)
+        logger.debug("[prompt:user_share]\n{}", user_prompt)
 
         tools = [
             {

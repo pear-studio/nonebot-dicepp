@@ -5,7 +5,7 @@
 from typing import List, Dict, Any, Optional
 import json
 import time
-import logging
+from nonebot.log import logger
 from datetime import timedelta
 
 from core.bot import Bot
@@ -13,8 +13,6 @@ from core.bot import Bot
 from .factory import PersonaApp
 from .data.store import PersonaDataStore
 from .wall_clock import persona_wall_now
-
-logger = logging.getLogger("persona.admin")
 
 
 class AdminDispatcher:

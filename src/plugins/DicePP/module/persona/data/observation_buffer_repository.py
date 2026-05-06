@@ -5,14 +5,12 @@
 """
 import json
 import time
-import logging
+from nonebot.log import logger
 from typing import Dict, Optional, Any
 
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_OBSERVATION_BUFFERS
 from ..life.observation import ObservationBuffer, ObservationExtractor
-
-logger = logging.getLogger("persona.observation_repo")
 
 
 class ObservationBufferRepository:

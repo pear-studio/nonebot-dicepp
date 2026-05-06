@@ -3,14 +3,12 @@
 
 兼容 SillyTavern V2 标准的角色卡定义
 """
-import logging
+from nonebot.log import logger
 import random
 from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
-
-logger = logging.getLogger("persona.character")
 
 
 class SharePolicy(str, Enum):

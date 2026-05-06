@@ -4,13 +4,10 @@
 将 module.roll 的调用隔离在 persona 模块外部，
 负责异常转换和结果格式化。
 """
-import logging
-
+from nonebot.log import logger
 from module.roll import exec_roll_exp, RollDiceError
 from .context import ToolContext
 from .registry import ToolDef
-
-logger = logging.getLogger("persona.roll_dice")
 
 
 class RollAdapter:

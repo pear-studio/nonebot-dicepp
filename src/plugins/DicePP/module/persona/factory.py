@@ -4,8 +4,7 @@
 """
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
-import logging
-
+from nonebot.log import logger
 from core.bot import Bot
 
 from .character.loader import CharacterLoader
@@ -36,8 +35,6 @@ from .tools.registry import ToolRegistry, ToolDomain
 from .tools.search_memory import SEARCH_MEMORY_TOOL, search_memory_executor
 from .tools.search_history import SEARCH_HISTORY_TOOL, make_search_history_executor
 from .tools.roll_dice import ROLL_DICE_TOOL, roll_dice_executor
-
-logger = logging.getLogger("persona.factory")
 
 
 @dataclass
