@@ -94,7 +94,7 @@ metadata:
      cd /home/ubuntu/dicepp/worktrees/<branch_name>
 
    开发完成后:
-     /create-pr   (创建 Pull Request)
+     /pr-create   (创建 Pull Request)
    ```
 
 **清理 worktree**

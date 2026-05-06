@@ -1,5 +1,5 @@
 ---
-name: create-pr
+name: pr-create
 description: 从当前 feature 分支创建 GitHub Pull Request，自动推送分支并填写标题/描述。
 license: MIT
 metadata:
@@ -9,7 +9,7 @@ metadata:
 
 从当前 feature 分支创建 GitHub Pull Request，自动推送到远端并生成 PR 标题和描述。
 
-**Input**: 用户请求创建 PR，如 "开 PR"、"create pr"、"/create-pr"。
+**Input**: 用户请求创建 PR，如 "开 PR"、"create pr"、"/pr-create"。
 
 **Prerequisites**
 
@@ -87,4 +87,4 @@ metadata:
 
 - 目标分支固定为 `master`（ DicePP 项目主分支）。
 - 如果 commit message 不够清晰，主动询问用户是否要修改 PR 标题。
-- PR 创建后不会自动合并，需通过 `review-pr` skill 或手动审核。
+- PR 创建后不会自动合并，需通过 `pr-review` skill 或手动审核。

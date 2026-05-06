@@ -1,5 +1,5 @@
 ---
-name: review-pr
+name: pr-review
 description: 读取 GitHub Pull Request 的 diff，review 代码质量，执行 approve / request changes / merge 操作。
 license: MIT
 metadata:
@@ -9,7 +9,7 @@ metadata:
 
 读取指定的 GitHub Pull Request，分析 diff 给出 review 意见，并根据用户决策执行 approve、request changes 或 merge。
 
-**Input**: 用户指定 PR 号或分支名，如 "review #42"、"/review-pr 42"。
+**Input**: 用户指定 PR 号或分支名，如 "review #42"、"/pr-review 42"。
 
 **Prerequisites**
 
