@@ -27,6 +27,7 @@ from .data.store import PersonaDataStore
 from .data.persist_keys import PERSONA_SK_OBSERVATION_BUFFERS
 from .life.observation import ObservationBuffer
 from .utils.privacy import mask_sensitive_string
+from .gateway.pipeline import make_segment
 
 
 @custom_user_command("PersonaAI", priority=DPP_COMMAND_PRIORITY_DEFAULT, flag=DPP_COMMAND_FLAG_FUN)
@@ -403,7 +404,7 @@ class PersonaCommand(UserCommandBase):
             await self.app.port.send_segmented(
                 user_id,
                 group_id,
-                [{"content": content, "skip_history_record": bool(group_id)}],
+                [make_segment(content, group_id)],
             )
         else:
             dice_log(
@@ -1073,29 +1074,31 @@ class PersonaCommand(UserCommandBase):
     async def _ensure_observation_buffers_loaded(self) -> None:
         if self._observation_buffers_loaded or not self.data_store:
             return
-        self._observation_buffers_loaded = True
-        raw = await self.data_store.get_setting(PERSONA_SK_OBSERVATION_BUFFERS)
-        if not raw:
-            return
         try:
-            blob = json.loads(raw)
-        except json.JSONDecodeError:
-            return
-        for gid, payload in blob.items():
-            if not isinstance(payload, dict):
-                continue
+            raw = await self.data_store.get_setting(PERSONA_SK_OBSERVATION_BUFFERS)
+            if not raw:
+                return
             try:
-                self._observation_buffers[gid] = ObservationBuffer.from_persist_dict(
-                    gid,
-                    payload,
-                    initial_threshold=self.config.observe_initial_threshold,
-                    max_threshold=self.config.observe_max_threshold,
-                    min_threshold=self.config.observe_min_threshold,
-                    max_buffer_size=self.config.observe_max_buffer_size,
-                    timezone=self.config.timezone,
-                )
-            except Exception:
-                continue
+                blob = json.loads(raw)
+            except json.JSONDecodeError:
+                return
+            for gid, payload in blob.items():
+                if not isinstance(payload, dict):
+                    continue
+                try:
+                    self._observation_buffers[gid] = ObservationBuffer.from_persist_dict(
+                        gid,
+                        payload,
+                        initial_threshold=self.config.observe_initial_threshold,
+                        max_threshold=self.config.observe_max_threshold,
+                        min_threshold=self.config.observe_min_threshold,
+                        max_buffer_size=self.config.observe_max_buffer_size,
+                        timezone=self.config.timezone,
+                    )
+                except Exception:
+                    continue
+        finally:
+            self._observation_buffers_loaded = True
 
     async def _persist_observation_buffers_to_store(self) -> None:
         if not self.data_store:
@@ -1140,50 +1143,53 @@ class PersonaCommand(UserCommandBase):
 
         try:
             await self._ensure_observation_buffers_loaded()
-            if group_id not in self._observation_buffers:
-                self._observation_buffers[group_id] = ObservationBuffer(
-                    group_id=group_id,
-                    initial_threshold=self.config.observe_initial_threshold,
-                    max_threshold=self.config.observe_max_threshold,
-                    min_threshold=self.config.observe_min_threshold,
-                    max_buffer_size=self.config.observe_max_buffer_size,
-                    timezone=self.config.timezone,
+            should_extract = False
+            try:
+                if group_id not in self._observation_buffers:
+                    self._observation_buffers[group_id] = ObservationBuffer(
+                        group_id=group_id,
+                        initial_threshold=self.config.observe_initial_threshold,
+                        max_threshold=self.config.observe_max_threshold,
+                        min_threshold=self.config.observe_min_threshold,
+                        max_buffer_size=self.config.observe_max_buffer_size,
+                        timezone=self.config.timezone,
+                    )
+
+                buffer = self._observation_buffers[group_id]
+
+                should_extract = buffer.add_message(
+                    user_id=user_id,
+                    nickname=display_name,
+                    content=msg_str,
                 )
 
-            buffer = self._observation_buffers[group_id]
+                if should_extract:
+                    from .life.observation import ObservationExtractor
 
-            should_extract = buffer.add_message(
-                user_id=user_id,
-                nickname=display_name,
-                content=msg_str,
-            )
+                    messages = buffer.get_messages_for_extraction()
 
-            if should_extract:
-                from .life.observation import ObservationExtractor
+                    event_agent = None
+                    if self.app and self.app.life.scheduler:
+                        event_agent = self.app.life.scheduler.event_agent
 
-                messages = buffer.get_messages_for_extraction()
+                    if event_agent:
+                        extractor = ObservationExtractor(
+                            event_agent=event_agent,
+                            data_store=self.data_store,
+                            config=self.config,
+                            prune_observations_keep=self.config.observe_max_records,
+                        )
+                        await extractor.extract_observations(group_id, messages)
 
-                event_agent = None
-                if self.app and self.app.life.scheduler:
-                    event_agent = self.app.life.scheduler.event_agent
+                    # 观察触发提取时，更新群内容活跃度（减缓衰减）
+                    if self.config.group_activity_enabled:
+                        try:
+                            await self.data_store.update_group_content(group_id)
+                        except Exception as e:
+                            dice_log(f"[Persona] 群内容活跃度更新失败: {e}")
 
-                if event_agent:
-                    extractor = ObservationExtractor(
-                        event_agent=event_agent,
-                        data_store=self.data_store,
-                        config=self.config,
-                        prune_observations_keep=self.config.observe_max_records,
-                    )
-                    await extractor.extract_observations(group_id, messages)
-
-                # 观察触发提取时，更新群内容活跃度（减缓衰减）
-                if self.config.group_activity_enabled:
-                    try:
-                        await self.data_store.update_group_content(group_id)
-                    except Exception as e:
-                        dice_log(f"[Persona] 群内容活跃度更新失败: {e}")
-
-            await self._maybe_persist_observation_buffers(force=should_extract)
+            finally:
+                await self._maybe_persist_observation_buffers(force=should_extract)
 
         except Exception as e:
             dice_log(f"[Persona] 群聊观察失败: {e}")
@@ -1225,9 +1231,7 @@ class PersonaCommand(UserCommandBase):
 
             if loop.is_running():
                 if self._async_tick_task is None or self._async_tick_task.done():
-                    new_task = asyncio.create_task(_run_tick())
-                    new_task.add_done_callback(self._on_tick_done)
-                    self._async_tick_task = new_task
+                    self._async_tick_task = asyncio.create_task(_run_tick())
                 return []
 
             loop.run_until_complete(self.app.life.tick())
@@ -1264,9 +1268,7 @@ class PersonaCommand(UserCommandBase):
 
             if loop.is_running():
                 if self._async_tick_daily_task is None or self._async_tick_daily_task.done():
-                    new_task = asyncio.create_task(_run_daily())
-                    new_task.add_done_callback(self._on_tick_daily_done)
-                    self._async_tick_daily_task = new_task
+                    self._async_tick_daily_task = asyncio.create_task(_run_daily())
                 return []
 
             diary = loop.run_until_complete(self.app.life.tick_daily())
@@ -1276,30 +1278,6 @@ class PersonaCommand(UserCommandBase):
         except Exception as e:
             dice_log(f"[Persona] tick_daily 失败: {e}")
             return []
-
-    @staticmethod
-    def _on_tick_done(task: "asyncio.Task") -> None:
-        """tick 任务完成回调：立刻消费 result，缩短异常感知链路。
-
-        完成回调与下一轮 tick 中的 ``done()`` 清理是双保险：
-          - 回调先触发，第一时间记录异常；
-          - 下一轮 tick 仍负责把 ``self._async_tick_task`` 置回 None，
-            释放单槽给新任务。
-        """
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None:
-            dice_log(f"[Persona] tick 异步任务失败: {exc}")
-
-    @staticmethod
-    def _on_tick_daily_done(task: "asyncio.Task") -> None:
-        """tick_daily 任务完成回调，语义同 _on_tick_done。"""
-        if task.cancelled():
-            return
-        exc = task.exception()
-        if exc is not None:
-            dice_log(f"[Persona] tick_daily 异步任务失败: {exc}")
 
     # ── Phase 4: 用户 LLM Key 配置 ──
 

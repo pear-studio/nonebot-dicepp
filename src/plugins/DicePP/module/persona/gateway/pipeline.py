@@ -1,5 +1,5 @@
 """消息处理管道 — 链式转换 SendAction 元数据，不做 I/O"""
-from typing import List
+from typing import List, Dict, Any
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
@@ -70,3 +70,8 @@ class TruncateStage(MessageStage):
             if len(action.content) > self.max_chars:
                 action.content = action.content[: self.max_chars - 3] + "..."
         return actions
+
+
+def make_segment(content: str, group_id: str = "") -> Dict[str, Any]:
+    """构造 send_segmented 兼容的消息段"""
+    return {"content": content, "skip_history_record": bool(group_id)}
