@@ -11,6 +11,21 @@
 
 ## persona
 
+### [B-260507-3a7763] proactive_greeting_schedule 死配置删除
+- 创建: 2026-05-07
+- 问题表现:
+    - ProactiveGreetingEntry 类与 _default_proactive_greeting_schedule (5 个时段) 仅在 src/plugins/DicePP/core/config/pydantic_models.py:14-46 定义
+    - PersonaConfig.proactive_greeting_schedule 字段 (pydantic_models.py:167) 全仓库零消费者
+    - 代码注释 pydantic_models.py:166 已自承 "定时事件配置已迁移到角色卡 extensions.scheduled_events"
+    - 文档 docs/dicepp/persona/config-example.md:71 已标 DEPRECATED 且备注 "被调度器 redesign 忽略"
+    - config/global.json:133 仍写有 proactive_greeting_schedule 默认值条目
+- 工作计划:
+    - 删除 src/plugins/DicePP/core/config/pydantic_models.py 中 ProactiveGreetingEntry 类、_default_proactive_greeting_schedule、PersonaConfig.proactive_greeting_schedule 字段
+    - 删除 config/global.json 中 proactive_greeting_schedule 条目
+    - 移除 docs/dicepp/persona/config-example.md 中 DEPRECATED 行
+    - 影响面: 仅死代码删除, character_life 已有 wake_up/good_night 槽位机制不受影响
+    - 风险: 低 (零消费者), 但需确认 bot 配置文件 config/bots/*.json 不会因严格模式 pydantic 校验报错
+
 ### [B-260507-7127d2] add_group_conversation 在 post_send_hook 回调中事务嵌套报错
 - 创建: 2026-05-07
 - 问题表现:
@@ -37,17 +52,6 @@
   - 评估触发条件改造: 时间窗口（24h 内有对话即触发）或下调 `scoring_interval`
   - 需先在 dev 加日志复现一次评分失败路径，确认是 LLM 返回异常 / 解析失败 / 超时
   - 影响面: `chat/session.py:_process_batch_scoring`、`data/store.py` 表结构、配置项
-
-### [B-260507-a78174] 主动消息阈值默认值评估与 proactive_greeting_schedule 落地或下线
-- 创建: 2026-05-07
-- 问题表现:
-  - `share_desire` 阈值: 4月27日后所有事件 share_desire ≤ 0.45，低于默认 0.5，事件分享完全停止；目前 1276920536 已临时覆盖到 0.3
-  - 想念阈值: 用户好感度 39.9 vs `proactive_miss_min_score` 默认 40.0，刚好卡阈值下永不触发想念
-  - 死配置: `proactive_greeting_schedule` 在 `core/config/pydantic_models.py` 有 default 定义（5 个时段），但全代码仓库未被消费（grep 0 结果）
-- 工作计划:
-  - 收集 1~2 周内 share_desire 分布与好感度变化数据，决定 `proactive_event_share_threshold` / `proactive_miss_min_score` 是否下调到 0.3-0.4 / 35-38
-  - `proactive_greeting_schedule` 二选一：实现 scheduler 消费这份配置（character_life 已有 wake_up/good_night 槽位但与配置脱节），或从 pydantic_models 删除该字段
-  - 影响面: scheduler、character_life、PersonaConfig；需确认覆盖文件 `config/bots/*.json` 不会破坏
 
 ### [B-260507-d3cc8b] 事件生成 LLM 调用超时策略与 fallback 事件 delta 兜底
 - 创建: 2026-05-07
