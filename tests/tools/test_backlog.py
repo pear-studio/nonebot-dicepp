@@ -33,10 +33,8 @@ class TestAdd:
             "add",
             "--module", "roll",
             "--title", "Dice balance check",
-            "--source", "review-260506-0000-roll.md / R1",
-            "--problem", "Missing edge case for d0",
-            "--trigger", "When refactoring dice engine",
-            "--reason", "Out of current PR scope",
+            "--symptom", "d0 边界未覆盖, 输出概率分布偏移",
+            "--plan", "增补 d0 单测, 评估随机分布拦截",
         )
         assert rc == 0
         assert out.startswith("B-")
@@ -45,64 +43,56 @@ class TestAdd:
         assert "roll" in text
 
     def test_add_missing_required_field(self, tmp_dir):
+        # 必填字段传空值, 走 validate 路径
         backlog = tmp_dir / "backlog.md"
         rc, out, err = run(
             "--file", str(backlog),
             "add",
             "--module", "roll",
             "--title", "X",
-            "--trigger", "T",
-            "--reason", "",
+            "--symptom", "",
+            "--plan", "p",
         )
         assert rc != 0
         assert "校验失败" in err
 
     def test_add_duplicate_id_rejected(self, tmp_dir):
+        # 同秒内同 module/title/symptom 会生成相同 ID, 应被拒绝
         backlog = tmp_dir / "backlog.md"
-        # First add
         run(
             "--file", str(backlog),
             "add",
             "--module", "roll",
             "--title", "Dice balance check",
-            "--source", "review-260506-0000-roll.md / R1",
-            "--problem", "Missing edge case for d0",
-            "--trigger", "When refactoring dice engine",
-            "--reason", "Out of current PR scope",
+            "--symptom", "d0 边界未覆盖",
+            "--plan", "增补单测",
         )
-        # Second identical add
         rc, out, err = run(
             "--file", str(backlog),
             "add",
             "--module", "roll",
             "--title", "Dice balance check",
-            "--source", "review-260506-0000-roll.md / R1",
-            "--problem", "Missing edge case for d0",
-            "--trigger", "When refactoring dice engine",
-            "--reason", "Out of current PR scope",
+            "--symptom", "d0 边界未覆盖",
+            "--plan", "增补单测",
         )
         assert rc != 0
         assert "已存在" in err
 
 
 class TestBatchAdd:
-    def test_batch_add_via_file(self, tmp_dir):
+    def test_batch_add_via_file_single_line(self, tmp_dir):
         backlog = tmp_dir / "backlog.md"
         payload_file = tmp_dir / "payload.txt"
         payload_file.write_text(
             "Module: roll\n"
             "Title: Batch A\n"
-            "Source: review-260506-0000-roll.md / R2\n"
-            "Problem: p1\n"
-            "Trigger: t1\n"
-            "Reason: r1\n"
+            "Symptom: 单行问题表现\n"
+            "Plan: 单行工作计划\n"
             "<<<END>>>\n"
             "Module: persona\n"
             "Title: Batch B\n"
-            "Source: chat\n"
-            "Problem: p2\n"
-            "Trigger: t2\n"
-            "Reason: r2\n"
+            "Symptom: 另一条单行\n"
+            "Plan: 另一条计划\n"
             "<<<END>>>\n",
             encoding="utf-8",
         )
@@ -111,7 +101,7 @@ class TestBatchAdd:
             "batch-add",
             "--payload-file", str(payload_file),
         )
-        assert rc == 0
+        assert rc == 0, err
         lines = out.splitlines()
         assert len(lines) == 2
         assert lines[0].startswith("B-")
@@ -120,6 +110,39 @@ class TestBatchAdd:
         assert "Batch A" in text
         assert "Batch B" in text
 
+    def test_batch_add_multiline_bullets(self, tmp_dir):
+        # 验证多行 bullet 写法可以被解析、保存和读出
+        backlog = tmp_dir / "backlog.md"
+        payload_file = tmp_dir / "payload.txt"
+        payload_file.write_text(
+            "Module: persona\n"
+            "Title: 多行测试\n"
+            "Symptom:\n"
+            "  - 现象 1\n"
+            "  - 现象 2\n"
+            "  - 现象 3\n"
+            "Plan:\n"
+            "  - 修复方向 A\n"
+            "  - 风险点 B\n"
+            "<<<END>>>\n",
+            encoding="utf-8",
+        )
+        rc, bid, err = run(
+            "--file", str(backlog),
+            "batch-add",
+            "--payload-file", str(payload_file),
+        )
+        assert rc == 0, err
+        bid = bid.strip()
+
+        rc2, out2, _ = run("--file", str(backlog), "show", bid)
+        assert rc2 == 0
+        assert "现象 1" in out2
+        assert "现象 2" in out2
+        assert "现象 3" in out2
+        assert "修复方向 A" in out2
+        assert "风险点 B" in out2
+
 
 class TestListShow:
     def test_list_and_show(self, tmp_dir):
@@ -127,13 +150,14 @@ class TestListShow:
         run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "Item1",
-            "--source", "s", "--problem", "p", "--trigger", "t", "--reason", "r",
+            "--symptom", "s", "--plan", "p",
         )
         rc, out, _ = run("--file", str(backlog), "list")
         assert rc == 0
         assert "Item1" in out
 
-        rc2, out2, _ = run("--file", str(backlog), "show", out.split()[0].strip("[]"))
+        bid = out.split()[0].strip("[]")
+        rc2, out2, _ = run("--file", str(backlog), "show", bid)
         assert rc2 == 0
         assert "Item1" in out2
 
@@ -144,7 +168,7 @@ class TestClosePrune:
         rc, bid, _ = run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "ToClose",
-            "--source", "s", "--problem", "p", "--trigger", "t", "--reason", "r",
+            "--symptom", "s", "--plan", "p",
         )
         assert rc == 0
         bid = bid.strip()
@@ -160,12 +184,12 @@ class TestClosePrune:
         rc1, b1, _ = run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "A",
-            "--source", "s", "--problem", "p", "--trigger", "t", "--reason", "r",
+            "--symptom", "s", "--plan", "p",
         )
         rc2, b2, _ = run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "B",
-            "--source", "s", "--problem", "p", "--trigger", "t", "--reason", "r",
+            "--symptom", "s", "--plan", "p",
         )
         b1 = b1.strip()
         b2 = b2.strip()
@@ -182,23 +206,21 @@ class TestClosePrune:
 class TestSortValidate:
     def test_sort(self, tmp_dir):
         backlog = tmp_dir / "backlog.md"
-        # Add two items out of order (simulate by direct write)
-        # Actually add normally; order should be insertion order.
+        # 模块以字典序排序写出, 不论插入顺序
         run(
             "--file", str(backlog),
             "add", "--module", "zmod", "--title", "Z",
-            "--source", "s", "--problem", "p", "--trigger", "t", "--reason", "r",
+            "--symptom", "s", "--plan", "p",
         )
         run(
             "--file", str(backlog),
             "add", "--module", "amod", "--title", "A",
-            "--source", "s", "--problem", "p", "--trigger", "t", "--reason", "r",
+            "--symptom", "s", "--plan", "p",
         )
 
         rc, _, _ = run("--file", str(backlog), "sort")
         assert rc == 0
         text = backlog.read_text()
-        # amod should come before zmod after sort
         assert text.index("amod") < text.index("zmod")
 
     def test_validate_pass(self, tmp_dir):
@@ -206,25 +228,23 @@ class TestSortValidate:
         run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "V",
-            "--source", "s", "--problem", "p", "--trigger", "t", "--reason", "r",
+            "--symptom", "s", "--plan", "p",
         )
         rc, out, _ = run("--file", str(backlog), "validate")
         assert rc == 0
         assert "校验通过" in out
 
-    def test_validate_fail_missing_trigger(self, tmp_dir):
+    def test_validate_fail_missing_symptom_and_plan(self, tmp_dir):
         backlog = tmp_dir / "backlog.md"
-        # Manually craft invalid file
+        # 手工写入一个缺 问题表现 / 工作计划 的非法条目
         backlog.write_text(
             "# Backlog\n\n---\n\n## roll\n\n"
             "### [B-260506-000000] Bad\n"
-            "- 来源: s\n"
             "- 创建: 2026-05-06\n"
-            "- 原始问题: p\n"
-            "- 暂缓原因: r\n"
             "\n",
             encoding="utf-8",
         )
         rc, _, err = run("--file", str(backlog), "validate")
         assert rc != 0
-        assert "缺少触发条件" in err
+        assert "缺少问题表现" in err
+        assert "缺少工作计划" in err
