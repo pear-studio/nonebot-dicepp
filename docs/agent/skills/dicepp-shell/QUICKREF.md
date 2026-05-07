@@ -2,12 +2,12 @@
 
 ## 启动
 ```bash
-python -m DicePP.shell start <session> [--group <id>]
+.venv/bin/dicepp-shell start <session> [--group <id>]
 ```
 
 ## 发送消息
 ```bash
-python -m DicePP.shell send <session> --user <id> --msg "<cmd>" [options]
+.venv/bin/dicepp-shell send <session> --user <id> --msg "<cmd>" [options]
 ```
 
 ### 常用选项
@@ -18,8 +18,8 @@ python -m DicePP.shell send <session> --user <id> --msg "<cmd>" [options]
 
 ## 管理
 ```bash
-python -m DicePP.shell list          # 列出现有会话
-python -m DicePP.shell rm <session>  # 删除会话
+.venv/bin/dicepp-shell list          # 列出现有会话
+.venv/bin/dicepp-shell rm <session>  # 删除会话
 ```
 
 ## 典型命令

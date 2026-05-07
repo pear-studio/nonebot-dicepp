@@ -18,29 +18,29 @@ metadata:
 
 ```bash
 # 创建会话
-python -m DicePP.shell start test
+.venv/bin/dicepp-shell start test
 
 # 发送命令（带确定性骰子结果）
-python -m DicePP.shell send test --user player1 --msg ".r 1d20 攻击" --dice 20
+.venv/bin/dicepp-shell send test --user player1 --msg ".r 1d20 攻击" --dice 20
 
 # 清理
-python -m DicePP.shell rm test
+.venv/bin/dicepp-shell rm test
 ```
 
 ### 多步骤场景测试
 
 ```bash
 # 1. 创建专门用于此场景的会话
-python -m DicePP.shell start <scenario_name> --group <group_id>
+.venv/bin/dicepp-shell start <scenario_name> --group <group_id>
 
 # 2. 按顺序执行测试步骤
-python -m DicePP.shell send <scenario_name> --user <user> --msg "<cmd>" [--dice <seq>]
+.venv/bin/dicepp-shell send <scenario_name> --user <user> --msg "<cmd>" [--dice <seq>]
 
 # 3. 查看结果，必要时使用 --json 获取结构化输出
-python -m DicePP.shell send <scenario_name> --user <user> --msg "<cmd>" --json
+.venv/bin/dicepp-shell send <scenario_name> --user <user> --msg "<cmd>" --json
 
 # 4. 完成后清理
-python -m DicePP.shell rm <scenario_name>
+.venv/bin/dicepp-shell rm <scenario_name>
 ```
 
 ### 常用命令速查
@@ -70,26 +70,26 @@ python -m DicePP.shell rm <scenario_name>
 ### 测试战斗流程
 
 ```bash
-python -m DicePP.shell start combat
-python -m DicePP.shell send combat --user DM --msg ".init"
-python -m DicePP.shell send combat --user 战士 --msg ".ri" --dice 18
-python -m DicePP.shell send combat --user 法师 --msg ".ri" --dice 12
-python -m DicePP.shell send combat --user DM --msg ".init next"
-python -m DicePP.shell rm combat
+.venv/bin/dicepp-shell start combat
+.venv/bin/dicepp-shell send combat --user DM --msg ".init"
+.venv/bin/dicepp-shell send combat --user 战士 --msg ".ri" --dice 18
+.venv/bin/dicepp-shell send combat --user 法师 --msg ".ri" --dice 12
+.venv/bin/dicepp-shell send combat --user DM --msg ".init next"
+.venv/bin/dicepp-shell rm combat
 ```
 
 ### 测试角色卡功能
 
 ```bash
-python -m DicePP.shell start char
-python -m DicePP.shell send char --user player1 --msg ".角色卡记录
+.venv/bin/dicepp-shell start char
+.venv/bin/dicepp-shell send char --user player1 --msg ".角色卡记录
 $姓名$ 测试角色
 $等级$ 5
 $生命值$ 50/50
 $生命骰$ 5/5 D10
 $属性$ 16/14/13/10/12/8"
-python -m DicePP.shell send char --user player1 --msg ".状态"
-python -m DicePP.shell rm char
+.venv/bin/dicepp-shell send char --user player1 --msg ".状态"
+.venv/bin/dicepp-shell rm char
 ```
 
 ## 最佳实践
@@ -102,5 +102,5 @@ python -m DicePP.shell rm char
 ## 故障排除
 
 - **会话已存在**: `start` 命令会加载已存在的会话
-- **找不到会话**: 先运行 `python -m DicePP.shell start <name>`
+- **找不到会话**: 先运行 `.venv/bin/dicepp-shell start <name>`
 - **输出乱码**: Windows 终端设置 `chcp 65001`
