@@ -32,7 +32,7 @@ try:
     app: FastAPI = nonebot.get_app()
     app.mount("/dpp", dpp_api)
 except ValueError:
-    dice_log("DPP API is not amounted because NoneBot has not been initialized")
+    pass
 
 command_matcher = on_message(block=False)
 notice_matcher = on_notice()
@@ -347,7 +347,6 @@ try:
     driver = nonebot.get_driver()
 except ValueError:
     driver = None  # type: ignore
-    dice_log("[NB Adapter] NoneBot has not been initialized (driver unavailable)")
 else:
     # 在Bot连接时调用
     @driver.on_bot_connect
