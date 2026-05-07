@@ -67,9 +67,9 @@ SAMPLE_EVENTS: List[Tuple[float, float, str]] = [
 def _load_persona_config_dict() -> dict:
     """合并 global.json + secrets.json 的 persona_ai 段。"""
     cfg: dict = {}
-    with open("config/global.json", encoding="utf-8") as f:
+    with open(ROOT / "config" / "global.json", encoding="utf-8") as f:
         cfg.update(json.load(f).get("persona_ai", {}))
-    secrets_path = Path("config/secrets.json")
+    secrets_path = ROOT / "config" / "secrets.json"
     if secrets_path.exists():
         with open(secrets_path, encoding="utf-8") as f:
             cfg.update(json.load(f).get("persona_ai", {}))
@@ -83,7 +83,7 @@ async def main() -> None:
     cfg = PersonaConfig(**filtered)
 
     if not cfg.primary_api_key:
-        print("❌ 缺少 primary_api_key，请检查 config/secrets.json")
+        print("[err] 缺少 primary_api_key，请检查 config/secrets.json")
         return
 
     router = LLMRouter(
@@ -99,15 +99,16 @@ async def main() -> None:
         config=cfg,
     )
 
-    loader = CharacterLoader(cfg.character_path)
+    character_path_abs = ROOT / cfg.character_path
+    loader = CharacterLoader(str(character_path_abs))
     character = loader.load(cfg.character_name)
     if character is None:
-        print(f"❌ 角色卡加载失败: {cfg.character_name} (path={cfg.character_path})")
+        print(f"[err] 角色卡加载失败: {cfg.character_name} (path={character_path_abs})")
         return
 
-    print(f"✅ 角色卡: {character.name}")
-    print(f"✅ 模型: {cfg.primary_model} (aux: {cfg.auxiliary_model or '(=primary)'})")
-    print(f"✅ 采样事件数: {len(SAMPLE_EVENTS)}\n")
+    print(f"[ok] 角色卡: {character.name}")
+    print(f"[ok] 模型: {cfg.primary_model} (aux: {cfg.auxiliary_model or '(=primary)'})")
+    print(f"[ok] 采样事件数: {len(SAMPLE_EVENTS)}\n")
 
     agent = EventGenerationAgent(router, cfg)
     sem = asyncio.Semaphore(3)
@@ -143,7 +144,7 @@ async def main() -> None:
         ok = lo <= sd <= hi
         if ok:
             hit += 1
-        marker = "✓" if ok else "✗"
+        marker = "OK" if ok else "--"
         actual_by_band.setdefault(band, []).append(sd)
         rows.append((band, sd, marker, event, reaction))
         reaction_short = (reaction or "")[:40]
