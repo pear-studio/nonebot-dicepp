@@ -64,23 +64,29 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - 评估: 用户裁决
    - 裁决记录: ...
    - 共识状态: 已共识·延后
-   - 触发条件: 当 X 重构时一并处理
-   - 暂缓原因: 当前 PR scope 外
+   - 问题表现:
+     - 现象 / 数据 / 日志（可从 Review/Reply 中提取并细化）
+   - 工作计划:
+     - 修复方向
+     - 影响面
+     - 风险点 / 何时拉起
    <<<END>>>
    EOF
    ```
 6. 自动归档 `已共识·延后` 条目到 backlog：
    - 扫描所有 `共识状态: 已共识·延后`（含 review0 产出的"用户明确·延后"）的 Rn
-   - 提取 module（从 review 文档名推断）、title、source、problem、trigger、reason
+   - 提取 module（从 review 文档名推断）、title、symptom、plan
    - 在上下文中构造 payload，**一次**调用 `backlog.py batch-add`：
      ```bash
      python scripts/tools/backlog.py batch-add <<'EOF'
      Module: persona
-     Title: ...
-     Source: review-yymmdd-hhmm-slug.md / Rn
-     Problem: ...
-     Trigger: ...
-     Reason: ...
+     Title: <Rn 标题>
+     Symptom:
+       - 现象 / 数据 / 日志
+     Plan:
+       - 修复方向
+       - 影响面
+       - 风险点 / 何时拉起
      <<<END>>>
      EOF
      ```
@@ -99,8 +105,8 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 - 澄清内容: ...（仅 待澄清 时：针对 Defender 困惑点的解答，供其重新回复）
 - 裁决记录: ...（仅用户裁决时：用户决定及简要理由）
 - 共识状态: 已共识·实施 / 已共识·延后 / 已共识·否决 / 需补充回复
-- 触发条件: ...（仅 已共识·延后 必填）
-- 暂缓原因: ...（仅 已共识·延后 必填）
+- 问题表现: ...（仅 已共识·延后 必填，可单行或多行 bullet）
+- 工作计划: ...（仅 已共识·延后 必填，可单行或多行 bullet）
 - 已归档: B-...（仅 已共识·延后，由脚本自动回填）
 ```
 
@@ -108,7 +114,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 
 - 只修改 review 文档，不改业务代码
 - 本阶段输出的 `共识状态` 只允许四种值：`已共识·实施` / `已共识·延后` / `已共识·否决` / `需补充回复`，禁止输出旧的 `已共识` 或 `待裁决`
-- `已共识·延后` 必须填写 `触发条件` 和 `暂缓原因`，缺一不可
+- `已共识·延后` 必须填写 `问题表现` 和 `工作计划`，缺一不可
 - `需补充回复` 条目不得进入 review4-execute，必须通知用户让 Defender 先补充回复
 - 分歧仲裁必须当场闭环，不得遗留
 - `已共识·延后` 必须在本阶段自动归档到 backlog，不得遗留到 review5

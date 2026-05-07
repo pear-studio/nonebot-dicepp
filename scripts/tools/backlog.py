@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""通用 Backlog 管理工具。"""
+"""通用 Backlog 管理工具。
+
+字段说明：
+    创建      自动填入的录入日期
+    问题表现  详细症状、现场数据、错误日志、量化指标、复现路径
+    工作计划  可能的修复方向、需先验证的假设、影响范围、风险点
+
+问题表现 / 工作计划支持单行或多行写法：
+    - 问题表现: 简短描述
+    或
+    - 问题表现:
+      - 现象 1
+      - 现象 2
+"""
 
 import argparse
 import hashlib
@@ -9,10 +22,9 @@ import os
 import re
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 if sys.platform == "win32":
@@ -23,14 +35,12 @@ if sys.platform == "win32":
 
 BACKLOG_PATH = Path("docs/dev/backlog.md")
 
-# ID pattern: B-yymmdd-hex6
 ID_RE = re.compile(r"^B-\d{6}-[0-9a-f]{6}$")
-
-# H3 entry header: ### [B-260506-a3f9c1] Title
 ENTRY_HEADER_RE = re.compile(r"^### \[(B-\d{6}-[0-9a-f]{6})\] (.*)$")
+FIELD_RE = re.compile(r"^- (创建|问题表现|工作计划):\s*(.*)$")
+INDENT_RE = re.compile(r"^  (.*)$")  # 2-space indent → 字段多行内容
 
-# List item line under an entry: `- 字段: 值`
-FIELD_RE = re.compile(r"^- (来源|创建|触发条件|原始问题|暂缓原因):\s*(.*)$")
+FIELD_KEYS = ("创建", "问题表现", "工作计划")
 
 
 @dataclass
@@ -38,11 +48,9 @@ class BacklogItem:
     id: str
     module: str
     title: str
-    source: str = ""
     created: str = ""
-    trigger: str = ""
-    problem: str = ""
-    reason: str = ""
+    symptom: str = ""
+    plan: str = ""
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -54,27 +62,33 @@ class BacklogItem:
             errors.append("缺少 module")
         if not self.title:
             errors.append("缺少 title")
-        if not self.trigger:
-            errors.append("缺少触发条件")
-        if not self.reason:
-            errors.append("缺少暂缓原因")
+        if not self.symptom:
+            errors.append("缺少问题表现")
+        if not self.plan:
+            errors.append("缺少工作计划")
         return errors
 
     def to_md(self) -> str:
-        lines = [
-            f"### [{self.id}] {self.title}",
-            f"- 来源: {self.source}",
-            f"- 创建: {self.created}",
-            f"- 触发条件: {self.trigger}",
-            f"- 原始问题: {self.problem}",
-            f"- 暂缓原因: {self.reason}",
-            "",
-        ]
+        lines = [f"### [{self.id}] {self.title}"]
+        lines.append(f"- 创建: {self.created}")
+        lines.append(_render_field("问题表现", self.symptom))
+        lines.append(_render_field("工作计划", self.plan))
+        lines.append("")
         return "\n".join(lines)
 
 
+def _render_field(label: str, value: str) -> str:
+    """单行 → `- label: value`；多行 → `- label:` 后跟缩进块。"""
+    value = value.rstrip()
+    if not value:
+        return f"- {label}:"
+    if "\n" not in value:
+        return f"- {label}: {value}"
+    body_lines = ["  " + line if line.strip() else "" for line in value.splitlines()]
+    return f"- {label}:\n" + "\n".join(body_lines)
+
+
 def _resolve_path(path: Path | str | None) -> Path:
-    """Return backlog path. Relative paths are resolved against cwd."""
     if path is None:
         return BACKLOG_PATH
     return Path(path)
@@ -84,18 +98,16 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def _gen_id(module: str, title: str, problem: str) -> str:
-    """Generate a backlog ID. Collision is possible if the same module/title/problem
-    is added within the same second; the duplicate guard in cmd_add handles this."""
+def _gen_id(module: str, title: str, symptom: str) -> str:
+    """同毫秒内同 module/title/symptom 才会撞 ID，cmd_add 内还有兜底校验。"""
     timestamp = datetime.now(timezone.utc).strftime("%y%m%d%H%M%S")
-    payload = f"{module}:{title}:{problem}:{timestamp}"
+    payload = f"{module}:{title}:{symptom}:{timestamp}"
     h = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:6]
-    date_part = timestamp[:6]  # yymmdd
+    date_part = timestamp[:6]
     return f"B-{date_part}-{h}"
 
 
 def parse_backlog(path: Path) -> tuple[list[str], dict[str, list[BacklogItem]]]:
-    """Parse the backlog file. Returns (preamble lines, {module: [items]})."""
     if not path.exists():
         return [], {}
 
@@ -108,6 +120,29 @@ def parse_backlog(path: Path) -> tuple[list[str], dict[str, list[BacklogItem]]]:
     state = "preamble"
     current_module = ""
     current_item: BacklogItem | None = None
+    current_field: str | None = None  # 正在累积多行 body 的字段名
+    field_buffer: list[str] = []
+
+    def flush_field() -> None:
+        nonlocal current_field, field_buffer
+        if current_item is None or current_field is None:
+            current_field = None
+            field_buffer = []
+            return
+        body = "\n".join(field_buffer).rstrip()
+        if current_field == "问题表现":
+            current_item.symptom = body
+        elif current_field == "工作计划":
+            current_item.plan = body
+        current_field = None
+        field_buffer = []
+
+    def flush_item() -> None:
+        nonlocal current_item
+        flush_field()
+        if current_item is not None:
+            modules.setdefault(current_module, []).append(current_item)
+            current_item = None
 
     i = 0
     while i < len(lines):
@@ -122,16 +157,15 @@ def parse_backlog(path: Path) -> tuple[list[str], dict[str, list[BacklogItem]]]:
             continue
 
         if stripped.startswith("## "):
+            flush_item()
             current_module = stripped[3:].strip()
-            if current_module not in modules:
-                modules[current_module] = []
+            modules.setdefault(current_module, [])
             i += 1
             continue
 
         m = ENTRY_HEADER_RE.match(stripped)
         if m:
-            if current_item is not None:
-                modules[current_module].append(current_item)
+            flush_item()
             current_item = BacklogItem(
                 id=m.group(1),
                 module=current_module,
@@ -140,30 +174,47 @@ def parse_backlog(path: Path) -> tuple[list[str], dict[str, list[BacklogItem]]]:
             i += 1
             continue
 
-        if current_item is not None:
-            fm = FIELD_RE.match(stripped)
-            if fm:
-                key = fm.group(1)
-                val = fm.group(2)
-                if key == "来源":
-                    current_item.source = val
-                elif key == "创建":
-                    current_item.created = val
-                elif key == "触发条件":
-                    current_item.trigger = val
-                elif key == "原始问题":
-                    current_item.problem = val
-                elif key == "暂缓原因":
-                    current_item.reason = val
-            elif stripped == "" and (i + 1 >= len(lines) or not FIELD_RE.match(lines[i + 1].strip())):
-                # blank line separating entries
-                if current_item is not None:
-                    modules[current_module].append(current_item)
-                    current_item = None
+        if current_item is None:
+            i += 1
+            continue
+
+        fm = FIELD_RE.match(stripped)
+        if fm:
+            flush_field()
+            key = fm.group(1)
+            val = fm.group(2)
+            if key == "创建":
+                current_item.created = val
+            elif key in ("问题表现", "工作计划"):
+                if val:
+                    # 单行写法：值就在冒号后
+                    if key == "问题表现":
+                        current_item.symptom = val
+                    else:
+                        current_item.plan = val
+                else:
+                    # 多行写法：等待后续缩进块
+                    current_field = key
+                    field_buffer = []
+            i += 1
+            continue
+
+        if current_field is not None:
+            im = INDENT_RE.match(line)  # 用原始 line 保留缩进右侧空格无关紧要
+            if im:
+                field_buffer.append(im.group(1))
+                i += 1
+                continue
+            if stripped == "":
+                # 空行可能是字段 body 的一部分；只有当下一行不再缩进时才结束
+                if i + 1 < len(lines) and INDENT_RE.match(lines[i + 1]):
+                    field_buffer.append("")
+                    i += 1
+                    continue
+            flush_field()
         i += 1
 
-    if current_item is not None:
-        modules[current_module].append(current_item)
+    flush_item()
 
     return preamble, modules
 
@@ -174,28 +225,28 @@ def _write_backlog(path: Path, preamble: list[str], modules: dict[str, list[Back
         lines.append("---")
     lines.append("")
 
-    # Sort modules alphabetically for stable output
     for mod in sorted(modules.keys()):
         items = modules[mod]
         if not items:
             continue
         lines.append(f"## {mod}")
         lines.append("")
-        for item in items:
+        for idx, item in enumerate(items):
+            if idx > 0:
+                lines.append("")
             lines.append(item.to_md().rstrip("\n"))
         lines.append("")
 
     content = "\n".join(lines) + "\n"
 
     if dry_run:
-        print("[dry-run] 将要写入的内容预览（前 30 行）：")
-        for line in content.splitlines()[:30]:
+        print("[dry-run] 将要写入的内容预览（前 40 行）：")
+        for line in content.splitlines()[:40]:
             print(line)
-        if len(content.splitlines()) > 30:
+        if len(content.splitlines()) > 40:
             print("...")
         return
 
-    # Atomic write via temp file
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix="backlog-tmp-", suffix=".md")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -207,10 +258,7 @@ def _write_backlog(path: Path, preamble: list[str], modules: dict[str, list[Back
 
 
 def _resolve_module_order(existing: dict[str, list[BacklogItem]], items: list[BacklogItem]) -> dict[str, list[BacklogItem]]:
-    """Merge new items into existing module buckets."""
-    merged: dict[str, list[BacklogItem]] = {}
-    for mod, itms in existing.items():
-        merged[mod] = list(itms)
+    merged: dict[str, list[BacklogItem]] = {mod: list(itms) for mod, itms in existing.items()}
     for item in items:
         merged.setdefault(item.module, []).append(item)
     return merged
@@ -219,14 +267,12 @@ def _resolve_module_order(existing: dict[str, list[BacklogItem]], items: list[Ba
 def cmd_add(args):
     path = _resolve_path(args.file)
     item = BacklogItem(
-        id=_gen_id(args.module, args.title, args.problem or ""),
+        id=_gen_id(args.module, args.title, args.symptom or ""),
         module=args.module,
         title=args.title,
-        source=args.source,
         created=_today(),
-        trigger=args.trigger,
-        problem=args.problem,
-        reason=args.reason,
+        symptom=args.symptom,
+        plan=args.plan,
     )
     errors = item.validate()
     if errors:
@@ -234,7 +280,6 @@ def cmd_add(args):
         sys.exit(1)
 
     preamble, modules = parse_backlog(path)
-    # Deduplicate by ID (shouldn't happen with hash, but guard anyway)
     all_ids = {it.id for lst in modules.values() for it in lst}
     if item.id in all_ids:
         print(f"ID 已存在: {item.id}", file=sys.stderr)
@@ -246,42 +291,50 @@ def cmd_add(args):
 
 
 def _parse_batch_payload(text: str) -> list[dict[str, str]]:
-    """Parse plain text batch payload separated by <<<END>>>."""
-    items: list[dict[str, str]] = []
+    """以 <<<END>>> 分隔多个条目。
+
+    每个条目内部支持 ``Key: value`` 单行写法，和 ``Key:`` 后跟若干续行的多行写法：
+        Symptom:
+        - 现象 1
+        - 现象 2
+    续行直到下一个识别到的 Key 行或条目分隔符为止。
+    """
+    label_to_key = {
+        "Module": "module",
+        "Title": "title",
+        "Symptom": "symptom",
+        "Plan": "plan",
+    }
+
+    entries: list[dict[str, str]] = []
     blocks = re.split(r"(?m)^<<<END>>>\s*$", text)
+
     for block in blocks:
-        block = block.strip()
-        if not block:
+        block = block.strip("\n")
+        if not block.strip():
             continue
-        item: dict[str, str] = {}
-        key = None
-        for line in block.splitlines():
+        item: dict[str, list[str]] = {}
+        current_key: str | None = None
+        for raw_line in block.splitlines():
+            line = raw_line.rstrip()
             stripped = line.strip()
-            if stripped.startswith("Module:"):
-                key = "module"
-                item["module"] = stripped[7:].strip()
-            elif stripped.startswith("Title:"):
-                key = "title"
-                item["title"] = stripped[6:].strip()
-            elif stripped.startswith("Source:"):
-                key = "source"
-                item["source"] = stripped[7:].strip()
-            elif stripped.startswith("Problem:"):
-                key = "problem"
-                item["problem"] = stripped[8:].strip()
-            elif stripped.startswith("Trigger:"):
-                key = "trigger"
-                item["trigger"] = stripped[8:].strip()
-            elif stripped.startswith("Reason:"):
-                key = "reason"
-                item["reason"] = stripped[7:].strip()
-            elif key and not stripped.startswith("---"):
-                # Continuation of previous field
-                item[key] = item.get(key, "") + "\n" + line
-        for k in item:
-            item[k] = item[k].strip()
-        items.append(item)
-    return items
+            label_match = None
+            for label in label_to_key:
+                if stripped.startswith(f"{label}:"):
+                    rest = stripped[len(label) + 1 :]
+                    label_match = (label_to_key[label], rest.lstrip())
+                    break
+            if label_match:
+                current_key, rest = label_match
+                item.setdefault(current_key, [])
+                if rest:
+                    item[current_key].append(rest)
+            elif current_key:
+                item[current_key].append(line)
+        cleaned = {k: "\n".join(v).strip("\n") for k, v in item.items()}
+        if any(cleaned.values()):
+            entries.append(cleaned)
+    return entries
 
 
 def cmd_batch_add(args):
@@ -311,15 +364,13 @@ def cmd_batch_add(args):
             id=_gen_id(
                 raw.get("module", ""),
                 raw.get("title", ""),
-                raw.get("problem", ""),
+                raw.get("symptom", ""),
             ),
             module=raw.get("module", ""),
             title=raw.get("title", ""),
-            source=raw.get("source", ""),
             created=_today(),
-            trigger=raw.get("trigger", ""),
-            problem=raw.get("problem", ""),
-            reason=raw.get("reason", ""),
+            symptom=raw.get("symptom", ""),
+            plan=raw.get("plan", ""),
         )
         errors = item.validate()
         if errors:
@@ -340,7 +391,7 @@ def cmd_batch_add(args):
 
 def cmd_list(args):
     path = _resolve_path(args.file)
-    preamble, modules = parse_backlog(path)
+    _, modules = parse_backlog(path)
     items: list[BacklogItem] = []
     for mod, itms in modules.items():
         if args.module and mod != args.module:
@@ -362,11 +413,13 @@ def cmd_show(args):
                 print(f"ID:       {item.id}")
                 print(f"模块:     {item.module}")
                 print(f"标题:     {item.title}")
-                print(f"来源:     {item.source}")
                 print(f"创建:     {item.created}")
-                print(f"触发条件: {item.trigger}")
-                print(f"原始问题: {item.problem}")
-                print(f"暂缓原因: {item.reason}")
+                print("问题表现:")
+                for line in item.symptom.splitlines() or [""]:
+                    print(f"  {line}")
+                print("工作计划:")
+                for line in item.plan.splitlines() or [""]:
+                    print(f"  {line}")
                 return
     print(f"未找到: {args.id}", file=sys.stderr)
     sys.exit(1)
@@ -413,7 +466,6 @@ def cmd_sort(args):
     path = _resolve_path(args.file)
     preamble, modules = parse_backlog(path)
     for mod in modules:
-        # Sort by ID, which embeds date then hash
         modules[mod].sort(key=lambda it: it.id)
     _write_backlog(path, preamble, modules, dry_run=args.dry_run)
     print("已按 ID 排序")
@@ -421,7 +473,7 @@ def cmd_sort(args):
 
 def cmd_validate(args):
     path = _resolve_path(args.file)
-    preamble, modules = parse_backlog(path)
+    _, modules = parse_backlog(path)
     errors: list[str] = []
     all_ids: set[str] = set()
 
@@ -437,10 +489,10 @@ def cmd_validate(args):
             all_ids.add(item.id)
             if not item.title:
                 errors.append(f"[{item.id}] 缺少标题")
-            if not item.trigger:
-                errors.append(f"[{item.id}] 缺少触发条件")
-            if not item.reason:
-                errors.append(f"[{item.id}] 缺少暂缓原因")
+            if not item.symptom:
+                errors.append(f"[{item.id}] 缺少问题表现")
+            if not item.plan:
+                errors.append(f"[{item.id}] 缺少工作计划")
 
     if not errors:
         total = sum(len(v) for v in modules.values())
@@ -462,10 +514,8 @@ def main():
     p_add = sub.add_parser("add", help="新增单条 backlog")
     p_add.add_argument("--module", "-m", required=True)
     p_add.add_argument("--title", "-t", required=True)
-    p_add.add_argument("--source", "-s", default="")
-    p_add.add_argument("--problem", default="")
-    p_add.add_argument("--trigger", required=True)
-    p_add.add_argument("--reason", "-r", required=True)
+    p_add.add_argument("--symptom", required=True, help="问题表现（必填，可含换行）")
+    p_add.add_argument("--plan", required=True, help="工作计划（必填，可含换行）")
     p_add.set_defaults(func=cmd_add)
 
     p_batch = sub.add_parser("batch-add", help="批量新增 backlog")
