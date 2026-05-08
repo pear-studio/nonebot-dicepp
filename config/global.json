@@ -126,17 +126,10 @@
     "proactive_share_time_window_minutes": 15,
     "proactive_event_share_delay_min": 1,
     "proactive_event_share_delay_max": 5,
-    "proactive_event_share_threshold": 0.5,
+    "proactive_event_share_threshold": 0.4,
     "proactive_miss_enabled": true,
     "proactive_miss_min_hours": 72,
     "proactive_miss_min_score": 40.0,
-    "proactive_greeting_schedule": [
-      {"event_type": "wake_up", "time_range": "08:00-09:00"},
-      {"event_type": "lunch", "time_range": "11:30-13:00"},
-      {"event_type": "afternoon", "time_range": "14:00-15:00"},
-      {"event_type": "dinner", "time_range": "17:30-19:00"},
-      {"event_type": "good_night", "time_range": "22:00-23:00"}
-    ],
 
     "group_activity_enabled": true,
     "group_activity_decay_per_day": 10.0,
