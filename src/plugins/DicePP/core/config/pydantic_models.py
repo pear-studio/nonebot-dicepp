@@ -117,8 +117,6 @@ class PersonaConfig(BaseModel):
     decay_grace_period_hours: int = 8
     decay_rate_per_hour: float = 0.5
     decay_daily_cap: float = 5.0
-    decay_floor_offset: float = 20.0
-
     # ── Phase 2: 角色生活模拟
     character_life_enabled: bool = True
     # 生活事件时刻由角色卡 extensions.persona（generate_event_times）决定；此处仅控制触发容差
@@ -154,7 +152,7 @@ class PersonaConfig(BaseModel):
     )
     proactive_miss_enabled: bool = True
     proactive_miss_min_hours: int = 72
-    proactive_miss_min_score: float = 40.0
+    proactive_miss_min_score: float = 20.0
     proactive_always_send_users: List[str] = Field(
         default_factory=list,
         description="必定接收主动消息的私聊用户 ID 列表（绕过 min_interval 与好感度阈值）",

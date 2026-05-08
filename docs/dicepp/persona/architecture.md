@@ -273,14 +273,14 @@ Command.tick_daily() 每天调用
 - `trust`（信任，权重 0.3）
 - `secureness`（安全感，权重 0.2）
 
-`composite_score` = 加权平均，映射到 6 个温暖度等级和角色卡自定义标签。
+`composite_score` = 加权平均，映射到 5 个温暖度等级和角色卡自定义标签。
 
 #### `DecayCalculator`
 
 时间衰减计算：
 - 超过 `grace_period_hours` 后开始衰减
 - 衰减率 `decay_rate_per_hour`，单次上限 `decay_daily_cap`
-- 衰减下限 = `initial_relationship + decay_floor_offset`
+- 衰减下限 = `STAGE_FLOORS[peak_stage]`（历史最高阶段下界，单调递增）
 - **惰性计算**：对话展示和评分时使用 `effective_relationship()` 计算当前应得分数，不立即写库
 - **每日批处理**：`tick_daily()` 中将长时间未互动用户的衰减批量持久化
 

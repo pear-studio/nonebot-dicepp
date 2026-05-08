@@ -16,7 +16,7 @@ def _make_mock_character():
     char = MagicMock()
     char.name = "七七"
     char.description = "一个喜欢户外活动的女孩"
-    char.get_warmth_labels = MagicMock(return_value=["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"])
+    char.get_warmth_labels = MagicMock(return_value=["冷淡", "疏远", "友好", "默契", "亲密"])
     char.extensions = MagicMock()
     char.extensions.share_message_examples = None
     return char
@@ -123,7 +123,7 @@ class TestBuildAndGenerateShareMessage:
 
         ctx = mock_agent.generate_share_message.call_args[0][0]
         assert ctx.relationship_score == 64.5  # composite_score = 65*0.3 + 60*0.2 + 70*0.3 + 60*0.2
-        assert ctx.warmth_label == "亲近"
+        assert ctx.warmth_label == "默契"
         assert ctx.message_type == "miss_you"
 
     @pytest.mark.asyncio

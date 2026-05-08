@@ -51,7 +51,7 @@ class CharacterLoader:
         persona_data = extensions_data.get("persona", {})
         
         extensions = PersonaExtensions(
-            initial_relationship=persona_data.get("initial_relationship", 30),
+            initial_relationship=persona_data.get("initial_relationship", 40),
             warmth_labels=persona_data.get("warmth_labels", []),
             world=persona_data.get("world", ""),
             daily_events_count=persona_data.get("daily_events_count", 5),

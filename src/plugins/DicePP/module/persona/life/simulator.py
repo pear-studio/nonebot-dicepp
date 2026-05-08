@@ -164,14 +164,13 @@ class LifeSimulator:
         """每日批处理：将长时间未互动用户的时间衰减写入数据库。返回写库条数。"""
         if not self.decay_calculator or not self.character:
             return 0
-        initial = float(self.character.extensions.initial_relationship)
         n = 0
         now = persona_wall_now(self.config.timezone)
         try:
             for rel in await self.store.list_all_relationships_raw():
                 if not self.decay_calculator.should_apply_decay(rel, now):
                     continue
-                deltas, reason = self.decay_calculator.calculate_decay(rel, initial, now)
+                deltas, reason = self.decay_calculator.calculate_decay(rel, now=now)
                 rel.last_relationship_decay_applied_at = now
                 if abs(deltas.intimacy) <= 0.01:
                     continue

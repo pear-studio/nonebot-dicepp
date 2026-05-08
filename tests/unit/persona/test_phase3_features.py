@@ -4,7 +4,7 @@ Phase 3 功能测试
 测试内容:
 1. .ai mute/unmute 功能
 2. search_memory 工具
-3. 厌倦拒绝机制
+3. 冷淡拒绝机制
 4. 配置值更新
 """
 
@@ -140,10 +140,10 @@ class TestSearchMemory:
 
 
 class TestWarmthLevelRefuse:
-    """测试厌倦拒绝机制"""
+    """测试冷淡拒绝机制"""
 
     def test_warmth_level_cold(self):
-        """好感度 5 分应该在厌倦区间（0）"""
+        """好感度 5 分应该在冷淡区间（0）"""
         rel = RelationshipState(
             user_id="test",
             group_id="",
@@ -153,42 +153,42 @@ class TestWarmthLevelRefuse:
             secureness=5.0,
         )
 
-        ext = PersonaExtensions(initial_relationship=30)
+        ext = PersonaExtensions(initial_relationship=40)
         char = Character(name="Test", extensions=ext)
 
         warmth_level, label = rel.get_warmth_level(char.get_warmth_labels())
         assert warmth_level == 0, f"Expected 0 (cold), got {warmth_level}"
 
     def test_warmth_level_distant(self):
-        """好感度 15 分应该在冷淡区间（1）"""
+        """好感度 30 分应该在疏远区间（1）"""
         rel = RelationshipState(
             user_id="test",
             group_id="",
-            intimacy=15.0,
-            passion=15.0,
-            trust=15.0,
-            secureness=15.0,
+            intimacy=30.0,
+            passion=30.0,
+            trust=30.0,
+            secureness=30.0,
         )
 
-        ext = PersonaExtensions(initial_relationship=30)
+        ext = PersonaExtensions(initial_relationship=40)
         char = Character(name="Test", extensions=ext)
 
         warmth_level, label = rel.get_warmth_level(char.get_warmth_labels())
         assert warmth_level == 1, f"Expected 1 (distant), got {warmth_level}"
 
     def test_refuse_probability_formula(self):
-        """测试拒绝概率公式"""
-        # P_refuse = 0.5 + 0.4 * (1 - score / 10)
+        """测试拒绝概率公式：score/20"""
+        # P_refuse = 0.5 + 0.4 * (1 - score / 20)
         # When score = 0: P = 0.5 + 0.4 = 0.9 (90%)
-        # When score = 5: P = 0.5 + 0.4 * 0.5 = 0.7 (70%)
-        # When score = 10: P = 0.5 + 0 = 0.5 (50%)
+        # When score = 10: P = 0.5 + 0.4 * 0.5 = 0.7 (70%)
+        # When score = 20: P = 0.5 + 0 = 0.5 (50%)
 
         def calc_refuse_prob(score):
-            return 0.5 + 0.4 * (1 - score / 10)
+            return 0.5 + 0.4 * (1 - score / 20)
 
         assert abs(calc_refuse_prob(0) - 0.9) < 0.001
-        assert abs(calc_refuse_prob(5) - 0.7) < 0.001
-        assert abs(calc_refuse_prob(10) - 0.5) < 0.001
+        assert abs(calc_refuse_prob(10) - 0.7) < 0.001
+        assert abs(calc_refuse_prob(20) - 0.5) < 0.001
 
 
 class TestConfigValues:
@@ -229,11 +229,16 @@ class TestConfigValues:
         config = PersonaConfig()
 
         def calc_refuse_prob(score, base, max_p):
-            return base + (max_p - base) * (1 - score / 10)
+            return base + (max_p - base) * (1 - score / 20)
 
         # 使用新配置名测试
         assert abs(calc_refuse_prob(0, config.relationship_refuse_prob_base, config.relationship_refuse_prob_max) - 0.9) < 0.001
-        assert abs(calc_refuse_prob(10, config.relationship_refuse_prob_base, config.relationship_refuse_prob_max) - 0.5) < 0.001
+        assert abs(calc_refuse_prob(20, config.relationship_refuse_prob_base, config.relationship_refuse_prob_max) - 0.5) < 0.001
 
         # 测试禁用拒绝
         assert config.relationship_refuse_enabled is True
+
+    def test_proactive_miss_min_score_default(self):
+        """proactive_miss_min_score 默认应为 20.0"""
+        config = PersonaConfig()
+        assert config.proactive_miss_min_score == 20.0

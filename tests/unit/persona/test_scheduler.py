@@ -48,7 +48,7 @@ class TestProactiveSchedulerBasics:
             share_time_window_minutes=15,
             miss_enabled=True,
             miss_min_hours=72,
-            miss_min_score=40.0,
+            miss_min_score=20.0,
             timezone="Asia/Shanghai",
         )
 
@@ -267,7 +267,7 @@ class TestProactiveSchedulerMissYou:
             share_time_window_minutes=15,
             miss_enabled=True,
             miss_min_hours=72,
-            miss_min_score=40.0,
+            miss_min_score=20.0,
             timezone="Asia/Shanghai",
         )
         return ProactiveScheduler(
@@ -294,15 +294,15 @@ class TestProactiveSchedulerMissYou:
         rel = RelationshipState(
             user_id="u1",
             group_id="",
-            intimacy=30,
-            passion=30,
-            trust=30,
-            secureness=30,
+            intimacy=10,
+            passion=10,
+            trust=10,
+            secureness=10,
             last_interaction_at=fake_now - timedelta(hours=100),
         )
         mock_data_store.list_active_relationships.return_value = [rel]
         result = await scheduler._check_missed_users()
-        assert result == []  # score=30 < miss_min_score=40
+        assert result == []  # score=10 < miss_min_score=20
 
     @pytest.mark.asyncio
     async def test_miss_respects_idle_time(self, scheduler, mock_data_store, monkeypatch):
@@ -344,6 +344,139 @@ class TestProactiveSchedulerMissYou:
         mock_data_store.is_user_muted.return_value = True
         result = await scheduler._check_missed_users()
         assert result == []
+
+
+class TestProactiveSchedulerMissProbability:
+    """测试想念概率阶段固定表"""
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.is_user_muted = AsyncMock(return_value=False)
+        store.list_active_relationships = AsyncMock(return_value=[])
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.update_relationship = AsyncMock()
+        store.get_relationship = AsyncMock(return_value=None)
+        store.get_user_profile = AsyncMock(return_value=None)
+        store.get_recent_messages = AsyncMock(return_value=[])
+        store.get_character_state = AsyncMock(return_value=MagicMock())
+        return store
+
+    @pytest.fixture
+    def mock_character(self):
+        return _make_mock_character()
+
+    @pytest.fixture
+    def scheduler(self, mock_data_store, mock_character, mock_coordinator):
+        config = ProactiveConfig(
+            enabled=True,
+            min_interval_hours=0,
+            max_shares_per_event=3,
+            share_time_window_minutes=15,
+            miss_enabled=True,
+            miss_min_hours=72,
+            miss_min_score=20.0,
+            timezone="Asia/Shanghai",
+        )
+        return ProactiveScheduler(
+            config=config,
+            data_store=mock_data_store,
+            character=mock_character,
+            target_selector=MagicMock(),
+            coordinator=mock_coordinator,
+        )
+
+    def _make_rel(self, score: float, fake_now: datetime) -> RelationshipState:
+        return RelationshipState(
+            user_id="u1",
+            group_id="",
+            intimacy=score,
+            passion=score,
+            trust=score,
+            secureness=score,
+            last_interaction_at=fake_now - timedelta(hours=100),
+        )
+
+    def _make_event(self):
+        evt = MagicMock()
+        evt.description = "吃了蛋糕"
+        evt.reaction = "开心"
+        return evt
+
+    @pytest.mark.asyncio
+    async def test_miss_probability_distant_stage(self, scheduler, mock_data_store, monkeypatch):
+        """疏远阶段(score=30)概率 50%"""
+        import random
+        random.seed(42)
+
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        rel = self._make_rel(30.0, fake_now)
+        mock_data_store.list_active_relationships.return_value = [rel]
+        mock_data_store.get_daily_events.return_value = [self._make_event()]
+
+        # 让消息生成成功
+        mock_agent = AsyncMock()
+        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+        scheduler.event_agent = mock_agent
+
+        triggered = 0
+        trials = 100
+        for _ in range(trials):
+            result = await scheduler._check_missed_users()
+            if result:
+                triggered += 1
+            # 重置开关，否则下次循环开关已打开
+            rel.last_miss_sent_at = None
+        # 50% 概率，100 次试验中应落在 35-65 之间（3-sigma 约 ±15）
+        assert 35 <= triggered <= 65
+
+    @pytest.mark.asyncio
+    async def test_miss_probability_intimate_always(self, scheduler, mock_data_store, monkeypatch):
+        """亲密阶段(score=90)概率 100%，必然触发"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        rel = self._make_rel(90.0, fake_now)
+        mock_data_store.list_active_relationships.return_value = [rel]
+        mock_data_store.get_daily_events.return_value = [self._make_event()]
+
+        # 让消息生成成功
+        mock_agent = AsyncMock()
+        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+        scheduler.event_agent = mock_agent
+
+        result = await scheduler._check_missed_users()
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_miss_sets_last_miss_sent_at(self, scheduler, mock_data_store, monkeypatch):
+        """想念发出后应写入 last_miss_sent_at"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        rel = self._make_rel(90.0, fake_now)
+        mock_data_store.list_active_relationships.return_value = [rel]
+        mock_data_store.get_daily_events.return_value = [self._make_event()]
+
+        # 让消息生成成功
+        mock_agent = AsyncMock()
+        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+        scheduler.event_agent = mock_agent
+
+        await scheduler._check_missed_users()
+        mock_data_store.update_relationship.assert_called()
+        updated_rel = mock_data_store.update_relationship.call_args[0][0]
+        assert updated_rel.last_miss_sent_at == fake_now
 
 
 class TestProactiveSchedulerMessageCreation:
