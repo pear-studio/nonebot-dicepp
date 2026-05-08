@@ -276,39 +276,44 @@ class PersonaDataStore:
         content: str,
         display_name: str = "",
     ) -> None:
-        """添加群聊消息并在同一事务中执行群级裁剪
+        """添加群聊消息并执行群级裁剪
 
         群聊历史按 group_id 共享，私聊历史继续使用 persona_messages 按 user_id+group_id 隔离。
+        INSERT 与裁剪 DELETE 走 sqlite3 隐式事务，由末尾一次 commit 一并提交。
+
+        本类所有写方法均依赖 aiosqlite 默认 ``isolation_level=""`` 的隐式事务
+        （首条 DML 自动 BEGIN，commit 一次性提交累积写）。aiosqlite 共享单连接、
+        多协程交错时，任何前置未 commit 的 DML 都会让显式 ``await db.execute("BEGIN")``
+        触发 ``cannot start a transaction within a transaction``
+        （历史踩坑入口为 ``_group_chat_recorder`` post_send hook，但触发面不限于此）。
+
+        原子性依赖于"调用期间无其它协程在共享连接上 commit"——store.py
+        所有写方法均共享此隐式约定。极端竞态下可能出现裁剪滞后一次的瞬态，
+        不影响最终一致性。
         """
         now_iso = self._wall_now().isoformat()
-        await self.db.execute("BEGIN")
-        try:
-            await self.db.execute(
-                """
-                INSERT INTO persona_group_conversations
-                (group_id, user_id, role, content, display_name, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (group_id, user_id, role, content, display_name, now_iso),
-            )
-            # 同一事务内执行裁剪
-            await self.db.execute(
-                """
-                DELETE FROM persona_group_conversations
+        await self.db.execute(
+            """
+            INSERT INTO persona_group_conversations
+            (group_id, user_id, role, content, display_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (group_id, user_id, role, content, display_name, now_iso),
+        )
+        await self.db.execute(
+            """
+            DELETE FROM persona_group_conversations
+            WHERE group_id = ?
+              AND id NOT IN (
+                SELECT id FROM persona_group_conversations
                 WHERE group_id = ?
-                  AND id NOT IN (
-                    SELECT id FROM persona_group_conversations
-                    WHERE group_id = ?
-                    ORDER BY created_at DESC, id DESC
-                    LIMIT ?
-                )
-                """,
-                (group_id, group_id, self._group_max_messages),
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
             )
-            await self.db.commit()
-        except Exception:
-            await self.db.rollback()
-            raise
+            """,
+            (group_id, group_id, self._group_max_messages),
+        )
+        await self.db.commit()
 
     async def get_group_conversations(
         self,
