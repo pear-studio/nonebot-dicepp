@@ -145,6 +145,28 @@ CREATE TABLE IF NOT EXISTS persona_user_relationships (
 );
 """
 
+# 评分失败记录表
+CREATE_SCORING_FAILURES_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_scoring_failures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    group_id TEXT DEFAULT '',
+    messages_count INTEGER DEFAULT 0,
+    error TEXT DEFAULT '',
+    raw_response TEXT DEFAULT '',
+    conversation_digest TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+CREATE_SCORING_FAILURES_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_persona_scoring_failures_user ON persona_scoring_failures(user_id, group_id, created_at DESC);
+"""
+
+CREATE_SCORING_FAILURES_INDEX_CREATED_AT = """
+CREATE INDEX IF NOT EXISTS idx_persona_scoring_failures_created_at ON persona_scoring_failures(created_at);
+"""
+
 # 群活跃度表
 CREATE_GROUP_ACTIVITY_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_group_activity (
@@ -282,4 +304,7 @@ ALL_MIGRATIONS = [
     CREATE_GROUP_CONVERSATIONS_TABLE,
     CREATE_GROUP_CONVERSATIONS_INDEX,
     CREATE_GROUP_CONVERSATIONS_USER_INDEX,
+    CREATE_SCORING_FAILURES_TABLE,
+    CREATE_SCORING_FAILURES_INDEX,
+    CREATE_SCORING_FAILURES_INDEX_CREATED_AT,
 ]
