@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 class LifeConfig:
     """生活域配置"""
 
-    proactive_event_share_threshold: float = 0.5
+    proactive_event_share_threshold: float = 0.4
     proactive_event_share_delay_min: int = 1
-    proactive_event_share_delay_max: int = 10
+    proactive_event_share_delay_max: int = 5
     trace_enabled: bool = False
     trace_max_age_days: int = 7
     timezone: str = "Asia/Shanghai"

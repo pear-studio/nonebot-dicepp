@@ -5,58 +5,9 @@ All bot configuration is represented as typed fields here.
 Config is loaded hierarchically by ConfigLoader:
   global defaults < global secrets < persona < account overrides < env vars
 """
-from datetime import datetime
-from typing import Dict, List
+from typing import List
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
-
-
-class ProactiveGreetingEntry(BaseModel):
-    """定时问候时间段（使用 `PersonaConfig.timezone` 的本地时钟）。"""
-
-    event_type: str = Field(..., description="唯一键，用于同一天内去重")
-    time_range: str = Field(..., description="HH:MM-HH:MM，闭区间")
-
-    @field_validator("time_range")
-    @classmethod
-    def _validate_time_range(cls, v: str) -> str:
-        s = v.strip()
-        if "-" not in s:
-            raise ValueError("time_range 须为 HH:MM-HH:MM（含一个 '-'）")
-        left, right = s.split("-", 1)
-        left, right = left.strip(), right.strip()
-        try:
-            start_dt = datetime.strptime(left, "%H:%M")
-            end_dt = datetime.strptime(right, "%H:%M")
-        except ValueError as e:
-            raise ValueError("time_range 两端须为有效 HH:MM") from e
-        if start_dt > end_dt:
-            raise ValueError(
-                "time_range 不支持跨午夜：结束时间须 >= 开始时间；跨日请拆成两条 schedule 条目"
-            )
-        return f"{left}-{right}"
-
-
-def _default_proactive_greeting_schedule() -> List[ProactiveGreetingEntry]:
-    return [
-        ProactiveGreetingEntry(event_type="wake_up", time_range="08:00-09:00"),
-        ProactiveGreetingEntry(event_type="lunch", time_range="11:30-13:00"),
-        ProactiveGreetingEntry(event_type="afternoon", time_range="14:00-15:00"),
-        ProactiveGreetingEntry(event_type="dinner", time_range="17:30-19:00"),
-        ProactiveGreetingEntry(event_type="good_night", time_range="22:00-23:00"),
-    ]
-
-
-# ── Phase 4+: 主动消息配置（暂未启用）
-# class ProactiveConfig(BaseModel):
-#     enabled: bool = True
-#     quiet_hours: List[int] = [23, 7]
-#     min_interval_hours: int = 4
-#     max_shares_per_event: int = 10
-#     share_time_window_minutes: int = 5
-#     miss_enabled: bool = True
-#     miss_min_hours: int = 72
-#     miss_min_score: int = 40
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class PersonaConfig(BaseModel):
@@ -158,15 +109,13 @@ class PersonaConfig(BaseModel):
     proactive_share_time_window_minutes: int = 15
     proactive_event_share_delay_min: int = 1
     proactive_event_share_delay_max: int = 5
-    proactive_event_share_threshold: float = 0.5
+    proactive_event_share_threshold: float = Field(
+        default=0.4,
+        description="事件分享欲望阈值。基于 2026-04/05 线上 251 个事件的 share_desire 分布校准：avg≈0.305，≥0.4 占 36.7%，≥0.5 仅占 16.7%",
+    )
     proactive_miss_enabled: bool = True
     proactive_miss_min_hours: int = 72
     proactive_miss_min_score: float = 40.0
-    # DEPRECATED: 已被 LLM 生成分享消息取代，计划移除
-    # 定时事件配置已迁移到角色卡 extensions.scheduled_events
-    proactive_greeting_schedule: List[ProactiveGreetingEntry] = Field(
-        default_factory=_default_proactive_greeting_schedule
-    )
     proactive_always_send_users: List[str] = Field(
         default_factory=list,
         description="必定接收主动消息的私聊用户 ID 列表（绕过 min_interval 与好感度阈值）",
