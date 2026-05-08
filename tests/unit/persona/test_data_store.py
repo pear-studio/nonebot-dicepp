@@ -638,7 +638,8 @@ class TestGroupConversationCRUD:
 
     @pytest.mark.asyncio
     async def test_add_group_conversation_auto_prune(self, temp_db):
-        """1.7: write+prune happens in a single transaction via add_group_conversation"""
+        """1.7: write + prune 在同一次调用内完成（依赖 sqlite3 隐式事务 + end-of-call commit），
+        裁剪结果按 _group_max_messages 生效"""
         store = temp_db
         store._group_max_messages = 3
         for i in range(5):
@@ -649,6 +650,29 @@ class TestGroupConversationCRUD:
         assert msgs[0].content == "msg2"
         assert msgs[1].content == "msg3"
         assert msgs[2].content == "msg4"
+
+    @pytest.mark.asyncio
+    async def test_add_group_conversation_no_explicit_begin_regression(self, temp_db):
+        """# B-260507-7127d2 regression: 断言 add_group_conversation 不再 issue 显式 BEGIN。
+
+        仅模拟"前置 DML 已开启隐式事务"作为最小复现场景；真实触发路径是
+        aiosqlite 共享单连接 + 多协程并发写（如 ``_persist_assistant_message``、
+        observation_buffer 旁听同时进行）。本用例不背书"嵌套事务"为支持语义，
+        目标是断言本方法不再 issue 显式 BEGIN。
+        """
+        store = temp_db
+        # 制造未 commit 的隐式事务: 直接 DML 但不 commit
+        await store.db.execute(
+            "INSERT INTO persona_messages (user_id, group_id, role, content, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("u_pre", "g_pre", "user", "pre-flight", "2024-01-01T00:00:00"),
+        )
+        # 这一行在旧实现下会抛 sqlite3.OperationalError
+        await store.add_group_conversation("g1", "u1", "user", "hello", "Alice")
+        msgs = await store.get_group_conversations("g1")
+        assert len(msgs) == 1
+        assert msgs[0].content == "hello"
+        assert msgs[0].display_name == "Alice"
 
     @pytest.mark.asyncio
     async def test_search_group_conversations_keyword(self, temp_db):

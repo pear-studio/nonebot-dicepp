@@ -26,21 +26,6 @@
     - 影响面: 仅死代码删除, character_life 已有 wake_up/good_night 槽位机制不受影响
     - 风险: 低 (零消费者), 但需确认 bot 配置文件 config/bots/*.json 不会因严格模式 pydantic 校验报错
 
-### [B-260507-7127d2] add_group_conversation 在 post_send_hook 回调中事务嵌套报错
-- 创建: 2026-05-07
-- 问题表现:
-  - 日志原文: "旁听群消息写入失败: cannot start a transaction within a transaction"
-  - 触发路径: `_group_chat_recorder` (command.py:115) → `add_group_conversation` (store.py:271) → `BEGIN` 失败
-  - `store.py:284` 显式 `BEGIN`/`commit` 用于保证 INSERT + 裁剪 DELETE 在同一事务
-  - aiosqlite 异步共享连接，若外层已有事务，再次 `BEGIN` 失败
-  - 后果: 该次群聊消息漏写，无法回放
-- 工作计划:
-  - 加 stack trace 日志定位调用栈，在 dev 复现一次（需制造并发写入）
-  - 方案 A: `add_group_conversation` 改用 SAVEPOINT 兼容嵌套
-  - 方案 B: 拆掉显式事务，依赖 aiosqlite 隐式 autocommit（需评估裁剪与 INSERT 不在同事务的一致性影响）
-  - 方案 C: 裁剪改为异步任务，与 INSERT 解耦
-  - 影响面: `data/store.py:add_group_conversation`、所有显式调用路径（command.py、chat/session.py 多处）
-
 ### [B-260507-9b9094] 评分失败持久化记录与触发条件改造
 - 创建: 2026-05-07
 - 问题表现:
