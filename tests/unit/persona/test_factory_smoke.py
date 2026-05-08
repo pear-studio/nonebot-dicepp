@@ -62,7 +62,6 @@ def _make_bot() -> MagicMock:
     cfg.decay_grace_period_hours = 8
     cfg.decay_rate_per_hour = 0.5
     cfg.decay_daily_cap = 5.0
-    cfg.decay_floor_offset = 20.0
     bot.config.persona_ai = cfg
     bot.db = MagicMock()
     bot.db._db = MagicMock()  # 满足 PersonaDataStore 的 db_connection 参数位置

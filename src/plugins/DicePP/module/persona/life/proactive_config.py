@@ -16,7 +16,7 @@ class ProactiveConfig:
         share_time_window_minutes: int = 15,
         miss_enabled: bool = True,
         miss_min_hours: int = 72,
-        miss_min_score: float = 40.0,
+        miss_min_score: float = 20.0,
         timezone: str = "Asia/Shanghai",
         share_message_concurrent: int = 3,
         share_max_chars: int = 200,

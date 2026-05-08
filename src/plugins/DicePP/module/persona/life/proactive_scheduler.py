@@ -12,7 +12,7 @@ import re
 
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_SCHEDULER
-from ..data.models import RelationshipState
+from ..data.models import RelationshipState, DEFAULT_WARMTH_LABELS
 from ..character.models import Character
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now
@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 
 class ProactiveScheduler(BoundaryReceiver):
     """主动消息调度器"""
+
+    # 想念触发概率阶段固定表（冷淡/疏远/友好/默契/亲密）
+    _MISS_PROBABILITY = {0: 0.0, 1: 0.5, 2: 0.7, 3: 0.9, 4: 1.0}
 
     def __init__(
         self,
@@ -232,6 +235,15 @@ class ProactiveScheduler(BoundaryReceiver):
 
         return messages
 
+    async def _persist_miss_switch(self, rel: RelationshipState, now: datetime) -> None:
+        """记录想念已发出，打开衰减开关；异常时回滚。"""
+        original_miss_at = rel.last_miss_sent_at
+        rel.last_miss_sent_at = now
+        try:
+            await self.data_store.update_relationship(rel)
+        except Exception:
+            rel.last_miss_sent_at = original_miss_at
+            raise
 
     async def _check_missed_users(self) -> List[Dict]:
         """检查并触发想念消息"""
@@ -278,11 +290,12 @@ class ProactiveScheduler(BoundaryReceiver):
                     logger.debug(f"想念跳过(静音): user={user_id}")
                     continue
 
-                # 检查概率 P = 0.40 + 0.40 * (score/100)
-                probability = 0.40 + 0.40 * (eff.composite_score / 100)
+                # 阶段固定概率表
+                warmth_level, _ = eff.get_warmth_level(DEFAULT_WARMTH_LABELS)
+                probability = self._MISS_PROBABILITY.get(warmth_level, 0.0)
                 if random.random() > probability:
                     logger.debug(
-                        f"想念跳过(概率): user={user_id}, p={probability:.2f}"
+                        f"想念跳过(概率): user={user_id}, stage={warmth_level}, p={probability:.2f}"
                     )
                     continue
 
@@ -308,6 +321,8 @@ class ProactiveScheduler(BoundaryReceiver):
                 msg = await self._create_miss_you_message(target, event_desc, event_reaction)
                 # R9: buffered 意味着消息已排队，也应 break（避免同一 tick 触发多条）
                 if msg and msg.get("__coordinator_buffered"):
+                    # 即使 buffered 也记录想念已发出，打开衰减开关
+                    await self._persist_miss_switch(rel, now)
                     break
                 if msg:
                     messages.append(msg)
@@ -315,6 +330,9 @@ class ProactiveScheduler(BoundaryReceiver):
                         f"想念触发: user={user_id}, idle={idle_hours:.1f}h, "
                         f"score={eff.composite_score:.1f}, event={event_desc[:40]}"
                     )
+
+                    # 记录想念已发出，打开衰减开关
+                    await self._persist_miss_switch(rel, now)
 
                     # 限制每次 tick 只发送一条想念消息
                     break

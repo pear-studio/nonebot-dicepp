@@ -123,8 +123,6 @@
     "decay_grace_period_hours": 8,
     "decay_rate_per_hour": 0.5,
     "decay_daily_cap": 5.0,
-    "decay_floor_offset": 20.0,
-
     "character_life_enabled": true,
     "character_life_jitter_minutes": 15,
     "character_life_diary_time": "23:30",
@@ -138,7 +136,7 @@
     "proactive_event_share_threshold": 0.4,
     "proactive_miss_enabled": true,
     "proactive_miss_min_hours": 72,
-    "proactive_miss_min_score": 40.0,
+    "proactive_miss_min_score": 20.0,
 
     "group_activity_enabled": true,
     "group_activity_decay_per_day": 10.0,

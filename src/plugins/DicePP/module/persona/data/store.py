@@ -23,7 +23,7 @@ from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
     RelationshipState, Observation, DailyEvent, GroupActivity, UserLLMConfig,
     LLMTraceRecord, DelayedTask, GroupConversation, CharacterState,
-    ScoringFailure,
+    ScoringFailure, DEFAULT_WARMTH_LABELS,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -80,6 +80,7 @@ class PersonaDataStore:
         await self._ensure_group_activity_daily_columns()
         await self._ensure_group_activity_content_columns()
         await self._ensure_relationship_decay_watermark_column()
+        await self._ensure_relationship_miss_and_peak_columns()
         await self._ensure_score_history_conversation_digest()
         await self._ensure_observations_debug_columns()
         await self._ensure_daily_events_share_columns()
@@ -126,6 +127,38 @@ class PersonaDataStore:
             await self.db.execute(
                 "ALTER TABLE persona_user_relationships "
                 "ADD COLUMN last_relationship_decay_applied_at TIMESTAMP"
+            )
+
+    async def _ensure_relationship_miss_and_peak_columns(self) -> None:
+        """好感度表：想念开关时间与历史最高阶段。"""
+        async with self.db.execute("PRAGMA table_info(persona_user_relationships)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        if "last_miss_sent_at" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_user_relationships "
+                "ADD COLUMN last_miss_sent_at TIMESTAMP"
+            )
+        if "peak_stage" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_user_relationships "
+                "ADD COLUMN peak_stage INTEGER DEFAULT 0"
+            )
+            # Backfill：按当前 composite_score 回填旧数据的 peak_stage
+            # 公式与 RelationshipState.composite_score 同步
+            # （权重：intimacy 0.3, passion 0.2, trust 0.3, secureness 0.2）
+            await self.db.execute(
+                """
+                UPDATE persona_user_relationships
+                SET peak_stage = CASE
+                    WHEN (intimacy*0.3+passion*0.2+trust*0.3+secureness*0.2) >= 80 THEN 4
+                    WHEN (intimacy*0.3+passion*0.2+trust*0.3+secureness*0.2) >= 60 THEN 3
+                    WHEN (intimacy*0.3+passion*0.2+trust*0.3+secureness*0.2) >= 40 THEN 2
+                    WHEN (intimacy*0.3+passion*0.2+trust*0.3+secureness*0.2) >= 20 THEN 1
+                    ELSE 0
+                END
+                WHERE peak_stage = 0
+                """
             )
 
     async def _ensure_score_history_conversation_digest(self) -> None:
@@ -1126,7 +1159,7 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT intimacy, passion, trust, secureness, last_interaction_at,
-                   last_relationship_decay_applied_at, updated_at
+                   last_relationship_decay_applied_at, last_miss_sent_at, peak_stage, updated_at
             FROM persona_user_relationships
             WHERE user_id = ? AND group_id = ?
             """,
@@ -1146,16 +1179,29 @@ class PersonaDataStore:
                 last_relationship_decay_applied_at=(
                     datetime.fromisoformat(row[5]) if row[5] else None
                 ),
-                updated_at=datetime.fromisoformat(row[6]) if row[6] else None
+                last_miss_sent_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                peak_stage=row[7] if row[7] is not None else 0,
+                updated_at=datetime.fromisoformat(row[8]) if row[8] else None
             )
 
-    async def init_relationship(self, user_id: str, group_id: str, initial_score: float = 30.0) -> RelationshipState:
+    async def init_relationship(self, user_id: str, group_id: str, initial_score: float = 40.0) -> RelationshipState:
+        # 根据初始分数计算 peak_stage，确保新用户获得正确的阶段保护
+        tmp_rel = RelationshipState(
+            user_id=user_id,
+            group_id=group_id,
+            intimacy=initial_score,
+            passion=initial_score,
+            trust=initial_score,
+            secureness=initial_score,
+        )
+        initial_stage, _ = tmp_rel.get_warmth_level(DEFAULT_WARMTH_LABELS)
         await self.db.execute(
             """
             INSERT OR IGNORE INTO persona_user_relationships
             (user_id, group_id, intimacy, passion, trust, secureness,
-             last_interaction_at, last_relationship_decay_applied_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             last_interaction_at, last_relationship_decay_applied_at,
+             last_miss_sent_at, peak_stage, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -1166,6 +1212,8 @@ class PersonaDataStore:
                 initial_score,
                 self._wall_now().isoformat(),
                 None,
+                None,
+                initial_stage,
                 self._wall_now().isoformat(),
             )
         )
@@ -1181,12 +1229,18 @@ class PersonaDataStore:
             if rel.last_relationship_decay_applied_at
             else None
         )
+        miss_at = (
+            rel.last_miss_sent_at.isoformat()
+            if rel.last_miss_sent_at
+            else None
+        )
         await self.db.execute(
             """
             INSERT INTO persona_user_relationships
             (user_id, group_id, intimacy, passion, trust, secureness,
-             last_interaction_at, last_relationship_decay_applied_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             last_interaction_at, last_relationship_decay_applied_at,
+             last_miss_sent_at, peak_stage, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, group_id) DO UPDATE SET
                 intimacy = excluded.intimacy,
                 passion = excluded.passion,
@@ -1194,6 +1248,8 @@ class PersonaDataStore:
                 secureness = excluded.secureness,
                 last_interaction_at = excluded.last_interaction_at,
                 last_relationship_decay_applied_at = excluded.last_relationship_decay_applied_at,
+                last_miss_sent_at = excluded.last_miss_sent_at,
+                peak_stage = excluded.peak_stage,
                 updated_at = excluded.updated_at
             """,
             (
@@ -1207,6 +1263,8 @@ class PersonaDataStore:
                 if rel.last_interaction_at
                 else self._wall_now().isoformat(),
                 decay_at,
+                miss_at,
+                rel.peak_stage,
                 self._wall_now().isoformat(),
             )
         )
@@ -1223,7 +1281,8 @@ class PersonaDataStore:
         async with self.db.execute(
             f"""
             SELECT user_id, group_id, intimacy, passion, trust, secureness,
-                   last_interaction_at, last_relationship_decay_applied_at, updated_at
+                   last_interaction_at, last_relationship_decay_applied_at,
+                   last_miss_sent_at, peak_stage, updated_at
             FROM persona_user_relationships
             WHERE {where_clause}
             ORDER BY (intimacy * 0.3 + passion * 0.2 + trust * 0.3 + secureness * 0.2) DESC
@@ -1244,7 +1303,9 @@ class PersonaDataStore:
                     last_relationship_decay_applied_at=(
                         datetime.fromisoformat(row[7]) if row[7] else None
                     ),
-                    updated_at=datetime.fromisoformat(row[8]) if row[8] else None
+                    last_miss_sent_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                    peak_stage=row[9] if row[9] is not None else 0,
+                    updated_at=datetime.fromisoformat(row[10]) if row[10] else None
                 )
                 for row in rows
             ]
@@ -1571,7 +1632,8 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT user_id, group_id, intimacy, passion, trust, secureness,
-                   last_interaction_at, last_relationship_decay_applied_at, updated_at
+                   last_interaction_at, last_relationship_decay_applied_at,
+                   last_miss_sent_at, peak_stage, updated_at
             FROM persona_user_relationships
             ORDER BY user_id, group_id
             """
@@ -1589,7 +1651,9 @@ class PersonaDataStore:
                     last_relationship_decay_applied_at=(
                         datetime.fromisoformat(row[7]) if row[7] else None
                     ),
-                    updated_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                    last_miss_sent_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                    peak_stage=row[9] if row[9] is not None else 0,
+                    updated_at=datetime.fromisoformat(row[10]) if row[10] else None,
                 )
                 for row in rows
             ]
@@ -1609,7 +1673,8 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT user_id, group_id, intimacy, passion, trust, secureness,
-                   last_interaction_at, last_relationship_decay_applied_at, updated_at
+                   last_interaction_at, last_relationship_decay_applied_at,
+                   last_miss_sent_at, peak_stage, updated_at
             FROM persona_user_relationships
             WHERE (intimacy * 0.3 + passion * 0.2 + trust * 0.3 + secureness * 0.2) >= ?
               AND last_interaction_at >= ?
@@ -1630,7 +1695,9 @@ class PersonaDataStore:
                     last_relationship_decay_applied_at=(
                         datetime.fromisoformat(row[7]) if row[7] else None
                     ),
-                    updated_at=datetime.fromisoformat(row[8]) if row[8] else None
+                    last_miss_sent_at=datetime.fromisoformat(row[8]) if row[8] else None,
+                    peak_stage=row[9] if row[9] is not None else 0,
+                    updated_at=datetime.fromisoformat(row[10]) if row[10] else None
                 )
                 for row in rows
             ]

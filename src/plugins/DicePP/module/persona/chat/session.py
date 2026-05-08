@@ -59,7 +59,7 @@ class ChatConfig:
     tools_enabled: bool = True
     tools_max_rounds: int = 5
     relationship_refuse_enabled: bool = False
-    relationship_refuse_prob_base: float = 0.3
+    relationship_refuse_prob_base: float = 0.5
     relationship_refuse_prob_max: float = 0.9
     scoring_interval: int = 5
     max_messages: int = 100
@@ -190,14 +190,14 @@ class ChatSession:
                 rel = await self.store.get_relationship(user_id, group_id)
                 if rel:
                     if self.decay_calculator:
-                        initial = float(self.character.extensions.initial_relationship)
-                        rel = self.decay_calculator.effective_relationship(rel, initial)
+                        rel = self.decay_calculator.effective_relationship(rel)
                     warmth_level, _ = rel.get_warmth_level(self.character.get_warmth_labels())
                     if warmth_level == 0:
                         score = rel.composite_score
                         base = self.config.relationship_refuse_prob_base
                         max_p = self.config.relationship_refuse_prob_max
-                        p_refuse = base + (max_p - base) * (1 - score / 10)
+                        # 仅在 warmth_level==0（冷淡）时触发拒绝；阶段边界处的概率跳变是预期行为
+                        p_refuse = base + (max_p - base) * (1 - score / 20)
                         if random.random() < p_refuse:
                             default_refuse_messages = [
                                 "...（对方似乎没有兴趣理你）",
@@ -210,7 +210,7 @@ class ChatSession:
                             if refuse_messages:
                                 refuse_response = random.choice(refuse_messages)
                                 logger.info(
-                                    f"厌倦拒绝触发: user={user_id}, score={score:.2f}, "
+                                    f"冷淡拒绝触发: user={user_id}, score={score:.2f}, "
                                     f"p_refuse={p_refuse:.2%}"
                                 )
                                 if not group_id:
@@ -574,7 +574,7 @@ class ChatSession:
         now = persona_wall_now(self.config.timezone)
         decay_event: Optional[ScoreEvent] = None
         if self.decay_calculator and self.decay_calculator.should_apply_decay(rel, now):
-            deltas, reason = self.decay_calculator.calculate_decay(rel, initial, now)
+            deltas, reason = self.decay_calculator.calculate_decay(rel, now=now)
             if abs(deltas.intimacy) > 0.01:
                 composite_before = rel.composite_score
                 rel.apply_deltas(deltas, updated_at=now)
@@ -589,7 +589,8 @@ class ChatSession:
                 )
 
         rel.last_interaction_at = now
-        rel.last_relationship_decay_applied_at = now
+        rel.last_miss_sent_at = None  # 用户回应后关闭衰减开关
+        rel.last_relationship_decay_applied_at = None  # 配合 last_interaction_at=now，下次衰减从新互动起算
         await self.store.update_relationship(rel)
         if decay_event:
             await self.store.add_score_event(decay_event)
@@ -625,8 +626,7 @@ class ChatSession:
 
         rel_for_scoring = rel
         if rel and self.decay_calculator:
-            initial = float(self.character.extensions.initial_relationship)
-            rel_for_scoring = self.decay_calculator.effective_relationship(rel, initial)
+            rel_for_scoring = self.decay_calculator.effective_relationship(rel)
 
         try:
             result = await self.scoring_agent.batch_analyze(
@@ -798,7 +798,7 @@ class ChatSession:
 
         if rel:
             if self.decay_calculator:
-                rel = self.decay_calculator.effective_relationship(rel, initial)
+                rel = self.decay_calculator.effective_relationship(rel)
             _, warmth_label = rel.get_warmth_level(self.character.get_warmth_labels())
         else:
             temp_rel = RelationshipState(

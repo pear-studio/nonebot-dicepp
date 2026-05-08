@@ -36,8 +36,6 @@
 | `decay_grace_period_hours` | int | 8 | 免衰减期（小时） |
 | `decay_rate_per_hour` | float | 0.5 | 每小时衰减量 |
 | `decay_daily_cap` | float | 5.0 | **单次**衰减计算中可应用的衰减量上限（`min(按空闲时长算出的衰减, cap)`），非「每个自然日累计总帽」 |
-| `decay_floor_offset` | float | 20.0 | 下限 = 初始值 + offset |
-
 展示与对话上下文会按当前规则**惰性计算**衰减；长时间未互动的关系还会在**每日任务**（`tick_daily`）里批量写回数据库，避免仅靠聊天才落库。
 
 ---
@@ -63,7 +61,7 @@
 | `proactive_max_shares` | int | 10 | 每事件最多分享数 |
 | `proactive_miss_enabled` | bool | true | 是否启用想念触发 |
 | `proactive_miss_min_hours` | int | 72 | 想念触发最小空闲时间 |
-| `proactive_miss_min_score` | float | 40.0 | 想念触发最小好感度 |
+| `proactive_miss_min_score` | float | 20.0 | 想念触发最小好感度 |
 | `proactive_share_time_window_minutes` | int | 15 | 已弃用（DEPRECATED）。生活事件分享已迁移到 `DelayedTaskQueue`，不再使用 scheduler 的旧窗口 |
 | `proactive_event_share_delay_min` | int | 1 | 事件进入 `DelayedTaskQueue` 后的最小延迟（分钟） |
 | `proactive_event_share_delay_max` | int | 5 | 事件进入 `DelayedTaskQueue` 后的最大延迟（分钟） |

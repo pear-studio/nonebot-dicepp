@@ -67,7 +67,7 @@ class PersonaApp:
         char = self.chat.character
         if char and char.extensions:
             return float(char.extensions.initial_relationship)
-        return 30.0
+        return 40.0
 
     # ── 对话 ──────────────────────────────────────────────────
 
@@ -127,9 +127,9 @@ class PersonaApp:
     def get_decay_calculator(self) -> Optional[DecayCalculator]:
         return self.chat.decay_calculator
 
-    def effective_relationship(self, rel, initial: float) -> Any:
+    def effective_relationship(self, rel) -> Any:
         calc = self.chat.decay_calculator
-        return calc.effective_relationship(rel, initial) if calc else rel
+        return calc.effective_relationship(rel) if calc else rel
 
     # ── 生命周期驱动 ──────────────────────────────────────────
 

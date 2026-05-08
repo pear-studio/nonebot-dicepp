@@ -7,6 +7,13 @@ from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from enum import Enum
+from nonebot.log import logger
+
+
+# 阶段下界表：冷淡=0 / 疏远=20 / 友好=40 / 默契=60 / 亲密=80
+STAGE_FLOORS = [0.0, 20.0, 40.0, 60.0, 80.0]
+
+DEFAULT_WARMTH_LABELS = ["冷淡", "疏远", "友好", "默契", "亲密"]
 
 
 class ModelTier(str, Enum):
@@ -36,47 +43,62 @@ class RelationshipState(BaseModel):
     """关系状态（四维好感度）"""
     user_id: str
     group_id: str = ""  # 空字符串表示私聊
-    intimacy: float = 30.0
-    passion: float = 30.0
-    trust: float = 30.0
-    secureness: float = 30.0
+    intimacy: float = 40.0
+    passion: float = 40.0
+    trust: float = 40.0
+    secureness: float = 40.0
     last_interaction_at: Optional[datetime] = None
     # 上次将「时间衰减」计入存库分数的时刻（批处理与对话共用，避免对同一空闲窗口重复扣减）
     last_relationship_decay_applied_at: Optional[datetime] = None
+    # 想念消息发出时间；None 表示开关关闭（未发想念）
+    last_miss_sent_at: Optional[datetime] = None
+    # 历史最高阶段（0-4），用于衰减下限锁底
+    peak_stage: int = 0
     updated_at: Optional[datetime] = None
-    
+
     @property
     def composite_score(self) -> float:
-        """综合分数（加权平均）"""
-        return (self.intimacy * 0.3 + self.passion * 0.2 + 
+        """综合分数（加权平均）
+
+        公式与 store.py backfill UPDATE 同步
+        （权重：intimacy 0.3, passion 0.2, trust 0.3, secureness 0.2）
+        """
+        return (self.intimacy * 0.3 + self.passion * 0.2 +
                 self.trust * 0.3 + self.secureness * 0.2)
-    
+
     def get_warmth_level(self, labels: List[str]) -> tuple[int, str]:
         """
         获取温暖度等级和标签
-        返回: (等级 0-5, 标签文本)
+        返回: (等级 0-4, 标签文本)
+        5段切分: 冷淡[0,20) / 疏远[20,40) / 友好[40,60) / 默契[60,80) / 亲密[80,100]
         """
+        if len(labels) > 5:
+            logger.warning(
+                "warmth_labels 列表长度 {} 超过 5，已截取前 5 个元素。"
+                "请将角色卡配置更新为 5 元素列表（冷淡/疏远/友好/默契/亲密）。",
+                len(labels)
+            )
+            labels = labels[:5]
         score = self.composite_score
-        if score < 10:
-            return 0, labels[0] if len(labels) > 0 else "厌倦"
-        elif score < 20:
-            return 1, labels[1] if len(labels) > 1 else "冷淡"
-        elif score < 40:
-            return 2, labels[2] if len(labels) > 2 else "疏远"
-        elif score < 60:
-            return 3, labels[3] if len(labels) > 3 else "友好"
-        elif score < 80:
-            return 4, labels[4] if len(labels) > 4 else "亲近"
-        else:
-            return 5, labels[5] if len(labels) > 5 else "亲密"
-    
+        for level, floor in enumerate(STAGE_FLOORS[1:], start=1):
+            if score < floor:
+                return level - 1, labels[level - 1] if len(labels) > level - 1 else DEFAULT_WARMTH_LABELS[level - 1]
+        return 4, labels[4] if len(labels) > 4 else DEFAULT_WARMTH_LABELS[4]
+
     def apply_deltas(self, deltas: ScoreDeltas, updated_at: datetime) -> None:
-        """应用好感度变化"""
+        """应用好感度变化。
+
+        副作用：自动更新 peak_stage 为历史最高阶段（单调递增）。
+        调用方若不希望修改原对象的 peak_stage，应先 model_copy(deep=True)。
+        """
         self.intimacy = max(0.0, min(100.0, self.intimacy + deltas.intimacy))
         self.passion = max(0.0, min(100.0, self.passion + deltas.passion))
         self.trust = max(0.0, min(100.0, self.trust + deltas.trust))
         self.secureness = max(0.0, min(100.0, self.secureness + deltas.secureness))
         self.updated_at = updated_at
+        # 更新历史最高阶段
+        current_level, _ = self.get_warmth_level(DEFAULT_WARMTH_LABELS)
+        self.peak_stage = max(self.peak_stage, current_level)
 
 
 class UserProfile(BaseModel):

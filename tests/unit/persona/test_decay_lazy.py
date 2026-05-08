@@ -15,7 +15,6 @@ def test_effective_relationship_leaves_original_unchanged():
             grace_period_hours=0,
             decay_rate_per_hour=1.0,
             daily_cap=10.0,
-            floor_offset=-100.0,
         )
     )
     rel = RelationshipState(
@@ -26,8 +25,10 @@ def test_effective_relationship_leaves_original_unchanged():
         trust=50.0,
         secureness=50.0,
         last_interaction_at=datetime.now() - timedelta(hours=5),
+        last_miss_sent_at=datetime.now() - timedelta(hours=5),
+        peak_stage=0,
     )
     before = rel.composite_score
-    eff = calc.effective_relationship(rel, 30.0)
+    eff = calc.effective_relationship(rel)
     assert eff.composite_score < before
     assert rel.composite_score == before

@@ -43,13 +43,13 @@ class TestCharacter:
         assert char.get_warmth_labels()[0] == "陌生"
 
     def test_get_warmth_labels_default(self):
-        """测试默认温暖度标签"""
+        """测试默认温暖度标签（5元素）"""
         char = Character(name="测试")
         labels = char.get_warmth_labels()
-        
-        assert len(labels) == 6
-        assert labels[0] == "厌倦"
-        assert labels[5] == "亲密"
+
+        assert len(labels) == 5
+        assert labels[0] == "冷淡"
+        assert labels[4] == "亲密"
 
     def test_format_mes_example(self):
         """测试示例对话格式化"""

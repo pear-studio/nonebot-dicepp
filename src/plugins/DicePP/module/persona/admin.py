@@ -13,6 +13,7 @@ from core.bot import Bot
 from .factory import PersonaApp
 from .data.store import PersonaDataStore
 from .wall_clock import persona_wall_now
+from .game.decay import STAGE_FLOORS
 
 
 class AdminDispatcher:
@@ -268,7 +269,7 @@ class AdminDispatcher:
         target_group = setrel_args[2] if len(setrel_args) > 2 else group_id
         rel = await self.data_store.get_relationship(target_user, target_group)
         if not rel:
-            initial = self.app.get_initial_relationship() if self.app else 30.0
+            initial = self.app.get_initial_relationship() if self.app else 40.0
             rel = await self.data_store.init_relationship(target_user, target_group, initial)
         rel.intimacy = new_score
         rel.passion = new_score
@@ -309,7 +310,10 @@ class AdminDispatcher:
         labels = char.get_warmth_labels()
         lines.append(f"\n[好感度等级]")
         for i, label in enumerate(labels):
-            lines.append(f"  {i*10}-{(i+1)*10}: {label}")
+            if i < len(labels) - 1:
+                lines.append(f"  {STAGE_FLOORS[i]}-{STAGE_FLOORS[i+1]}: {label}")
+            else:
+                lines.append(f"  {STAGE_FLOORS[i]}-100: {label}")
         return "\n".join(lines)
 
     async def _admin_list(self, user_id: str, group_id: str, args: List[str]) -> str:
@@ -499,5 +503,4 @@ class AdminDispatcher:
         rel = await self.data_store.get_relationship(user_id, group_id)
         if not rel or not self.app or not self.app.get_decay_calculator() or not self.app.get_character():
             return rel
-        initial = self.app.get_initial_relationship()
-        return self.app.effective_relationship(rel, initial)
+        return self.app.effective_relationship(rel)
