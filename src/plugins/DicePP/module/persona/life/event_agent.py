@@ -116,7 +116,11 @@ class EventGenerationAgent:
         '→ 坏：第三人称动作描写（"低头"）+ 出现角色名（"{{character_name}}"）',
     ]
 
-    def __init__(self, llm_router: LLMRouter, config: Optional["PersonaConfig"] = None):
+    def __init__(
+        self,
+        llm_router: LLMRouter,
+        config: Optional["PersonaConfig"] = None,
+    ):
         self.llm_router = llm_router
         self.config = config
 
@@ -266,6 +270,7 @@ class EventGenerationAgent:
                 tool_name="record_event",
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.9,
+                timeout=self.config.event_generation_timeout if self.config else 90,
             )
 
             # tool-call 输出（generate_with_forced_tool）：args 已是合法 JSON，
@@ -308,7 +313,16 @@ class EventGenerationAgent:
 
         except Exception as e:
             logger.error(f"事件生成失败: {e}")
-            return EventGenerationResult(description=f"我正在房间里休息。", duration_minutes=0)
+            fallback_args = {
+                "description": "我正在房间里休息。",
+                "duration_minutes": 0,
+                "energy_delta": 0,
+                "mood_delta": None,
+                "health_delta": None,
+                "raw_response": '{"description":"我正在房间里休息。","duration_minutes":0,"energy_delta":0,"mood_delta":null,"health_delta":null}',
+                "system_prompt_digest": "[fallback]",
+            }
+            return EventGenerationResult(**fallback_args)
 
     async def generate_event_reaction(
         self,
@@ -422,6 +436,7 @@ class EventGenerationAgent:
                 tool_name="record_reaction",
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.9,
+                timeout=self.config.event_generation_timeout if self.config else 90,
             )
 
             # tool-call 输出（generate_with_forced_tool）：args 已是合法 JSON，

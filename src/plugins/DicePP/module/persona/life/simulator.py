@@ -3,6 +3,7 @@
 驱动角色生活事件、主动消息调度、日记生成。
 编排 CharacterLife、ProactiveScheduler、EventShareTaskQueue、DiaryGenerator。
 """
+import asyncio
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from dataclasses import dataclass
 import random
@@ -87,7 +88,9 @@ class LifeSimulator:
         # 尝试生成生活事件
         if self.character_life:
             try:
-                event_chain = await self.character_life.tick()
+                event_chain = await asyncio.wait_for(
+                    self.character_life.tick(), timeout=300
+                )
                 if event_chain:
                     logger.info(
                         f"角色生活事件: {event_chain[0].get('description', '')[:50]}..."
@@ -109,6 +112,8 @@ class LifeSimulator:
                             share_desire=best_event.get("share_desire", 0.0),
                             delay_minutes=delay,
                         )
+            except asyncio.TimeoutError:
+                logger.warning("tick: 角色生活事件生成超时（>300s），跳过本次以避免阻塞 proactive 系统")
             except Exception:
                 logger.exception("tick: 角色生活事件生成失败")
 

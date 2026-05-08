@@ -158,6 +158,56 @@ class TestCharacterLifeBasics:
         assert len(life._ongoing_activities) == 1
         assert life._ongoing_activities[0].duration_minutes == 60
 
+    @pytest.mark.asyncio
+    async def test_fallback_delta_applies_to_character_state(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """R10: fallback EventGenerationResult 经 _clamp_delta 后状态累加值验证"""
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+        from plugins.DicePP.module.persona.data.models import CharacterState
+
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            lambda tz: fake_now,
+        )
+
+        # 初始化角色状态为固定值
+        initial_state = CharacterState(energy=50, mood=50, health=50)
+        mock_data_store.get_character_state = AsyncMock(return_value=initial_state)
+        mock_data_store.update_character_state = AsyncMock()
+
+        # mock fallback 结果（energy=0, mood=None, health=None）
+        mock_event_agent.generate_event_result = AsyncMock(
+            return_value=EventGenerationResult(
+                description="我正在房间里休息。",
+                duration_minutes=0,
+                energy_delta=0,
+                mood_delta=None,
+                health_delta=None,
+            )
+        )
+        mock_event_agent.generate_event_reaction = AsyncMock(
+            return_value=EventReactionResult(reaction="", share_desire=0.0)
+        )
+
+        life._slot_minutes_today = [(10 * 60, "system")]
+        life._fired_slot_indices = set()
+        life._last_event_date = "2024-01-01"
+
+        result = await life.tick()
+        assert result is not None
+
+        # 验证 _clamp_delta 后状态不变（0 → 0, None → 0）
+        updated_state = mock_data_store.update_character_state.call_args[0][0]
+        assert updated_state.energy == 50
+        assert updated_state.mood == 50
+        assert updated_state.health == 50
+
+        # 验证 add_daily_event 中写入的原始 delta
+        call_kwargs = mock_data_store.add_daily_event.call_args.kwargs
+        assert call_kwargs["energy_delta"] == 0
+        assert call_kwargs["mood_delta"] is None
+        assert call_kwargs["health_delta"] is None
+
 
 class TestCharacterLifePersistence:
     """测试状态持久化"""
