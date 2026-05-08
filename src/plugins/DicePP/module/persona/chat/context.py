@@ -3,6 +3,7 @@
 
 组装四层记忆到 LLM 消息列表
 """
+from dataclasses import dataclass
 from nonebot.log import logger
 from typing import List, Dict, Optional, Any, Tuple
 
@@ -11,6 +12,19 @@ from utils.string import estimate_tokens
 from ..character.models import Character
 from ..data.models import UserProfile
 from ..wall_clock import persona_wall_now
+
+DEFAULT_DELAY_BEFORE = 1.0
+
+
+@dataclass
+class SegmentGuide:
+    """分段回复引导参数，None 表示不注入分段引导。"""
+
+    enabled: bool
+    target_chars: int
+    max_chars: int
+    soft_limit: int
+    hard_limit: int
 
 
 class ContextBuilder:
@@ -22,11 +36,13 @@ class ContextBuilder:
         max_short_term_chars: int = 1500,
         timezone: str = "Asia/Shanghai",
         lore_token_budget: int = 300,
+        segment_guide: Optional[SegmentGuide] = None,
     ):
         self.character = character
         self.max_short_term_chars = max_short_term_chars
         self.timezone = timezone
         self.lore_token_budget = lore_token_budget
+        self.segment_guide = segment_guide
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
@@ -166,6 +182,18 @@ class ContextBuilder:
 
         parts.append(f"你的名字是: {self.character.name}")
         parts.append(f"当前你和用户的关系: {warmth_label}")
+
+        # ── 分段回复引导（仅 chat 路径注入）
+        if self.segment_guide and self.segment_guide.enabled:
+            sg = self.segment_guide
+            guide = (
+                f"【回复规则】\n"
+                f"你必须使用 send_reply_segment 工具发送回复，不要直接在 content 中输出。\n"
+                f"- 每段建议 {sg.target_chars} 字，单段上限 {sg.max_chars} 字\n"
+                f"- 单次回复总字数软上限 {sg.soft_limit} 字，硬上限 {sg.hard_limit} 字\n"
+                f"- 短句 delay_before 用 {DEFAULT_DELAY_BEFORE} 秒，长句用 2–3 秒"
+            )
+            parts.append(guide)
 
         if user_profile and user_profile.facts:
             facts_text = "\n".join([f"- {k}: {v}" for k, v in user_profile.facts.items()])

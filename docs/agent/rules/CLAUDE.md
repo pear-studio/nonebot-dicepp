@@ -73,19 +73,6 @@ uv run python bot.py
 - **交互式验收**：新功能完成前，**必须**使用 `dicepp-shell` 技能进行交互式机器人测试，确认指令行为正确
 - **提交前**：必须跑通 `uv run pytest`，不自动 push
 
-### 常用 dicepp-shell 测试流程
-
-```bash
-# 创建测试会话
-python -m DicePP.shell start <scenario_name>
-
-# 发送命令（可带确定性骰子结果）
-python -m DicePP.shell send <scenario_name> --user <user> --msg "<cmd>" [--dice <seq>]
-
-# 完成后清理
-python -m DicePP.shell rm <scenario_name>
-```
-
 ## 代码风格
 
 - **最小化变更**：只改必要的内容

@@ -62,3 +62,49 @@ async def test_send_without_proxy_drops_silently():
     await port._send(user_id="u1", group_id="", content="hi")
 
     # 不应抛 AttributeError；测试通过即代表降级生效
+
+
+@pytest.mark.asyncio
+async def test_send_now_success_awaits_send():
+    bot = _make_bot()
+    port = MessagePort(bot)
+
+    result = await port.send_now("u1", "g1", "hello", skip_history_record=True)
+
+    assert result is True
+    bot.proxy.process_bot_command.assert_awaited_once()
+    cmd = bot.proxy.process_bot_command.await_args.args[0]
+    assert cmd.msg == "hello"
+    assert cmd.skip_history_record is True
+
+
+@pytest.mark.asyncio
+async def test_send_now_failure_returns_false_and_calls_on_delivery_failed():
+    bot = _make_bot()
+    bot.proxy.process_bot_command = AsyncMock(side_effect=RuntimeError("net down"))
+    on_failed = AsyncMock()
+    port = MessagePort(bot, on_delivery_failed=on_failed)
+
+    result = await port.send_now("u1", "", "oops")
+
+    assert result is False
+    on_failed.assert_awaited_once()
+    kwargs = on_failed.await_args.kwargs
+    assert kwargs["user_id"] == "u1"
+    assert kwargs["content"] == "oops"
+
+
+@pytest.mark.asyncio
+async def test_send_now_pipeline_stages_still_applied():
+    bot = _make_bot()
+    from plugins.DicePP.module.persona.gateway.pipeline import MessagePipeline, TruncateStage
+
+    pipeline = MessagePipeline()
+    pipeline.add(TruncateStage(max_chars=5))
+    port = MessagePort(bot, pipeline=pipeline)
+
+    result = await port.send_now("u1", "", "very long content")
+
+    assert result is True
+    cmd = bot.proxy.process_bot_command.await_args.args[0]
+    assert cmd.msg == "ve..."  # truncated by TruncateStage (max_chars=5 -> 2 chars + "...")

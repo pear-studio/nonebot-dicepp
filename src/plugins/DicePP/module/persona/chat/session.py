@@ -11,11 +11,12 @@ from typing import List, Dict, Optional, Any, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 import asyncio
 import json
-from nonebot.log import logger
 import time
 import random
 from collections import deque
 from datetime import datetime, timedelta
+
+from nonebot.log import logger
 
 from utils.string import estimate_tokens
 
@@ -28,6 +29,7 @@ from ..data.models import (
     GroupConversation,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
+from ..llm.client import RoundResult
 from ..character.models import Character
 from ..chat.scoring import ScoringAgent
 from ..chat.context import ContextBuilder
@@ -39,6 +41,8 @@ from ..llm.coordinator import LLMCallCoordinator
 from ..gateway.port import MessagePort
 from ..gateway.pipeline import make_segment
 from .billing import BillingPolicy
+from .segment_dispatcher import SegmentDispatcher, SegmentItem
+from .segment_state import SegmentBudgetState, SegmentLimits
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
@@ -62,6 +66,14 @@ class ChatConfig:
     group_context_budget_tokens: float = 2000.0
     group_max_messages: int = 15
     group_single_message_max_tokens: float = 500.0
+    # ── 分段回复配置
+    segment_target_chars: int = 30
+    segment_max_chars: int = 80
+    segment_soft_limit: int = 100
+    segment_hard_limit: int = 120
+    segment_count_max: int = 10
+    segment_max_delay: float = 10.0
+    segment_round_callbacks_max: int = 3
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "ChatConfig":
@@ -80,6 +92,13 @@ class ChatConfig:
             group_context_budget_tokens=persona.group_context_budget_tokens,
             group_max_messages=persona.group_max_messages,
             group_single_message_max_tokens=persona.group_single_message_max_tokens,
+            segment_target_chars=persona.segment_target_chars,
+            segment_max_chars=persona.segment_max_chars,
+            segment_soft_limit=persona.segment_soft_limit,
+            segment_hard_limit=persona.segment_hard_limit,
+            segment_count_max=persona.segment_count_max,
+            segment_max_delay=persona.segment_max_delay,
+            segment_round_callbacks_max=persona.segment_round_callbacks_max,
         )
 
 
@@ -90,6 +109,11 @@ class ChatSession:
 
     DIGEST_MAX_MESSAGES = 6
     DIGEST_MAX_CHARS = 80
+
+    class _SegmentedSentinel(str):
+        """标记分段路径的哨兵值，继承 str 以保持与 coordinator 的兼容性。"""
+
+        pass
 
     def __init__(
         self,
@@ -103,6 +127,7 @@ class ChatSession:
         context_builder: ContextBuilder,
         decay_calculator: Optional[DecayCalculator] = None,
         port: Optional[MessagePort] = None,
+        segment_dispatcher: Optional[SegmentDispatcher] = None,
     ):
         self.store = store
         self.router = router
@@ -114,6 +139,7 @@ class ChatSession:
         self.context_builder = context_builder
         self.decay_calculator = decay_calculator
         self.port = port
+        self.segment_dispatcher = segment_dispatcher
         self._pending_messages: Dict[str, deque] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}
         self._billing = BillingPolicy(router)
@@ -222,7 +248,7 @@ class ChatSession:
 
     async def _coordinator_chat_call_fn(
         self, user_id: str, group_id: str, messages: List[str]
-    ) -> str:
+    ) -> Optional[str]:
         """coordinator chat 路径的单轮 LLM 调用。"""
         current_message = "\n".join(messages) if messages else ""
 
@@ -240,6 +266,12 @@ class ChatSession:
                 group_id=group_id,
             )
 
+        if isinstance(response, self._SegmentedSentinel):
+            # 分段路径：历史已由 _chat_with_tools 写入，跳过重复持久化
+            await self._update_interaction(user_id, group_id, current_message, str(response))
+            return self._SegmentedSentinel("")
+
+        # 非分段路径：原逻辑
         await self._persist_assistant_message(user_id, group_id, response)
         if not group_id:
             await self.store.prune_old_messages(user_id, group_id, self.config.max_messages)
@@ -266,7 +298,54 @@ class ChatSession:
         return fallback_response
 
     async def _coordinator_on_result(self, user_id: str, group_id: str, result: str) -> None:
-        """中间轮结果：通过 MessagePort 发送、持久化并扣减额度。"""
+        """中间轮结果：通过 MessagePort 发送、持久化、扣减配额。
+
+        计费原则：按 coordinator 轮次算，每轮 1 次配额扣减。
+
+        - coordinator 外层循环每跑 1 轮 = 1 次扣费
+          （无论非分段/分段输出，也不论该轮内部因工具循环/分段/round callback
+           调了多少次 LLM API；内层 LLM API 调用次数与配额扣减无关）
+        - max_iterations 是外层循环上限（防刷屏），正常使用不会触及
+        - 分段路径下，本函数提前返回（消息已通过 send_reply_segment + dispatcher
+          实时发送，无需在此重发也无需写历史），但 charge 应在早返之前完成
+
+        场景对照（假设单次 LLM 调用从开始到完成耗时 5 秒）：
+
+        A. 单条消息 + 非分段输出
+           t=0 发 msg_1；之后无新消息
+           → coordinator 跑 1 轮 → 1 次扣费（仅最终轮 success）
+
+        B. 单条消息 + 分段输出
+           t=0 发 msg_1；之后无新消息
+           → coordinator 跑 1 轮 → 1 次扣费（仅最终轮 success）
+
+        C. 在第 1 轮期间发 1 条新消息 + 非分段输出
+           t=0 发 msg_1（开始 iter 1）；t=2 发 msg_2（iter 1 期间，进 buffer）；
+           t=5 iter 1 完成、发送 msg_1 的回复、开始 iter 2 处理 msg_2；
+           t=10 iter 2 完成、发送 msg_2 的回复，无新消息 → 退出
+           → coordinator 跑 2 轮 → 2 次扣费（iter 1 触发本函数 1 次 + 最终 success 1 次）
+
+        D. 在第 1 轮期间发 1 条新消息 + 分段输出
+           同 C 时间轴
+           → coordinator 跑 2 轮 → 2 次扣费
+
+        E. 连续在每轮期间发新消息 + 非分段输出
+           t=0 发 msg_1（开始 iter 1）；t=2 发 msg_2（iter 1 期间，进 buffer）；
+           t=5 iter 1 完成、发送 msg_1 的回复、开始 iter 2 处理 msg_2；
+           t=7 发 msg_3（iter 2 期间，进 buffer）；
+           t=10 iter 2 完成、发送 msg_2 的回复、开始 iter 3 处理 msg_3；
+           t=15 iter 3 完成、发送 msg_3 的回复，无新消息 → 退出
+           → coordinator 跑 3 轮 → 3 次扣费
+
+        F. 连续在每轮期间发新消息 + 分段输出
+           同 E 时间轴
+           → coordinator 跑 3 轮 → 3 次扣费
+        """
+        await self._billing.charge(user_id)
+
+        if isinstance(result, self._SegmentedSentinel):
+            return
+
         if self.port:
             await self.port.send_segmented(
                 user_id,
@@ -279,7 +358,6 @@ class ChatSession:
                 f"消息无法发送 (user={user_id}, group={group_id})"
             )
         await self._persist_assistant_message(user_id, group_id, result)
-        await self._billing.charge(user_id)
 
     async def _chat_via_coordinator(
         self, user_id: str, group_id: str, message: str, target_key: str
@@ -287,7 +365,7 @@ class ChatSession:
         fallback_response: Optional[str] = None
         current_message_for_exhausted = message
 
-        async def chat_call_fn(messages: List[str]) -> str:
+        async def chat_call_fn(messages: List[str]) -> Optional[str]:
             nonlocal current_message_for_exhausted
             current_message = "\n".join(messages) if messages else message
             current_message_for_exhausted = current_message
@@ -313,6 +391,8 @@ class ChatSession:
         if result.status == "success":
             # 最终轮计费：on_result 只覆盖中间轮，最终轮通过 success 路径扣费。
             await self._billing.charge(user_id)
+            # _SegmentedSentinel 是 str 子类，直接透传——
+            # 调用方用 `is None` 区分"未进入 chat"，用 `bool()` 区分"是否需要再发"
             return result.value
         return fallback_response if fallback_response is not None else None
 
@@ -324,9 +404,35 @@ class ChatSession:
         group_id: str,
         messages: List[Dict],
     ) -> str:
-        """支持工具调用的对话（通过 ToolRegistry）"""
+        """支持工具调用的对话"""
+        target_key = SegmentDispatcher.target_key(user_id, group_id)
+
+        # 5.3: 新聊天轮次开始前清空前一轮残段
+        if self.segment_dispatcher:
+            await self.segment_dispatcher.flush(target_key)
+
         tools = self.tool_registry.get_definitions_for(ToolDomain.CHAT)
-        ctx = ToolContext(user_id=user_id, group_id=group_id, store=self.store, send=self.port)
+
+        # 5.4.1: 构造 SegmentBudgetState 并注入 ToolContext
+        segment_state = None
+        if self.segment_dispatcher:
+            segment_limits = SegmentLimits(
+                max_chars=self.config.segment_max_chars,
+                soft_limit=self.config.segment_soft_limit,
+                hard_limit=self.config.segment_hard_limit,
+                count_max=self.config.segment_count_max,
+                max_delay=self.config.segment_max_delay,
+            )
+            segment_state = SegmentBudgetState(limits=segment_limits)
+
+        ctx = ToolContext(
+            user_id=user_id,
+            group_id=group_id,
+            store=self.store,
+            send=self.port,
+            segment_dispatcher=self.segment_dispatcher,
+            segment_state=segment_state,
+        )
         tool_executor = self.tool_registry.make_executor_for(ToolDomain.CHAT, ctx=ctx)
 
         content, metadata = await self.router.generate_with_tools(
@@ -337,6 +443,12 @@ class ChatSession:
             max_tool_rounds=self.config.tools_max_rounds,
             user_id=user_id,
             group_id=group_id,
+            on_round_complete=(
+                self._on_segment_round_complete if segment_state else None
+            ),
+            max_round_callbacks=(
+                self.config.segment_round_callbacks_max if segment_state else 0
+            ),
         )
 
         if metadata.get("tool_rounds", 0) > 0:
@@ -347,7 +459,106 @@ class ChatSession:
                 f"cached={metadata.get('cached_tokens', 0)}"
             )
 
+        if self.segment_dispatcher:
+            return await self._run_chat_with_tools_segmented(
+                user_id, group_id, target_key, content, metadata, segment_state
+            )
+
         return content
+
+    async def _run_chat_with_tools_segmented(
+        self,
+        user_id: str,
+        group_id: str,
+        target_key: str,
+        content: str,
+        metadata: Dict[str, Any],
+        segment_state: SegmentBudgetState,
+    ) -> str:
+        """分段路径：拼接回复、兜底处理、历史写入"""
+        full_reply = "".join(segment_state.buffer)
+
+        # 5.4.4 / 5.4.5: 兜底 — callback 用尽且 LLM 仍未分段
+        if metadata.get("callback_count", 0) >= self.config.segment_round_callbacks_max:
+            if content:
+                fallback_content = content[:self.config.segment_hard_limit]
+                logger.warning(
+                    f"LLM 忽略分段工具，使用兜底: user={user_id}, "
+                    f"fallback_len={len(fallback_content)}"
+                )
+                # fallback 语义为"完整替代"：清空此前尝试，丢弃 queue 中待发送 segment，
+                # 用最终 content 替代。已发送的 segment 无法召回。
+                # 历史仅记录 fallback_content，已发送的 segment 不计入历史，属已知设计妥协。
+                if segment_state.buffer:
+                    segment_state.buffer.clear()
+                    segment_state.total_chars = 0
+                    segment_state.segment_count = 0
+                if self.segment_dispatcher:
+                    await self.segment_dispatcher.flush(target_key)
+                segment_state.buffer.append(fallback_content)
+                segment_state.total_chars += len(fallback_content)
+                segment_state.segment_count += 1
+                self.segment_dispatcher.notify(
+                    target_key,
+                    SegmentItem(
+                        content=fallback_content,
+                        delay_before=0.0,
+                        user_id=user_id,
+                        group_id=group_id,
+                    ),
+                )
+                full_reply = "".join(segment_state.buffer)
+            else:
+                logger.error(f"LLM 耗尽 callback 且返回空 content: user={user_id}")
+
+        # 5.4.6: 写入历史（不依赖发送结果）
+        if not group_id:
+            await self.store.add_message(user_id, group_id, "assistant", full_reply)
+            await self.store.prune_old_messages(user_id, group_id, self.config.max_messages)
+        else:
+            await self.store.add_group_conversation(
+                group_id=group_id,
+                user_id="assistant",
+                role="assistant",
+                content=full_reply,
+                display_name="我",
+            )
+
+        return self._SegmentedSentinel(full_reply)
+
+    async def _on_segment_round_complete(
+        self,
+        completed_tool_rounds: int,
+        result: "RoundResult",
+        current_messages: List[Dict],
+    ) -> Optional[Dict]:
+        """5.5: LLM 不调用 send_reply_segment 时的纠正注入"""
+        has_send_reply_segment = any(
+            tc.get("name") == "send_reply_segment" for tc in (result.tool_calls or [])
+        )
+
+        # 5.5.1: 含 send_reply_segment → 正常流程
+        if has_send_reply_segment:
+            # 5.5.3: content + tool_call 同时存在 → warning log，丢弃 content
+            if result.content:
+                logger.warning(
+                    "LLM returned content alongside send_reply_segment; content ignored"
+                )
+            return None
+
+        # 5.5.2: 无工具调用且 content 非空 → 注入纠正
+        # 使用 user 角色而非 system，兼容 MiniMax 等不支持 mid-conversation system 角色的厂商
+        if result.content:
+            logger.warning(
+                f"send_reply_segment 未被调用，注入纠正指令: "
+                f"round={completed_tool_rounds}, content_preview={result.content[:30]!r}"
+            )
+            return {
+                "role": "user",
+                "content": "[内部指令: 请使用 send_reply_segment 工具发送回复，不要直接输出文本]",
+            }
+
+        return None
 
     # ── 关系与评分 ────────────────────────────────────────────
 

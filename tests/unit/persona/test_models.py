@@ -148,6 +148,40 @@ class TestPersonaConfig:
         assert ModelTier.PRIMARY == "primary"
         assert ModelTier.AUXILIARY == "auxiliary"
 
+    def test_segment_defaults(self):
+        """测试分段回复配置默认值"""
+        config = PersonaConfig()
+        assert config.segment_enabled is True
+        assert config.segment_target_chars == 30
+        assert config.segment_max_chars == 80
+        assert config.segment_soft_limit == 100
+        assert config.segment_hard_limit == 120
+        assert config.segment_count_max == 10
+        assert config.segment_max_delay == 10.0
+        assert config.segment_round_callbacks_max == 3
+
+    def test_segment_soft_limit_must_not_exceed_hard(self):
+        """soft_limit > hard_limit 时构造应抛 ValidationError"""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError) as exc_info:
+            PersonaConfig(
+                segment_soft_limit=150,
+                segment_hard_limit=120,
+            )
+        assert "segment_soft_limit" in str(exc_info.value)
+
+    def test_segment_positive_constraints(self):
+        """正数字段边界校验"""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            PersonaConfig(segment_max_chars=0)
+        with pytest.raises(ValidationError):
+            PersonaConfig(segment_count_max=0)
+        with pytest.raises(ValidationError):
+            PersonaConfig(segment_max_delay=0)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

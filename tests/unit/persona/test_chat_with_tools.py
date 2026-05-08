@@ -9,7 +9,7 @@ import asyncio
 from typing import List, Dict, Any
 from unittest.mock import Mock, AsyncMock
 
-from plugins.DicePP.module.persona.llm.client import LLMClient, ForcedToolError
+from plugins.DicePP.module.persona.llm.client import LLMClient, ForcedToolError, RoundResult
 from plugins.DicePP.module.persona.llm.router import LLMRouter
 
 
@@ -314,8 +314,186 @@ class TestChatWithTools:
             tools=tools,
             tool_executor=mock_executor,
             max_tool_rounds=2,  # 限制为 2 轮
+            max_round_callbacks=0,  # 禁用回调以保持原测试语义
             timeout=60
         )
 
         assert "工具调用次数超过限制" in content
         assert metadata["tool_rounds"] == 2
+
+    @pytest.mark.asyncio
+    async def test_callback_injection_appends_message_and_continues(self):
+        """回调返回 dict 时注入消息并继续循环"""
+        client = LLMClient(
+            api_key="test_key",
+            base_url="https://api.test.com/v1",
+            model="gpt-4o"
+        )
+
+        # Round 0: content without tool_calls -> callback injects system note
+        mock_response1 = Mock()
+        mock_response1.choices = [Mock()]
+        mock_response1.choices[0].message = Mock()
+        mock_response1.choices[0].message.content = "hello"
+        mock_response1.choices[0].message.tool_calls = None
+        mock_response1.usage = None
+
+        # Round 1 (after injection): content again -> callback returns None
+        mock_response2 = Mock()
+        mock_response2.choices = [Mock()]
+        mock_response2.choices[0].message = Mock()
+        mock_response2.choices[0].message.content = "world"
+        mock_response2.choices[0].message.tool_calls = None
+        mock_response2.usage = None
+
+        mock_openai_client = Mock()
+        mock_openai_client.chat.completions.create = AsyncMock(
+            side_effect=[mock_response1, mock_response2]
+        )
+        client._client = mock_openai_client
+
+        async def on_round(round_num, result, messages):
+            if result.content == "hello":
+                return {"role": "system", "content": "inject"}
+            return None
+
+        content, metadata = await client.chat_with_tools(
+            messages=[{"role": "user", "content": "test"}],
+            tools=[],
+            on_round_complete=on_round,
+            max_round_callbacks=3,
+            max_tool_rounds=5,
+        )
+
+        assert content == "world"
+        assert metadata["callback_count"] == 1
+        assert metadata["tool_rounds"] == 0
+        # Verify injected message was appended
+        second_call_messages = mock_openai_client.chat.completions.create.await_args_list[1][1]["messages"]
+        assert any(m.get("content") == "inject" for m in second_call_messages)
+
+    @pytest.mark.asyncio
+    async def test_callback_returns_none_uses_original_flow(self):
+        """回调返回 None 时走原流程（处理 tool_calls）"""
+        client = LLMClient(
+            api_key="test_key",
+            base_url="https://api.test.com/v1",
+            model="gpt-4o"
+        )
+
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message = Mock()
+        mock_response.choices[0].message.content = ""
+        mock_response.choices[0].message.tool_calls = [
+            MockToolCall("tc_1", "search_memory", '{}')
+        ]
+        mock_response.usage = None
+
+        mock_openai_client = Mock()
+        mock_openai_client.chat.completions.create = AsyncMock(return_value=mock_response)
+        client._client = mock_openai_client
+
+        async def mock_executor(tool_calls):
+            return [{"tool_call_id": tc["id"], "content": "ok"} for tc in tool_calls]
+
+        async def on_round(round_num, result, messages):
+            return None
+
+        content, metadata = await client.chat_with_tools(
+            messages=[{"role": "user", "content": "test"}],
+            tools=[{"type": "function", "function": {"name": "search_memory"}}],
+            tool_executor=mock_executor,
+            on_round_complete=on_round,
+            max_round_callbacks=2,
+            max_tool_rounds=1,
+        )
+
+        assert metadata["callback_count"] == 0  # on_round 返回 None，不递增
+        assert metadata["total_tool_calls"] > 0   # 确实走了 tool_calls 处理流程
+
+    @pytest.mark.asyncio
+    async def test_max_round_callbacks_stops_injection(self):
+        """callback_count 达到 max_round_callbacks 后不再注入"""
+        client = LLMClient(
+            api_key="test_key",
+            base_url="https://api.test.com/v1",
+            model="gpt-4o"
+        )
+
+        mock_openai_client = Mock()
+        mock_openai_client.chat.completions.create = AsyncMock(
+            side_effect=[
+                self._make_response("a"),
+                self._make_response("b"),
+                self._make_response("c"),
+            ]
+        )
+        client._client = mock_openai_client
+
+        async def on_round(round_num, result, messages):
+            return {"role": "system", "content": "inject"}
+
+        content, metadata = await client.chat_with_tools(
+            messages=[{"role": "user", "content": "test"}],
+            tools=[],
+            on_round_complete=on_round,
+            max_round_callbacks=2,
+            max_tool_rounds=2,
+        )
+
+        assert metadata["callback_count"] == 2
+        # max_total_rounds = 2 + 2 = 4, but after 2 injections total_rounds=3
+        # then round 3 (total_rounds=4) returns "c" without injection (callback exhausted)
+
+    def _make_response(self, content: str):
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message = Mock()
+        mock_response.choices[0].message.content = content
+        mock_response.choices[0].message.tool_calls = None
+        mock_response.usage = None
+        return mock_response
+
+    @pytest.mark.asyncio
+    async def test_max_total_rounds_enforced(self):
+        """total_rounds 达到 max_total_rounds 时强制退出"""
+        client = LLMClient(
+            api_key="test_key",
+            base_url="https://api.test.com/v1",
+            model="gpt-4o"
+        )
+
+        mock_openai_client = Mock()
+        mock_openai_client.chat.completions.create = AsyncMock(
+            side_effect=[
+                self._make_response("a"),
+                self._make_response("b"),
+            ]
+        )
+        client._client = mock_openai_client
+
+        async def on_round(round_num, result, messages):
+            return {"role": "system", "content": "inject"}
+
+        content, metadata = await client.chat_with_tools(
+            messages=[{"role": "user", "content": "test"}],
+            tools=[],
+            on_round_complete=on_round,
+            max_round_callbacks=1,
+            max_tool_rounds=1,
+        )
+
+        # max_total_rounds = 1 + 1 = 2
+        # round 0: "a" -> inject (callback_count=1, total_rounds=1)
+        # round 1: "b" -> callback exhausted, return "b" (total_rounds=2)
+        assert content == "b"
+        assert metadata["callback_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_generate_with_forced_tool_does_not_accept_callback(self):
+        """generate_with_forced_tool 签名不包含 callback 参数"""
+        import inspect
+        sig = inspect.signature(LLMClient.generate_with_forced_tool)
+        assert "on_round_complete" not in sig.parameters
+        assert "max_round_callbacks" not in sig.parameters

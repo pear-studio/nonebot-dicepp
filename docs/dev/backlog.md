@@ -66,6 +66,21 @@
   - fallback 事件携带默认 delta（如 energy=-1, mood=0）兜底，避免状态断层
   - 影响面: `life/character_life.py` 事件生成路径、PersonaConfig 超时项、fallback 构造代码
 
+### [B-260507-d4b350] 消息发送路径统一（合并 send_segmented 与 send_now）
+- 创建: 2026-05-07
+- 问题表现:
+  - 症状: MessagePort 同时存在 send_segmented 与新增的 send_now，行为重复
+  - 现场: 三处 send_segmented 调用方（ChatSession._coordinator_on_result、PersonaApp.send_message、LifeSimulator._send_msg）均为 [make_segment(content, group_id)] 单段形态，与 send_now 行为几乎一致
+  - 影响: 分段路径走 dispatcher → send_now，非分段路径走 send_segmented，形成两套并存的发送路径；语义割裂，可观测性不一致，新调用方需在两个 API 间二选一
+- 工作计划:
+  - 方向: 统一走 SegmentDispatcher 模型，让分段与非分段共享同一调度/失败回调/可观测路径
+  - 步骤:
+    1. 评估 send_segmented 三处调用方能否迁移到 dispatcher（含 life 主动消息的 delay 与失败回调语义）
+    2. 设计统一发送接口（扩展 dispatcher 支持非分段单条消息或并入 send_now）
+    3. 删除 send_segmented，迁移所有调用方，更新测试
+  - 影响面: persona 模块所有出口消息（chat 非分段、PersonaApp.send_message、life 主动消息）；测试 test_message_port、test_life_simulator
+  - 风险: life 主动消息原本是 fire-and-forget 后台 task，迁移 dispatcher 同步等待语义需保留或显式重设计
+
 ### [B-260507-f9ea98] 厂商适配层根据模型类型选择 prompt 注入角色（system/user/developer）
 - 创建: 2026-05-07
 - 问题表现:
@@ -77,4 +92,41 @@
   - 在 ContextBuilder 或厂商适配层加模型类型分支：支持 system/developer 角色的厂商使用对应角色，MiniMax 等保留 user 注入路径
   - 需先观察现有 LLM 是否真的频繁误识 `[内部指令]`，决定是否提前优先级
   - 影响面: ContextBuilder、厂商 adapter、segment dispatcher
+
+### [B-260508-1f1b9e] 消息发送路径统一（合并 send_segmented / send_now / dispatcher）
+- 创建: 2026-05-08
+- 问题表现:
+    - `send_segmented` 三处调用方（`ChatSession._coordinator_on_result`、`PersonaApp.send_message`、`LifeSimulator._send_msg`）当前都是 `[make_segment(content, group_id)]` 单段形态，行为与 `send_now` 重叠
+    - 分段路径走 `dispatcher → send_now`，非分段路径走 `send_segmented`，形成两套并存的发送路径，调度/失败回调/可观测点分裂
+    - 同一"发送"语义有两套实现，未来扩展失败重试、限流、监控时需要双写
+- 工作计划:
+    - 修复方向：评估三处调用方是否都能迁移到 dispatcher（含 life 主动消息的 delay 与失败回调语义）；设计统一发送接口（扩展 dispatcher 支持非分段单条 / 合并到 send_now / 让 send_segmented 内部走 dispatcher）；删除 `send_segmented`，迁移所有调用方，更新测试
+    - 影响面：persona 模块所有出口消息（chat 非分段、`PersonaApp.send_message`、life 主动消息）
+    - 风险点：需保证 life 主动消息行为不退化（delay/失败回调语义一致性）；何时拉起：分段回复主线合入并稳定运行后单独立项推进
+
+### [B-260508-7f130e] proactive_miss_min_score 默认值卡边界(40.0→38.0)
+- 创建: 2026-05-08
+- 问题表现:
+    - 用户好感度 39.9 vs `proactive_miss_min_score` 默认 40.0,卡阈值下永不触发想念消息(pydantic_models.py:127、config/global.json:131 仍为 40.0)
+    - a78174 PR 完成 share_desire 阈值与 greeting_schedule 死配置删除后,miss_min_score 仍未动,边界好感度用户(39-40 区间)体验损失持续累积
+    - 风险与 share_threshold 调整同档(数据驱动数值微调,无 schema 变更),无工程理由继续延后
+- 工作计划:
+    - 调整方向:`proactive_miss_min_score` 默认 40.0 → 38.0,与 share_threshold 同方法线上数据校准
+    - 影响面:pydantic_models.py:127、config/global.json:131、docs/dicepp/persona/config-example.md 默认值表
+    - 风险点:与 `proactive_miss_enabled` / `proactive_miss_min_hours` 联动需复核;何时拉起取决于 1-2 周线上 39-40 区间用户分布与触发率数据
+
+### [B-260508-eb32c9] 好感度阶段-想念-衰减联动重构
+- 创建: 2026-05-08
+- 问题表现:
+    - 当前好感度数值含义模糊：初始值30、想念阈值40、衰减下限50（=初始+20）三者之间无关联，各说各的
+    - 情感节奏不合理：高好感度用户长时间不互动，系统直接扣好感度；应先主动表达想念，被忽视后再伤心减分
+    - 想念消息触发概率使用连续公式 `0.40 + 0.40 * (score/100)`，不够直观，且亲密关系（80+）也无法100%触发
+- 工作计划:
+    - 重构好感度阶段定义，统一数值与行为含义：冷淡(0-20)/疏远(20-40)/友好(40-60)/默契(60-80)/亲密(80-100)
+    - 新增 `last_miss_sent_at` 字段到 `RelationshipState`，实现"开关型"衰减：想念消息发出前不衰减，发出后用户未回应才开始正常衰减
+    - 将想念概率改为阶段固定值：疏远50%/友好70%/默契90%/亲密100%
+    - 调整 `miss_min_score` 配置从40改为20
+    - 更新衰减计算逻辑，衰减下限改为当前阶段下限（取代 `initial_score + floor_offset`）
+    - 亲密用户（80+）长时间不互动最多掉到80，可永久保持亲密阶段
+    - 补充/更新相关测试
 
