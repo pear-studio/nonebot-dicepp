@@ -220,5 +220,72 @@ class TestContextBuilderSpeakerPrefix:
         assert "[你]" in system_content or "[我]" in system_content
 
 
+class TestContextBuilderSegmentGuide:
+    """测试分段回复引导文本注入"""
+
+    def _make_character(self):
+        return Character(
+            name="苏晓",
+            description="一个温柔的AI伴侣",
+        )
+
+    def test_segment_guide_injected_with_defaults(self):
+        char = self._make_character()
+        from plugins.DicePP.module.persona.chat.context import SegmentGuide
+        builder = ContextBuilder(
+            char,
+            segment_guide=SegmentGuide(
+                enabled=True, target_chars=30, max_chars=80, soft_limit=100, hard_limit=120
+            ),
+        )
+        messages = builder.build(short_term_history=[], current_message="hi")
+        system = messages[0]["content"]
+        assert "send_reply_segment" in system
+        assert "30" in system  # target_chars
+        assert "80" in system  # max_chars
+        assert "100" in system  # soft_limit
+        assert "120" in system  # hard_limit
+        assert "delay_before" in system
+
+    def test_segment_guide_reflects_custom_values(self):
+        char = self._make_character()
+        from plugins.DicePP.module.persona.chat.context import SegmentGuide
+        builder = ContextBuilder(
+            char,
+            segment_guide=SegmentGuide(
+                enabled=True, target_chars=50, max_chars=100, soft_limit=200, hard_limit=250
+            ),
+        )
+        messages = builder.build(short_term_history=[], current_message="hi")
+        system = messages[0]["content"]
+        assert "50" in system
+        assert "100" in system
+        assert "200" in system
+        assert "250" in system
+
+    def test_segment_guide_placed_after_character_info(self):
+        char = self._make_character()
+        from plugins.DicePP.module.persona.chat.context import SegmentGuide
+        builder = ContextBuilder(
+            char,
+            segment_guide=SegmentGuide(
+                enabled=True, target_chars=30, max_chars=80, soft_limit=100, hard_limit=120
+            ),
+        )
+        messages = builder.build(short_term_history=[], current_message="hi")
+        system = messages[0]["content"]
+        name_idx = system.index("苏晓")
+        guide_idx = system.index("【回复规则】")
+        remind_idx = system.index("请记住用户说过的话")
+        assert name_idx < guide_idx < remind_idx
+
+    def test_segment_guide_disabled_when_segment_enabled_false(self):
+        char = self._make_character()
+        builder = ContextBuilder(char, segment_guide=None)
+        messages = builder.build(short_term_history=[], current_message="hi")
+        system = messages[0]["content"]
+        assert "【回复规则】" not in system
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

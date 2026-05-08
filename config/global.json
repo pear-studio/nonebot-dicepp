@@ -107,6 +107,15 @@
     "max_diary_context_chars": 500,
     "lore_token_budget": 300,
 
+    "segment_enabled": true,
+    "segment_target_chars": 30,
+    "segment_max_chars": 80,
+    "segment_soft_limit": 100,
+    "segment_hard_limit": 120,
+    "segment_count_max": 10,
+    "segment_max_delay": 10.0,
+    "segment_round_callbacks_max": 3,
+
     "game_enabled": true,
     "scoring_interval": 5,
 

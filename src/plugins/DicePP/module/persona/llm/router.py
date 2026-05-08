@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional, Callable, Awaitable, TYPE_CHECKING
 import time
 import uuid
 from nonebot.log import logger
-from .client import LLMClient
+from .client import LLMClient, RoundResult
 from ..data.models import ModelTier, UserLLMConfig
 
 if TYPE_CHECKING:
@@ -459,6 +459,10 @@ class LLMRouter:
         max_tool_rounds: int = 5,
         user_id: Optional[str] = None,
         group_id: Optional[str] = None,
+        on_round_complete: Optional[
+            Callable[[int, RoundResult, List[Dict]], Awaitable[Optional[Dict]]]
+        ] = None,
+        max_round_callbacks: int = 3,
     ) -> tuple[str, dict]:
         """
         生成回复，支持工具调用（完整循环）
@@ -498,6 +502,8 @@ class LLMRouter:
                     max_tool_rounds=max_tool_rounds,
                     timeout=actual_timeout,
                     temperature=temperature,
+                    on_round_complete=on_round_complete,
+                    max_round_callbacks=max_round_callbacks,
                 ),
                 session_id=session_id,
                 user_id=user_id,

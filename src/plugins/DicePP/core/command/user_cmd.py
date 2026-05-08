@@ -40,6 +40,15 @@ class UserCommandBase(metaclass=abc.ABCMeta):
         """每天调用一次"""
         return []
 
+    async def shutdown(self) -> None:
+        """Bot 关闭时调用，用于清理资源。
+
+        契约：
+        - 在 db.close 之前调用，可写入存储；
+        - 不应抛异常（抛出的异常会被捕获并记录，但不影响其他命令的关闭）。
+        """
+        pass
+
     @abc.abstractmethod
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         """

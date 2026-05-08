@@ -33,6 +33,12 @@ class MessagePort(EventSharePort):
     async def send_segmented(
         self, user_id: str, group_id: str, segments: List[Dict]
     ) -> bool:
+        """批量发送分段消息，默认记录历史。
+
+        与 send_now 的差异：send_segmented 走 pipeline + 后台任务，
+        send_now 为即时单条发送。skip_history_record 默认均为 False，
+        分段域如需跳过应在调用侧显式指定。
+        """
         actions = [
             SendAction(
                 user_id=user_id,
@@ -46,6 +52,47 @@ class MessagePort(EventSharePort):
         processed = await self._pipeline.process(actions)
         self._spawn_background(processed)
         return True  # fire-and-forget
+
+    async def send_now(
+        self,
+        user_id: str,
+        group_id: str,
+        content: str,
+        *,
+        skip_history_record: bool = False,
+    ) -> bool:
+        """即时单条发送，默认记录历史。
+
+        分段调度器应显式传 skip_history_record=True，
+        把"分段消息不记历史"的决策留在分段域。
+        """
+        action = SendAction(
+            user_id=user_id,
+            group_id=group_id,
+            content=content,
+            delay_seconds=0,
+            skip_history_record=skip_history_record,
+        )
+        processed = await self._pipeline.process([action])
+        a = processed[0]
+        try:
+            await self._send(
+                a.user_id,
+                a.group_id,
+                a.content,
+                skip_history_record=a.skip_history_record,
+            )
+            return True
+        except Exception as e:
+            logger.exception("send_now 失败")
+            if self._on_delivery_failed:
+                await self._on_delivery_failed(
+                    user_id=a.user_id,
+                    group_id=a.group_id,
+                    content=a.content,
+                    error=str(e),
+                )
+            return False
 
     def _spawn_background(self, actions: List[SendAction]) -> None:
         task = asyncio.create_task(self._run_actions(actions))

@@ -370,6 +370,19 @@ class Bot:
         shutdown的异步版本
         销毁bot对象时触发, 可能是bot断连, 或关闭应用导致的
         """
+        shutdown_results = await asyncio.gather(
+            *[command.shutdown() for command in self.command_dict.values()],
+            return_exceptions=True,
+        )
+        for command, result in zip(self.command_dict.values(), shutdown_results):
+            if isinstance(result, Exception):
+                import traceback
+                tb_str = traceback.format_exception(type(result), result, result.__traceback__)
+                dice_log(
+                    f"[Bot] 命令 {command.__class__.readable_name} shutdown 失败: {result}\n"
+                    f"{''.join(tb_str)}"
+                )
+
         await self.db.close()
 
         if self.tick_task:

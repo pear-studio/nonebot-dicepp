@@ -85,7 +85,7 @@ async def test_single_call_charges_once():
 
 @pytest.mark.asyncio
 async def test_buffered_merge_charges_per_call():
-    """3 次 LLM 调用（2 中间 + 1 最终）→ 3 次扣费"""
+    """N 次 LLM 调用（中间轮 + 最终轮）→ N 次扣费（中间轮 on_result + 最终轮 success 各扣 1 次）"""
     coordinator = LLMCallCoordinator()
     session = _make_session(coordinator)
 
@@ -122,7 +122,7 @@ async def test_buffered_merge_charges_per_call():
 
     # call_count 至少 2（首轮 + 至少 1 次 buffered 合并）
     assert call_count >= 2
-    # 计费次数等于实际 LLM 调用次数
+    # 中间轮通过 on_result 各扣 1 次 + 最终轮 success 1 次：N 次 LLM 调用 → N 次扣费
     assert session.router.increment_usage.await_count == call_count
 
 

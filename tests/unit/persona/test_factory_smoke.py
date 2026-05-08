@@ -137,13 +137,15 @@ async def test_create_persona_success_registers_three_tools(monkeypatch):
     assert "search_memory" in names, f"缺失 search_memory，实际注册: {names}"
     assert "search_chat_history" in names, f"缺失 search_chat_history，实际注册: {names}"
     assert "roll_dice" in names, f"缺失 roll_dice，实际注册: {names}"
-    assert len(names) == 3, f"期望恰好 3 个工具，实际: {names}"
+    assert "send_reply_segment" in names, f"缺失 send_reply_segment，实际注册: {names}"
+    assert len(names) == 4, f"期望恰好 4 个工具，实际: {names}"
 
     # R6: 跨组件引用一致性
     assert app.chat is not None
     assert app.life is not None
     assert app.store is not None
     assert app.port is not None
+    assert app.segment_dispatcher is not None
     assert app.chat.port is app.port
     assert app.life.scheduler is not None
     assert app.life.character_life is not None

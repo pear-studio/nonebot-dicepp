@@ -7,7 +7,7 @@ Config is loaded hierarchically by ConfigLoader:
 """
 from typing import List
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 
 class PersonaConfig(BaseModel):
@@ -65,6 +65,40 @@ class PersonaConfig(BaseModel):
 
     # ── Phase 5a: 世界书 Token 预算（当前为字符估算值，非精确 token）
     lore_token_budget: int = 300  # 每次对话注入世界书的最大估算 token 数
+
+    # ── 分段回复（Segmented Reply）
+    # LLM 通过 send_reply_segment 工具按段输出，由 SegmentDispatcher 按 delay_before 调度发送
+    segment_enabled: bool = True
+    segment_target_chars: int = Field(
+        default=30, ge=1, description="单段建议字数（写入 system prompt 引导 LLM）"
+    )
+    segment_max_chars: int = Field(
+        default=80, ge=1, description="单段字符上限，超出由 send_reply_segment executor 拒绝"
+    )
+    segment_soft_limit: int = Field(
+        default=100, ge=1, description="单次回复总字数软上限，超出返回 warning"
+    )
+    segment_hard_limit: int = Field(
+        default=120, ge=1, description="单次回复总字数硬上限，超出返回 error 并拒绝该段"
+    )
+    segment_count_max: int = Field(
+        default=10, ge=1, description="单次回复最大段数，超出由 executor 拒绝"
+    )
+    segment_max_delay: float = Field(
+        default=10.0, gt=0, description="单段 delay_before 上限（秒）"
+    )
+    segment_round_callbacks_max: int = Field(
+        default=3, ge=0, description="LLM 不调用 send_reply_segment 时最大纠正注入次数"
+    )
+
+    @model_validator(mode="after")
+    def _validate_segment_limits(self) -> "PersonaConfig":
+        if self.segment_soft_limit > self.segment_hard_limit:
+            raise ValueError(
+                f"segment_soft_limit ({self.segment_soft_limit}) "
+                f"必须 <= segment_hard_limit ({self.segment_hard_limit})"
+            )
+        return self
 
     # ── Phase 4+: 群活跃度（影响主动消息频率，暂未启用）
     # group_activity_decay_days: List[int] = [1, 3, 7]

@@ -35,6 +35,8 @@ from .tools.registry import ToolRegistry, ToolDomain
 from .tools.search_memory import SEARCH_MEMORY_TOOL, search_memory_executor
 from .tools.search_history import SEARCH_HISTORY_TOOL, make_search_history_executor
 from .tools.roll_dice import ROLL_DICE_TOOL, roll_dice_executor
+from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
+from .chat.segment_dispatcher import SegmentDispatcher
 
 
 @dataclass
@@ -45,6 +47,7 @@ class PersonaApp:
     life: LifeSimulator
     store: PersonaDataStore
     port: MessagePort
+    segment_dispatcher: Optional[SegmentDispatcher] = None
 
     # ── 角色卡 ────────────────────────────────────────────────
 
@@ -73,7 +76,7 @@ class PersonaApp:
 
     async def chat_with_user(
         self, user_id: str, group_id: str, message: str, nickname: str
-    ) -> str:
+    ) -> Optional[str]:
         return await self.chat.chat(user_id, group_id, message, nickname)
 
     # ── 消息发送 ──────────────────────────────────────────────
@@ -212,14 +215,28 @@ def _build_chat(
     config,
     decay_calculator: DecayCalculator,
     port: MessagePort,
+    segment_dispatcher: Optional[SegmentDispatcher] = None,
 ) -> ChatSession:
     """组装 ChatSession"""
     scoring_agent = ScoringAgent(router)
+    from .chat.context import SegmentGuide
+
+    segment_guide = None
+    if config.segment_enabled:
+        segment_guide = SegmentGuide(
+            enabled=True,
+            target_chars=config.segment_target_chars,
+            max_chars=config.segment_max_chars,
+            soft_limit=config.segment_soft_limit,
+            hard_limit=config.segment_hard_limit,
+        )
+
     context_builder = ContextBuilder(
         character,
         max_short_term_chars=config.max_short_term_chars,
         timezone=config.timezone,
         lore_token_budget=config.lore_token_budget,
+        segment_guide=segment_guide,
     )
     chat_config = ChatConfig.from_persona(config)
     return ChatSession(
@@ -233,6 +250,7 @@ def _build_chat(
         context_builder=context_builder,
         decay_calculator=decay_calculator,
         port=port,
+        segment_dispatcher=segment_dispatcher,
     )
 
 
@@ -336,6 +354,14 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     store = await _build_store(bot, config)
     router = _build_router(config, store)
 
+    port = _build_port(bot, store)
+
+    segment_dispatcher = None
+    if config.segment_enabled:
+        segment_dispatcher = SegmentDispatcher(
+            message_port=port,
+        )
+
     tool_registry = ToolRegistry()
     tool_registry.register(ToolDomain.CHAT, SEARCH_MEMORY_TOOL, search_memory_executor)
     tool_registry.register(
@@ -344,7 +370,17 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         make_search_history_executor(config.search_chat_history_max_chars),
     )
     tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
-    logger.info("工具注册表已初始化")
+    if config.segment_enabled:
+        tool_registry.register(
+            ToolDomain.CHAT,
+            make_tool_def(
+                target_chars=config.segment_target_chars,
+                max_chars=config.segment_max_chars,
+                max_delay=config.segment_max_delay,
+            ),
+            send_reply_segment_executor,
+        )
+    logger.info("工具注册表与分段调度器已初始化")
 
     coordinator = LLMCallCoordinator(
         max_failures=config.proactive_coordinator_max_failures,
@@ -358,9 +394,12 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("衰减计算器已初始化")
 
-    port = _build_port(bot, store)
-    chat = _build_chat(store, router, tool_registry, coordinator, character, config, decay_calculator, port)
+    chat = _build_chat(
+        store, router, tool_registry, coordinator, character, config, decay_calculator, port, segment_dispatcher
+    )
     life = await _build_life(store, character, config, coordinator, port, decay_calculator, router)
 
     logger.info("Persona 模块初始化完成")
-    return PersonaApp(chat=chat, life=life, store=store, port=port)
+    return PersonaApp(
+        chat=chat, life=life, store=store, port=port, segment_dispatcher=segment_dispatcher
+    )

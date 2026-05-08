@@ -19,3 +19,5 @@ class ToolContext:
     group_id: str
     store: Any = None
     send: Optional[SendPort] = None
+    segment_dispatcher: Optional[Any] = None
+    segment_state: Optional[Any] = None

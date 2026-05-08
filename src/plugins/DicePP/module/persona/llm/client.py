@@ -4,12 +4,22 @@ LLM 客户端封装
 基于 AsyncOpenAI 的异步客户端，支持超时和错误处理
 """
 import asyncio
+from dataclasses import dataclass
 from nonebot.log import logger
-from typing import List, Dict, Optional, Any, Callable, Awaitable
+from typing import List, Dict, Optional, Any, Callable, Awaitable, TypedDict
 import time
 
+
+class ToolCallInfo(TypedDict):
+    """工具调用结构，供 RoundResult 与 ToolExecutor 使用"""
+
+    id: str
+    name: str
+    arguments: str
+
+
 # 工具执行器类型别名
-ToolExecutor = Callable[[List[Dict]], Awaitable[List[Dict]]]
+ToolExecutor = Callable[[List[ToolCallInfo]], Awaitable[List[Dict]]]
 
 
 _RETRYABLE_KEYWORDS = (
@@ -24,6 +34,14 @@ class ForcedToolError(Exception):
     def __init__(self, message: str, raw_content: str = ""):
         super().__init__(message)
         self.raw_content = raw_content
+
+
+@dataclass
+class RoundResult:
+    """单轮 LLM 响应结果，供 on_round_complete 回调使用"""
+
+    content: Optional[str]
+    tool_calls: List[ToolCallInfo]
 
 
 class LLMClient:
@@ -239,6 +257,10 @@ class LLMClient:
         max_tool_rounds: int = 5,
         timeout: int = 60,
         temperature: Optional[float] = None,
+        on_round_complete: Optional[
+            Callable[[int, RoundResult, List[Dict]], Awaitable[Optional[Dict]]]
+        ] = None,
+        max_round_callbacks: int = 3,
     ) -> tuple[str, dict]:
         """
         支持多轮工具调用的对话（完整循环实现）
@@ -259,6 +281,9 @@ class LLMClient:
             max_tool_rounds: 最多多少轮工具调用
             timeout: 单次调用超时时间
             temperature: 采样温度
+            on_round_complete: 每轮 LLM 响应后的回调；返回 dict 则注入消息并继续，
+                返回 None 则走原流程（处理 tool_calls 或返回 content）。
+            max_round_callbacks: 回调注入最大次数。
 
         Returns:
             (最终回复文本, 元数据字典)
@@ -268,8 +293,12 @@ class LLMClient:
         total_tool_calls = 0
         all_tool_names: List[str] = []
         retry_count = 0  # 独立重试计数器，避免轮次过多时退避时间过长
+        callback_count = 0
+        tool_round_num = 0
+        total_rounds = 0
+        max_total_rounds = max_tool_rounds + max_round_callbacks
 
-        for round_num in range(max_tool_rounds):
+        while total_rounds < max_total_rounds:
             try:
                 create_kwargs: Dict[str, Any] = {
                     "model": self.model,
@@ -285,6 +314,7 @@ class LLMClient:
                     timeout=timeout
                 )
 
+                total_rounds += 1
                 message = response.choices[0].message
 
                 # 检查单轮工具调用数量上限
@@ -295,6 +325,26 @@ class LLMClient:
                     # 截断到上限
                     message.tool_calls = message.tool_calls[:self.MAX_TOOLS_PER_ROUND]
 
+                result = RoundResult(
+                    content=message.content or "",
+                    tool_calls=[
+                        {
+                            "id": tc.id,
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        }
+                        for tc in (message.tool_calls or [])
+                    ],
+                )
+
+                # ── Round callback (injection) ──
+                if on_round_complete is not None and callback_count < max_round_callbacks:
+                    injected = await on_round_complete(tool_round_num, result, current_messages)
+                    if injected is not None:
+                        current_messages.append(injected)
+                        callback_count += 1
+                        continue  # 跳过原流程，直接进入下一轮 LLM
+
                 # 如果没有工具调用，直接返回内容
                 if not message.tool_calls:
                     content = message.content or ""
@@ -303,13 +353,14 @@ class LLMClient:
                     # 收集元数据
                     metadata = {
                         "model": self.model,
-                        "tool_rounds": round_num,
+                        "tool_rounds": tool_round_num,
                         "total_tool_calls": total_tool_calls,
                         "tool_names": all_tool_names,
                         "tokens_input": response.usage.prompt_tokens if response.usage else 0,
                         "tokens_output": response.usage.completion_tokens if response.usage else 0,
                         # Phase 3: 缓存数据收集
                         "cached_tokens": self._get_cached_tokens(response),
+                        "callback_count": callback_count,
                     }
 
                     return content, metadata
@@ -347,6 +398,7 @@ class LLMClient:
                             "tool_call_id": tc.id,
                             "content": "[System note: Tool execution is temporarily unavailable, please respond without using this information]"
                         })
+                    tool_round_num += 1
                     continue  # 继续循环，让 LLM 基于错误信息生成合适的回复
 
                 # 执行工具调用
@@ -366,7 +418,7 @@ class LLMClient:
                     # 工具执行失败，返回错误信息
                     return f"（工具执行失败: {e}）", {
                         "model": self.model,
-                        "tool_rounds": round_num,
+                        "tool_rounds": tool_round_num,
                         "error": str(e),
                     }
 
@@ -378,32 +430,36 @@ class LLMClient:
                         "content": result["content"],
                     })
 
+                tool_round_num += 1
                 # 继续下一轮循环，让 LLM 基于工具结果生成回复
                 continue
 
-            except asyncio.TimeoutError:
-                raise
             except Exception as e:
                 error_msg = str(e).lower()
-                # 检查是否需要重试的错误
-                retryable = any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
+                # 检查是否需要重试的错误（包含 timeout）
+                retryable = (
+                    any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
+                    or isinstance(e, asyncio.TimeoutError)
+                )
 
                 if not retryable or retry_count >= 3:  # 最多重试 3 次
                     raise
 
-                # 使用指数退避（基于独立重试计数器，避免轮次过多时延迟过大）
-                retry_delay = 2 * (2 ** retry_count)
+                # timeout 与其他可重试异常共享总轮次预算
+                total_rounds += 1
                 retry_count += 1
-                logger.warning(f"工具调用第 {round_num + 1} 轮失败，{retry_delay}秒后重试: {e}")
+                retry_delay = 2 * (2 ** retry_count)
+                logger.warning(f"工具调用第 {tool_round_num + 1} 轮失败，{retry_delay}秒后重试: {e}")
                 await asyncio.sleep(retry_delay)
                 continue
 
         # 达到最大轮次仍未完成
         return "（工具调用次数超过限制）", {
             "model": self.model,
-            "tool_rounds": max_tool_rounds,
+            "tool_rounds": tool_round_num,
             "total_tool_calls": total_tool_calls,
             "tool_names": all_tool_names,
+            "callback_count": callback_count,
         }
 
     def _get_cached_tokens(self, response) -> int:

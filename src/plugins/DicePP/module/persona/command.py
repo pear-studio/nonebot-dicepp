@@ -368,8 +368,11 @@ class PersonaCommand(UserCommandBase):
         else:
             response = self._get_introduction()
 
-        # 发送回复（去重命中时 response 为 None，静默不发送）
-        if not response:
+        # 发送回复
+        # - response is None：去重命中或未进入 chat 路径，静默早退
+        # - response 是 falsy 但非 None（_SegmentedSentinel("")）：分段路径已通过
+        #   调度器实时发送，仍需更新群活跃度，但跳过再次 _send
+        if response is None:
             return []
 
         # 更新群活跃度（群聊且是@触发或AI命令）
@@ -385,7 +388,9 @@ class PersonaCommand(UserCommandBase):
             except Exception as e:
                 dice_log(f"[Persona] 群活跃度更新失败（已忽略）: {e}")
 
-        await self._send(user_id, group_id, response)
+        # 分段路径下 response 是 falsy sentinel，已通过 dispatcher 发出，不再次 _send
+        if response:
+            await self._send(user_id, group_id, response)
         return []
 
     async def _send(self, user_id: str, group_id: str, content: str) -> None:
@@ -621,6 +626,11 @@ class PersonaCommand(UserCommandBase):
     async def _handle_debug(self, user_id: str, group_id: str, msg: str) -> str:
         """.pa 命令已废弃，请使用 .ai admin 子命令"""
         return ".pa 命令已废弃，请使用 .ai admin 子命令"
+
+    async def shutdown(self) -> None:
+        """Bot 关闭时清理分段调度器"""
+        if self.app and self.app.segment_dispatcher:
+            await self.app.segment_dispatcher.shutdown()
 
     def get_description(self) -> str:
         """获取命令描述"""
