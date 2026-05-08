@@ -38,19 +38,6 @@
   - 需先在 dev 加日志复现一次评分失败路径，确认是 LLM 返回异常 / 解析失败 / 超时
   - 影响面: `chat/session.py:_process_batch_scoring`、`data/store.py` 表结构、配置项
 
-### [B-260507-d3cc8b] 事件生成 LLM 调用超时策略与 fallback 事件 delta 兜底
-- 创建: 2026-05-07
-- 问题表现:
-  - 4月30日 19:38 一次 MiniMax-M2.7 调用 134 秒后返回 error；推测为服务端排队而非生成
-  - 上层 fallback 事件: "我正在房间里休息。"，无 delta（energy/mood/health 全 None），无内容质量
-  - 后果: 后续事件链无状态变化，角色状态长期停滞
-  - 现状: `client.py` 已有 `max_retries=3` 指数退避（默认 timeout=30），事件生成上层调用未消费 / 未配置长 timeout
-- 工作计划:
-  - 评估 auxiliary 模型 timeout 默认值是否上调到 60-90 秒
-  - 上层是否引入轻量重试（独立于客户端层）：1 次重试，避免单点 fallback 事件
-  - fallback 事件携带默认 delta（如 energy=-1, mood=0）兜底，避免状态断层
-  - 影响面: `life/character_life.py` 事件生成路径、PersonaConfig 超时项、fallback 构造代码
-
 ### [B-260507-d4b350] 消息发送路径统一（合并 send_segmented 与 send_now）
 - 创建: 2026-05-07
 - 问题表现:

@@ -27,6 +27,11 @@ class PersonaConfig(BaseModel):
     
     max_concurrent_requests: int = 2
     timeout: int = 30
+    event_generation_timeout: int = Field(
+        default=90,
+        ge=5,
+        description="事件生成 LLM 调用超时（秒）",
+    )
     timezone: str = "Asia/Shanghai"
 
     # ── Phase 3: 短期记忆限制

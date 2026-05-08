@@ -36,7 +36,9 @@ class TestEventGenerationAgent:
     @pytest.fixture
     def agent(self, mock_llm_router):
         """创建 EventGenerationAgent 实例"""
-        return EventGenerationAgent(mock_llm_router)
+        config = MagicMock()
+        config.event_generation_timeout = 90
+        return EventGenerationAgent(mock_llm_router, config=config)
 
     @pytest.fixture
     def event_context(self):
@@ -166,7 +168,9 @@ class TestGenerateEventResult:
 
     @pytest.fixture
     def agent_forced(self, mock_llm_router_forced):
-        return EventGenerationAgent(mock_llm_router_forced)
+        config = MagicMock()
+        config.event_generation_timeout = 90
+        return EventGenerationAgent(mock_llm_router_forced, config=config)
 
     @pytest.mark.asyncio
     async def test_generate_event_result_success(self, agent_forced, mock_llm_router_forced):
@@ -197,6 +201,9 @@ class TestGenerateEventResult:
         assert result.system_prompt_digest != ""
         assert "世界观设定专家" in result.system_prompt_digest
         mock_llm_router_forced.generate_with_forced_tool.assert_called_once()
+        # B-260507-d3cc8b: 验证 timeout 默认传递到 router
+        call_kwargs = mock_llm_router_forced.generate_with_forced_tool.call_args.kwargs
+        assert call_kwargs["timeout"] == 90
 
     @pytest.mark.asyncio
     async def test_generate_event_result_fallback(self, agent_forced, mock_llm_router_forced):
@@ -216,6 +223,13 @@ class TestGenerateEventResult:
 
         assert "休息" in result.description
         assert result.duration_minutes == 0
+        # B-260507-d3cc8b: fallback 携带默认 delta 避免状态断层
+        assert result.energy_delta == 0
+        assert result.mood_delta is None
+        assert result.health_delta is None
+        # R7: fallback 填充 raw_response 和 system_prompt_digest 以增强可观测性
+        assert result.raw_response != ""
+        assert "fallback" in result.system_prompt_digest
 
     @pytest.mark.asyncio
     async def test_generate_event_result_clamp_duration_max(self, agent_forced, mock_llm_router_forced):
@@ -340,7 +354,9 @@ class TestGenerateEventReaction:
 
     @pytest.fixture
     def agent_forced(self, mock_llm_router_forced):
-        return EventGenerationAgent(mock_llm_router_forced)
+        config = MagicMock()
+        config.event_generation_timeout = 90
+        return EventGenerationAgent(mock_llm_router_forced, config=config)
 
     @pytest.mark.asyncio
     async def test_generate_event_reaction_success(self, agent_forced, mock_llm_router_forced):
@@ -363,6 +379,9 @@ class TestGenerateEventReaction:
         assert raw["reaction"] == "真开心~"
         assert raw["share_desire"] == 0.8
         mock_llm_router_forced.generate_with_forced_tool.assert_called_once()
+        # B-260507-d3cc8b: 验证 timeout 默认传递到 router
+        call_kwargs = mock_llm_router_forced.generate_with_forced_tool.call_args.kwargs
+        assert call_kwargs["timeout"] == 90
 
     @pytest.mark.asyncio
     async def test_generate_event_reaction_fallback_required(self, agent_forced, mock_llm_router_forced):
