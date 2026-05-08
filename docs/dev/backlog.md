@@ -26,18 +26,6 @@
     - 影响面: 仅死代码删除, character_life 已有 wake_up/good_night 槽位机制不受影响
     - 风险: 低 (零消费者), 但需确认 bot 配置文件 config/bots/*.json 不会因严格模式 pydantic 校验报错
 
-### [B-260507-9b9094] 评分失败持久化记录与触发条件改造
-- 创建: 2026-05-07
-- 问题表现:
-  - `persona_score_history` 最后一条停留在 2026-04-19，之后用户共 12 条消息、6 轮对话均未触发评分
-  - 触发条件 `len(messages) >= scoring_interval * 2 = 10`，多用户场景下刚好卡边缘
-  - 失败路径: `_process_batch_scoring` 异常仅 `logger.warning`，无持久化，旧容器日志已丢失，根因无从回溯
-- 工作计划:
-  - 新增 `persona_scoring_failures` 表（user_id/group_id/error/raw_response/created_at）持久化失败记录
-  - 评估触发条件改造: 时间窗口（24h 内有对话即触发）或下调 `scoring_interval`
-  - 需先在 dev 加日志复现一次评分失败路径，确认是 LLM 返回异常 / 解析失败 / 超时
-  - 影响面: `chat/session.py:_process_batch_scoring`、`data/store.py` 表结构、配置项
-
 ### [B-260507-d4b350] 消息发送路径统一（合并 send_segmented 与 send_now）
 - 创建: 2026-05-07
 - 问题表现:

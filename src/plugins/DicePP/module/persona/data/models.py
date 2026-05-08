@@ -158,6 +158,18 @@ class ScoreEvent(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class ScoringFailure(BaseModel):
+    """评分失败记录"""
+    id: Optional[int] = None
+    user_id: str
+    group_id: str = ""
+    messages_count: int = 0
+    error: str = ""  # 异常信息
+    raw_response: str = ""  # LLM 原始响应（若有）
+    conversation_digest: str = ""  # 消息内容摘要
+    created_at: Optional[datetime] = None
+
+
 class DiaryEntry(BaseModel):
     """角色日记条目"""
     date: str  # YYYY-MM-DD

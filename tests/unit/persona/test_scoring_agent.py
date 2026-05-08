@@ -31,18 +31,19 @@ class TestScoringAgentParsing:
         }
         '''
         
-        deltas, facts = agent._parse_response(response)
-        
+        deltas, facts, parse_error = agent._parse_response(response)
+
         assert deltas.intimacy == 3.5
         assert deltas.passion == 1.0
         assert deltas.trust == 2.0
         assert deltas.secureness == 0.5
         assert facts["name"] == "张三"
+        assert parse_error == ""
 
     def test_parse_with_markdown_fence(self):
         """测试解析带 markdown 围栏的 JSON"""
         agent = ScoringAgent(None)
-        
+
         response = '''
 ```json
 {
@@ -56,25 +57,27 @@ class TestScoringAgentParsing:
 }
 ```
         '''
-        
-        deltas, facts = agent._parse_response(response)
-        
+
+        deltas, facts, parse_error = agent._parse_response(response)
+
         assert deltas.intimacy == 2.0
         assert deltas.secureness == -0.5
+        assert parse_error == ""
 
     def test_parse_invalid_fallback(self):
-        """测试解析失败返回零值"""
+        """测试解析失败返回零值并附带 parse_error"""
         agent = ScoringAgent(None)
-        
+
         response = "这不是有效的 JSON"
-        
-        deltas, facts = agent._parse_response(response)
-        
+
+        deltas, facts, parse_error = agent._parse_response(response)
+
         assert deltas.intimacy == 0.0
         assert deltas.passion == 0.0
         assert deltas.trust == 0.0
         assert deltas.secureness == 0.0
         assert facts == {}
+        assert "JSON 解析失败" in parse_error
 
     def test_parse_bracket_counting_fallback(self):
         """测试 Level 3：括号计数从噪声文本中提取 JSON"""
@@ -82,16 +85,17 @@ class TestScoringAgentParsing:
 
         response = '好的，根据分析结果如下：{"deltas": {"intimacy": 1.0, "passion": 0.5, "trust": 2.0, "secureness": 0.0}, "facts": {"name": "小明"}} 以上为评分结果。'
 
-        deltas, facts = agent._parse_response(response)
+        deltas, facts, parse_error = agent._parse_response(response)
 
         assert deltas.intimacy == 1.0
         assert deltas.trust == 2.0
         assert facts["name"] == "小明"
+        assert parse_error == ""
 
     def test_clamp_values(self):
         """测试值被限制在范围内"""
         agent = ScoringAgent(None)
-        
+
         response = '''
         {
           "deltas": {
@@ -102,8 +106,8 @@ class TestScoringAgentParsing:
           }
         }
         '''
-        
-        deltas, _ = agent._parse_response(response)
+
+        deltas, _, parse_error = agent._parse_response(response)
         
         # 应该被限制在 [-5, 5] 范围内
         assert deltas.intimacy == 5.0

@@ -23,6 +23,7 @@ from .models import (
     Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
     RelationshipState, Observation, DailyEvent, GroupActivity, UserLLMConfig,
     LLMTraceRecord, DelayedTask, GroupConversation, CharacterState,
+    ScoringFailure,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -83,6 +84,7 @@ class PersonaDataStore:
         await self._ensure_observations_debug_columns()
         await self._ensure_daily_events_share_columns()
         await self._ensure_daily_events_delta_columns()
+        await self._ensure_scoring_failures_table()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
         """
@@ -178,6 +180,31 @@ class PersonaDataStore:
         if "health_delta" not in col_names:
             await self.db.execute(
                 "ALTER TABLE persona_daily_events ADD COLUMN health_delta INTEGER"
+            )
+
+    async def _ensure_scoring_failures_table(self) -> None:
+        """确保评分失败记录表及索引已创建（兼容旧库升级）。"""
+        from .migrations import (
+            CREATE_SCORING_FAILURES_TABLE,
+            CREATE_SCORING_FAILURES_INDEX,
+            CREATE_SCORING_FAILURES_INDEX_CREATED_AT,
+        )
+        async with self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='persona_scoring_failures'"
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            await self.db.execute(CREATE_SCORING_FAILURES_TABLE)
+        # 索引
+        for idx_sql in [CREATE_SCORING_FAILURES_INDEX, CREATE_SCORING_FAILURES_INDEX_CREATED_AT]:
+            await self.db.execute(idx_sql)
+        # 兼容旧库：conversation_digest 列
+        async with self.db.execute("PRAGMA table_info(persona_scoring_failures)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {r[1] for r in rows}
+        if "conversation_digest" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_scoring_failures ADD COLUMN conversation_digest TEXT DEFAULT ''"
             )
 
     # ========== 消息相关 ==========
@@ -765,6 +792,69 @@ class PersonaDataStore:
             )
         )
         await self.db.commit()
+
+    async def record_scoring_failure(self, failure: ScoringFailure) -> None:
+        """记录评分失败"""
+        await self.db.execute(
+            """
+            INSERT INTO persona_scoring_failures
+            (user_id, group_id, messages_count, error, raw_response, conversation_digest, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                failure.user_id,
+                failure.group_id,
+                failure.messages_count,
+                failure.error,
+                failure.raw_response,
+                failure.conversation_digest,
+                failure.created_at.isoformat() if failure.created_at else self._wall_now().isoformat(),
+            )
+        )
+        await self.db.commit()
+
+    async def get_recent_scoring_failures(
+        self,
+        user_id: str,
+        group_id: Optional[str] = None,
+        limit: int = 10,
+    ) -> List[ScoringFailure]:
+        """获取最近评分失败记录"""
+        limit = max(1, limit)
+        async with self.db.execute(
+            """
+            SELECT id, user_id, group_id, messages_count, error, raw_response, conversation_digest, created_at
+            FROM persona_scoring_failures
+            WHERE user_id = ? AND (? IS NULL OR group_id = ?)
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, group_id, group_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                ScoringFailure(
+                    id=row[0],
+                    user_id=row[1],
+                    group_id=row[2],
+                    messages_count=row[3] or 0,
+                    error=row[4] or "",
+                    raw_response=row[5] or "",
+                    conversation_digest=row[6] or "",
+                    created_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                )
+                for row in rows
+            ]
+
+    async def prune_scoring_failures(self, max_age_days: int) -> int:
+        """清理超过 max_age_days 的评分失败记录"""
+        cutoff = (self._wall_now() - timedelta(days=max_age_days)).isoformat()
+        cursor = await self.db.execute(
+            "DELETE FROM persona_scoring_failures WHERE datetime(created_at) < datetime(?)",
+            (cutoff,),
+        )
+        await self.db.commit()
+        return cursor.rowcount
 
     # ========== 群聊观察 ==========
 

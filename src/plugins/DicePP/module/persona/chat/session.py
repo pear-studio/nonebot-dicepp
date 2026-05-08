@@ -27,6 +27,7 @@ from ..data.models import (
     RelationshipState,
     ScoreEvent,
     GroupConversation,
+    ScoringFailure,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
 from ..llm.client import RoundResult
@@ -60,7 +61,7 @@ class ChatConfig:
     relationship_refuse_enabled: bool = False
     relationship_refuse_prob_base: float = 0.3
     relationship_refuse_prob_max: float = 0.9
-    scoring_interval: int = 10
+    scoring_interval: int = 5
     max_messages: int = 100
     group_max_age_minutes: int = 60
     group_context_budget_tokens: float = 2000.0
@@ -607,18 +608,17 @@ class ChatSession:
                 await self._process_batch_scoring(user_id, group_id)
             except Exception as e:
                 logger.warning(f"批量评分失败（不影响对话）: {e}")
-                self._pending_messages.pop(key, None)
 
     async def _process_batch_scoring(self, user_id: str, group_id: str) -> None:
         if not self.scoring_agent:
             return
 
         key = f"{user_id}:{group_id}"
-        messages = self._pending_messages.get(key, [])
+        messages = list(self._pending_messages.get(key, []))
         if not messages:
             return
 
-        self._pending_messages[key] = []
+        messages_count = len(messages)
 
         profile = await self.store.get_user_profile(user_id)
         rel = await self.store.get_relationship(user_id, group_id)
@@ -628,12 +628,52 @@ class ChatSession:
             initial = float(self.character.extensions.initial_relationship)
             rel_for_scoring = self.decay_calculator.effective_relationship(rel, initial)
 
-        deltas, new_facts = await self.scoring_agent.batch_analyze(
-            messages=messages,
-            current_profile=profile,
-            relationship=rel_for_scoring,
-        )
+        try:
+            result = await self.scoring_agent.batch_analyze(
+                messages=messages,
+                current_profile=profile,
+                relationship=rel_for_scoring,
+            )
+        except Exception as exc:
+            try:
+                await self.store.record_scoring_failure(
+                    ScoringFailure(
+                        user_id=user_id,
+                        group_id=group_id,
+                        messages_count=messages_count,
+                        error=f"{type(exc).__name__}: {exc}",
+                        conversation_digest=self._build_conversation_digest(messages),
+                    )
+                )
+            except Exception as record_exc:
+                logger.error(
+                    f"记录评分失败时数据库出错: {record_exc} "
+                    f"(原始异常: {type(exc).__name__}: {exc})"
+                )
+            raise
 
+        if result.parse_error:
+            logger.warning(
+                f"评分解析失败，{messages_count} 条消息保留待重试: "
+                f"user={user_id}, parse_error={result.parse_error[:100]}"
+            )
+            await self.store.record_scoring_failure(
+                ScoringFailure(
+                    user_id=user_id,
+                    group_id=group_id,
+                    messages_count=messages_count,
+                    error=result.parse_error,
+                    raw_response=result.raw_response,
+                    conversation_digest=self._build_conversation_digest(messages),
+                )
+            )
+            return
+
+        # 评分成功后才清空 pending 消息
+        self._pending_messages[key] = []
+
+        deltas = result.deltas
+        new_facts = result.facts
         now = persona_wall_now(self.config.timezone)
         if rel:
             composite_before = rel.composite_score

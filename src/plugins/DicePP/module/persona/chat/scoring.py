@@ -6,9 +6,18 @@
 import json
 from typing import List, Dict, Any, Optional
 from nonebot.log import logger
+from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState, ModelTier
 from ..llm.router import LLMRouter
 from ..utils.json_helpers import safe_json_loads
+
+
+class ScoringAnalysisResult(BaseModel):
+    """评分分析结果"""
+    deltas: ScoreDeltas
+    facts: Dict[str, Any]
+    raw_response: str = ""
+    parse_error: str = ""  # 非空表示解析失败
 
 
 class ScoringAgent:
@@ -22,23 +31,28 @@ class ScoringAgent:
         messages: List[Dict[str, str]],
         current_profile: Optional[UserProfile] = None,
         relationship: Optional[RelationshipState] = None,
-    ) -> tuple[ScoreDeltas, Dict[str, Any]]:
+    ) -> ScoringAnalysisResult:
         prompt = self._build_analysis_prompt(
             messages,
             current_profile or UserProfile(user_id="", facts={}),
             relationship
         )
-        
+
         # 调用辅助模型
         response = await self.llm_router.generate(
             messages=[{"role": "user", "content": prompt}],
             model_tier=ModelTier.AUXILIARY,
         )
-        
+
         # 解析结果
-        deltas, facts = self._parse_response(response)
-        
-        return deltas, facts
+        deltas, facts, parse_error = self._parse_response(response)
+
+        return ScoringAnalysisResult(
+            deltas=deltas,
+            facts=facts,
+            raw_response=response,
+            parse_error=parse_error,
+        )
 
     def _build_analysis_prompt(
         self,
@@ -95,12 +109,19 @@ class ScoringAgent:
         
         return prompt
 
-    def _parse_response(self, response: str) -> tuple[ScoreDeltas, Dict[str, Any]]:
-        """解析 LLM 响应（统一走 safe_json_loads 容错）"""
+    def _parse_response(self, response: str) -> tuple[ScoreDeltas, Dict[str, Any], str]:
+        """解析 LLM 响应（统一走 safe_json_loads 容错）
+
+        Returns:
+            (deltas, facts, parse_error)
+        """
         data = safe_json_loads(response, fallback=None, log_prefix="评分解析")
         if not isinstance(data, dict):
-            return ScoreDeltas(), {}
-        return self._extract_result(data)
+            return ScoreDeltas(), {}, f"JSON 解析失败或返回非 dict: type={type(data).__name__}"
+        try:
+            return (*self._extract_result(data), "")
+        except Exception as exc:
+            return ScoreDeltas(), {}, f"提取评分结果异常: {type(exc).__name__}: {exc}"
 
     @staticmethod
     def _safe_float(value: Any, default: float = 0.0) -> float:
