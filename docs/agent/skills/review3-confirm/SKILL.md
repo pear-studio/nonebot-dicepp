@@ -17,6 +17,11 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 
 **对抗假设**：Defender 的回复可能在为不合理决策辩护，或用技术细节掩盖真正问题。不因 Defender 给出了解释就直接接受——要求解释**可验证**且**符合约束**。遇到真实分歧时当场向用户发起仲裁；遇到 `待澄清` 时提供解答而非直接裁定——Defender 还未真正回复，不得跳过其回复机会。预设 Defender 在 `review4-execute` 将严格按 Confirm 结论实施，因此结论必须清晰、无歧义。
 
+**追加对抗规则（Reviewer 自检清单，每条延后前必须过检）**：
+1. **"超出范围"断言必须独立验证**：当 Defender 以"超出本次范围/需要大量改动"为由拒绝时，Reviewer 必须独立检查相关文件/测试是否已存在、评估实际改动行数，不得仅凭 Defender 单方面断言就接受延后。
+2. **"引入恶化"必须同步 mitigate**：若 PR 明确恶化某项指标（如最坏情况耗时增加、可观测性损失、内存上升），Reviewer 应默认要求在同一 PR 中同步防护。不接受"trade-off"作为延后的唯一理由——若 mitigation 成本低（如加 timeout/加字段标记），必须已共识·实施。
+3. **"理由成立"必须可验证**：Defender 不采纳但"理由成立"的裁定，前提是 Defender 的技术断言可被验证或已被验证。不可验证的断言（如"改动太大""影响面太广"）不得作为"理由成立"的依据。
+
 ## 参数要求
 
 **必须**由用户显式提供文档路径。若未提供，提示用户：
@@ -118,6 +123,14 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 - `需补充回复` 条目不得进入 review4-execute，必须通知用户让 Defender 先补充回复
 - 分歧仲裁必须当场闭环，不得遗留
 - `已共识·延后` 必须在本阶段自动归档到 backlog，不得遗留到 review5
+
+## Worktree 路径规范
+
+当评审对象是 worktree 中的未提交改动时（如 `review1-raise` 调用时指定了 worktree），所有产出和修改必须作用于**目标 worktree**，不可写入 dev 目录：
+
+- **评审报告路径**：`.temp/review-*.md` 必须生成在目标 worktree 根目录下，与对应代码改动共存，随 worktree 一起清理/提交。
+- **backlog 修改路径**：`docs/dev/backlog.md` 必须修改目标 worktree 中的文件，与对应代码改动一起提交。
+- **脚本调用**：`review_record.py`、`backlog.py` 等脚本必须在目标 worktree 的目录下执行，确保相对路径解析正确。
 
 ## 输出
 

@@ -103,6 +103,15 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 ...
 ```
 
+## Worktree 路径规范
+
+当评审对象是 worktree 中的未提交改动时，所有操作必须在**目标 worktree** 中执行，不可写入 dev 目录：
+
+- **历史 review 检查**：步骤 1 的 `ls -t .temp/review-*.md` 必须在目标 worktree 根目录下执行，读取目标 worktree 中的历史 review 记录。
+- **diff 收集**：`git diff HEAD` 必须在目标 worktree 目录下执行，确保 diff 来自目标 worktree 的未提交改动。
+- **评审报告生成**：步骤 8 的 `review_record.py create` 必须在目标 worktree 目录下执行，生成的 `.temp/review-*.md` 位于目标 worktree 根目录，随 worktree 一起清理/提交。
+- **脚本路径**：`review_record.py` 等脚本的调用必须在目标 worktree 目录下执行，确保相对路径解析正确。
+
 ## 输出
 
 向用户报告生成的文件路径（位于 `.temp/`），并提示下一步：
