@@ -13,7 +13,6 @@ from ..data.models import RelationshipState, ScoreEvent
 from ..character.models import Character
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now
-from ..gateway.pipeline import make_segment
 from .proactive_scheduler import ProactiveScheduler
 from .event_share_queue import EventShareTaskQueue
 from .protocols import EventSharePort
@@ -121,6 +120,7 @@ class LifeSimulator:
         if self.scheduler:
             try:
                 proactive_msgs = await self.scheduler.tick()
+                # 串行 await 保证消息顺序，请勿改为 gather
                 for msg in proactive_msgs:
                     await self._send_msg(msg)
             except Exception:
@@ -132,6 +132,7 @@ class LifeSimulator:
                 delayed_msgs = await self.event_share_queue.tick(
                     on_share=self._run_due_share
                 )
+                # 串行 await 保证消息顺序，请勿改为 gather
                 for msg in delayed_msgs:
                     await self._send_msg(msg)
             except Exception:
@@ -231,8 +232,10 @@ class LifeSimulator:
                 f"_send_msg 收件人为空，丢弃消息: content={content[:30]}..."
             )
             return
-        await self.port.send_segmented(
-            user_id,
-            group_id,
-            [make_segment(content, group_id)],
-        )
+        if not await self.port.send(user_id, group_id, content):
+            logger.warning(
+                "_send_msg 发送失败: user_id=%s group_id=%s content=%s...",
+                user_id,
+                group_id,
+                content[:30],
+            )

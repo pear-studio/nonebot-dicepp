@@ -19,7 +19,7 @@ from .exceptions import (
     PersonaStorageError,
 )
 from .game.decay import DecayCalculator, DecayConfig
-from .gateway.pipeline import MessagePipeline, TruncateStage, make_segment
+from .gateway.pipeline import MessagePipeline, TruncateStage
 from .gateway.port import MessagePort
 from .life.character_life import CharacterLife, CharacterLifeConfig
 from .life.diary import DiaryGenerator, DiaryConfig
@@ -81,10 +81,8 @@ class PersonaApp:
 
     # ── 消息发送 ──────────────────────────────────────────────
 
-    async def send_message(self, user_id: str, group_id: str, content: str) -> None:
-        await self.port.send_segmented(
-            user_id, group_id, [make_segment(content, group_id)]
-        )
+    async def send_message(self, user_id: str, group_id: str, content: str) -> bool:
+        return await self.port.send(user_id, group_id, content)
 
     # ── LLM 路由器 ────────────────────────────────────────────
 

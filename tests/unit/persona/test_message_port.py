@@ -65,11 +65,11 @@ async def test_send_without_proxy_drops_silently():
 
 
 @pytest.mark.asyncio
-async def test_send_now_success_awaits_send():
+async def test_send_success_awaits_send():
     bot = _make_bot()
     port = MessagePort(bot)
 
-    result = await port.send_now("u1", "g1", "hello", skip_history_record=True)
+    result = await port.send("u1", "g1", "hello", skip_history_record=True)
 
     assert result is True
     bot.proxy.process_bot_command.assert_awaited_once()
@@ -79,13 +79,29 @@ async def test_send_now_success_awaits_send():
 
 
 @pytest.mark.asyncio
-async def test_send_now_failure_returns_false_and_calls_on_delivery_failed():
+async def test_send_defaults_skip_history_by_group_id():
+    """group_id 非空时默认 skip_history_record=True，空时默认 False"""
+    bot = _make_bot()
+    port = MessagePort(bot)
+
+    await port.send("u1", "g1", "hello")
+    cmd = bot.proxy.process_bot_command.await_args.args[0]
+    assert cmd.skip_history_record is True
+
+    bot.proxy.process_bot_command.reset_mock()
+    await port.send("u1", "", "hello")
+    cmd = bot.proxy.process_bot_command.await_args.args[0]
+    assert cmd.skip_history_record is False
+
+
+@pytest.mark.asyncio
+async def test_send_failure_returns_false_and_calls_on_delivery_failed():
     bot = _make_bot()
     bot.proxy.process_bot_command = AsyncMock(side_effect=RuntimeError("net down"))
     on_failed = AsyncMock()
     port = MessagePort(bot, on_delivery_failed=on_failed)
 
-    result = await port.send_now("u1", "", "oops")
+    result = await port.send("u1", "", "oops")
 
     assert result is False
     on_failed.assert_awaited_once()
@@ -95,7 +111,7 @@ async def test_send_now_failure_returns_false_and_calls_on_delivery_failed():
 
 
 @pytest.mark.asyncio
-async def test_send_now_pipeline_stages_still_applied():
+async def test_send_pipeline_stages_still_applied():
     bot = _make_bot()
     from plugins.DicePP.module.persona.gateway.pipeline import MessagePipeline, TruncateStage
 
@@ -103,8 +119,21 @@ async def test_send_now_pipeline_stages_still_applied():
     pipeline.add(TruncateStage(max_chars=5))
     port = MessagePort(bot, pipeline=pipeline)
 
-    result = await port.send_now("u1", "", "very long content")
+    result = await port.send("u1", "", "very long content")
 
     assert result is True
     cmd = bot.proxy.process_bot_command.await_args.args[0]
     assert cmd.msg == "ve..."  # truncated by TruncateStage (max_chars=5 -> 2 chars + "...")
+
+
+@pytest.mark.asyncio
+async def test_send_failure_callback_exception_still_returns_false():
+    """on_delivery_failed 自身抛异常时 send 仍返回 False 且不向上抛"""
+    bot = _make_bot()
+    bot.proxy.process_bot_command = AsyncMock(side_effect=RuntimeError("net down"))
+    on_failed = AsyncMock(side_effect=RuntimeError("callback boom"))
+    port = MessagePort(bot, on_delivery_failed=on_failed)
+
+    result = await port.send("u1", "", "oops")
+
+    assert result is False

@@ -53,7 +53,7 @@ def _make_simulator(
     character.extensions.initial_relationship = 50.0
 
     port = MagicMock()
-    port.send_segmented = AsyncMock()
+    port.send = AsyncMock()
 
     config = LifeConfig(
         proactive_event_share_threshold=share_threshold,
@@ -131,8 +131,8 @@ async def test_tick_sends_proactive_messages():
         ],
     )
     await sim.tick()
-    sim.port.send_segmented.assert_called_once()
-    args, kwargs = sim.port.send_segmented.call_args
+    sim.port.send.assert_called_once()
+    args, kwargs = sim.port.send.call_args
     assert args[0] == "u1"
 
 
@@ -145,8 +145,21 @@ async def test_tick_processes_delayed_share():
         ],
     )
     await sim.tick()
-    # send_segmented 至少调用一次（处理 delayed 消息）
-    assert sim.port.send_segmented.await_count >= 1
+    assert sim.port.send.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_send_msg_calls_port_with_correct_args():
+    """_send_msg 将 user_id / group_id / content 正确传递给 port.send"""
+    sim = _make_simulator()
+    await sim._send_msg({"user_id": "u1", "group_id": "g1", "content": "群消息"})
+    args, _ = sim.port.send.call_args
+    assert args == ("u1", "g1", "群消息")
+
+    sim.port.send.reset_mock()
+    await sim._send_msg({"user_id": "u1", "group_id": "", "content": "私聊"})
+    args, _ = sim.port.send.call_args
+    assert args == ("u1", "", "私聊")
 
 
 @pytest.mark.asyncio
@@ -196,10 +209,10 @@ async def test_tick_daily_calls_prune_traces_when_enabled():
 
 @pytest.mark.asyncio
 async def test_send_msg_drops_empty_recipient():
-    """_send_msg 收件人为空（user_id 与 group_id 都缺失）时跳过 port.send_segmented"""
+    """_send_msg 收件人为空（user_id 与 group_id 都缺失）时跳过 port.send"""
     sim = _make_simulator()
     await sim._send_msg({"user_id": "", "group_id": "", "content": "孤儿消息"})
-    sim.port.send_segmented.assert_not_called()
+    sim.port.send.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -207,7 +220,7 @@ async def test_send_msg_with_user_only_still_sends():
     """仅有 user_id 仍应正常发送，确认空收件人防御不会误伤"""
     sim = _make_simulator()
     await sim._send_msg({"user_id": "u1", "group_id": "", "content": "hi"})
-    sim.port.send_segmented.assert_called_once()
+    sim.port.send.assert_called_once()
 
 
 @pytest.mark.asyncio

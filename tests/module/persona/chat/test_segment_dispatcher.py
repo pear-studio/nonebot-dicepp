@@ -43,14 +43,14 @@ class TestLazyCreation:
     async def test_first_segment_creates_worker(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("hello", 0, "u1", "g1"))
         await asyncio.sleep(0.05)
-        mock_port.send_now.assert_awaited_once_with("u1", "g1", "hello", skip_history_record=True)
+        mock_port.send.assert_awaited_once_with("u1", "g1", "hello", skip_history_record=True)
 
     @pytest.mark.asyncio
     async def test_second_segment_reuses_worker(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("a", 0, "u1", "g1"))
         dispatcher.notify("group:1", SegmentItem("b", 0, "u1", "g1"))
         await asyncio.sleep(0.05)
-        assert mock_port.send_now.await_count == 2
+        assert mock_port.send.await_count == 2
 
 
 class TestIdleTimeout:
@@ -71,16 +71,16 @@ class TestDelayBefore:
     async def test_zero_delay_sends_immediately(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("now", 0, "u1", "g1"))
         await asyncio.sleep(0.05)
-        mock_port.send_now.assert_awaited_once()
+        mock_port.send.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_positive_delay_waits(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("later", 0.3, "u1", "g1"))
         await asyncio.sleep(0.05)
         # Not sent yet
-        mock_port.send_now.assert_not_awaited()
+        mock_port.send.assert_not_awaited()
         await asyncio.sleep(0.35)
-        mock_port.send_now.assert_awaited_once()
+        mock_port.send.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_new_segment_wakes_sleeping_worker(self, dispatcher, mock_port):
@@ -90,7 +90,7 @@ class TestDelayBefore:
         dispatcher.notify("group:1", SegmentItem("b", 0, "u1", "g1"))
         await asyncio.sleep(0.6)
         # Both should be sent; order preserved
-        calls = mock_port.send_now.await_args_list
+        calls = mock_port.send.await_args_list
         assert len(calls) == 2
         assert calls[0][0][2] == "a"
         assert calls[1][0][2] == "b"
@@ -142,13 +142,13 @@ class TestMaxPerRun:
         for i in range(3):
             dispatcher.notify("group:1", SegmentItem(str(i), 0, "u1", "g1"))
         await asyncio.sleep(0.1)
-        calls = mock_port.send_now.await_args_list
+        calls = mock_port.send.await_args_list
         assert len(calls) == 3
 
         for i in range(3, 5):
             dispatcher.notify("group:1", SegmentItem(str(i), 0, "u1", "g1"))
         await asyncio.sleep(0.1)
-        calls = mock_port.send_now.await_args_list
+        calls = mock_port.send.await_args_list
         assert len(calls) == 5
         contents = [c[0][2] for c in calls]
         assert contents == ["0", "1", "2", "3", "4"]
@@ -157,8 +157,8 @@ class TestMaxPerRun:
 class TestSendFailure:
     @pytest.mark.asyncio
     async def test_failure_does_not_kill_worker(self, dispatcher, mock_port):
-        mock_port.send_now.side_effect = [Exception("boom"), None]
+        mock_port.send.side_effect = [Exception("boom"), None]
         dispatcher.notify("group:1", SegmentItem("fail", 0, "u1", "g1"))
         dispatcher.notify("group:1", SegmentItem("ok", 0, "u1", "g1"))
         await asyncio.sleep(0.1)
-        assert mock_port.send_now.await_count == 2
+        assert mock_port.send.await_count == 2

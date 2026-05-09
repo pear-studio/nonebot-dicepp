@@ -7,7 +7,7 @@ from ..tools.context import SendPort
 class EventSharePort(SendPort, Protocol):
     """生活域 — 我需要一个能发送事件分享消息的口子
 
-    继承 SendPort，确保工具域与生活域的 send_segmented 签名始终一致。
+    继承 SendPort，确保工具域与生活域的 send 签名始终一致。
     """
     pass
 
