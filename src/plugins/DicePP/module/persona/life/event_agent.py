@@ -15,6 +15,9 @@ from ..llm.router import LLMRouter
 from ..data.models import ModelTier
 from typing import TYPE_CHECKING
 
+# keep in sync with PersonaConfig.background_llm_timeout_seconds default
+_DEFAULT_BG_TIMEOUT = 90
+
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
 
@@ -123,6 +126,11 @@ class EventGenerationAgent:
     ):
         self.llm_router = llm_router
         self.config = config
+        self._bg_timeout = (
+            getattr(config, "background_llm_timeout_seconds", _DEFAULT_BG_TIMEOUT)
+            if config
+            else _DEFAULT_BG_TIMEOUT
+        )
 
     @staticmethod
     def _format_state_prompt(energy: Optional[int], mood: Optional[int],
@@ -270,7 +278,7 @@ class EventGenerationAgent:
                 tool_name="record_event",
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.9,
-                timeout=self.config.event_generation_timeout if self.config else 90,
+                timeout=self._bg_timeout,
             )
 
             # tool-call 输出（generate_with_forced_tool）：args 已是合法 JSON，
@@ -436,7 +444,7 @@ class EventGenerationAgent:
                 tool_name="record_reaction",
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.9,
-                timeout=self.config.event_generation_timeout if self.config else 90,
+                timeout=self._bg_timeout,
             )
 
             # tool-call 输出（generate_with_forced_tool）：args 已是合法 JSON，
@@ -571,6 +579,7 @@ class EventGenerationAgent:
                 ],
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.85,
+                timeout=self._bg_timeout,
             )
 
             diary = response.strip()
@@ -589,9 +598,8 @@ class EventGenerationAgent:
         为指定目标生成个性化分享消息。
 
         使用 AUXILIARY tier 模型，通过 generate_with_forced_tool 强制输出。
-        默认单次 10 秒超时、最多 2 次重试，实际值受配置项
-        proactive_share_timeout_seconds / proactive_share_max_retries /
-        proactive_share_backoff_base_seconds 控制。
+        超时与重试由配置项 background_llm_timeout_seconds /
+        proactive_share_max_retries / proactive_share_backoff_base_seconds 控制。
         彻底失败返回 None（调用方应静默丢弃）。
 
         Args:
@@ -718,7 +726,7 @@ class EventGenerationAgent:
         ]
 
         max_retries = getattr(self.config, "proactive_share_max_retries", 3) if self.config else 3
-        timeout_seconds = getattr(self.config, "proactive_share_timeout_seconds", 60) if self.config else 60
+        timeout_seconds = self._bg_timeout
         backoff_base = getattr(self.config, "proactive_share_backoff_base_seconds", 2) if self.config else 2
         max_chars = getattr(self.config, "proactive_share_max_chars", 200) if self.config else 200
 

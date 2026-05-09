@@ -37,7 +37,7 @@ class TestEventGenerationAgent:
     def agent(self, mock_llm_router):
         """创建 EventGenerationAgent 实例"""
         config = MagicMock()
-        config.event_generation_timeout = 90
+        config.background_llm_timeout_seconds = 90
         return EventGenerationAgent(mock_llm_router, config=config)
 
     @pytest.fixture
@@ -77,6 +77,7 @@ class TestEventGenerationAgent:
             mock_llm_router.generate.assert_called_once()
             call_kwargs = mock_llm_router.generate.call_args.kwargs
             assert call_kwargs["temperature"] == 0.85
+            assert call_kwargs["timeout"] == 90
             assert call_kwargs["model_tier"] == ModelTier.AUXILIARY
 
         async def test_generate_diary_truncate_long(self, agent, mock_llm_router):
@@ -169,7 +170,7 @@ class TestGenerateEventResult:
     @pytest.fixture
     def agent_forced(self, mock_llm_router_forced):
         config = MagicMock()
-        config.event_generation_timeout = 90
+        config.background_llm_timeout_seconds = 90
         return EventGenerationAgent(mock_llm_router_forced, config=config)
 
     @pytest.mark.asyncio
@@ -355,7 +356,7 @@ class TestGenerateEventReaction:
     @pytest.fixture
     def agent_forced(self, mock_llm_router_forced):
         config = MagicMock()
-        config.event_generation_timeout = 90
+        config.background_llm_timeout_seconds = 90
         return EventGenerationAgent(mock_llm_router_forced, config=config)
 
     @pytest.mark.asyncio

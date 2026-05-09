@@ -19,7 +19,7 @@ from plugins.DicePP.module.persona.llm import ForcedToolError
 class MockConfig:
     proactive_share_max_chars = 200
     proactive_share_max_retries = 2
-    proactive_share_timeout_seconds = 10
+    background_llm_timeout_seconds = 10
     proactive_share_backoff_base_seconds = 2
 
 
@@ -107,6 +107,7 @@ async def test_generate_share_message_timeout_raises(agent, mock_llm_router, bas
         await agent.generate_share_message(base_context)
 
     assert mock_llm_router.generate_with_forced_tool.call_count == 1
+    assert mock_llm_router.generate_with_forced_tool.call_args.kwargs["timeout"] == 10
 
 
 @pytest.mark.asyncio

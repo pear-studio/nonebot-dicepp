@@ -185,7 +185,7 @@ def _build_router(config, store: PersonaDataStore) -> LLMRouter:
         auxiliary_base_url=config.auxiliary_base_url,
         auxiliary_model=config.auxiliary_model,
         max_concurrent=config.max_concurrent_requests,
-        timeout=config.timeout,
+        timeout=config.chat_llm_timeout_seconds,
         daily_limit=config.daily_limit,
         quota_check_enabled=config.quota_check_enabled,
         data_store=store,
