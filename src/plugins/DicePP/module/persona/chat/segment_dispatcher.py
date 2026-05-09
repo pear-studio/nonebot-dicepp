@@ -1,7 +1,10 @@
 """SegmentDispatcher: 内存分段调度器，按 target_key 维护独立 asyncio worker。
 
 每个 target_key（群聊 group:{id} / 私聊 user:{id}）拥有独立的 Queue + Event + worker task，
-worker 按 FIFO 顺序同步发送 segment，支持 delay_before  pacing、flush、shutdown。
+worker 按 FIFO 顺序同步发送 segment，支持 delay_before pacing、flush、shutdown。
+
+注意：分段发送 worker loop 中的异常仅记录日志，不触发 MessagePort 的
+on_delivery_failed 回调。如需失败通知，请在调用方自行处理。
 """
 
 import asyncio
@@ -16,6 +19,12 @@ _DEFAULT_MAX_PER_RUN = 20
 
 @dataclass
 class SegmentItem:
+    """分段消息项。
+
+    delay_before 为"调用 send 前等待"的秒数；send 本身的阻塞耗时会顺延
+    下一条的计时，因此实际发送间隔 ≥ delay_before。
+    """
+
     content: str
     delay_before: float
     user_id: str
@@ -151,7 +160,7 @@ class SegmentDispatcher:
 
                     try:
                         # R11: 显式传 skip_history_record=True，把决策留在分段域
-                        await self._port.send_now(
+                        await self._port.send(
                             segment.user_id,
                             segment.group_id,
                             segment.content,

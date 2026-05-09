@@ -40,7 +40,6 @@ from ..tools.registry import ToolRegistry, ToolDomain
 from ..tools.context import ToolContext
 from ..llm.coordinator import LLMCallCoordinator
 from ..gateway.port import MessagePort
-from ..gateway.pipeline import make_segment
 from .billing import BillingPolicy
 from .segment_dispatcher import SegmentDispatcher, SegmentItem
 from .segment_state import SegmentBudgetState, SegmentLimits
@@ -348,11 +347,7 @@ class ChatSession:
             return
 
         if self.port:
-            await self.port.send_segmented(
-                user_id,
-                group_id,
-                [make_segment(result, group_id)],
-            )
+            await self.port.send(user_id, group_id, result)
         else:
             logger.warning(
                 f"_coordinator_on_result: MessagePort 未注入，"

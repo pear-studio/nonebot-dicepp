@@ -36,17 +36,6 @@
   - 需先观察现有 LLM 是否真的频繁误识 `[内部指令]`，决定是否提前优先级
   - 影响面: ContextBuilder、厂商 adapter、segment dispatcher
 
-### [B-260508-1f1b9e] 消息发送路径统一（合并 send_segmented / send_now / dispatcher）
-- 创建: 2026-05-08
-- 问题表现:
-    - `send_segmented` 三处调用方（`ChatSession._coordinator_on_result`、`PersonaApp.send_message`、`LifeSimulator._send_msg`）当前都是 `[make_segment(content, group_id)]` 单段形态，行为与 `send_now` 重叠
-    - 分段路径走 `dispatcher → send_now`，非分段路径走 `send_segmented`，形成两套并存的发送路径，调度/失败回调/可观测点分裂
-    - 同一"发送"语义有两套实现，未来扩展失败重试、限流、监控时需要双写
-- 工作计划:
-    - 修复方向：评估三处调用方是否都能迁移到 dispatcher（含 life 主动消息的 delay 与失败回调语义）；设计统一发送接口（扩展 dispatcher 支持非分段单条 / 合并到 send_now / 让 send_segmented 内部走 dispatcher）；删除 `send_segmented`，迁移所有调用方，更新测试
-    - 影响面：persona 模块所有出口消息（chat 非分段、`PersonaApp.send_message`、life 主动消息）
-    - 风险点：需保证 life 主动消息行为不退化（delay/失败回调语义一致性）；何时拉起：分段回复主线合入并稳定运行后单独立项推进
-
 ### [B-260508-da7e68] admin events 命令打印好感度等级时数组越界
 - 创建: 2026-05-08
 - 问题表现:

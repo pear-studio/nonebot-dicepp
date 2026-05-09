@@ -117,7 +117,7 @@ class TestChatWithToolsFlush:
         queue = dispatcher._queues.get("user:u1")
         if queue is not None:
             assert queue.empty()
-        mock_port.send_now.assert_not_awaited()
+        mock_port.send.assert_not_awaited()
 
 
 class TestFlagLifecycle:
