@@ -313,6 +313,11 @@ class ObservationExtractor:
         self.event_agent = event_agent
         self.data_store = data_store
         self.config = config
+        self._bg_timeout = (
+            getattr(config, "background_llm_timeout_seconds", 90)
+            if config
+            else 90
+        )
         self._prune_observations_keep = prune_observations_keep
 
     async def extract_observations(
@@ -419,6 +424,7 @@ class ObservationExtractor:
                 ],
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.7,
+                timeout=self._bg_timeout,
             )
 
             # 解析 JSON 响应：自由文本可能含 markdown 围栏，走统一容错

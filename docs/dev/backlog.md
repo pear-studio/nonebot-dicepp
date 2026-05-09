@@ -9,6 +9,19 @@
 
 ---
 
+## ci
+
+### [B-260508-93fe70] CI 没覆盖 integration 测试，回归保护层裸奔
+- 创建: 2026-05-08
+- 问题表现:
+  - .github/workflows/ci.yml:41 仅执行 pytest -m unit，整个 tests/integration/** 不会被 CI 触发
+  - 本次 timeout 收敛改动验证时发现 tests/integration/persona/test_command.py::TestAdminCommands::test_admin_events 在 origin/master 41d8973 之前就已 break，未被任何 CI/PR 拦截
+  - 用户面命令链路（IsolatedAsyncioTestCase 走 .ai admin events 等）恰好是 integration 标签，CI 长期裸奔
+- 工作计划:
+  - 在 ci.yml 增加 integration 测试 step：可改为 pytest -m "unit or integration" 单 job，或拆分为独立 job 便于失败定位
+  - 本机跑 tests/unit/persona + tests/integration/persona 共 494 用例约 58s，加进 CI 总时长可控
+  - 如担心 integration 偶发依赖（外部进程/真实 IO），先 grep tests/integration 确认无 real_llm/external_service 类需要单独 marker 隔离
+
 ## persona
 
 ### [B-260507-f9ea98] 厂商适配层根据模型类型选择 prompt 注入角色（system/user/developer）
@@ -34,12 +47,13 @@
     - 影响面：persona 模块所有出口消息（chat 非分段、`PersonaApp.send_message`、life 主动消息）
     - 风险点：需保证 life 主动消息行为不退化（delay/失败回调语义一致性）；何时拉起：分段回复主线合入并稳定运行后单独立项推进
 
-### [B-260508-d32c36] timeout 配置碎片化统一收敛
+### [B-260508-da7e68] admin events 命令打印好感度等级时数组越界
 - 创建: 2026-05-08
 - 问题表现:
-    - EventGenerationAgent 内部 4 个 LLM 方法使用 3 种 timeout 来源（self.timeout / self.config.proactive_share_timeout_seconds / router 默认 30）
-    - PersonaConfig 中 timeout 分裂为 4 条独立路径（timeout:30 / proactive_share_timeout_seconds:60 / event_generation_timeout:90 / diary 未传）
+  - .ai admin events 命令在打印 [好感度等级] 时 admin.py:314 抛 IndexError: list index out of range
+  - 根因：char.get_warmth_labels() 返回的 labels 数量超过 STAGE_FLOORS = [0,20,40,60,80] 的 5 档，循环到 i=4 时访问 STAGE_FLOORS[i+1] 越界
+  - 集成测试 tests/integration/persona/test_command.py::TestAdminCommands::test_admin_events 因此长期失败
 - 工作计划:
-    - 立项统一后台 proactive 任务 timeout 配置项，覆盖 event、share、diary、observation 等后台路径
-    - 评估 diary/observation 是否也应共享同一 timeout，避免"三等公民"
+  - 让 admin.py:312-316 的循环和 STAGE_FLOORS 长度对齐：要么把多余 labels 折叠进最后一档，要么扩展 STAGE_FLOORS 与 labels 同长度
+  - 顺手核对 get_warmth_labels() 是否本就该和 STAGE_FLOORS 严格 1:1（决定是修循环还是修数据契约）
 

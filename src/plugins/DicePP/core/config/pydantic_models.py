@@ -5,9 +5,12 @@ All bot configuration is represented as typed fields here.
 Config is loaded hierarchically by ConfigLoader:
   global defaults < global secrets < persona < account overrides < env vars
 """
+import logging
 from typing import List
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class PersonaConfig(BaseModel):
@@ -26,11 +29,15 @@ class PersonaConfig(BaseModel):
     auxiliary_model: str = "gpt-4o-mini"
     
     max_concurrent_requests: int = 2
-    timeout: int = 30
-    event_generation_timeout: int = Field(
+    chat_llm_timeout_seconds: int = Field(
+        default=30,
+        ge=5,
+        description="用户对话触发的 LLM 调用超时（秒）",
+    )
+    background_llm_timeout_seconds: int = Field(
         default=90,
         ge=5,
-        description="事件生成 LLM 调用超时（秒）",
+        description="后台角色模拟（事件/反应/日记/分享/观察）LLM 调用超时（秒）",
     )
     timezone: str = "Asia/Shanghai"
 
@@ -105,6 +112,50 @@ class PersonaConfig(BaseModel):
             )
         return self
 
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_deprecated_timeout_fields(cls, data):
+        if not isinstance(data, dict):
+            return data
+
+        # 一对一迁移: timeout -> chat_llm_timeout_seconds
+        if "timeout" in data:
+            if "chat_llm_timeout_seconds" not in data:
+                data["chat_llm_timeout_seconds"] = data.pop("timeout")
+                logger.warning(
+                    "配置项 'timeout' 已被重命名为 'chat_llm_timeout_seconds'，"
+                    "旧值已自动迁移，请更新配置文件。"
+                )
+            else:
+                data.pop("timeout", None)
+                logger.warning(
+                    "配置项 'timeout' 已被重命名为 'chat_llm_timeout_seconds'，"
+                    "当前 'timeout' 的值将被忽略（新字段已存在）。"
+                )
+
+        # 多对一迁移: event_generation_timeout / proactive_share_timeout_seconds -> background_llm_timeout_seconds
+        bg_old_fields = ["event_generation_timeout", "proactive_share_timeout_seconds"]
+        has_old_bg = any(f in data for f in bg_old_fields)
+        if has_old_bg:
+            if "background_llm_timeout_seconds" not in data:
+                values = [data.pop(f) for f in bg_old_fields if f in data]
+                data["background_llm_timeout_seconds"] = max(values)
+                logger.warning(
+                    "配置项 'event_generation_timeout' / 'proactive_share_timeout_seconds' "
+                    "已被重命名为 'background_llm_timeout_seconds'，旧值已自动迁移（取较大值），"
+                    "请更新配置文件。"
+                )
+            else:
+                for f in bg_old_fields:
+                    data.pop(f, None)
+                logger.warning(
+                    "配置项 'event_generation_timeout' / 'proactive_share_timeout_seconds' "
+                    "已被重命名为 'background_llm_timeout_seconds'，当前旧字段的值将被忽略"
+                    "（新字段已存在）。"
+                )
+
+        return data
+
     # ── Phase 4+: 群活跃度（影响主动消息频率，暂未启用）
     # group_activity_decay_days: List[int] = [1, 3, 7]
     # group_activity_decay_values: List[int] = [10, 30, 50]
@@ -172,9 +223,6 @@ class PersonaConfig(BaseModel):
     )
     proactive_share_max_retries: int = Field(
         default=2, ge=0, description="分享消息生成失败后的最大重试次数"
-    )
-    proactive_share_timeout_seconds: int = Field(
-        default=60, ge=5, description="单次分享消息 LLM 调用超时（秒）"
     )
     proactive_share_backoff_base_seconds: int = Field(
         default=2, ge=1, description="分享消息重试的指数退避基数（秒）"

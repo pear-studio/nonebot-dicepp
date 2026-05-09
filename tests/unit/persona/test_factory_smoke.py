@@ -26,7 +26,7 @@ def _make_bot() -> MagicMock:
     cfg.auxiliary_base_url = ""
     cfg.auxiliary_model = ""
     cfg.max_concurrent_requests = 2
-    cfg.timeout = 30
+    cfg.chat_llm_timeout_seconds = 30
     cfg.daily_limit = 20
     cfg.quota_check_enabled = False
     cfg.trace_enabled = False
