@@ -11,7 +11,7 @@ from utils.string import estimate_tokens
 
 from ..character.models import Character
 from ..data.models import UserProfile
-from ..wall_clock import persona_wall_now
+from ..wall_clock import persona_wall_now, format_timestamp
 
 DEFAULT_DELAY_BEFORE = 1.0
 
@@ -218,11 +218,16 @@ class ContextBuilder:
         return "\n\n".join(parts)
 
     def _format_short_term(self, history: List[Dict[str, str]]) -> str:
-        """格式化短期记忆，根据 speaker_name 生成称呼前缀"""
+        """格式化短期记忆，根据 speaker_name 生成称呼前缀，附带时间戳"""
         lines = []
+        now = persona_wall_now(self.timezone)
         for msg in history:
             speaker_name = msg.get("speaker_name") or ("你" if msg["role"] == "user" else "我")
-            lines.append(f"[{speaker_name}] {msg['content']}")
+            prefix = format_timestamp(msg.get("created_at"), now)
+            if prefix:
+                lines.append(f"[{prefix}] [{speaker_name}] {msg['content']}")
+            else:
+                lines.append(f"[{speaker_name}] {msg['content']}")
         return "\n".join(lines)
 
     def truncate_by_turns(self, history: List[Dict[str, str]], max_chars: int) -> List[Dict[str, str]]:

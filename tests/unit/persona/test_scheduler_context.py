@@ -4,6 +4,8 @@
 覆盖 _build_share_context 默认值、_format_user_profile_facts、_format_recent_history。
 """
 
+from datetime import datetime
+
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
@@ -231,8 +233,14 @@ class TestFormatUserProfileFacts:
 class TestFormatRecentHistory:
     """测试 _format_recent_history"""
 
+    @staticmethod
+    def _mock_scheduler():
+        s = MagicMock()
+        s._now.return_value = datetime.now()
+        return s
+
     def test_empty_messages(self):
-        assert ProactiveScheduler._format_recent_history([]) == "（无）"
+        assert ProactiveScheduler._format_recent_history(self._mock_scheduler(), []) == "（无）"
 
     def test_user_and_assistant(self):
         msg1 = MagicMock()
@@ -241,7 +249,7 @@ class TestFormatRecentHistory:
         msg2 = MagicMock()
         msg2.role = "assistant"
         msg2.content = "你好呀"
-        result = ProactiveScheduler._format_recent_history([msg1, msg2])
+        result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg1, msg2])
         assert "- 用户: 你好" in result
         assert "- 我: 你好呀" in result
 
@@ -249,28 +257,28 @@ class TestFormatRecentHistory:
         msg = MagicMock()
         msg.role = "system"
         msg.content = "系统提示"
-        result = ProactiveScheduler._format_recent_history([msg])
+        result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
         assert "- 系统: 系统提示" in result
 
     def test_tool_role(self):
         msg = MagicMock()
         msg.role = "tool"
         msg.content = "工具结果"
-        result = ProactiveScheduler._format_recent_history([msg])
+        result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
         assert "- 工具: 工具结果" in result
 
     def test_unknown_role(self):
         msg = MagicMock()
         msg.role = "unknown"
         msg.content = "未知内容"
-        result = ProactiveScheduler._format_recent_history([msg])
+        result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
         assert "- 用户: 未知内容" in result  # 兜底为"用户"
 
     def test_long_content_truncation(self):
         msg = MagicMock()
         msg.role = "user"
         msg.content = "哈" * 100
-        result = ProactiveScheduler._format_recent_history([msg])
+        result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
         assert result.endswith("...")
         assert len(result) < 100
 
@@ -281,11 +289,20 @@ class TestFormatRecentHistory:
             m.role = "user"
             m.content = f"消息{i}"
             msgs.append(m)
-        result = ProactiveScheduler._format_recent_history(msgs, limit=3)
+        result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), msgs, limit=3)
         lines = result.split("\n")
         assert len(lines) == 3
         assert "消息7" in result
         assert "消息0" not in result
+
+    def test_with_timestamps(self):
+        now = datetime.now()
+        msg = MagicMock()
+        msg.role = "user"
+        msg.content = "你好"
+        msg.created_at = datetime(2026, 5, 11, 9, 15)
+        result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
+        assert "[09:15] 用户: 你好" in result
 
 
 if __name__ == "__main__":

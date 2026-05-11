@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from typing import Optional, Union
 from nonebot.log import logger
 from datetime import datetime
 
@@ -34,3 +35,27 @@ def persona_wall_now(timezone_name: str) -> datetime:
             e,
         )
         return datetime.now()
+
+
+def format_timestamp(
+    ts: Optional[Union[datetime, str]],
+    now: datetime,
+    fmt_today: str = "%H:%M",
+    fmt_other: str = "%m-%d %H:%M",
+) -> str:
+    """格式化时间戳为可读字符串。
+
+    - ts: datetime / ISO str / None
+    - now: 参考时间（用于判断是否同日）
+    - 返回值: 当日返回 HH:MM，隔日返回 MM-DD HH:MM，ts 为 None 返回空字符串
+    """
+    if ts is None:
+        return ""
+    if isinstance(ts, str):
+        try:
+            ts = datetime.fromisoformat(ts)
+        except ValueError:
+            return ""
+    if not isinstance(ts, datetime):
+        return ""
+    return ts.strftime(fmt_today) if ts.date() == now.date() else ts.strftime(fmt_other)

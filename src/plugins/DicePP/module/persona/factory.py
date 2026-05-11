@@ -216,7 +216,7 @@ def _build_chat(
     segment_dispatcher: Optional[SegmentDispatcher] = None,
 ) -> ChatSession:
     """组装 ChatSession"""
-    scoring_agent = ScoringAgent(router)
+    scoring_agent = ScoringAgent(router, timezone=config.timezone)
     from .chat.context import SegmentGuide
 
     segment_guide = None
