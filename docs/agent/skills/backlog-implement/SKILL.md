@@ -59,11 +59,8 @@ description: "开始实现某一个 backlog 条目。展示条目详情，引导
    修改完成后必须跑项目配套测试（`uv run pytest` 或相关模块测试），确认不破坏现有功能。
 
 6. **清理 backlog**：
-   实现并测试通过后，向用户确认是否从 backlog 移除该条目：
-   ```bash
-   python scripts/tools/backlog.py close <id> --dry-run
-   ```
-   展示预览，用户确认后：
+   实现并测试通过后，向用户确认是否从 backlog 移除该条目
+   用户确认后：
    ```bash
    python scripts/tools/backlog.py close <id>
    ```

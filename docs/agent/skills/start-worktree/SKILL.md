@@ -11,6 +11,8 @@ metadata:
 
 **Input**: 用户请求创建 feature worktree，如 "开新功能"、"/start-worktree"、或提供分支名如 "feature/roll-refactor"。
 
+**重要**: 本项目使用 bare repo + worktree 架构，Claude Code 内置的 `EnterWorktree` 工具无法识别此结构。**禁止使用 EnterWorktree 工具**，必须直接使用 `git worktree add` 命令。
+
 **Prerequisites**
 
 - Git 仓库为 bare repo + worktree 模式
@@ -39,18 +41,16 @@ metadata:
    - 汇报：`dev/.venv 不存在，请先运行 uv sync`
    - **停止**
 
-3. **创建功能分支（基于 origin/master）**
+3. **创建 worktree（同时创建分支）**
+
+   目标路径：`/home/ubuntu/dicepp/worktrees/<branch_name>`
 
    ```bash
    git fetch origin master
-   git branch <branch_name> origin/master
+   git worktree add -b <branch_name> /home/ubuntu/dicepp/worktrees/<branch_name> origin/master
    ```
 
-   如果分支已存在：跳过创建，直接使用已有分支。
-
-4. **创建 worktree**
-
-   目标路径：`/home/ubuntu/dicepp/worktrees/<branch_name>`
+   `-b` 会基于 `origin/master` 创建新分支并同时 checkout 到新 worktree。如果分支已存在则去掉 `-b`：
 
    ```bash
    git worktree add /home/ubuntu/dicepp/worktrees/<branch_name> <branch_name>
