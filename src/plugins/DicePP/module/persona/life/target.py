@@ -37,7 +37,7 @@ class TargetSelector:
     def update_character(self, character: Optional[Character]) -> None:
         """同步新的角色卡引用"""
         self._character = character
-        total_force = len(bot_config.proactive_always_send_users) + len(bot_config.proactive_always_send_groups)
+        total_force = len(self.bot_config.proactive_always_send_users) + len(self.bot_config.proactive_always_send_groups)
         if total_force > FORCE_LIST_WARNING_THRESHOLD:
             logger.warning(
                 f"force 目标列表长度 ({total_force}) 超过 {FORCE_LIST_WARNING_THRESHOLD}，"

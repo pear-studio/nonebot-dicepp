@@ -70,10 +70,6 @@
   - `context.py:215-221` `_format_short_term()` 仅输出 `[称呼] content`，丢弃了 `msg.get("created_at")`
   - `session.py:807-824` `_build_diary_context()` 虽然按 `created_at` 排序事件，但最终只拼接纯文本描述 `描述；描述；描述...`，时间信息全部丢弃
   - 两个位置的数据模型（`UserMessage`、`GroupConversation`、`DailyEvent`）均有 `created_at` 字段但未被使用
-- 影响:
-  - LLM 无法判断对话先后顺序和时间间隔（"早上好"是 5月6日说的 vs 刚刚说的，对 LLM 来说完全一样）
-  - LLM 无法知道事件发生在什么时段（早上醒来？下午打架？刚刚？）
-  - 对于记忆差、需要靠时间线索维持连贯性的角色，缺少时序信息加剧对话混乱
 - 工作计划:
   - `_format_short_term()`: 每条消息前加上相对时间或绝对时间（如 `[12:34] [你] xxx` 或 `[5分钟前] [你] xxx`）
   - `_build_diary_context()`: 事件描述前加上时间前缀（如 `08:15 七七醒来...；12:30 七七在绝云间...`）
@@ -91,16 +87,6 @@
   - 方案A: 在 `generate_share_message` 的 system prompt 中明确指示 recent_history 仅供参考，禁止回答历史问题
   - 方案B: 将 `recent_history` 改为"关系背景"摘要而非原始对话，从源头消除补答动机
   - 影响面: `event_agent.py` `generate_share_message` prompt、`proactive_scheduler.py` `_format_recent_history`
-
-### [B-260511-f8a1d3] target.py:40 `bot_config` 应为 `self.bot_config`
-- 创建: 2026-05-11
-- 问题表现:
-  - `target.py:40` 在 `update_character()` 方法内引用了 `bot_config`，但这是 `__init__` 的局部参数名，不在该方法作用域内
-  - 调用 `update_character()` 时触发 `NameError: name 'bot_config' is not defined`
-- 工作计划:
-  - `bot_config.proactive_always_send_users` → `self.bot_config.proactive_always_send_users`
-  - `bot_config.proactive_always_send_groups` → `self.bot_config.proactive_always_send_groups`
-  - 单行修复，影响面: `target.py:40`
 
 ### [B-260511-d9b2e4] 批量评分偶发类型错误，浪费 LLM 配额
 - 创建: 2026-05-11
@@ -126,5 +112,4 @@
   - 或考虑将历史对话放在 `user` 消息而非 `system` 消息中，区分角色设定层和对话上下文层
   - 短期可降低 `max_short_term_chars` 缓解，但长期需要摘要机制
   - 影响面: `context.py` `ContextBuilder.build`、`_format_short_term`、session 截断策略
-
 
