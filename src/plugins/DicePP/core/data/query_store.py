@@ -90,6 +90,7 @@ class QueryStore:
 
             try:
                 conn = await aiosqlite.connect(path)
+                await conn.execute("PRAGMA journal_mode=WAL;")
                 await conn.create_function("regexp", 2, regexp)
                 self._conns[db_name] = conn
             except PermissionError:
@@ -136,6 +137,7 @@ class QueryStore:
         try:
             create_parent_dir(path)
             conn = await aiosqlite.connect(path)
+            await conn.execute("PRAGMA journal_mode=WAL;")
             await conn.execute(
                 "CREATE TABLE data ("
                 + ",".join([f"{field} TEXT DEFAULT ('')" for field in QUERY_DATA_FIELD_LIST])

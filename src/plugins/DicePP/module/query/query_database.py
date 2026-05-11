@@ -45,6 +45,7 @@ def create_empty_sqlite_database(path: str):
     """创建空白查询数据库"""
     try:
         db = sqlite3.connect(path)
+        db.execute("PRAGMA journal_mode=WAL;")
         cur = db.cursor()
         cur.execute(
             "CREATE TABLE data (" + ",".join([(field + " TEXT DEFAULT ('')") for field in QUERY_DATA_FIELD_LIST]) + ");")
@@ -80,6 +81,7 @@ def connect_query_database(path: str) -> str:
             return "\n".join(error_info)
         try:
             conn = sqlite3.connect(path)
+            conn.execute("PRAGMA journal_mode=WAL;")
             conn.row_factory = sqlite3.Row
             conn.create_function("regexp", 2, regexp)
             CONNECTED_QUERY_DATABASES[db] = conn
