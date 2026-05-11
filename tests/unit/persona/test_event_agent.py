@@ -176,7 +176,7 @@ class TestGenerateEventResult:
     @pytest.mark.asyncio
     async def test_generate_event_result_success(self, agent_forced, mock_llm_router_forced):
         mock_llm_router_forced.generate_with_forced_tool.return_value = (
-            '{"description": "窗外下雨了", "duration_minutes": 30}',
+            '{"description": "窗外下雨了", "context_summary": "窗外下雨", "duration_minutes": 30}',
             {}
         )
 
@@ -193,11 +193,13 @@ class TestGenerateEventResult:
         )
 
         assert result.description == "窗外下雨了"
+        assert result.context_summary == "窗外下雨"
         assert result.duration_minutes == 30
         # raw_response 和 system_prompt_digest 必须保存原始 LLM 输出
         assert result.raw_response != ""
         raw = json.loads(result.raw_response)
         assert raw["description"] == "窗外下雨了"
+        assert raw["context_summary"] == "窗外下雨"
         assert raw["duration_minutes"] == 30
         assert result.system_prompt_digest != ""
         assert "世界观设定专家" in result.system_prompt_digest
@@ -297,9 +299,9 @@ class TestGenerateEventResult:
         assert result.duration_minutes == 0
 
     @pytest.mark.asyncio
-    async def test_generate_event_result_truncate_long_description(self, agent_forced, mock_llm_router_forced):
-        """超长描述被截断到 _EVENT_DESCRIPTION_MAX_LEN 并加省略号"""
-        long_desc = "窗外" * 50  # 100 字，超过 60
+    async def test_generate_event_result_no_truncate_long_description(self, agent_forced, mock_llm_router_forced):
+        """description 不再硬截断，完整保留；context_summary 为空时 fallback 到 description 前 60 字"""
+        long_desc = "窗外" * 50  # 100 字
         mock_llm_router_forced.generate_with_forced_tool.return_value = (
             f'{{"description": "{long_desc}", "duration_minutes": 0}}',
             {}
@@ -317,8 +319,28 @@ class TestGenerateEventResult:
             )
         )
 
-        assert len(result.description) <= 60
-        assert result.description.endswith("...")
+        assert result.description == long_desc  # 完整保留，不截断
+        assert len(result.context_summary) == 60
+        assert result.context_summary == long_desc[:60]
+
+        # description < 60 字时 fallback 保留完整文本
+        short_desc = "窗外下雨了"
+        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+            f'{{"description": "{short_desc}", "duration_minutes": 0}}',
+            {}
+        )
+        result2 = await agent_forced.generate_event_result(
+            EventContext(
+                character_name="小雨",
+                character_description="温柔的少女",
+                world="",
+                scenario="",
+                recent_diaries=[],
+                today_events=[],
+                current_time=datetime(2024, 1, 1, 10, 0),
+            )
+        )
+        assert result2.context_summary == short_desc
 
     @pytest.mark.asyncio
     async def test_generate_event_result_empty_context(self, agent_forced, mock_llm_router_forced):

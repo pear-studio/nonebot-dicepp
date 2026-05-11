@@ -85,6 +85,7 @@ class PersonaDataStore:
         await self._ensure_observations_debug_columns()
         await self._ensure_daily_events_share_columns()
         await self._ensure_daily_events_delta_columns()
+        await self._ensure_daily_events_context_summary()
         await self._ensure_scoring_failures_table()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
@@ -213,6 +214,16 @@ class PersonaDataStore:
         if "health_delta" not in col_names:
             await self.db.execute(
                 "ALTER TABLE persona_daily_events ADD COLUMN health_delta INTEGER"
+            )
+
+    async def _ensure_daily_events_context_summary(self) -> None:
+        """为每日事件表增加 context_summary 列，存储聊天上下文注入用的简短摘要。"""
+        async with self.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        if "context_summary" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_daily_events ADD COLUMN context_summary TEXT DEFAULT ''"
             )
 
     async def _ensure_scoring_failures_table(self) -> None:
@@ -1006,6 +1017,7 @@ class PersonaDataStore:
         energy_delta: Optional[int] = None,
         mood_delta: Optional[int] = None,
         health_delta: Optional[int] = None,
+        context_summary: str = "",
     ) -> None:
         """添加每日事件"""
         await self.db.execute(
@@ -1014,8 +1026,9 @@ class PersonaDataStore:
                 date, event_type, description, reaction,
                 share_desire, duration_minutes,
                 system_prompt_digest, raw_response,
-                energy_delta, mood_delta, health_delta, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                energy_delta, mood_delta, health_delta, created_at,
+                context_summary
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 date,
@@ -1030,6 +1043,7 @@ class PersonaDataStore:
                 mood_delta,
                 health_delta,
                 self._wall_now().isoformat(),
+                context_summary,
             )
         )
         await self.db.commit()
@@ -1041,7 +1055,8 @@ class PersonaDataStore:
             SELECT event_type, description, reaction, share_desire,
                    duration_minutes, created_at,
                    system_prompt_digest, raw_response,
-                   energy_delta, mood_delta, health_delta
+                   energy_delta, mood_delta, health_delta,
+                   context_summary
             FROM persona_daily_events
             WHERE date = ?
             ORDER BY created_at
@@ -1063,6 +1078,7 @@ class PersonaDataStore:
                     energy_delta=row[8],
                     mood_delta=row[9],
                     health_delta=row[10],
+                    context_summary=row[11] or "",
                 )
                 for row in rows
             ]

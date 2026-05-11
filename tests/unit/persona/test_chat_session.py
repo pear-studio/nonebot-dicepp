@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from plugins.DicePP.module.persona.chat.session import ChatSession, ChatConfig
-from plugins.DicePP.module.persona.data.models import RelationshipState
+from plugins.DicePP.module.persona.data.models import DailyEvent, RelationshipState
 from plugins.DicePP.module.persona.llm.coordinator import LLMCallCoordinator
 
 
@@ -327,3 +327,77 @@ class TestDecayInChatSession:
         # 验证写入的 score_event 包含 decay 原因
         event = session.store.add_score_event.call_args[0][0]
         assert "time_decay" in event.reason
+
+
+class TestBuildDiaryContext:
+    """测试 _build_diary_context 的 context_summary 选择逻辑"""
+
+    @pytest.mark.asyncio
+    async def test_uses_context_summary_when_present(self):
+        """context_summary 非空时优先使用"""
+        session = _make_session()
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(date="2024-01-01", event_type="system",
+                       description="长描述内容在这里很长很长很长",
+                       context_summary="短摘要"),
+        ])
+        session.store.get_diary = AsyncMock(return_value=None)
+        result = await session._build_diary_context()
+        assert "短摘要" in result
+        assert "长描述" not in result
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_description_when_context_summary_empty(self):
+        """context_summary 为空时回退到 description"""
+        session = _make_session()
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(date="2024-01-01", event_type="system",
+                       description="窗外下雨了",
+                       context_summary=""),
+        ])
+        session.store.get_diary = AsyncMock(return_value=None)
+        result = await session._build_diary_context()
+        assert "窗外下雨了" in result
+
+    @pytest.mark.asyncio
+    async def test_filters_out_events_with_both_fields_empty(self):
+        """context_summary 和 description 都为空时事件被过滤"""
+        session = _make_session()
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(date="2024-01-01", event_type="system",
+                       description="   ", context_summary=""),
+        ])
+        session.store.get_diary = AsyncMock(return_value=None)
+        result = await session._build_diary_context()
+        assert result == ""  # 无有效事件，无日记
+
+    @pytest.mark.asyncio
+    async def test_mixed_scenario(self):
+        """混合场景：摘要/回退/过滤同时存在"""
+        session = _make_session()
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(date="2024-01-01", event_type="system",
+                       description="长描述A", context_summary="摘要A"),
+            DailyEvent(date="2024-01-01", event_type="system",
+                       description="长描述B", context_summary=""),
+            DailyEvent(date="2024-01-01", event_type="system",
+                       description="   ", context_summary=""),
+        ])
+        session.store.get_diary = AsyncMock(return_value=None)
+        result = await session._build_diary_context()
+        assert "摘要A" in result        # 使用 context_summary
+        assert "长描述B" in result      # 回退到 description
+        assert "长描述A" not in result  # context_summary 替代了 description
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_yesterday_diary_when_no_events(self):
+        """无有效事件时回退到昨日日记"""
+        session = _make_session()
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(date="2024-01-01", event_type="system",
+                       description="   ", context_summary=""),
+        ])
+        session.store.get_diary = AsyncMock(return_value="昨天去了公园")
+        result = await session._build_diary_context()
+        assert "昨天" in result
+        assert "公园" in result

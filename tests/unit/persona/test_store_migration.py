@@ -99,3 +99,87 @@ class TestPeakStageBackfill:
         # peak_stage 应保持为 3（不被 backfill 覆盖）
         rel2 = await store.get_relationship("u_cold", "")
         assert rel2.peak_stage == 3
+
+
+@pytest.fixture
+async def old_schema_daily_events_db():
+    """创建模拟旧 schema 的 daily_events 表（无 context_summary 列）。"""
+    import aiosqlite
+
+    async with aiosqlite.connect(":memory:") as db:
+        await db.execute(
+            """
+            CREATE TABLE persona_daily_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                reaction TEXT DEFAULT '',
+                share_desire REAL DEFAULT 0.0,
+                duration_minutes INTEGER DEFAULT 0,
+                system_prompt_digest TEXT DEFAULT '',
+                raw_response TEXT DEFAULT '',
+                energy_delta INTEGER,
+                mood_delta INTEGER,
+                health_delta INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        # 插入一条旧数据
+        await db.execute(
+            """
+            INSERT INTO persona_daily_events
+            (date, event_type, description)
+            VALUES (?, ?, ?)
+            """,
+            ("2024-01-01", "system", "旧事件"),
+        )
+        await db.commit()
+
+        store = PersonaDataStore(db)
+        await store.ensure_tables()
+        yield store
+
+
+class TestContextSummaryMigration:
+    """测试 context_summary 列迁移：旧 schema → 新列添加 + 幂等。"""
+
+    @pytest.mark.asyncio
+    async def test_migration_adds_context_summary_column(self, old_schema_daily_events_db):
+        """旧 schema 表经 ensure_tables 后应增加 context_summary 列且旧行值为 ''。"""
+        store = old_schema_daily_events_db
+
+        # 验证 PRAGMA 中列已存在
+        async with store.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        assert "context_summary" in col_names
+
+        # 旧行回读 context_summary 为空字符串
+        events = await store.get_daily_events("2024-01-01")
+        assert len(events) == 1
+        assert events[0].context_summary == ""
+
+    @pytest.mark.asyncio
+    async def test_migration_idempotent(self, old_schema_daily_events_db):
+        """重复调用 ensure_tables 不报错且列不变。"""
+        store = old_schema_daily_events_db
+        await store.ensure_tables()  # 第二次调用
+
+        async with store.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        assert "context_summary" in col_names
+
+        # 写入新数据验证列可正常使用
+        await store.add_daily_event(
+            date="2024-01-01",
+            event_type="system",
+            description="新事件",
+            context_summary="新摘要",
+        )
+        events = await store.get_daily_events("2024-01-01")
+        assert len(events) == 2
+        new_ev = [e for e in events if e.context_summary == "新摘要"][0]
+        assert new_ev.description == "新事件"
