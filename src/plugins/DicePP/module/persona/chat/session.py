@@ -813,12 +813,20 @@ class ChatSession:
 
         events = await self.store.get_daily_events(today)
         if events:
-            valid_events = [e for e in events if e.description and e.description.strip()]
+            valid_events = [
+                e for e in events
+                if (e.context_summary and e.context_summary.strip())
+                or (e.description and e.description.strip())
+            ]
             valid_events.sort(key=lambda e: e.created_at or PERSONA_EPOCH, reverse=True)
 
             if valid_events:
-                descriptions = [e.description for e in valid_events]
-                diary_context = "今天发生的事：" + "；".join(descriptions)
+                # 优先用 context_summary，空则回退到 description
+                summaries = [
+                    e.context_summary if e.context_summary else e.description
+                    for e in valid_events
+                ]
+                diary_context = "今天发生的事：" + "；".join(summaries)
                 if len(diary_context) > max_diary_len:
                     diary_context = diary_context[:max_diary_len].rsplit('；', 1)[0] + "..."
                 return diary_context

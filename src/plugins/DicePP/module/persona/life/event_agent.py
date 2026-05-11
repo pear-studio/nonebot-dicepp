@@ -21,12 +21,10 @@ _DEFAULT_BG_TIMEOUT = 90
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
 
-_EVENT_DESCRIPTION_MAX_LEN = 60
-
-
 @dataclass
 class EventGenerationResult:
     description: str = ""
+    context_summary: str = ""  # 用于聊天上下文注入的简短摘要
     duration_minutes: int = 0
     energy_delta: Optional[int] = None
     mood_delta: Optional[int] = None
@@ -195,10 +193,11 @@ class EventGenerationAgent:
 2. 只记录可观察的行为和状态（动作、位置、物品、身体状态）
 3. 不包含心理活动、情绪评价、内心独白
 4. 不使用"觉得""认为""感到"等主观动词
-5. 20-60字，简洁具体
-6. 符合世界观和场景设定，但场景中的具体动作是参考而非约束
-7. 避免与今天已发生事件在具体内容上高度重复，优先描述不同的事
-8. 同时给出该事件对角色体力/心情/健康的影响（delta，可选整数，范围-20~+20）
+5. description 自然叙事，不强制字数上限，但保持简洁
+6. context_summary 为事件摘要，30-60字，仅包含关键事实（谁、在哪、做了什么、结果）
+7. 符合世界观和场景设定，但场景中的具体动作是参考而非约束
+8. 避免与今天已发生事件在具体内容上高度重复，优先描述不同的事
+9. 同时给出该事件对角色体力/心情/健康的影响（delta，可选整数，范围-20~+20）
 
 你必须通过调用 record_event 工具来输出结果。"""
 
@@ -240,7 +239,12 @@ class EventGenerationAgent:
                         "properties": {
                             "description": {
                                 "type": "string",
-                                "description": "20-60字的生活事件描述",
+                                "description": "事件描述，自然叙事，不强制字数上限但保持简洁",
+                            },
+                            "context_summary": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "事件摘要，30-60字，仅包含关键事实（谁、在哪、做了什么、结果），用于聊天上下文注入",
                             },
                             "duration_minutes": {
                                 "type": "integer",
@@ -261,7 +265,7 @@ class EventGenerationAgent:
                                 "description": "事件对健康的影响（可选，范围-20~+20）",
                             },
                         },
-                        "required": ["description", "duration_minutes"],
+                        "required": ["description", "context_summary", "duration_minutes"],
                     },
                 },
             }
@@ -289,6 +293,11 @@ class EventGenerationAgent:
                 description = "我正在房间里休息。"
             duration_minutes = max(0, min(2880, int(args.get("duration_minutes", 0))))
 
+            context_summary = str(args.get("context_summary", "")).strip().strip('"').strip("'")
+            if not context_summary:
+                # fallback: 用 description 前 60 字
+                context_summary = description[:60]
+
             # 解析可选的 delta 值
             def _parse_delta(val) -> Optional[int]:
                 if val is None:
@@ -302,15 +311,13 @@ class EventGenerationAgent:
             mood_delta = _parse_delta(args.get("mood_delta"))
             health_delta = _parse_delta(args.get("health_delta"))
 
-            if len(description) > _EVENT_DESCRIPTION_MAX_LEN:
-                description = description[:_EVENT_DESCRIPTION_MAX_LEN - 3] + "..."
-
             logger.debug(
-                f"生成事件: {description}, duration={duration_minutes}, "
-                f"deltas=({energy_delta}, {mood_delta}, {health_delta})"
+                f"生成事件: {description[:50]}..., summary={context_summary[:50]}..., "
+                f"duration={duration_minutes}, deltas=({energy_delta}, {mood_delta}, {health_delta})"
             )
             return EventGenerationResult(
                 description=description,
+                context_summary=context_summary,
                 duration_minutes=duration_minutes,
                 energy_delta=energy_delta,
                 mood_delta=mood_delta,
@@ -323,6 +330,7 @@ class EventGenerationAgent:
             logger.error(f"事件生成失败: {e}")
             fallback_args = {
                 "description": "我正在房间里休息。",
+                "context_summary": "在房间里休息",
                 "duration_minutes": 0,
                 "energy_delta": 0,
                 "mood_delta": None,

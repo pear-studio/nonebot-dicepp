@@ -205,6 +205,7 @@ class DailyEvent(BaseModel):
     date: str  # YYYY-MM-DD
     event_type: str  # "system" | "scheduled"
     description: str  # 事件描述
+    context_summary: str = ""  # 聊天上下文注入用的简短摘要
     reaction: str = ""  # 角色反应
     share_desire: float = 0.0  # 分享欲望值 0~1
     duration_minutes: int = 0  # 持续时间（分钟），0 表示瞬时
