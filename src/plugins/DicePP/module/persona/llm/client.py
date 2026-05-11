@@ -326,7 +326,7 @@ class LLMClient:
                     message.tool_calls = message.tool_calls[:self.MAX_TOOLS_PER_ROUND]
 
                 result = RoundResult(
-                    content=message.content or "",
+                    content=self._filter_think_tags(message.content or ""),
                     tool_calls=[
                         {
                             "id": tc.id,
@@ -347,8 +347,7 @@ class LLMClient:
 
                 # 如果没有工具调用，直接返回内容
                 if not message.tool_calls:
-                    content = message.content or ""
-                    content = self._filter_think_tags(content)
+                    content = result.content
 
                     # 收集元数据
                     metadata = {
