@@ -153,6 +153,7 @@ def life(temp_db, mock_event_agent, character, config):
     return life
 
 
+@pytest.mark.integration
 class TestCharacterDaySimulation:
     """完整一天模拟"""
 

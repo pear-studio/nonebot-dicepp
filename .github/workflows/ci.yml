@@ -39,6 +39,10 @@ jobs:
       - name: Run unit tests
         run: |
           uv run pytest -m unit --tb=short -q
+
+      - name: Run integration tests
+        run: |
+          uv run pytest -m integration --tb=short -q
       
       - name: Run compatibility corpus tests
         run: |
