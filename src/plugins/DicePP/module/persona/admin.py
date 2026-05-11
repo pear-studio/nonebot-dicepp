@@ -309,11 +309,9 @@ class AdminDispatcher:
             lines.append(f"  {ext.world}")
         labels = char.get_warmth_labels()
         lines.append(f"\n[好感度等级]")
-        for i, label in enumerate(labels):
-            if i < len(labels) - 1:
-                lines.append(f"  {STAGE_FLOORS[i]}-{STAGE_FLOORS[i+1]}: {label}")
-            else:
-                lines.append(f"  {STAGE_FLOORS[i]}-100: {label}")
+        floors = list(zip(STAGE_FLOORS, STAGE_FLOORS[1:] + [100.0]))
+        for (low, high), label in zip(floors, labels):
+            lines.append(f"  {low}-{high}: {label}")
         return "\n".join(lines)
 
     async def _admin_list(self, user_id: str, group_id: str, args: List[str]) -> str:

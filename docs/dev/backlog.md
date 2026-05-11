@@ -36,13 +36,4 @@
   - 需先观察现有 LLM 是否真的频繁误识 `[内部指令]`，决定是否提前优先级
   - 影响面: ContextBuilder、厂商 adapter、segment dispatcher
 
-### [B-260508-da7e68] admin events 命令打印好感度等级时数组越界
-- 创建: 2026-05-08
-- 问题表现:
-  - .ai admin events 命令在打印 [好感度等级] 时 admin.py:314 抛 IndexError: list index out of range
-  - 根因：char.get_warmth_labels() 返回的 labels 数量超过 STAGE_FLOORS = [0,20,40,60,80] 的 5 档，循环到 i=4 时访问 STAGE_FLOORS[i+1] 越界
-  - 集成测试 tests/integration/persona/test_command.py::TestAdminCommands::test_admin_events 因此长期失败
-- 工作计划:
-  - 让 admin.py:312-316 的循环和 STAGE_FLOORS 长度对齐：要么把多余 labels 折叠进最后一档，要么扩展 STAGE_FLOORS 与 labels 同长度
-  - 顺手核对 get_warmth_labels() 是否本就该和 STAGE_FLOORS 严格 1:1（决定是修循环还是修数据契约）
 
