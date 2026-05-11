@@ -497,3 +497,55 @@ class TestChatWithTools:
         sig = inspect.signature(LLMClient.generate_with_forced_tool)
         assert "on_round_complete" not in sig.parameters
         assert "max_round_callbacks" not in sig.parameters
+
+
+class TestFilterThinkTags:
+    """<think> 标签过滤（client 层模型输出归一化）"""
+
+    def test_filters_single_think_block(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        result = client._filter_think_tags("<think>用户问的是前两个观察</think>")
+        assert result == ""
+
+    def test_filters_multiple_think_blocks(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        result = client._filter_think_tags(
+            "<think>分析1</think>\n<think>分析2</think>"
+        )
+        assert result == ""
+
+    def test_preserves_text_after_think(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        result = client._filter_think_tags(
+            "<think>需要回答</think>你好我是苏晓"
+        )
+        assert result == "你好我是苏晓"
+
+    def test_preserves_text_before_think(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        result = client._filter_think_tags(
+            "你好<think>这里是思考</think>再见"
+        )
+        assert result == "你好再见"
+
+    def test_handles_multiline_think(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        result = client._filter_think_tags(
+            "<think>\n分析中...\n需要搜索对话历史\n</think>\n"
+        )
+        assert result == ""
+
+    def test_no_think_tags_unchanged(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        result = client._filter_think_tags("这是普通文本")
+        assert result == "这是普通文本"
+
+    def test_empty_string_unchanged(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        result = client._filter_think_tags("")
+        assert result == ""
+
+    def test_whitespace_only_stripped(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        result = client._filter_think_tags("  \t\n  ")
+        assert result == ""

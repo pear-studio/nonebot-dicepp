@@ -529,31 +529,36 @@ class ChatSession:
         current_messages: List[Dict],
     ) -> Optional[Dict]:
         """5.5: LLM 不调用 send_reply_segment 时的纠正注入"""
+        # result.content 已在 client 层过滤 <think> 标签
+        content = result.content or ""
+
         has_send_reply_segment = any(
             tc.get("name") == "send_reply_segment" for tc in (result.tool_calls or [])
         )
 
         # 5.5.1: 含 send_reply_segment → 正常流程
         if has_send_reply_segment:
-            # 5.5.3: content + tool_call 同时存在 → warning log，丢弃 content
-            if result.content:
+            if content.strip():
                 logger.warning(
                     "LLM returned content alongside send_reply_segment; content ignored"
                 )
             return None
 
-        # 5.5.2: 无工具调用且 content 非空 → 注入纠正
-        # 使用 user 角色而非 system，兼容 MiniMax 等不支持 mid-conversation system 角色的厂商
-        if result.content:
+        # 5.5.2: 有实际文本内容 → 注入纠正
+        if content.strip():
             logger.warning(
                 f"send_reply_segment 未被调用，注入纠正指令: "
-                f"round={completed_tool_rounds}, content_preview={result.content[:30]!r}"
+                f"round={completed_tool_rounds}, content_preview={content.strip()[:30]!r}"
             )
             return {
                 "role": "user",
-                "content": "[内部指令: 请使用 send_reply_segment 工具发送回复，不要直接输出文本]",
+                "content": (
+                    "[系统指令] 你必须调用 send_reply_segment 工具发送回复。"
+                    "这不是用户消息，不要回应它，直接调用工具。"
+                ),
             }
 
+        # 纯 <think> 或无内容 → 不纠正，让循环自然终止
         return None
 
     # ── 关系与评分 ────────────────────────────────────────────

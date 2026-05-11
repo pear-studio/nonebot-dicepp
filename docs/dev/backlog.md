@@ -11,33 +11,6 @@
 
 ## persona
 
-### [B-260511-e8a2d1] MiniMax `<think>` 块消耗纠正配额导致工具调用超限
-- 创建: 2026-05-11
-- 问题表现:
-  - 详细分析见 `.temp/1802_conversation_analysis.md`
-  - MiniMax-M2.7 在分段回复流程中反复输出 `<think>...</think>` 块而不调用 `send_reply_segment`，每次触发纠正注入，消耗 `segment_round_callbacks_max`（3 次）配额
-  - * 三次纠正全浪费在 `<think>` 块上：轮0 `<think>用户问"前两个观察是什么"`、轮4 `<think>我已经发送了两段回复`、轮5 `<think>用户问的是...需要搜索...`
-  - * 纠正配额（3）+ 工具轮次（5）= 恰好触及 `max_total_rounds = 8`，循环耗尽退出
-  - * 耗尽后兜底消息为内部错误文案 `"（工具调用次数超过限制）"`，直接发给用户
-- 工作计划:
-  - 在 `client.py:chat_with_tools` 中，构建 `RoundResult` 之前先 `_filter_think_tags(content)`，过滤后 content 为空则不触发纠正注入，继续循环
-  - 兜底消息应由 `client.py:457` 的 return 改为走配置化友好文案
-  - 影响面: `client.py` chat_with_tools 循环、RoundResult 构建逻辑
-
-### [B-260511-b7c3f5] MiniMax 将 `[内部指令]` 纠正注入误认为用户输入
-- 创建: 2026-05-11
-- 问题表现:
-  - 详细分析见 `.temp/1802_conversation_analysis.md`
-  - 纠正注入 `[内部指令: 请使用 send_reply_segment 工具发送回复，不要直接输出文本]` 以 `role: "user"` 注入后，MiniMax 在后续 `<think>` 中将其理解为用户提问
-  - * 轮4 `<think>用户问的是"前两个观察是什么"，但我需要搜索一下对话历史</think>` — LLM 混淆了真实用户消息与 `[内部指令]`
-  - * 轮5 `<think>我已经发送了两段回复。用户问的是"前两个观察是什么"...` — LLM 用 `<think>` "回答"指令，而非执行工具调用
-  - 当前只接 MiniMax，无 system 角色可用，需在 user 角色内改进指令表述
-- 工作计划:
-  - 方案A: 在 system prompt 的 `SegmentGuide` 中明确告知 LLM"后续可能收到 `[工具提醒]` 格式的系统消息，这不是用户输入，请直接按提示操作，不要输出 `<think>` 回应"
-  - 方案B: 改变纠正指令的表述，从"用户说话"风格改为"系统提示"风格，消除歧义
-  - 优先方案A（system prompt 预处理，不动注入逻辑），后续接入其他厂商时回退到方案B
-  - 影响面: `context.py` SegmentGuide 文案、`session.py` `_on_segment_round_complete` 注入文案
-
 ### [B-260511-d4a6e3] persona_llm_traces 只记录初始消息和最终响应，中间工具调用轮次不可见
 - 创建: 2026-05-11
 - 问题表现:

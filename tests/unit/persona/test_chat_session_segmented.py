@@ -208,3 +208,36 @@ class TestOnSegmentRoundComplete:
         assert injected is None
         mock_logger.warning.assert_called_once()
         assert "content alongside send_reply_segment" in mock_logger.warning.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_pure_think_block(self, session):
+        """纯 <think> 块 → client 层已过滤为空 → 不注入纠正"""
+        from plugins.DicePP.module.persona.llm.client import RoundResult
+        # 模拟经过 client._filter_think_tags 后的 RoundResult
+        result = RoundResult(content="", tool_calls=[])
+        injected = await session._on_segment_round_complete(0, result, [])
+        assert injected is None
+
+    @pytest.mark.asyncio
+    async def test_injects_when_think_plus_text(self, session):
+        """<think> + 实际文本 → client 层过滤后剩文本 → 注入纠正"""
+        from plugins.DicePP.module.persona.llm.client import RoundResult
+        # 模拟 client 层已过滤 <think>，剩余实际文本
+        result = RoundResult(content="你好我是苏晓", tool_calls=[])
+        injected = await session._on_segment_round_complete(0, result, [])
+        assert injected is not None
+        assert "send_reply_segment" in injected["content"]
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_none_think_and_segment_tool(self, session):
+        """纯 <think> + send_reply_segment → client 层过滤后 content 为空 → 正常流程，无 warning"""
+        from unittest.mock import patch
+        from plugins.DicePP.module.persona.llm.client import RoundResult
+        result = RoundResult(
+            content="",
+            tool_calls=[{"name": "send_reply_segment"}],
+        )
+        with patch("plugins.DicePP.module.persona.chat.session.logger") as mock_logger:
+            injected = await session._on_segment_round_complete(0, result, [])
+        assert injected is None
+        mock_logger.warning.assert_not_called()
