@@ -5,6 +5,7 @@
 from datetime import datetime, timedelta
 import aiosqlite
 import pytest
+from unittest.mock import patch
 
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.data.models import ScoringFailure
@@ -136,8 +137,9 @@ async def test_prune_scoring_failures_by_days():
             )
         )
 
-        # 清理 1 天前的记录
-        deleted = await store.prune_scoring_failures(1)
+        # 锁定 _wall_now 为测试时间，避免真实时间流逝影响 cutoff 计算
+        with patch.object(store, '_wall_now', return_value=now):
+            deleted = await store.prune_scoring_failures(1)
         assert deleted == 1
 
         remaining = await store.get_recent_scoring_failures("u4", "g4", limit=10)
