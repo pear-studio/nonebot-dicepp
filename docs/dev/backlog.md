@@ -37,18 +37,6 @@
   - 或者 `_EVENT_DESCRIPTION_MAX_LEN` 上调到合理值（如 300），但既然 `_build_diary_context` 已有整体预算控制，直接移除硬截断更干净
   - 影响面: `event_agent.py` 事件生成、`session.py` `_build_diary_context` 截断逻辑
 
-### [B-260511-c9d0e4] 短期记忆和事件注入未附带时间戳，LLM 无法感知时间顺序
-- 创建: 2026-05-11
-- 问题表现:
-  - `context.py:215-221` `_format_short_term()` 仅输出 `[称呼] content`，丢弃了 `msg.get("created_at")`
-  - `session.py:807-824` `_build_diary_context()` 虽然按 `created_at` 排序事件，但最终只拼接纯文本描述 `描述；描述；描述...`，时间信息全部丢弃
-  - 两个位置的数据模型（`UserMessage`、`GroupConversation`、`DailyEvent`）均有 `created_at` 字段但未被使用
-- 工作计划:
-  - `_format_short_term()`: 每条消息前加上相对时间或绝对时间（如 `[12:34] [你] xxx` 或 `[5分钟前] [你] xxx`）
-  - `_build_diary_context()`: 事件描述前加上时间前缀（如 `08:15 七七醒来...；12:30 七七在绝云间...`）
-  - 时间格式用相对时间（距当前时间）还是绝对时间（HH:MM），取决于角色设定倾向；建议默认绝对时间，保持信息密度
-  - 影响面: `context.py` `_format_short_term`、`session.py` `_build_diary_context`、数据模型 dict 转换通知 created_at
-
 ### [B-260511-e2f3c7] 主动分享 prompt 中 recent_history 引发跨时段"补答"
 - 创建: 2026-05-11
 - 问题表现:

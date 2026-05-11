@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState, ModelTier
 from ..llm.router import LLMRouter
 from ..utils.json_helpers import safe_json_loads
+from ..wall_clock import persona_wall_now, format_timestamp
 
 
 class ScoringAnalysisResult(BaseModel):
@@ -23,8 +24,9 @@ class ScoringAnalysisResult(BaseModel):
 class ScoringAgent:
     """评分 Agent - 批量分析对话提取用户档案和好感度变化"""
 
-    def __init__(self, llm_router: LLMRouter):
+    def __init__(self, llm_router: LLMRouter, timezone: str = "Asia/Shanghai"):
         self.llm_router = llm_router
+        self.timezone = timezone
 
     async def batch_analyze(
         self,
@@ -61,9 +63,14 @@ class ScoringAgent:
         relationship: Optional[RelationshipState] = None,
     ) -> str:
         dialogue_lines = []
+        now = persona_wall_now(self.timezone)
         for msg in messages:
             role = "用户" if msg["role"] == "user" else "AI"
-            dialogue_lines.append(f"{role}: {msg['content']}")
+            prefix = format_timestamp(msg.get("created_at"), now)
+            if prefix:
+                dialogue_lines.append(f"[{prefix}] {role}: {msg['content']}")
+            else:
+                dialogue_lines.append(f"{role}: {msg['content']}")
         dialogue = "\n".join(dialogue_lines)
 
         existing_facts = json.dumps(profile.facts, ensure_ascii=False) if profile and profile.facts else "无"

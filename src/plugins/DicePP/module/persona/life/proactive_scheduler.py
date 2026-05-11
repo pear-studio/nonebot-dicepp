@@ -15,7 +15,7 @@ from ..data.persist_keys import PERSONA_SK_SCHEDULER
 from ..data.models import RelationshipState, DEFAULT_WARMTH_LABELS
 from ..character.models import Character
 from ..game.decay import DecayCalculator
-from ..wall_clock import persona_wall_now
+from ..wall_clock import persona_wall_now, format_timestamp
 from .event_agent import EventGenerationAgent, ShareMessageContext
 from .protocols import BoundaryReceiver
 from .models import ShareTarget
@@ -385,19 +385,24 @@ class ProactiveScheduler(BoundaryReceiver):
         text = "\n".join(lines) if lines else "（无）"
         return ProactiveScheduler._sanitize_prompt_text(text)
 
-    @staticmethod
-    def _format_recent_history(messages, limit: int = 5) -> str:
-        """将 Message 列表格式化为精简对话摘要。"""
+    # 改为实例方法以通过 self._now() 获取时区时间
+    def _format_recent_history(self, messages, limit: int = 5) -> str:
+        """将 Message 列表格式化为精简对话摘要，附带时间戳。"""
         if not messages:
             return "（无）"
         lines = []
+        now = self._now()
         role_map = {"user": "用户", "assistant": "我", "system": "系统", "tool": "工具"}
         for msg in messages[-limit:]:
             role_label = role_map.get(msg.role, "用户")
             content = msg.content
             if len(content) > 50:
                 content = content[:47] + "..."
-            lines.append(f"- {role_label}: {content}")
+            prefix = format_timestamp(getattr(msg, "created_at", None), now)
+            if prefix:
+                lines.append(f"- [{prefix}] {role_label}: {content}")
+            else:
+                lines.append(f"- {role_label}: {content}")
         text = "\n".join(lines)
         return ProactiveScheduler._sanitize_prompt_text(text)
 

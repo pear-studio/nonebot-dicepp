@@ -35,7 +35,7 @@ from ..character.models import Character
 from ..chat.scoring import ScoringAgent
 from ..chat.context import ContextBuilder
 from ..game.decay import DecayCalculator
-from ..wall_clock import persona_wall_now, PERSONA_EPOCH
+from ..wall_clock import persona_wall_now, PERSONA_EPOCH, format_timestamp
 from ..tools.registry import ToolRegistry, ToolDomain
 from ..tools.context import ToolContext
 from ..llm.coordinator import LLMCallCoordinator
@@ -601,8 +601,8 @@ class ChatSession:
         key = f"{user_id}:{group_id}"
         if key not in self._pending_messages:
             self._pending_messages[key] = deque(maxlen=100)
-        self._pending_messages[key].append({"role": "user", "content": user_msg})
-        self._pending_messages[key].append({"role": "assistant", "content": assistant_msg})
+        self._pending_messages[key].append({"role": "user", "content": user_msg, "created_at": now})
+        self._pending_messages[key].append({"role": "assistant", "content": assistant_msg, "created_at": now})
 
         if len(self._pending_messages[key]) >= self.config.scoring_interval * 2:
             try:
@@ -725,7 +725,7 @@ class ChatSession:
         if not group_id:
             history = await self.store.get_recent_messages(user_id, group_id, limit=limit)
             history_dicts = [
-                {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我"}
+                {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我", "created_at": msg.created_at}
                 for msg in history
             ]
             truncated = self.context_builder.truncate_by_turns(
@@ -785,6 +785,7 @@ class ChatSession:
                 "role": msg.role,
                 "content": content,
                 "speaker_name": speaker_name,
+                "created_at": msg.created_at,
             })
             total_tokens += msg_cost
 
@@ -823,14 +824,16 @@ class ChatSession:
                 if (e.context_summary and e.context_summary.strip())
                 or (e.description and e.description.strip())
             ]
-            valid_events.sort(key=lambda e: e.created_at or PERSONA_EPOCH, reverse=True)
+            # 按时间升序排列（旧→新），使日记以自然时序呈现
+            valid_events.sort(key=lambda e: e.created_at or PERSONA_EPOCH, reverse=False)
 
             if valid_events:
                 # 优先用 context_summary，空则回退到 description
-                summaries = [
-                    e.context_summary if e.context_summary else e.description
-                    for e in valid_events
-                ]
+                summaries = []
+                for e in valid_events:
+                    prefix = format_timestamp(e.created_at, wall)
+                    text = e.context_summary if e.context_summary else e.description
+                    summaries.append(f"{prefix} {text}" if prefix else text)
                 diary_context = "今天发生的事：" + "；".join(summaries)
                 if len(diary_context) > max_diary_len:
                     diary_context = diary_context[:max_diary_len].rsplit('；', 1)[0] + "..."

@@ -18,6 +18,7 @@ from nonebot.log import logger
 from .event_agent import EventGenerationAgent
 from ..data.store import PersonaDataStore
 from ..utils.json_helpers import safe_json_loads
+from ..wall_clock import persona_wall_now, format_timestamp
 
 
 @dataclass
@@ -340,8 +341,9 @@ class ObservationExtractor:
 
         try:
             # 构建消息文本
+            now = persona_wall_now(self.config.timezone)
             messages_text = "\n".join(
-                f"{msg.nickname}: {msg.content}"
+                f"[{format_timestamp(msg.timestamp, now)}] {msg.nickname}: {msg.content}"
                 for msg in messages[-20:]  # 最多取最近20条
             )
 
