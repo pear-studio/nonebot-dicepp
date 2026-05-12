@@ -204,11 +204,6 @@ class TestConfigValues:
         config = PersonaConfig()
         assert config.max_messages == 15
 
-    def test_tools_enabled(self):
-        """tools_enabled 应该为 True"""
-        config = PersonaConfig()
-        assert config.tools_enabled is True
-
     def test_relationship_refuse_enabled(self):
         """relationship_refuse_enabled 应该默认为 True"""
         config = PersonaConfig()

@@ -69,8 +69,8 @@ class PersonaConfig(BaseModel):
     )
 
     # ── Phase 3: 工具调用
-    tools_enabled: bool = True
-    tools_max_rounds: int = 5  # 工具调用最大轮次
+    tools_max_rounds: int = 5  # 聊天工具调用最大轮次
+    background_llm_max_tool_rounds: int = 1  # 后台单工具场景最大轮次（首轮收集即终止）
 
     # ── Phase 3: 日记上下文长度限制
     max_diary_context_chars: int = 500  # 日记注入上下文的最大字符数

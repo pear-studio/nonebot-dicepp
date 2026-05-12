@@ -41,8 +41,7 @@ def _make_session(
 
     router = MagicMock()
     router.increment_usage = AsyncMock()
-    router.generate = AsyncMock(return_value="reply")
-    router.generate_with_tools = AsyncMock(return_value=("reply", {}))
+    router.generate = AsyncMock(return_value=("reply", {}))
 
     character = MagicMock()
     character.name = "Test"
@@ -56,7 +55,6 @@ def _make_session(
     )
 
     config = ChatConfig(
-        tools_enabled=False,
         relationship_refuse_enabled=refuse_enabled,
         relationship_refuse_prob_base=0.3,
         relationship_refuse_prob_max=0.9,
@@ -119,7 +117,6 @@ async def test_first_message_uses_first_mes_without_llm():
     assert result == "你好，我是测试角色"
     # 不应调用 LLM
     assert session.router.generate.await_count == 0
-    assert session.router.generate_with_tools.await_count == 0
     # 应该已写入用户消息和 first_mes 两条
     assert session.store.add_message.await_count >= 2
 

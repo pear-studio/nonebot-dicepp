@@ -36,3 +36,15 @@
   - 短期可降低 `max_short_term_chars` 缓解，但长期需要摘要机制
   - 影响面: `context.py` `ContextBuilder.build`、`_format_short_term`、session 截断策略
 
+
+### [B-260512-f2d8a1] tool_choice="required" 场景缺少显式终止机制
+- 创建: 2026-05-12
+- 问题表现:
+  - `tool_choice="required"` 下 LLM 完成工具调用后无法表达"我已做完"——它必须继续调工具直到 `max_total_rounds` 耗尽
+  - 单工具 CollectExecutor 场景首轮收集成功后 100% 浪费
+  - 当前通过 `max_tool_rounds=1` + 早退 break 缓解，多工具场景依赖硬上限
+- 工作计划:
+  - 引入 `finish_task` 工具：LLM 完成后主动调用声明结束，循环检测到后立即终止
+  - 作为通用终止方案，统一单工具和多工具场景
+  - 影响面: `client.py:_generate_with_tools` 循环终止条件、后台 Agent prompt
+  - 前置条件: 当前 `max_tool_rounds=1` 已覆盖，本条为架构扩展预留

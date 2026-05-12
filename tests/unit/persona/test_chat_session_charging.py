@@ -34,8 +34,7 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
 
     router = MagicMock()
     router.increment_usage = AsyncMock()
-    router.generate = AsyncMock(return_value="reply")
-    router.generate_with_tools = AsyncMock(return_value=("reply", {}))
+    router.generate = AsyncMock(return_value=("reply", {}))
 
     character = MagicMock()
     character.name = "Test"
@@ -46,7 +45,6 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
     character.get_warmth_labels = MagicMock(return_value=["a", "b", "c", "d", "e", "f"])
 
     config = ChatConfig(
-        tools_enabled=False,
         relationship_refuse_enabled=False,
         scoring_interval=999,
     )

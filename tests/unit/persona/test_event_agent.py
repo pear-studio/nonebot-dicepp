@@ -1,10 +1,7 @@
 """
 单元测试: Persona Event Agent
 
-测试 EventGenerationAgent 的三个主要方法:
-- generate_event: 生成客观生活事件
-- generate_reaction: 生成角色对事件的反应
-- generate_diary: 生成日记总结
+测试 EventGenerationAgent 的主要方法
 """
 
 import json
@@ -23,164 +20,197 @@ from plugins.DicePP.module.persona.life.event_agent import (
 from plugins.DicePP.module.persona.data.models import ModelTier
 
 
-class TestEventGenerationAgent:
-    """测试事件生成 Agent"""
+def _make_side_effect(result_args: str, tool_name: str):
+    """创建 router.generate 的 side_effect，调用 tool_executor 填充 CollectExecutor"""
+    async def side_effect(**kwargs):
+        tool_executor = kwargs.get("tool_executor")
+        if tool_executor:
+            tc = {
+                "id": "tc_1",
+                "name": tool_name,
+                "arguments": result_args,
+            }
+            await tool_executor([tc])
+        return "", {}
+    return side_effect
+
+
+class TestGenerateDiary:
+    """测试 generate_diary 方法"""
 
     @pytest.fixture
     def mock_llm_router(self):
-        """创建 Mock LLM Router"""
         router = MagicMock()
         router.generate = AsyncMock()
         return router
 
     @pytest.fixture
     def agent(self, mock_llm_router):
-        """创建 EventGenerationAgent 实例"""
         config = MagicMock()
         config.background_llm_timeout_seconds = 90
+        config.background_llm_max_tool_rounds = 3
         return EventGenerationAgent(mock_llm_router, config=config)
 
-    @pytest.fixture
-    def event_context(self):
-        """创建测试用的 EventContext"""
-        return EventContext(
-            character_name="测试角色",
-            character_description="一个温柔的AI助手",
-            world="现代日常世界",
-            scenario="居家生活",
-            recent_diaries=["今天天气不错，去公园散步了。"],
-            today_events=[{"description": "早上喝了咖啡"}],
-            permanent_state="心情愉悦",
-            current_time=datetime(2024, 1, 1, 10, 0),
+    @pytest.mark.asyncio
+    async def test_generate_diary_success(self, agent, mock_llm_router):
+        """正常生成日记"""
+        mock_llm_router.generate.side_effect = _make_side_effect(
+            '{"diary": "今天过得真充实，发生了很多有趣的事情。"}',
+            "record_diary_entry",
         )
 
-    class TestGenerateDiary:
-        """测试 generate_diary 方法"""
+        events = [
+            {"description": "早上喝咖啡", "reaction": "感觉很清醒"},
+            {"description": "下午散步", "reaction": "心情放松了许多"},
+        ]
 
-        async def test_generate_diary_success(self, agent, mock_llm_router):
-            """测试正常生成日记"""
-            mock_llm_router.generate.return_value = "  今天过得真充实，发生了很多有趣的事情。  "
+        result = await agent.generate_diary(
+            events=events,
+            character_name="测试角色",
+            character_description="一个喜欢记录生活的人",
+            yesterday_diary="昨天也很充实。",
+        )
 
-            events = [
-                {"description": "早上喝咖啡", "reaction": "感觉很清醒"},
-                {"description": "下午散步", "reaction": "心情放松了许多"},
-            ]
+        assert result == "今天过得真充实，发生了很多有趣的事情。"
+        mock_llm_router.generate.assert_called_once()
+        call_kwargs = mock_llm_router.generate.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.85
+        assert call_kwargs["timeout"] == 90
+        assert call_kwargs["model_tier"] == ModelTier.AUXILIARY
+        assert call_kwargs["tools"] is not None
 
-            result = await agent.generate_diary(
-                events=events,
-                character_name="测试角色",
-                character_description="一个喜欢记录生活的人",
-                yesterday_diary="昨天也很充实。",
-            )
+    @pytest.mark.asyncio
+    async def test_generate_diary_truncate_long(self, agent, mock_llm_router):
+        """超长日记被截断"""
+        long_diary = "今天真是漫长的一天" * 60
+        mock_llm_router.generate.side_effect = _make_side_effect(
+            f'{{"diary": "{long_diary}"}}',
+            "record_diary_entry",
+        )
 
-            assert result == "今天过得真充实，发生了很多有趣的事情。"
-            mock_llm_router.generate.assert_called_once()
-            call_kwargs = mock_llm_router.generate.call_args.kwargs
-            assert call_kwargs["temperature"] == 0.85
-            assert call_kwargs["timeout"] == 90
-            assert call_kwargs["model_tier"] == ModelTier.AUXILIARY
+        result = await agent.generate_diary(
+            events=[{"description": "事件", "reaction": "反应"}],
+            character_name="角色",
+            character_description="描述",
+        )
 
-        async def test_generate_diary_truncate_long(self, agent, mock_llm_router):
-            """测试超长日记被截断"""
-            long_diary = "今天真是漫长的一天" * 60  # 540字，超过500字
-            mock_llm_router.generate.return_value = long_diary
+        assert len(result) <= 300
+        assert result.endswith("...")
 
-            result = await agent.generate_diary(
-                events=[{"description": "事件", "reaction": "反应"}],
-                character_name="角色",
-                character_description="描述",
-            )
+    @pytest.mark.asyncio
+    async def test_generate_diary_fallback_on_exception(self, agent, mock_llm_router):
+        """异常时返回默认兜底文本"""
+        mock_llm_router.generate.side_effect = Exception("服务不可用")
 
-            assert len(result) <= 500
-            assert result.endswith("...")
+        result = await agent.generate_diary(
+            events=[{"description": "事件", "reaction": "反应"}],
+            character_name="角色",
+            character_description="描述",
+        )
 
-        async def test_generate_diary_fallback_on_exception(self, agent, mock_llm_router):
-            """测试异常时返回默认兜底文本"""
-            mock_llm_router.generate.side_effect = Exception("服务不可用")
+        assert "太累了" in result
+        assert "简单记录" in result
 
-            result = await agent.generate_diary(
-                events=[{"description": "事件", "reaction": "反应"}],
-                character_name="角色",
-                character_description="描述",
-            )
+    @pytest.mark.asyncio
+    async def test_generate_diary_no_collected(self, agent, mock_llm_router):
+        """LLM 未调用工具时返回兜底文本"""
+        mock_llm_router.generate.return_value = ("text without tool call", {})
 
-            assert "太累了" in result
-            assert "简单记录" in result
+        result = await agent.generate_diary(
+            events=[{"description": "事件", "reaction": "反应"}],
+            character_name="角色",
+            character_description="描述",
+        )
 
-        async def test_generate_diary_without_yesterday(self, agent, mock_llm_router):
-            """测试不传入昨天日记的情况"""
-            mock_llm_router.generate.return_value = "今天的日记内容"
+        assert "太累了" in result
 
-            events = [{"description": "事件1", "reaction": "反应1"}]
-            await agent.generate_diary(
-                events=events,
-                character_name="角色",
-                character_description="描述",
-                yesterday_diary=None,
-            )
+    @pytest.mark.asyncio
+    async def test_generate_diary_without_yesterday(self, agent, mock_llm_router):
+        """不传入昨天日记的情况"""
+        mock_llm_router.generate.side_effect = _make_side_effect(
+            '{"diary": "今天的日记内容"}',
+            "record_diary_entry",
+        )
 
-            call_args = mock_llm_router.generate.call_args.kwargs
-            messages = call_args["messages"]
-            user_prompt = messages[1]["content"]
-            assert "昨天的日记" not in user_prompt
-            assert "事件1" in user_prompt
-            assert "反应1" in user_prompt
+        events = [{"description": "事件1", "reaction": "反应1"}]
+        await agent.generate_diary(
+            events=events,
+            character_name="角色",
+            character_description="描述",
+            yesterday_diary=None,
+        )
 
-        async def test_generate_diary_with_yesterday(self, agent, mock_llm_router):
-            """测试传入昨天日记的情况"""
-            mock_llm_router.generate.return_value = "今天的日记内容"
+        call_args = mock_llm_router.generate.call_args.kwargs
+        messages = call_args["messages"]
+        user_prompt = messages[1]["content"]
+        assert "昨天的日记" not in user_prompt
+        assert "事件1" in user_prompt
+        assert "反应1" in user_prompt
 
-            events = [{"description": "事件1", "reaction": "反应1"}]
-            yesterday = "这是昨天的日记内容，写了很多字。"
-            await agent.generate_diary(
-                events=events,
-                character_name="角色",
-                character_description="描述",
-                yesterday_diary=yesterday,
-            )
+    @pytest.mark.asyncio
+    async def test_generate_diary_with_yesterday(self, agent, mock_llm_router):
+        """传入昨天日记的情况"""
+        mock_llm_router.generate.side_effect = _make_side_effect(
+            '{"diary": "今天的日记内容"}',
+            "record_diary_entry",
+        )
 
-            call_args = mock_llm_router.generate.call_args.kwargs
-            messages = call_args["messages"]
-            user_prompt = messages[1]["content"]
-            assert "昨天的日记" in user_prompt
-            assert yesterday[:200] in user_prompt
+        events = [{"description": "事件1", "reaction": "反应1"}]
+        yesterday = "这是昨天的日记内容，写了很多字。"
+        await agent.generate_diary(
+            events=events,
+            character_name="角色",
+            character_description="描述",
+            yesterday_diary=yesterday,
+        )
 
-        async def test_generate_diary_empty_events(self, agent, mock_llm_router):
-            """测试空事件列表"""
-            mock_llm_router.generate.return_value = "今天没什么特别的事发生。"
+        call_args = mock_llm_router.generate.call_args.kwargs
+        messages = call_args["messages"]
+        user_prompt = messages[1]["content"]
+        assert "昨天的日记" in user_prompt
+        assert yesterday[:200] in user_prompt
 
-            result = await agent.generate_diary(
-                events=[],
-                character_name="角色",
-                character_description="描述",
-            )
+    @pytest.mark.asyncio
+    async def test_generate_diary_empty_events(self, agent, mock_llm_router):
+        """空事件列表"""
+        mock_llm_router.generate.side_effect = _make_side_effect(
+            '{"diary": "今天没什么特别的事发生。"}',
+            "record_diary_entry",
+        )
 
-            assert result == "今天没什么特别的事发生。"
+        result = await agent.generate_diary(
+            events=[],
+            character_name="角色",
+            character_description="描述",
+        )
+
+        assert result == "今天没什么特别的事发生。"
 
 
 class TestGenerateEventResult:
-    """测试 generate_event_result Function Calling 路径"""
+    """测试 generate_event_result 工具路径"""
 
     @pytest.fixture
-    def mock_llm_router_forced(self):
+    def mock_llm_router(self):
         router = MagicMock()
-        router.generate_with_forced_tool = AsyncMock()
+        router.generate = AsyncMock()
         return router
 
     @pytest.fixture
-    def agent_forced(self, mock_llm_router_forced):
+    def agent(self, mock_llm_router):
         config = MagicMock()
         config.background_llm_timeout_seconds = 90
-        return EventGenerationAgent(mock_llm_router_forced, config=config)
+        config.background_llm_max_tool_rounds = 3
+        return EventGenerationAgent(mock_llm_router, config=config)
 
     @pytest.mark.asyncio
-    async def test_generate_event_result_success(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_result_success(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"description": "窗外下雨了", "context_summary": "窗外下雨", "duration_minutes": 30}',
-            {}
+            "record_event",
         )
 
-        result = await agent_forced.generate_event_result(
+        result = await agent.generate_event_result(
             EventContext(
                 character_name="小雨",
                 character_description="温柔的少女",
@@ -195,7 +225,6 @@ class TestGenerateEventResult:
         assert result.description == "窗外下雨了"
         assert result.context_summary == "窗外下雨"
         assert result.duration_minutes == 30
-        # raw_response 和 system_prompt_digest 必须保存原始 LLM 输出
         assert result.raw_response != ""
         raw = json.loads(result.raw_response)
         assert raw["description"] == "窗外下雨了"
@@ -203,16 +232,15 @@ class TestGenerateEventResult:
         assert raw["duration_minutes"] == 30
         assert result.system_prompt_digest != ""
         assert "世界观设定专家" in result.system_prompt_digest
-        mock_llm_router_forced.generate_with_forced_tool.assert_called_once()
-        # B-260507-d3cc8b: 验证 timeout 默认传递到 router
-        call_kwargs = mock_llm_router_forced.generate_with_forced_tool.call_args.kwargs
+        mock_llm_router.generate.assert_called_once()
+        call_kwargs = mock_llm_router.generate.call_args.kwargs
         assert call_kwargs["timeout"] == 90
 
     @pytest.mark.asyncio
-    async def test_generate_event_result_fallback(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.side_effect = Exception("forced tool error")
+    async def test_generate_event_result_fallback(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = Exception("forced tool error")
 
-        result = await agent_forced.generate_event_result(
+        result = await agent.generate_event_result(
             EventContext(
                 character_name="小雨",
                 character_description="温柔的少女",
@@ -226,22 +254,20 @@ class TestGenerateEventResult:
 
         assert "休息" in result.description
         assert result.duration_minutes == 0
-        # B-260507-d3cc8b: fallback 携带默认 delta 避免状态断层
         assert result.energy_delta == 0
         assert result.mood_delta is None
         assert result.health_delta is None
-        # R7: fallback 填充 raw_response 和 system_prompt_digest 以增强可观测性
         assert result.raw_response != ""
         assert "fallback" in result.system_prompt_digest
 
     @pytest.mark.asyncio
-    async def test_generate_event_result_clamp_duration_max(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_result_clamp_duration_max(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"description": "测试中", "duration_minutes": 3000}',
-            {}
+            "record_event",
         )
 
-        result = await agent_forced.generate_event_result(
+        result = await agent.generate_event_result(
             EventContext(
                 character_name="小雨",
                 character_description="温柔的少女",
@@ -256,13 +282,13 @@ class TestGenerateEventResult:
         assert result.duration_minutes == 2880
 
     @pytest.mark.asyncio
-    async def test_generate_event_result_clamp_duration_min(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_result_clamp_duration_min(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"description": "测试中", "duration_minutes": -10}',
-            {}
+            "record_event",
         )
 
-        result = await agent_forced.generate_event_result(
+        result = await agent.generate_event_result(
             EventContext(
                 character_name="小雨",
                 character_description="温柔的少女",
@@ -277,13 +303,13 @@ class TestGenerateEventResult:
         assert result.duration_minutes == 0
 
     @pytest.mark.asyncio
-    async def test_generate_event_result_empty_description_fallback(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_result_empty_description_fallback(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"description": "", "duration_minutes": 0}',
-            {}
+            "record_event",
         )
 
-        result = await agent_forced.generate_event_result(
+        result = await agent.generate_event_result(
             EventContext(
                 character_name="小雨",
                 character_description="温柔的少女",
@@ -299,15 +325,15 @@ class TestGenerateEventResult:
         assert result.duration_minutes == 0
 
     @pytest.mark.asyncio
-    async def test_generate_event_result_no_truncate_long_description(self, agent_forced, mock_llm_router_forced):
+    async def test_generate_event_result_no_truncate_long_description(self, agent, mock_llm_router):
         """description 不再硬截断，完整保留；context_summary 为空时 fallback 到 description 前 60 字"""
-        long_desc = "窗外" * 50  # 100 字
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+        long_desc = "窗外" * 50
+        mock_llm_router.generate.side_effect = _make_side_effect(
             f'{{"description": "{long_desc}", "duration_minutes": 0}}',
-            {}
+            "record_event",
         )
 
-        result = await agent_forced.generate_event_result(
+        result = await agent.generate_event_result(
             EventContext(
                 character_name="小雨",
                 character_description="温柔的少女",
@@ -319,17 +345,16 @@ class TestGenerateEventResult:
             )
         )
 
-        assert result.description == long_desc  # 完整保留，不截断
+        assert result.description == long_desc
         assert len(result.context_summary) == 60
         assert result.context_summary == long_desc[:60]
 
-        # description < 60 字时 fallback 保留完整文本
         short_desc = "窗外下雨了"
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+        mock_llm_router.generate.side_effect = _make_side_effect(
             f'{{"description": "{short_desc}", "duration_minutes": 0}}',
-            {}
+            "record_event",
         )
-        result2 = await agent_forced.generate_event_result(
+        result2 = await agent.generate_event_result(
             EventContext(
                 character_name="小雨",
                 character_description="温柔的少女",
@@ -343,14 +368,14 @@ class TestGenerateEventResult:
         assert result2.context_summary == short_desc
 
     @pytest.mark.asyncio
-    async def test_generate_event_result_empty_context(self, agent_forced, mock_llm_router_forced):
-        """空上下文（recent_diaries/today_events 均为空）时正常生成"""
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_result_empty_context(self, agent, mock_llm_router):
+        """空上下文时正常生成"""
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"description": "正在休息", "duration_minutes": 15}',
-            {}
+            "record_event",
         )
 
-        result = await agent_forced.generate_event_result(
+        result = await agent.generate_event_result(
             EventContext(
                 character_name="小雨",
                 character_description="温柔的少女",
@@ -367,28 +392,29 @@ class TestGenerateEventResult:
 
 
 class TestGenerateEventReaction:
-    """测试 generate_event_reaction Function Calling 路径"""
+    """测试 generate_event_reaction 工具路径"""
 
     @pytest.fixture
-    def mock_llm_router_forced(self):
+    def mock_llm_router(self):
         router = MagicMock()
-        router.generate_with_forced_tool = AsyncMock()
+        router.generate = AsyncMock()
         return router
 
     @pytest.fixture
-    def agent_forced(self, mock_llm_router_forced):
+    def agent(self, mock_llm_router):
         config = MagicMock()
         config.background_llm_timeout_seconds = 90
-        return EventGenerationAgent(mock_llm_router_forced, config=config)
+        config.background_llm_max_tool_rounds = 3
+        return EventGenerationAgent(mock_llm_router, config=config)
 
     @pytest.mark.asyncio
-    async def test_generate_event_reaction_success(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_reaction_success(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"reaction": "真开心~", "share_desire": 0.8}',
-            {}
+            "record_reaction",
         )
 
-        result = await agent_forced.generate_event_reaction(
+        result = await agent.generate_event_reaction(
             event="窗外下雨了",
             character_name="小雨",
             character_description="温柔的少女",
@@ -396,21 +422,19 @@ class TestGenerateEventReaction:
 
         assert result.reaction == "真开心~"
         assert result.share_desire == 0.8
-        # raw_response 必须保存原始 LLM 输出
         assert result.raw_response != ""
         raw = json.loads(result.raw_response)
         assert raw["reaction"] == "真开心~"
         assert raw["share_desire"] == 0.8
-        mock_llm_router_forced.generate_with_forced_tool.assert_called_once()
-        # B-260507-d3cc8b: 验证 timeout 默认传递到 router
-        call_kwargs = mock_llm_router_forced.generate_with_forced_tool.call_args.kwargs
+        mock_llm_router.generate.assert_called_once()
+        call_kwargs = mock_llm_router.generate.call_args.kwargs
         assert call_kwargs["timeout"] == 90
 
     @pytest.mark.asyncio
-    async def test_generate_event_reaction_fallback_required(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.side_effect = Exception("tool error")
+    async def test_generate_event_reaction_fallback_required(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = Exception("tool error")
 
-        result = await agent_forced.generate_event_reaction(
+        result = await agent.generate_event_reaction(
             event="窗外下雨了",
             character_name="小雨",
             character_description="温柔的少女",
@@ -420,10 +444,10 @@ class TestGenerateEventReaction:
         assert result.share_desire == 1.0
 
     @pytest.mark.asyncio
-    async def test_generate_event_reaction_fallback_never(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.side_effect = Exception("tool error")
+    async def test_generate_event_reaction_fallback_never(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = Exception("tool error")
 
-        result = await agent_forced.generate_event_reaction(
+        result = await agent.generate_event_reaction(
             event="窗外下雨了",
             character_name="小雨",
             character_description="温柔的少女",
@@ -433,10 +457,10 @@ class TestGenerateEventReaction:
         assert result.share_desire == 0.0
 
     @pytest.mark.asyncio
-    async def test_generate_event_reaction_fallback_optional(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.side_effect = Exception("tool error")
+    async def test_generate_event_reaction_fallback_optional(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = Exception("tool error")
 
-        result = await agent_forced.generate_event_reaction(
+        result = await agent.generate_event_reaction(
             event="窗外下雨了",
             character_name="小雨",
             character_description="温柔的少女",
@@ -446,13 +470,13 @@ class TestGenerateEventReaction:
         assert result.share_desire == 0.5
 
     @pytest.mark.asyncio
-    async def test_generate_event_reaction_clamp_share_desire_max(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_reaction_clamp_share_desire_max(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"reaction": "开心", "share_desire": 1.5}',
-            {}
+            "record_reaction",
         )
 
-        result = await agent_forced.generate_event_reaction(
+        result = await agent.generate_event_reaction(
             event="窗外下雨了",
             character_name="小雨",
             character_description="温柔的少女",
@@ -462,13 +486,13 @@ class TestGenerateEventReaction:
         assert result.share_desire == 1.0
 
     @pytest.mark.asyncio
-    async def test_generate_event_reaction_clamp_share_desire_min(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_reaction_clamp_share_desire_min(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"reaction": "开心", "share_desire": -0.3}',
-            {}
+            "record_reaction",
         )
 
-        result = await agent_forced.generate_event_reaction(
+        result = await agent.generate_event_reaction(
             event="窗外下雨了",
             character_name="小雨",
             character_description="温柔的少女",
@@ -478,13 +502,13 @@ class TestGenerateEventReaction:
         assert result.share_desire == 0.0
 
     @pytest.mark.asyncio
-    async def test_generate_event_reaction_empty_reaction_fallback(self, agent_forced, mock_llm_router_forced):
-        mock_llm_router_forced.generate_with_forced_tool.return_value = (
+    async def test_generate_event_reaction_empty_reaction_fallback(self, agent, mock_llm_router):
+        mock_llm_router.generate.side_effect = _make_side_effect(
             '{"reaction": "", "share_desire": 0.5}',
-            {}
+            "record_reaction",
         )
 
-        result = await agent_forced.generate_event_reaction(
+        result = await agent.generate_event_reaction(
             event="窗外下雨了",
             character_name="小雨",
             character_description="温柔的少女",
@@ -496,14 +520,17 @@ class TestGenerateEventReaction:
 
     @pytest.mark.asyncio
     async def test_share_message_prompt_injection(self):
-        """验证分享消息 prompt 注入状态/事件/意向（3.3.2 / 3.3.3）"""
+        """验证分享消息 prompt 注入状态/事件/意向"""
         from io import StringIO
         from loguru import logger
         from plugins.DicePP.module.persona.life.event_agent import ShareMessageContext
 
-        # 创建真实 EventGenerationAgent，mock llm_router
         mock_router = MagicMock()
-        mock_router.generate_with_forced_tool = AsyncMock(return_value=('{"message": "茶很好喝哦"}', {}))
+        mock_router.generate = AsyncMock()
+        mock_router.generate.side_effect = _make_side_effect(
+            '{"message": "茶很好喝哦"}',
+            "record_share_message",
+        )
         agent = EventGenerationAgent(llm_router=mock_router)
 
         context = ShareMessageContext(
@@ -534,7 +561,6 @@ class TestGenerateEventReaction:
 
         assert message == "茶很好喝哦"
 
-        # 验证分享消息 prompt 注入
         logs = output.getvalue()
         assert "[prompt:system_share]" in logs
         assert "[prompt:user_share]" in logs

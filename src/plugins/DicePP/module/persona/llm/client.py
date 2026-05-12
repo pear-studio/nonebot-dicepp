@@ -30,13 +30,6 @@ _RETRYABLE_KEYWORDS = (
 )
 
 
-class ForcedToolError(Exception):
-    """LLM 未按 tool_choice 要求调用指定工具"""
-
-    def __init__(self, message: str, raw_content: str = ""):
-        super().__init__(message)
-        self.raw_content = raw_content
-
 
 @dataclass
 class RoundResult:
@@ -92,218 +85,154 @@ class LLMClient:
         content = content.strip()
         return content
 
-    async def chat(
-        self,
-        messages: List[Dict[str, str]],
-        timeout: int = 30,
-        max_retries: int = 3,
-        temperature: Optional[float] = None,
-    ) -> tuple[str, dict]:
-        """
-        发送聊天请求
-        
-        Args:
-            messages: 消息列表，格式 [{"role": "user", "content": "..."}, ...]
-            timeout: 超时时间（秒）
-            max_retries: 最大重试次数
-            
-        Returns:
-            (回复文本, 元数据字典)
-            
-        Raises:
-            TimeoutError: 请求超时
-            Exception: API 调用失败
-        """
-        client = self._get_client()
-        
-        last_error = None
-        retry_delay = 2  # 初始重试延迟（秒）
-        
-        for attempt in range(max_retries + 1):
-            try:
-                start_time = time.monotonic()
-                
-                create_kwargs: Dict[str, Any] = {
-                    "model": self.model,
-                    "messages": messages,
-                }
-                if temperature is not None:
-                    create_kwargs["temperature"] = temperature
+    # ── L1 纠正消息 ──
+    _L1_CORRECTION_MESSAGE: Dict[str, str] = {
+        "role": "user",
+        "content": (
+            "[系统指令] 你必须调用工具来完成任务。"
+            "不要直接输出文本——只能通过调用工具来输出结果。"
+        ),
+    }
 
-                response = await asyncio.wait_for(
-                    client.chat.completions.create(**create_kwargs),
-                    timeout=timeout
-                )
-                
-                latency = time.monotonic() - start_time
-                
-                # 提取回复文本
-                content = response.choices[0].message.content or ""
-
-                # 过滤 <think>...</think> 思考过程（MiniMax-M2.7 等模型）
-                content = self._filter_think_tags(content)
-
-                # 构建元数据
-                metadata = {
-                    "latency": latency,
-                    "model": self.model,
-                    "tokens_input": response.usage.prompt_tokens if response.usage else 0,
-                    "tokens_output": response.usage.completion_tokens if response.usage else 0,
-                }
-                
-                return content, metadata
-
-            except asyncio.TimeoutError as e:
-                last_error = e
-                if attempt < max_retries:
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2  # 指数退避
-                continue
-                
-            except Exception as e:
-                last_error = e
-                error_msg = str(e).lower()
-                
-                # 检查是否需要重试的错误
-                retryable = any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
-                
-                if retryable and attempt < max_retries:
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    raise
-        
-        # 所有重试都失败了
-        raise last_error or Exception("LLM request failed after retries")
-
-    async def generate_with_forced_tool(
+    async def generate(
         self,
         messages: List[Dict],
-        tools: List[Dict],
-        tool_name: str,
-        timeout: int = 30,
-        temperature: Optional[float] = None,
-        max_retries: int = 3,
-    ) -> tuple[str, dict]:
-        """
-        强制调用指定工具，只发一轮请求，直接返回工具参数 JSON 字符串。
-        """
-        client = self._get_client()
-        last_error = None
-        retry_delay = 2
-
-        for attempt in range(max_retries + 1):
-            try:
-                start_time = time.monotonic()
-                create_kwargs: Dict[str, Any] = {
-                    "model": self.model,
-                    "messages": messages,
-                    "tools": tools,
-                    "tool_choice": {"type": "function", "function": {"name": tool_name}},
-                }
-                if temperature is not None:
-                    create_kwargs["temperature"] = temperature
-
-                response = await asyncio.wait_for(
-                    client.chat.completions.create(**create_kwargs),
-                    timeout=timeout
-                )
-                latency = time.monotonic() - start_time
-
-                message = response.choices[0].message
-                if message.tool_calls:
-                    tc = message.tool_calls[0]
-                    args = tc.function.arguments
-                    metadata = {
-                        "latency": latency,
-                        "model": self.model,
-                        "tool_name": tc.function.name,
-                        "tool_names": [tc.function.name],
-                        "tokens_input": response.usage.prompt_tokens if response.usage else 0,
-                        "tokens_output": response.usage.completion_tokens if response.usage else 0,
-                    }
-                    return args, metadata
-
-                # LLM 未按 tool_choice 调用指定工具。此类错误在下方 except 块中
-                # 会被识别为 ForcedToolError 并触发重试（max_retries 次）。
-                raw_content = getattr(message, "content", "") or ""
-                content_preview = raw_content[:200]
-                raise ForcedToolError(
-                    f"模型未按 tool_choice 调用强制工具 '{tool_name}'，"
-                    f"返回内容: {content_preview!r}",
-                    raw_content=raw_content,
-                )
-
-            except asyncio.TimeoutError as e:
-                last_error = e
-                if attempt < max_retries:
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2
-                continue
-            except Exception as e:
-                last_error = e
-                error_msg = str(e).lower()
-                retryable = (
-                    any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
-                    or isinstance(e, ForcedToolError)
-                )
-                if retryable and attempt < max_retries:
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    raise
-
-        raise last_error or Exception("LLM forced tool request failed after retries")
-
-    # ── Phase 3: 工具调用
-    async def chat_with_tools(
-        self,
-        messages: List[Dict],
-        tools: List[Dict],
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[str] = None,
         tool_executor: Optional[ToolExecutor] = None,
         max_tool_rounds: int = 5,
         timeout: int = 60,
         temperature: Optional[float] = None,
+        max_retries: int = 3,
         on_round_complete: Optional[
             Callable[[int, RoundResult, List[Dict]], Awaitable[Optional[Dict]]]
         ] = None,
         max_round_callbacks: int = 3,
     ) -> tuple[str, dict]:
         """
-        支持多轮工具调用的对话（完整循环实现）
-
-        流程:
-        1. 调用 LLM，传入 tools
-        2. 如果 LLM 返回 tool_calls，调用 tool_executor 执行工具
-        3. 将工具结果追加到 messages
-        4. 重复直到 LLM 不调用工具或达到最大轮次
+        统一 LLM 生成入口，参数化控制工具调用与多轮循环。
 
         Args:
             messages: 消息列表
-            tools: 工具定义列表（OpenAI function calling 格式）
-            tool_executor: 工具执行回调函数，接收 tool_calls 列表，返回 tool_results 列表
-                格式: async def executor(tool_calls: List[Dict]) -> List[Dict]
-                其中 tool_calls: [{"id": str, "name": str, "arguments": str}]
-                返回: [{"tool_call_id": str, "content": str}]
-            max_tool_rounds: 最多多少轮工具调用
-            timeout: 单次调用超时时间
+            tools: 工具定义列表（None/空 → 纯文本路径）
+            tool_choice: None | "auto" | "required"。tools 非空且未设置时默认 "required"
+            tool_executor: 工具执行回调
+            max_tool_rounds: 最多工具调用轮次
+            timeout: 单次调用超时（秒）
             temperature: 采样温度
-            on_round_complete: 每轮 LLM 响应后的回调；返回 dict 则注入消息并继续，
-                返回 None 则走原流程（处理 tool_calls 或返回 content）。
-            max_round_callbacks: 回调注入最大次数。
+            max_retries: 纯文本路径最大重试次数
+            on_round_complete: L2 领域回调，每轮 LLM 响应后调用
+            max_round_callbacks: L1+L2 回调注入最大次数
 
         Returns:
-            (最终回复文本, 元数据字典)。metadata 含 round_records 列表，
-            每轮记录 think/tool_calls/tool_results/callback。
+            (content, metadata)
         """
         client = self._get_client()
-        current_messages = list(messages)  # 复制一份，避免修改原列表
+
+        # ── 纯文本路径 ──
+        if not tools:
+            return await self._generate_text(
+                client, messages, timeout, temperature, max_retries
+            )
+
+        # ── 工具路径 ──
+        if tool_choice is None:
+            tool_choice = "required"
+
+        return await self._generate_with_tools(
+            client, messages, tools, tool_choice, tool_executor,
+            max_tool_rounds, timeout, temperature,
+            on_round_complete, max_round_callbacks,
+        )
+
+    async def _generate_text(
+        self,
+        client: Any,
+        messages: List[Dict],
+        timeout: int,
+        temperature: Optional[float],
+        max_retries: int,
+    ) -> tuple[str, dict]:
+        """纯文本路径：单次请求 + 退避重试"""
+        last_error = None
+        retry_delay = 2
+
+        for attempt in range(max_retries + 1):
+            try:
+                start_time = time.monotonic()
+
+                create_kwargs: Dict[str, Any] = {
+                    "model": self.model,
+                    "messages": messages,
+                }
+                if temperature is not None:
+                    create_kwargs["temperature"] = temperature
+
+                response = await asyncio.wait_for(
+                    client.chat.completions.create(**create_kwargs),
+                    timeout=timeout,
+                )
+
+                latency = time.monotonic() - start_time
+                content = self._filter_think_tags(
+                    response.choices[0].message.content or ""
+                )
+
+                metadata = {
+                    "latency": latency,
+                    "model": self.model,
+                    "tokens_input": response.usage.prompt_tokens if response.usage else 0,
+                    "tokens_output": response.usage.completion_tokens if response.usage else 0,
+                    "tool_rounds": 0,
+                    "tool_names": [],
+                    "cached_tokens": self._get_cached_tokens(response),
+                    "round_records": [],
+                }
+
+                return content, metadata
+
+            except asyncio.TimeoutError as e:
+                last_error = e
+                if attempt < max_retries:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                continue
+
+            except Exception as e:
+                last_error = e
+                error_msg = str(e).lower()
+                retryable = any(
+                    keyword in error_msg for keyword in _RETRYABLE_KEYWORDS
+                )
+                if retryable and attempt < max_retries:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                raise
+
+        raise last_error or Exception("LLM request failed after retries")
+
+    async def _generate_with_tools(
+        self,
+        client: Any,
+        messages: List[Dict],
+        tools: List[Dict],
+        tool_choice: str,
+        tool_executor: Optional[ToolExecutor],
+        max_tool_rounds: int,
+        timeout: int,
+        temperature: Optional[float],
+        on_round_complete: Optional[
+            Callable[[int, RoundResult, List[Dict]], Awaitable[Optional[Dict]]]
+        ],
+        max_round_callbacks: int,
+    ) -> tuple[str, dict]:
+        """工具路径：多轮循环，L1/L2 纠正回调"""
+        current_messages = list(messages)
         round_records: List[Dict[str, Any]] = []
         total_tool_calls = 0
         all_tool_names: List[str] = []
-        retry_count = 0  # 独立重试计数器，避免轮次过多时退避时间过长
+        retry_count = 0
         callback_count = 0
         tool_round_num = 0
         total_rounds = 0
@@ -315,25 +244,24 @@ class LLMClient:
                     "model": self.model,
                     "messages": current_messages,
                     "tools": tools,
-                    "tool_choice": "auto",
+                    "tool_choice": tool_choice,
                 }
                 if temperature is not None:
                     create_kwargs["temperature"] = temperature
 
                 response = await asyncio.wait_for(
                     client.chat.completions.create(**create_kwargs),
-                    timeout=timeout
+                    timeout=timeout,
                 )
 
                 total_rounds += 1
                 message = response.choices[0].message
 
-                # 检查单轮工具调用数量上限
+                # 截断超限的工具调用
                 if message.tool_calls and len(message.tool_calls) > self.MAX_TOOLS_PER_ROUND:
                     logger.warning(
                         f"工具调用数量超限: {len(message.tool_calls)} > {self.MAX_TOOLS_PER_ROUND}"
                     )
-                    # 截断到上限
                     message.tool_calls = message.tool_calls[:self.MAX_TOOLS_PER_ROUND]
 
                 result = RoundResult(
@@ -360,20 +288,33 @@ class LLMClient:
                 }
                 round_records.append(round_record)
 
-                # ── Round callback (injection) ──
-                if on_round_complete is not None and callback_count < max_round_callbacks:
+                # ── L1: 内置纠正注入（仅在未达工具轮次上限时）──
+                if (
+                    tool_round_num < max_tool_rounds
+                    and not result.tool_calls
+                    and tool_choice == "required"
+                    and callback_count < max_round_callbacks
+                ):
+                    current_messages.append(dict(self._L1_CORRECTION_MESSAGE))
+                    callback_count += 1
+                    round_record["callback"] = dict(self._L1_CORRECTION_MESSAGE)
+                    continue
+
+                # ── L2: 领域回调（仅在未达工具轮次上限时）──
+                if (
+                    tool_round_num < max_tool_rounds
+                    and on_round_complete is not None
+                    and callback_count < max_round_callbacks
+                ):
                     injected = await on_round_complete(tool_round_num, result, current_messages)
                     if injected is not None:
                         current_messages.append(injected)
                         callback_count += 1
                         round_record["callback"] = injected
-                        continue  # 跳过原流程，直接进入下一轮 LLM
+                        continue
 
-                # 如果没有工具调用，直接返回内容
+                # 无工具调用 → 返回内容
                 if not message.tool_calls:
-                    content = result.content
-
-                    # 收集元数据
                     metadata = {
                         "model": self.model,
                         "tool_rounds": tool_round_num,
@@ -381,18 +322,15 @@ class LLMClient:
                         "tool_names": all_tool_names,
                         "tokens_input": response.usage.prompt_tokens if response.usage else 0,
                         "tokens_output": response.usage.completion_tokens if response.usage else 0,
-                        # Phase 3: 缓存数据收集
                         "cached_tokens": self._get_cached_tokens(response),
                         "callback_count": callback_count,
                         "round_records": round_records,
                     }
+                    return result.content, metadata
 
-                    return content, metadata
-
-                # 有工具调用，需要执行工具并继续对话
+                # ── 执行工具调用 ──
                 total_tool_calls += len(message.tool_calls)
 
-                # 将 assistant 的消息（含 tool_calls）加入上下文
                 current_messages.append({
                     "role": "assistant",
                     "content": message.content or "",
@@ -403,33 +341,30 @@ class LLMClient:
                             "function": {
                                 "name": tc.function.name,
                                 "arguments": tc.function.arguments,
-                            }
+                            },
                         }
                         for tc in message.tool_calls
-                    ]
+                    ],
                 })
 
-                # 如果没有提供 tool_executor，将错误作为工具结果返回给 LLM
                 if tool_executor is None:
                     logger.error(
                         f"工具调用失败: tool_executor is None, "
                         f"tool_names={[tc.function.name for tc in message.tool_calls]}"
                     )
-                    # 将错误作为工具结果返回给 LLM，让它生成友好回复
                     for tc in message.tool_calls:
                         current_messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": "[System note: Tool execution is temporarily unavailable, please respond without using this information]"
+                            "content": "[System note: Tool execution is temporarily unavailable, please respond without using this information]",
                         })
                         round_record["tool_results"].append({
                             "tool_call_id": tc.id,
                             "content": "[System note: Tool execution is temporarily unavailable]",
                         })
                     tool_round_num += 1
-                    continue  # 继续循环，让 LLM 基于错误信息生成合适的回复
+                    continue
 
-                # 执行工具调用
                 tool_calls = [
                     {
                         "id": tc.id,
@@ -443,56 +378,73 @@ class LLMClient:
                 try:
                     tool_results = await tool_executor(tool_calls)
                 except Exception as e:
-                    # 工具执行失败，返回错误信息
                     return f"（工具执行失败: {e}）", {
                         "model": self.model,
                         "tool_rounds": tool_round_num,
+                        "total_tool_calls": total_tool_calls,
+                        "callback_count": callback_count,
+                        "tokens_input": 0,
+                        "tokens_output": 0,
+                        "cached_tokens": 0,
                         "error": str(e),
+                        "tool_names": all_tool_names,
                         "round_records": round_records,
                     }
 
-                # 将工具结果加入上下文
-                for result in tool_results:
+                for result_item in tool_results:
                     current_messages.append({
                         "role": "tool",
-                        "tool_call_id": result["tool_call_id"],
-                        "content": result["content"],
+                        "tool_call_id": result_item["tool_call_id"],
+                        "content": result_item["content"],
                     })
                     round_record["tool_results"].append({
-                        "tool_call_id": result["tool_call_id"],
-                        "content": result["content"],
+                        "tool_call_id": result_item["tool_call_id"],
+                        "content": result_item["content"],
                     })
 
                 tool_round_num += 1
-                # 继续下一轮循环，让 LLM 基于工具结果生成回复
+                if tool_round_num >= max_tool_rounds:
+                    return result.content or "", {
+                        "model": self.model,
+                        "tool_rounds": tool_round_num,
+                        "total_tool_calls": total_tool_calls,
+                        "tool_names": all_tool_names,
+                        "callback_count": callback_count,
+                        "tokens_input": response.usage.prompt_tokens if response.usage else 0,
+                        "tokens_output": response.usage.completion_tokens if response.usage else 0,
+                        "cached_tokens": self._get_cached_tokens(response),
+                        "round_records": round_records,
+                    }
                 continue
 
             except Exception as e:
                 error_msg = str(e).lower()
-                # 检查是否需要重试的错误（包含 timeout）
                 retryable = (
                     any(keyword in error_msg for keyword in _RETRYABLE_KEYWORDS)
                     or isinstance(e, asyncio.TimeoutError)
                 )
 
-                if not retryable or retry_count >= 3:  # 最多重试 3 次
+                if not retryable or retry_count >= 3:
                     raise
 
-                # timeout 与其他可重试异常共享总轮次预算
-                total_rounds += 1
                 retry_count += 1
                 retry_delay = 2 * (2 ** retry_count)
-                logger.warning(f"工具调用第 {tool_round_num + 1} 轮失败，{retry_delay}秒后重试: {e}")
+                logger.warning(
+                    f"工具调用第 {tool_round_num + 1} 轮失败，{retry_delay}秒后重试: {e}"
+                )
                 await asyncio.sleep(retry_delay)
                 continue
 
-        # 达到最大轮次仍未完成
-        return "（工具调用次数超过限制）", {
+        # 达到最大轮次
+        return "", {
             "model": self.model,
             "tool_rounds": tool_round_num,
             "total_tool_calls": total_tool_calls,
             "tool_names": all_tool_names,
             "callback_count": callback_count,
+            "tokens_input": 0,
+            "tokens_output": 0,
+            "cached_tokens": 0,
             "round_records": round_records,
         }
 

@@ -355,110 +355,16 @@ class LLMRouter:
 
     async def generate(
         self,
-        messages: List[Dict[str, str]],
-        model_tier: ModelTier = ModelTier.PRIMARY,
-        timeout: Optional[int] = None,
-        temperature: Optional[float] = None,
-        user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
-    ) -> str:
-        """
-        生成回复
-
-        Args:
-            messages: 消息列表
-            model_tier: 模型层级（primary/auxiliary）
-            timeout: 超时时间（覆盖默认）
-            temperature: 采样温度；None 时使用服务端默认
-            user_id: 用户ID（用于配额检查）
-            group_id: 群ID（用于配额检查）
-
-        Returns:
-            回复文本
-
-        Raises:
-            QuotaExceeded: 当配额超限时
-        """
-        tier_name, client, user_config, actual_timeout = await self._prepare_request(
-            model_tier, user_id, group_id, timeout
-        )
-
-        session_id = f"{user_id or ''}:{group_id or ''}:{uuid.uuid4().hex[:16]}"
-
-        async with self.semaphore:
-            self.stats[tier_name]["requests"] += 1
-            content, _ = await self._execute_and_trace(
-                client,
-                tier_name,
-                client.chat(
-                    messages=messages,
-                    timeout=actual_timeout,
-                    temperature=temperature,
-                ),
-                session_id=session_id,
-                user_id=user_id,
-                group_id=group_id,
-                messages=messages,
-                temperature=temperature,
-                model_tier=model_tier,
-                is_tools=False,
-            )
-            return content
-
-    async def generate_with_forced_tool(
-        self,
         messages: List[Dict],
-        tools: List[Dict],
-        tool_name: str,
-        model_tier: ModelTier = ModelTier.AUXILIARY,
-        timeout: Optional[int] = None,
-        temperature: Optional[float] = None,
-        user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
-    ) -> tuple[str, dict]:
-        """
-        强制调用指定工具，只发一轮请求。
-        """
-        tier_name, client, user_config, actual_timeout = await self._prepare_request(
-            model_tier, user_id, group_id, timeout
-        )
-
-        session_id = f"{user_id or ''}:{group_id or ''}:{uuid.uuid4().hex[:16]}"
-
-        async with self.semaphore:
-            self.stats[tier_name]["requests"] += 1
-            content, metadata = await self._execute_and_trace(
-                client,
-                tier_name,
-                client.generate_with_forced_tool(
-                    messages=messages,
-                    tools=tools,
-                    tool_name=tool_name,
-                    timeout=actual_timeout,
-                    temperature=temperature,
-                ),
-                session_id=session_id,
-                user_id=user_id,
-                group_id=group_id,
-                messages=messages,
-                temperature=temperature,
-                model_tier=model_tier,
-                is_tools=True,
-            )
-            return content, metadata
-
-    # ── Phase 3: 工具调用
-    async def generate_with_tools(
-        self,
-        messages: List[Dict],
-        tools: List[Dict],
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[str] = None,
         tool_executor: Optional[
             Callable[[List[Dict]], Awaitable[List[Dict]]]
         ] = None,
+        max_tool_rounds: int = 5,
         model_tier: ModelTier = ModelTier.PRIMARY,
         timeout: Optional[int] = None,
         temperature: Optional[float] = None,
-        max_tool_rounds: int = 5,
         user_id: Optional[str] = None,
         group_id: Optional[str] = None,
         on_round_complete: Optional[
@@ -467,21 +373,24 @@ class LLMRouter:
         max_round_callbacks: int = 3,
     ) -> tuple[str, dict]:
         """
-        生成回复，支持工具调用（完整循环）
+        统一 LLM 生成入口，参数化控制工具调用与多轮循环。
 
         Args:
             messages: 消息列表
-            tools: 工具定义列表
-            tool_executor: 工具执行回调函数，接收 tool_calls 列表，返回 tool_results 列表
+            tools: 工具定义列表（None/空 → 纯文本路径）
+            tool_choice: None | "auto" | "required"
+            tool_executor: 工具执行回调
+            max_tool_rounds: 最多工具调用轮次
             model_tier: 模型层级
-            timeout: 超时时间
+            timeout: 超时时间（覆盖默认）
             temperature: 采样温度
-            max_tool_rounds: 最多多少轮工具调用
             user_id: 用户ID（用于配额检查）
             group_id: 群ID（用于配额检查）
+            on_round_complete: L2 领域回调
+            max_round_callbacks: L1+L2 回调注入最大次数
 
         Returns:
-            (回复文本, 元数据字典)
+            (content, metadata)
 
         Raises:
             QuotaExceeded: 当配额超限时
@@ -497,9 +406,10 @@ class LLMRouter:
             content, metadata = await self._execute_and_trace(
                 client,
                 tier_name,
-                client.chat_with_tools(
+                client.generate(
                     messages=messages,
                     tools=tools,
+                    tool_choice=tool_choice,
                     tool_executor=tool_executor,
                     max_tool_rounds=max_tool_rounds,
                     timeout=actual_timeout,
@@ -513,7 +423,7 @@ class LLMRouter:
                 messages=messages,
                 temperature=temperature,
                 model_tier=model_tier,
-                is_tools=True,
+                is_tools=bool(tools),
             )
             return content, metadata
 

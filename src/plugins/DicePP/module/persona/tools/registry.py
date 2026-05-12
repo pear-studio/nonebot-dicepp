@@ -75,7 +75,7 @@ class ToolRegistry:
 
     def make_executor_for(self, *domains: str, ctx: ToolContext):
         """
-        返回闭包，作为 LLMRouter.generate_with_tools 的 tool_executor 回调。
+        返回闭包，作为 LLMRouter.generate() 的 tool_executor 回调。
 
         所有 executor 签名统一: async (args: dict, ctx: ToolContext) -> str
         ctx 在运行时注入，executor 不持有任何外部 import。

@@ -134,8 +134,7 @@ class TestScoringAgentPrompt:
         assert "你好" in prompt
         assert "你好呀~" in prompt
         assert "张三" in prompt
-        assert "deltas" in prompt
-        assert "facts" in prompt
+        assert "score_relationship" in prompt
 
     def test_build_prompt_empty_profile(self):
         """测试空档案的 Prompt"""
