@@ -4,10 +4,12 @@ LLM 客户端封装
 基于 AsyncOpenAI 的异步客户端，支持超时和错误处理
 """
 import asyncio
-from dataclasses import dataclass
-from nonebot.log import logger
-from typing import List, Dict, Optional, Any, Callable, Awaitable, TypedDict
+import re
 import time
+from dataclasses import dataclass
+from typing import List, Dict, Optional, Any, Callable, Awaitable, TypedDict
+
+from nonebot.log import logger
 
 
 class ToolCallInfo(TypedDict):
@@ -74,12 +76,19 @@ class LLMClient:
                 raise ImportError("openai package is required. Install with: pip install openai")
         return self._client
 
+    _THINK_RE = r'<think>.*?</think>'
+
+    @staticmethod
+    def _extract_think(content: Optional[str]) -> Optional[str]:
+        """提取全部 <think>...</think> 块内容（含标签），无则返回 None"""
+        if not content:
+            return None
+        blocks = re.findall(LLMClient._THINK_RE, content, flags=re.DOTALL)
+        return "".join(blocks) if blocks else None
+
     def _filter_think_tags(self, content: str) -> str:
         """过滤 <think>...</think> 思考过程标签"""
-        import re
-        # 移除 <think>...</think> 及其内容
-        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
-        # 清理多余的空白
+        content = re.sub(self._THINK_RE, '', content, flags=re.DOTALL)
         content = content.strip()
         return content
 
@@ -286,10 +295,12 @@ class LLMClient:
             max_round_callbacks: 回调注入最大次数。
 
         Returns:
-            (最终回复文本, 元数据字典)
+            (最终回复文本, 元数据字典)。metadata 含 round_records 列表，
+            每轮记录 think/tool_calls/tool_results/callback。
         """
         client = self._get_client()
         current_messages = list(messages)  # 复制一份，避免修改原列表
+        round_records: List[Dict[str, Any]] = []
         total_tool_calls = 0
         all_tool_names: List[str] = []
         retry_count = 0  # 独立重试计数器，避免轮次过多时退避时间过长
@@ -337,12 +348,25 @@ class LLMClient:
                     ],
                 )
 
+                round_record: Dict[str, Any] = {
+                    "round": tool_round_num,
+                    "think": self._extract_think(message.content or ""),
+                    "tool_calls": [
+                        {"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments}
+                        for tc in (message.tool_calls or [])
+                    ],
+                    "tool_results": [],
+                    "callback": None,
+                }
+                round_records.append(round_record)
+
                 # ── Round callback (injection) ──
                 if on_round_complete is not None and callback_count < max_round_callbacks:
                     injected = await on_round_complete(tool_round_num, result, current_messages)
                     if injected is not None:
                         current_messages.append(injected)
                         callback_count += 1
+                        round_record["callback"] = injected
                         continue  # 跳过原流程，直接进入下一轮 LLM
 
                 # 如果没有工具调用，直接返回内容
@@ -360,6 +384,7 @@ class LLMClient:
                         # Phase 3: 缓存数据收集
                         "cached_tokens": self._get_cached_tokens(response),
                         "callback_count": callback_count,
+                        "round_records": round_records,
                     }
 
                     return content, metadata
@@ -397,6 +422,10 @@ class LLMClient:
                             "tool_call_id": tc.id,
                             "content": "[System note: Tool execution is temporarily unavailable, please respond without using this information]"
                         })
+                        round_record["tool_results"].append({
+                            "tool_call_id": tc.id,
+                            "content": "[System note: Tool execution is temporarily unavailable]",
+                        })
                     tool_round_num += 1
                     continue  # 继续循环，让 LLM 基于错误信息生成合适的回复
 
@@ -419,12 +448,17 @@ class LLMClient:
                         "model": self.model,
                         "tool_rounds": tool_round_num,
                         "error": str(e),
+                        "round_records": round_records,
                     }
 
                 # 将工具结果加入上下文
                 for result in tool_results:
                     current_messages.append({
                         "role": "tool",
+                        "tool_call_id": result["tool_call_id"],
+                        "content": result["content"],
+                    })
+                    round_record["tool_results"].append({
                         "tool_call_id": result["tool_call_id"],
                         "content": result["content"],
                     })
@@ -459,6 +493,7 @@ class LLMClient:
             "total_tool_calls": total_tool_calls,
             "tool_names": all_tool_names,
             "callback_count": callback_count,
+            "round_records": round_records,
         }
 
     def _get_cached_tokens(self, response) -> int:

@@ -80,6 +80,14 @@ class TestChatWithTools:
         assert metadata["tool_rounds"] == 0
         assert metadata["total_tool_calls"] == 0
 
+        rr = metadata["round_records"]
+        assert len(rr) == 1
+        assert rr[0]["round"] == 0
+        assert rr[0]["think"] is None
+        assert rr[0]["tool_calls"] == []
+        assert rr[0]["tool_results"] == []
+        assert rr[0]["callback"] is None
+
     @pytest.mark.asyncio
     async def test_single_tool_call(self):
         """测试单次工具调用"""
@@ -152,6 +160,19 @@ class TestChatWithTools:
         assert metadata["total_tool_calls"] == 1
         assert "search_memory" in metadata["tool_names"]
 
+        # round_records: 2 entries — tool call round + final round
+        rr = metadata["round_records"]
+        assert len(rr) == 2
+        assert rr[0]["round"] == 0
+        assert rr[0]["think"] is None
+        assert rr[0]["callback"] is None
+        assert rr[0]["tool_calls"] == [{"id": "tc_1", "name": "search_memory", "arguments": '{"query": "猫"}'}]
+        assert rr[0]["tool_results"] == [{"tool_call_id": "tc_1", "content": "工具 search_memory 执行结果"}]
+        assert rr[1]["round"] == 1  # tool_round_num 在上轮递增
+        assert rr[1]["think"] is None
+        assert rr[1]["tool_calls"] == []
+        assert rr[1]["tool_results"] == []
+
     @pytest.mark.asyncio
     async def test_tool_executor_none_graceful_fallback(self):
         """测试 tool_executor 为 None 时优雅降级，将错误返回给 LLM 处理"""
@@ -203,6 +224,14 @@ class TestChatWithTools:
         # 验证：元数据中包含工具调用轮次
         assert metadata["tool_rounds"] == 1
 
+        rr = metadata["round_records"]
+        assert len(rr) == 2
+        assert rr[0]["round"] == 0
+        assert rr[0]["tool_calls"][0]["name"] == "search_memory"
+        assert len(rr[0]["tool_results"]) == 1
+        assert "temporarily unavailable" in rr[0]["tool_results"][0]["content"]
+        assert rr[0]["tool_results"][0]["tool_call_id"] == "tc_1"
+
     @pytest.mark.asyncio
     async def test_tool_execution_failure(self):
         """测试工具执行失败处理"""
@@ -241,6 +270,12 @@ class TestChatWithTools:
 
         assert "工具执行失败" in content
         assert "数据库连接失败" in metadata["error"]
+
+        rr = metadata["round_records"]
+        assert len(rr) == 1
+        assert rr[0]["round"] == 0
+        assert rr[0]["tool_calls"][0]["name"] == "search_memory"
+        assert rr[0]["tool_results"] == []  # 执行失败，无结果
 
     @pytest.mark.asyncio
     async def test_generate_with_forced_tool_no_tool_calls_raises(self):
@@ -321,6 +356,15 @@ class TestChatWithTools:
         assert "工具调用次数超过限制" in content
         assert metadata["tool_rounds"] == 2
 
+        rr = metadata["round_records"]
+        assert len(rr) == 2
+        assert rr[0]["round"] == 0
+        assert rr[0]["tool_calls"][0]["name"] == "search_memory"
+        assert len(rr[0]["tool_results"]) == 1
+        assert rr[1]["round"] == 1
+        assert rr[1]["tool_calls"][0]["name"] == "search_memory"
+        assert len(rr[1]["tool_results"]) == 1
+
     @pytest.mark.asyncio
     async def test_callback_injection_appends_message_and_continues(self):
         """回调返回 dict 时注入消息并继续循环"""
@@ -368,6 +412,14 @@ class TestChatWithTools:
         assert content == "world"
         assert metadata["callback_count"] == 1
         assert metadata["tool_rounds"] == 0
+
+        rr = metadata["round_records"]
+        assert len(rr) == 2
+        assert rr[0]["callback"] == {"role": "system", "content": "inject"}
+        assert rr[0]["tool_calls"] == []
+        assert rr[0]["tool_results"] == []
+        assert rr[1]["callback"] is None
+
         # Verify injected message was appended
         second_call_messages = mock_openai_client.chat.completions.create.await_args_list[1][1]["messages"]
         assert any(m.get("content") == "inject" for m in second_call_messages)
@@ -498,6 +550,99 @@ class TestChatWithTools:
         assert "on_round_complete" not in sig.parameters
         assert "max_round_callbacks" not in sig.parameters
 
+    @pytest.mark.asyncio
+    async def test_round_records_with_think_and_multiple_tool_rounds(self):
+        """round_records 完整记录 think / tool_calls / tool_results / callback"""
+        client = LLMClient(
+            api_key="test_key",
+            base_url="https://api.test.com/v1",
+            model="gpt-4o"
+        )
+
+        # Round 0: think + tool_call
+        r0 = Mock()
+        r0.choices = [Mock()]
+        r0.choices[0].message = Mock()
+        r0.choices[0].message.content = "<think>需要查询记忆</think>"
+        r0.choices[0].message.tool_calls = [
+            MockToolCall("tc_1", "search_memory", '{"query":"猫"}')
+        ]
+        r0.usage = None
+
+        # Round 1: think + tool_call (second round, different tool)
+        r1 = Mock()
+        r1.choices = [Mock()]
+        r1.choices[0].message = Mock()
+        r1.choices[0].message.content = "<think>还需要掷骰</think>"
+        r1.choices[0].message.tool_calls = [
+            MockToolCall("tc_2", "roll_dice", '{"expr":"2d6"}')
+        ]
+        r1.usage = None
+
+        # Round 2: think + final response (no tool_calls)
+        r2 = Mock()
+        r2.choices = [Mock()]
+        r2.choices[0].message = Mock()
+        r2.choices[0].message.content = "<think>回答准备好了</think>你喜欢猫！"
+        r2.choices[0].message.tool_calls = None
+        r2.usage = None
+
+        mock_openai_client = Mock()
+        mock_openai_client.chat.completions.create = AsyncMock(
+            side_effect=[r0, r1, r2]
+        )
+        client._client = mock_openai_client
+
+        async def mock_executor(tool_calls):
+            return [
+                {"tool_call_id": tc["id"], "content": f"[{tc['name']}] result"}
+                for tc in tool_calls
+            ]
+
+        content, metadata = await client.chat_with_tools(
+            messages=[{"role": "user", "content": "test"}],
+            tools=[
+                {"type": "function", "function": {"name": "search_memory"}},
+                {"type": "function", "function": {"name": "roll_dice"}},
+            ],
+            tool_executor=mock_executor,
+            max_tool_rounds=5,
+        )
+
+        assert content == "你喜欢猫！"
+        assert metadata["tool_rounds"] == 2
+        assert metadata["total_tool_calls"] == 2
+
+        rr = metadata["round_records"]
+        assert len(rr) == 3  # 2 tool rounds + 1 final
+
+        # Round 0: tool call
+        assert rr[0]["round"] == 0
+        assert rr[0]["think"] == "<think>需要查询记忆</think>"
+        assert rr[0]["callback"] is None
+        assert rr[0]["tool_calls"] == [
+            {"id": "tc_1", "name": "search_memory", "arguments": '{"query":"猫"}'}
+        ]
+        assert rr[0]["tool_results"] == [
+            {"tool_call_id": "tc_1", "content": "[search_memory] result"}
+        ]
+
+        # Round 1: second tool call
+        assert rr[1]["round"] == 1
+        assert rr[1]["think"] == "<think>还需要掷骰</think>"
+        assert rr[1]["tool_calls"] == [
+            {"id": "tc_2", "name": "roll_dice", "arguments": '{"expr":"2d6"}'}
+        ]
+        assert rr[1]["tool_results"] == [
+            {"tool_call_id": "tc_2", "content": "[roll_dice] result"}
+        ]
+
+        # Round 2: final, no tool_calls, think preserved
+        assert rr[2]["round"] == 2
+        assert rr[2]["think"] == "<think>回答准备好了</think>"
+        assert rr[2]["tool_calls"] == []
+        assert rr[2]["tool_results"] == []
+
 
 class TestFilterThinkTags:
     """<think> 标签过滤（client 层模型输出归一化）"""
@@ -549,3 +694,32 @@ class TestFilterThinkTags:
         client = LLMClient(api_key="k", base_url="http://x", model="m")
         result = client._filter_think_tags("  \t\n  ")
         assert result == ""
+
+
+class TestExtractThink:
+    """_extract_think 功能验证"""
+
+    def test_extracts_single_think_block(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        think = client._extract_think("<think>用户问的是前两个观察</think>")
+        assert think == "<think>用户问的是前两个观察</think>"
+
+    def test_extracts_multiple_think_blocks(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        think = client._extract_think("<think>A</think>\n<think>B</think>")
+        assert think == "<think>A</think><think>B</think>"
+
+    def test_returns_none_when_no_think(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        think = client._extract_think("这是普通文本")
+        assert think is None
+
+    def test_handles_multiline_think(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        think = client._extract_think("<think>\n分析中...\n</think>")
+        assert think == "<think>\n分析中...\n</think>"
+
+    def test_only_extracts_think_blocks_not_surrounding_text(self):
+        client = LLMClient(api_key="k", base_url="http://x", model="m")
+        think = client._extract_think("你好<think>思考</think>再见")
+        assert think == "<think>思考</think>"

@@ -87,6 +87,7 @@ class PersonaDataStore:
         await self._ensure_daily_events_delta_columns()
         await self._ensure_daily_events_context_summary()
         await self._ensure_scoring_failures_table()
+        await self._ensure_llm_traces_round_messages()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
         """
@@ -249,6 +250,16 @@ class PersonaDataStore:
         if "conversation_digest" not in col_names:
             await self.db.execute(
                 "ALTER TABLE persona_scoring_failures ADD COLUMN conversation_digest TEXT DEFAULT ''"
+            )
+
+    async def _ensure_llm_traces_round_messages(self) -> None:
+        """为 LLM trace 表增加 round_messages 列（兼容旧库升级）。"""
+        async with self.db.execute("PRAGMA table_info(persona_llm_traces)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {r[1] for r in rows}
+        if "round_messages" not in col_names:
+            await self.db.execute(
+                "ALTER TABLE persona_llm_traces ADD COLUMN round_messages TEXT DEFAULT ''"
             )
 
     # ========== 消息相关 ==========
@@ -516,9 +527,9 @@ class PersonaDataStore:
             """
             INSERT INTO persona_llm_traces (
                 session_id, user_id, group_id, model, tier,
-                messages, response, tool_calls, latency_ms,
+                messages, response, tool_calls, round_messages, latency_ms,
                 tokens_in, tokens_out, temperature, status, error, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trace.session_id,
@@ -529,6 +540,7 @@ class PersonaDataStore:
                 trace.messages,
                 trace.response,
                 trace.tool_calls,
+                trace.round_messages,
                 trace.latency_ms,
                 trace.tokens_in,
                 trace.tokens_out,
@@ -548,7 +560,7 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT id, session_id, user_id, group_id, model, tier,
-                   messages, response, tool_calls, latency_ms,
+                   messages, response, tool_calls, round_messages, latency_ms,
                    tokens_in, tokens_out, temperature, status, error, created_at
             FROM persona_llm_traces
             WHERE user_id = ?
@@ -570,13 +582,14 @@ class PersonaDataStore:
                     messages=row[6],
                     response=row[7],
                     tool_calls=row[8] or "",
-                    latency_ms=row[9],
-                    tokens_in=row[10] or 0,
-                    tokens_out=row[11] or 0,
-                    temperature=row[12],
-                    status=row[13],
-                    error=row[14] or "",
-                    created_at=datetime.fromisoformat(row[15]) if row[15] else None,
+                    round_messages=row[9] or "",
+                    latency_ms=row[10],
+                    tokens_in=row[11] or 0,
+                    tokens_out=row[12] or 0,
+                    temperature=row[13],
+                    status=row[14],
+                    error=row[15] or "",
+                    created_at=datetime.fromisoformat(row[16]) if row[16] else None,
                 ))
             return traces
 

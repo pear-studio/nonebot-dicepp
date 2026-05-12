@@ -258,6 +258,7 @@ CREATE TABLE IF NOT EXISTS persona_llm_traces (
     messages TEXT NOT NULL,
     response TEXT NOT NULL,
     tool_calls TEXT DEFAULT '',
+    round_messages TEXT DEFAULT '',
     latency_ms INTEGER,
     tokens_in INTEGER DEFAULT 0,
     tokens_out INTEGER DEFAULT 0,

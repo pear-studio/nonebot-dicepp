@@ -274,6 +274,7 @@ class LLMTraceRecord(BaseModel):
     messages: str  # JSON
     response: str
     tool_calls: str = ""  # JSON
+    round_messages: str = ""  # JSON — 结构化轮次摘要
     latency_ms: Optional[int] = None
     tokens_in: int = 0
     tokens_out: int = 0

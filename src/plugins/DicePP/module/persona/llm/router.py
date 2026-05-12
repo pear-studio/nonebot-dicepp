@@ -334,6 +334,7 @@ class LLMRouter:
             tool_calls_for_trace: List[Dict] = []
             if is_tools and metadata and metadata.get("tool_names"):
                 tool_calls_for_trace = [{"name": n} for n in metadata["tool_names"]]
+            round_records = metadata.get("round_records", []) if metadata else []
             self._maybe_record_trace(
                 session_id=session_id,
                 user_id=user_id,
@@ -343,6 +344,7 @@ class LLMRouter:
                 messages=messages,
                 response=response_text,
                 tool_calls=tool_calls_for_trace,
+                round_records=round_records,
                 latency_ms=latency_ms,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
@@ -578,6 +580,7 @@ class LLMRouter:
         messages: List[Dict],
         response: str,
         tool_calls: List[Dict],
+        round_records: List[Dict],
         latency_ms: int,
         tokens_in: int,
         tokens_out: int,
@@ -591,6 +594,14 @@ class LLMRouter:
             return
         from ..data.models import LLMTraceRecord
 
+        _MAX_ROUND_MESSAGES_BYTES = 100 * 1024
+        round_json = json.dumps(round_records, ensure_ascii=False, default=str)
+        if len(round_json.encode("utf-8")) > _MAX_ROUND_MESSAGES_BYTES:
+            round_json = json.dumps(
+                {"_truncated": True, "reason": "round_messages exceeded 100KB", "rounds": len(round_records)},
+                ensure_ascii=False,
+            )
+
         trace = LLMTraceRecord(
             session_id=session_id,
             user_id=user_id or "",
@@ -600,6 +611,7 @@ class LLMRouter:
             messages=json.dumps(messages, ensure_ascii=False, default=str),
             response=response,
             tool_calls=json.dumps(tool_calls, ensure_ascii=False, default=str),
+            round_messages=round_json,
             latency_ms=latency_ms,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
