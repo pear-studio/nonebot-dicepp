@@ -146,7 +146,6 @@ class TestWarmthLevelRefuse:
         """好感度 5 分应该在冷淡区间（0）"""
         rel = RelationshipState(
             user_id="test",
-            group_id="",
             intimacy=5.0,
             passion=5.0,
             trust=5.0,
@@ -163,7 +162,6 @@ class TestWarmthLevelRefuse:
         """好感度 30 分应该在疏远区间（1）"""
         rel = RelationshipState(
             user_id="test",
-            group_id="",
             intimacy=30.0,
             passion=30.0,
             trust=30.0,

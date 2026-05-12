@@ -98,12 +98,13 @@ class TargetSelector:
         # === Normal 策略 ===
         try:
             high_score = await self.data_store.get_top_relationships(limit=20)
+            logger.debug(f"Normal 策略: get_top_relationships 返回 {len(high_score)} 个候选")
             for rel in high_score:
                 eff = effective_for_proactive(rel, self._decay_calculator, self._character)
                 key = f"user:{rel.user_id}"
                 if key in seen_ids:
                     continue
-                if eff.composite_score >= 60 and not rel.group_id:
+                if eff.composite_score >= 60:
                     seen_ids.add(key)
                     targets.append(
                         ShareTarget(
@@ -113,7 +114,7 @@ class TargetSelector:
                             policy="normal",
                         )
                     )
-                elif 40 <= eff.composite_score < 60 and not rel.group_id:
+                elif 40 <= eff.composite_score < 60:
                     seen_ids.add(key)
                     targets.append(
                         ShareTarget(

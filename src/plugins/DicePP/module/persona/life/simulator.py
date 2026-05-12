@@ -181,7 +181,8 @@ class LifeSimulator:
                 await self.store.add_score_event(
                     ScoreEvent(
                         user_id=rel.user_id,
-                        group_id=rel.group_id,
+                        # 关系统一后衰减为全局行为，group_id 仅作审计（reason 字段已记录衰减标识）
+                        group_id="",
                         deltas=deltas,
                         composite_before=composite_before,
                         composite_after=rel.composite_score,

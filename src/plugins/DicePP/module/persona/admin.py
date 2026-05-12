@@ -74,8 +74,8 @@ class AdminDispatcher:
             ".ai admin stats - 查看今日 LLM 调用统计\n"
             ".ai admin errors - 查看最近 24h 错误摘要\n"
             ".ai admin debug - 查看当前上下文\n"
-            ".ai admin rel <用户ID> [群组ID] - 查看指定用户关系\n"
-            ".ai admin setrel <用户ID> <分数> [群组ID] - 修改好感度\n"
+            ".ai admin rel <用户ID> - 查看指定用户关系\n"
+            ".ai admin setrel <用户ID> <分数> - 修改好感度\n"
             ".ai admin reload - 热重载角色卡\n"
             ".ai admin events - 查看事件配置\n"
             ".ai admin list - 查看白名单\n"
@@ -174,7 +174,7 @@ class AdminDispatcher:
             lines.append("\n[状态] 模块未初始化")
             return "\n".join(lines)
         profile = await self.data_store.get_user_profile(user_id)
-        rel = await self._get_relationship_for_display(user_id, group_id)
+        rel = await self._get_relationship_for_display(user_id)
         lines.append(f"\n当前用户: {user_id}")
         if group_id:
             lines.append(f"当前群组: {group_id}")
@@ -231,14 +231,11 @@ class AdminDispatcher:
     async def _admin_rel(self, user_id: str, group_id: str, args: List[str]) -> str:
         rel_args = args[1:]
         if not rel_args:
-            return "用法: .ai admin rel <用户ID> [群组ID]"
+            return "用法: .ai admin rel <用户ID>"
         target_user = rel_args[0]
-        target_group = rel_args[1] if len(rel_args) > 1 else group_id
-        rel = await self._get_relationship_for_display(target_user, target_group)
+        rel = await self._get_relationship_for_display(target_user)
         profile = await self.data_store.get_user_profile(target_user)
         lines = [f"=== 用户 {target_user} 的关系详情 ==="]
-        if target_group:
-            lines.append(f"群组: {target_group}")
         if rel:
             lines.extend(self._format_relationship_base(rel))
             if self.app and self.app.get_character():
@@ -258,7 +255,7 @@ class AdminDispatcher:
     async def _admin_setrel(self, user_id: str, group_id: str, args: List[str]) -> str:
         setrel_args = args[1:]
         if len(setrel_args) < 2:
-            return "用法: .ai admin setrel <用户ID> <综合分数> [群组ID]"
+            return "用法: .ai admin setrel <用户ID> <综合分数>"
         target_user = setrel_args[0]
         try:
             new_score = float(setrel_args[1])
@@ -266,11 +263,10 @@ class AdminDispatcher:
             return "分数必须是数字"
         if new_score < 0 or new_score > 100:
             return "分数必须在 0-100 之间"
-        target_group = setrel_args[2] if len(setrel_args) > 2 else group_id
-        rel = await self.data_store.get_relationship(target_user, target_group)
+        rel = await self.data_store.get_relationship(target_user)
         if not rel:
             initial = self.app.get_initial_relationship() if self.app else 40.0
-            rel = await self.data_store.init_relationship(target_user, target_group, initial)
+            rel = await self.data_store.init_relationship(target_user, initial)
         rel.intimacy = new_score
         rel.passion = new_score
         rel.trust = new_score
@@ -493,12 +489,12 @@ class AdminDispatcher:
         return lines
 
     async def _get_relationship_for_display(
-        self, user_id: str, group_id: str
+        self, user_id: str
     ) -> Optional[Any]:
         """读取关系并应用惰性时间衰减（展示用，不写库）"""
         if not self.data_store:
             return None
-        rel = await self.data_store.get_relationship(user_id, group_id)
+        rel = await self.data_store.get_relationship(user_id)
         if not rel or not self.app or not self.app.get_decay_calculator() or not self.app.get_character():
             return rel
         return self.app.effective_relationship(rel)

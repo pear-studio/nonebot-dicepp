@@ -281,8 +281,8 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         assert "调试信息" in _get_sent_content(self.cmd)
 
     async def test_admin_rel(self):
-        rel = RelationshipState(user_id="u1", group_id="", intimacy=30, passion=30, trust=30, secureness=30)
-        self.cmd._get_relationship_for_display = AsyncMock(return_value=rel)
+        rel = RelationshipState(user_id="u1", intimacy=30, passion=30, trust=30, secureness=30)
+        self.cmd.admin_dispatcher._get_relationship_for_display = AsyncMock(return_value=rel)
         self.store.get_user_profile = AsyncMock(return_value=None)
         meta = _make_private_meta(".ai admin rel u1", user_id=self.user_id)
         await self.cmd.process_msg(".ai admin rel u1", meta, "admin")
@@ -290,7 +290,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
 
     async def test_admin_setrel(self):
         self.store.get_relationship = AsyncMock(return_value=None)
-        self.store.init_relationship = AsyncMock(return_value=RelationshipState(user_id="u1", group_id=""))
+        self.store.init_relationship = AsyncMock(return_value=RelationshipState(user_id="u1"))
         meta = _make_private_meta(".ai admin setrel u1 50", user_id=self.user_id)
         await self.cmd.process_msg(".ai admin setrel u1 50", meta, "admin")
         assert "已设置用户 u1 的好感度为 50.00" in _get_sent_content(self.cmd)
@@ -393,12 +393,13 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         assert "已启用" in _get_sent_content(self.cmd)
 
     async def test_profile(self):
-        rel = RelationshipState(user_id="user", group_id="", intimacy=30, passion=30, trust=30, secureness=30)
-        self.cmd._get_relationship_for_display = AsyncMock(return_value=rel)
+        rel = RelationshipState(user_id="user", intimacy=30, passion=30, trust=30, secureness=30)
+        self.store.get_relationship = AsyncMock(return_value=rel)
         self.store.get_user_profile = AsyncMock(return_value=UserProfile(user_id="user", facts={"name": "Xiao"}))
         self.store.get_recent_score_events = AsyncMock(return_value=[])
         self.store.get_earliest_message_time = AsyncMock(return_value=None)
         self.store.count_messages = AsyncMock(return_value=5)
+        self.cmd.app.get_decay_calculator = MagicMock(return_value=None)
         meta = _make_private_meta(".ai profile")
         await self.cmd.process_msg(".ai profile", meta, None)
         assert "你的档案" in _get_sent_content(self.cmd)

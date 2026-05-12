@@ -58,26 +58,26 @@ async def test_group_activity_decay_uses_config():
 
 
 @pytest.mark.asyncio
-async def test_get_top_relationships_includes_null_group_id_as_private():
+async def test_get_top_relationships_global_ranking():
     async with aiosqlite.connect(":memory:") as db:
         store = PersonaDataStore(db)
         await store.ensure_tables()
         await db.execute(
             """
             INSERT INTO persona_user_relationships
-            (user_id, group_id, intimacy, passion, trust, secureness, last_interaction_at, updated_at)
-            VALUES ('u_null', NULL, 80, 80, 80, 80, datetime('now'), datetime('now'))
+            (user_id, intimacy, passion, trust, secureness, last_interaction_at, updated_at)
+            VALUES ('u_high', 80, 80, 80, 80, datetime('now'), datetime('now'))
             """,
         )
         await db.execute(
             """
             INSERT INTO persona_user_relationships
-            (user_id, group_id, intimacy, passion, trust, secureness, last_interaction_at, updated_at)
-            VALUES ('u_empty', '', 70, 70, 70, 70, datetime('now'), datetime('now'))
+            (user_id, intimacy, passion, trust, secureness, last_interaction_at, updated_at)
+            VALUES ('u_mid', 70, 70, 70, 70, datetime('now'), datetime('now'))
             """,
         )
         await db.commit()
-        top = await store.get_top_relationships(group_id="", limit=10)
+        top = await store.get_top_relationships(limit=10)
         ids = {r.user_id for r in top}
-        assert "u_null" in ids
-        assert "u_empty" in ids
+        assert "u_high" in ids
+        assert "u_mid" in ids

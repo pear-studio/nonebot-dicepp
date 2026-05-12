@@ -293,7 +293,6 @@ class TestProactiveSchedulerMissYou:
         )
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=10,
             passion=10,
             trust=10,
@@ -313,7 +312,6 @@ class TestProactiveSchedulerMissYou:
         )
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=60,
             passion=60,
             trust=60,
@@ -333,7 +331,6 @@ class TestProactiveSchedulerMissYou:
         )
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=60,
             passion=60,
             trust=60,
@@ -391,7 +388,6 @@ class TestProactiveSchedulerMissProbability:
     def _make_rel(self, score: float, fake_now: datetime) -> RelationshipState:
         return RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=score,
             passion=score,
             trust=score,

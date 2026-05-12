@@ -19,7 +19,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=50.0,
             last_interaction_at=datetime.now() - timedelta(days=1),
             last_miss_sent_at=datetime.now() - timedelta(days=1),
@@ -31,7 +30,7 @@ class TestDecayCalculatorEdgeCases:
     def test_no_last_interaction_returns_zero(self):
         config = DecayConfig(enabled=True)
         calc = DecayCalculator(config)
-        rel = RelationshipState(user_id="u1", group_id="", intimacy=50.0, last_interaction_at=None)
+        rel = RelationshipState(user_id="u1", intimacy=50.0, last_interaction_at=None)
         deltas, reason = calc.calculate_decay(rel)
         assert deltas.intimacy == 0.0
         assert "无上次互动记录" in reason
@@ -42,7 +41,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=50.0,
             last_interaction_at=datetime.now() - timedelta(days=1),
             last_miss_sent_at=None,
@@ -56,7 +54,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=50.0,
             last_interaction_at=datetime.now() - timedelta(hours=4),
             last_miss_sent_at=datetime.now() - timedelta(hours=4),
@@ -76,7 +73,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=25.0,
             passion=25.0,
             trust=25.0,
@@ -101,7 +97,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=20.0,
             passion=20.0,
             trust=20.0,
@@ -125,7 +120,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=82.0,
             passion=82.0,
             trust=82.0,
@@ -149,7 +143,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=80.0,
             passion=80.0,
             trust=80.0,
@@ -173,7 +166,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=58.0,
             passion=58.0,
             trust=58.0,
@@ -197,7 +189,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=80.0,
             passion=80.0,
             trust=80.0,
@@ -214,7 +205,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=50.0,
             last_interaction_at=datetime.now() - timedelta(hours=2),
             last_miss_sent_at=datetime.now() - timedelta(hours=2),
@@ -227,7 +217,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=50.0,
             last_interaction_at=datetime.now() - timedelta(days=1),
             last_miss_sent_at=None,
@@ -239,7 +228,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=50.0,
             last_interaction_at=datetime.now() - timedelta(minutes=30),
             last_miss_sent_at=datetime.now() - timedelta(minutes=30),
@@ -251,7 +239,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=50.0,
             last_interaction_at=datetime.now() - timedelta(days=1),
             last_miss_sent_at=datetime.now() - timedelta(days=1),
@@ -261,7 +248,7 @@ class TestDecayCalculatorEdgeCases:
     def test_should_apply_decay_false_no_interaction(self):
         config = DecayConfig(enabled=True)
         calc = DecayCalculator(config)
-        rel = RelationshipState(user_id="u1", group_id="", intimacy=50.0, last_interaction_at=None)
+        rel = RelationshipState(user_id="u1", intimacy=50.0, last_interaction_at=None)
         assert calc.should_apply_decay(rel) is False
 
     def test_effective_relationship_returns_copy(self):
@@ -274,7 +261,6 @@ class TestDecayCalculatorEdgeCases:
         calc = DecayCalculator(config)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=50.0,
             passion=50.0,
             trust=50.0,
@@ -301,7 +287,6 @@ class TestDecayCalculatorEdgeCases:
         now = datetime(2026, 1, 2, 12, 0, 0)
         rel = RelationshipState(
             user_id="u1",
-            group_id="",
             intimacy=80.0,
             passion=80.0,
             trust=80.0,

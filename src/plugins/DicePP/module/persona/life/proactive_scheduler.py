@@ -425,7 +425,7 @@ class ProactiveScheduler(BoundaryReceiver):
         try:
             # 获取目标上下文
             user_profile = await self.data_store.get_user_profile(target.user_id)
-            rel = await self.data_store.get_relationship(target.user_id, target.group_id)
+            rel = await self.data_store.get_relationship(target.user_id)
 
             warmth_label = ""
             relationship_score = 0.0

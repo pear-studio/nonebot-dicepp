@@ -22,7 +22,6 @@ def test_decay_incremental_same_moment_no_double_apply():
     )
     rel = RelationshipState(
         user_id="u1",
-        group_id="",
         intimacy=80.0,
         passion=80.0,
         trust=80.0,
@@ -56,7 +55,6 @@ def test_decay_incremental_after_batch_user_message_only_new_idle():
     )
     rel = RelationshipState(
         user_id="u1",
-        group_id="",
         intimacy=80.0,
         passion=80.0,
         trust=80.0,
@@ -91,7 +89,6 @@ def test_decay_after_miss_accounts_full_idle():
     )
     rel = RelationshipState(
         user_id="u1",
-        group_id="",
         intimacy=80.0,
         passion=80.0,
         trust=80.0,
@@ -131,7 +128,6 @@ def test_decay_switch_off_then_on():
     )
     rel = RelationshipState(
         user_id="u1",
-        group_id="",
         intimacy=80.0,
         passion=80.0,
         trust=80.0,

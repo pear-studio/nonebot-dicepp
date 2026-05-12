@@ -49,7 +49,6 @@ async def test_force_and_normal_dedup(mock_data_store, bot_config):
 
     rel = MagicMock()
     rel.user_id = "u1"
-    rel.group_id = ""
     rel.composite_score = 80
     mock_data_store.get_top_relationships = AsyncMock(return_value=[rel])
 
@@ -70,7 +69,6 @@ def test_is_force_user(mock_data_store, bot_config):
 async def test_normal_high_score_user(mock_data_store, bot_config):
     rel = MagicMock()
     rel.user_id = "u3"
-    rel.group_id = ""
     rel.composite_score = 75
     mock_data_store.get_top_relationships = AsyncMock(return_value=[rel])
 
@@ -86,7 +84,6 @@ async def test_normal_high_score_user(mock_data_store, bot_config):
 async def test_normal_medium_score_user(mock_data_store, bot_config):
     rel = MagicMock()
     rel.user_id = "u4"
-    rel.group_id = ""
     rel.composite_score = 50
     mock_data_store.get_top_relationships = AsyncMock(return_value=[rel])
 

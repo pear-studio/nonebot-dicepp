@@ -132,8 +132,7 @@ CREATE TABLE IF NOT EXISTS persona_user_profiles (
 
 CREATE_USER_RELATIONSHIPS_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_user_relationships (
-    user_id TEXT NOT NULL,
-    group_id TEXT DEFAULT '',
+    user_id TEXT PRIMARY KEY,
     intimacy REAL DEFAULT 40.0,
     passion REAL DEFAULT 40.0,
     trust REAL DEFAULT 40.0,
@@ -142,8 +141,7 @@ CREATE TABLE IF NOT EXISTS persona_user_relationships (
     last_relationship_decay_applied_at TIMESTAMP,
     last_miss_sent_at TIMESTAMP,
     peak_stage INTEGER DEFAULT 0,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (user_id, group_id)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 

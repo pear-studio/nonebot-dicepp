@@ -1,7 +1,8 @@
-"""旧 schema 迁移回归测试：验证 peak_stage backfill 正确性。"""
+"""旧 schema 迁移回归测试：验证 peak_stage backfill 正确性，以及
+_ensure_relationship_unified 合并迁移正确性。"""
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.data.models import RelationshipState
@@ -77,7 +78,7 @@ class TestPeakStageBackfill:
             "u_exact_20": 1,
         }
         for user_id, expected_stage in expected.items():
-            rel = await store.get_relationship(user_id, "")
+            rel = await store.get_relationship(user_id)
             assert rel is not None, f"user {user_id} not found"
             assert rel.peak_stage == expected_stage, (
                 f"user {user_id}: expected peak_stage={expected_stage}, got {rel.peak_stage}"
@@ -89,7 +90,7 @@ class TestPeakStageBackfill:
         store = old_schema_db
 
         # 先手动设置一个非零值
-        rel = await store.get_relationship("u_cold", "")
+        rel = await store.get_relationship("u_cold")
         rel.peak_stage = 3
         await store.update_relationship(rel)
 
@@ -97,43 +98,67 @@ class TestPeakStageBackfill:
         await store.ensure_tables()
 
         # peak_stage 应保持为 3（不被 backfill 覆盖）
-        rel2 = await store.get_relationship("u_cold", "")
+        rel2 = await store.get_relationship("u_cold")
         assert rel2.peak_stage == 3
 
 
 @pytest.fixture
-async def old_schema_daily_events_db():
-    """创建模拟旧 schema 的 daily_events 表（无 context_summary 列）。"""
+async def old_multi_record_db():
+    """创建含 group_id 列的旧 schema 数据库，同一用户有多条记录。"""
     import aiosqlite
 
     async with aiosqlite.connect(":memory:") as db:
         await db.execute(
             """
-            CREATE TABLE persona_daily_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                description TEXT NOT NULL,
-                reaction TEXT DEFAULT '',
-                share_desire REAL DEFAULT 0.0,
-                duration_minutes INTEGER DEFAULT 0,
-                system_prompt_digest TEXT DEFAULT '',
-                raw_response TEXT DEFAULT '',
-                energy_delta INTEGER,
-                mood_delta INTEGER,
-                health_delta INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE persona_user_relationships (
+                user_id TEXT NOT NULL,
+                group_id TEXT DEFAULT '',
+                intimacy REAL DEFAULT 40.0,
+                passion REAL DEFAULT 40.0,
+                trust REAL DEFAULT 40.0,
+                secureness REAL DEFAULT 40.0,
+                last_interaction_at TIMESTAMP,
+                last_relationship_decay_applied_at TIMESTAMP,
+                last_miss_sent_at TIMESTAMP,
+                peak_stage INTEGER DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, group_id)
             )
             """
         )
-        # 插入一条旧数据
+        # u_single: 单条记录 → 直接复制
+        t0 = datetime(2026, 1, 1, 12, 0, 0)
         await db.execute(
             """
-            INSERT INTO persona_daily_events
-            (date, event_type, description)
-            VALUES (?, ?, ?)
+            INSERT INTO persona_user_relationships
+            (user_id, group_id, intimacy, passion, trust, secureness,
+             last_interaction_at, peak_stage, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2024-01-01", "system", "旧事件"),
+            ("u_single", "g1", 50.0, 50.0, 50.0, 50.0, t0.isoformat(), 2, t0.isoformat()),
+        )
+        # u_multi: 两条记录（私聊 + 群聊）→ 应合并为一条
+        t1 = datetime(2026, 1, 1, 10, 0, 0)  # 较早（群聊）
+        t2 = datetime(2026, 1, 2, 10, 0, 0)  # 较新（私聊）
+        await db.execute(
+            """
+            INSERT INTO persona_user_relationships
+            (user_id, group_id, intimacy, passion, trust, secureness,
+             last_interaction_at, peak_stage, last_miss_sent_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("u_multi", "g1", 20.0, 20.0, 20.0, 20.0,
+             t1.isoformat(), 1, t1.isoformat(), t1.isoformat()),
+        )
+        await db.execute(
+            """
+            INSERT INTO persona_user_relationships
+            (user_id, group_id, intimacy, passion, trust, secureness,
+             last_interaction_at, peak_stage, last_miss_sent_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("u_multi", "", 55.0, 55.0, 55.0, 55.0,
+             t2.isoformat(), 3, None, t2.isoformat()),
         )
         await db.commit()
 
@@ -142,44 +167,101 @@ async def old_schema_daily_events_db():
         yield store
 
 
-class TestContextSummaryMigration:
-    """测试 context_summary 列迁移：旧 schema → 新列添加 + 幂等。"""
+class TestRelationshipUnifiedMigration:
+    """测试 _ensure_relationship_unified 迁移：去 group_id、合并多行。"""
 
     @pytest.mark.asyncio
-    async def test_migration_adds_context_summary_column(self, old_schema_daily_events_db):
-        """旧 schema 表经 ensure_tables 后应增加 context_summary 列且旧行值为 ''。"""
-        store = old_schema_daily_events_db
-
-        # 验证 PRAGMA 中列已存在
-        async with store.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
+    async def test_no_group_id_column(self, old_multi_record_db):
+        """迁移后新表不应包含 group_id 列。"""
+        store = old_multi_record_db
+        async with store.db.execute(
+            "PRAGMA table_info(persona_user_relationships)"
+        ) as cursor:
             rows = await cursor.fetchall()
         col_names = {row[1] for row in rows}
-        assert "context_summary" in col_names
-
-        # 旧行回读 context_summary 为空字符串
-        events = await store.get_daily_events("2024-01-01")
-        assert len(events) == 1
-        assert events[0].context_summary == ""
+        assert "group_id" not in col_names
 
     @pytest.mark.asyncio
-    async def test_migration_idempotent(self, old_schema_daily_events_db):
-        """重复调用 ensure_tables 不报错且列不变。"""
-        store = old_schema_daily_events_db
-        await store.ensure_tables()  # 第二次调用
+    async def test_single_record_direct_copy(self, old_multi_record_db):
+        """单条记录的用户直接复制，分数不变。"""
+        store = old_multi_record_db
+        rel = await store.get_relationship("u_single")
+        assert rel is not None
+        assert rel.intimacy == 50.0
+        assert rel.passion == 50.0
+        assert rel.peak_stage == 2
 
-        async with store.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        assert "context_summary" in col_names
+    @pytest.mark.asyncio
+    async def test_multi_record_merge_latest_wins(self, old_multi_record_db):
+        """同一用户多条记录：intimacy 取 last_interaction_at 最新行的值。"""
+        store = old_multi_record_db
+        rel = await store.get_relationship("u_multi")
+        assert rel is not None
+        # 最新行 (t2) 的 intimacy=55
+        assert rel.intimacy == 55.0
+        assert rel.passion == 55.0
 
-        # 写入新数据验证列可正常使用
-        await store.add_daily_event(
-            date="2024-01-01",
-            event_type="system",
-            description="新事件",
-            context_summary="新摘要",
+    @pytest.mark.asyncio
+    async def test_multi_record_peak_stage_takes_max(self, old_multi_record_db):
+        """同一用户多条记录：peak_stage 取 MAX。"""
+        store = old_multi_record_db
+        rel = await store.get_relationship("u_multi")
+        # t1 的 peak_stage=1, t2 的 peak_stage=3 → MAX = 3
+        assert rel.peak_stage == 3
+
+    @pytest.mark.asyncio
+    async def test_multi_record_miss_sent_at_takes_min(self, old_multi_record_db):
+        """同一用户多条记录：last_miss_sent_at 取 MIN（最早非 NULL）。"""
+        store = old_multi_record_db
+        rel = await store.get_relationship("u_multi")
+        # t1 miss_at = t1, t2 miss_at = NULL → MIN = t1
+        t1 = datetime(2026, 1, 1, 10, 0, 0)
+        assert rel.last_miss_sent_at == t1
+
+    @pytest.mark.asyncio
+    async def test_idempotent_skip_on_second_run(self, old_multi_record_db):
+        """已迁移的库再次 ensure_tables 应跳过，不抛异常。"""
+        store = old_multi_record_db
+        # 第二次 ensure_tables
+        await store.ensure_tables()
+        # u_single 应仍存在且数据不变
+        rel = await store.get_relationship("u_single")
+        assert rel is not None
+        assert rel.intimacy == 50.0
+
+    @pytest.mark.asyncio
+    async def test_orphan_backup_table_cleanup(self, old_multi_record_db):
+        """模拟步骤 6 前崩溃：_backup 表残留，下次 ensure_tables 应自动清理。"""
+        store = old_multi_record_db
+        await store.db.execute(
+            "CREATE TABLE persona_user_relationships_backup AS SELECT * FROM persona_user_relationships"
         )
-        events = await store.get_daily_events("2024-01-01")
-        assert len(events) == 2
-        new_ev = [e for e in events if e.context_summary == "新摘要"][0]
-        assert new_ev.description == "新事件"
+        await store.db.commit()
+        await store.ensure_tables()
+        async with store.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='persona_user_relationships_backup'"
+        ) as cursor:
+            row = await cursor.fetchone()
+        assert row is None
+
+    @pytest.mark.asyncio
+    async def test_orphan_new_table_recovery(self, old_multi_record_db):
+        """模拟步骤 4a→4b 之间崩溃：_new 孤儿表，主表缺失，应自动恢复。"""
+        store = old_multi_record_db
+        rel = await store.get_relationship("u_single")
+        assert rel is not None
+
+        # 模拟：旧表已 RENAME→_backup，_new 存在但未晋升为主表
+        await store.db.execute("DROP TABLE IF EXISTS persona_user_relationships_backup")
+        await store.db.execute(
+            "ALTER TABLE persona_user_relationships RENAME TO persona_user_relationships_backup"
+        )
+        await store.db.execute(
+            "CREATE TABLE persona_user_relationships_new AS SELECT * FROM persona_user_relationships_backup"
+        )
+        await store.db.commit()
+
+        await store.ensure_tables()
+        rel2 = await store.get_relationship("u_single")
+        assert rel2 is not None
+        assert rel2.intimacy == 50.0
