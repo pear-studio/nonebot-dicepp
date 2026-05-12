@@ -55,7 +55,6 @@ class ChatConfig:
     max_short_term_chars: int = 1500
     timezone: str = "Asia/Shanghai"
     lore_token_budget: int = 300
-    tools_enabled: bool = True
     tools_max_rounds: int = 5
     relationship_refuse_enabled: bool = False
     relationship_refuse_prob_base: float = 0.5
@@ -81,7 +80,6 @@ class ChatConfig:
             max_short_term_chars=persona.max_short_term_chars,
             timezone=persona.timezone,
             lore_token_budget=persona.lore_token_budget,
-            tools_enabled=persona.tools_enabled,
             tools_max_rounds=persona.tools_max_rounds,
             relationship_refuse_enabled=persona.relationship_refuse_enabled,
             relationship_refuse_prob_base=persona.relationship_refuse_prob_base,
@@ -254,17 +252,7 @@ class ChatSession:
 
         messages_for_llm = await self._build_messages(user_id, group_id, current_message)
 
-        if self.config.tools_enabled:
-            logger.debug(f"对话走 tools 路径: user={user_id}, tools_enabled=true")
-            response = await self._chat_with_tools(user_id, group_id, messages_for_llm)
-        else:
-            logger.debug(f"对话走普通路径: user={user_id}, tools_enabled=false")
-            response = await self.router.generate(
-                messages=messages_for_llm,
-                model_tier=ModelTier.PRIMARY,
-                user_id=user_id,
-                group_id=group_id,
-            )
+        response = await self._chat_with_tools(user_id, group_id, messages_for_llm)
 
         if isinstance(response, self._SegmentedSentinel):
             # 分段路径：历史已由 _chat_with_tools 写入，跳过重复持久化
@@ -431,12 +419,13 @@ class ChatSession:
         )
         tool_executor = self.tool_registry.make_executor_for(ToolDomain.CHAT, ctx=ctx)
 
-        content, metadata = await self.router.generate_with_tools(
+        content, metadata = await self.router.generate(
             messages=messages,
             tools=tools,
             tool_executor=tool_executor,
-            model_tier=ModelTier.PRIMARY,
+            tool_choice="required" if segment_state else "auto",
             max_tool_rounds=self.config.tools_max_rounds,
+            model_tier=ModelTier.PRIMARY,
             user_id=user_id,
             group_id=group_id,
             on_round_complete=(

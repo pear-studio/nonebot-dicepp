@@ -10,8 +10,8 @@ from typing import List, Literal, Optional
 from datetime import datetime
 import json
 from nonebot.log import logger
-from ..llm import ForcedToolError
 from ..llm.router import LLMRouter
+from ..llm.collect_executor import CollectExecutor
 from ..data.models import ModelTier
 from typing import TYPE_CHECKING
 
@@ -128,6 +128,11 @@ class EventGenerationAgent:
             getattr(config, "background_llm_timeout_seconds", _DEFAULT_BG_TIMEOUT)
             if config
             else _DEFAULT_BG_TIMEOUT
+        )
+        self._max_tool_rounds = (
+            getattr(config, "background_llm_max_tool_rounds", 1)
+            if config
+            else 1
         )
 
     @staticmethod
@@ -272,22 +277,28 @@ class EventGenerationAgent:
         ]
 
         try:
-            # 使用强制 tool_choice 确保只发一轮请求
-            content, metadata = await self.llm_router.generate_with_forced_tool(
+            max_tool_rounds = self._max_tool_rounds
+            executor = CollectExecutor()
+
+            content, metadata = await self.llm_router.generate(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 tools=tools,
-                tool_name="record_event",
+                tool_executor=executor,
+                max_tool_rounds=max_tool_rounds,
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.9,
                 timeout=self._bg_timeout,
             )
 
-            # tool-call 输出（generate_with_forced_tool）：args 已是合法 JSON，
-            # 解析失败属真异常，由外层 except 捕获走 fallback。
-            args = json.loads(content)
+            if not executor.collected:
+                logger.warning("事件生成: LLM 未调用 record_event 工具")
+                raise ValueError("LLM 未调用 record_event")
+
+            raw_args = executor.collected[0]["arguments"]
+            args = json.loads(raw_args)
             description = str(args.get("description", "")).strip().strip('"').strip("'")
             if not description:
                 description = "我正在房间里休息。"
@@ -295,10 +306,8 @@ class EventGenerationAgent:
 
             context_summary = str(args.get("context_summary", "")).strip().strip('"').strip("'")
             if not context_summary:
-                # fallback: 用 description 前 60 字
                 context_summary = description[:60]
 
-            # 解析可选的 delta 值
             def _parse_delta(val) -> Optional[int]:
                 if val is None:
                     return None
@@ -443,21 +452,28 @@ class EventGenerationAgent:
         ]
 
         try:
-            content, metadata = await self.llm_router.generate_with_forced_tool(
+            max_tool_rounds = self._max_tool_rounds
+            executor = CollectExecutor()
+
+            content, metadata = await self.llm_router.generate(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 tools=tools,
-                tool_name="record_reaction",
+                tool_executor=executor,
+                max_tool_rounds=max_tool_rounds,
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.9,
                 timeout=self._bg_timeout,
             )
 
-            # tool-call 输出（generate_with_forced_tool）：args 已是合法 JSON，
-            # 解析失败属真异常，由外层 except 捕获走 fallback。
-            args = json.loads(content)
+            if not executor.collected:
+                logger.warning("反应生成: LLM 未调用 record_reaction 工具")
+                raise ValueError("LLM 未调用 record_reaction")
+
+            raw_args = executor.collected[0]["arguments"]
+            args = json.loads(raw_args)
             reaction = str(args.get("reaction", "")).strip().strip('"').strip("'")
             if not reaction:
                 reaction = f"（{character_name}默默地想着这件事）"
@@ -553,7 +569,7 @@ class EventGenerationAgent:
 
 注意：事件描述是第三人称客观记录，反应是角色第一人称自述。请将两者统一转换为日记口吻。
 
-只输出日记内容，不要添加日期或标题。"""
+你必须通过调用 record_diary_entry 工具来输出日记内容，不要直接回复文本。"""
 
         # 构建事件上下文（带时间戳）
         events_lines = []
@@ -579,18 +595,54 @@ class EventGenerationAgent:
         logger.debug("[prompt:system_diary]\n{}", system_prompt)
         logger.debug("[prompt:user_diary]\n{}", user_prompt)
 
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "record_diary_entry",
+                    "description": "记录日记内容",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "diary": {
+                                "type": "string",
+                                "description": "日记内容，100-300字，第一人称",
+                            },
+                        },
+                        "required": ["diary"],
+                    },
+                },
+            }
+        ]
+
         try:
-            response = await self.llm_router.generate(
+            max_tool_rounds = self._max_tool_rounds
+            executor = CollectExecutor()
+
+            content, metadata = await self.llm_router.generate(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                tools=tools,
+                tool_executor=executor,
+                max_tool_rounds=max_tool_rounds,
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.85,
                 timeout=self._bg_timeout,
             )
 
-            diary = response.strip()
+            if not executor.collected:
+                logger.warning("日记生成: LLM 未调用 record_diary_entry 工具")
+                return "今天发生了一些事，但我太累了，简单记录一下。"
+
+            raw_args = executor.collected[0]["arguments"]
+            args = json.loads(raw_args)
+            diary = str(args.get("diary", "")).strip()
+
+            if not diary:
+                return "今天发生了一些事，但我太累了，简单记录一下。"
+
             if len(diary) > 300:
                 diary = diary[:297] + "..."
 
@@ -605,9 +657,10 @@ class EventGenerationAgent:
         """
         为指定目标生成个性化分享消息。
 
-        使用 AUXILIARY tier 模型，通过 generate_with_forced_tool 强制输出。
-        超时与重试由配置项 background_llm_timeout_seconds /
-        proactive_share_max_retries / proactive_share_backoff_base_seconds 控制。
+        使用 AUXILIARY tier 模型，通过 generate() 工具路径 +
+        CollectExecutor 收集结果。client.generate() 内建 L1 纠正注入和 API
+        级重试（3 次指数退避）。超时由 background_llm_timeout_seconds 控制。
+        JSON 解析失败或空消息时最多额外重试 2 次（指数退避）。
         彻底失败返回 None（调用方应静默丢弃）。
 
         Args:
@@ -733,54 +786,58 @@ class EventGenerationAgent:
             }
         ]
 
-        max_retries = getattr(self.config, "proactive_share_max_retries", 3) if self.config else 3
-        timeout_seconds = self._bg_timeout
-        backoff_base = getattr(self.config, "proactive_share_backoff_base_seconds", 2) if self.config else 2
         max_chars = getattr(self.config, "proactive_share_max_chars", 200) if self.config else 200
-
         max_chars = max(10, max_chars)
+        max_tool_rounds = self._max_tool_rounds
+        max_parse_retries = 2
+        backoff_base = getattr(self.config, "proactive_share_backoff_base_seconds", 2) if self.config else 2
 
-        for attempt in range(1, max_retries + 2):  # 原始 + max_retries 次重试
+        for attempt in range(max_parse_retries + 1):
+            executor = CollectExecutor()
+
             try:
-                content, metadata = await self.llm_router.generate_with_forced_tool(
+                content, metadata = await self.llm_router.generate(
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
                     tools=tools,
-                    tool_name="record_share_message",
+                    tool_executor=executor,
+                    max_tool_rounds=max_tool_rounds,
                     model_tier=ModelTier.AUXILIARY,
                     temperature=0.85,
-                    timeout=timeout_seconds,
+                    timeout=self._bg_timeout,
                 )
-            except ForcedToolError as e:
-                logger.warning(
-                    f"分享消息强制工具调用失败（第{attempt}次）: {e}"
-                )
-                if attempt < max_retries + 1:
-                    backoff = backoff_base ** attempt
-                    await asyncio.sleep(backoff)
-                continue
+            except Exception as e:
+                logger.error(f"分享消息生成失败: {e}")
+                return None
 
+            if not executor.collected:
+                logger.warning("分享消息: LLM 未调用 record_share_message 工具")
+                return None
+
+            raw_args = executor.collected[0]["arguments"]
             try:
-                args = json.loads(content)
+                args = json.loads(raw_args)
             except json.JSONDecodeError as je:
                 logger.warning(
-                    f"分享消息 JSON 解析失败（第{attempt}次）: {je}, "
-                    f"content={content[:100]!r}"
+                    f"分享消息 JSON 解析失败（第{attempt + 1}次）: {je}, "
+                    f"content={raw_args[:100]!r}"
                 )
-                if attempt < max_retries + 1:
-                    backoff = backoff_base ** attempt
+                if attempt < max_parse_retries:
+                    backoff = backoff_base ** (attempt + 1)
                     await asyncio.sleep(backoff)
-                continue
+                    continue
+                return None
 
             message = str(args.get("message", "")).strip().strip('"').strip("'")
             if not message:
-                logger.warning(f"分享消息生成结果为空（第{attempt}次）")
-                if attempt < max_retries + 1:
-                    backoff = backoff_base ** attempt
+                logger.warning(f"分享消息生成结果为空（第{attempt + 1}次）")
+                if attempt < max_parse_retries:
+                    backoff = backoff_base ** (attempt + 1)
                     await asyncio.sleep(backoff)
-                continue
+                    continue
+                return None
 
             if len(message) > max_chars:
                 original_len = len(message)

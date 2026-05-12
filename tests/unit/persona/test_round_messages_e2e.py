@@ -41,10 +41,10 @@ async def test_round_messages_e2e():
     content, metadata = await router._execute_and_trace(
         client=client,
         tier_name="primary",
-        call_coro=client.chat_with_tools(
+        call_coro=client.generate(
             messages=[{"role": "user", "content": "hi"}],
-            tools=[],
-            max_tool_rounds=3,
+            tools=[{"type": "function", "function": {"name": "test_tool"}}],
+            max_round_callbacks=0,
         ),
         session_id="s1",
         user_id="u1",
@@ -52,7 +52,7 @@ async def test_round_messages_e2e():
         messages=[{"role": "user", "content": "hi"}],
         temperature=None,
         model_tier="primary",
-        is_tools=False,
+        is_tools=True,
     )
 
     await asyncio.sleep(0.5)

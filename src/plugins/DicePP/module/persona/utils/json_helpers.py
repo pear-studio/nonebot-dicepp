@@ -14,8 +14,8 @@ r"""LLM 响应 JSON 解析的统一容错实现
 ========
 - 仅适用于 **自由文本响应**（如 chat 完成、辅助模型直出），LLM 可能添加
   ``\`\`\`json`` 围栏或前后多余空白。
-- **不适用于 tool-call 结构化输出**（``generate_with_forced_tool`` /
-  ``response_format=json``），那些路径返回的 ``arguments`` 已是合法 JSON 字符串，
+- **不适用于 tool-call 结构化输出**（``tool_choice="required"`` 多轮路径），
+  那些路径返回的 ``arguments`` 已是合法 JSON 字符串，
   应直接用 ``json.loads(content)`` 包 ``try/except json.JSONDecodeError``，
   无需 markdown 围栏处理。
 """

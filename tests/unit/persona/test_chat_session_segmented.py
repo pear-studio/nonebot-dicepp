@@ -40,7 +40,7 @@ def mock_store():
 def mock_router():
     router = MagicMock(spec=LLMRouter)
     router.generate = AsyncMock(return_value="hello")
-    router.generate_with_tools = AsyncMock(return_value=("hello", {"tool_rounds": 0, "callback_count": 0}))
+    router.generate = AsyncMock(return_value=("hello", {"tool_rounds": 0, "callback_count": 0}))
     router.increment_usage = AsyncMock()
     return router
 
@@ -79,7 +79,6 @@ def context_builder(character):
 @pytest.fixture
 def config():
     return ChatConfig(
-        tools_enabled=True,
         tools_max_rounds=5,
         segment_target_chars=30,
         segment_max_chars=80,
@@ -135,7 +134,7 @@ class TestFlagLifecycle:
 
     @pytest.mark.asyncio
     async def test_exception_does_not_produce_sentinel(self, session, mock_router):
-        mock_router.generate_with_tools = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_router.generate = AsyncMock(side_effect=RuntimeError("boom"))
         with pytest.raises(RuntimeError):
             await session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
 
@@ -143,7 +142,7 @@ class TestFlagLifecycle:
 class TestReturnSemantics:
     @pytest.mark.asyncio
     async def test_chat_returns_falsy_sentinel_for_segmented(self, session):
-        # tools_enabled=True with segment_dispatcher -> falsy _SegmentedSentinel
+        # segment_dispatcher enabled → falsy _SegmentedSentinel
         result = await session.chat("u1", "", "hello")
         assert result is not None
         assert not result
@@ -151,16 +150,17 @@ class TestReturnSemantics:
         assert session.router.increment_usage.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_chat_returns_str_for_tools_disabled(self, session):
-        session.config.tools_enabled = False
+    async def test_chat_returns_falsy_for_segmented_mode(self, session):
+        """分段模式下 chat 返回 falsy sentinel"""
         result = await session.chat("u1", "", "hello")
-        assert result == "hello"
+        assert result is not None
+        assert not result
 
 
 class TestFallback:
     @pytest.mark.asyncio
     async def test_fallback_when_callbacks_exhausted(self, session, mock_router):
-        mock_router.generate_with_tools = AsyncMock(return_value=("fallback content", {
+        mock_router.generate = AsyncMock(return_value=("fallback content", {
             "tool_rounds": 0,
             "callback_count": 3,
         }))
@@ -171,7 +171,7 @@ class TestFallback:
     @pytest.mark.asyncio
     async def test_fallback_empty_content_logged(self, session, mock_router):
         from unittest.mock import patch
-        mock_router.generate_with_tools = AsyncMock(return_value=("", {
+        mock_router.generate = AsyncMock(return_value=("", {
             "tool_rounds": 0,
             "callback_count": 3,
         }))

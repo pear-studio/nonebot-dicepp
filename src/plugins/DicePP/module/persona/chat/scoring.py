@@ -9,6 +9,7 @@ from nonebot.log import logger
 from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState, ModelTier
 from ..llm.router import LLMRouter
+from ..llm.collect_executor import CollectExecutor
 from ..utils.json_helpers import safe_json_loads
 from ..wall_clock import persona_wall_now, format_timestamp
 
@@ -24,9 +25,11 @@ class ScoringAnalysisResult(BaseModel):
 class ScoringAgent:
     """评分 Agent - 批量分析对话提取用户档案和好感度变化"""
 
-    def __init__(self, llm_router: LLMRouter, timezone: str = "Asia/Shanghai"):
+    def __init__(self, llm_router: LLMRouter, timezone: str = "Asia/Shanghai",
+                 max_tool_rounds: int = 3):
         self.llm_router = llm_router
         self.timezone = timezone
+        self.max_tool_rounds = max_tool_rounds
 
     async def batch_analyze(
         self,
@@ -40,21 +43,88 @@ class ScoringAgent:
             relationship
         )
 
-        # 调用辅助模型
-        response = await self.llm_router.generate(
-            messages=[{"role": "user", "content": prompt}],
-            model_tier=ModelTier.AUXILIARY,
-        )
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "score_relationship",
+                    "description": "输出好感度变化分析和用户事实提取结果",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "deltas": {
+                                "type": "object",
+                                "properties": {
+                                    "intimacy": {"type": "number", "description": "亲密度变化，范围 -5.0 到 +5.0"},
+                                    "passion": {"type": "number", "description": "激情变化"},
+                                    "trust": {"type": "number", "description": "信任变化"},
+                                    "secureness": {"type": "number", "description": "安全感变化"},
+                                },
+                                "required": ["intimacy", "passion", "trust", "secureness"],
+                            },
+                            "facts": {
+                                "type": "object",
+                                "description": "提取或更新的用户事实，key-value 形式",
+                            },
+                        },
+                        "required": ["deltas", "facts"],
+                    },
+                },
+            }
+        ]
 
-        # 解析结果
-        deltas, facts, parse_error = self._parse_response(response)
+        executor = CollectExecutor()
 
-        return ScoringAnalysisResult(
-            deltas=deltas,
-            facts=facts,
-            raw_response=response,
-            parse_error=parse_error,
-        )
+        try:
+            content, metadata = await self.llm_router.generate(
+                messages=[{"role": "user", "content": prompt}],
+                tools=tools,
+                tool_executor=executor,
+                max_tool_rounds=self.max_tool_rounds,
+                model_tier=ModelTier.AUXILIARY,
+            )
+        except Exception as e:
+            logger.error(f"评分 LLM 调用失败: {e}")
+            return ScoringAnalysisResult(
+                deltas=ScoreDeltas(),
+                facts={},
+                parse_error=f"LLM 调用失败: {type(e).__name__}: {e}",
+            )
+
+        if not executor.collected:
+            raw_response = content if content else ""
+            deltas, facts, parse_error = self._parse_response(raw_response)
+            return ScoringAnalysisResult(
+                deltas=deltas,
+                facts=facts,
+                raw_response=raw_response,
+                parse_error=parse_error,
+            )
+
+        raw_args = executor.collected[0]["arguments"]
+        data = safe_json_loads(raw_args, fallback=None, log_prefix="评分解析")
+        if not isinstance(data, dict):
+            return ScoringAnalysisResult(
+                deltas=ScoreDeltas(),
+                facts={},
+                raw_response=raw_args,
+                parse_error=f"JSON 解析失败或返回非 dict: type={type(data).__name__}",
+            )
+        try:
+            deltas, facts = self._extract_result(data)
+            return ScoringAnalysisResult(
+                deltas=deltas,
+                facts=facts,
+                raw_response=json.dumps(data, ensure_ascii=False),
+                parse_error="",
+            )
+        except Exception as exc:
+            return ScoringAnalysisResult(
+                deltas=ScoreDeltas(),
+                facts={},
+                raw_response=raw_args,
+                parse_error=f"提取评分结果异常: {type(exc).__name__}: {exc}",
+            )
 
     def _build_analysis_prompt(
         self,
@@ -94,19 +164,7 @@ class ScoringAgent:
 ## 已知的用户信息
 {existing_facts}
 
-## 输出格式（严格 JSON）
-{{
-  "deltas": {{
-    "intimacy": 0.0,  // 亲密度变化，范围 -5.0 到 +5.0
-    "passion": 0.0,   // 激情变化
-    "trust": 0.0,     // 信任变化
-    "secureness": 0.0 // 安全感变化
-  }},
-  "facts": {{
-    // 提取或更新的用户事实，key-value 形式
-    // 只包含新发现或需要更新的信息
-  }}
-}}
+你必须通过调用 score_relationship 工具来输出结果，不要直接回复文本。
 
 注意：
 - 好感度变化基于用户的态度、话题深度、情感表达

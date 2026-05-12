@@ -10,6 +10,7 @@
   避免冷清群迟迟达不到阈值。
 - 阈值因此会在 `min_threshold`～`max_threshold` 之间浮动；爆发期可能接近上限，需调参时改构造参数。
 """
+import json
 import re
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Set, Any
@@ -17,7 +18,7 @@ from datetime import datetime, timedelta
 from nonebot.log import logger
 from .event_agent import EventGenerationAgent
 from ..data.store import PersonaDataStore
-from ..utils.json_helpers import safe_json_loads
+
 from ..wall_clock import persona_wall_now, format_timestamp
 
 
@@ -319,6 +320,11 @@ class ObservationExtractor:
             if config
             else 90
         )
+        self._max_tool_rounds = (
+            getattr(config, "background_llm_max_tool_rounds", 1)
+            if config
+            else 1
+        )
         self._prune_observations_keep = prune_observations_keep
 
     async def extract_observations(
@@ -394,6 +400,7 @@ class ObservationExtractor:
             [{"what": ..., "why": ...}, ...]
         """
         from ..data.models import ModelTier
+        from ..llm.collect_executor import CollectExecutor
 
         # 构建提示
         system_prompt = """你是一个观察者。从以下群聊消息中提取1-3条有价值的观察。
@@ -403,41 +410,70 @@ class ObservationExtractor:
 2. 记录谁参与了、发生了什么、为什么值得记住
 3. 简洁具体，每条20-50字
 
-输出格式（JSON）:
-[
-  {"what": "发生了什么", "why": "为什么值得记住"},
-  ...
-]
-
-只输出JSON，不要其他内容。"""
+你必须通过调用 note_observation 工具来输出结果，每次调用记录一条观察。"""
 
         user_prompt = f"群聊消息:\n{messages_text}\n\n请提取观察:"
 
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "note_observation",
+                    "description": "记录一条从群聊中提取的观察",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "what": {
+                                "type": "string",
+                                "description": "发生了什么，20-50字",
+                            },
+                            "why": {
+                                "type": "string",
+                                "description": "为什么值得记住",
+                            },
+                        },
+                        "required": ["what", "why"],
+                    },
+                },
+            }
+        ]
+
         try:
-            # 使用 EventGenerationAgent 的 llm_router 进行提取
             if not self.event_agent or not self.event_agent.llm_router:
                 logger.warning("LLM 路由器未初始化，跳过观察提取")
                 return []
 
-            response = await self.event_agent.llm_router.generate(
+            max_tool_rounds = self._max_tool_rounds
+            executor = CollectExecutor()
+
+            content, metadata = await self.event_agent.llm_router.generate(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                tools=tools,
+                tool_executor=executor,
+                max_tool_rounds=max_tool_rounds,
                 model_tier=ModelTier.AUXILIARY,
                 temperature=0.7,
                 timeout=self._bg_timeout,
             )
 
-            # 解析 JSON 响应：自由文本可能含 markdown 围栏，走统一容错
-            observations = safe_json_loads(response, fallback=None, log_prefix="观察提取")
-            if isinstance(observations, list):
-                return observations
-            if isinstance(observations, dict):
-                return [observations]
-            if observations is not None:
-                logger.warning(f"LLM 返回了非列表/字典格式: {response[:100]}")
-            return []
+            observations = []
+            if not executor.collected:
+                logger.warning("观察提取: LLM 未调用 note_observation 工具")
+                return []
+            for entry in executor.collected:
+                try:
+                    args = json.loads(entry["arguments"])
+                    observations.append({
+                        "what": args.get("what", ""),
+                        "why": args.get("why", ""),
+                    })
+                except json.JSONDecodeError:
+                    logger.warning(f"观察提取 JSON 解析失败: {entry['arguments'][:100]!r}")
+                    continue
+            return observations
 
         except Exception as e:
             logger.error(f"LLM 调用失败: {e}")
