@@ -91,7 +91,7 @@ metadata:
 
 **Important Notes**
 
-- Reviewer 不应审核自己创建的 PR。如果检测到 PR 作者是当前 `gh auth status` 的登录用户，提醒用户找其他人 review。
+- PR 作者与 reviewer 身份不设限制，允许自审。
 - Merge 前默认检查 CI 状态，如果检查失败则警告用户。
 - 如果 PR 有冲突，merge 会失败，需提示用户先解决冲突。
 - 合并方式默认推荐 `--squash`，保持 master 历史简洁。
