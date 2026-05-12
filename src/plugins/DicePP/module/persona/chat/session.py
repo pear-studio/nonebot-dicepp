@@ -607,8 +607,9 @@ class ChatSession:
         if len(self._pending_messages[key]) >= self.config.scoring_interval * 2:
             try:
                 await self._process_batch_scoring(user_id, group_id)
-            except Exception as e:
-                logger.warning(f"批量评分失败（不影响对话）: {e}")
+            except Exception:
+                logger.exception(f"批量评分失败（不影响对话）")
+                self._pending_messages.pop(key, None)
 
     async def _process_batch_scoring(self, user_id: str, group_id: str) -> None:
         if not self.scoring_agent:
