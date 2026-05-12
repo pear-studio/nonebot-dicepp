@@ -186,7 +186,7 @@ class ChatSession:
 
             is_chat_message = not message.startswith(".") or message.lower().startswith(".ai")
             if self.config.relationship_refuse_enabled and not is_first and is_chat_message:
-                rel = await self.store.get_relationship(user_id, group_id)
+                rel = await self.store.get_relationship(user_id)
                 if rel:
                     if self.decay_calculator:
                         rel = self.decay_calculator.effective_relationship(rel)
@@ -566,10 +566,10 @@ class ChatSession:
     async def _update_interaction(
         self, user_id: str, group_id: str, user_msg: str, assistant_msg: str
     ) -> None:
-        rel = await self.store.get_relationship(user_id, group_id)
+        rel = await self.store.get_relationship(user_id)
         initial = float(self.character.extensions.initial_relationship)
         if not rel:
-            rel = await self.store.init_relationship(user_id, group_id, initial)
+            rel = await self.store.init_relationship(user_id, initial)
 
         now = persona_wall_now(self.config.timezone)
         decay_event: Optional[ScoreEvent] = None
@@ -598,7 +598,9 @@ class ChatSession:
                 f"应用时间衰减: {user_id} 衰减 {decay_event.deltas.intimacy:.2f}, 原因: {decay_event.reason}"
             )
 
-        key = f"{user_id}:{group_id}"
+        # 统一关系后 user_id 为唯一键；同一用户的私聊/群聊消息合并评分。
+        # group_id 仅记录触发评分的场景（ScoreEvent 审计字段）。
+        key = user_id
         if key not in self._pending_messages:
             self._pending_messages[key] = deque(maxlen=100)
         self._pending_messages[key].append({"role": "user", "content": user_msg, "created_at": now})
@@ -615,7 +617,7 @@ class ChatSession:
         if not self.scoring_agent:
             return
 
-        key = f"{user_id}:{group_id}"
+        key = user_id
         messages = list(self._pending_messages.get(key, []))
         if not messages:
             return
@@ -623,7 +625,7 @@ class ChatSession:
         messages_count = len(messages)
 
         profile = await self.store.get_user_profile(user_id)
-        rel = await self.store.get_relationship(user_id, group_id)
+        rel = await self.store.get_relationship(user_id)
 
         rel_for_scoring = rel
         if rel and self.decay_calculator:
@@ -864,7 +866,7 @@ class ChatSession:
     ) -> List[Dict[str, str]]:
         history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
         profile = await self.store.get_user_profile(user_id)
-        rel = await self.store.get_relationship(user_id, group_id)
+        rel = await self.store.get_relationship(user_id)
         warmth_label = self._resolve_warmth_label(user_id, rel)
         diary_context = await self._build_diary_context()
         lore_sections = self._build_lore_sections(history_dicts, current_message)

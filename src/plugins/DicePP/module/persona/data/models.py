@@ -42,7 +42,6 @@ class ScoreDeltas(BaseModel):
 class RelationshipState(BaseModel):
     """关系状态（四维好感度）"""
     user_id: str
-    group_id: str = ""  # 空字符串表示私聊
     intimacy: float = 40.0
     passion: float = 40.0
     trust: float = 40.0
@@ -171,6 +170,7 @@ class DailyUsage(BaseModel):
 class ScoreEvent(BaseModel):
     """评分事件记录"""
     user_id: str
+    # 关系统一后仅作审计，记录评分触发时的群组上下文；关系变更本身是用户级全局的
     group_id: str = ""
     deltas: ScoreDeltas
     composite_before: float

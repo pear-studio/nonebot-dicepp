@@ -475,7 +475,9 @@ class PersonaCommand(UserCommandBase):
             return "模块未初始化"
 
         profile = await self.data_store.get_user_profile(user_id)
-        rel = await self._get_relationship_for_display(user_id, group_id)
+        rel = await self.data_store.get_relationship(user_id)
+        if rel and self.app and self.app.get_decay_calculator() and self.app.get_character():
+            rel = self.app.effective_relationship(rel)
 
         lines = ["你的档案"]
 
@@ -490,7 +492,7 @@ class PersonaCommand(UserCommandBase):
             lines.extend(base_lines[1:])  # 去掉 [好感度] 标题
 
             try:
-                recent_events = await self.data_store.get_recent_score_events(user_id, group_id, limit=2)
+                recent_events = await self.data_store.get_recent_score_events(user_id, limit=2)
                 if len(recent_events) >= 2:
                     latest = recent_events[-1]
                     previous = recent_events[-2]
@@ -614,8 +616,8 @@ class PersonaCommand(UserCommandBase):
                 lines.append("")
                 lines.append("[管理员调试]")
                 lines.append(".ai admin debug - 调试信息")
-                lines.append(".ai admin rel <用户ID> [群组ID] - 查看关系")
-                lines.append(".ai admin setrel <用户ID> <分数> [群组ID] - 修改好感度")
+                lines.append(".ai admin rel <用户ID> - 查看关系")
+                lines.append(".ai admin setrel <用户ID> <分数> - 修改好感度")
                 lines.append(".ai admin reload - 热重载角色卡")
                 lines.append(".ai admin events - 事件配置")
                 lines.append(".ai admin today/yesterday - 查看今天/昨天的事件和日记")

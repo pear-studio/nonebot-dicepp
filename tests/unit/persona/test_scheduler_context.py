@@ -107,7 +107,7 @@ class TestBuildAndGenerateShareMessage:
         """当有关系记录时 warmth_label 和 score 正确解析"""
         from plugins.DicePP.module.persona.life.models import ShareTarget
 
-        rel = RelationshipState(user_id="u1", group_id="", intimacy=65.0, passion=60.0, trust=70.0, secureness=60.0)
+        rel = RelationshipState(user_id="u1", intimacy=65.0, passion=60.0, trust=70.0, secureness=60.0)
         mock_data_store.get_relationship = AsyncMock(return_value=rel)
 
         mock_agent = MagicMock()
@@ -302,7 +302,7 @@ class TestFormatRecentHistory:
         msg.content = "你好"
         msg.created_at = datetime(2026, 5, 11, 9, 15)
         result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
-        assert "[09:15] 用户: 你好" in result
+        assert "[05-11 09:15] 用户: 你好" in result
 
 
 if __name__ == "__main__":

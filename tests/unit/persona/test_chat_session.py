@@ -138,7 +138,7 @@ async def test_first_message_skipped_in_group_chat():
 async def test_refuse_triggers_at_warmth_zero(monkeypatch):
     """warmth_level=0 时按概率返回 refuse 文案，跳过 LLM"""
     rel = RelationshipState(
-        user_id="u1", group_id="",
+        user_id="u1",
         intimacy=0, passion=0, trust=0, secureness=0,
     )
     session = _make_session(
@@ -166,7 +166,7 @@ async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch):
     """warmth_level>0 时不进入拒绝分支"""
     # 高分 → warmth_level>0
     rel = RelationshipState(
-        user_id="u1", group_id="",
+        user_id="u1",
         intimacy=80, passion=80, trust=80, secureness=80,
     )
     session = _make_session(
@@ -313,7 +313,7 @@ class TestDecayInChatSession:
         ))
         session.decay_calculator = decay_calc
 
-        rel = RelationshipState(user_id="u1", group_id="")
+        rel = RelationshipState(user_id="u1")
         session.store.get_relationship = AsyncMock(return_value=rel)
         session.store.update_relationship = AsyncMock()
         session.store.add_score_event = AsyncMock()

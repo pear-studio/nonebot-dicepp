@@ -88,6 +88,7 @@ class PersonaDataStore:
         await self._ensure_daily_events_context_summary()
         await self._ensure_scoring_failures_table()
         await self._ensure_llm_traces_round_messages()
+        await self._ensure_relationship_unified()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
         """
@@ -261,6 +262,173 @@ class PersonaDataStore:
             await self.db.execute(
                 "ALTER TABLE persona_llm_traces ADD COLUMN round_messages TEXT DEFAULT ''"
             )
+
+    async def _ensure_relationship_unified(self) -> None:
+        """将 persona_user_relationships 从 (user_id, group_id) 迁移到 user_id 主键。
+
+        幂等：通过 PRAGMA table_info 检测 group_id 列是否存在，已迁移则跳过。
+        合并策略：取 last_interaction_at 最新行的基础数据，peak_stage 取 MAX，
+        last_miss_sent_at 取 MIN（最早非 NULL 值）。
+        崩溃恢复：若步骤 4-6 之间崩溃，_backup/_new 表残留由幂等守卫在下次
+        ensure_tables 时清理或恢复。
+        """
+        async with self.db.execute("PRAGMA table_info(persona_user_relationships)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {row[1] for row in rows}
+        if "group_id" not in col_names:
+            # 清理上次迁移可能残留的备份表（步骤 6 前崩溃所致）
+            await self.db.execute("DROP TABLE IF EXISTS persona_user_relationships_backup")
+            # 恢复：若旧表已被 RENAME 但 _new 未晋升（步骤 4a→4b 之间崩溃）
+            async with self.db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+                " AND name='persona_user_relationships_new'"
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row:
+                async with self.db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                    " AND name='persona_user_relationships'"
+                ) as cur:
+                    main_exists = await cur.fetchone()
+                if main_exists:
+                    # 主表由 ALL_MIGRATIONS 的 CREATE IF NOT EXISTS 重建为空表，
+                    # _new 中才有合并后的数据 → 替换
+                    await self.db.execute("DROP TABLE persona_user_relationships")
+                await self.db.execute(
+                    "ALTER TABLE persona_user_relationships_new"
+                    " RENAME TO persona_user_relationships"
+                )
+                await self.db.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_pur_last_interaction "
+                    "ON persona_user_relationships(last_interaction_at DESC)"
+                )
+                logger.info("关系表迁移修复: 从 _new 中间表恢复主表")
+                await self.db.commit()
+            return  # 已迁移，跳过
+
+        logger.info("开始迁移 persona_user_relationships：移除 group_id，合并同用户记录")
+
+        # 1. 创建新表（无 group_id，主键 user_id）
+        # 先清理可能残留的中间表（上次迁移中途崩溃所致）
+        await self.db.execute("DROP TABLE IF EXISTS persona_user_relationships_new")
+        # 1b. 清理脏数据：user_id 为 NULL 的行无法迁入 PRIMARY KEY 表
+        cursor = await self.db.execute(
+            "DELETE FROM persona_user_relationships WHERE user_id IS NULL"
+        )
+        if cursor.rowcount:
+            logger.warning(
+                f"关系表迁移: 清理了 {cursor.rowcount} 行 user_id IS NULL 的脏数据"
+            )
+        await self.db.execute("""
+            CREATE TABLE persona_user_relationships_new (
+                user_id TEXT PRIMARY KEY,
+                intimacy REAL DEFAULT 40.0,
+                passion REAL DEFAULT 40.0,
+                trust REAL DEFAULT 40.0,
+                secureness REAL DEFAULT 40.0,
+                last_interaction_at TIMESTAMP,
+                last_relationship_decay_applied_at TIMESTAMP,
+                last_miss_sent_at TIMESTAMP,
+                peak_stage INTEGER DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 2. 合并数据：用 CTE + ROW_NUMBER 取最新行，JOIN 子查询取聚合值
+        await self.db.execute("""
+            INSERT INTO persona_user_relationships_new
+            SELECT
+                latest.user_id,
+                latest.intimacy,
+                latest.passion,
+                latest.trust,
+                latest.secureness,
+                latest.last_interaction_at,
+                latest.last_relationship_decay_applied_at,
+                agg.min_miss_at AS last_miss_sent_at,
+                COALESCE(agg.max_peak, 0) AS peak_stage,
+                latest.updated_at
+            FROM (
+                SELECT *,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY user_id ORDER BY last_interaction_at DESC, updated_at DESC, ROWID DESC
+                       ) AS rn
+                FROM persona_user_relationships
+            ) AS latest
+            LEFT JOIN (
+                SELECT
+                    user_id,
+                    MAX(peak_stage) AS max_peak,
+                    MIN(last_miss_sent_at) AS min_miss_at
+                FROM persona_user_relationships
+                GROUP BY user_id
+            ) AS agg ON latest.user_id = agg.user_id
+            WHERE latest.rn = 1
+        """)
+
+        # 2b. 统计冗余行数（运维用）
+        async with self.db.execute(
+            "SELECT COUNT(*) - COUNT(DISTINCT user_id) FROM persona_user_relationships"
+        ) as cursor:
+            row = await cursor.fetchone()
+            redundant = row[0] if row else 0
+            if redundant:
+                logger.info(
+                    f"关系表迁移: {redundant} 行冗余数据因 (user_id,group_id) 被合并"
+                )
+
+        # 3. 验证新表行数 = 旧表 DISTINCT user_id 数
+        async with self.db.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM persona_user_relationships"
+        ) as cursor:
+            row = await cursor.fetchone()
+            expected = row[0] if row else 0
+
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM persona_user_relationships_new"
+        ) as cursor:
+            row = await cursor.fetchone()
+            actual = row[0] if row else 0
+
+        if actual != expected:
+            await self.db.execute("DROP TABLE persona_user_relationships_new")
+            raise RuntimeError(
+                f"关系表迁移行数不匹配: 期望 {expected} 行, 实际 {actual} 行. "
+                f"已回滚新表，旧数据完整保留"
+            )
+
+        # 4. 替换表：RENAME 旧表 → RENAME 新表 → DROP 旧表
+        await self.db.execute(
+            "ALTER TABLE persona_user_relationships RENAME TO persona_user_relationships_backup"
+        )
+        await self.db.execute(
+            "ALTER TABLE persona_user_relationships_new RENAME TO persona_user_relationships"
+        )
+
+        # 5. 验证新表可正常读写
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM persona_user_relationships"
+        ) as cursor:
+            row = await cursor.fetchone()
+            verify_count = row[0] if row else 0
+        if verify_count != expected:
+            raise RuntimeError(
+                f"替换后验证失败: 期望 {expected} 行, 实际 {verify_count} 行"
+            )
+
+        # 6. 删除备份
+        await self.db.execute("DROP TABLE persona_user_relationships_backup")
+
+        # 7. 重建索引
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pur_last_interaction "
+            "ON persona_user_relationships(last_interaction_at DESC)"
+        )
+
+        await self.db.commit()
+        logger.info(
+            f"关系表迁移完成: 从多记录合并为 {actual} 条唯一用户记录"
+        )
 
     # ========== 消息相关 ==========
 
@@ -639,18 +807,18 @@ class PersonaDataStore:
                 return datetime.fromisoformat(row[0])
             return None
 
-    async def get_recent_score_events(self, user_id: str, group_id: str, limit: int = 2) -> List[ScoreEvent]:
+    async def get_recent_score_events(self, user_id: str, limit: int = 2) -> List[ScoreEvent]:
         """获取最近评分事件，用于趋势计算"""
         async with self.db.execute(
             """
             SELECT user_id, group_id, intimacy_delta, passion_delta, trust_delta, secureness_delta,
                    composite_before, composite_after, reason, conversation_digest, created_at
             FROM persona_score_history
-            WHERE user_id = ? AND group_id = ?
+            WHERE user_id = ?
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (user_id, group_id, limit)
+            (user_id, limit)
         ) as cursor:
             rows = await cursor.fetchall()
             events = []
@@ -1184,22 +1352,21 @@ class PersonaDataStore:
         )
         await self.db.commit()
 
-    async def get_relationship(self, user_id: str, group_id: str = "") -> Optional[RelationshipState]:
+    async def get_relationship(self, user_id: str) -> Optional[RelationshipState]:
         async with self.db.execute(
             """
             SELECT intimacy, passion, trust, secureness, last_interaction_at,
                    last_relationship_decay_applied_at, last_miss_sent_at, peak_stage, updated_at
             FROM persona_user_relationships
-            WHERE user_id = ? AND group_id = ?
+            WHERE user_id = ?
             """,
-            (user_id, group_id)
+            (user_id,)
         ) as cursor:
             row = await cursor.fetchone()
             if not row:
                 return None
             return RelationshipState(
                 user_id=user_id,
-                group_id=group_id,
                 intimacy=row[0],
                 passion=row[1],
                 trust=row[2],
@@ -1213,11 +1380,9 @@ class PersonaDataStore:
                 updated_at=datetime.fromisoformat(row[8]) if row[8] else None
             )
 
-    async def init_relationship(self, user_id: str, group_id: str, initial_score: float = 40.0) -> RelationshipState:
-        # 根据初始分数计算 peak_stage，确保新用户获得正确的阶段保护
+    async def init_relationship(self, user_id: str, initial_score: float = 40.0) -> RelationshipState:
         tmp_rel = RelationshipState(
             user_id=user_id,
-            group_id=group_id,
             intimacy=initial_score,
             passion=initial_score,
             trust=initial_score,
@@ -1227,14 +1392,13 @@ class PersonaDataStore:
         await self.db.execute(
             """
             INSERT OR IGNORE INTO persona_user_relationships
-            (user_id, group_id, intimacy, passion, trust, secureness,
+            (user_id, intimacy, passion, trust, secureness,
              last_interaction_at, last_relationship_decay_applied_at,
              last_miss_sent_at, peak_stage, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
-                group_id,
                 initial_score,
                 initial_score,
                 initial_score,
@@ -1247,9 +1411,9 @@ class PersonaDataStore:
             )
         )
         await self.db.commit()
-        rel = await self.get_relationship(user_id, group_id)
+        rel = await self.get_relationship(user_id)
         if rel is None:
-            return RelationshipState(user_id=user_id, group_id=group_id)
+            return RelationshipState(user_id=user_id)
         return rel
 
     async def update_relationship(self, rel: RelationshipState) -> None:
@@ -1266,11 +1430,11 @@ class PersonaDataStore:
         await self.db.execute(
             """
             INSERT INTO persona_user_relationships
-            (user_id, group_id, intimacy, passion, trust, secureness,
+            (user_id, intimacy, passion, trust, secureness,
              last_interaction_at, last_relationship_decay_applied_at,
              last_miss_sent_at, peak_stage, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id, group_id) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
                 intimacy = excluded.intimacy,
                 passion = excluded.passion,
                 trust = excluded.trust,
@@ -1283,7 +1447,6 @@ class PersonaDataStore:
             """,
             (
                 rel.user_id,
-                rel.group_id,
                 rel.intimacy,
                 rel.passion,
                 rel.trust,
@@ -1299,42 +1462,33 @@ class PersonaDataStore:
         )
         await self.db.commit()
 
-    async def get_top_relationships(self, group_id: str = "", limit: int = 10) -> List[RelationshipState]:
-        # 私聊关系在库中一般为 ''；兼容历史 NULL 行
-        if group_id == "":
-            where_clause = "COALESCE(group_id, '') = ''"
-            params: tuple = (limit,)
-        else:
-            where_clause = "group_id = ?"
-            params = (group_id, limit)
+    async def get_top_relationships(self, limit: int = 10) -> List[RelationshipState]:
         async with self.db.execute(
-            f"""
-            SELECT user_id, group_id, intimacy, passion, trust, secureness,
+            """
+            SELECT user_id, intimacy, passion, trust, secureness,
                    last_interaction_at, last_relationship_decay_applied_at,
                    last_miss_sent_at, peak_stage, updated_at
             FROM persona_user_relationships
-            WHERE {where_clause}
             ORDER BY (intimacy * 0.3 + passion * 0.2 + trust * 0.3 + secureness * 0.2) DESC
             LIMIT ?
             """,
-            params,
+            (limit,),
         ) as cursor:
             rows = await cursor.fetchall()
             return [
                 RelationshipState(
                     user_id=row[0],
-                    group_id=row[1] if row[1] is not None else "",
-                    intimacy=row[2],
-                    passion=row[3],
-                    trust=row[4],
-                    secureness=row[5],
-                    last_interaction_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                    intimacy=row[1],
+                    passion=row[2],
+                    trust=row[3],
+                    secureness=row[4],
+                    last_interaction_at=datetime.fromisoformat(row[5]) if row[5] else None,
                     last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row[7]) if row[7] else None
+                        datetime.fromisoformat(row[6]) if row[6] else None
                     ),
-                    last_miss_sent_at=datetime.fromisoformat(row[8]) if row[8] else None,
-                    peak_stage=row[9] if row[9] is not None else 0,
-                    updated_at=datetime.fromisoformat(row[10]) if row[10] else None
+                    last_miss_sent_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                    peak_stage=row[8] if row[8] is not None else 0,
+                    updated_at=datetime.fromisoformat(row[9]) if row[9] else None
                 )
                 for row in rows
             ]
@@ -1660,29 +1814,28 @@ class PersonaDataStore:
         """列出所有关系行，无过滤（用于每日衰减批处理等）。"""
         async with self.db.execute(
             """
-            SELECT user_id, group_id, intimacy, passion, trust, secureness,
+            SELECT user_id, intimacy, passion, trust, secureness,
                    last_interaction_at, last_relationship_decay_applied_at,
                    last_miss_sent_at, peak_stage, updated_at
             FROM persona_user_relationships
-            ORDER BY user_id, group_id
+            ORDER BY user_id
             """
         ) as cursor:
             rows = await cursor.fetchall()
             return [
                 RelationshipState(
                     user_id=row[0],
-                    group_id=row[1] if row[1] is not None else "",
-                    intimacy=row[2],
-                    passion=row[3],
-                    trust=row[4],
-                    secureness=row[5],
-                    last_interaction_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                    intimacy=row[1],
+                    passion=row[2],
+                    trust=row[3],
+                    secureness=row[4],
+                    last_interaction_at=datetime.fromisoformat(row[5]) if row[5] else None,
                     last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row[7]) if row[7] else None
+                        datetime.fromisoformat(row[6]) if row[6] else None
                     ),
-                    last_miss_sent_at=datetime.fromisoformat(row[8]) if row[8] else None,
-                    peak_stage=row[9] if row[9] is not None else 0,
-                    updated_at=datetime.fromisoformat(row[10]) if row[10] else None,
+                    last_miss_sent_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                    peak_stage=row[8] if row[8] is not None else 0,
+                    updated_at=datetime.fromisoformat(row[9]) if row[9] else None,
                 )
                 for row in rows
             ]
@@ -1701,7 +1854,7 @@ class PersonaDataStore:
 
         async with self.db.execute(
             """
-            SELECT user_id, group_id, intimacy, passion, trust, secureness,
+            SELECT user_id, intimacy, passion, trust, secureness,
                    last_interaction_at, last_relationship_decay_applied_at,
                    last_miss_sent_at, peak_stage, updated_at
             FROM persona_user_relationships
@@ -1715,18 +1868,17 @@ class PersonaDataStore:
             return [
                 RelationshipState(
                     user_id=row[0],
-                    group_id=row[1] or "",
-                    intimacy=row[2],
-                    passion=row[3],
-                    trust=row[4],
-                    secureness=row[5],
-                    last_interaction_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                    intimacy=row[1],
+                    passion=row[2],
+                    trust=row[3],
+                    secureness=row[4],
+                    last_interaction_at=datetime.fromisoformat(row[5]) if row[5] else None,
                     last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row[7]) if row[7] else None
+                        datetime.fromisoformat(row[6]) if row[6] else None
                     ),
-                    last_miss_sent_at=datetime.fromisoformat(row[8]) if row[8] else None,
-                    peak_stage=row[9] if row[9] is not None else 0,
-                    updated_at=datetime.fromisoformat(row[10]) if row[10] else None
+                    last_miss_sent_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                    peak_stage=row[8] if row[8] is not None else 0,
+                    updated_at=datetime.fromisoformat(row[9]) if row[9] else None
                 )
                 for row in rows
             ]

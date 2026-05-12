@@ -19,7 +19,6 @@ def test_effective_relationship_leaves_original_unchanged():
     )
     rel = RelationshipState(
         user_id="u1",
-        group_id="",
         intimacy=50.0,
         passion=50.0,
         trust=50.0,

@@ -238,7 +238,7 @@ async def test_tick_daily_applies_relationship_decay():
     ))
     sim.decay_calculator = decay_calc
 
-    rel = RelationshipState(user_id="u1", group_id="")
+    rel = RelationshipState(user_id="u1")
     sim.store.list_all_relationships_raw = AsyncMock(return_value=[rel])
 
     await sim.tick_daily()
