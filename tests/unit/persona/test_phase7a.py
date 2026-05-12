@@ -104,6 +104,50 @@ async def test_trace_lifecycle(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_trace_round_messages_round_trip(temp_db):
+    """round_messages 字段在 DB 存储和读取后字段正确保留"""
+    store = temp_db
+    rr = [
+        {
+            "round": 0,
+            "think": "<think>需要查记忆</think>",
+            "tool_calls": [{"id": "tc_1", "name": "search_memory", "arguments": '{"q":"猫"}'}],
+            "tool_results": [{"tool_call_id": "tc_1", "content": "找到 3 条记忆"}],
+            "callback": None,
+        },
+        {
+            "round": 1,
+            "think": "<think>准备回复</think>",
+            "tool_calls": [],
+            "tool_results": [],
+            "callback": None,
+        },
+    ]
+    trace = LLMTraceRecord(
+        session_id="s-rr",
+        user_id="u1",
+        model="gpt-4o",
+        tier="primary",
+        messages=json.dumps([{"role": "user", "content": "hi"}]),
+        response="reply",
+        round_messages=json.dumps(rr, ensure_ascii=False),
+        status="ok",
+    )
+    await store.add_llm_trace(trace)
+
+    traces = await store.get_llm_traces("u1", limit=5)
+    assert len(traces) == 1
+    stored_rr = json.loads(traces[0].round_messages)
+    assert len(stored_rr) == 2
+    assert stored_rr[0]["round"] == 0
+    assert stored_rr[0]["think"] == "<think>需要查记忆</think>"
+    assert stored_rr[0]["tool_calls"][0]["name"] == "search_memory"
+    assert stored_rr[0]["tool_results"][0]["content"] == "找到 3 条记忆"
+    assert stored_rr[1]["round"] == 1
+    assert stored_rr[1]["think"] == "<think>准备回复</think>"
+
+
+@pytest.mark.asyncio
 async def test_trace_enabled_false_does_not_create_task():
     router = LLMRouter("fake", "http://localhost", "fake", max_concurrent=1)
     router.trace_enabled = False
@@ -118,6 +162,7 @@ async def test_trace_enabled_false_does_not_create_task():
         messages=[],
         response="r",
         tool_calls=[],
+        round_records=[],
         latency_ms=100,
         tokens_in=1,
         tokens_out=1,
