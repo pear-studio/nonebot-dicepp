@@ -23,7 +23,7 @@
 | 目录 | 分支 | 用途 | 操作原则 |
 |------|------|------|---------|
 | `dev/` | `master` | 基础工作区 | 存放共享的 `.venv`，一般在此开发 |
-| `prod/` | `prod` | 生产环境 | 只 pull 更新，不直接开发 |
+| `prod/` | `master` | 生产环境 | 只 pull 更新，不直接开发 |
 | `.claude/worktrees/*/` | `feature/xxx` | 功能开发 | Claude Code 的 `EnterWorktree` 自动创建和管理 |
 
 **worktree 机制**
