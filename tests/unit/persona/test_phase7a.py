@@ -62,9 +62,9 @@ def test_latency_percentiles_per_tier():
 
 def test_build_debug_info():
     char = Character(name="Test", system_prompt="You are a test character.")
-    builder = ContextBuilder(char, max_short_term_chars=100)
+    builder = ContextBuilder(char, max_history_turns=10, max_history_tokens=100)
     info = builder.build_debug_info(
-        short_term_history=[{"role": "user", "content": "hi", "speaker_name": "你"}],
+        short_term_history=[{"role": "user", "content": "hi"}],
         diary_context="今天下雨了",
     )
     assert info["system_prompt_chars"] > 0

@@ -42,16 +42,16 @@ class PersonaConfig(BaseModel):
     timezone: str = "Asia/Shanghai"
 
     # ── Phase 3: 短期记忆限制
-    # 两个限制同时生效，语义如下：
     # - max_messages: 数据库中保留的消息条数上限（user + assistant 各算一条）
-    # - max_short_term_chars: 注入上下文的短期记忆字符上限（包括 user 和 assistant 的内容）
-    # 注意：这是按总字数限制，如果消息较长，实际注入的轮数可能少于 max_messages
-    # 例如：每轮 300 字（user 100 + assistant 200），1500 字只能容纳约 5 轮
-    max_short_term_chars: int = 1500  # 从 3000 改为 1500（配合工具调用）
-    max_messages: int = 15  # 从 200 改为 15（约 7-8 轮对话）
+    # - max_history_turns: 注入上下文的对话轮次上限（user/assistant 消息对）
+    # - max_history_tokens: 注入上下文的历史 token 估算上限（基于字符统计，兜底截断）
+    max_short_term_chars: int = 1500  # 已废弃：运行时不再使用，保留字段避免配置解析报错。迁移至 max_history_turns + max_history_tokens
+    max_messages: int = 15
+    max_history_turns: int = 10
+    max_history_tokens: int = 4000
 
     # ── 群聊共享历史限制（token-based 动态窗口）
-    # 群聊使用 token 估算（与 LLM 上下文窗口对齐），私聊使用字符数（max_short_term_chars）。
+    # 群聊使用 token 估算（与 LLM 上下文窗口对齐），私聊使用轮次 + token 估算双重兜底（max_history_turns + max_history_tokens）。
     # 两者计量单位不同，token 估算基于字符统计，为性能考虑不引入真实 tokenizer。
     group_max_messages: int = 40  # 群聊数据库保留条数上限
     group_max_age_minutes: int = 10  # 群聊时间窗口上限（分钟）
@@ -152,6 +152,22 @@ class PersonaConfig(BaseModel):
                     "配置项 'event_generation_timeout' / 'proactive_share_timeout_seconds' "
                     "已被重命名为 'background_llm_timeout_seconds'，当前旧字段的值将被忽略"
                     "（新字段已存在）。"
+                )
+
+        # 跨语义迁移: max_short_term_chars → max_history_turns + max_history_tokens
+        # 字符数到轮次无精确公式，启发式估算：假设每轮约 300 字符。
+        if "max_short_term_chars" in data:
+            old_val = data["max_short_term_chars"]
+            if old_val != 1500:
+                if "max_history_turns" not in data:
+                    data["max_history_turns"] = max(5, old_val // 300)
+                if "max_history_tokens" not in data:
+                    data["max_history_tokens"] = old_val
+                logger.warning(
+                    "配置项 'max_short_term_chars' 已废弃，已自动迁移至 "
+                    f"'max_history_turns'={data.get('max_history_turns')} + "
+                    f"'max_history_tokens'={data.get('max_history_tokens')}。"
+                    "转换值为估算（假设每轮约 300 字符），建议手动核实。"
                 )
 
         return data
