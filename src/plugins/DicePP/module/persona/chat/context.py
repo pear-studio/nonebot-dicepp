@@ -33,13 +33,15 @@ class ContextBuilder:
     def __init__(
         self,
         character: Character,
-        max_short_term_chars: int = 1500,
+        max_history_turns: int = 10,
+        max_history_tokens: int = 4000,
         timezone: str = "Asia/Shanghai",
         lore_token_budget: int = 300,
         segment_guide: Optional[SegmentGuide] = None,
     ):
         self.character = character
-        self.max_short_term_chars = max_short_term_chars
+        self.max_history_turns = max_history_turns
+        self.max_history_tokens = max_history_tokens
         self.timezone = timezone
         self.lore_token_budget = lore_token_budget
         self.segment_guide = segment_guide
@@ -50,7 +52,8 @@ class ContextBuilder:
 
     def build(
         self,
-        short_term_history: List[Dict[str, str]],
+        formatted_history: List[Dict[str, str]],
+        history_dicts: List[Dict[str, str]],
         user_profile: Optional[UserProfile] = None,
         diary_context: str = "",
         current_message: str = "",
@@ -58,11 +61,11 @@ class ContextBuilder:
     ) -> List[Dict[str, str]]:
         messages = []
 
+        # 世界书扫描仍用 raw dicts（未格式化的 content 避免时间戳/speaker 前缀干扰匹配）
+        lore_sections = self.build_lore_text(history_dicts, current_message)
+
         # 合并所有 system 内容为一条（某些提供商如 MiniMax 不支持多条 system 消息）
         system_parts = []
-
-        # 世界书扫描（按位置分类，为后续 LoreEntry.position 扩展留接口）
-        lore_sections = self.build_lore_text(short_term_history, current_message)
 
         system_prompt = self._build_system_prompt(user_profile, diary_context, warmth_label, lore_sections)
         system_parts.append(system_prompt)
@@ -71,12 +74,11 @@ class ContextBuilder:
             example = self.character.format_mes_example()
             system_parts.append(f"示例对话:\n{example}")
 
-        short_term_text = self._format_short_term(short_term_history)
-        if short_term_text:
-            system_parts.append(f"近期对话:\n{short_term_text}")
-
-        # 合并为单条 system 消息
         messages.append({"role": "system", "content": "\n\n".join(system_parts)})
+
+        # 追加格式化后的历史消息对
+        for msg in formatted_history:
+            messages.append({"role": msg["role"], "content": msg["content"]})
 
         if current_message:
             messages.append({"role": "user", "content": current_message})
@@ -85,10 +87,13 @@ class ContextBuilder:
 
     def build_lore_text(
         self,
-        short_term_history: List[Dict[str, str]],
+        history_dicts: List[Dict[str, str]],
         current_message: str,
     ) -> Dict[str, List[str]]:
         """扫描文本并返回按位置分类的世界书内容
+
+        history_dicts 的 content 字段应为原始内容（无格式化前缀），
+        世界书关键词扫描依赖纯净文本。
 
         返回结构为 {"before_char": [...], "after_char": [...]}，
         即使目前 LoreEntry 没有 position 字段，也为后续扩展留接口。
@@ -99,7 +104,7 @@ class ContextBuilder:
             return sections
 
         texts_to_scan = [current_message] if current_message is not None else []
-        for msg in short_term_history:
+        for msg in history_dicts:
             texts_to_scan.append(msg.get("content", ""))
 
         matched = self.character.search_lore_entries(texts_to_scan)
@@ -217,38 +222,123 @@ class ContextBuilder:
 
         return "\n\n".join(parts)
 
-    def _format_short_term(self, history: List[Dict[str, str]]) -> str:
-        """格式化短期记忆，根据 speaker_name 生成称呼前缀，附带时间戳"""
-        lines = []
+    def _format_private_history(self, history: List[Dict]) -> List[Dict[str, str]]:
+        """私聊历史格式化：按 role 直接映射，content 加 [HH:MM] 时间戳前缀"""
+        if not history:
+            return []
         now = persona_wall_now(self.timezone)
+        result = []
         for msg in history:
-            speaker_name = msg.get("speaker_name") or ("你" if msg["role"] == "user" else "我")
-            prefix = format_timestamp(msg.get("created_at"), now)
-            if prefix:
-                lines.append(f"[{prefix}] [{speaker_name}] {msg['content']}")
+            ts = format_timestamp(msg.get("created_at"), now)
+            prefix = f"[{ts}] " if ts else ""
+            result.append({
+                "role": msg["role"],
+                "content": f"{prefix}{msg['content']}",
+            })
+        return result
+
+    def _format_group_history(self, history: List[Dict]) -> List[Dict[str, str]]:
+        """群聊历史格式化：连续非 assistant 合并为单条 user
+
+        每行格式为 ``[HH:MM] [speaker_name] content``。
+        speaker_name 缺失时 fallback 为 ``"系统"``。
+        """
+        if not history:
+            return []
+        now = persona_wall_now(self.timezone)
+        result = []
+        buffer = []
+
+        def flush_buffer():
+            if not buffer:
+                return
+            lines = []
+            for m in buffer:
+                ts = format_timestamp(m.get("created_at"), now)
+                ts_prefix = f"[{ts}] " if ts else ""
+                speaker = m.get("speaker_name") or "系统"
+                lines.append(f"{ts_prefix}[{speaker}] {m['content']}")
+            result.append({"role": "user", "content": "\n".join(lines)})
+            buffer.clear()
+
+        for msg in history:
+            role = msg.get("role", "user")
+            if role == "assistant":
+                flush_buffer()
+                ts = format_timestamp(msg.get("created_at"), now)
+                prefix = f"[{ts}] " if ts else ""
+                result.append({
+                    "role": "assistant",
+                    "content": f"{prefix}{msg['content']}",
+                })
             else:
-                lines.append(f"[{speaker_name}] {msg['content']}")
-        return "\n".join(lines)
+                buffer.append(msg)
 
-    def truncate_by_turns(self, history: List[Dict[str, str]], max_chars: int) -> List[Dict[str, str]]:
-        """按对话轮次截断，从后往前保留完整的 user-assistant 对
+        flush_buffer()
+        return result
 
-        避免截断在对话中间，保持上下文完整性。
+    def format_history(self, history: List[Dict], is_group: bool) -> List[Dict[str, str]]:
+        """格式化历史消息统一入口，根据 is_group 派发私聊/群聊路径"""
+        if is_group:
+            return self._format_group_history(history)
+        return self._format_private_history(history)
+
+    def truncate_by_turns(
+        self, history: List[Dict[str, str]], max_turns: int, max_tokens: int
+    ) -> List[Dict[str, str]]:
+        """按轮次 + token 双重兜底从后往前截断
+
+        一轮 = 一个 user + 一个 assistant 消息对。
+        始终保留完整轮次，不拆散对。
+        末尾孤立的 user 消息保留。
+
+        输入必须已按 user/assistant 交替排列（开头可能多一个 assistant，末尾可能多一个
+        user 或 assistant）。此契约由上游格式化函数 _format_private_history /
+        _format_group_history 保证。
         """
         if not history:
             return []
 
-        # 从后往前累计
-        result = []
-        total_chars = 0
+        orphan = None
+        work = list(history)
 
-        for msg in reversed(history):
-            msg_chars = len(msg.get("content", ""))
-            # 如果超限制且已保留至少一条，停止
-            if total_chars + msg_chars > max_chars and result:
+        # 兜底：剥离开头孤立的 assistant（后续配对以 user 开头）
+        leading = None
+        if work and work[0]["role"] == "assistant":
+            leading = work.pop(0)
+
+        if work and work[-1]["role"] == "user":
+            orphan = work.pop()
+
+        # 按轮次分组 (user + assistant)
+        turns = []
+        for i in range(0, len(work) - 1, 2):
+            if work[i]["role"] == "user" and work[i + 1]["role"] == "assistant":
+                turns.append((work[i], work[i + 1]))
+
+        result = []
+        total_tokens = 0.0
+        for user_msg, assistant_msg in reversed(turns):
+            pair_cost = estimate_tokens(user_msg.get("content", "")) + estimate_tokens(
+                assistant_msg.get("content", "")
+            )
+            if len(result) // 2 >= max_turns:
                 break
-            result.insert(0, msg)  # 插入头部保持顺序
-            total_chars += msg_chars
+            if total_tokens + pair_cost > max_tokens and result:
+                break
+            result.insert(0, assistant_msg)
+            result.insert(0, user_msg)
+            total_tokens += pair_cost
+
+        if leading:
+            result.insert(0, leading)
+
+        # 兜底：末尾孤立 assistant（len(work) 奇数时最后一个元素未被 range 覆盖）
+        if len(work) % 2 == 1 and work and work[-1]["role"] == "assistant":
+            result.append(work[-1])
+
+        if orphan:
+            result.append(orphan)
 
         return result
 
@@ -266,13 +356,14 @@ class ContextBuilder:
             warmth_label=warmth_label,
             lore_sections=lore_sections or self.build_lore_text(short_term_history, ""),
         )
-        short_term_text = self._format_short_term(short_term_history)
+        # short_term_history 已由调用方格式化并截断（truncated），直接统计即可
+        formatted_chars = sum(len(msg.get("content", "")) for msg in short_term_history)
         profile_text = ""
         if user_profile and user_profile.facts:
             profile_text = "\n".join([f"- {k}: {v}" for k, v in user_profile.facts.items()])
         return {
             "system_prompt_chars": len(system_prompt),
-            "short_term_chars": len(short_term_text),
+            "short_term_chars": formatted_chars,
             "profile_chars": len(profile_text),
             "diary_chars": len(diary_context),
             "returned_message_count": 1 + len(short_term_history),

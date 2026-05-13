@@ -53,7 +53,8 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
     context_builder = MagicMock()
     context_builder.build = MagicMock(return_value=[{"role": "user", "content": "hi"}])
     context_builder.build_debug_info = MagicMock(return_value="")
-    context_builder.truncate_by_turns = MagicMock(side_effect=lambda h, _: h)
+    context_builder.format_history = MagicMock(side_effect=lambda h, is_group: h)
+    context_builder.truncate_by_turns = MagicMock(side_effect=lambda h, *a, **kw: h)
     context_builder.build_lore_text = MagicMock(return_value={})
 
     session = ChatSession(

@@ -232,7 +232,8 @@ def _build_chat(
 
     context_builder = ContextBuilder(
         character,
-        max_short_term_chars=config.max_short_term_chars,
+        max_history_turns=config.max_history_turns,
+        max_history_tokens=config.max_history_tokens,
         timezone=config.timezone,
         lore_token_budget=config.lore_token_budget,
         segment_guide=segment_guide,

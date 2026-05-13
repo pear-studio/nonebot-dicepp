@@ -52,7 +52,9 @@ if TYPE_CHECKING:
 class ChatConfig:
     """对话域配置（从 PersonaConfig 中提取的子集）"""
 
-    max_short_term_chars: int = 1500
+    max_history_turns: int = 10
+    max_history_tokens: int = 4000
+    max_diary_context_chars: int = 500
     timezone: str = "Asia/Shanghai"
     lore_token_budget: int = 300
     tools_max_rounds: int = 5
@@ -77,7 +79,9 @@ class ChatConfig:
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "ChatConfig":
         return cls(
-            max_short_term_chars=persona.max_short_term_chars,
+            max_history_turns=persona.max_history_turns,
+            max_history_tokens=persona.max_history_tokens,
+            max_diary_context_chars=persona.max_diary_context_chars,
             timezone=persona.timezone,
             lore_token_budget=persona.lore_token_budget,
             tools_max_rounds=persona.tools_max_rounds,
@@ -708,22 +712,21 @@ class ChatSession:
         self,
         user_id: str,
         group_id: str,
-        limit: int = 15,
+        limit: Optional[int] = None,
     ) -> Tuple[List[Dict[str, str]], bool]:
         """获取并格式化近期对话历史
 
         Returns: (history_dicts, was_truncated)
         """
+        if limit is None:
+            limit = self.config.max_messages
         if not group_id:
             history = await self.store.get_recent_messages(user_id, group_id, limit=limit)
             history_dicts = [
                 {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我", "created_at": msg.created_at}
                 for msg in history
             ]
-            truncated = self.context_builder.truncate_by_turns(
-                history_dicts, self.config.max_short_term_chars
-            )
-            return truncated, len(truncated) < len(history_dicts)
+            return history_dicts, False
 
         history = await self.store.get_group_conversations(group_id, limit=None)
         return self._apply_token_window(history)
@@ -767,7 +770,9 @@ class ChatSession:
                     content = content[:-1]
 
             speaker_name = "我" if msg.role == "assistant" else (msg.display_name or "群友")
-            formatted = f"[{speaker_name}] {content}"
+            ts = format_timestamp(msg.created_at, now)
+            ts_prefix = f"[{ts}] " if ts else ""
+            formatted = f"{ts_prefix}[{speaker_name}] {content}"
             msg_cost = estimate_tokens(formatted)
 
             if total_tokens + msg_cost > budget and result:
@@ -807,7 +812,7 @@ class ChatSession:
         wall = persona_wall_now(self.config.timezone)
         today = wall.strftime("%Y-%m-%d")
         yesterday = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
-        max_diary_len = self.config.max_short_term_chars  # 复用同一配置
+        max_diary_len = self.config.max_diary_context_chars
 
         events = await self.store.get_daily_events(today)
         if events:
@@ -854,6 +859,21 @@ class ChatSession:
         current_message: str,
     ) -> List[Dict[str, str]]:
         history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
+        is_group = bool(group_id)
+
+        formatted = self.context_builder.format_history(history_dicts, is_group)
+        # 群聊双层截断：_apply_token_window 在存储层按时间窗口 + token budget + max messages
+        # 做首轮过滤，truncate_by_turns 在格式化后按 max_history_turns + max_history_tokens 兜底。
+        # 当前 max_history_tokens=4000 > group_context_budget_tokens=2000，第二层通常不触发。
+        # WHY 群聊保留双层：_apply_token_window 负责群聊特有的时间窗口收敛和说话人合并，
+        # 这些逻辑超出 truncate_by_turns 通用截断的职责范围。私聊消息直接来自 DB 按时间升序，
+        # 无需首层过滤，因此仅走 truncate_by_turns 单层截断。
+        truncated = self.context_builder.truncate_by_turns(
+            formatted,
+            self.config.max_history_turns,
+            self.config.max_history_tokens,
+        )
+
         profile = await self.store.get_user_profile(user_id)
         rel = await self.store.get_relationship(user_id)
         warmth_label = self._resolve_warmth_label(user_id, rel)
@@ -861,7 +881,7 @@ class ChatSession:
         lore_sections = self._build_lore_sections(history_dicts, current_message)
 
         debug_info = self.context_builder.build_debug_info(
-            short_term_history=history_dicts,
+            short_term_history=truncated,
             user_profile=profile,
             diary_context=diary_context,
             warmth_label=warmth_label,
@@ -870,7 +890,8 @@ class ChatSession:
         logger.debug(f"context_debug: {debug_info}")
 
         return self.context_builder.build(
-            short_term_history=history_dicts,
+            formatted_history=truncated,
+            history_dicts=history_dicts,
             user_profile=profile,
             diary_context=diary_context,
             current_message=current_message,
