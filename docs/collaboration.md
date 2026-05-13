@@ -13,40 +13,25 @@
 
 ## 本地环境结构
 
-项目采用 **bare repo + worktree** 的本地部署模式：
-
 ```
-/home/ubuntu/dicepp/
-├── .bare/                  # bare 仓库（所有 worktree 共享）
-├── dev/                    # master 分支，基础工作区 + .venv
-├── prod/                   # prod 本地分支（跟踪 origin/master），生产环境
-└── worktrees/              # feature worktree 目录
-    ├── feature-roll/       # feature/roll 分支
-    └── ...
+项目根目录/
+├── dev/                    # master 分支，开发区 + .venv
+│   └── .claude/worktrees/  # Claude Code EnterWorktree 自动管理
+└── prod/                   # prod 分支，生产环境
 ```
 
 | 目录 | 分支 | 用途 | 操作原则 |
 |------|------|------|---------|
-| `dev/` | `master` | 基础工作区 | 存放共享的 `.venv`，不直接开发 |
-| `prod/` | `prod`（跟踪 `origin/master`）| 生产环境 | 只 pull 更新，不直接开发 |
-| `worktrees/*/` | `feature/xxx` | 功能开发 | 每个功能独立的 worktree，共享 dev 的 `.venv` |
+| `dev/` | `master` | 基础工作区 | 存放共享的 `.venv`，一般在此开发 |
+| `prod/` | `prod` | 生产环境 | 只 pull 更新，不直接开发 |
+| `.claude/worktrees/*/` | `feature/xxx` | 功能开发 | Claude Code 的 `EnterWorktree` 自动创建和管理 |
 
-**为什么选择 worktree？**
+**worktree 机制**
 
-- dev 和 prod 共享同一个 git 数据库，不重复克隆
-- 每个 feature 有独立的目录，互不干扰
-- `.venv` 符号链接共享，避免重复安装依赖
-- prod 本地分支独立命名，避免与 master 冲突
-
-### .venv 共享机制
-
-所有 feature worktree 通过符号链接共享 dev 的 `.venv`：
-
-```
-worktrees/feature-xxx/.venv -> /home/ubuntu/dicepp/dev/.venv
-```
-
-新增依赖时，在任意 worktree（包括 dev）中运行 `uv sync` 即可同步到全部 worktree。
+- feature worktree 由 Claude Code 的 `EnterWorktree` 工具自动创建在 `.claude/worktrees/` 下
+- `.venv` 通过 `PostToolUse` hook 自动创建符号链接到 `dev/.venv`
+- 每个 worktree 的 `config/`、`data/` 等本地文件相互独立
+- 新增依赖时，在 `dev/` 中运行 `uv sync` 即可同步到所有 worktree
 
 ## 分支规范
 
@@ -63,31 +48,22 @@ worktrees/feature-xxx/.venv -> /home/ubuntu/dicepp/dev/.venv
 
 ## 开发流程
 
-### 1. 创建功能 worktree
+### 1. 创建功能 worktree（可选）
 
-使用 Claude Code 的 `start-worktree` skill：
+如果需要隔离的 worktree 进行开发，直接告诉 Claude "创建 worktree" 或使用 `/start-worktree`。Claude Code 会调用 `EnterWorktree` 工具自动创建隔离环境，`.venv` 通过 hook 自动共享。
 
-```
-/start-worktree
-```
-
-或手动：
+如果不需要隔离，也可以直接在 `dev/` 中切 feature 分支开发。
 
 ```bash
-cd /home/ubuntu/dicepp/dev
-git fetch origin master
-git branch feature/xxx origin/master
-git worktree add /home/ubuntu/dicepp/worktrees/feature-xxx feature/xxx
-cd /home/ubuntu/dicepp/worktrees/feature-xxx
-ln -s /home/ubuntu/dicepp/dev/.venv .venv
+cd dev/
+git checkout -b feature/xxx origin/master
 ```
 
 ### 2. 开发与提交
 
-在 feature worktree 中开发：
+在 feature 分支中开发：
 
 ```bash
-cd /home/ubuntu/dicepp/worktrees/feature-xxx
 git add .
 git commit -m "feat: xxx"
 ```
@@ -97,7 +73,6 @@ git commit -m "feat: xxx"
 如果 `master` 有更新，先同步：
 
 ```bash
-cd /home/ubuntu/dicepp/worktrees/feature-xxx
 git fetch origin
 git rebase origin/master
 git push --force-with-lease
@@ -105,10 +80,10 @@ git push --force-with-lease
 
 ### 4. 创建 Pull Request
 
-使用 Claude Code 的 `create-pr` skill：
+使用 Claude Code 的 `pr-create` skill：
 
 ```
-/create-pr
+/pr-create
 ```
 
 或手动：
@@ -120,10 +95,10 @@ gh pr create --title "feat: xxx" --body "xxx" --base master
 
 ### 5. Code Review
 
-使用 Claude Code 的 `review-pr` skill：
+使用 Claude Code 的 `pr-review` skill：
 
 ```
-/review-pr <pr_number>
+/pr-review <pr_number>
 ```
 
 Review 维度：
@@ -147,16 +122,12 @@ gh pr merge <pr_number> --squash
 
 ### 7. 清理 worktree
 
-合并后删除 feature worktree：
+合并后，如果使用了 worktree，通过 Claude Code 的 `ExitWorktree` 工具退出并自动清理。
+
+如果是在 `dev/` 中直接开发：
 
 ```bash
-# 先切走当前分支
-cd /home/ubuntu/dicepp/worktrees/feature-xxx
 git checkout master
-
-# 删除 worktree 和分支
-cd /home/ubuntu/dicepp/dev
-git worktree remove /home/ubuntu/dicepp/worktrees/feature-xxx
 git branch -d feature/xxx
 git push origin --delete feature/xxx
 ```
@@ -179,7 +150,7 @@ git push origin --delete feature/xxx
 发版后更新生产环境：
 
 ```bash
-cd /home/ubuntu/dicepp/prod
+cd prod/
 git pull origin master
 ```
 
@@ -200,8 +171,8 @@ git pull origin master
 | Skill | 触发方式 | 用途 |
 |-------|---------|------|
 | `start-worktree` | `/start-worktree` | 创建 feature worktree 并共享 .venv |
-| `create-pr` | `/create-pr` | 从当前 feature 分支创建 PR |
-| `review-pr` | `/review-pr <number>` | Review PR diff 并执行 approve/merge |
+| `pr-create` | `/pr-create` | 从当前 feature 分支创建 PR |
+| `pr-review` | `/pr-review <number>` | Review PR diff 并执行 approve/merge |
 | `bump-version` | `/bump-version` | 递增版本号、打 tag、推送 |
 
 ## 注意事项
