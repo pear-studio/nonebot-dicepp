@@ -9,7 +9,9 @@ from nonebot.log import logger
 from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState, ModelTier
 from ..llm.router import LLMRouter
-from ..llm.collect_executor import CollectExecutor
+from ..llm.loop import AgentLoop, LoopResult
+from ..tools.collecting import make_collecting_executor
+from ..tools.registry import ToolRegistry, ToolDef
 from ..utils.json_helpers import safe_json_loads
 from ..wall_clock import persona_wall_now, format_timestamp
 
@@ -73,36 +75,47 @@ class ScoringAgent:
             }
         ]
 
-        executor = CollectExecutor()
+        collected_args: list = []
+        tool_name = tools[0]["function"]["name"]
+
+        tool_registry = ToolRegistry()
+        tool_registry.register(
+            "scoring",
+            ToolDef(name=tool_name, description="评分工具",
+                    parameters=tools[0]["function"]["parameters"]),
+            make_collecting_executor(collected_args),
+        )
+
+        hooks = self.llm_router.make_default_hooks()
+        loop = AgentLoop(
+            provider=self.llm_router.auxiliary_client,
+            tool_registry=tool_registry,
+            hooks=hooks, max_tool_rounds=self.max_tool_rounds,
+        )
 
         try:
-            content, metadata = await self.llm_router.generate(
+            result: LoopResult = await loop.run(
                 messages=[{"role": "user", "content": prompt}],
-                tools=tools,
-                tool_executor=executor,
-                max_tool_rounds=self.max_tool_rounds,
-                model_tier=ModelTier.AUXILIARY,
+                tools=tools, temperature=0.7,
             )
         except Exception as e:
             logger.error(f"评分 LLM 调用失败: {e}")
             return ScoringAnalysisResult(
-                deltas=ScoreDeltas(),
-                facts={},
+                deltas=ScoreDeltas(), facts={},
                 parse_error=f"LLM 调用失败: {type(e).__name__}: {e}",
             )
 
-        if not executor.collected:
+        content = result.final_output or ""
+
+        if not collected_args:
             raw_response = content if content else ""
             deltas, facts, parse_error = self._parse_response(raw_response)
             return ScoringAnalysisResult(
-                deltas=deltas,
-                facts=facts,
-                raw_response=raw_response,
-                parse_error=parse_error,
+                deltas=deltas, facts=facts,
+                raw_response=raw_response, parse_error=parse_error,
             )
 
-        raw_args = executor.collected[0]["arguments"]
-        data = safe_json_loads(raw_args, fallback=None, log_prefix="评分解析")
+        data = collected_args[0]
         if not isinstance(data, dict):
             return ScoringAnalysisResult(
                 deltas=ScoreDeltas(),

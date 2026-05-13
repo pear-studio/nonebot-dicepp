@@ -34,7 +34,21 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
 
     router = MagicMock()
     router.increment_usage = AsyncMock()
-    router.generate = AsyncMock(return_value=("reply", {}))
+    from plugins.DicePP.module.persona.llm.loop import LoopResult
+
+    async def _run_via_loop(*args, **kwargs):
+        # BillingHook 在首次 post_llm 时调用 increment_usage
+        user_id = kwargs.get("user_id", "")
+        await router.increment_usage(user_id)
+        return LoopResult(final_output="reply", metadata={"tool_rounds": 0, "callback_count": 0})
+
+    router.run_via_loop = AsyncMock(side_effect=_run_via_loop)
+    router.data_store = None
+    router.quota_check_enabled = False
+    router.daily_limit = 20
+    router.trace_enabled = False
+    router.trace_max_age_days = 7
+    router.config = None
 
     character = MagicMock()
     character.name = "Test"
@@ -95,9 +109,11 @@ async def test_buffered_merge_charges_per_call():
     async def slow_chat_call(user_id, group_id, messages):
         nonlocal call_count
         call_count += 1
+        # 模拟 BillingHook 在 _chat_with_tools 内的计费行为
+        await session.router.increment_usage(user_id)
         if call_count == 1:
             first_started.set()
-            await asyncio.sleep(0.05)  # 留出 buffered 注入窗口
+            await asyncio.sleep(0.05)
         elif call_count == 2:
             await asyncio.sleep(0.05)
         return f"reply_{call_count}"

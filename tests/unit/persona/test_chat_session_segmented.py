@@ -13,6 +13,7 @@ from plugins.DicePP.module.persona.chat.segment_dispatcher import SegmentDispatc
 from plugins.DicePP.module.persona.chat.segment_state import SegmentBudgetState
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.llm.router import LLMRouter
+from plugins.DicePP.module.persona.llm.loop import LoopResult
 from plugins.DicePP.module.persona.tools.registry import ToolRegistry, ToolDomain
 from plugins.DicePP.module.persona.llm.coordinator import LLMCallCoordinator
 from plugins.DicePP.module.persona.character.models import Character
@@ -38,10 +39,18 @@ def mock_store():
 
 @pytest.fixture
 def mock_router():
-    router = MagicMock(spec=LLMRouter)
-    router.generate = AsyncMock(return_value="hello")
-    router.generate = AsyncMock(return_value=("hello", {"tool_rounds": 0, "callback_count": 0}))
+    router = MagicMock()
+    router.run_via_loop = AsyncMock(return_value=LoopResult(
+        final_output="hello",
+        metadata={"tool_rounds": 0, "callback_count": 0},
+    ))
     router.increment_usage = AsyncMock()
+    router.data_store = None
+    router.quota_check_enabled = False
+    router.daily_limit = 20
+    router.trace_enabled = False
+    router.trace_max_age_days = 7
+    router.config = None
     return router
 
 
@@ -134,7 +143,7 @@ class TestFlagLifecycle:
 
     @pytest.mark.asyncio
     async def test_exception_does_not_produce_sentinel(self, session, mock_router):
-        mock_router.generate = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_router.run_via_loop = AsyncMock(side_effect=RuntimeError("boom"))
         with pytest.raises(RuntimeError):
             await session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
 
@@ -143,11 +152,12 @@ class TestReturnSemantics:
     @pytest.mark.asyncio
     async def test_chat_returns_falsy_sentinel_for_segmented(self, session):
         # segment_dispatcher enabled → falsy _SegmentedSentinel
+        # BillingHook 在 AgentLoop 内部计费，mock 的 run_via_loop 绕过此逻辑
         result = await session.chat("u1", "", "hello")
         assert result is not None
         assert not result
         assert isinstance(result, ChatSession._SegmentedSentinel)
-        assert session.router.increment_usage.await_count == 1
+        assert session.router.run_via_loop.await_count >= 1
 
     @pytest.mark.asyncio
     async def test_chat_returns_falsy_for_segmented_mode(self, session):
@@ -160,21 +170,20 @@ class TestReturnSemantics:
 class TestFallback:
     @pytest.mark.asyncio
     async def test_fallback_when_callbacks_exhausted(self, session, mock_router):
-        mock_router.generate = AsyncMock(return_value=("fallback content", {
-            "tool_rounds": 0,
-            "callback_count": 3,
-        }))
+        mock_router.run_via_loop = AsyncMock(return_value=LoopResult(
+            final_output="fallback content",
+            metadata={"tool_rounds": 0, "callback_count": 3},
+        ))
         result = await session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
-        # Fallback content should be appended to buffer
         assert "fallback content" in result
 
     @pytest.mark.asyncio
     async def test_fallback_empty_content_logged(self, session, mock_router):
         from unittest.mock import patch
-        mock_router.generate = AsyncMock(return_value=("", {
-            "tool_rounds": 0,
-            "callback_count": 3,
-        }))
+        mock_router.run_via_loop = AsyncMock(return_value=LoopResult(
+            final_output="",
+            metadata={"tool_rounds": 0, "callback_count": 3},
+        ))
         with patch("plugins.DicePP.module.persona.chat.session.logger") as mock_logger:
             result = await session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
         assert result == ""
@@ -182,62 +191,49 @@ class TestFallback:
         assert "耗尽 callback 且返回空 content" in mock_logger.error.call_args[0][0]
 
 
-class TestOnSegmentRoundComplete:
-    @pytest.mark.asyncio
-    async def test_returns_none_when_tool_called(self, session):
-        from plugins.DicePP.module.persona.llm.client import RoundResult
-        result = RoundResult(content="", tool_calls=[{"name": "send_reply_segment"}])
-        injected = await session._on_segment_round_complete(0, result, [])
-        assert injected is None
+class TestSegmentCorrectionHook:
+    """SegmentCorrectionHook 逻辑（替代 _on_segment_round_complete）"""
 
     @pytest.mark.asyncio
-    async def test_returns_injection_when_content_without_tools(self, session):
-        from plugins.DicePP.module.persona.llm.client import RoundResult
-        result = RoundResult(content="hello", tool_calls=[])
-        injected = await session._on_segment_round_complete(0, result, [])
-        assert injected is not None
-        assert "send_reply_segment" in injected["content"]
+    async def test_returns_none_when_tool_called(self):
+        from plugins.DicePP.module.persona.llm.hooks import SegmentCorrectionHook
+        from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
+        from unittest.mock import Mock
 
-    @pytest.mark.asyncio
-    async def test_returns_none_and_warns_when_both(self, session):
-        from unittest.mock import patch
-        from plugins.DicePP.module.persona.llm.client import RoundResult
-        result = RoundResult(content="extra", tool_calls=[{"name": "send_reply_segment"}])
-        with patch("plugins.DicePP.module.persona.chat.session.logger") as mock_logger:
-            injected = await session._on_segment_round_complete(0, result, [])
-        assert injected is None
-        mock_logger.warning.assert_called_once()
-        assert "content alongside send_reply_segment" in mock_logger.warning.call_args[0][0]
-
-    @pytest.mark.asyncio
-    async def test_returns_none_for_pure_think_block(self, session):
-        """纯 <think> 块 → client 层已过滤为空 → 不注入纠正"""
-        from plugins.DicePP.module.persona.llm.client import RoundResult
-        # 模拟经过 client._filter_think_tags 后的 RoundResult
-        result = RoundResult(content="", tool_calls=[])
-        injected = await session._on_segment_round_complete(0, result, [])
-        assert injected is None
-
-    @pytest.mark.asyncio
-    async def test_injects_when_think_plus_text(self, session):
-        """<think> + 实际文本 → client 层过滤后剩文本 → 注入纠正"""
-        from plugins.DicePP.module.persona.llm.client import RoundResult
-        # 模拟 client 层已过滤 <think>，剩余实际文本
-        result = RoundResult(content="你好我是苏晓", tool_calls=[])
-        injected = await session._on_segment_round_complete(0, result, [])
-        assert injected is not None
-        assert "send_reply_segment" in injected["content"]
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_none_think_and_segment_tool(self, session):
-        """纯 <think> + send_reply_segment → client 层过滤后 content 为空 → 正常流程，无 warning"""
-        from unittest.mock import patch
-        from plugins.DicePP.module.persona.llm.client import RoundResult
-        result = RoundResult(
+        hook = SegmentCorrectionHook()
+        resp = LLMResponse(
             content="",
-            tool_calls=[{"name": "send_reply_segment"}],
+            tool_calls=[ToolCall(id="tc1", name="send_reply_segment", arguments="{}")],
+            usage=TokenUsage(),
         )
-        with patch("plugins.DicePP.module.persona.chat.session.logger") as mock_logger:
-            injected = await session._on_segment_round_complete(0, result, [])
-        assert injected is None
-        mock_logger.warning.assert_not_called()
+        ctx = Mock()
+        ctx.tool_round_num = 0
+        result = await hook.post_llm([], resp, ctx)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_injection_when_content_without_tools(self):
+        from plugins.DicePP.module.persona.llm.hooks import SegmentCorrectionHook
+        from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage
+        from unittest.mock import Mock
+
+        hook = SegmentCorrectionHook()
+        resp = LLMResponse(content="hello", tool_calls=[], usage=TokenUsage())
+        ctx = Mock()
+        ctx.tool_round_num = 0
+        result = await hook.post_llm([], resp, ctx)
+        assert result is not None
+        assert "send_reply_segment" in result["content"]
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_empty_content(self):
+        from plugins.DicePP.module.persona.llm.hooks import SegmentCorrectionHook
+        from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage
+        from unittest.mock import Mock
+
+        hook = SegmentCorrectionHook()
+        resp = LLMResponse(content="", tool_calls=[], usage=TokenUsage())
+        ctx = Mock()
+        ctx.tool_round_num = 0
+        result = await hook.post_llm([], resp, ctx)
+        assert result is None

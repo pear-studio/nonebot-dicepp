@@ -1,18 +1,18 @@
 """
 LLM 路由器
 
-多模型路由 + 并发控制 + 配额管理
+多模型路由 + 并发控制。配额检查、trace 记录已迁移至 Hook 系统。
 """
 from __future__ import annotations
 
 import asyncio
 from collections import deque
-import json
-from typing import List, Dict, Any, Optional, Callable, Awaitable, TYPE_CHECKING
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 import time
-import uuid
+
 from nonebot.log import logger
-from .client import LLMClient, RoundResult
+from .providers.openai import OpenAIProvider, NonRetryableError
+from .loop import AgentLoop, LoopResult
 from ..data.models import ModelTier, UserLLMConfig
 
 if TYPE_CHECKING:
@@ -21,11 +21,6 @@ if TYPE_CHECKING:
 
 class QuotaExceeded(Exception):
     """配额超限异常"""
-    pass
-
-
-class NonRetryableError(Exception):
-    """不可重试的 LLM 错误（认证失败、内容过滤等）"""
     pass
 
 
@@ -49,139 +44,41 @@ class LLMRouter:
         trace_enabled: bool = False,
         trace_max_age_days: int = 7,
     ):
-        """
-        初始化 LLM 路由器
-
-        Args:
-            primary_api_key: 主模型 API Key
-            primary_base_url: 主模型 Base URL
-            primary_model: 主模型名称
-            auxiliary_api_key: 辅助模型 API Key（留空复用主模型）
-            auxiliary_base_url: 辅助模型 Base URL
-            auxiliary_model: 辅助模型名称
-            max_concurrent: 最大并发数
-            timeout: 默认超时时间
-            daily_limit: 每日配额限制
-            quota_check_enabled: 是否启用配额检查
-            data_store: 数据存储层（用于配额检查）
-            config: 配置对象（用于白名单检查）
-            trace_enabled: 是否启用 trace 记录
-            trace_max_age_days: trace 保留天数
-        """
-        # 主模型客户端
-        self.primary_client = LLMClient(
+        self.primary_client = OpenAIProvider(
             api_key=primary_api_key,
             base_url=primary_base_url,
             model=primary_model,
         )
 
-        # 辅助模型客户端（未配置则复用主模型）
         aux_key = auxiliary_api_key or primary_api_key
         aux_url = auxiliary_base_url or primary_base_url
         aux_model = auxiliary_model or primary_model
 
-        self.auxiliary_client = LLMClient(
+        self.auxiliary_client = OpenAIProvider(
             api_key=aux_key,
             base_url=aux_url,
             model=aux_model,
         )
 
-        # 并发控制
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.timeout = timeout
 
-        # 配额控制（可在初始化后设置）
         self.daily_limit = daily_limit
         self.quota_check_enabled = quota_check_enabled
         self.data_store: Optional[Any] = data_store
         self.config: Optional[PersonaConfig] = config
 
-        # 统计
         self.stats = {
             "primary": {"requests": 0, "errors": 0},
             "auxiliary": {"requests": 0, "errors": 0},
         }
 
-        # Phase 7a: sliding-window latency stats per tier (maxlen=100)
         self._latency_window: Dict[str, deque] = {
             "primary": deque(maxlen=100),
             "auxiliary": deque(maxlen=100),
         }
         self.trace_enabled = trace_enabled
         self.trace_max_age_days = trace_max_age_days
-        self._trace_tasks: set[asyncio.Task] = set()
-
-    async def _check_quota(
-        self,
-        user_id: str,
-        group_id: str,
-        user_config: Optional[UserLLMConfig] = None,
-    ) -> bool:
-        """检查配额是否超限
-
-        Returns:
-            True 表示通过检查（可以继续），False 表示超限或检查失败
-        """
-        try:
-            if not self.quota_check_enabled:
-                return True
-            if not self.data_store:
-                return True
-
-            # R7: 使用独立的豁免检查方法
-            if await self._is_exempt_from_quota(user_id, group_id, user_config=user_config):
-                return True
-
-            # 检查配额
-            from ..wall_clock import persona_wall_now
-            today = persona_wall_now(self.config.timezone if self.config else "Asia/Shanghai").strftime("%Y-%m-%d")
-            usage = await self.data_store.get_daily_usage(user_id, today)
-
-            if usage >= self.daily_limit:
-                logger.info(f"配额超限: user={user_id}, usage={usage}/{self.daily_limit}")
-                return False
-
-            return True
-        except Exception as e:
-            # R4: 配额检查异常时记录错误并拒绝请求（避免配额失控）
-            logger.error(f"配额检查失败: user={user_id}, error={e}")
-            return False
-
-    async def _is_exempt_from_quota(
-        self,
-        user_id: str,
-        group_id: str,
-        user_config: Optional[UserLLMConfig] = None,
-    ) -> bool:
-        """检查用户/群是否豁免配额限制（R7: 解耦豁免逻辑）
-
-        Returns:
-            True 表示豁免（跳过配额检查），False 表示需要检查配额
-        """
-        if not self.data_store:
-            return False
-
-        try:
-            # 1. 检查用户是否有自定义 Key（豁免）
-            if user_config is None:
-                user_config = await self.data_store.get_user_llm_config(user_id)
-            if user_config and user_config.primary_api_key:
-                return True
-
-            # 2. 检查用户是否在白名单（豁免）
-            if self.config and self.config.whitelist_enabled:
-                if await self.data_store.is_user_whitelisted(user_id):
-                    return True
-
-            # 3. 检查群是否在白名单（豁免）
-            if group_id and self.config and self.config.whitelist_enabled:
-                if await self.data_store.is_group_whitelisted(group_id):
-                    return True
-
-            return False
-        except Exception as e:
-            logger.error(f"豁免检查失败: user={user_id}, error={e}")
-            return False  # 检查失败时保守处理（不豁免）
 
     async def increment_usage(self, user_id: str) -> None:
         """增加用量计数"""
@@ -191,42 +88,46 @@ class LLMRouter:
         today = persona_wall_now(self.config.timezone if self.config else "Asia/Shanghai").strftime("%Y-%m-%d")
         await self.data_store.increment_daily_usage(user_id, today)
 
+    def make_default_hooks(
+        self, include_billing: bool = False, include_segment: bool = False,
+    ) -> list:
+        """统一的 Hook 工厂方法，消除调用方重复构造逻辑"""
+        from .hooks import QuotaHook, TraceHook, BillingHook, SegmentCorrectionHook
+        hooks = [
+            QuotaHook(data_store=self.data_store,
+                      quota_check_enabled=self.quota_check_enabled,
+                      daily_limit=self.daily_limit, config=self.config),
+            TraceHook(data_store=self.data_store,
+                      trace_enabled=self.trace_enabled,
+                      trace_max_age_days=self.trace_max_age_days),
+        ]
+        if include_billing:
+            hooks.append(BillingHook(router=self))
+        if include_segment:
+            hooks.append(SegmentCorrectionHook())
+        return hooks
+
     def _get_client_for_tier(
-        self,
-        model_tier: ModelTier,
-        user_config: Optional[UserLLMConfig],
-    ) -> LLMClient:
-        """根据模型层级和用户配置获取对应的 LLMClient
-
-        Args:
-            model_tier: 模型层级
-            user_config: 用户自定义配置（可能为 None）
-
-        Returns:
-            对应的 LLMClient 实例
-        """
+        self, model_tier: ModelTier, user_config: Optional[UserLLMConfig],
+    ) -> OpenAIProvider:
         if model_tier == ModelTier.PRIMARY:
-            # 主模型：优先使用用户配置
             if user_config and user_config.primary_api_key:
-                return LLMClient(
+                return OpenAIProvider(
                     api_key=user_config.primary_api_key,
                     base_url=user_config.primary_base_url or self.primary_client.base_url,
                     model=user_config.primary_model or self.primary_client.model,
                 )
             return self.primary_client
         else:
-            # 辅助模型：优先使用用户配置
             if user_config:
-                # 如果用户配置了辅助模型 Key，使用它
                 if user_config.auxiliary_api_key:
-                    return LLMClient(
+                    return OpenAIProvider(
                         api_key=user_config.auxiliary_api_key,
                         base_url=user_config.auxiliary_base_url or user_config.primary_base_url or self.auxiliary_client.base_url,
                         model=user_config.auxiliary_model or self.auxiliary_client.model,
                     )
-                # 如果用户只配置了主模型 Key，使用主模型配置作为辅助模型
                 elif user_config.primary_api_key:
-                    return LLMClient(
+                    return OpenAIProvider(
                         api_key=user_config.primary_api_key,
                         base_url=user_config.primary_base_url or self.primary_client.base_url,
                         model=user_config.primary_model or self.primary_client.model,
@@ -234,198 +135,86 @@ class LLMRouter:
             return self.auxiliary_client
 
     async def _prepare_request(
-        self,
-        model_tier: ModelTier,
-        user_id: Optional[str],
-        group_id: Optional[str],
-        timeout: Optional[int],
-    ) -> tuple[str, LLMClient, Optional[UserLLMConfig], int]:
-        """统一处理 Phase 4 前置逻辑：读取用户配置、选择客户端、配额检查
-
-        Returns:
-            (tier_name, client, user_config, actual_timeout)
-        """
+        self, model_tier: ModelTier, user_id: Optional[str],
+        group_id: Optional[str], timeout: Optional[int],
+    ) -> tuple[str, OpenAIProvider, Optional[UserLLMConfig], int]:
         actual_timeout = timeout if timeout is not None else self.timeout
         tier_name = "primary" if model_tier == ModelTier.PRIMARY else "auxiliary"
-
         user_config = None
         if user_id and self.data_store:
             user_config = await self.data_store.get_user_llm_config(user_id)
-
         client = self._get_client_for_tier(model_tier, user_config)
-
-        # Phase 4: 配额检查（仅主模型且用户没有自定义 Key）
-        if model_tier == ModelTier.PRIMARY and user_id:
-            if not (user_config and user_config.primary_api_key):
-                if not await self._check_quota(user_id, group_id or "", user_config=user_config):
-                    msg_template = self.config.quota_exceeded_message if self.config else "今日配额已用完（{limit}次）"
-                    message = msg_template.replace("{limit}", str(self.daily_limit))
-                    raise QuotaExceeded(message)
-
         return tier_name, client, user_config, actual_timeout
 
-    async def _execute_and_trace(
-        self,
-        client: LLMClient,
-        tier_name: str,
-        call_coro: Awaitable[tuple[str, dict]],
-        *,
-        session_id: str,
-        user_id: Optional[str],
-        group_id: Optional[str],
-        messages: List[Dict],
-        temperature: Optional[float],
-        model_tier: ModelTier,
-        is_tools: bool = False,
-    ) -> tuple[str, dict]:
-        """执行 LLM 调用并统一记录 trace"""
-        status = "ok"
-        error_str = ""
-        response_text = ""
-        tokens_in = 0
-        tokens_out = 0
-        metadata: Dict[str, Any] = {}
-        start_time = time.monotonic()
-
-        try:
-            content, metadata = await call_coro
-            response_text = content
-            tokens_in = metadata.get("tokens_input", 0)
-            tokens_out = metadata.get("tokens_output", 0)
-            latency = time.monotonic() - start_time
-
-            # 记录日志
-            if is_tools:
-                tool_info = ""
-                if metadata.get("tool_names"):
-                    tool_info = f" tools={metadata['tool_names']}"
-                logger.info(
-                    f"model={metadata.get('model', client.model)} tier={tier_name} "
-                    f"latency={latency:.1f}s tools_rounds={metadata.get('tool_rounds', 0)}{tool_info} "
-                    f"cached={metadata.get('cached_tokens', 0)} status=ok"
-                )
-            else:
-                logger.info(
-                    f"model={metadata.get('model', client.model)} tier={tier_name} "
-                    f"latency={latency:.1f}s tokens_in={tokens_in} "
-                    f"tokens_out={tokens_out} "
-                    f"cached={metadata.get('cached_tokens', 0)} status=ok"
-                )
-
-            return content, metadata
-
-        except Exception as e:
-            self.stats[tier_name]["errors"] += 1
-            status = self._classify_error(e)
-            error_str = str(e)
-            latency = time.monotonic() - start_time
-
-            logger.warning(
-                f"model={client.model} tier={tier_name} "
-                f"latency={latency:.1f}s status=error error={e}"
-            )
-
-            if status in ("auth_error", "content_filter"):
-                raise NonRetryableError(str(e)) from e
-            raise
-        finally:
-            latency_ms = int((time.monotonic() - start_time) * 1000)
-            self._latency_window[tier_name].append(latency_ms)
-            tool_calls_for_trace: List[Dict] = []
-            if is_tools and metadata and metadata.get("tool_names"):
-                tool_calls_for_trace = [{"name": n} for n in metadata["tool_names"]]
-            round_records = metadata.get("round_records", []) if metadata else []
-            self._maybe_record_trace(
-                session_id=session_id,
-                user_id=user_id,
-                group_id=group_id,
-                model=client.model,
-                tier=tier_name,
-                messages=messages,
-                response=response_text,
-                tool_calls=tool_calls_for_trace,
-                round_records=round_records,
-                latency_ms=latency_ms,
-                tokens_in=tokens_in,
-                tokens_out=tokens_out,
-                temperature=temperature,
-                status=status,
-                error=error_str,
-            )
-
-    async def generate(
-        self,
-        messages: List[Dict],
+    async def run_via_loop(
+        self, messages: List[Dict], model_tier: ModelTier = ModelTier.PRIMARY,
+        timeout: Optional[int] = None, temperature: Optional[float] = None,
+        user_id: Optional[str] = None, group_id: Optional[str] = None,
         tools: Optional[List[Dict]] = None,
-        tool_choice: Optional[str] = None,
-        tool_executor: Optional[
-            Callable[[List[Dict]], Awaitable[List[Dict]]]
-        ] = None,
-        max_tool_rounds: int = 5,
-        model_tier: ModelTier = ModelTier.PRIMARY,
-        timeout: Optional[int] = None,
-        temperature: Optional[float] = None,
-        user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
-        on_round_complete: Optional[
-            Callable[[int, RoundResult, List[Dict]], Awaitable[Optional[Dict]]]
-        ] = None,
-        max_round_callbacks: int = 3,
-    ) -> tuple[str, dict]:
-        """
-        统一 LLM 生成入口，参数化控制工具调用与多轮循环。
+        max_tool_rounds: int = 5, max_round_callbacks: int = 3,
+        tool_registry: Any = None, tool_domains: Optional[List[str]] = None,
+        tool_ctx: Any = None, hooks: Optional[List] = None,
+        trace_hook: Any = None,
+    ) -> LoopResult:
+        """通过 AgentLoop 执行带工具的 LLM 调用。
 
-        Args:
-            messages: 消息列表
-            tools: 工具定义列表（None/空 → 纯文本路径）
-            tool_choice: None | "auto" | "required"
-            tool_executor: 工具执行回调
-            max_tool_rounds: 最多工具调用轮次
-            model_tier: 模型层级
-            timeout: 超时时间（覆盖默认）
-            temperature: 采样温度
-            user_id: 用户ID（用于配额检查）
-            group_id: 群ID（用于配额检查）
-            on_round_complete: L2 领域回调
-            max_round_callbacks: L1+L2 回调注入最大次数
-
-        Returns:
-            (content, metadata)
-
-        Raises:
-            QuotaExceeded: 当配额超限时
+        tier 选择 → 用户 Key 查找 → semaphore acquire → AgentLoop → flush trace。
         """
         tier_name, client, user_config, actual_timeout = await self._prepare_request(
-            model_tier, user_id, group_id, timeout
-        )
-
-        session_id = f"{user_id or ''}:{group_id or ''}:{uuid.uuid4().hex[:16]}"
+            model_tier, user_id, group_id, timeout)
 
         async with self.semaphore:
             self.stats[tier_name]["requests"] += 1
-            content, metadata = await self._execute_and_trace(
-                client,
-                tier_name,
-                client.generate(
-                    messages=messages,
-                    tools=tools,
-                    tool_choice=tool_choice,
-                    tool_executor=tool_executor,
-                    max_tool_rounds=max_tool_rounds,
-                    timeout=actual_timeout,
-                    temperature=temperature,
-                    on_round_complete=on_round_complete,
-                    max_round_callbacks=max_round_callbacks,
-                ),
-                session_id=session_id,
-                user_id=user_id,
-                group_id=group_id,
-                messages=messages,
-                temperature=temperature,
-                model_tier=model_tier,
-                is_tools=bool(tools),
+
+            loop = AgentLoop(
+                provider=client, tool_registry=tool_registry,
+                hooks=hooks or [],
+                max_tool_rounds=max_tool_rounds,
+                max_round_callbacks=max_round_callbacks,
             )
-            return content, metadata
+            try:
+                result = await loop.run(
+                    messages=messages, tools=tools,
+                    temperature=temperature, timeout=actual_timeout,
+                    user_id=user_id or "", group_id=group_id or "",
+                    tool_domains=tool_domains, tool_ctx=tool_ctx,
+                )
+            except NonRetryableError:
+                self.stats[tier_name]["errors"] += 1
+                raise
+            except Exception:
+                self.stats[tier_name]["errors"] += 1
+                raise
+
+            if result.metadata.get("status") == "ok":
+                md = result.metadata
+                logger.info(
+                    f"model={md.get('model', client.model)} tier={tier_name} "
+                    f"latency={md.get('latency_ms', 0)/1000:.1f}s "
+                    f"tools_rounds={md.get('tool_rounds', 0)} "
+                    f"tools={md.get('tool_names', [])} "
+                    f"cached={md.get('cached_tokens', 0)} status=ok")
+            result.metadata["tier"] = tier_name
+
+            if result.aborted and result.abort_reason:
+                raise QuotaExceeded(result.abort_reason)
+
+            latency_ms = result.metadata.get("latency_ms", 0)
+            self._latency_window[tier_name].append(latency_ms)
+
+            if result.metadata.get("status") not in ("ok", "max_rounds"):
+                self.stats[tier_name]["errors"] += 1
+
+        # flush trace hook after semaphore release（自动从 hooks 检测或使用显式参数）
+        from .hooks import TraceHook as _TraceHook
+        _trace_hook = trace_hook or next(
+            (h for h in (hooks or []) if isinstance(h, _TraceHook)), None)
+        if _trace_hook:
+            await _trace_hook.flush(
+                f"{user_id or ''}:{group_id or ''}:loop",
+                result.metadata)
+
+        return result
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
@@ -433,24 +222,6 @@ class LLMRouter:
             "primary": self.stats["primary"].copy(),
             "auxiliary": self.stats["auxiliary"].copy(),
         }
-
-    _RATE_LIMIT_KEYWORDS = ("rate limit", "rate_limit_error", "ratelimitreached", "insufficient_quota", "429")
-    _AUTH_KEYWORDS = ("authentication", "unauthorized", "401", "403")
-    _CONTENT_FILTER_KEYWORDS = ("content_filter", "moderation", "content policy")
-
-    @staticmethod
-    def _classify_error(e: Exception) -> str:
-        # TODO: 长期应由 LLMClient 层返回结构化错误码，减少字符串匹配依赖
-        msg = str(e).lower()
-        if isinstance(e, asyncio.TimeoutError):
-            return "timeout"
-        if any(k in msg for k in LLMRouter._RATE_LIMIT_KEYWORDS):
-            return "rate_limit"
-        if any(k in msg for k in LLMRouter._AUTH_KEYWORDS):
-            return "auth_error"
-        if any(k in msg for k in LLMRouter._CONTENT_FILTER_KEYWORDS):
-            return "content_filter"
-        return "unknown"
 
     def get_latency_percentiles(self, tier: str = "primary") -> Dict[str, float]:
         window = self._latency_window.get(tier)
@@ -480,63 +251,3 @@ class LLMRouter:
             "auxiliary_errors": self.stats["auxiliary"]["errors"],
         }
 
-    def _maybe_record_trace(
-        self,
-        session_id: str,
-        user_id: Optional[str],
-        group_id: Optional[str],
-        model: str,
-        tier: str,
-        messages: List[Dict],
-        response: str,
-        tool_calls: List[Dict],
-        round_records: List[Dict],
-        latency_ms: int,
-        tokens_in: int,
-        tokens_out: int,
-        temperature: Optional[float],
-        status: str,
-        error: str,
-    ) -> None:
-        if not self.trace_enabled:
-            return
-        if not self.data_store:
-            return
-        from ..data.models import LLMTraceRecord
-
-        _MAX_ROUND_MESSAGES_BYTES = 100 * 1024
-        round_json = json.dumps(round_records, ensure_ascii=False, default=str)
-        if len(round_json.encode("utf-8")) > _MAX_ROUND_MESSAGES_BYTES:
-            round_json = json.dumps(
-                {"_truncated": True, "reason": "round_messages exceeded 100KB", "rounds": len(round_records)},
-                ensure_ascii=False,
-            )
-
-        trace = LLMTraceRecord(
-            session_id=session_id,
-            user_id=user_id or "",
-            group_id=group_id or "",
-            model=model,
-            tier=tier,
-            messages=json.dumps(messages, ensure_ascii=False, default=str),
-            response=response,
-            tool_calls=json.dumps(tool_calls, ensure_ascii=False, default=str),
-            round_messages=round_json,
-            latency_ms=latency_ms,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            temperature=temperature,
-            status=status,
-            error=error,
-        )
-        # fire-and-forget; failure must not disturb the conversation
-        task = asyncio.create_task(self._write_trace(trace))
-        self._trace_tasks.add(task)
-        task.add_done_callback(self._trace_tasks.discard)
-
-    async def _write_trace(self, trace: Any) -> None:
-        try:
-            if self.data_store:
-                await self.data_store.add_llm_trace(trace)
-        except Exception as e:
-            logger.warning(f"写入 LLM trace 失败: {e}")
