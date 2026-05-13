@@ -95,7 +95,8 @@
     "auxiliary_model": "MiniMax-M2.7",
 
     "max_concurrent_requests": 2,
-    "timeout": 30,
+    "chat_llm_timeout_seconds": 30,
+    "background_llm_timeout_seconds": 90,
     "timezone": "Asia/Shanghai",
 
     "max_short_term_chars": 1500,
