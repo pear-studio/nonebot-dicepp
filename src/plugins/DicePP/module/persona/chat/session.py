@@ -30,7 +30,6 @@ from ..data.models import (
     ScoringFailure,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
-from ..llm.client import RoundResult
 from ..character.models import Character
 from ..chat.scoring import ScoringAgent
 from ..chat.context import ContextBuilder
@@ -40,7 +39,6 @@ from ..tools.registry import ToolRegistry, ToolDomain
 from ..tools.context import ToolContext
 from ..llm.coordinator import LLMCallCoordinator
 from ..gateway.port import MessagePort
-from .billing import BillingPolicy
 from .segment_dispatcher import SegmentDispatcher, SegmentItem
 from .segment_state import SegmentBudgetState, SegmentLimits
 
@@ -144,7 +142,6 @@ class ChatSession:
         self.segment_dispatcher = segment_dispatcher
         self._pending_messages: Dict[str, deque] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}
-        self._billing = BillingPolicy(router)
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
@@ -333,8 +330,6 @@ class ChatSession:
            同 E 时间轴
            → coordinator 跑 3 轮 → 3 次扣费
         """
-        await self._billing.charge(user_id)
-
         if isinstance(result, self._SegmentedSentinel):
             return
 
@@ -377,8 +372,7 @@ class ChatSession:
             on_result=_on_result,
         )
         if result.status == "success":
-            # 最终轮计费：on_result 只覆盖中间轮，最终轮通过 success 路径扣费。
-            await self._billing.charge(user_id)
+            # 最终轮计费由 BillingHook 处理（每次 AgentLoop.run() 首次 post_llm 扣费）。
             # _SegmentedSentinel 是 str 子类，直接透传——
             # 调用方用 `is None` 区分"未进入 chat"，用 `bool()` 区分"是否需要再发"
             return result.value
@@ -387,21 +381,15 @@ class ChatSession:
     # ── 工具调用 ──────────────────────────────────────────────
 
     async def _chat_with_tools(
-        self,
-        user_id: str,
-        group_id: str,
-        messages: List[Dict],
+        self, user_id: str, group_id: str, messages: List[Dict],
     ) -> str:
-        """支持工具调用的对话"""
         target_key = SegmentDispatcher.target_key(user_id, group_id)
 
-        # 5.3: 新聊天轮次开始前清空前一轮残段
         if self.segment_dispatcher:
             await self.segment_dispatcher.flush(target_key)
 
         tools = self.tool_registry.get_definitions_for(ToolDomain.CHAT)
 
-        # 5.4.1: 构造 SegmentBudgetState 并注入 ToolContext
         segment_state = None
         if self.segment_dispatcher:
             segment_limits = SegmentLimits(
@@ -414,44 +402,41 @@ class ChatSession:
             segment_state = SegmentBudgetState(limits=segment_limits)
 
         ctx = ToolContext(
-            user_id=user_id,
-            group_id=group_id,
-            store=self.store,
-            send=self.port,
-            segment_dispatcher=self.segment_dispatcher,
+            user_id=user_id, group_id=group_id, store=self.store,
+            send=self.port, segment_dispatcher=self.segment_dispatcher,
             segment_state=segment_state,
         )
-        tool_executor = self.tool_registry.make_executor_for(ToolDomain.CHAT, ctx=ctx)
 
-        content, metadata = await self.router.generate(
-            messages=messages,
-            tools=tools,
-            tool_executor=tool_executor,
-            tool_choice="required" if segment_state else "auto",
+        # 组装 Hooks（通过 Router 工厂方法避免重复构造逻辑）
+        hooks = self.router.make_default_hooks(
+            include_billing=True, include_segment=bool(segment_state))
+
+        result = await self.router.run_via_loop(
+            messages=messages, tools=tools,
             max_tool_rounds=self.config.tools_max_rounds,
             model_tier=ModelTier.PRIMARY,
-            user_id=user_id,
-            group_id=group_id,
-            on_round_complete=(
-                self._on_segment_round_complete if segment_state else None
-            ),
-            max_round_callbacks=(
-                self.config.segment_round_callbacks_max if segment_state else 0
-            ),
+            user_id=user_id, group_id=group_id,
+            tool_registry=self.tool_registry,
+            tool_domains=[ToolDomain.CHAT], tool_ctx=ctx,
+            hooks=hooks,
         )
+
+        if result.aborted:
+            raise QuotaExceeded(result.abort_reason)
+
+        metadata = result.metadata
+        content = result.final_output or ""
 
         if metadata.get("tool_rounds", 0) > 0:
             logger.debug(
                 f"工具调用完成: user={user_id}, "
                 f"rounds={metadata.get('tool_rounds')}, "
                 f"tools={metadata.get('tool_names')}, "
-                f"cached={metadata.get('cached_tokens', 0)}"
-            )
+                f"cached={metadata.get('cached_tokens', 0)}")
 
         if self.segment_dispatcher:
             return await self._run_chat_with_tools_segmented(
-                user_id, group_id, target_key, content, metadata, segment_state
-            )
+                user_id, group_id, target_key, content, metadata, segment_state)
 
         return content
 
@@ -514,45 +499,6 @@ class ChatSession:
             )
 
         return self._SegmentedSentinel(full_reply)
-
-    async def _on_segment_round_complete(
-        self,
-        completed_tool_rounds: int,
-        result: "RoundResult",
-        current_messages: List[Dict],
-    ) -> Optional[Dict]:
-        """5.5: LLM 不调用 send_reply_segment 时的纠正注入"""
-        # result.content 已在 client 层过滤 <think> 标签
-        content = result.content or ""
-
-        has_send_reply_segment = any(
-            tc.get("name") == "send_reply_segment" for tc in (result.tool_calls or [])
-        )
-
-        # 5.5.1: 含 send_reply_segment → 正常流程
-        if has_send_reply_segment:
-            if content.strip():
-                logger.warning(
-                    "LLM returned content alongside send_reply_segment; content ignored"
-                )
-            return None
-
-        # 5.5.2: 有实际文本内容 → 注入纠正
-        if content.strip():
-            logger.warning(
-                f"send_reply_segment 未被调用，注入纠正指令: "
-                f"round={completed_tool_rounds}, content_preview={content.strip()[:30]!r}"
-            )
-            return {
-                "role": "user",
-                "content": (
-                    "[系统指令] 你必须调用 send_reply_segment 工具发送回复。"
-                    "这不是用户消息，不要回应它，直接调用工具。"
-                ),
-            }
-
-        # 纯 <think> 或无内容 → 不纠正，让循环自然终止
-        return None
 
     # ── 关系与评分 ────────────────────────────────────────────
 

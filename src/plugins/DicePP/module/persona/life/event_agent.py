@@ -11,7 +11,9 @@ from datetime import datetime
 import json
 from nonebot.log import logger
 from ..llm.router import LLMRouter
-from ..llm.collect_executor import CollectExecutor
+from ..llm.loop import AgentLoop, LoopResult
+from ..tools.collecting import make_collecting_executor
+from ..tools.registry import ToolRegistry, ToolDef
 from ..data.models import ModelTier
 from typing import TYPE_CHECKING
 
@@ -102,6 +104,26 @@ class EventContext:
 
 class EventGenerationAgent:
     """事件生成 Agent - 使用辅助模型"""
+
+    def _make_collect_loop(self, max_tool_rounds: int, tool_def: dict):
+        """创建收集型 AgentLoop——工具 executor 将参数存入 collected_args"""
+        collected_args: list = []
+        name = tool_def["function"]["name"]
+        params = tool_def["function"]["parameters"]
+
+        tool_registry = ToolRegistry()
+        tool_registry.register(
+            "life", ToolDef(name=name, description="", parameters=params),
+            make_collecting_executor(collected_args),
+        )
+
+        hooks = self.llm_router.make_default_hooks()
+        loop = AgentLoop(
+            provider=self.llm_router.auxiliary_client,
+            tool_registry=tool_registry,
+            hooks=hooks, max_tool_rounds=max_tool_rounds,
+        )
+        return loop, collected_args
 
     # ── 默认 few-shot 示例（系统默认）
     _DEFAULT_SHARE_EXAMPLES: List[str] = [
@@ -278,27 +300,21 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            executor = CollectExecutor()
+            loop, collected = self._make_collect_loop(max_tool_rounds, tools[0])
 
-            content, metadata = await self.llm_router.generate(
+            result: LoopResult = await loop.run(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools,
-                tool_executor=executor,
-                max_tool_rounds=max_tool_rounds,
-                model_tier=ModelTier.AUXILIARY,
-                temperature=0.9,
-                timeout=self._bg_timeout,
+                tools=tools, temperature=0.9, timeout=self._bg_timeout,
             )
 
-            if not executor.collected:
+            if not collected:
                 logger.warning("事件生成: LLM 未调用 record_event 工具")
                 raise ValueError("LLM 未调用 record_event")
 
-            raw_args = executor.collected[0]["arguments"]
-            args = json.loads(raw_args)
+            args = collected[0]
             description = str(args.get("description", "")).strip().strip('"').strip("'")
             if not description:
                 description = "我正在房间里休息。"
@@ -453,27 +469,21 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            executor = CollectExecutor()
+            loop, collected = self._make_collect_loop(max_tool_rounds, tools[0])
 
-            content, metadata = await self.llm_router.generate(
+            result: LoopResult = await loop.run(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools,
-                tool_executor=executor,
-                max_tool_rounds=max_tool_rounds,
-                model_tier=ModelTier.AUXILIARY,
-                temperature=0.9,
-                timeout=self._bg_timeout,
+                tools=tools, temperature=0.9, timeout=self._bg_timeout,
             )
 
-            if not executor.collected:
+            if not collected:
                 logger.warning("反应生成: LLM 未调用 record_reaction 工具")
                 raise ValueError("LLM 未调用 record_reaction")
 
-            raw_args = executor.collected[0]["arguments"]
-            args = json.loads(raw_args)
+            args = collected[0]
             reaction = str(args.get("reaction", "")).strip().strip('"').strip("'")
             if not reaction:
                 reaction = f"（{character_name}默默地想着这件事）"
@@ -617,27 +627,21 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            executor = CollectExecutor()
+            loop, collected = self._make_collect_loop(max_tool_rounds, tools[0])
 
-            content, metadata = await self.llm_router.generate(
+            result: LoopResult = await loop.run(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools,
-                tool_executor=executor,
-                max_tool_rounds=max_tool_rounds,
-                model_tier=ModelTier.AUXILIARY,
-                temperature=0.85,
-                timeout=self._bg_timeout,
+                tools=tools, temperature=0.85, timeout=self._bg_timeout,
             )
 
-            if not executor.collected:
+            if not collected:
                 logger.warning("日记生成: LLM 未调用 record_diary_entry 工具")
                 return "今天发生了一些事，但我太累了，简单记录一下。"
 
-            raw_args = executor.collected[0]["arguments"]
-            args = json.loads(raw_args)
+            args = collected[0]
             diary = str(args.get("diary", "")).strip()
 
             if not diary:
@@ -793,43 +797,25 @@ class EventGenerationAgent:
         backoff_base = getattr(self.config, "proactive_share_backoff_base_seconds", 2) if self.config else 2
 
         for attempt in range(max_parse_retries + 1):
-            executor = CollectExecutor()
+            loop, collected = self._make_collect_loop(max_tool_rounds, tools[0])
 
             try:
-                content, metadata = await self.llm_router.generate(
+                result: LoopResult = await loop.run(
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    tools=tools,
-                    tool_executor=executor,
-                    max_tool_rounds=max_tool_rounds,
-                    model_tier=ModelTier.AUXILIARY,
-                    temperature=0.85,
-                    timeout=self._bg_timeout,
+                    tools=tools, temperature=0.85, timeout=self._bg_timeout,
                 )
             except Exception as e:
                 logger.error(f"分享消息生成失败: {e}")
                 return None
 
-            if not executor.collected:
+            if not collected:
                 logger.warning("分享消息: LLM 未调用 record_share_message 工具")
                 return None
 
-            raw_args = executor.collected[0]["arguments"]
-            try:
-                args = json.loads(raw_args)
-            except json.JSONDecodeError as je:
-                logger.warning(
-                    f"分享消息 JSON 解析失败（第{attempt + 1}次）: {je}, "
-                    f"content={raw_args[:100]!r}"
-                )
-                if attempt < max_parse_retries:
-                    backoff = backoff_base ** (attempt + 1)
-                    await asyncio.sleep(backoff)
-                    continue
-                return None
-
+            args = collected[0]
             message = str(args.get("message", "")).strip().strip('"').strip("'")
             if not message:
                 logger.warning(f"分享消息生成结果为空（第{attempt + 1}次）")

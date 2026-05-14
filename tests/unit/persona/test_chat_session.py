@@ -41,7 +41,15 @@ def _make_session(
 
     router = MagicMock()
     router.increment_usage = AsyncMock()
-    router.generate = AsyncMock(return_value=("reply", {}))
+    from plugins.DicePP.module.persona.llm.loop import LoopResult
+    router.run_via_loop = AsyncMock(return_value=LoopResult(
+        final_output="reply", metadata={"tool_rounds": 0, "callback_count": 0}))
+    router.data_store = None
+    router.quota_check_enabled = False
+    router.daily_limit = 20
+    router.trace_enabled = False
+    router.trace_max_age_days = 7
+    router.config = None
 
     character = MagicMock()
     character.name = "Test"
@@ -93,7 +101,7 @@ async def test_dedup_within_5_seconds_returns_none():
     again = await session.chat("u1", "", "你好")
     assert again is None
     # 第二次不应触发任何 router 调用
-    assert session.router.generate.await_count <= 1
+    assert session.router.run_via_loop.await_count <= 1
 
 
 @pytest.mark.asyncio
@@ -117,7 +125,7 @@ async def test_first_message_uses_first_mes_without_llm():
 
     assert result == "你好，我是测试角色"
     # 不应调用 LLM
-    assert session.router.generate.await_count == 0
+    assert session.router.run_via_loop.await_count == 0
     # 应该已写入用户消息和 first_mes 两条
     assert session.store.add_message.await_count >= 2
 
@@ -156,7 +164,7 @@ async def test_refuse_triggers_at_warmth_zero(monkeypatch):
     result = await session.chat("u1", "", "你好")
 
     assert result == "...（已读不回）"
-    assert session.router.generate.await_count == 0
+    assert session.router.run_via_loop.await_count == 0
 
 
 @pytest.mark.asyncio

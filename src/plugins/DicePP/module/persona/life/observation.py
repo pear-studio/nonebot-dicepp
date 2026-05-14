@@ -400,7 +400,9 @@ class ObservationExtractor:
             [{"what": ..., "why": ...}, ...]
         """
         from ..data.models import ModelTier
-        from ..llm.collect_executor import CollectExecutor
+        from ..llm.loop import AgentLoop, LoopResult
+        from ..tools.collecting import make_collecting_executor
+        from ..tools.registry import ToolRegistry, ToolDef
 
         # 构建提示
         system_prompt = """你是一个观察者。从以下群聊消息中提取1-3条有价值的观察。
@@ -444,35 +446,39 @@ class ObservationExtractor:
                 return []
 
             max_tool_rounds = self._max_tool_rounds
-            executor = CollectExecutor()
+            router = self.event_agent.llm_router
 
-            content, metadata = await self.event_agent.llm_router.generate(
+            collected_args: list = []
+            tool_registry = ToolRegistry()
+            tool_registry.register(
+                "obs", ToolDef(name="note_observation", description="", parameters={}),
+                make_collecting_executor(collected_args),
+            )
+
+            hooks = router.make_default_hooks()
+            loop = AgentLoop(
+                provider=router.auxiliary_client,
+                tool_registry=tool_registry,
+                hooks=hooks, max_tool_rounds=max_tool_rounds,
+            )
+
+            result: LoopResult = await loop.run(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools,
-                tool_executor=executor,
-                max_tool_rounds=max_tool_rounds,
-                model_tier=ModelTier.AUXILIARY,
-                temperature=0.7,
-                timeout=self._bg_timeout,
+                tools=tools, temperature=0.7, timeout=self._bg_timeout,
             )
 
             observations = []
-            if not executor.collected:
+            if not collected_args:
                 logger.warning("观察提取: LLM 未调用 note_observation 工具")
                 return []
-            for entry in executor.collected:
-                try:
-                    args = json.loads(entry["arguments"])
-                    observations.append({
-                        "what": args.get("what", ""),
-                        "why": args.get("why", ""),
-                    })
-                except json.JSONDecodeError:
-                    logger.warning(f"观察提取 JSON 解析失败: {entry['arguments'][:100]!r}")
-                    continue
+            for entry in collected_args:
+                observations.append({
+                    "what": entry.get("what", ""),
+                    "why": entry.get("why", ""),
+                })
             return observations
 
         except Exception as e:

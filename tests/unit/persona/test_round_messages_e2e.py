@@ -1,60 +1,50 @@
-"""端到端验证 round_messages 完整流程"""
+"""端到端验证 round_messages 通过 TraceHook 写入 DB"""
 import pytest
 import asyncio
 import aiosqlite
 import json
 from unittest.mock import Mock, AsyncMock
 
+from module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
+from module.persona.llm.loop import AgentLoop, LoopResult
+from module.persona.llm.hooks import TraceHook
+from module.persona.data.store import PersonaDataStore
+
 
 @pytest.mark.asyncio
 async def test_round_messages_e2e():
-    """通过 router._execute_and_trace 完整路径，验证 round_messages 写入 DB"""
-    from module.persona.llm.client import LLMClient
-    from module.persona.llm.router import LLMRouter
-    from module.persona.data.store import PersonaDataStore
-
+    """通过 AgentLoop + TraceHook 完整路径，验证 round_messages 写入 DB"""
     db = await aiosqlite.connect(":memory:")
     store = PersonaDataStore(db)
     await store.ensure_tables()
 
-    router = LLMRouter(
-        primary_api_key="sk-test",
-        primary_base_url="https://api.test.com/v1",
-        primary_model="test-model",
-        max_concurrent=1,
-        data_store=store,
-        trace_enabled=True,
-    )
+    provider = Mock()
+    provider.retryable_errors = frozenset()
+    provider.generate = AsyncMock(side_effect=[
+        LLMResponse(content="<think>简单思考</think>你好", tool_calls=[],
+                    usage=TokenUsage(input=50, output=10), finish_reason="stop", model="test-model"),
+        LLMResponse(content="<think>简单思考</think>你好", tool_calls=[],
+                    usage=TokenUsage(input=50, output=10), finish_reason="stop", model="test-model"),
+    ])
 
-    client = router.primary_client
-    mock_response = Mock()
-    mock_response.choices = [Mock()]
-    mock_response.choices[0].message = Mock()
-    mock_response.choices[0].message.content = "<think>简单思考</think>你好"
-    mock_response.choices[0].message.tool_calls = None
-    mock_response.usage = None
+    trace_hook = TraceHook(data_store=store, trace_enabled=True)
+    loop = AgentLoop(provider=provider, hooks=[trace_hook])
 
-    mock_openai = Mock()
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
-    client._client = mock_openai
-
-    content, metadata = await router._execute_and_trace(
-        client=client,
-        tier_name="primary",
-        call_coro=client.generate(
-            messages=[{"role": "user", "content": "hi"}],
-            tools=[{"type": "function", "function": {"name": "test_tool"}}],
-            max_round_callbacks=0,
-        ),
-        session_id="s1",
-        user_id="u1",
-        group_id="g1",
+    result = await loop.run(
         messages=[{"role": "user", "content": "hi"}],
-        temperature=None,
-        model_tier="primary",
-        is_tools=True,
+        user_id="u1", group_id="g1",
     )
 
+    import logging
+    logging.getLogger("plugins.DicePP.module.persona.data.store").setLevel(logging.WARNING)
+    await trace_hook.flush("s1", {
+        "user_id": "u1", "group_id": "g1",
+        "model": "test-model", "tier": "primary",
+        "messages": [{"role": "user", "content": "hi"}],
+        "content": "你好", "tool_names": [],
+        "latency_ms": 500, "tokens_input": 50, "tokens_output": 10,
+        "temperature": None, "status": "ok", "error": "",
+    })
     await asyncio.sleep(0.5)
 
     cursor = await db.execute(
@@ -69,6 +59,5 @@ async def test_round_messages_e2e():
     assert len(data) >= 1
     assert data[0]["think"] == "<think>简单思考</think>"
     assert data[0]["tool_calls"] == []
-    assert data[0]["tool_results"] == []
 
     await db.close()

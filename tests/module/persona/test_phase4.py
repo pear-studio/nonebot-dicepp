@@ -404,10 +404,12 @@ class TestQuotaExemptions:
             )
 
             # 白名单用户应豁免配额检查
-            assert await router._is_exempt_from_quota("WHITELISTED_USER", "") is True
+            from plugins.DicePP.module.persona.llm.hooks import QuotaHook
+            hook = QuotaHook(data_store=store, quota_check_enabled=True, daily_limit=2, config=config)
+            assert await hook._is_exempt("WHITELISTED_USER", "") is True
 
             # 非白名单用户不应豁免
-            assert await router._is_exempt_from_quota("REGULAR_USER", "") is False
+            assert await hook._is_exempt("REGULAR_USER", "") is False
 
     @pytest.mark.asyncio
     async def test_whitelist_group_exempt_from_quota(self, tmp_path):
@@ -516,29 +518,33 @@ class TestQuotaExceededException:
 
     @pytest.mark.asyncio
     async def test_quota_exceeded_raised_when_limit_reached(self, tmp_path):
-        """测试配额超限时抛出异常"""
+        """测试配额超限时抛出异常（通过 QuotaHook）"""
         import aiosqlite
         from plugins.DicePP.module.persona.llm.router import LLMRouter, QuotaExceeded
+        from plugins.DicePP.module.persona.llm.hooks import QuotaHook
+        from plugins.DicePP.module.persona.llm.loop import AgentLoop
 
         db_path = tmp_path / "test.db"
         async with aiosqlite.connect(str(db_path)) as db:
             store = PersonaDataStore(db, timezone="Asia/Shanghai")
             await store.ensure_tables()
 
-            # 创建 router（配额限制为 0 次，立即触发超限）
+            # 创建 router
             router = LLMRouter(
                 primary_api_key="test-key",
                 primary_base_url="https://api.test.com/v1",
                 primary_model="gpt-4o",
-                daily_limit=0,  # 配额为 0，任何请求都会超限
+                daily_limit=0,
                 quota_check_enabled=True,
                 data_store=store,
             )
 
-            # 应抛出 QuotaExceeded
+            # 通过 run_via_loop 触发 QuotaHook → 应抛出 QuotaExceeded
             with pytest.raises(QuotaExceeded):
-                await router.generate(
+                await router.run_via_loop(
                     messages=[{"role": "user", "content": "hello"}],
-                    user_id="TEST_USER",
-                    group_id="",
+                    user_id="TEST_USER", group_id="",
+                    hooks=[QuotaHook(
+                        data_store=store, quota_check_enabled=True,
+                        daily_limit=0)],
                 )

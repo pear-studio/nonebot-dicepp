@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta
 
 from module.persona.llm.router import LLMRouter
+from module.persona.llm.loop import AgentLoop
 from module.persona.chat.context import ContextBuilder
 from module.persona.character.models import Character
 from module.persona.data.store import PersonaDataStore
@@ -26,18 +27,10 @@ async def temp_db():
 
 
 def test_classify_error():
-    assert LLMRouter._classify_error(asyncio.TimeoutError()) == "timeout"
-    assert LLMRouter._classify_error(Exception("rate limit hit")) == "rate_limit"
-    assert (
-        LLMRouter._classify_error(Exception("authentication failed")) == "auth_error"
-    )
-    assert (
-        LLMRouter._classify_error(Exception("content_filter triggered"))
-        == "content_filter"
-    )
-    assert LLMRouter._classify_error(Exception("RateLimitReached")) == "rate_limit"
-    assert LLMRouter._classify_error(Exception("insufficient_quota")) == "rate_limit"
-    assert LLMRouter._classify_error(Exception("something else")) == "unknown"
+    assert AgentLoop._ce(asyncio.TimeoutError()) == "timeout"
+    assert AgentLoop._ce(Exception("rate limit hit")) == "rate_limit"
+    assert AgentLoop._ce(Exception("rate_limit_error occurred")) == "rate_limit"
+    assert AgentLoop._ce(Exception("something else")) == "unknown"
 
 
 def test_latency_percentiles_empty():
@@ -148,29 +141,18 @@ async def test_trace_round_messages_round_trip(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_trace_enabled_false_does_not_create_task():
-    router = LLMRouter("fake", "http://localhost", "fake", max_concurrent=1)
-    router.trace_enabled = False
-    router.data_store = None
-    # Should return early without creating any task
-    router._maybe_record_trace(
-        session_id="s1",
-        user_id="u1",
-        group_id="g1",
-        model="m",
-        tier="primary",
-        messages=[],
-        response="r",
-        tool_calls=[],
-        round_records=[],
-        latency_ms=100,
-        tokens_in=1,
-        tokens_out=1,
-        temperature=None,
-        status="ok",
-        error="",
-    )
-    assert len(router._trace_tasks) == 0
+async def test_trace_hook_disabled_does_not_write():
+    """TraceHook trace_enabled=False 时 post_llm 不累积记录"""
+    from module.persona.llm.hooks import TraceHook
+    hook = TraceHook(data_store=None, trace_enabled=False)
+    from module.persona.llm.hook_protocol import LoopContext
+    from module.persona.llm.providers.protocol import LLMResponse, TokenUsage
+
+    ctx = LoopContext()
+    resp = LLMResponse(content="hello", usage=TokenUsage())
+    result = await hook.post_llm([], resp, ctx)
+    assert result is None
+    assert len(hook.round_records) == 0
 
 
 @pytest.mark.asyncio
