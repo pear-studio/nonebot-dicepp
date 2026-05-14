@@ -19,8 +19,9 @@ from core.data.query_store import (
     QUERY_DATA_FIELD_LIST,
     QUERY_REDIRECT_FIELD,
     QUERY_REDIRECT_FIELD_LIST,
-    regexp_normalize,
+    QueryStoreError,
 )
+from .query_utils import command_split
 from utils.time import get_current_date_raw
 from utils.data import yield_deduplicate
 
@@ -523,9 +524,9 @@ class QueryCommand(UserCommandBase):
         if meta.group_id:
             port = GroupMessagePort(meta.group_id)
             row = await self.bot.db.group_config.get(meta.group_id)
-            database = "DND5E"
+            database = self.bot.config.mode.default
             if row and row.data:
-                database = row.data.get("query_database", "DND5E")
+                database = row.data.get("query_database", self.bot.config.mode.default)
         else:
             port = PrivateMessagePort(meta.user_id)
             # 私聊优先使用用户私设的 query_database（支持私聊切换模式），回退到全局私聊默认
@@ -993,39 +994,8 @@ class QueryCommand(UserCommandBase):
                                                        page_total=poss_result_num // page_item_num + 1)
         return feedback
     
-    def command_split(self,keywords: str) -> List[str]:
-        """
-        处理一遍指令，将更加规范的文本传递给查询
-        """
-        result_list: List[str] = []
-        collect_words: str = ""
-        prefix: str = ""
-        fine_mode: bool = False
-        for key in keywords:
-            if not fine_mode and collect_words == "" and key == "\"":
-                fine_mode = True
-            elif fine_mode and key == "\"":
-                fine_mode = False
-                if collect_words != "":
-                    result_list.append(prefix + collect_words)
-                    prefix = ""
-            elif not fine_mode and key in ["#","&"]:
-                if collect_words.strip():
-                    result_list.append(prefix + collect_words.strip())
-                collect_words = ""
-                prefix = key
-            elif not fine_mode and key in [" "]:
-                if collect_words.strip():
-                    result_list.append(prefix + collect_words.strip())
-                collect_words = ""
-                prefix = ""
-            else:
-                collect_words += key
-        if fine_mode:
-            result_list.append(prefix + collect_words)
-        elif collect_words.strip():
-            result_list.append(prefix + collect_words.strip())
-        return result_list
+    def command_split(self, keywords: str) -> List[str]:
+        return command_split(keywords)
     
     async def query_item(
         self,
@@ -1034,190 +1004,50 @@ class QueryCommand(UserCommandBase):
         query_keywords: str,
         search_mode: int = 0,
     ) -> List[QueryData]:
-        """
-        查询的实际处理,会同时处理普通数据库与房规数据库
-        """
         poss_result: List[QueryData] = []
-        # 如果库不存在直接撤
         if not self.bot.db.query.has_database(database):
             return poss_result
-        # 分割关键字，这里不检测超出，因为全部由数据库决定
-        query_command_list:List[str] = []
+        query_command_list: List[str] = []
         if len(query_keywords) > 0:
             query_command_list = self.command_split(query_keywords)
             if len(query_command_list) == 0:
                 return poss_result
         else:
             return poss_result
-        # 找到搜索候选
-        poss_result = await self.search_item(database, query_command_list, search_mode)
-        # 找到私设候选（如果开的话）
-        if homebrew_database != "":
-            homebrew_result = await self.search_item(homebrew_database, query_command_list, search_mode)
-            for homebrew in homebrew_result[::-1]:
-                if len(poss_result) > 0:
-                    for poss in poss_result[::-1]:
-                        if homebrew.data_name == poss.data_name:
-                            poss_result.remove(poss)
-                if len(homebrew.data_content.strip()) == 0:
-                    homebrew_result.remove(homebrew)
-            poss_result = poss_result + homebrew_result
-        
+        poss_result = await self.search_item(
+            database, query_command_list, search_mode, homebrew_database,
+        )
         return poss_result
 
-    async def search_item(self, database: str, query_command_list: List[str], search_mode: int = 0) -> List[QueryData]:
-        """
-        搜索合规的对象
-        """
-        sql_search_command_prefix: str = "Select * From data Where " #查询指令前缀
-        sql_redirect_command_prefix: str = "Select * From redirect Where " #查询指令前缀
-        sql_command_suffix: str = "" #" COLLATE NOCASE" #查询指令后缀
-        # 统一通过异步 store 访问 query db
-        query_result: List[QueryData] = []
-        result_length: int = 0
-        use_redirect: bool = True
-        # 分割指令
-        # 获取查询指令列表
-        complete_name: str = ""
-        complete_name_en: str = ""
-        can_single_query: bool = True
-        condition_type: List[str] = ["名称","英文","来源","分类","标签","内容","全部"]
-        condition_list: Dict[str, List[List[str]]] = {}
-        # 预处理指令
-        for query_command in query_command_list:
-            # 确认指令对象
-            cmd_target = ["名称","英文"]
-            if query_command[0]  == "#":
-                cmd_target = ["来源","分类","标签"]
-                query_command = query_command[1:]
-                can_single_query = False
-            elif query_command[0]  == "&":
-                cmd_target = ["分类"]
-                query_command = query_command[1:]
-                can_single_query = False
-                '''
-            elif "=" in query_command:
-                left_word, right_word = query_command.split("=")
-                can_single_query = False
-                if len(left_word) != 0 and len(right_word) != 0:
-                    new_cmd_target = []
-                    for word in left_word.split("/"):
-                        if word not in condition_type:
-                            new_cmd_target.append(word)
-                        else:
-                            break
-                    if len(new_cmd_target) != 0:
-                        cmd_target = new_cmd_target
-                        query_command = right_word
-                '''
-            elif search_mode == 1:
-                cmd_target = ["全部"]
-                can_single_query = False
-            command_list = [command for command in query_command.split("/")]
-            if len(command_list) == 0:
-                continue
-            # 添加条件指令
-            if tuple(cmd_target) not in condition_list.keys():
-                condition_list[tuple(cmd_target)] = []
-            condition_list[tuple(cmd_target)].append(command_list)
-            if len(command_list) == 1:
-                if "名称" in cmd_target:
-                    complete_name += command_list[0]
-                if "英文" in cmd_target:
-                    if complete_name_en != "":
-                        complete_name_en += " " + command_list[0]
-                    else:
-                        complete_name_en += command_list[0]
-            else:
-                complete_name = ""
-                complete_name_en = ""
-        # 防止空查询
-        condition_size = 0
-        for key_list in condition_list.keys():
-            condition_size += len(condition_list[key_list])
-        if condition_size == 0:
-            return []
-        # 正常查询
-        sql_condition, params = self.generate_search_conditions(condition_list)
-        #print(sql_condition)
-        rows = await self.bot.db.query.fetchall(
-            database,
-            sql_search_command_prefix + sql_condition + sql_command_suffix,
-            params,
-        )
-        for _data in rows:
-            query_result.append(QueryData(_data, database=database))
-            result_length += 1
-            if result_length > MAX_QUERY_ITEM_NUM:
-                raise QueryError("匹配条目过多，无法查询")
-        # 处理重定向
-        if use_redirect:
-            redirect_condition_list: Dict[tuple, List[List[str]]] = {
-                ("名称",) : []
-            }
-            sql_condition_list: Dict[tuple, List[List[str]]] = {
-                ("名称",) : []
-            }
-            for key_list in condition_list.keys():
-                if "全部" in key_list or "名称" in key_list:
-                    redirect_condition_list[("名称",)] += condition_list[key_list]
-                else:
-                    sql_condition_list[key_list] = condition_list[key_list]
-            if len(redirect_condition_list[("名称",)]) != 0:
-                redirect_result: List[List[str]] = []
-                sql_condition, params = self.generate_search_conditions(redirect_condition_list)
-                redirect_rows = await self.bot.db.query.fetchall(
-                    database,
-                    sql_redirect_command_prefix + sql_condition + sql_command_suffix,
-                    params,
-                )
-                for _data in redirect_rows:
-                    redirect_result.append([_data[0],_data[1]])
-                if len(redirect_condition_list) > 0:
-                    for _redirect in redirect_result:
-                        sql_condition_list[("名称",)] = [[_redirect[1]]]
-                        sql_condition, params = self.generate_search_conditions(sql_condition_list)
-                        redirected_rows = await self.bot.db.query.fetchall(
-                            database,
-                            sql_search_command_prefix + sql_condition + sql_command_suffix,
-                            params,
-                        )
-                        for _data in redirected_rows:
-                            query_result.append(QueryData(_data,_redirect[0],database))
-                            result_length += 1
-                            if result_length > MAX_QUERY_ITEM_NUM:
-                                raise QueryError("匹配条目过多，无法查询")
-        # 去除重复的条目，并寻找直接确认者,或者同名确认者
-        dupe_list: List[str] = []
-        new_query_result: List[QueryData] = []
-        found_equal: bool = False
-        for query_data in query_result:
-            if can_single_query:
-                if complete_name != "" and query_data.original_data[0] == complete_name:
-                    if not found_equal:
-                        dupe_list.clear()
-                        new_query_result.clear()
-                    found_equal = True
-                    if query_data.hash_word not in dupe_list:
-                        dupe_list.append(query_data.hash_word)
-                        new_query_result.append(query_data)
-                elif complete_name_en != "" and query_data.original_data[0].lower() == complete_name_en:
-                    if not found_equal:
-                        dupe_list.clear()
-                        new_query_result.clear()
-                    found_equal = True
-                    if query_data.hash_word not in dupe_list:
-                        dupe_list.append(query_data.hash_word)
-                        new_query_result.append(query_data)
-            if not found_equal:
-                if query_data.hash_word not in dupe_list:
-                    dupe_list.append(query_data.hash_word)
-                    new_query_result.append(query_data)
-        # 生成额外数据供使用
-        for query_data in query_result:
-            query_data.data_extend()
-        # 查询结束
-        return new_query_result
+    async def search_item(
+        self, database: str, query_command_list: List[str],
+        search_mode: int = 0, homebrew_database: str = "",
+    ) -> List[QueryData]:
+        """搜索合规的对象（适配层：调用 QueryStore.search() + dict→QueryData）。"""
+        databases = [database]
+        if homebrew_database:
+            databases.append(homebrew_database)
+
+        try:
+            result = await self.bot.db.query.search(
+                databases=databases,
+                query_tokens=query_command_list,
+                fulltext=(search_mode == 1),
+                limit=MAX_QUERY_ITEM_NUM,
+            )
+        except QueryStoreError:
+            raise QueryError("匹配条目过多，无法查询")
+
+        results: List[QueryData] = []
+        for r in result["results"]:
+            qd = QueryData(
+                [r["name"], r["name_en"], r["source"], r["catalogue"], r["tag"], r["content"]],
+                redirect_by=r.get("redirect_by", ""),
+                database=database,
+            )
+            qd.data_extend()
+            results.append(qd)
+        return results
 
     async def query_feedback(
         self,
@@ -1274,109 +1104,6 @@ class QueryCommand(UserCommandBase):
             self.record_dict[port] = QueryRecord(sub_query_items, database, get_current_date_raw(), len(sub_query_items))
         item.data_content = "\n".join(item_lines)
         return self.format_item_feedback(item)
-
-    def generate_search_conditions(
-        self,
-        condition_list: Dict[tuple, List[List[str]]],
-    ) -> Tuple[str, List[Any]]:
-        """
-        将多维条件构造成：
-        - 可执行的 SQL 片段（含占位符）
-        - 对应的 params 列表
-        """
-        sql_fragments: List[str] = []
-        params: List[Any] = []
-
-        for key_list in condition_list.keys():
-            cmd_groups = condition_list[key_list]
-            if len(cmd_groups) == 0:
-                continue
-
-            key_sql_parts: List[str] = []
-            key_params: List[Any] = []
-
-            if "全部" in key_list:
-                for command in cmd_groups:
-                    sql_part, part_params = self.generate_search_sql_regexp(
-                        command, "名称||英文||来源||分类||标签||内容"
-                    )
-                    key_sql_parts.append(sql_part)
-                    key_params.extend(part_params)
-            elif key_list == ["分类"]:
-                for command in cmd_groups:
-                    sql_part, part_params = self.generate_search_sql_in(command, "分类")
-                    key_sql_parts.append(sql_part)
-                    key_params.extend(part_params)
-            else:
-                for command in cmd_groups:
-                    sql_part, part_params = self.generate_search_sql_regexp(
-                        command, "||".join(key_list)
-                    )
-                    key_sql_parts.append(sql_part)
-                    key_params.extend(part_params)
-
-            if len(key_sql_parts) != 0:
-                sql_fragments.append("(" + " AND ".join(key_sql_parts) + ")")
-                params.extend(key_params)
-
-        return " AND ".join(sql_fragments), params
-    
-    def generate_search_sql_regexp(
-        self,
-        command_list: List[str],
-        prefix: str = "名称",
-    ) -> Tuple[str, List[str]]:
-        # 生成正则表达式的 condition（params 化）
-        result: List[str] = []
-        for command in command_list:
-            if command.startswith("-") and len(command) > 1:
-                result.append(f"^(?!.*{regexp_normalize(command[1:])})")
-            elif command.startswith("=") and len(command) > 1:
-                result.append(f"^{regexp_normalize(command[1:])}$")
-            elif len(command) > 0:
-                result.append(regexp_normalize(command))
-
-        pattern = "|".join(result)
-        return f"{prefix} regexp ?", [pattern]
-    
-    def generate_search_sql_in(
-        self,
-        command_list: List[str],
-        prefix: str = "来源",
-    ) -> Tuple[str, List[str]]:
-        # 生成列表检测 condition（params 化）
-        words: List[str] = []
-        anti_words: List[str] = []
-        for command in command_list:
-            if command.startswith("-") and len(command) > 1:
-                anti_words.append(command[1:])
-            elif command.startswith("=") and len(command) > 1:
-                words.append(command[1:])
-            elif len(command) > 0:
-                words.append(command)
-
-        clauses: List[str] = []
-        params: List[str] = []
-
-        if words:
-            placeholders = ",".join(["?"] * len(words))
-            clauses.append(f"{prefix} in ({placeholders})")
-            params.extend(words)
-
-        if anti_words:
-            placeholders = ",".join(["?"] * len(anti_words))
-            clauses.append(f"{prefix} not in ({placeholders})")
-            params.extend(anti_words)
-
-        if not clauses:
-            # 理论上不会发生：search_item 会保证至少有一个有效 token
-            return "1=0", []
-
-        if len(clauses) == 1:
-            return clauses[0], params
-
-        # words + anti_words：保持旧语义的 OR（满足 in 或不在 anti 集）
-        return f"({clauses[0]} OR {clauses[1]})", params
 
     def format_item_feedback(self, item: QueryData) -> str:
         # 最基本的单条目返回文本

@@ -129,6 +129,8 @@ class ChatSession:
         decay_calculator: Optional[DecayCalculator] = None,
         port: Optional[MessagePort] = None,
         segment_dispatcher: Optional[SegmentDispatcher] = None,
+        query_store: Any = None,
+        resolve_db: Any = None,
     ):
         self.store = store
         self.router = router
@@ -141,6 +143,8 @@ class ChatSession:
         self.decay_calculator = decay_calculator
         self.port = port
         self.segment_dispatcher = segment_dispatcher
+        self.query_store = query_store
+        self.resolve_db = resolve_db
         self._pending_messages: Dict[str, deque] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}
 
@@ -383,6 +387,7 @@ class ChatSession:
             user_id=user_id, group_id=group_id, store=self.store,
             send=self.port, segment_dispatcher=self.segment_dispatcher,
             segment_state=segment_state,
+            query=self.query_store, resolve_db=self.resolve_db,
         )
 
         # 组装 Hooks（通过 Router 工厂方法避免重复构造逻辑）

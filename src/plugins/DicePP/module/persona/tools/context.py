@@ -27,8 +27,10 @@ class ToolContext:
     """工具执行上下文 — 运行时注入的依赖"""
 
     user_id: str
-    group_id: str
+    group_id: str              # 私聊时为 ""
     store: Any = None
     send: Optional[SendPort] = None
     segment_dispatcher: Optional[Any] = None
     segment_state: Optional[Any] = None
+    query: Any = None          # QueryStore 实例
+    resolve_db: Any = None     # Callable[[str, str], Awaitable[str]]
