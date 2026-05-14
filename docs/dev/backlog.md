@@ -35,67 +35,47 @@
   - 影响面: `client.py:_generate_with_tools` 循环终止条件、后台 Agent prompt
   - 前置条件: 当前 `max_tool_rounds=1` 已覆盖，本条为架构扩展预留
 
-### [B-260513-a1b2c3] 统一消息存储：多源消息汇总入库 + LLM 工具检索
-- 创建: 2026-05-13
+### [B-260514-d3e4f5] 删除 first_mes 特判逻辑
+- 创建: 2026-05-14
 - 问题表现:
-  - 当前消息分散存储在三套表：`messages`（私聊对话）、`group_conversations`（群聊对话）、`observation_buffer`（旁听暂存）
-  - 非对话指令（掷骰 `.r`、规则查询 `.q` 等）完全不落库，LLM 无法感知用户的指令行为
-  - 消息发送结果（成功/失败）仅在 `_persist_assistant_message` 写入后隐式成功，发送失败时无记录
-  - LLM 的 `search_chat_history` 工具只能检索 `messages` 表，不能跨群聊/私聊或查看掷骰历史
-  - 数据模型不统一（`Message` vs `GroupConversation` vs `Observation`），每加一个数据源需新增表 + 独立 API
+  - first_mes 是无视用户实际输入的静态欢迎语，首次私聊不管用户说什么都返回同一段预设文本
+  - 绕过 AgentLoop / Hook / LLMCallCoordinator 等抽象层，是唯一不经过架构统一路径的特殊分支
+  - first_mes 文本与用户原始消息的"假对话对"持久化到历史中，污染上下文
 - 工作计划:
+  - 删除 `session.py:chat()` 中 `is_first and self.character.first_mes` 特判分支（L182-184）
+  - 删除 `Character` 模型中的 `first_mes` 字段（`character/models.py`）
+  - 清理角色卡中的 `first_mes` 配置项
+  - 注意：已移除 first_mes 路径中的内部持久化调用，删除时无需考虑持久化副作用
 
-  **1. 数据层 — 统一消息表**
-  - 新建 `unified_messages` 表：
-    ```
-    id, user_id, group_id, role, type, content, display_name,
-    sent_ok, tool_call_id, created_at
-    ```
-  - `role`: `user` / `assistant` / `system` / `tool`
-  - `type`: `chat`（对话消息）、`dice_command`（`.r 3d6` 之类）、`system_notice`（系统指令注入，如 [[系统指令]]）、`send_result`（发送状态回执）
-  - `sent_ok`: `True` / `False` / `NULL`（非 assistant 消息无意义时为 NULL）
-  - `group_id` 为空表示私聊；有值为群聊
-  - 该表替代现有的 `messages`、`group_conversations`、`observation_buffer` 三张表
+### [B-260514-18afa4] 合并 config/personas 和 content/characters 为统一目录结构
+- 创建: 2026-05-14
+- 问题表现:
+    - config/personas/ 和 content/characters/ 各存一份同一角色的设定（如七七），分散在两处
+    - config/personas/qiqi.local.json 实质是空壳，仅 llm_personality 一行有差异，而这个字段在代码中未被消费（只在 PersonaModel 定义和测试中出现，无任何模块读取）
+    - 新增角色需同时维护 JSON + YAML 两份文件，容易遗漏或不一致
+    - config/personas/ 目录定位模糊：角色皮肤配置和 AI 角色定义分离，概念上不清晰
+- 工作计划:
+    - 迁移为 content/characters/{name}/ 子目录结构，每角色一个目录，内含 character.yaml + skin.yaml（统一 YAML 格式）
+    - 删除 PersonaModel.llm_personality 字段（无消费方）
+    - 更新 PersonaLoader：扫描路径从 config/personas/*.json → content/characters/*/skin.yaml，JSON→YAML
+    - 更新 CharacterLoader：路径从 {name}.yaml → {name}/character.yaml，list_characters() 改为列子目录
+    - 更新 Paths：CONFIG_PERSONAS_DIR → CONTENT_CHARACTERS_DIR，修改 ensure_dirs
+    - 迁移 4 个现有文件，删除 config/personas/ 目录
+    - 更新测试（test_persona.py、test_character.py）
 
-  **2. 采集层 — 全量消息拦截**
-  - 在 message pipeline / command 层统一 hook：所有用户消息（含掷骰指令、规则查询等）在进入具体 handler 之前先写入 `unified_messages`
-  - 消息写入时机：前置 hook（handler 执行前），`sent_ok` 初始为 NULL，发送结果后续回填
-  - 现有采集点迁移：
-    - `chat()` 中的 `store.add_message()` / `store.add_group_conversation()` → 改为写 `unified_messages`
-    - `_persist_assistant_message()` → 改为写 `unified_messages` 并回填 `sent_ok`
-    - `command.py` 中的 `_group_chat_recorder()` → 改为写 `unified_messages`
+## test-infra
 
-  **3. 保留策略 — 滚动 + 保底**
-  - 总容量上限：每 `(user_id, group_id)` 组合保留最近 N 条（默认 1000）
-  - 保底：每个群/私聊至少保留最近 M 条（默认 50），即使超出总上限
-  - 清理触发：写入后检查，超出上限时按 `created_at` 删最旧的
-  - 独立于 LLM 上下文截断（`max_history_turns` / `max_history_tokens`），后者继续在获取时做窗口截断
-
-  **4. LLM 数据消费**
-  - 对话上下文构建（`_fetch_short_term_history` → `format_history` → `truncate_by_turns`）：
-    - 从 `unified_messages` 读取，筛选 `type=chat`（或包含 `type=chat` + `type=dice_command`，待讨论）
-    - LLM 能看到同一会话中的掷骰结果等非对话内容，但通过 `role`/`type` 区分不是 bot 发出的
-  - 工具检索（`search_chat_history`）：
-    - 扩展为跨会话查询，支持按 `type` / `user_id` / `group_id` / 时间范围筛选
-    - 返回精简摘要而非原文全文（字符上限控制）
-
-  **5. observe_group 存废**
-  - 如果保留：将现有的 `observation_buffer` 采集 path 改为从 `unified_messages` 表筛选：
-    ```sql
-    WHERE group_id = ? AND type = 'chat' AND NOT (role = 'assistant')
-          AND created_at > ? ORDER BY created_at DESC
-    ```
-    阈值逻辑（`observe_min_length` / `observe_initial_threshold` 等）不变
-  - 如果取消：直接删除 `observation_buffer` 表、`observe_group_enabled` 配置项、`command.py` 中的 `_group_chat_recorder` 旁听分支
-
-  **6. 迁移策略**
-  - 旧表数据（`messages` / `group_conversations` / `observation_buffer`）做一次性迁移到 `unified_messages`
-  - `observation_buffer` 在迁移后直接删除（无论 observe_group 是否保留，其数据均归入统一表）
-  - `messages` / `group_conversations` 保留旧表作为回滚备份，后续版本删除
-
-  **7. 配置变更**
-  - PersonaConfig 新增：
-    - `unified_message_max_total: int = 1000` — 每 `(user_id, group_id)` 总条数上限
-    - `unified_message_min_retain: int = 50` — 每 `(user_id, group_id)` 保底保留条数
-  - `observe_group_enabled` 暂保留，取决于 observe_group 存废讨论结论
+### [B-260514-60a29a] 测试 bot config 文件泄漏，config/bots/ 积累 8000+ 残留文件
+- 创建: 2026-05-14
+- 问题表现:
+    - config/bots/ 下有 8012 个文件，均为测试生成的 bot 账号配置
+    - 按前缀分布：char_test(2278)、e2e(2090)、init_test(1751)、rollcmd_test(1236)、test_bot(645)、shell(11)
+    - conftest.py 设置了 DICEPP_APP_DIR 指向 tmpdir，但未设置 DICEPP_PROJECT_ROOT，Paths.CONFIG_DIR 仍指向真实项目目录
+    - _new_test_account() 每次生成唯一 bot ID（含 uuid），_ensure_account_config() 发现文件不存在即从 _template.json 自动拷贝
+    - async_teardown_test_bot 和两个 pytest fixture 只清理 data_path（data 目录），不清理 config/bots/{id}.json
+    - 每次 pytest 都泄漏文件，无任何回收机制
+- 工作计划:
+    - conftest.py 增设 DICEPP_PROJECT_ROOT 指向 tmpdir，在 tmpdir 下创建最小 config/bots/_template.json，atexit 全量清理
+    - async_teardown_test_bot / shared_bot / fresh_bot 增加防御性删除 config/bots/{bot_id}.json
+    - 清理现有 8012 个残留文件
 
