@@ -1,5 +1,5 @@
 # ── 构建阶段 ──────────────────────────────────────────────────────
-FROM python:3.10-slim AS builder
+FROM python:3.13-slim AS builder
 
 # 构建参数：镜像源配置
 ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
@@ -34,7 +34,7 @@ RUN uv venv /app/.venv && \
     uv pip install . --index-url ${UV_INDEX_URL}
 
 # ── 运行阶段 ──────────────────────────────────────────────────────
-FROM python:3.10-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
