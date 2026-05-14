@@ -1,7 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import aiosqlite
 
@@ -47,6 +47,10 @@ def regexp_normalize(string: str) -> str:
         else:
             new_string += char
     return new_string
+
+
+class QueryStoreError(RuntimeError):
+    """查询数据库操作异常"""
 
 
 class QueryStore:
@@ -354,4 +358,303 @@ class QueryStore:
             )
         await (await self._get_conn(db_name)).commit()
         return True
+
+    # ── 共享搜索逻辑 ──────────────────────────────────────────
+
+    @staticmethod
+    def _generate_search_sql_regexp(
+        command_list: List[str],
+        prefix: str = "名称",
+    ) -> Tuple[str, List[str]]:
+        result: List[str] = []
+        for command in command_list:
+            if command.startswith("-") and len(command) > 1:
+                result.append(f"^(?!.*{regexp_normalize(command[1:])})")
+            elif command.startswith("=") and len(command) > 1:
+                result.append(f"^{regexp_normalize(command[1:])}$")
+            elif len(command) > 0:
+                result.append(regexp_normalize(command))
+
+        pattern = "|".join(result)
+        return f"{prefix} regexp ?", [pattern]
+
+    @staticmethod
+    def _generate_search_sql_in(
+        command_list: List[str],
+        prefix: str = "来源",
+    ) -> Tuple[str, List[str]]:
+        words: List[str] = []
+        anti_words: List[str] = []
+        for command in command_list:
+            if command.startswith("-") and len(command) > 1:
+                anti_words.append(command[1:])
+            elif command.startswith("=") and len(command) > 1:
+                words.append(command[1:])
+            elif len(command) > 0:
+                words.append(command)
+
+        clauses: List[str] = []
+        params: List[str] = []
+
+        if words:
+            placeholders = ",".join(["?"] * len(words))
+            clauses.append(f"{prefix} in ({placeholders})")
+            params.extend(words)
+
+        if anti_words:
+            placeholders = ",".join(["?"] * len(anti_words))
+            clauses.append(f"{prefix} not in ({placeholders})")
+            params.extend(anti_words)
+
+        if not clauses:
+            return "1=0", []
+
+        if len(clauses) == 1:
+            return clauses[0], params
+
+        return f"({clauses[0]} OR {clauses[1]})", params
+
+    @staticmethod
+    def _generate_search_conditions(
+        condition_list: Dict[tuple, List[List[str]]],
+    ) -> Tuple[str, List[Any]]:
+        sql_fragments: List[str] = []
+        params: List[Any] = []
+
+        for key_list in condition_list.keys():
+            cmd_groups = condition_list[key_list]
+            if len(cmd_groups) == 0:
+                continue
+
+            key_sql_parts: List[str] = []
+            key_params: List[Any] = []
+
+            if "全部" in key_list:
+                for command in cmd_groups:
+                    sql_part, part_params = QueryStore._generate_search_sql_regexp(
+                        command, "名称||英文||来源||分类||标签||内容"
+                    )
+                    key_sql_parts.append(sql_part)
+                    key_params.extend(part_params)
+            elif key_list == ("分类",):
+                for command in cmd_groups:
+                    sql_part, part_params = QueryStore._generate_search_sql_in(command, "分类")
+                    key_sql_parts.append(sql_part)
+                    key_params.extend(part_params)
+            else:
+                for command in cmd_groups:
+                    sql_part, part_params = QueryStore._generate_search_sql_regexp(
+                        command, "||".join(key_list)
+                    )
+                    key_sql_parts.append(sql_part)
+                    key_params.extend(part_params)
+
+            if len(key_sql_parts) != 0:
+                sql_fragments.append("(" + " AND ".join(key_sql_parts) + ")")
+                params.extend(key_params)
+
+        return " AND ".join(sql_fragments), params
+
+    async def _search_single_db(
+        self,
+        db_name: str,
+        query_tokens: List[str],
+        fulltext: bool,
+        limit: int,
+        offset: int,
+    ) -> List[Dict[str, str]]:
+        """在单个数据库中执行搜索，返回 dict 列表（含 redirect 解析与去重）。"""
+        sql_search_command_prefix: str = "Select * From data Where "
+        sql_redirect_command_prefix: str = "Select * From redirect Where "
+
+        condition_list: Dict[tuple, List[List[str]]] = {}
+        complete_name: str = ""
+        complete_name_en: str = ""
+        can_single_query: bool = True
+
+        for query_command in query_tokens:
+            cmd_target = ["名称", "英文"]
+            if query_command[0] == "#":
+                cmd_target = ["来源", "分类", "标签"]
+                query_command = query_command[1:]
+                can_single_query = False
+            elif query_command[0] == "&":
+                cmd_target = ["分类"]
+                query_command = query_command[1:]
+                can_single_query = False
+            elif fulltext:
+                cmd_target = ["全部"]
+                can_single_query = False
+
+            command_list = [command for command in query_command.split("/")]
+            if not any(command_list):
+                continue
+
+            if tuple(cmd_target) not in condition_list.keys():
+                condition_list[tuple(cmd_target)] = []
+            condition_list[tuple(cmd_target)].append(command_list)
+
+            if len(command_list) == 1:
+                if "名称" in cmd_target:
+                    complete_name += command_list[0]
+                if "英文" in cmd_target:
+                    if complete_name_en != "":
+                        complete_name_en += " " + command_list[0]
+                    else:
+                        complete_name_en += command_list[0]
+            else:
+                complete_name = ""
+                complete_name_en = ""
+
+        # 防止空查询
+        condition_size = 0
+        for key_list in condition_list.keys():
+            condition_size += len(condition_list[key_list])
+        if condition_size == 0:
+            return []
+
+        # 主查询（SQL 层 LIMIT 减少 I/O）
+        sql_condition, params = self._generate_search_conditions(condition_list)
+        sql_limit = limit * 2  # 预留余量给 redirect 追加结果
+        rows = await self.fetchall(
+            db_name,
+            sql_search_command_prefix + sql_condition + f" LIMIT {sql_limit}",
+            params,
+        )
+        results: List[Dict[str, str]] = []
+        for _data in rows:
+            results.append({
+                "name": _data[0], "name_en": _data[1], "source": _data[2],
+                "catalogue": _data[3], "tag": _data[4], "content": _data[5],
+                "redirect_by": "",
+            })
+
+        # 处理重定向
+        redirect_condition_list: Dict[tuple, List[List[str]]] = {
+            ("名称",): []
+        }
+        sql_condition_list: Dict[tuple, List[List[str]]] = {
+            ("名称",): []
+        }
+        for key_list in condition_list.keys():
+            if "全部" in key_list or "名称" in key_list:
+                redirect_condition_list[("名称",)] += condition_list[key_list]
+            else:
+                sql_condition_list[key_list] = condition_list[key_list]
+
+        if len(redirect_condition_list[("名称",)]) != 0:
+            redirect_result: List[List[str]] = []
+            sql_condition, params = self._generate_search_conditions(redirect_condition_list)
+            redirect_rows = await self.fetchall(
+                db_name,
+                sql_redirect_command_prefix + sql_condition,
+                params,
+            )
+            for _data in redirect_rows:
+                redirect_result.append([_data[0], _data[1]])
+
+            for _redirect in redirect_result:
+                sql_condition_list[("名称",)] = [[_redirect[1]]]
+                sql_condition, params = self._generate_search_conditions(sql_condition_list)
+                redirected_rows = await self.fetchall(
+                    db_name,
+                    sql_search_command_prefix + sql_condition,
+                    params,
+                )
+                for _data in redirected_rows:
+                    results.append({
+                        "name": _data[0], "name_en": _data[1], "source": _data[2],
+                        "catalogue": _data[3], "tag": _data[4], "content": _data[5],
+                        "redirect_by": _redirect[0],
+                    })
+
+        # 去重 + 精确匹配优先
+        dupe_list: Set[str] = set()
+        new_results: List[Dict[str, str]] = []
+        found_equal: bool = False
+        for r in results:
+            hash_word = r["name"] + "#" + r["source"] + "#" + r["catalogue"]
+            if can_single_query:
+                if complete_name != "" and r["name"] == complete_name:
+                    if not found_equal:
+                        dupe_list.clear()
+                        new_results.clear()
+                    found_equal = True
+                    if hash_word not in dupe_list:
+                        dupe_list.add(hash_word)
+                        new_results.append(r)
+                elif complete_name_en != "" and r["name"].lower() == complete_name_en:
+                    if not found_equal:
+                        dupe_list.clear()
+                        new_results.clear()
+                    found_equal = True
+                    if hash_word not in dupe_list:
+                        dupe_list.add(hash_word)
+                        new_results.append(r)
+            if not found_equal:
+                if hash_word not in dupe_list:
+                    dupe_list.add(hash_word)
+                    new_results.append(r)
+
+        return new_results[offset:offset + limit]
+
+    async def search(
+        self,
+        databases: List[str],
+        query_tokens: List[str],
+        fulltext: bool = False,
+        limit: int = 5,
+        offset: int = 0,
+        max_total: int = 1000,
+    ) -> dict:
+        """搜索多个资料库，返回 dict。
+
+        Returns:
+            {"results": [...], "total": int}
+
+        Raises:
+            QueryStoreError: total > max_total 或数据库未加载
+        """
+        if not query_tokens:
+            return {"results": [], "total": 0}
+
+        if not databases:
+            return {"results": [], "total": 0}
+
+        for db in databases:
+            if not self.has_database(db):
+                raise QueryStoreError(f"数据库未加载: {db}")
+
+        # 主库搜索
+        all_results = await self._search_single_db(
+            databases[0], query_tokens, fulltext, max_total + 1, 0,
+        )
+
+        # 私设库合并（私设覆盖同名主库条目）
+        for hb_db in databases[1:]:
+            hb_results = await self._search_single_db(
+                hb_db, query_tokens, fulltext, max_total + 1, 0,
+            )
+            for hb in hb_results[::-1]:
+                for main in all_results[::-1]:
+                    if hb["name"] == main["name"]:
+                        all_results.remove(main)
+                if hb["content"].strip():
+                    all_results.append(hb)
+
+        total = len(all_results)
+        if total > max_total:
+            raise QueryStoreError(f"result count {total} exceeds max_total={max_total}")
+
+        return {"results": all_results[offset:offset + limit], "total": total}
+
+    async def get_database_info(self, db_name: str) -> Optional[dict]:
+        """获取资料库元数据，未加载则返回 None。"""
+        if not self.has_database(db_name):
+            return None
+        row = await self.fetchone(db_name, "SELECT COUNT(*) FROM data")
+        rows = row[0] if row else 0
+        cat_rows = await self.fetchall(db_name, "SELECT DISTINCT 分类 FROM data")
+        categories = [r[0] for r in cat_rows if r[0]]
+        return {"name": db_name, "rows": rows, "categories": categories}
 

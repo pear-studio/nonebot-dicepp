@@ -36,6 +36,8 @@ from .tools.search_memory import SEARCH_MEMORY_TOOL, search_memory_executor
 from .tools.search_history import SEARCH_HISTORY_TOOL, make_search_history_executor
 from .tools.roll_dice import ROLL_DICE_TOOL, roll_dice_executor
 from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
+from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_databases_executor
+from .tools.search_query import SEARCH_QUERY_TOOL, search_query_executor
 from .chat.segment_dispatcher import SegmentDispatcher
 
 
@@ -224,6 +226,8 @@ def _build_chat(
     decay_calculator: DecayCalculator,
     port: MessagePort,
     segment_dispatcher: Optional[SegmentDispatcher] = None,
+    query_store: Any = None,
+    resolve_db: Any = None,
 ) -> ChatSession:
     """组装 ChatSession"""
     scoring_agent = ScoringAgent(router, timezone=config.timezone,
@@ -261,6 +265,8 @@ def _build_chat(
         decay_calculator=decay_calculator,
         port=port,
         segment_dispatcher=segment_dispatcher,
+        query_store=query_store,
+        resolve_db=resolve_db,
     )
 
 
@@ -380,6 +386,8 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         make_search_history_executor(config.search_chat_history_max_chars),
     )
     tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
+    tool_registry.register(ToolDomain.CHAT, LIST_QUERY_DATABASES_TOOL, list_query_databases_executor)
+    tool_registry.register(ToolDomain.CHAT, SEARCH_QUERY_TOOL, search_query_executor)
     if config.segment_enabled:
         tool_registry.register(
             ToolDomain.CHAT,
@@ -404,8 +412,24 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("衰减计算器已初始化")
 
+    async def _resolve_query_db(user_id: str, group_id: str) -> str:
+        if group_id:
+            row = await bot.db.group_config.get(group_id)
+            if row and row.data:
+                return row.data.get("query_database", bot.config.mode.default)
+            return bot.config.mode.default
+        else:
+            row = await bot.db.user_stat.get(user_id)
+            if row and row.data:
+                db = row.data.get("query_database")
+                if db:
+                    return db
+            return bot.config.query.private_database
+
     chat = _build_chat(
-        store, router, tool_registry, coordinator, character, config, decay_calculator, port, segment_dispatcher
+        store, router, tool_registry, coordinator, character, config,
+        decay_calculator, port, segment_dispatcher,
+        query_store=bot.db.query, resolve_db=_resolve_query_db,
     )
     life = await _build_life(store, character, config, coordinator, port, decay_calculator, router)
 
