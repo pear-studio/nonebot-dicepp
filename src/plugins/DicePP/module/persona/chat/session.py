@@ -438,33 +438,36 @@ class ChatSession:
         # 5.4.4 / 5.4.5: 兜底 — callback 用尽且 LLM 仍未分段
         if metadata.get("callback_count", 0) >= self.config.segment_round_callbacks_max:
             if content:
-                fallback_content = content[:self.config.segment_hard_limit]
-                logger.warning(
-                    f"LLM 忽略分段工具，使用兜底: user={user_id}, "
-                    f"fallback_len={len(fallback_content)}"
-                )
-                # fallback 语义为"完整替代"：清空此前尝试，丢弃 queue 中待发送 segment，
-                # 用最终 content 替代。已发送的 segment 无法召回。
-                # 历史仅记录 fallback_content，已发送的 segment 不计入历史，属已知设计妥协。
+                # 若 buffer 已有成功发送的分段，说明 LLM 已发完内容、
+                # 最后一轮多输出了一句状态文本，保留 buffer 忽略 content。
+                # 此处兜底与 ContextBuilder 分段引导 prompt 共同防御 LLM 多余输出，
+                # 修改任一需确认另一是否需要同步。
                 if segment_state.buffer:
-                    segment_state.buffer.clear()
-                    segment_state.total_chars = 0
-                    segment_state.segment_count = 0
-                if self.segment_dispatcher:
-                    await self.segment_dispatcher.flush(target_key)
-                segment_state.buffer.append(fallback_content)
-                segment_state.total_chars += len(fallback_content)
-                segment_state.segment_count += 1
-                self.segment_dispatcher.notify(
-                    target_key,
-                    SegmentItem(
-                        content=fallback_content,
-                        delay_before=0.0,
-                        user_id=user_id,
-                        group_id=group_id,
-                    ),
-                )
-                full_reply = "".join(segment_state.buffer)
+                    logger.warning(
+                        f"LLM 已发送 {segment_state.segment_count} 段后输出额外文本，已忽略: "
+                        f"user={user_id}, extra={content[:80]!r}"
+                    )
+                else:
+                    fallback_content = content[:self.config.segment_hard_limit]
+                    logger.warning(
+                        f"LLM 忽略分段工具，使用兜底: user={user_id}, "
+                        f"fallback_len={len(fallback_content)}"
+                    )
+                    if self.segment_dispatcher:
+                        await self.segment_dispatcher.flush(target_key)
+                    segment_state.buffer.append(fallback_content)
+                    segment_state.total_chars += len(fallback_content)
+                    segment_state.segment_count += 1
+                    self.segment_dispatcher.notify(
+                        target_key,
+                        SegmentItem(
+                            content=fallback_content,
+                            delay_before=0.0,
+                            user_id=user_id,
+                            group_id=group_id,
+                        ),
+                    )
+                    full_reply = "".join(segment_state.buffer)
             else:
                 logger.error(f"LLM 耗尽 callback 且返回空 content: user={user_id}")
 

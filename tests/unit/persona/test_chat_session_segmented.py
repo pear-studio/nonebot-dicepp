@@ -189,6 +189,92 @@ class TestFallback:
         mock_logger.error.assert_called_once()
         assert "耗尽 callback 且返回空 content" in mock_logger.error.call_args[0][0]
 
+    @pytest.mark.asyncio
+    async def test_fallback_preserves_buffer_when_segments_already_sent(
+        self, session, mock_store, dispatcher,
+    ):
+        """buffer 已有成功分段时，fallback 应保留 buffer 并忽略 LLM 多余文本"""
+        from plugins.DicePP.module.persona.chat.segment_state import (
+            SegmentBudgetState, SegmentLimits,
+        )
+        limits = SegmentLimits(
+            max_chars=80, soft_limit=100, hard_limit=120,
+            count_max=10, max_delay=10.0,
+        )
+        segment_state = SegmentBudgetState(limits=limits)
+        segment_state.buffer = ["段落1", "段落2", "段落3", "段落4"]
+        segment_state.total_chars = 12
+        segment_state.segment_count = 4
+
+        result = await session._run_chat_with_tools_segmented(
+            user_id="u1", group_id="", target_key="user:u1",
+            content="已经回复过了，等待用户下一条消息。",
+            metadata={"tool_rounds": 4, "callback_count": 3},
+            segment_state=segment_state,
+        )
+
+        # buffer 内容应保留
+        assert "段落1" in result
+        assert "段落2" in result
+        assert "段落3" in result
+        assert "段落4" in result
+        # LLM 多余文本不应出现
+        assert "已经回复过了" not in result
+        # buffer 未被清空
+        assert len(segment_state.buffer) == 4
+        # 历史写入的是 buffer 内容，不是多余文本
+        history_call = mock_store.add_unified_message.call_args
+        assert history_call is not None
+        history_content = history_call[1]["content"]
+        assert "段落1" in history_content
+        assert "已经回复过了" not in history_content
+        # dispatcher 未被额外通知
+        queue = dispatcher._queues.get("user:u1")
+        assert queue is None or queue.empty()
+
+    @pytest.mark.asyncio
+    async def test_fallback_empty_content_buffer_nonempty(
+        self, session, mock_store,
+    ):
+        """buffer 非空 + content 为空：应保留 buffer 并记录 error"""
+        from unittest.mock import patch
+        from plugins.DicePP.module.persona.chat.segment_state import (
+            SegmentBudgetState, SegmentLimits,
+        )
+        limits = SegmentLimits(
+            max_chars=80, soft_limit=100, hard_limit=120,
+            count_max=10, max_delay=10.0,
+        )
+        segment_state = SegmentBudgetState(limits=limits)
+        segment_state.buffer = ["A", "B", "C"]
+        segment_state.total_chars = 3
+        segment_state.segment_count = 3
+
+        with patch("plugins.DicePP.module.persona.chat.session.logger") as mock_logger:
+            result = await session._run_chat_with_tools_segmented(
+                user_id="u1", group_id="", target_key="user:u1",
+                content="",
+                metadata={"tool_rounds": 3, "callback_count": 3},
+                segment_state=segment_state,
+            )
+
+        # 返回 buffer 内容
+        assert "A" in result
+        assert "B" in result
+        assert "C" in result
+        # buffer 未被清空
+        assert len(segment_state.buffer) == 3
+        # error 日志被记录
+        mock_logger.error.assert_called_once()
+        assert "耗尽 callback 且返回空 content" in mock_logger.error.call_args[0][0]
+        # 历史写入 buffer 原内容
+        history_call = mock_store.add_unified_message.call_args
+        assert history_call is not None
+        history_content = history_call[1]["content"]
+        assert "A" in history_content
+        assert "B" in history_content
+        assert "C" in history_content
+
 
 class TestSegmentCorrectionHook:
     """SegmentCorrectionHook 逻辑（替代 _on_segment_round_complete）"""

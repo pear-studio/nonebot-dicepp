@@ -197,6 +197,7 @@ class ContextBuilder:
                 f"- 每段建议 {sg.target_chars} 字，单段上限 {sg.max_chars} 字\n"
                 f"- 单次回复总字数软上限 {sg.soft_limit} 字，硬上限 {sg.hard_limit} 字\n"
                 f"- 短句 delay_before 用 {DEFAULT_DELAY_BEFORE} 秒，长句用 2–3 秒\n"
+                f"- 回复完成后直接结束，禁止输出任何状态描述（如\"已经回复过了\"、\"回复完成\"等）\n"
                 f"\n"
                 f"【系统消息说明】\n"
                 f"对话中可能出现以 [系统指令] 开头的消息，"
