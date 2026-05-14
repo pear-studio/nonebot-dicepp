@@ -20,10 +20,10 @@ from ..wall_clock import persona_wall_now
 from ..utils.privacy import mask_sensitive_string
 
 from .models import (
-    Message, WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
-    RelationshipState, Observation, DailyEvent, GroupActivity, UserLLMConfig,
-    LLMTraceRecord, DelayedTask, GroupConversation, CharacterState,
-    ScoringFailure, DEFAULT_WARMTH_LABELS,
+    WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
+    RelationshipState, DailyEvent, GroupActivity, UserLLMConfig,
+    LLMTraceRecord, DelayedTask, CharacterState,
+    ScoringFailure, UnifiedMessage, MessageType, DEFAULT_WARMTH_LABELS,
 )
 from .migrations import ALL_MIGRATIONS
 
@@ -45,7 +45,7 @@ class PersonaDataStore:
         group_activity_decay_with_content: float = 5.0,  # 有内容时衰减减半
         group_activity_content_window_hours: float = 24.0,  # 内容保护时间窗口
         timezone: str = "Asia/Shanghai",
-        group_max_messages: int = 40,
+        unified_message_max_per_group: int = 1000,
     ):
         self.db = db_connection
         self._group_activity_decay_per_day = group_activity_decay_per_day
@@ -53,7 +53,7 @@ class PersonaDataStore:
         self._group_activity_decay_with_content = group_activity_decay_with_content
         self._group_activity_content_window_hours = group_activity_content_window_hours
         self._timezone = timezone
-        self._group_max_messages = group_max_messages
+        self._unified_message_max_per_group = unified_message_max_per_group
 
     def _wall_now(self) -> datetime:
         """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
@@ -82,7 +82,6 @@ class PersonaDataStore:
         await self._ensure_relationship_decay_watermark_column()
         await self._ensure_relationship_miss_and_peak_columns()
         await self._ensure_score_history_conversation_digest()
-        await self._ensure_observations_debug_columns()
         await self._ensure_daily_events_share_columns()
         await self._ensure_daily_events_delta_columns()
         await self._ensure_daily_events_context_summary()
@@ -171,19 +170,6 @@ class PersonaDataStore:
         if "conversation_digest" not in col_names:
             await self.db.execute(
                 "ALTER TABLE persona_score_history ADD COLUMN conversation_digest TEXT DEFAULT ''"
-            )
-
-    async def _ensure_observations_debug_columns(self) -> None:
-        async with self.db.execute("PRAGMA table_info(persona_observations)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "source_messages_count" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_observations ADD COLUMN source_messages_count INTEGER DEFAULT 0"
-            )
-        if "extract_prompt_digest" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_observations ADD COLUMN extract_prompt_digest TEXT DEFAULT ''"
             )
 
     async def _ensure_daily_events_share_columns(self) -> None:
@@ -430,223 +416,161 @@ class PersonaDataStore:
             f"关系表迁移完成: 从多记录合并为 {actual} 条唯一用户记录"
         )
 
-    # ========== 消息相关 ==========
+    # ========== 统一消息表 (persona_unified_messages) ==========
 
-    async def add_message(self, user_id: str, group_id: str, role: str, content: str) -> None:
-        """添加消息"""
-        await self.db.execute(
-            """
-            INSERT INTO persona_messages (user_id, group_id, role, content, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (user_id, group_id, role, content, self._wall_now().isoformat())
-        )
-        await self.db.commit()
-
-    async def record_delivery_failure(
-        self, user_id: str, group_id: str, content: str, error: Optional[str] = None
-    ) -> None:
-        """记录发送失败的消息（供 MessagePort on_delivery_failed 回调使用）"""
-        try:
-            await self.add_message(user_id, group_id, "assistant", f"[发送失败] {content}")
-        except Exception:
-            logger.exception("on_delivery_failed 二次入库失败")
-
-    async def get_recent_messages(
+    async def add_unified_message(
         self,
         user_id: str,
         group_id: str,
-        limit: int = 20
-    ) -> List[Message]:
+        role: str,
+        type: MessageType,
+        content: str,
+        display_name: str = "",
+    ) -> int:
+        """写入一条统一消息，返回 last_insert_rowid。写入后自动触发保留裁剪。"""
+        now_iso = self._wall_now().isoformat()
+        cursor = await self.db.execute(
+            """
+            INSERT INTO persona_unified_messages
+            (user_id, group_id, role, type, content, display_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, group_id, role, type.value, content, display_name, now_iso),
+        )
+        await self.db.commit()
+        rowid = cursor.lastrowid
+        await self._retain_unified(group_id, user_id)
+        return rowid
+
+    async def get_recent_unified_messages(
+        self,
+        user_id: str,
+        group_id: str = "",
+        limit: int = 20,
+    ) -> List[UnifiedMessage]:
+        """获取最近消息（按 user_id + group_id），时间升序返回"""
         async with self.db.execute(
             """
-            SELECT id, user_id, group_id, role, content, created_at
-            FROM persona_messages
+            SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
+            FROM persona_unified_messages
             WHERE user_id = ? AND group_id = ?
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (user_id, group_id, limit)
+            (user_id, group_id, limit),
         ) as cursor:
             rows = await cursor.fetchall()
-            messages: List[Message] = []
-            rows_list: List[Any] = list(rows)
-            for row in reversed(rows_list):
-                messages.append(Message(
+            messages: List[UnifiedMessage] = []
+            for row in reversed(list(rows)):
+                messages.append(UnifiedMessage(
                     id=row[0],
                     user_id=row[1],
                     group_id=row[2],
                     role=row[3],
-                    content=row[4],
-                    created_at=datetime.fromisoformat(row[5]) if row[5] else None
+                    type=MessageType(row[4]),
+                    content=row[5],
+                    display_name=row[6] or "",
+                    sent_ok=row[7],
+                    created_at=datetime.fromisoformat(row[8]) if row[8] else None,
                 ))
             return messages
 
-    async def clear_messages(self, user_id: str, group_id: str) -> None:
-        """清空消息"""
-        await self.db.execute(
-            "DELETE FROM persona_messages WHERE user_id = ? AND group_id = ?",
-            (user_id, group_id)
-        )
-        await self.db.commit()
+    async def get_earliest_message_time(self, user_id: str, group_id: str = "") -> Optional[datetime]:
+        """获取用户最早消息时间（ORDER BY created_at ASC LIMIT 1）
 
-    async def prune_old_messages(self, user_id: str, group_id: str, keep: int) -> None:
-        """保留最近 N 条消息，删除旧的"""
-        await self.db.execute(
-            """
-            DELETE FROM persona_messages
-            WHERE user_id = ? AND group_id = ?
-              AND id NOT IN (
-                SELECT id FROM persona_messages
-                WHERE user_id = ? AND group_id = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-            )
-            """,
-            (user_id, group_id, user_id, group_id, keep)
-        )
-        await self.db.commit()
-
-    async def count_messages(self, user_id: str, group_id: str) -> int:
-        """统计用户消息数量"""
+        group_id 非空时查群聊，为空时查私聊。
+        """
         async with self.db.execute(
-            "SELECT COUNT(*) FROM persona_messages WHERE user_id = ? AND group_id = ?",
-            (user_id, group_id)
+            """
+            SELECT created_at FROM persona_unified_messages
+            WHERE user_id = ? AND group_id = ?
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (user_id, group_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0]:
+                return datetime.fromisoformat(row[0])
+            return None
+
+    async def count_unified_messages(self, user_id: str, group_id: str = "") -> int:
+        """统计用户消息数量（使用 SELECT COUNT(*) 避免全量加载）"""
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM persona_unified_messages WHERE user_id = ? AND group_id = ?",
+            (user_id, group_id),
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
 
-    # ========== 群聊共享历史 ==========
-
-    async def add_group_conversation(
+    async def get_group_unified_messages(
         self,
         group_id: str,
-        user_id: str,
-        role: str,
-        content: str,
-        display_name: str = "",
-    ) -> None:
-        """添加群聊消息并执行群级裁剪
-
-        群聊历史按 group_id 共享，私聊历史继续使用 persona_messages 按 user_id+group_id 隔离。
-        INSERT 与裁剪 DELETE 走 sqlite3 隐式事务，由末尾一次 commit 一并提交。
-
-        本类所有写方法均依赖 aiosqlite 默认 ``isolation_level=""`` 的隐式事务
-        （首条 DML 自动 BEGIN，commit 一次性提交累积写）。aiosqlite 共享单连接、
-        多协程交错时，任何前置未 commit 的 DML 都会让显式 ``await db.execute("BEGIN")``
-        触发 ``cannot start a transaction within a transaction``
-        （历史踩坑入口为 ``_group_chat_recorder`` post_send hook，但触发面不限于此）。
-
-        原子性依赖于"调用期间无其它协程在共享连接上 commit"——store.py
-        所有写方法均共享此隐式约定。极端竞态下可能出现裁剪滞后一次的瞬态，
-        不影响最终一致性。
-        """
-        now_iso = self._wall_now().isoformat()
-        await self.db.execute(
+        limit: int = 50,
+    ) -> List[UnifiedMessage]:
+        """获取群聊最近消息，时间升序返回"""
+        async with self.db.execute(
             """
-            INSERT INTO persona_group_conversations
-            (group_id, user_id, role, content, display_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (group_id, user_id, role, content, display_name, now_iso),
-        )
-        await self.db.execute(
-            """
-            DELETE FROM persona_group_conversations
-            WHERE group_id = ?
-              AND id NOT IN (
-                SELECT id FROM persona_group_conversations
-                WHERE group_id = ?
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
-            )
-            """,
-            (group_id, group_id, self._group_max_messages),
-        )
-        await self.db.commit()
-
-    async def get_group_conversations(
-        self,
-        group_id: str,
-        limit: Optional[int] = None,
-    ) -> List[GroupConversation]:
-        """获取群聊历史，按时间升序返回
-
-        群聊历史按 group_id 共享，私聊历史继续使用 persona_messages 按 user_id+group_id 隔离。
-        """
-        sql = """
-            SELECT id, group_id, user_id, role, content, display_name, created_at
-            FROM persona_group_conversations
-            WHERE group_id = ?
+            SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
+            FROM persona_unified_messages
+            WHERE group_id = ? AND group_id != ''
             ORDER BY created_at DESC
-        """
-        params: List[Any] = [group_id]
-        if limit is not None:
-            sql += " LIMIT ?"
-            params.append(limit)
-
-        async with self.db.execute(sql, params) as cursor:
+            LIMIT ?
+            """,
+            (group_id, limit),
+        ) as cursor:
             rows = await cursor.fetchall()
-            messages: List[GroupConversation] = []
-            rows_list: List[Any] = list(rows)
-            for row in reversed(rows_list):
-                messages.append(GroupConversation(
+            messages: List[UnifiedMessage] = []
+            for row in reversed(list(rows)):
+                messages.append(UnifiedMessage(
                     id=row[0],
-                    group_id=row[1],
-                    user_id=row[2],
+                    user_id=row[1],
+                    group_id=row[2],
                     role=row[3],
-                    content=row[4],
-                    display_name=row[5] or "",
-                    created_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                    type=MessageType(row[4]),
+                    content=row[5],
+                    display_name=row[6] or "",
+                    sent_ok=row[7],
+                    created_at=datetime.fromisoformat(row[8]) if row[8] else None,
                 ))
             return messages
 
-    async def prune_group_conversations(self, group_id: str, keep: int) -> None:
-        """保留最近 N 条群聊消息，删除旧的"""
-        await self.db.execute(
-            """
-            DELETE FROM persona_group_conversations
-            WHERE group_id = ?
-              AND id NOT IN (
-                SELECT id FROM persona_group_conversations
-                WHERE group_id = ?
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
-            )
-            """,
-            (group_id, group_id, keep),
-        )
-        await self.db.commit()
-
-    async def search_group_conversations(
+    async def search_unified_messages(
         self,
         group_id: str,
+        *,
         keyword: Optional[str] = None,
+        type: Optional[MessageType] = None,
+        user_id: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         hours_back: Optional[int] = None,
         limit: int = 5,
-    ) -> List[GroupConversation]:
-        """搜索群聊历史，按时间升序返回
+    ) -> List[UnifiedMessage]:
+        """搜索统一消息表，时间升序返回
 
-        注意：content LIKE 搜索依赖 SQLite 全表扫描，高并发大数据量场景下性能有限。
-        群聊历史按 group_id 共享，私聊历史继续使用 persona_messages 按 user_id+group_id 隔离。
-
-        参数优先级：hours_back 与 start_time/end_time 互斥，同时传入时抛出 ValueError。
+        参数优先级：hours_back 与 start_time/end_time 互斥。
         """
         if hours_back is not None and (start_time is not None or end_time is not None):
             raise ValueError("hours_back 与 start_time/end_time 不能同时使用")
-
         if (start_time is None) != (end_time is None):
             raise ValueError("start_time 和 end_time 必须同时提供或同时省略")
 
-        conditions = ["group_id = ?"]
+        conditions = ["group_id = ?", "group_id != ''"]
         params: List[Any] = [group_id]
 
         if keyword:
             safe_query = self._sanitize_search_query(keyword)
             conditions.append("content LIKE ? ESCAPE '\\'")
             params.append(f"%{safe_query}%")
+
+        if type is not None:
+            conditions.append("type = ?")
+            params.append(type.value)
+
+        if user_id is not None:
+            conditions.append("user_id = ?")
+            params.append(user_id)
 
         if hours_back is not None:
             cutoff = self._wall_now() - timedelta(hours=hours_back)
@@ -659,8 +583,8 @@ class PersonaDataStore:
 
         where_clause = " AND ".join(conditions)
         sql = f"""
-            SELECT id, group_id, user_id, role, content, display_name, created_at
-            FROM persona_group_conversations
+            SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
+            FROM persona_unified_messages
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ?
@@ -669,19 +593,95 @@ class PersonaDataStore:
 
         async with self.db.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
-            messages: List[GroupConversation] = []
-            rows_list: List[Any] = list(rows)
-            for row in reversed(rows_list):
-                messages.append(GroupConversation(
+            messages: List[UnifiedMessage] = []
+            for row in reversed(list(rows)):
+                messages.append(UnifiedMessage(
                     id=row[0],
-                    group_id=row[1],
-                    user_id=row[2],
+                    user_id=row[1],
+                    group_id=row[2],
                     role=row[3],
-                    content=row[4],
-                    display_name=row[5] or "",
-                    created_at=datetime.fromisoformat(row[6]) if row[6] else None,
+                    type=MessageType(row[4]),
+                    content=row[5],
+                    display_name=row[6] or "",
+                    sent_ok=row[7],
+                    created_at=datetime.fromisoformat(row[8]) if row[8] else None,
                 ))
             return messages
+
+    async def update_sent_ok(self, msg_id: int, sent_ok: int = 1) -> None:
+        """回填消息发送状态"""
+        await self.db.execute(
+            "UPDATE persona_unified_messages SET sent_ok = ? WHERE id = ?",
+            (sent_ok, msg_id),
+        )
+        await self.db.commit()
+
+    async def _prune_unified_private(self, user_id: str) -> None:
+        """私聊按 user_id 维度保留最近 N 条"""
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM persona_unified_messages WHERE user_id = ? AND group_id = ''",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0] <= self._unified_message_max_per_group:
+                return
+        await self.db.execute(
+            """
+            DELETE FROM persona_unified_messages
+            WHERE user_id = ? AND group_id = ''
+              AND id NOT IN (
+                SELECT id FROM persona_unified_messages
+                WHERE user_id = ? AND group_id = ''
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+            )
+            """,
+            (user_id, user_id, self._unified_message_max_per_group),
+        )
+        await self.db.commit()
+
+    async def _prune_unified_group(self, group_id: str) -> None:
+        """群聊按 group_id 维度保留最近 N 条"""
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM persona_unified_messages WHERE group_id = ? AND group_id != ''",
+            (group_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0] <= self._unified_message_max_per_group:
+                return
+        await self.db.execute(
+            """
+            DELETE FROM persona_unified_messages
+            WHERE group_id = ? AND group_id != ''
+              AND id NOT IN (
+                SELECT id FROM persona_unified_messages
+                WHERE group_id = ? AND group_id != ''
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+            )
+            """,
+            (group_id, group_id, self._unified_message_max_per_group),
+        )
+        await self.db.commit()
+
+    async def _retain_unified(self, group_id: str, user_id: str) -> None:
+        """写入后触发保留策略：私聊按 user_id，群聊按 group_id"""
+        if not user_id and not group_id:
+            return
+        if group_id:
+            await self._prune_unified_group(group_id)
+        else:
+            await self._prune_unified_private(user_id)
+
+    # ========== 消息相关 ==========
+
+    async def clear_messages(self, user_id: str, group_id: str) -> None:
+        """清空指定用户+群组的消息（精确匹配 user_id AND group_id）"""
+        await self.db.execute(
+            "DELETE FROM persona_unified_messages WHERE user_id = ? AND group_id = ?",
+            (user_id, group_id),
+        )
+        await self.db.commit()
 
     # ========== LLM Trace 相关 (Phase 7a) ==========
 
@@ -790,22 +790,6 @@ class PersonaDataStore:
         ) as cursor:
             rows = await cursor.fetchall()
             return [(status, count) for status, count in rows]
-
-    async def get_earliest_message_time(self, user_id: str, group_id: str) -> Optional[datetime]:
-        """获取最早消息时间"""
-        async with self.db.execute(
-            """
-            SELECT created_at FROM persona_messages
-            WHERE user_id = ? AND group_id = ?
-            ORDER BY created_at ASC
-            LIMIT 1
-            """,
-            (user_id, group_id)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row and row[0]:
-                return datetime.fromisoformat(row[0])
-            return None
 
     async def get_recent_score_events(self, user_id: str, limit: int = 2) -> List[ScoreEvent]:
         """获取最近评分事件，用于趋势计算"""
@@ -1080,85 +1064,6 @@ class PersonaDataStore:
         )
         await self.db.commit()
         return cursor.rowcount
-
-    # ========== 群聊观察 ==========
-
-    async def add_observation(
-        self,
-        group_id: str,
-        participants: List[str],
-        who_names: Dict[str, str],
-        what: str,
-        why_remember: str,
-        source_messages_count: int = 0,
-        extract_prompt_digest: str = "",
-        observed_at: Optional[str] = None,
-    ) -> None:
-        """添加观察记录"""
-        await self.db.execute(
-            """
-            INSERT INTO persona_observations
-            (group_id, participants, who_names, what, why_remember,
-             source_messages_count, extract_prompt_digest, observed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                group_id,
-                json.dumps(participants),
-                json.dumps(who_names),
-                what,
-                why_remember,
-                source_messages_count,
-                extract_prompt_digest,
-                observed_at if observed_at is not None else self._wall_now().isoformat(),
-            )
-        )
-        await self.db.commit()
-
-    async def get_observations_by_group(self, group_id: str, limit: int = 30) -> List[Observation]:
-        """获取群的观察记录"""
-        async with self.db.execute(
-            """
-            SELECT group_id, participants, who_names, what, why_remember,
-                   observed_at, source_messages_count, extract_prompt_digest
-            FROM persona_observations
-            WHERE group_id = ?
-            ORDER BY observed_at DESC
-            LIMIT ?
-            """,
-            (group_id, limit)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [
-                Observation(
-                    group_id=row[0],
-                    participants=json.loads(row[1]),
-                    who_names=json.loads(row[2]),
-                    what=row[3],
-                    why_remember=row[4],
-                    observed_at=datetime.fromisoformat(row[5]) if row[5] else None,
-                    source_messages_count=row[6] or 0,
-                    extract_prompt_digest=row[7] or "",
-                )
-                for row in rows
-            ]
-
-    async def prune_observations(self, group_id: str, keep: int) -> None:
-        """保留最近 N 条观察记录"""
-        await self.db.execute(
-            """
-            DELETE FROM persona_observations
-            WHERE group_id = ?
-              AND id NOT IN (
-                SELECT id FROM persona_observations
-                WHERE group_id = ?
-                ORDER BY observed_at DESC
-                LIMIT ?
-            )
-            """,
-            (group_id, group_id, keep)
-        )
-        await self.db.commit()
 
     # ========== 日记相关 ==========
 
@@ -1926,7 +1831,7 @@ class PersonaDataStore:
         搜索记忆，返回格式化的文本结果
 
         Args:
-            search_type: all/profile/observation/diary
+            search_type: all/profile/diary
             days: 日记搜索天数
             limit: 最多返回几条
 
@@ -1947,13 +1852,7 @@ class PersonaDataStore:
                 if matched_facts:
                     results.append("【用户档案】\n" + "\n".join(matched_facts))
 
-        # 2. 搜索群聊观察
-        if search_type in ("all", "observation"):
-            observations = await self._search_observations(user_id, group_id, query, limit)
-            if observations:
-                results.append("【相关观察】\n" + "\n".join(observations))
-
-        # 3. 搜索日记
+        # 2. 搜索日记
         # R8/R11: 根据场景自动调整搜索范围（仅当用户未指定时）
         if search_type in ("all", "diary"):
             if days is None:
@@ -1969,64 +1868,6 @@ class PersonaDataStore:
         if results:
             return "\n\n".join(results)
         return "未找到相关记忆"
-
-    async def _search_observations(
-        self,
-        user_id: str,
-        group_id: str,
-        query: str,
-        limit: int,
-    ) -> List[str]:
-        """搜索群聊观察记录"""
-        # 私聊场景：搜索用户参与过的观察
-        # 群聊场景：搜索该群的所有观察
-        # 转义 LIKE 特殊字符
-        safe_query = self._sanitize_search_query(query)
-
-        if not self._is_private_chat(group_id):
-            # 群聊场景
-            sql = """
-                SELECT what, why_remember, observed_at
-                FROM persona_observations
-                WHERE group_id = ? AND (what LIKE ? ESCAPE '\' OR why_remember LIKE ? ESCAPE '\')
-                ORDER BY observed_at DESC
-                LIMIT ?
-            """
-            params = (group_id, f"%{safe_query}%", f"%{safe_query}%", limit)
-
-            async with self.db.execute(sql, params) as cursor:
-                rows = await cursor.fetchall()
-                results = []
-                for row in rows:
-                    what = row[0]
-                    why = row[1]
-                    when = datetime.fromisoformat(row[2]).strftime("%m-%d") if row[2] else ""
-                    results.append(f"[{when}] {what} ({why})")
-                return results
-        else:
-            # 私聊场景：搜索该用户参与过的观察
-            # 使用 SQLite JSON 函数在查询层面过滤（SQLite 3.38+）
-            sql = """
-                SELECT what, why_remember, observed_at
-                FROM persona_observations
-                WHERE (what LIKE ? ESCAPE '\' OR why_remember LIKE ? ESCAPE '\')
-                  AND EXISTS (
-                      SELECT 1 FROM json_each(participants)
-                      WHERE json_each.value = ?
-                  )
-                ORDER BY observed_at DESC
-                LIMIT ?
-            """
-
-            async with self.db.execute(sql, (f"%{safe_query}%", f"%{safe_query}%", user_id, limit)) as cursor:
-                rows = await cursor.fetchall()
-                results = []
-                for row in rows:
-                    what = row[0]
-                    why = row[1]
-                    when = datetime.fromisoformat(row[2]).strftime("%m-%d") if row[2] else ""
-                    results.append(f"[{when}] {what} ({why})")
-                return results
 
     async def _search_diaries(
         self,

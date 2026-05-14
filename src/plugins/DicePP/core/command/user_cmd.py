@@ -6,6 +6,7 @@ from core.communication import MessageMetaData
 
 from core.command.const import *
 from core.command.bot_cmd import BotCommandBase
+from core.message_types import MessageType
 
 
 class UserCommandBase(metaclass=abc.ABCMeta):
@@ -16,6 +17,7 @@ class UserCommandBase(metaclass=abc.ABCMeta):
     priority: int = DPP_COMMAND_PRIORITY_DEFAULT
     flag: int = DPP_COMMAND_FLAG_DEFAULT
     cluster: int = DPP_COMMAND_CLUSTER_DEFAULT
+    message_type: MessageType = MessageType.COMMAND
     
     group_only: bool = False
     permission_require: int = 0

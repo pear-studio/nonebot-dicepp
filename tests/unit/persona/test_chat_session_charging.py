@@ -20,17 +20,17 @@ from plugins.DicePP.module.persona.llm.coordinator import LLMCallCoordinator
 def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
     """构造最小可运行 ChatSession，仅用于走 coordinator + charging 路径"""
     store = AsyncMock()
-    store.get_recent_messages = AsyncMock(return_value=[])
-    store.get_group_conversations = AsyncMock(return_value=[])
-    store.add_message = AsyncMock()
-    store.add_group_conversation = AsyncMock()
+    store.get_recent_unified_messages = AsyncMock(return_value=[])
+    store.get_group_unified_messages = AsyncMock(return_value=[])
+    store.add_unified_message = AsyncMock(return_value=1)
+    store._retain_unified = AsyncMock()
     store.add_score_event = AsyncMock()
     store.update_relationship = AsyncMock()
     store.init_relationship = AsyncMock()
     store.get_relationship = AsyncMock(return_value=None)
     store.get_user_profile = AsyncMock(return_value=None)
     store.save_user_profile = AsyncMock()
-    store.prune_old_messages = AsyncMock()
+    store.update_sent_ok = AsyncMock()
 
     router = MagicMock()
     router.increment_usage = AsyncMock()

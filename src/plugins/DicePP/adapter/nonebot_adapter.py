@@ -59,6 +59,35 @@ def convert_group_member_info(nb_group_member_info: Dict) -> GroupMemberInfo:
     return res
 
 
+async def _trigger_post_send_hooks(
+    all_bots: dict,
+    bot_self_id: str,
+    group_id: str,
+    user_id: str,
+    role: str,
+    msg_type_val: str,
+    content: str,
+    display_name: str,
+    msg_id: Optional[int],
+) -> None:
+    """触发消息发送后跨模块通知 hook（群聊/私聊复用）"""
+    bot_obj = all_bots.get(bot_self_id)
+    hooks = getattr(bot_obj, "_post_send_hooks", []) if bot_obj else []
+    for hook in hooks:
+        try:
+            await hook(
+                group_id=group_id,
+                user_id=user_id,
+                role=role,
+                type=msg_type_val,
+                content=content,
+                display_name=display_name,
+                msg_id=msg_id,
+            )
+        except Exception as e:
+            dice_log(f"[PostSendHook] 记录失败: {e}")
+
+
 class NoneBotClientProxy(ClientProxy):
     def __init__(self, bot: NoneBot):
         self.bot = bot
@@ -68,31 +97,31 @@ class NoneBotClientProxy(ClientProxy):
         dice_log(f"[OneBot] [BotCommand] {command}")
         try:
             if isinstance(command, BotSendMsgCommand):
+                from core.message_types import MessageType
+                raw_type = getattr(command, "message_type", None)
+                msg_type_val = MessageType.from_str(raw_type).value if raw_type else "command"
+                msg_id = getattr(command, "msg_id", None)
+                skip_hook = getattr(command, "skip_history_record", False)
+
                 for target in command.targets:
                     if target.group_id:
                         await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
-                        # 记录到群日志
                         try:
                             append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", command.msg)
                         except Exception:
                             pass
-                        # 触发消息发送后跨模块通知 hook
-                        if not getattr(command, "skip_history_record", False):
-                            bot_obj = all_bots.get(self.bot.self_id)
-                            hooks = getattr(bot_obj, "_post_send_hooks", []) if bot_obj else []
-                            for hook in hooks:
-                                try:
-                                    await hook(
-                                        group_id=target.group_id,
-                                        user_id=str(self.bot.self_id),
-                                        role="assistant",
-                                        content=command.msg,
-                                        display_name="我",
-                                    )
-                                except Exception as e:
-                                    dice_log(f"[PostSendHook] 记录失败: {e}")
+                        if not skip_hook:
+                            await _trigger_post_send_hooks(
+                                all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
+                                "assistant", msg_type_val, command.msg, "我", msg_id,
+                            )
                     else:
                         await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
+                        if not skip_hook:
+                            await _trigger_post_send_hooks(
+                                all_bots, self.bot.self_id, "", str(self.bot.self_id),
+                                "assistant", msg_type_val, command.msg, "我", msg_id,
+                            )
             elif isinstance(command, BotLeaveGroupCommand):
                 await self.bot.set_group_leave(group_id=int(command.target_group_id))
             elif isinstance(command, BotSendForwardMsgCommand):

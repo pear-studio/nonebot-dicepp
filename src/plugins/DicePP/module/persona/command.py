@@ -23,7 +23,7 @@ from .factory import PersonaApp, create_persona
 from .exceptions import PersonaInitError
 from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
-from .data.observation_buffer_repository import ObservationBufferRepository
+from .data.models import MessageType
 from .utils.privacy import mask_sensitive_string
 from .admin import AdminDispatcher
 
@@ -32,6 +32,7 @@ from .admin import AdminDispatcher
 class PersonaCommand(UserCommandBase):
     """Persona AI 命令处理器"""
 
+    message_type: MessageType = MessageType.CHAT
     _format_relationship_base = staticmethod(AdminDispatcher._format_relationship_base)
 
     def __init__(self, bot: Bot):
@@ -41,7 +42,6 @@ class PersonaCommand(UserCommandBase):
         self.data_store: Optional[PersonaDataStore] = None
         self.init_error: Optional[str] = None  # create_persona 抛出的具名异常文本，供 _admin_debug 展示
         self._whitelist_confirm_pending: Dict[str, float] = {}  # user_id -> timestamp
-        self._observation_repo: Optional[ObservationBufferRepository] = None
         # 主循环在 async 中调用同步 tick() 时，单槽异步任务（避免 life.tick 慢于 1s 时堆积）
         self._async_tick_task: Optional[asyncio.Task] = None
         self._async_tick_daily_task: Optional[asyncio.Task] = None
@@ -85,11 +85,14 @@ class PersonaCommand(UserCommandBase):
                 return []
             if self.app:
                 self.data_store = self.app.store
-                self._observation_repo = ObservationBufferRepository(self.data_store, config)
                 # 注册消息发送后跨模块通知 hook（先注销旧 hook 再注册，防止热重载后重复）
                 if hasattr(self, "_post_send_hook_unregister"):
                     self._post_send_hook_unregister()
                 self._post_send_hook_unregister = self.bot.add_post_send_hook(self._group_chat_recorder)
+                # 注册入站消息记录 hook
+                if hasattr(self, "_inbound_hook_unregister"):
+                    self._inbound_hook_unregister()
+                self._inbound_hook_unregister = self.bot.add_inbound_message_hook(self._inbound_message_recorder)
                 dice_log(f"[Persona] 模块初始化成功: {config.character_name}")
             else:
                 # config.enabled=False 走这里：禁用而非失败
@@ -117,22 +120,60 @@ class PersonaCommand(UserCommandBase):
         group_id: str,
         user_id: str,
         role: str,
+        type: str,
         content: str,
         display_name: str,
+        msg_id: Optional[int] = None,
     ) -> None:
-        """群聊消息记录器回调（跨模块 bot 回复统一入流）"""
+        """消息发送后记录器回调（跨模块 bot 回复统一入流）
+
+        - msg_id 非 None：仅回填 sent_ok=1（persona 聊天路径已通过 _persist_assistant_message 写入）
+        - msg_id 为 None：直接写入 unified_messages（非 persona 命令回复路径）
+        """
         if not self.data_store:
             return
         try:
-            await self.data_store.add_group_conversation(
-                group_id=group_id,
+            if msg_id is not None:
+                await self.data_store.update_sent_ok(msg_id, 1)
+            else:
+                msg_type = MessageType.from_str(type)
+                await self.data_store.add_unified_message(
+                    user_id=user_id,
+                    group_id=group_id,
+                    role=role,
+                    type=msg_type,
+                    content=content,
+                    display_name=display_name,
+                )
+        except Exception as e:
+            dice_log(f"[Persona] 出站记录器写入失败: {e}")
+
+    async def _inbound_message_recorder(
+        self,
+        user_id: str,
+        group_id: str,
+        role: str,
+        type: str,
+        content: str,
+        display_name: str,
+    ) -> None:
+        """入站消息记录器回调（每条用户消息记录一次）"""
+        if not self.data_store:
+            return
+        try:
+            msg_type = MessageType.from_str(type)
+            if type not in (MessageType.CHAT.value, MessageType.COMMAND.value, MessageType.SYSTEM_NOTICE.value):
+                dice_log(f"[Persona] 未知 message_type='{type}'，fallback 到 CHAT")
+            await self.data_store.add_unified_message(
                 user_id=user_id,
+                group_id=group_id,
                 role=role,
+                type=msg_type,
                 content=content,
                 display_name=display_name,
             )
         except Exception as e:
-            dice_log(f"[Persona] 群聊记录器写入失败: {e}")
+            dice_log(f"[Persona] 入站记录器写入失败: {e}")
 
     def _is_admin(self, user_id: str) -> bool:
         """检查用户是否是管理员"""
@@ -194,15 +235,6 @@ class PersonaCommand(UserCommandBase):
 
         # @bot 或 .ai 前缀触发
         if not self._is_persona_trigger(meta, msg):
-            # 群聊旁听模式（观察但不回复）— 不应拦截其他命令
-            if meta.group_id and self._observation_repo:
-                await self._observation_repo.handle_observation(
-                    group_id=meta.group_id or "",
-                    user_id=meta.user_id,
-                    display_name=self._resolve_display_name(meta),
-                    msg_str=msg_str,
-                    event_agent=self.app.get_scheduler_event_agent() if self.app else None,
-                )
             return False, False, None
 
         # 提取命令内容
@@ -259,21 +291,6 @@ class PersonaCommand(UserCommandBase):
         group_id = meta.group_id or ""
         nickname = meta.nickname or ""
         is_private = not meta.group_id
-
-        # 群聊消息写入共享历史（触发消息直接入流；非触发消息由旁听模式处理，避免重复）
-        is_trigger = self._is_persona_trigger(meta, msg_str)
-        if group_id and self.data_store and (is_trigger or not self.config.observe_group_enabled):
-            display_name = self._resolve_display_name(meta)
-            try:
-                await self.data_store.add_group_conversation(
-                    group_id=group_id,
-                    user_id=user_id,
-                    role="user",
-                    content=msg_str,
-                    display_name=display_name,
-                )
-            except Exception as e:
-                dice_log(f"[Persona] 群聊用户消息写入失败: {e}")
 
         # 提取命令内容
         msg = msg_str.strip()
@@ -445,10 +462,9 @@ class PersonaCommand(UserCommandBase):
             daily_p = (
                 self._async_tick_daily_task is not None and not self._async_tick_daily_task.done()
             )
-            obs_status = self._observation_repo.get_status(group_id) if self._observation_repo and group_id else None
             return await self.admin_dispatcher._admin_debug(
                 user_id, group_id, args,
-                tick_pending=tick_p, daily_pending=daily_p, observation_status=obs_status,
+                tick_pending=tick_p, daily_pending=daily_p,
             )
         return await self.admin_dispatcher.dispatch(user_id, group_id, args)
 
@@ -523,7 +539,7 @@ class PersonaCommand(UserCommandBase):
                 lines.append(f"  认识: 1 天")
 
             try:
-                message_count = await self.data_store.count_messages(user_id, group_id)
+                message_count = await self.data_store.count_unified_messages(user_id, group_id)
                 lines.append(f"  互动: {message_count} 次")
             except Exception:
                 lines.append(f"  互动: 0 次")

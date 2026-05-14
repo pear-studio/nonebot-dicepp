@@ -9,24 +9,6 @@
     两处须同步维护（store 模块顶部另有交叉引用注释）。
 """
 
-# 对话历史表
-CREATE_MESSAGES_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    group_id TEXT DEFAULT '',
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-# 索引
-CREATE_MESSAGES_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_persona_messages_user_group 
-ON persona_messages(user_id, group_id, created_at DESC);
-"""
-
 # 白名单表
 CREATE_WHITELIST_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_whitelist (
@@ -69,19 +51,6 @@ CREATE TABLE IF NOT EXISTS persona_usage (
     date TEXT NOT NULL,
     count INTEGER DEFAULT 0,
     PRIMARY KEY (user_id, date)
-);
-"""
-
-# 群聊观察表
-CREATE_OBSERVATIONS_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_observations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id TEXT NOT NULL,
-    participants TEXT NOT NULL,  -- JSON list of user_ids
-    who_names TEXT NOT NULL,     -- JSON dict of user_id -> nickname
-    what TEXT NOT NULL,
-    why_remember TEXT NOT NULL,
-    observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -189,27 +158,29 @@ CREATE TABLE IF NOT EXISTS persona_user_mute (
 );
 """
 
-# 群聊对话历史表（群共享短期历史）
-CREATE_GROUP_CONVERSATIONS_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_group_conversations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    display_name TEXT DEFAULT '',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+# 统一消息表 (替代 persona_messages + persona_group_conversations)
+CREATE_UNIFIED_MESSAGES_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_unified_messages (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      TEXT NOT NULL,
+    group_id     TEXT NOT NULL DEFAULT '',
+    role         TEXT NOT NULL,
+    type         TEXT NOT NULL DEFAULT 'chat',
+    content      TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    sent_ok      INTEGER NOT NULL DEFAULT 0,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
-CREATE_GROUP_CONVERSATIONS_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_pgc_group_created
-ON persona_group_conversations(group_id, created_at DESC);
+CREATE_UNIFIED_MESSAGES_USER_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_umsgs_user_time
+ON persona_unified_messages(user_id, created_at DESC);
 """
 
-CREATE_GROUP_CONVERSATIONS_USER_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_pgc_group_user_created
-ON persona_group_conversations(group_id, user_id, created_at DESC);
+CREATE_UNIFIED_MESSAGES_GROUP_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_umsgs_group_time
+ON persona_unified_messages(group_id, created_at DESC);
 """
 
 # 用户 LLM 配置表 (Phase 4)
@@ -281,13 +252,13 @@ CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_created_at ON persona_llm_trac
 """
 
 ALL_MIGRATIONS = [
-    CREATE_MESSAGES_TABLE,
-    CREATE_MESSAGES_INDEX,
+    CREATE_UNIFIED_MESSAGES_TABLE,
+    CREATE_UNIFIED_MESSAGES_USER_INDEX,
+    CREATE_UNIFIED_MESSAGES_GROUP_INDEX,
     CREATE_WHITELIST_TABLE,
     CREATE_SETTINGS_TABLE,
     CREATE_SCORE_HISTORY_TABLE,
     CREATE_USAGE_TABLE,
-    CREATE_OBSERVATIONS_TABLE,
     CREATE_DIARY_TABLE,
     CREATE_DAILY_EVENTS_TABLE,
     CREATE_CHARACTER_STATE_TABLE,
@@ -302,10 +273,11 @@ ALL_MIGRATIONS = [
     CREATE_LLM_TRACES_INDEX_SESSION,
     CREATE_LLM_TRACES_INDEX_USER,
     CREATE_LLM_TRACES_INDEX_CREATED_AT,
-    CREATE_GROUP_CONVERSATIONS_TABLE,
-    CREATE_GROUP_CONVERSATIONS_INDEX,
-    CREATE_GROUP_CONVERSATIONS_USER_INDEX,
     CREATE_SCORING_FAILURES_TABLE,
     CREATE_SCORING_FAILURES_INDEX,
     CREATE_SCORING_FAILURES_INDEX_CREATED_AT,
+    # 清理旧表（新表已创建后执行，倒序避免外键约束报错）
+    "DROP TABLE IF EXISTS persona_observations",
+    "DROP TABLE IF EXISTS persona_group_conversations",
+    "DROP TABLE IF EXISTS persona_messages",
 ]

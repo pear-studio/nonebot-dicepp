@@ -67,6 +67,11 @@ class PersonaConfig(BaseModel):
         default=180,
         description="search_chat_history 工具返回内容的最大字符数（超出截断）",
     )
+    unified_message_max_per_group: int = Field(
+        default=1000,
+        ge=10,
+        description="统一消息表每组/用户保留上限（写入后触发清理）",
+    )
 
     # ── Phase 3: 工具调用
     tools_max_rounds: int = 5  # 聊天工具调用最大轮次
@@ -262,18 +267,6 @@ class PersonaConfig(BaseModel):
     
     group_chat_enabled: bool = True
     group_simple_scoring: bool = True
-    observe_group_enabled: bool = Field(
-        default=True,
-        validation_alias=AliasChoices("observe_group_enabled", "observe_group"),
-    )
-    observe_min_length: int = 5
-    observe_max_length: int = 500
-    observe_initial_threshold: int = 20
-    observe_max_threshold: int = 60
-    observe_min_threshold: int = 5
-    observe_max_records: int = 30
-    observe_max_buffer_size: int = 60
-
     daily_limit: int = 20
     quota_check_enabled: bool = True
     quota_exceeded_message: str = "今日配额已用完（{limit}次），请使用 `.ai key config` 配置自己的 API Key"

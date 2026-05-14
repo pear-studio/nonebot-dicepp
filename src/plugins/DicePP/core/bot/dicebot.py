@@ -3,7 +3,7 @@ import asyncio
 import datetime
 import inspect
 import random
-from typing import List, Optional, Dict, Callable, Union, Set, Awaitable
+from typing import List, Optional, Dict, Callable, Union, Set, Awaitable, Protocol, runtime_checkable
 from random import choice
 
 from utils.logger import dice_log, get_exception_info
@@ -35,6 +35,35 @@ except ImportError:
     PSUTIL_AVAILABLE = False
 
 NICKNAME_ERROR = "UNDEF_NAME"
+
+
+@runtime_checkable
+class PostSendHook(Protocol):
+    """post_send_hook 回调签名"""
+    async def __call__(
+        self,
+        group_id: str,
+        user_id: str,
+        role: str,
+        type: str,
+        content: str,
+        display_name: str,
+        msg_id: Optional[int] = None,
+    ) -> None: ...
+
+
+@runtime_checkable
+class InboundMessageHook(Protocol):
+    """入站消息记录 hook 回调签名"""
+    async def __call__(
+        self,
+        user_id: str,
+        group_id: str,
+        role: str,
+        type: str,
+        content: str,
+        display_name: str,
+    ) -> None: ...
 
 
 # noinspection PyBroadException
@@ -82,7 +111,10 @@ class Bot:
         # 消息发送后跨模块通知 hook 列表
         # 设计意图：adapter 层发送群/私聊消息后，允许各模块订阅并记录。
         # 长期路径：引入轻量级事件总线彻底解耦。
-        self._post_send_hooks: List[Callable[[str, str, str, str, str], Awaitable[None]]] = []
+        self._post_send_hooks: List[PostSendHook] = []
+
+        # 消息入站记录 hook 列表
+        self._inbound_message_hooks: List[InboundMessageHook] = []
 
         self.start_up(readonly=readonly)
 
@@ -95,11 +127,11 @@ class Bot:
 
     def add_post_send_hook(
         self,
-        hook: Callable[[str, str, str, str, str], Awaitable[None]],
+        hook: PostSendHook,
     ) -> Callable[[], None]:
         """注册消息发送后跨模块通知 hook
 
-        回调签名: (group_id, user_id, role, content, display_name) -> Awaitable[None]
+        回调签名: (group_id, user_id, role, type, content, display_name, msg_id) -> Awaitable[None]
         返回注销函数，调用即可移除该 hook。
         """
         if hook not in self._post_send_hooks:
@@ -108,6 +140,24 @@ class Bot:
         def unregister() -> None:
             if hook in self._post_send_hooks:
                 self._post_send_hooks.remove(hook)
+
+        return unregister
+
+    def add_inbound_message_hook(
+        self,
+        hook: InboundMessageHook,
+    ) -> Callable[[], None]:
+        """注册入站消息记录 hook
+
+        回调签名: (user_id, group_id, role, type, content, display_name) -> Awaitable[None]
+        返回注销函数。
+        """
+        if hook not in self._inbound_message_hooks:
+            self._inbound_message_hooks.append(hook)
+
+        def unregister() -> None:
+            if hook in self._inbound_message_hooks:
+                self._inbound_message_hooks.remove(hook)
 
         return unregister
 
@@ -614,7 +664,9 @@ class Bot:
         is_multi_command = len(msg_list) > 1
 
         # 遍历所有指令, 尝试处理消息
+        msg_type_default = "chat"  # 兜底：不匹配任何命令时使用
         for msg_cur in msg_list:
+            recorded = False
             for command in self.command_dict.values():
                 # 判断是否能处理该条指令
                 import inspect
@@ -631,6 +683,24 @@ class Bot:
                     bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info}出错位置:{command.readable_name}\n错误代码：CODE100")
                 if not should_proc:
                     continue
+                # 入站记录（逐 msg_cur 去重）
+                if not recorded and self._inbound_message_hooks:
+                    display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
+                    msg_type = getattr(command, "message_type", None)
+                    msg_type_val = msg_type.value if hasattr(msg_type, "value") else str(msg_type or msg_type_default)
+                    for hook in self._inbound_message_hooks:
+                        try:
+                            await hook(
+                                user_id=meta.user_id,
+                                group_id=meta.group_id or "",
+                                role="user",
+                                type=msg_type_val,
+                                content=msg_cur,
+                                display_name=display_name,
+                            )
+                        except Exception as e:
+                            dice_log(f"[InboundHook] 记录失败: {e}")
+                    recorded = True
                 # 在非群聊中企图执行群聊指令, 回复一条提示
                 if command.group_only and not meta.group_id:
                     feedback = self.loc_helper.format_loc_text(LOC_GROUP_ONLY_NOTICE)
@@ -664,6 +734,22 @@ class Bot:
 
                 if not should_pass:  # 已经处理过, 不需要再传递给后面的指令
                     break
+
+            # 未匹配任何命令的消息：以 chat 类型记录
+            if not recorded and self._inbound_message_hooks:
+                display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
+                for hook in self._inbound_message_hooks:
+                    try:
+                        await hook(
+                            user_id=meta.user_id,
+                            group_id=meta.group_id or "",
+                            role="user",
+                            type=msg_type_default,
+                            content=msg_cur,
+                            display_name=display_name,
+                        )
+                    except Exception as e:
+                        dice_log(f"[InboundHook] 记录失败: {e}")
 
         if is_multi_command:  # 多行指令的话合并port相同的send msg
             invalid_command_count = 0

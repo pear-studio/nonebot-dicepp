@@ -1,8 +1,9 @@
 import abc
 import re
-from typing import List
+from typing import List, Optional
 
 from core.communication import MessagePort
+from core.message_types import MessageType
 
 from nonebot.adapters.onebot.v11 import Message as CQMessage
 
@@ -25,6 +26,8 @@ class BotSendMsgCommand(BotCommandBase):
         self.msg = msg
         self.targets = targets
         self.skip_history_record: bool = False
+        self.message_type: MessageType = MessageType.COMMAND
+        self.msg_id: Optional[int] = None
 
     def __str__(self):
         def handle_base64img(match):  # 如果是base64编码就不要显示了

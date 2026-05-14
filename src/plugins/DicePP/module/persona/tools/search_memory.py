@@ -5,7 +5,7 @@ from .registry import ToolDef
 
 SEARCH_MEMORY_TOOL = ToolDef(
     name="search_memory",
-    description="搜索关于用户或特定话题的记忆，包括用户档案、群聊观察记录、日记等",
+    description="搜索关于用户或特定话题的记忆，包括用户档案、日记等",
     parameters={
         "type": "object",
         "properties": {
@@ -15,8 +15,8 @@ SEARCH_MEMORY_TOOL = ToolDef(
             },
             "type": {
                 "type": "string",
-                "enum": ["all", "profile", "observation", "diary"],
-                "description": "搜索类型：all=全部, profile=用户档案, observation=群聊观察, diary=日记",
+                "enum": ["all", "profile", "diary"],
+                "description": "搜索类型：all=全部, profile=用户档案, diary=日记",
                 "default": "all",
             },
             "days": {
