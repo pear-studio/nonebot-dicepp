@@ -24,10 +24,9 @@ from plugins.DicePP.module.persona.chat.context import ContextBuilder
 @pytest.fixture
 def mock_store():
     store = MagicMock(spec=PersonaDataStore)
-    store.get_group_conversations = AsyncMock(return_value=[])
-    store.get_recent_messages = AsyncMock(return_value=[])
-    store.add_message = AsyncMock()
-    store.add_group_conversation = AsyncMock()
+    store.get_group_unified_messages = AsyncMock(return_value=[])
+    store.get_recent_unified_messages = AsyncMock(return_value=[])
+    store.add_unified_message = AsyncMock(return_value=1)
     store.get_relationship = AsyncMock(return_value=None)
     store.get_user_profile = AsyncMock(return_value=None)
     store.get_user_llm_config = AsyncMock(return_value=None)

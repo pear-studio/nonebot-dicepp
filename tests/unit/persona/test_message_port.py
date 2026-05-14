@@ -79,14 +79,14 @@ async def test_send_success_awaits_send():
 
 
 @pytest.mark.asyncio
-async def test_send_defaults_skip_history_by_group_id():
-    """group_id 非空时默认 skip_history_record=True，空时默认 False"""
+async def test_send_defaults_skip_history_to_false():
+    """默认 skip_history_record=False（群聊和私聊行为对齐）"""
     bot = _make_bot()
     port = MessagePort(bot)
 
     await port.send("u1", "g1", "hello")
     cmd = bot.proxy.process_bot_command.await_args.args[0]
-    assert cmd.skip_history_record is True
+    assert cmd.skip_history_record is False
 
     bot.proxy.process_bot_command.reset_mock()
     await port.send("u1", "", "hello")

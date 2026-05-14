@@ -357,7 +357,7 @@ class TestProactiveSchedulerMissProbability:
         store.update_relationship = AsyncMock()
         store.get_relationship = AsyncMock(return_value=None)
         store.get_user_profile = AsyncMock(return_value=None)
-        store.get_recent_messages = AsyncMock(return_value=[])
+        store.get_recent_unified_messages = AsyncMock(return_value=[])
         store.get_character_state = AsyncMock(return_value=MagicMock())
         return store
 
@@ -491,7 +491,7 @@ class TestProactiveSchedulerMessageCreation:
         store = AsyncMock()
         store.get_relationship = AsyncMock(return_value=None)
         store.get_user_profile = AsyncMock(return_value=None)
-        store.get_recent_messages = AsyncMock(return_value=[])
+        store.get_recent_unified_messages = AsyncMock(return_value=[])
         return ProactiveScheduler(
             config=config,
             data_store=store,

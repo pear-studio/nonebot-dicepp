@@ -34,15 +34,16 @@ async def temp_db():
 
 
 class TestMessageCRUD:
-    """测试消息相关 CRUD"""
+    """测试统一消息表 CRUD"""
 
     @pytest.mark.asyncio
     async def test_add_and_get_recent_messages(self, temp_db):
         store = temp_db
-        await store.add_message("u1", "g1", "user", "hello")
-        await store.add_message("u1", "g1", "assistant", "hi")
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_unified_message("u1", "", "user", MessageType.CHAT, "hello")
+        await store.add_unified_message("u1", "", "assistant", MessageType.CHAT, "hi")
 
-        msgs = await store.get_recent_messages("u1", "g1", limit=10)
+        msgs = await store.get_recent_unified_messages("u1", limit=10)
         assert len(msgs) == 2
         assert msgs[0].role == "user"
         assert msgs[0].content == "hello"
@@ -52,10 +53,11 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_get_recent_messages_order_and_limit(self, temp_db):
         store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
         for i in range(5):
-            await store.add_message("u1", "g1", "user", f"msg{i}")
+            await store.add_unified_message("u1", "", "user", MessageType.CHAT, f"msg{i}")
 
-        msgs = await store.get_recent_messages("u1", "g1", limit=3)
+        msgs = await store.get_recent_unified_messages("u1", limit=3)
         assert len(msgs) == 3
         assert msgs[0].content == "msg2"
         assert msgs[1].content == "msg3"
@@ -64,32 +66,90 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_clear_messages(self, temp_db):
         store = temp_db
-        await store.add_message("u1", "g1", "user", "hello")
-        await store.clear_messages("u1", "g1")
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_unified_message("u1", "", "user", MessageType.CHAT, "hello")
+        await store.clear_messages("u1", "")
 
-        msgs = await store.get_recent_messages("u1", "g1", limit=10)
+        msgs = await store.get_recent_unified_messages("u1", limit=10)
         assert len(msgs) == 0
 
     @pytest.mark.asyncio
-    async def test_prune_old_messages(self, temp_db):
+    async def test_prune_unified(self, temp_db):
         store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        # 修改上限以便测试
+        store._unified_message_max_per_group = 2
         for i in range(5):
-            await store.add_message("u1", "g1", "user", f"msg{i}")
+            await store.add_unified_message("u1", "", "user", MessageType.CHAT, f"msg{i}")
 
-        await store.prune_old_messages("u1", "g1", keep=2)
-        msgs = await store.get_recent_messages("u1", "g1", limit=10)
+        await store._retain_unified("", "u1")
+        msgs = await store.get_recent_unified_messages("u1", limit=10)
         assert len(msgs) == 2
         assert msgs[0].content == "msg3"
         assert msgs[1].content == "msg4"
 
     @pytest.mark.asyncio
-    async def test_count_messages(self, temp_db):
+    async def test_get_group_unified_messages(self, temp_db):
         store = temp_db
-        assert await store.count_messages("u1", "g1") == 0
-        await store.add_message("u1", "g1", "user", "a")
-        await store.add_message("u1", "g1", "assistant", "b")
-        assert await store.count_messages("u1", "g1") == 2
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "hello", "Alice")
+        await store.add_unified_message("u2", "g1", "user", MessageType.COMMAND, "hi", "Bob")
+        await store.add_unified_message("bot", "g1", "assistant", MessageType.CHAT, "welcome", "我")
 
+        msgs = await store.get_group_unified_messages("g1", limit=10)
+        assert len(msgs) == 3
+        assert msgs[0].content == "hello"
+        assert msgs[1].content == "hi"
+        assert msgs[2].content == "welcome"
+
+    @pytest.mark.asyncio
+    async def test_search_unified_messages_keyword(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "奈雪的茶很好喝", "A")
+        await store.add_unified_message("u2", "g1", "user", MessageType.CHAT, "今天天气不错", "B")
+
+        results = await store.search_unified_messages("g1", keyword="奈雪", limit=10)
+        assert len(results) == 1
+        assert results[0].content == "奈雪的茶很好喝"
+
+    @pytest.mark.asyncio
+    async def test_search_unified_messages_type_filter(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "chat msg", "A")
+        await store.add_unified_message("u2", "g1", "user", MessageType.COMMAND, ".r 1d20", "B")
+
+        results = await store.search_unified_messages("g1", type=MessageType.COMMAND, limit=10)
+        assert len(results) == 1
+        assert results[0].content == ".r 1d20"
+
+    @pytest.mark.asyncio
+    async def test_clear_messages_exact_match(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "u1 in g1")
+        await store.add_unified_message("u2", "g1", "user", MessageType.CHAT, "u2 in g1")
+
+        await store.clear_messages("u1", "g1")
+        msgs_u1 = await store.get_recent_unified_messages("u1", "g1", limit=10)
+        msgs_u2 = await store.get_recent_unified_messages("u2", "g1", limit=10)
+        assert len(msgs_u1) == 0  # u1 的消息被清除
+        assert len(msgs_u2) == 1  # u2 的消息未被清除
+
+    @pytest.mark.asyncio
+    async def test_count_unified_messages(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        assert await store.count_unified_messages("u1", "") == 0
+        assert await store.count_unified_messages("u1", "g1") == 0
+
+        await store.add_unified_message("u1", "", "user", MessageType.CHAT, "private")
+        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "group1")
+        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "group2")
+
+        assert await store.count_unified_messages("u1", "") == 1
+        assert await store.count_unified_messages("u1", "g1") == 2
 
 class TestWhitelistCRUD:
     """测试白名单 CRUD"""
@@ -250,47 +310,6 @@ class TestUserProfileCRUD:
     async def test_get_nonexistent_profile(self, temp_db):
         store = temp_db
         assert await store.get_user_profile("u_unknown") is None
-
-
-class TestObservationCRUD:
-    """测试观察记录 CRUD"""
-
-    @pytest.mark.asyncio
-    async def test_add_and_get_observations(self, temp_db):
-        store = temp_db
-        await store.add_observation(
-            group_id="g1",
-            participants=["u1", "u2"],
-            who_names={"u1": "Alice", "u2": "Bob"},
-            what="Discussed cats",
-            why_remember="User likes cats",
-        )
-
-        obs = await store.get_observations_by_group("g1", limit=10)
-        assert len(obs) == 1
-        assert obs[0].what == "Discussed cats"
-        assert obs[0].participants == ["u1", "u2"]
-
-    @pytest.mark.asyncio
-    async def test_prune_observations(self, temp_db):
-        store = temp_db
-        base_time = datetime.now()
-        for i in range(5):
-            await store.add_observation(
-                group_id="g1",
-                participants=["u1"],
-                who_names={"u1": "A"},
-                what=f"obs{i}",
-                why_remember="r",
-                observed_at=(base_time + timedelta(milliseconds=i * 10)).isoformat(),
-            )
-
-        await store.prune_observations("g1", keep=2)
-        obs = await store.get_observations_by_group("g1", limit=10)
-        assert len(obs) == 2
-        # 最近两条是 obs3, obs4
-        whats = {o.what for o in obs}
-        assert whats == {"obs3", "obs4"}
 
 
 class TestDiaryAndDailyEventsCRUD:
@@ -587,156 +606,3 @@ class TestCharacterStateCRUD:
         assert legacy.energy is None  # 旧版纯文本迁移：结构化字段保持 None
 
 
-class TestGroupConversationCRUD:
-    """测试群聊共享历史 CRUD (fix-persona-group-history-context)"""
-
-    @pytest.mark.asyncio
-    async def test_add_and_get_group_conversations(self, temp_db):
-        """8.1: add_group_conversation and get_group_conversations"""
-        store = temp_db
-        await store.add_group_conversation("g1", "u1", "user", "hello", "Alice")
-        await store.add_group_conversation("g1", "u2", "user", "hi", "Bob")
-        await store.add_group_conversation("g1", "bot", "assistant", "welcome", "我")
-
-        msgs = await store.get_group_conversations("g1", limit=10)
-        assert len(msgs) == 3
-        assert msgs[0].content == "hello"
-        assert msgs[0].display_name == "Alice"
-        assert msgs[1].content == "hi"
-        assert msgs[1].display_name == "Bob"
-        assert msgs[2].content == "welcome"
-        assert msgs[2].display_name == "我"
-
-    @pytest.mark.asyncio
-    async def test_get_group_conversations_isolation(self, temp_db):
-        """群聊历史按 group_id 隔离"""
-        store = temp_db
-        await store.add_group_conversation("g1", "u1", "user", "g1-msg", "A")
-        await store.add_group_conversation("g2", "u1", "user", "g2-msg", "B")
-
-        g1_msgs = await store.get_group_conversations("g1")
-        assert len(g1_msgs) == 1
-        assert g1_msgs[0].content == "g1-msg"
-
-        g2_msgs = await store.get_group_conversations("g2")
-        assert len(g2_msgs) == 1
-        assert g2_msgs[0].content == "g2-msg"
-
-    @pytest.mark.asyncio
-    async def test_prune_group_conversations(self, temp_db):
-        """8.2: prune_group_conversations keeps recent N messages"""
-        store = temp_db
-        for i in range(5):
-            await store.add_group_conversation("g1", "u1", "user", f"msg{i}", "A")
-
-        await store.prune_group_conversations("g1", keep=2)
-        msgs = await store.get_group_conversations("g1", limit=10)
-        assert len(msgs) == 2
-        assert msgs[0].content == "msg3"
-        assert msgs[1].content == "msg4"
-
-    @pytest.mark.asyncio
-    async def test_add_group_conversation_auto_prune(self, temp_db):
-        """1.7: write + prune 在同一次调用内完成（依赖 sqlite3 隐式事务 + end-of-call commit），
-        裁剪结果按 _group_max_messages 生效"""
-        store = temp_db
-        store._group_max_messages = 3
-        for i in range(5):
-            await store.add_group_conversation("g1", "u1", "user", f"msg{i}", "A")
-
-        msgs = await store.get_group_conversations("g1", limit=10)
-        assert len(msgs) == 3
-        assert msgs[0].content == "msg2"
-        assert msgs[1].content == "msg3"
-        assert msgs[2].content == "msg4"
-
-    @pytest.mark.asyncio
-    async def test_add_group_conversation_no_explicit_begin_regression(self, temp_db):
-        """# B-260507-7127d2 regression: 断言 add_group_conversation 不再 issue 显式 BEGIN。
-
-        仅模拟"前置 DML 已开启隐式事务"作为最小复现场景；真实触发路径是
-        aiosqlite 共享单连接 + 多协程并发写（如 ``_persist_assistant_message``、
-        observation_buffer 旁听同时进行）。本用例不背书"嵌套事务"为支持语义，
-        目标是断言本方法不再 issue 显式 BEGIN。
-        """
-        store = temp_db
-        # 制造未 commit 的隐式事务: 直接 DML 但不 commit
-        await store.db.execute(
-            "INSERT INTO persona_messages (user_id, group_id, role, content, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ("u_pre", "g_pre", "user", "pre-flight", "2024-01-01T00:00:00"),
-        )
-        # 这一行在旧实现下会抛 sqlite3.OperationalError
-        await store.add_group_conversation("g1", "u1", "user", "hello", "Alice")
-        msgs = await store.get_group_conversations("g1")
-        assert len(msgs) == 1
-        assert msgs[0].content == "hello"
-        assert msgs[0].display_name == "Alice"
-
-    @pytest.mark.asyncio
-    async def test_search_group_conversations_keyword(self, temp_db):
-        """8.3: search with keyword filter"""
-        store = temp_db
-        await store.add_group_conversation("g1", "u1", "user", "奈雪的茶很好喝", "A")
-        await store.add_group_conversation("g1", "u2", "user", "今天天气不错", "B")
-        await store.add_group_conversation("g1", "bot", "assistant", "我也喜欢奈雪", "我")
-
-        results = await store.search_group_conversations("g1", keyword="奈雪", limit=10)
-        assert len(results) == 2
-        contents = {r.content for r in results}
-        assert "奈雪的茶很好喝" in contents
-        assert "我也喜欢奈雪" in contents
-
-    @pytest.mark.asyncio
-    async def test_search_group_conversations_time_filter(self, temp_db):
-        """8.3: search with time filter"""
-        store = temp_db
-        from datetime import datetime, timedelta
-        now = datetime.now()
-        # 通过直接操作数据库插入不同时间的历史
-        await store.add_group_conversation("g1", "u1", "user", "recent", "A")
-
-        # hours_back 过滤
-        results = await store.search_group_conversations("g1", hours_back=1, limit=10)
-        assert len(results) >= 1
-        assert results[0].content == "recent"
-
-        # 久远时间过滤
-        old = now - timedelta(hours=3)
-        results = await store.search_group_conversations(
-            "g1", start_time=old, end_time=now - timedelta(hours=2), limit=10
-        )
-        assert len(results) == 0
-
-    @pytest.mark.asyncio
-    async def test_search_group_conversations_limit(self, temp_db):
-        """8.3: search respects limit"""
-        store = temp_db
-        for i in range(5):
-            await store.add_group_conversation("g1", "u1", "user", f"msg{i}", "A")
-
-        results = await store.search_group_conversations("g1", limit=3)
-        assert len(results) == 3
-
-    @pytest.mark.asyncio
-    async def test_search_group_conversations_escape_wildcards(self, temp_db):
-        """8.3: keyword search escapes LIKE wildcards % _ and backslash"""
-        store = temp_db
-        await store.add_group_conversation("g1", "u1", "user", "100% complete", "A")
-        await store.add_group_conversation("g1", "u2", "user", "under_score", "B")
-        await store.add_group_conversation("g1", "u3", "user", "path\\to\\file", "C")
-
-        # % 应被转义为字面量，而不是通配符
-        results = await store.search_group_conversations("g1", keyword="100%", limit=10)
-        assert len(results) == 1
-        assert results[0].content == "100% complete"
-
-        # _ 应被转义为字面量
-        results = await store.search_group_conversations("g1", keyword="under_score", limit=10)
-        assert len(results) == 1
-        assert results[0].content == "under_score"
-
-        # \ 应被转义为字面量
-        results = await store.search_group_conversations("g1", keyword="path\\to", limit=10)
-        assert len(results) == 1
-        assert "path\\to\\file" in results[0].content

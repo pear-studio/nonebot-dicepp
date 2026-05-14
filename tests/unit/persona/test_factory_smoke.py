@@ -106,9 +106,6 @@ async def test_create_persona_success_registers_three_tools(monkeypatch):
         async def get_setting(self, key):
             return None
 
-        async def record_delivery_failure(self, user_id, group_id, content, error=None):
-            pass
-
     monkeypatch.setattr(
         "plugins.DicePP.module.persona.factory.PersonaDataStore",
         FakeStore,

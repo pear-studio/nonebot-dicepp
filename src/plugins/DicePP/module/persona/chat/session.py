@@ -26,8 +26,9 @@ from ..data.models import (
     UserProfile,
     RelationshipState,
     ScoreEvent,
-    GroupConversation,
     ScoringFailure,
+    UnifiedMessage,
+    MessageType,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
 from ..character.models import Character
@@ -173,14 +174,12 @@ class ChatSession:
 
         try:
             if group_id:
-                history = await self.store.get_group_conversations(group_id, limit=1)
+                history = await self.store.get_group_unified_messages(group_id, limit=1)
             else:
-                history = await self.store.get_recent_messages(user_id, group_id, limit=1)
+                history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=1)
             is_first = len(history) == 0
 
             if is_first and not group_id and self.character.first_mes:
-                await self.store.add_message(user_id, group_id, "user", message)
-                await self._persist_assistant_message(user_id, group_id, self.character.first_mes)
                 return self.character.first_mes
 
             is_chat_message = not message.startswith(".") or message.lower().startswith(".ai")
@@ -211,24 +210,9 @@ class ChatSession:
                                     f"冷淡拒绝触发: user={user_id}, score={score:.2f}, "
                                     f"p_refuse={p_refuse:.2%}"
                                 )
-                                if not group_id:
-                                    await self.store.add_message(user_id, group_id, "user", message)
-                                    await self._persist_assistant_message(user_id, group_id, refuse_response)
-                                else:
-                                    await self.store.add_group_conversation(
-                                        group_id=group_id,
-                                        user_id=user_id,
-                                        role="user",
-                                        content=message,
-                                        display_name=nickname or "",
-                                    )
-                                    await self._persist_assistant_message(user_id, group_id, refuse_response)
                                 return refuse_response
 
             target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
-
-            if not group_id:
-                await self.store.add_message(user_id, group_id, "user", message)
 
             response = await self._chat_via_coordinator(user_id, group_id, message, target_key)
             return response
@@ -260,10 +244,7 @@ class ChatSession:
             await self._update_interaction(user_id, group_id, current_message, str(response))
             return self._SegmentedSentinel("")
 
-        # 非分段路径：原逻辑
-        await self._persist_assistant_message(user_id, group_id, response)
-        if not group_id:
-            await self.store.prune_old_messages(user_id, group_id, self.config.max_messages)
+        # 非分段路径：持久化由 _coordinator_on_result 统一完成
         await self._update_interaction(user_id, group_id, current_message, response)
         return response
 
@@ -333,14 +314,14 @@ class ChatSession:
         if isinstance(result, self._SegmentedSentinel):
             return
 
+        msg_id = await self._persist_assistant_message(user_id, group_id, result)
         if self.port:
-            await self.port.send(user_id, group_id, result)
+            await self.port.send(user_id, group_id, result, msg_id=msg_id)
         else:
             logger.warning(
                 f"_coordinator_on_result: MessagePort 未注入，"
                 f"消息无法发送 (user={user_id}, group={group_id})"
             )
-        await self._persist_assistant_message(user_id, group_id, result)
 
     async def _chat_via_coordinator(
         self, user_id: str, group_id: str, message: str, target_key: str
@@ -486,17 +467,15 @@ class ChatSession:
                 logger.error(f"LLM 耗尽 callback 且返回空 content: user={user_id}")
 
         # 5.4.6: 写入历史（不依赖发送结果）
-        if not group_id:
-            await self.store.add_message(user_id, group_id, "assistant", full_reply)
-            await self.store.prune_old_messages(user_id, group_id, self.config.max_messages)
-        else:
-            await self.store.add_group_conversation(
-                group_id=group_id,
-                user_id="assistant",
-                role="assistant",
-                content=full_reply,
-                display_name="我",
-            )
+        effective_user_id = "assistant" if group_id else user_id
+        await self.store.add_unified_message(
+            user_id=effective_user_id,
+            group_id=group_id or "",
+            role="assistant",
+            type=MessageType.CHAT,
+            content=full_reply,
+            display_name="我",
+        )
 
         return self._SegmentedSentinel(full_reply)
 
@@ -667,19 +646,19 @@ class ChatSession:
         if limit is None:
             limit = self.config.max_messages
         if not group_id:
-            history = await self.store.get_recent_messages(user_id, group_id, limit=limit)
+            history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=limit)
             history_dicts = [
                 {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我", "created_at": msg.created_at}
                 for msg in history
             ]
             return history_dicts, False
 
-        history = await self.store.get_group_conversations(group_id, limit=None)
+        history = await self.store.get_group_unified_messages(group_id, limit=None)
         return self._apply_token_window(history)
 
     def _apply_token_window(
         self,
-        history: List[GroupConversation],
+        history: List[UnifiedMessage],
     ) -> Tuple[List[Dict[str, str]], bool]:
         """群聊 Token-based 动态窗口（从新到旧收集，升序输出）"""
         if not history:
@@ -848,15 +827,15 @@ class ChatSession:
 
     async def _persist_assistant_message(
         self, user_id: str, group_id: str, content: str, display_name: str = "我"
-    ) -> None:
-        if not group_id:
-            await self.store.add_message(user_id, group_id, "assistant", content)
-        else:
-            await self.store.add_group_conversation(
-                group_id=group_id,
-                user_id="assistant",
-                role="assistant",
-                content=content,
-                display_name=display_name,
-            )
+    ) -> int:
+        effective_user_id = "assistant" if group_id else user_id
+        msg_id = await self.store.add_unified_message(
+            user_id=effective_user_id,
+            group_id=group_id or "",
+            role="assistant",
+            type=MessageType.CHAT,
+            content=content,
+            display_name=display_name,
+        )
+        return msg_id
 

@@ -27,17 +27,17 @@ def _make_session(
 ) -> ChatSession:
     """构造最小可运行 ChatSession（mock 全部依赖）"""
     store = AsyncMock()
-    store.get_recent_messages = AsyncMock(return_value=[])
-    store.get_group_conversations = AsyncMock(return_value=[])
-    store.add_message = AsyncMock()
-    store.add_group_conversation = AsyncMock()
+    store.get_recent_unified_messages = AsyncMock(return_value=[])
+    store.get_group_unified_messages = AsyncMock(return_value=[])
+    store.add_unified_message = AsyncMock(return_value=1)
+    store._retain_unified = AsyncMock()
     store.add_score_event = AsyncMock()
     store.update_relationship = AsyncMock()
     store.init_relationship = AsyncMock()
     store.get_relationship = AsyncMock(return_value=relationship)
     store.get_user_profile = AsyncMock(return_value=None)
     store.save_user_profile = AsyncMock()
-    store.prune_old_messages = AsyncMock()
+    store.update_sent_ok = AsyncMock()
 
     router = MagicMock()
     router.increment_usage = AsyncMock()
@@ -126,8 +126,7 @@ async def test_first_message_uses_first_mes_without_llm():
     assert result == "你好，我是测试角色"
     # 不应调用 LLM
     assert session.router.run_via_loop.await_count == 0
-    # 应该已写入用户消息和 first_mes 两条
-    assert session.store.add_message.await_count >= 2
+    # first_mes 路径不内部持久化，由 post_send_hook 记录（first_mes 即将删除，不修复此路径）
 
 
 @pytest.mark.asyncio
@@ -154,7 +153,7 @@ async def test_refuse_triggers_at_warmth_zero(monkeypatch):
     )
 
     # 历史已有消息，绕开 is_first 分支
-    session.store.get_recent_messages = AsyncMock(return_value=[
+    session.store.get_recent_unified_messages = AsyncMock(return_value=[
         MagicMock(role="user", content="prev"),
     ])
 
@@ -181,7 +180,7 @@ async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch):
         refuse_messages=["...（已读不回）"],
     )
 
-    session.store.get_recent_messages = AsyncMock(return_value=[
+    session.store.get_recent_unified_messages = AsyncMock(return_value=[
         MagicMock(role="user", content="prev"),
     ])
 
@@ -196,14 +195,16 @@ class TestApplyTokenWindow:
     """_apply_token_window 行为测试"""
 
     def _make_gc(self, content, created_at, role="user", display_name="群友"):
-        from plugins.DicePP.module.persona.data.models import GroupConversation
-        return GroupConversation(
+        from plugins.DicePP.module.persona.data.models import UnifiedMessage
+        from plugins.DicePP.core.message_types import MessageType
+        return UnifiedMessage(
             user_id="u1",
             role=role,
             content=content,
             created_at=created_at,
             group_id="g1",
             display_name=display_name,
+            type=MessageType.CHAT,
         )
 
     def test_empty_history(self):

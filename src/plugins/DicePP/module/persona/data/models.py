@@ -9,6 +9,8 @@ from datetime import datetime
 from enum import Enum
 from nonebot.log import logger
 
+from core.message_types import MessageType  # noqa: F401 — re-export from central location
+
 
 # 阶段下界表：冷淡=0 / 疏远=20 / 友好=40 / 默契=60 / 亲密=80
 STAGE_FLOORS = [0.0, 20.0, 40.0, 60.0, 80.0]
@@ -133,24 +135,17 @@ class UserLLMConfig(BaseModel):
     decrypt_failed: bool = False  # 数据库有加密数据但解密失败
 
 
-class Message(BaseModel):
-    """历史消息表模型；group_id='' 表示私聊场景"""
+class UnifiedMessage(BaseModel):
+    """统一消息表模型，替代 Message / GroupConversation"""
     id: Optional[int] = None
     user_id: str
-    group_id: str = ""  # 空字符串表示私聊
-    role: str  # "user" | "assistant" | "system"
+    group_id: str = ""
+    role: str
+    type: MessageType = MessageType.CHAT
     content: str
-    created_at: Optional[datetime] = None
-
-
-class GroupConversation(Message):
-    """群聊共享历史表模型
-
-    继承 Message 复用基类字段，仅增加群聊特有的 display_name。
-    display_name 为入库时快照，不随用户改名更新。
-    """
-    group_id: str  # 覆盖基类默认值，群聊场景下必传
     display_name: str = ""
+    sent_ok: int = 0
+    created_at: Optional[datetime] = None
 
 
 class WhitelistEntry(BaseModel):
@@ -215,19 +210,6 @@ class DailyEvent(BaseModel):
     mood_delta: Optional[int] = None
     health_delta: Optional[int] = None
     created_at: Optional[datetime] = None
-
-
-class Observation(BaseModel):
-    """群聊观察记录"""
-    id: Optional[int] = None
-    group_id: str
-    participants: List[str]  # 参与用户ID列表
-    who_names: Dict[str, str]  # user_id -> nickname
-    what: str  # 发生了什么
-    why_remember: str  # 为什么值得记住
-    source_messages_count: int = 0   # Phase 7a
-    extract_prompt_digest: str = "" # Phase 7a
-    observed_at: Optional[datetime] = None
 
 
 class CharacterState(BaseModel):

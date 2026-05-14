@@ -434,9 +434,14 @@ class ProactiveScheduler(BoundaryReceiver):
                 labels = self.character.get_warmth_labels()
                 _, warmth_label = rel.get_warmth_level(labels)
 
-            recent_msgs = await self.data_store.get_recent_messages(
-                target.user_id, target.group_id, limit=self.config.share_context_history_limit
-            )
+            if target.group_id:
+                recent_msgs = await self.data_store.get_group_unified_messages(
+                    target.group_id, limit=self.config.share_context_history_limit
+                )
+            else:
+                recent_msgs = await self.data_store.get_recent_unified_messages(
+                    target.user_id, limit=self.config.share_context_history_limit
+                )
 
             share_examples = self.character.extensions.share_message_examples
 

@@ -163,7 +163,7 @@ async def _build_store(bot: Bot, config) -> PersonaDataStore:
         group_activity_decay_with_content=config.group_activity_decay_with_content,
         group_activity_content_window_hours=config.group_activity_content_window_hours,
         timezone=config.timezone,
-        group_max_messages=config.group_max_messages,
+        unified_message_max_per_group=config.unified_message_max_per_group,
     )
     try:
         await store.ensure_tables()
@@ -199,7 +199,17 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
     """初始化消息发送端口"""
     pipeline = MessagePipeline()
     pipeline.add(TruncateStage(max_chars=2000))
-    port = MessagePort(bot, pipeline=pipeline, on_delivery_failed=store.record_delivery_failure)
+    async def _on_delivery_failed(user_id: str, group_id: str, content: str, error: str = "") -> None:
+        try:
+            from .data.models import MessageType
+            await store.add_unified_message(
+                user_id=user_id, group_id=group_id, role="assistant",
+                type=MessageType.SYSTEM_NOTICE, content=f"[发送失败] {content}",
+            )
+        except Exception:
+            logger.exception("on_delivery_failed 二次入库失败")
+
+    port = MessagePort(bot, pipeline=pipeline, on_delivery_failed=_on_delivery_failed)
     logger.info("消息发送端口已初始化")
     return port
 

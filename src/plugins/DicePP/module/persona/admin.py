@@ -165,7 +165,6 @@ class AdminDispatcher:
         *,
         tick_pending: bool = False,
         daily_pending: bool = False,
-        observation_status: Optional[Dict[str, Any]] = None,
     ) -> str:
         lines = ["=== Persona AI 调试信息 ==="]
         if self.init_error:
@@ -199,7 +198,6 @@ class AdminDispatcher:
         lines.append(f"  衰减: {'开启' if config.decay_enabled else '关闭'}")
         lines.append(f"  生活模拟: {'开启' if config.character_life_enabled else '关闭'}")
         lines.append(f"  主动消息: {'开启' if config.proactive_enabled else '关闭'}")
-        lines.append(f"  群聊观察: {'开启' if config.observe_group_enabled else '关闭'}")
         lines.append(f"  群活跃度: {'开启' if config.group_activity_enabled else '关闭'}")
         if config.decay_enabled:
             lines.append(f"\n[衰减配置]")
@@ -222,10 +220,6 @@ class AdminDispatcher:
                 lines.append(f"  最后互动: {activity.last_interaction_at.strftime('%Y-%m-%d %H:%M') if activity.last_interaction_at else '无'}")
             except Exception:
                 pass
-        if observation_status:
-            lines.append(f"\n[观察缓冲]")
-            lines.append(f"  缓冲消息: {observation_status.get('buffer_size', 0)}")
-            lines.append(f"  当前阈值: {observation_status.get('threshold', 0)}")
         return "\n".join(lines)
 
     async def _admin_rel(self, user_id: str, group_id: str, args: List[str]) -> str:

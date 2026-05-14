@@ -43,7 +43,6 @@ def _default_persona_config():
         primary_api_key="fake_key",
         primary_base_url="http://localhost",
         primary_model="gpt-4o",
-        observe_group_enabled=False,
         group_activity_enabled=False,
         trace_enabled=False,
         whitelist_enabled=True,
@@ -115,16 +114,6 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
         cmd = _make_cmd()
         meta = _make_group_meta(".r 1d20")
         ok, _, _ = await cmd.can_process_msg(".r 1d20", meta)
-        assert ok is False
-
-    async def test_group_observation_not_intercept(self):
-        bot = _make_mock_bot()
-        bot.config.persona_ai.observe_group_enabled = True
-        cmd = _make_cmd(bot)
-        cmd.data_store = AsyncMock()
-        cmd._observation_buffers_loaded = True
-        meta = _make_group_meta("hello", to_me=False)
-        ok, _, _ = await cmd.can_process_msg("hello", meta)
         assert ok is False
 
     async def test_join_private(self):
@@ -397,8 +386,7 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         self.store.get_relationship = AsyncMock(return_value=rel)
         self.store.get_user_profile = AsyncMock(return_value=UserProfile(user_id="user", facts={"name": "Xiao"}))
         self.store.get_recent_score_events = AsyncMock(return_value=[])
-        self.store.get_earliest_message_time = AsyncMock(return_value=None)
-        self.store.count_messages = AsyncMock(return_value=5)
+        self.store.get_recent_unified_messages = AsyncMock(return_value=[])
         self.cmd.app.get_decay_calculator = MagicMock(return_value=None)
         meta = _make_private_meta(".ai profile")
         await self.cmd.process_msg(".ai profile", meta, None)
@@ -508,13 +496,15 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
             group_id="g1",
             user_id="u1",
             role="user",
+            type="chat",
             content="hello",
             display_name="小明",
         )
-        self.store.add_group_conversation.assert_awaited_once_with(
-            group_id="g1",
+        self.store.add_unified_message.assert_awaited_once_with(
             user_id="u1",
+            group_id="g1",
             role="user",
+            type="chat",
             content="hello",
             display_name="小明",
         )
@@ -526,6 +516,7 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
             group_id="g1",
             user_id="u1",
             role="user",
+            type="chat",
             content="hello",
             display_name="小明",
         )
@@ -567,7 +558,8 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
 
         self.store.is_group_whitelisted = AsyncMock(return_value=True)
         self.store.update_group_activity = AsyncMock()
-        self.store.add_group_conversation = AsyncMock()
+        self.store.add_unified_message = AsyncMock(return_value=1)
+        self.store._retain_unified = AsyncMock()
 
         self.cmd.app = MagicMock()
         self.cmd.app.chat_with_user = AsyncMock(

@@ -5,6 +5,7 @@ from typing import Optional, Callable
 from core.bot import Bot
 from core.command.bot_cmd import BotSendMsgCommand
 from core.communication import GroupMessagePort, PrivateMessagePort
+from ..data.models import MessageType
 
 from .pipeline import MessagePipeline, SendAction
 from ..tools.context import SendPort
@@ -36,6 +37,7 @@ class MessagePort(EventSharePort):
         content: str,
         *,
         skip_history_record: Optional[bool] = None,
+        msg_id: Optional[int] = None,
     ) -> bool:
         """单条消息发送，默认记录历史。
 
@@ -46,10 +48,11 @@ class MessagePort(EventSharePort):
         分段调度器应显式传 skip_history_record=True，
         把"分段消息不记历史"的决策留在分段域。
 
-        :param skip_history_record: None 时群聊默认 True（跳过历史），私聊默认 False。
+        :param skip_history_record: None 时默认 False（不跳过历史）。群聊分段调度等特殊路径可显式传 True。
+        :param msg_id: 统一消息表中的行 ID，用于 post_send_hook 回填 sent_ok。
         """
         if skip_history_record is None:
-            skip_history_record = bool(group_id)
+            skip_history_record = False
         action = SendAction(
             user_id=user_id,
             group_id=group_id,
@@ -64,6 +67,7 @@ class MessagePort(EventSharePort):
                 a.group_id,
                 a.content,
                 skip_history_record=a.skip_history_record,
+                msg_id=msg_id,
             )
             return True
         except Exception as e:
@@ -81,7 +85,12 @@ class MessagePort(EventSharePort):
             return False
 
     async def _send(
-        self, user_id: str, group_id: str, content: str, skip_history_record: bool = False
+        self,
+        user_id: str,
+        group_id: str,
+        content: str,
+        skip_history_record: bool = False,
+        msg_id: Optional[int] = None,
     ) -> None:
         proxy = getattr(self._bot, "proxy", None)
         if proxy is None:
@@ -93,6 +102,9 @@ class MessagePort(EventSharePort):
         else:
             port = PrivateMessagePort(user_id)
         cmd = BotSendMsgCommand(self._bot.account, content, [port])
+        cmd.message_type = MessageType.CHAT
         if skip_history_record:
             cmd.skip_history_record = True
+        if msg_id is not None:
+            cmd.msg_id = msg_id
         await proxy.process_bot_command(cmd)

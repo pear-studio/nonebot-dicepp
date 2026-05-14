@@ -4,6 +4,7 @@ from typing import Optional, Dict, List
 
 from .context import ToolContext
 from .registry import ToolDef
+from ..data.models import MessageType
 
 
 LIMIT_MIN = 1
@@ -11,7 +12,7 @@ LIMIT_MAX = 20
 
 SEARCH_HISTORY_TOOL = ToolDef(
     name="search_chat_history",
-    description="检索群聊历史记录，支持关键词、时间范围、返回条数过滤。用于回答【刚才谁说了什么】类问题",
+    description="检索群聊历史记录，支持关键词、时间范围、用户、消息类型过滤。用于回答【刚才谁说了什么】类问题",
     parameters={
         "type": "object",
         "properties": {
@@ -38,6 +39,15 @@ SEARCH_HISTORY_TOOL = ToolDef(
                 "type": "string",
                 "description": "结束时间，ISO8601 格式如 2026-04-18T12:00:00（必须与 start_time 成对使用）",
             },
+            "user_id": {
+                "type": "string",
+                "description": "按用户ID过滤（可选，仅搜索该用户发送的消息）",
+            },
+            "type": {
+                "type": "string",
+                "enum": ["chat", "command", "system_notice"],
+                "description": "按消息类型过滤（可选）",
+            },
         },
     },
 )
@@ -51,6 +61,10 @@ def _validate_params(args: dict, group_id: str) -> Optional[str]:
     limit = args.get("limit", 5)
     if not isinstance(limit, int) or not (LIMIT_MIN <= limit <= LIMIT_MAX):
         return f"参数错误：limit 必须在 {LIMIT_MIN}-{LIMIT_MAX} 之间"
+
+    type_val = args.get("type")
+    if type_val is not None and type_val not in ("chat", "command", "system_notice"):
+        return "参数错误：type 必须是 chat、command 或 system_notice"
 
     hours_back = args.get("hours_back")
     if hours_back is not None and (not isinstance(hours_back, int) or hours_back < 0):
@@ -137,9 +151,14 @@ def make_search_history_executor(max_chars: int = 200):
             start_time = datetime.fromisoformat(start_time_str)
             end_time = datetime.fromisoformat(end_time_str)
 
-        results = await ctx.store.search_group_conversations(
+        type_val = args.get("type")
+        msg_type = MessageType(type_val) if type_val else None
+
+        results = await ctx.store.search_unified_messages(
             group_id=ctx.group_id,
             keyword=keyword,
+            type=msg_type,
+            user_id=args.get("user_id"),
             start_time=start_time,
             end_time=end_time,
             hours_back=hours_back,
