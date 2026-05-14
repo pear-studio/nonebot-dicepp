@@ -3,8 +3,7 @@
 覆盖 chat() 入口前置逻辑（不进入 coordinator 路径）：
 
 1. 5 秒去重：相同消息 5 秒内重复返回 None
-2. 首次对话：私聊首次且角色配置了 first_mes，直接返回 first_mes，不调 LLM
-3. 厌倦拒绝：relationship_refuse_enabled 且 warmth_level=0，按概率返回 refuse_messages
+2. 厌倦拒绝：relationship_refuse_enabled 且 warmth_level=0，按概率返回 refuse_messages
 """
 
 import random
@@ -21,7 +20,6 @@ from plugins.DicePP.module.persona.llm.coordinator import LLMCallCoordinator
 def _make_session(
     *,
     refuse_enabled: bool = False,
-    first_mes: str = "",
     relationship: RelationshipState = None,
     refuse_messages=None,
 ) -> ChatSession:
@@ -53,7 +51,6 @@ def _make_session(
 
     character = MagicMock()
     character.name = "Test"
-    character.first_mes = first_mes
     character.extensions = MagicMock()
     character.extensions.initial_relationship = 30.0
     character.extensions.refuse_messages = refuse_messages
@@ -117,26 +114,21 @@ async def test_dedup_different_message_not_skipped():
 
 
 @pytest.mark.asyncio
-async def test_first_message_uses_first_mes_without_llm():
-    """私聊首条消息且角色配置了 first_mes，直接返回 first_mes"""
-    session = _make_session(first_mes="你好，我是测试角色")
-
-    result = await session.chat("u1", "", "Hi")
-
-    assert result == "你好，我是测试角色"
-    # 不应调用 LLM
-    assert session.router.run_via_loop.await_count == 0
-    # first_mes 路径不内部持久化，由 post_send_hook 记录（first_mes 即将删除，不修复此路径）
+async def test_first_private_message_goes_through_coordinator():
+    """私聊首次对话走标准 LLM 路径"""
+    session = _make_session()
+    result = await session.chat("u1", "", "你好")
+    assert result is not None
+    assert session.router.run_via_loop.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_first_message_skipped_in_group_chat():
-    """群聊不走 first_mes 分支，正常进入 LLM 路径"""
-    session = _make_session(first_mes="你好，我是测试角色")
-
-    # 群聊场景应走正常流程（不会触发 first_mes 提前返回）
-    result = await session.chat("u1", "g1", "Hi")
-    assert result != "你好，我是测试角色"
+async def test_first_group_message_goes_through_coordinator():
+    """群聊首次对话走标准 LLM 路径"""
+    session = _make_session()
+    result = await session.chat("u1", "g1", "大家好")
+    assert result is not None
+    assert session.router.run_via_loop.await_count == 1
 
 
 @pytest.mark.asyncio

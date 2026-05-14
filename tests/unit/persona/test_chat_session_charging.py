@@ -52,7 +52,6 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
 
     character = MagicMock()
     character.name = "Test"
-    character.first_mes = ""
     character.extensions = MagicMock()
     character.extensions.initial_relationship = 30.0
     character.extensions.refuse_messages = None

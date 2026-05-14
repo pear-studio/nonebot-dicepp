@@ -24,7 +24,6 @@ class TestCharacter:
         char = Character(name="测试角色")
         assert char.name == "测试角色"
         assert char.description == ""
-        assert char.first_mes == ""
 
     def test_with_extensions(self):
         """测试带扩展的角色"""
@@ -35,7 +34,6 @@ class TestCharacter:
         char = Character(
             name="苏晓",
             description="一个温柔的AI伴侣",
-            first_mes="你好呀~",
             extensions=ext
         )
         
@@ -256,7 +254,6 @@ class TestCharacterLoader:
 name: 测试角色
 description: 这是一个测试角色
 personality: 温柔、体贴
-first_mes: 你好呀~
 mes_example: |
   <START>
   {{user}}: 你好

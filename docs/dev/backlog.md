@@ -35,18 +35,6 @@
   - 影响面: `client.py:_generate_with_tools` 循环终止条件、后台 Agent prompt
   - 前置条件: 当前 `max_tool_rounds=1` 已覆盖，本条为架构扩展预留
 
-### [B-260514-d3e4f5] 删除 first_mes 特判逻辑
-- 创建: 2026-05-14
-- 问题表现:
-  - first_mes 是无视用户实际输入的静态欢迎语，首次私聊不管用户说什么都返回同一段预设文本
-  - 绕过 AgentLoop / Hook / LLMCallCoordinator 等抽象层，是唯一不经过架构统一路径的特殊分支
-  - first_mes 文本与用户原始消息的"假对话对"持久化到历史中，污染上下文
-- 工作计划:
-  - 删除 `session.py:chat()` 中 `is_first and self.character.first_mes` 特判分支（L182-184）
-  - 删除 `Character` 模型中的 `first_mes` 字段（`character/models.py`）
-  - 清理角色卡中的 `first_mes` 配置项
-  - 注意：已移除 first_mes 路径中的内部持久化调用，删除时无需考虑持久化副作用
-
 ### [B-260514-18afa4] 合并 config/personas 和 content/characters 为统一目录结构
 - 创建: 2026-05-14
 - 问题表现:

@@ -65,7 +65,7 @@
 PersonaCommand.process_msg() / 聊天触发
   → PersonaApp.chat.chat()
     → 5秒消息去重
-    → 首次对话：返回 first_mes
+    → 首次对话：走标准 LLM 路径
     → 厌倦拒绝检查（好感度 0-10 区间概率拒绝）
     → _build_messages(): ContextBuilder 组装上下文
       - system_prompt（角色设定 + 当前时间 + 关系标签）
@@ -202,7 +202,7 @@ Command.tick_daily() 每天调用
 #### `ChatSession`
 
 对话入口，负责构造 LLM 上下文、调用 router、处理工具回调、执行评分：
-- 消息去重、首次对话 first_mes、厌倦拒绝检查
+- 消息去重、厌倦拒绝检查
 - 通过 `LLMCallCoordinator` 串行化同一 target 的 LLM 调用
 - 支持工具调用路径（`tools_enabled=True`）
 - 计费走 `BillingPolicy`

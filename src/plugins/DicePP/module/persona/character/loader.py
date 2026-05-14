@@ -75,12 +75,14 @@ class CharacterLoader:
                 ))
             character_book = CharacterBook(entries=entries)
         
+        if data.get("first_mes"):
+            logger.debug("角色卡包含已弃用的 first_mes 字段，将被忽略: %s", data.get("name"))
+
         return Character(
             name=data.get("name", "未命名"),
             description=data.get("description", ""),
             personality=data.get("personality", ""),
             scenario=data.get("scenario", ""),
-            first_mes=data.get("first_mes", ""),
             mes_example=data.get("mes_example", ""),
             system_prompt=data.get("system_prompt", ""),
             character_book=character_book,

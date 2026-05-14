@@ -173,44 +173,41 @@ class ChatSession:
             self._last_messages.pop(k, None)
 
         try:
-            if group_id:
-                history = await self.store.get_group_unified_messages(group_id, limit=1)
-            else:
-                history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=1)
-            is_first = len(history) == 0
-
-            if is_first and not group_id and self.character.first_mes:
-                return self.character.first_mes
-
             is_chat_message = not message.startswith(".") or message.lower().startswith(".ai")
-            if self.config.relationship_refuse_enabled and not is_first and is_chat_message:
-                rel = await self.store.get_relationship(user_id)
-                if rel:
-                    if self.decay_calculator:
-                        rel = self.decay_calculator.effective_relationship(rel)
-                    warmth_level, _ = rel.get_warmth_level(self.character.get_warmth_labels())
-                    if warmth_level == 0:
-                        score = rel.composite_score
-                        base = self.config.relationship_refuse_prob_base
-                        max_p = self.config.relationship_refuse_prob_max
-                        # 仅在 warmth_level==0（冷淡）时触发拒绝；阶段边界处的概率跳变是预期行为
-                        p_refuse = base + (max_p - base) * (1 - score / 20)
-                        if random.random() < p_refuse:
-                            default_refuse_messages = [
-                                "...（对方似乎没有兴趣理你）",
-                                "...（已读不回）",
-                                "嗯。",
-                            ]
-                            char_refuse = self.character.extensions.refuse_messages
-                            refuse_messages = char_refuse if char_refuse is not None else default_refuse_messages
+            if self.config.relationship_refuse_enabled and is_chat_message:
+                if group_id:
+                    history = await self.store.get_group_unified_messages(group_id, limit=1)
+                else:
+                    history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=1)
+                is_first = len(history) == 0
+                if not is_first:
+                    rel = await self.store.get_relationship(user_id)
+                    if rel:
+                        if self.decay_calculator:
+                            rel = self.decay_calculator.effective_relationship(rel)
+                        warmth_level, _ = rel.get_warmth_level(self.character.get_warmth_labels())
+                        if warmth_level == 0:
+                            score = rel.composite_score
+                            base = self.config.relationship_refuse_prob_base
+                            max_p = self.config.relationship_refuse_prob_max
+                            # 仅在 warmth_level==0（冷淡）时触发拒绝；阶段边界处的概率跳变是预期行为
+                            p_refuse = base + (max_p - base) * (1 - score / 20)
+                            if random.random() < p_refuse:
+                                default_refuse_messages = [
+                                    "...（对方似乎没有兴趣理你）",
+                                    "...（已读不回）",
+                                    "嗯。",
+                                ]
+                                char_refuse = self.character.extensions.refuse_messages
+                                refuse_messages = char_refuse if char_refuse is not None else default_refuse_messages
 
-                            if refuse_messages:
-                                refuse_response = random.choice(refuse_messages)
-                                logger.info(
-                                    f"冷淡拒绝触发: user={user_id}, score={score:.2f}, "
-                                    f"p_refuse={p_refuse:.2%}"
-                                )
-                                return refuse_response
+                                if refuse_messages:
+                                    refuse_response = random.choice(refuse_messages)
+                                    logger.info(
+                                        f"冷淡拒绝触发: user={user_id}, score={score:.2f}, "
+                                        f"p_refuse={p_refuse:.2%}"
+                                    )
+                                    return refuse_response
 
             target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
 

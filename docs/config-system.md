@@ -133,7 +133,6 @@ name: "角色名"
 description: "角色背景"
 personality: "性格描述"
 scenario: "当前场景"
-first_mes: "首次见面开场白"
 mes_example: "示例对话"
 system_prompt: "系统提示词"
 

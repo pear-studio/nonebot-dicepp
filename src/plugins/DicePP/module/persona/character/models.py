@@ -1,7 +1,7 @@
 """
 角色卡模型
 
-兼容 SillyTavern V2 标准的角色卡定义
+参考 SillyTavern V2 标准（部分关键字段，不保证全部兼容）
 """
 from nonebot.log import logger
 import random
@@ -85,7 +85,6 @@ class Character(BaseModel):
     description: str = ""
     personality: str = ""
     scenario: str = ""
-    first_mes: str = ""
     mes_example: str = ""
     system_prompt: str = ""
     character_book: Optional[CharacterBook] = None

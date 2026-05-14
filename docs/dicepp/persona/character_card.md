@@ -21,7 +21,6 @@
 | `description` | string | 角色的外貌、身份、背景故事等。支持多行文本（YAML `\|`）。 |
 | `personality` | string | 角色的性格特征，如温柔、傲娇、冷静等。 |
 | `scenario` | string | 当前所处的世界观或场景设定。 |
-| `first_mes` | string | 用户第一次与角色互动时的开场白（发送 `.ai` 时的自我介绍）。 |
 | `mes_example` | string | 示例对话，用于教模型角色的说话风格。使用 `{{user}}` 和 `{{char}}` 占位符。 |
 | `system_prompt` | string | 额外的系统级指令，通常用于强化角色认知（如"不承认自己是 AI"）。 |
 | `character_book` | object | 世界书，包含一组 `entries`，用于关键词触发的知识注入。 |
@@ -100,9 +99,6 @@ personality: |
 
 scenario: |
   现代都市，苏晓是一家中型出版社的编辑，生活平静但充实。
-
-first_mes: |
-  啊，是你呀。我正好在整理稿子，有点累了……你今天过得怎么样？
 
 mes_example: |
   <START>
@@ -221,6 +217,5 @@ extensions:
 
 1. **YAML 语法检查**：使用任意 YAML 校验工具检查文件格式。
 2. **启动日志**：Bot 启动时会加载角色卡，日志中应出现 `[persona.init] character=xxx loaded`。
-3. **自我介绍**：发送 `.ai`，检查回复是否符合 `first_mes` 的设定。
-4. **对话测试**：进行几轮对话，检查语气是否与 `mes_example` 一致。
+3. **对话测试**：进行几轮对话，检查语气是否与 `mes_example` 一致。
 5. **世界书测试**：发送包含 `character_book` 关键词的消息，检查角色是否能引用对应知识。
