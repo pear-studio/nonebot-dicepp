@@ -1,33 +1,19 @@
 ---
 name: start-feature
-description: 从 master 创建新的 feature 分支，确保基于最新代码并检查工作区状态。
+description: 从 master 创建新的 feature 分支，基于 git worktree 实现环境隔离。
 license: MIT
 metadata:
   author: DicePP
-  version: "1.0"
+  version: "2.0"
 ---
 
-从最新 master 创建功能分支，自动拉取上游更新并检查工作区状态。
+从最新 master 创建功能分支，使用 git worktree 实现独立工作区，自动共享 `.venv` 环境。
 
 **Input**: 用户请求创建功能分支，如 "开新功能"、"/start-feature"、或提供分支名如 "feature/roll-refactor"。
 
-**Prerequisites**
-
-- Git 仓库已初始化
-- 有 `origin/master` remote
-
 **Steps**
 
-1. **检查当前分支**
-
-   运行：
-   ```bash
-   git branch --show-current
-   ```
-
-   记录当前分支名，用于最后提示。
-
-2. **检查工作区状态**
+1. **检查当前工作区状态**
 
    运行：
    ```bash
@@ -41,52 +27,58 @@ metadata:
      - **停止**
    - 干净：继续
 
-3. **获取功能分支名称**
+2. **获取功能分支名称**
 
-   如果用户没有提供分支名，询问：
-   > 请输入功能分支名称（如 `feature/roll-refactor`）：
+   如果用户已提供分支名，直接使用。
 
-   分支名规范检查：
+   如果未提供，根据上下文猜测——从用户最近讨论的功能、需求中推断合理的分支名。目标明确时直接创建，不需确认；模糊时简单汇报拟用名称即可。
+
+   分支名规范处理：
    - 如果不以 `feature/` 或 `hotfix/` 开头，自动补全 `feature/` 前缀
    - 去除空格和特殊字符
 
-4. **拉取最新 master**
+3. **创建 worktree**
+
+   调用 `EnterWorktree` 工具，传入校验后的分支名作为 `name` 参数。
+
+   `EnterWorktree` 默认 `baseRef: fresh`，自动基于 `origin/master` 创建，无需手动 fetch/pull。
+
+4. **验证 .venv 符号链接**
 
    ```bash
-   git fetch origin master
-   git checkout master
-   git pull origin master
+   test -L .venv && echo ".venv symlink ok" || ln -sf /home/ubuntu/dicepp/dev/.venv .venv
    ```
 
-   如果 pull 失败（如本地 master 有未推送提交）：
-   - 汇报错误原因
-   - **停止**
+   如果符号链接创建失败，汇报原因并**停止**。
 
-5. **创建功能分支**
+5. **验证环境**
 
    ```bash
-   git checkout -b <branch_name> master
+   uv run python -c "import sys; print(sys.executable)"
    ```
-
-   如果分支已存在：
-   - 汇报：`分支 <name> 已存在`
-   - 询问是否切换到该分支，或重新命名
 
 6. **输出结果**
 
-   成功创建后输出：
    ```
-   ✅ 功能分支已创建
+   功能分支已创建
 
    分支: <branch_name>
-   基于: origin/master (<commit_hash>)
-   当前分支已切换到: <branch_name>
+   基于: origin/master
+   worktree 路径: .claude/worktrees/<name>/
 
    可以开始开发了。开发完成后用 /pr-create 创建 Pull Request。
    ```
 
+**清理 worktree**
+
+开发完成、分支合并后，使用 `ExitWorktree` 退出并清理：
+
+- `action: "remove"` — 删除 worktree 目录和关联分支
+- `action: "keep"` — 保留 worktree，后续继续使用
+
 **Important Notes**
 
-- 如果当前不在 master 分支，会先 stash（如有需要）切到 master，创建完 feature 分支后不会切回原分支——你就在 feature 分支上开始开发。
-- 自动基于最新 `origin/master` 创建，避免后续 rebase 冲突。
-- 分支名建议用 `feature/简述` 或 `hotfix/简述` 格式。
+- worktree 提供独立工作区，`config/`、`data/` 等文件互不干扰
+- `.venv` 通过符号链接共享，所有 worktree 使用同一套 Python 环境
+- `EnterWorktree` 的 hook 配置位于 `.claude/settings.json`
+- 分支名建议用 `feature/简述` 或 `hotfix/简述` 格式
