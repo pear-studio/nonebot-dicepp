@@ -75,6 +75,7 @@ def cmd_send(args) -> None:
                 msg=args.msg,
                 group_id=group_id,
                 dice_sequence=dice_seq,
+                to_me=getattr(args, "to_me", False),
             )
         finally:
             await runner.stop()
@@ -148,6 +149,7 @@ def main() -> None:
     send_parser.add_argument("--msg", required=True, help="Message content")
     send_parser.add_argument("--private", action="store_true", help="Send as private message")
     send_parser.add_argument("--dice", help="Dice sequence, e.g., '20,18,15,8'")
+    send_parser.add_argument("--to-me", action="store_true", dest="to_me", help="Mark message as @bot trigger")
     send_parser.add_argument("--json", action="store_true", help="Output in JSON format")
     send_parser.set_defaults(func=cmd_send)
 
