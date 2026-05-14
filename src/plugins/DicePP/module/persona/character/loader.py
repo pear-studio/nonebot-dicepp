@@ -22,12 +22,12 @@ class CharacterLoader:
         加载指定名称的角色卡
         
         Args:
-            character_name: 角色卡名称（不含扩展名）
+            character_name: 角色卡名称（子目录名）
             
         Returns:
             Character 对象，加载失败返回 None
         """
-        file_path = self.character_path / f"{character_name}.yaml"
+        file_path = self.character_path / character_name / "character.yaml"
         
         if not file_path.exists():
             return None
@@ -90,11 +90,12 @@ class CharacterLoader:
         )
 
     def list_characters(self) -> list[str]:
-        """列出所有可用的角色卡名称"""
+        """列出所有可用的角色卡名称（含 character.yaml 的子目录）"""
         if not self.character_path.exists():
             return []
-        
+
         characters = []
-        for file_path in self.character_path.glob("*.yaml"):
-            characters.append(file_path.stem)
+        for char_dir in sorted(self.character_path.iterdir()):
+            if char_dir.is_dir() and (char_dir / "character.yaml").exists():
+                characters.append(char_dir.name)
         return characters

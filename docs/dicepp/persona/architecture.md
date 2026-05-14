@@ -166,7 +166,7 @@ Command.tick_daily() 每天调用
 
 #### 加载
 
-- **`CharacterLoader`**：从 `content/characters/{name}.yaml` 加载角色卡
+- **`CharacterLoader`**：从 `content/characters/{name}/character.yaml` 加载角色卡
 
 #### 世界书匹配规则
 

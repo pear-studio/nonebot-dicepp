@@ -4,7 +4,7 @@ Pydantic models for the Persona system.
 A Persona bundles together:
 - localization overrides (key → one or more response strings)
 - chat patterns (regex → response list)
-- llm_personality (system prompt override)
+
 
 All fields are optional — a Persona only needs to specify what it wants
 to override from the hard-coded defaults.
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 class PersonaModel(BaseModel):
     """
     Represents a single persona definition loaded from
-    config/personas/{name}.json
+    content/characters/{name}/skin.yaml
     """
     name: str = "default"
 
@@ -27,9 +27,6 @@ class PersonaModel(BaseModel):
     # Regex pattern → list of response strings.
     # Completely replaces the built-in chat patterns when non-empty.
     chat: Dict[str, Union[str, List[str]]] = Field(default_factory=dict)
-
-    # LLM system prompt override.
-    llm_personality: str = ""
 
     def get_loc_texts(self, key: str) -> List[str]:
         """Return the list of response strings for a localization key, or []."""

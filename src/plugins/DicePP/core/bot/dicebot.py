@@ -91,8 +91,8 @@ class Bot:
 
         # New config system: ConfigLoader + PersonaLoader
         self._cfg_loader = ConfigLoader(account=account)
-        self._persona_loader = PersonaLoader()
         self.config: BotConfig = self._cfg_loader.load()
+        self._persona_loader = PersonaLoader(self.config.persona_ai.character_path)
 
         # LocalizationManager now takes a PersonaLoader; no file paths needed
         self.loc_helper = LocalizationManager(persona_loader=self._persona_loader)

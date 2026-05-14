@@ -11,16 +11,15 @@ config/                 # 配置目录（可提交到版本库）
 ├── bots/              # 账号配置
 │   ├── _template.json # 配置模板
 │   └── {账号}.json    # 具体账号配置 - gitignored
-└── personas/          # 人设配置
-    ├── default.json
-    └── {自定义}.json
-
 data/                  # 运行时数据（可写）
 ├── bots/{账号}/       # 各账号数据
 └── local_images/      # 本地图片
 
 content/               # 内容资源（可写）
-├── characters/        # 角色卡（Persona AI 使用）
+├── characters/        # 角色卡与皮肤（Persona AI 使用）
+│   └── {name}/
+│       ├── character.yaml
+│       └── skin.yaml
 ├── decks/             # 牌组数据
 ├── excel/             # Excel 配置
 ├── queries/           # 查询数据库
@@ -101,30 +100,24 @@ cp config/bots/_template.json config/bots/你的QQ号.json
 | `persona_ai.enabled` | `false` | Persona AI 模块 |
 | `mode.default` | `DND5E2024` | 默认游戏规则 |
 
-## 人设配置 (`config/personas/`)
+## 人设皮肤 (`content/characters/{name}/skin.yaml`)
 
-人设包含：
+皮肤配置包含：
 - **localization**: 覆盖本地化文本
 - **chat**: 自定义对话触发规则
-- **llm_personality**: AI 人格描述
 
-示例 (`qiqi.json`)：
+示例 (`content/characters/qiqi/skin.yaml`)：
 
-```json
-{
-  "name": "qiqi",
-  "localization": {
-    "login_notice": "……七七……早上好……"
-  },
-  "chat": {
-    "^你好$": ["……你好……", "……你也好……"],
-    "^.*椰奶.*$": ["……椰奶……喜欢……"]
-  },
-  "llm_personality": "你是原神中的七七，僵尸少女……"
-}
+```yaml
+name: qiqi
+localization:
+  login_notice: "……七七……早上好……"
+chat:
+  "^你好$": ["……你好……", "……你也好……"]
+  "^.*椰奶.*$": ["……椰奶……喜欢……"]
 ```
 
-## 角色卡配置 (`content/characters/`)
+## 角色卡配置 (`content/characters/{name}/character.yaml`)
 
 Persona AI 模块使用 SillyTavern V2 格式的角色卡：
 
@@ -191,8 +184,8 @@ docker compose up -d
 | 旧文件 | 新位置 |
 |--------|--------|
 | `Data/Config.xlsx` | `config/global.json` |
-| `Data/Localization.xlsx` | `config/personas/default.json` → `localization` |
-| `Data/Chat.xlsx` | `config/personas/default.json` → `chat` |
+| `Data/Localization.xlsx` | `content/characters/default/skin.yaml` → `localization` |
+| `Data/Chat.xlsx` | `content/characters/default/skin.yaml` → `chat` |
 
 ### 从旧 Data/ 目录迁移
 

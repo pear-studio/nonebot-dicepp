@@ -271,10 +271,12 @@ extensions:
 """
         
         with tempfile.TemporaryDirectory() as tmpdir:
-            char_file = os.path.join(tmpdir, "test_char.yaml")
+            char_dir = os.path.join(tmpdir, "test_char")
+            os.makedirs(char_dir, exist_ok=True)
+            char_file = os.path.join(char_dir, "character.yaml")
             with open(char_file, "w", encoding="utf-8") as f:
                 f.write(yaml_content)
-            
+
             loader = CharacterLoader(tmpdir)
             char = loader.load("test_char")
             
@@ -294,12 +296,38 @@ extensions:
         """测试加载默认角色卡"""
         loader = CharacterLoader("content/characters")
         char = loader.load("default")
-        
-        if os.path.exists("content/characters/default.yaml"):
+
+        if os.path.exists("content/characters/default/character.yaml"):
             assert char is not None
             assert char.name is not None
         else:
             pytest.skip("默认角色卡不存在")
+
+    def test_list_characters(self):
+        """测试列出所有角色"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for name in ["alice", "bob"]:
+                char_dir = os.path.join(tmpdir, name)
+                os.makedirs(char_dir, exist_ok=True)
+                open(os.path.join(char_dir, "character.yaml"), "w").close()
+
+            loader = CharacterLoader(tmpdir)
+            chars = loader.list_characters()
+            assert chars == ["alice", "bob"]
+
+    def test_list_characters_skips_invalid_dirs(self):
+        """测试跳过无 character.yaml 的目录"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            char_dir = os.path.join(tmpdir, "valid")
+            os.makedirs(char_dir, exist_ok=True)
+            open(os.path.join(char_dir, "character.yaml"), "w").close()
+
+            empty_dir = os.path.join(tmpdir, "no_character_yaml")
+            os.makedirs(empty_dir, exist_ok=True)
+
+            loader = CharacterLoader(tmpdir)
+            chars = loader.list_characters()
+            assert chars == ["valid"]
 
 
 if __name__ == "__main__":

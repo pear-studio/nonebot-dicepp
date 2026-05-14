@@ -4,11 +4,11 @@ Tests for core/persona/loader.py and core/persona/models.py
 Covers:
   9.3  Persona loading and fallback
 """
-import json
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "src" / "plugins" / "DicePP"
 if str(PLUGIN_ROOT) not in sys.path:
@@ -21,16 +21,18 @@ from core.persona.models import PersonaModel
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _write(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+def _write_skin(base_dir: Path, name: str, data: dict) -> None:
+    """Write a skin.yaml file in base_dir/{name}/skin.yaml."""
+    char_dir = base_dir / name
+    char_dir.mkdir(parents=True, exist_ok=True)
+    skin_path = char_dir / "skin.yaml"
+    skin_path.write_text(yaml.dump(data, allow_unicode=True), encoding="utf-8")
 
 
 @pytest.fixture
-def personas_dir(tmp_path):
-    d = tmp_path / "personas"
-    d.mkdir()
-    return tmp_path  # PersonaLoader takes the parent (data_path)
+def chars_dir(tmp_path):
+    """Temp dir used as character_path for PersonaLoader."""
+    return tmp_path
 
 
 # ── PersonaModel ──────────────────────────────────────────────────────────────
@@ -41,7 +43,6 @@ def test_persona_model_defaults():
     assert p.name == "default"
     assert p.localization == {}
     assert p.chat == {}
-    assert p.llm_personality == ""
 
 
 def test_persona_model_get_loc_texts_missing_key():
@@ -78,81 +79,80 @@ def test_persona_model_get_chat_responses_list():
 
 
 def test_loader_missing_dir_returns_default(tmp_path):
-    loader = PersonaLoader(str(tmp_path))
+    loader = PersonaLoader(str(tmp_path / "nonexistent"))
     p = loader.get("default")
     assert isinstance(p, PersonaModel)
 
 
-def test_loader_loads_default_persona(personas_dir):
-    _write(personas_dir / "personas" / "default.json", {
+def test_loader_loads_default_persona(chars_dir):
+    _write_skin(chars_dir, "default", {
         "name": "default",
         "localization": {"hello": "你好"},
         "chat": {"^hi$": "嗨"},
-        "llm_personality": "友好的助手",
     })
-    loader = PersonaLoader(str(personas_dir))
+    loader = PersonaLoader(str(chars_dir))
     p = loader.get("default")
     assert p.get_loc_texts("hello") == ["你好"]
-    assert p.llm_personality == "友好的助手"
 
 
-def test_loader_loads_multiple_personas(personas_dir):
-    _write(personas_dir / "personas" / "default.json", {"name": "default"})
-    _write(personas_dir / "personas" / "kawaii.json", {
+def test_loader_loads_multiple_personas(chars_dir):
+    _write_skin(chars_dir, "default", {"name": "default"})
+    _write_skin(chars_dir, "kawaii", {
         "name": "kawaii",
         "localization": {"greeting": "好可爱呀~"},
     })
-    loader = PersonaLoader(str(personas_dir))
+    loader = PersonaLoader(str(chars_dir))
     assert "default" in loader.available_names()
     assert "kawaii" in loader.available_names()
 
 
-def test_loader_get_existing_persona(personas_dir):
-    _write(personas_dir / "personas" / "default.json", {"name": "default"})
-    _write(personas_dir / "personas" / "cool.json", {
+def test_loader_get_existing_persona(chars_dir):
+    _write_skin(chars_dir, "default", {"name": "default"})
+    _write_skin(chars_dir, "cool", {
         "name": "cool",
-        "llm_personality": "酷炫助手",
+        "chat": {"^hi$": ["Yo!"]},
     })
-    loader = PersonaLoader(str(personas_dir))
+    loader = PersonaLoader(str(chars_dir))
     p = loader.get("cool")
-    assert p.llm_personality == "酷炫助手"
+    assert p.get_chat_responses("^hi$") == ["Yo!"]
 
 
 # ── PersonaLoader: fallback ───────────────────────────────────────────────────
 
 
-def test_loader_fallback_to_default_when_name_missing(personas_dir):
-    _write(personas_dir / "personas" / "default.json", {
+def test_loader_fallback_to_default_when_name_missing(chars_dir):
+    _write_skin(chars_dir, "default", {
         "name": "default",
         "localization": {"key": "default_value"},
     })
-    loader = PersonaLoader(str(personas_dir))
+    loader = PersonaLoader(str(chars_dir))
     p = loader.get("nonexistent")
     assert p.get_loc_texts("key") == ["default_value"]
 
 
-def test_loader_fallback_to_empty_persona_when_no_default(personas_dir):
-    _write(personas_dir / "personas" / "other.json", {"name": "other"})
-    loader = PersonaLoader(str(personas_dir))
+def test_loader_fallback_to_empty_persona_when_no_default(chars_dir):
+    _write_skin(chars_dir, "other", {"name": "other"})
+    loader = PersonaLoader(str(chars_dir))
     p = loader.get("missing")
     assert isinstance(p, PersonaModel)
     assert p.localization == {}
 
 
-def test_loader_ignores_malformed_json(personas_dir):
-    (personas_dir / "personas").mkdir(exist_ok=True)
-    (personas_dir / "personas" / "default.json").write_text("NOT JSON", encoding="utf-8")
-    loader = PersonaLoader(str(personas_dir))
+def test_loader_ignores_malformed_yaml(chars_dir):
+    default_dir = chars_dir / "default"
+    default_dir.mkdir(exist_ok=True)
+    (default_dir / "skin.yaml").write_text("NOT YAML: [broken", encoding="utf-8")
+    loader = PersonaLoader(str(chars_dir))
     p = loader.get("default")
     assert isinstance(p, PersonaModel)  # empty fallback, no exception
 
 
-def test_loader_ignores_validation_error(personas_dir):
-    _write(personas_dir / "personas" / "default.json", {
+def test_loader_ignores_validation_error(chars_dir):
+    _write_skin(chars_dir, "default", {
         "name": "default",
         "localization": "should_be_dict_not_string",
     })
-    loader = PersonaLoader(str(personas_dir))
+    loader = PersonaLoader(str(chars_dir))
     p = loader.get("default")
     assert isinstance(p, PersonaModel)
 
@@ -160,42 +160,43 @@ def test_loader_ignores_validation_error(personas_dir):
 # ── PersonaLoader: reload ─────────────────────────────────────────────────────
 
 
-def test_loader_reload_picks_up_new_file(personas_dir):
-    _write(personas_dir / "personas" / "default.json", {"name": "default"})
-    loader = PersonaLoader(str(personas_dir))
+def test_loader_reload_picks_up_new_file(chars_dir):
+    _write_skin(chars_dir, "default", {"name": "default"})
+    loader = PersonaLoader(str(chars_dir))
     assert "newpersona" not in loader.available_names()
 
-    _write(personas_dir / "personas" / "newpersona.json", {
+    _write_skin(chars_dir, "newpersona", {
         "name": "newpersona",
-        "llm_personality": "new!",
+        "localization": {"greeting": "new!"},
     })
     loader.reload()
     assert "newpersona" in loader.available_names()
-    assert loader.get("newpersona").llm_personality == "new!"
+    assert loader.get("newpersona").get_loc_texts("greeting") == ["new!"]
 
 
-def test_loader_reload_picks_up_changes(personas_dir):
-    _write(personas_dir / "personas" / "default.json", {
+def test_loader_reload_picks_up_changes(chars_dir):
+    _write_skin(chars_dir, "default", {
         "name": "default",
-        "llm_personality": "before",
+        "localization": {"greeting": "before"},
     })
-    loader = PersonaLoader(str(personas_dir))
-    assert loader.get("default").llm_personality == "before"
+    loader = PersonaLoader(str(chars_dir))
+    assert loader.get("default").get_loc_texts("greeting") == ["before"]
 
-    _write(personas_dir / "personas" / "default.json", {
+    _write_skin(chars_dir, "default", {
         "name": "default",
-        "llm_personality": "after",
+        "localization": {"greeting": "after"},
     })
     loader.reload()
-    assert loader.get("default").llm_personality == "after"
+    assert loader.get("default").get_loc_texts("greeting") == ["after"]
 
 
-def test_loader_reload_clears_removed_persona(personas_dir):
-    _write(personas_dir / "personas" / "default.json", {"name": "default"})
-    _write(personas_dir / "personas" / "temp.json", {"name": "temp"})
-    loader = PersonaLoader(str(personas_dir))
+def test_loader_reload_clears_removed_persona(chars_dir):
+    _write_skin(chars_dir, "default", {"name": "default"})
+    _write_skin(chars_dir, "temp", {"name": "temp"})
+    loader = PersonaLoader(str(chars_dir))
     assert "temp" in loader.available_names()
 
-    (personas_dir / "personas" / "temp.json").unlink()
+    (chars_dir / "temp" / "skin.yaml").unlink()
+    (chars_dir / "temp").rmdir()
     loader.reload()
     assert "temp" not in loader.available_names()

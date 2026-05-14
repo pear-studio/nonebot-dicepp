@@ -35,22 +35,6 @@
   - 影响面: `client.py:_generate_with_tools` 循环终止条件、后台 Agent prompt
   - 前置条件: 当前 `max_tool_rounds=1` 已覆盖，本条为架构扩展预留
 
-### [B-260514-18afa4] 合并 config/personas 和 content/characters 为统一目录结构
-- 创建: 2026-05-14
-- 问题表现:
-    - config/personas/ 和 content/characters/ 各存一份同一角色的设定（如七七），分散在两处
-    - config/personas/qiqi.local.json 实质是空壳，仅 llm_personality 一行有差异，而这个字段在代码中未被消费（只在 PersonaModel 定义和测试中出现，无任何模块读取）
-    - 新增角色需同时维护 JSON + YAML 两份文件，容易遗漏或不一致
-    - config/personas/ 目录定位模糊：角色皮肤配置和 AI 角色定义分离，概念上不清晰
-- 工作计划:
-    - 迁移为 content/characters/{name}/ 子目录结构，每角色一个目录，内含 character.yaml + skin.yaml（统一 YAML 格式）
-    - 删除 PersonaModel.llm_personality 字段（无消费方）
-    - 更新 PersonaLoader：扫描路径从 config/personas/*.json → content/characters/*/skin.yaml，JSON→YAML
-    - 更新 CharacterLoader：路径从 {name}.yaml → {name}/character.yaml，list_characters() 改为列子目录
-    - 更新 Paths：CONFIG_PERSONAS_DIR → CONTENT_CHARACTERS_DIR，修改 ensure_dirs
-    - 迁移 4 个现有文件，删除 config/personas/ 目录
-    - 更新测试（test_persona.py、test_character.py）
-
 ## test-infra
 
 ### [B-260514-60a29a] 测试 bot config 文件泄漏，config/bots/ 积累 8000+ 残留文件

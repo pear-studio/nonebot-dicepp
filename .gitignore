@@ -156,8 +156,8 @@ config/personas/*.local.json
 content/**
 !content/**/
 !content/**/.gitkeep
-!content/characters/*.yaml
-content/characters/*.local.yaml
+!content/characters/default/character.yaml
+!content/characters/default/skin.yaml
 src/plugins/DicePP/module/misc/log_command.py
 
 # uv lock 文件（可选是否追踪，这里选择不追踪）

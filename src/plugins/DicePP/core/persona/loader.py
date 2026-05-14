@@ -1,36 +1,35 @@
 """
-PersonaLoader: discovers and loads Persona files from config/personas/.
+PersonaLoader: discovers and loads Persona files from content/characters/*/skin.yaml.
 """
-import json
 from pathlib import Path
 from typing import Dict, Optional
 
+import yaml
 from pydantic import ValidationError
 
 from utils.logger import dice_log
 from core.persona.models import PersonaModel
 from core.config.basic import Paths
 
-_PERSONAS_DIR = "personas"
 _DEFAULT_PERSONA = "default"
 
 
 class PersonaLoader:
     """
-    Loads and caches PersonaModel objects from config/personas/*.json.
+    Loads and caches PersonaModel objects from content/characters/*/skin.yaml.
 
     Usage:
-        loader = PersonaLoader()            # production: uses Paths.CONFIG_PERSONAS_DIR
-        loader = PersonaLoader(data_path)   # tests: looks in data_path/personas/
-        persona = loader.get("cute")        # falls back to "default"
-        loader.reload()                     # hot-reload all personas
+        loader = PersonaLoader()                  # production: uses Paths.CONTENT_CHARACTERS_DIR
+        loader = PersonaLoader(character_path)    # custom path (tests)
+        persona = loader.get("cute")              # falls back to "default"
+        loader.reload()                           # hot-reload all personas
     """
 
-    def __init__(self, data_path: Optional[str] = None):
-        if data_path is not None:
-            self._dir = Path(data_path) / _PERSONAS_DIR
+    def __init__(self, character_path: Optional[str] = None):
+        if character_path is not None:
+            self._dir = Path(character_path)
         else:
-            self._dir = Paths.CONFIG_PERSONAS_DIR
+            self._dir = Paths.CONTENT_CHARACTERS_DIR
         self._cache: Dict[str, PersonaModel] = {}
         self._load_all()
 
@@ -50,20 +49,20 @@ class PersonaLoader:
         self._load_all()
         dice_log(f"[Persona] Reloaded {len(self._cache)} persona(s)")
 
-    def available_names(self) -> list:
+    def available_names(self) -> list[str]:
         return list(self._cache.keys())
 
     # ── internals ───────────────────────────────────────────────────────────
 
     def _load_all(self) -> None:
         if not self._dir.exists():
-            dice_log(f"[Persona] Personas directory not found: {self._dir}")
+            dice_log(f"[Persona] Characters directory not found: {self._dir}")
             self._cache[_DEFAULT_PERSONA] = PersonaModel()
             return
 
-        for path in sorted(self._dir.glob("*.json")):
-            name = path.stem
-            persona = self._load_one(path, name)
+        for skin_path in sorted(self._dir.glob("*/skin.yaml")):
+            name = skin_path.parent.name
+            persona = self._load_one(skin_path, name)
             if persona is not None:
                 self._cache[name] = persona
 
@@ -73,11 +72,20 @@ class PersonaLoader:
 
     def _load_one(self, path: Path, name: str) -> Optional[PersonaModel]:
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            data.setdefault("name", name)
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                dice_log(f"[Persona] Invalid YAML structure in {path}: expected dict")
+                return None
+            yaml_name = data.get("name")
+            if yaml_name is not None and yaml_name != name:
+                dice_log(
+                    f"[Persona] skin.yaml name {yaml_name!r} differs from "
+                    f"directory name {name!r}; using directory name"
+                )
+            data["name"] = name
             return PersonaModel.model_validate(data)
-        except json.JSONDecodeError as exc:
-            dice_log(f"[Persona] JSON parse error in {path}: {exc}")
+        except yaml.YAMLError as exc:
+            dice_log(f"[Persona] YAML parse error in {path}: {exc}")
         except ValidationError as exc:
             dice_log(f"[Persona] Validation error in {path}: {exc}")
         except OSError as exc:

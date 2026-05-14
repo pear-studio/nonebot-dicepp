@@ -12,13 +12,13 @@ class Paths:
     CONFIG_GLOBAL:       Path = CONFIG_DIR / "global.json"
     CONFIG_SECRETS:      Path = CONFIG_DIR / "secrets.json"
     CONFIG_BOTS_DIR:     Path = CONFIG_DIR / "bots"
-    CONFIG_PERSONAS_DIR: Path = CONFIG_DIR / "personas"
 
     DATA_DIR:      Path = PROJECT_ROOT / "data"
     DATA_BOTS_DIR: Path = DATA_DIR / "bots"
     LOCAL_IMG_DIR: Path = DATA_DIR / "local_images"
 
     CONTENT_DIR:         Path = PROJECT_ROOT / "content"
+    CONTENT_CHARACTERS_DIR: Path = CONTENT_DIR / "characters"
     CONTENT_QUERIES_DIR: Path = CONTENT_DIR / "queries"
     CONTENT_DECKS_DIR:   Path = CONTENT_DIR / "decks"
     CONTENT_RANDOM_DIR:  Path = CONTENT_DIR / "random"
@@ -31,9 +31,9 @@ class Paths:
     @classmethod
     def ensure_dirs(cls) -> None:
         for d in [
-            cls.CONFIG_DIR, cls.CONFIG_BOTS_DIR, cls.CONFIG_PERSONAS_DIR,
+            cls.CONFIG_DIR, cls.CONFIG_BOTS_DIR,
             cls.DATA_DIR, cls.DATA_BOTS_DIR, cls.LOCAL_IMG_DIR,
-            cls.CONTENT_DIR, cls.CONTENT_QUERIES_DIR, cls.CONTENT_DECKS_DIR,
+            cls.CONTENT_DIR, cls.CONTENT_CHARACTERS_DIR, cls.CONTENT_QUERIES_DIR, cls.CONTENT_DECKS_DIR,
             cls.CONTENT_RANDOM_DIR, cls.CONTENT_EXCEL_DIR,
         ]:
             if not d.exists():

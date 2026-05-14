@@ -65,7 +65,7 @@
 
 | 字段 | 说明 |
 |------|------|
-| `character_name` | 角色卡文件名（不含 `.yaml`），对应 `content/characters/{name}.yaml` |
+| `character_name` | 角色卡子目录名，对应 `content/characters/{name}/character.yaml` |
 | `character_path` | 角色卡存放目录，默认 `./content/characters` |
 | `primary_model` | 主模型，用于生成对话回复 |
 | `auxiliary_model` | 辅助模型，用于评分、摘要、事件生成等后台任务 |
@@ -78,12 +78,12 @@
 
 ## 第三步：创建角色卡
 
-角色卡是 YAML 文件，存放于 `content/characters/` 目录下，文件名与 `character_name` 对应。
+角色卡是 YAML 文件，存放于 `content/characters/{name}/` 子目录下，目录名与 `character_name` 对应。每个角色目录包含 `character.yaml`（角色定义）和 `skin.yaml`（皮肤/回复风格）。
 
-仓库已提供一个示例 `content/characters/default.yaml`，可直接复制修改：
+仓库已提供一个示例 `content/characters/default/`，可直接复制修改：
 
 ```bash
-cp content/characters/default.yaml content/characters/mychar.yaml
+cp -r content/characters/default content/characters/mychar
 ```
 
 然后编辑 `config/global.json`：

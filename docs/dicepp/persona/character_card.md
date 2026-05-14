@@ -7,7 +7,7 @@
 
 ## 文件位置
 
-角色卡存放在 `content/characters/` 目录下，文件名为 `{character_name}.yaml`，与 `config/global.json` 中的 `persona_ai.character_name` 对应。
+角色卡存放在 `content/characters/{name}/` 子目录下，文件名为 `character.yaml`，目录名与 `config/global.json` 中的 `persona_ai.character_name` 对应。同目录下的 `skin.yaml` 定义皮肤/回复风格。
 
 ---
 
@@ -83,7 +83,7 @@ warmth_labels: ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
 
 ## 完整示例
 
-以下是一个完整的角色卡示例，可直接复制到 `content/characters/default.yaml` 并修改：
+以下是一个完整的角色卡示例，可直接复制到 `content/characters/default/character.yaml` 并修改：
 
 ```yaml
 # ==================== SillyTavern V2 标准字段 ====================
