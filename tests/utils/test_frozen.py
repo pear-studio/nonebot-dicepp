@@ -130,7 +130,8 @@ class TestGetRuntimeInfo:
 
 class TestGetProjectRoot:
 
-    def test_dev_environment_returns_repo_root(self):
+    def test_dev_environment_returns_repo_root(self, monkeypatch):
+        monkeypatch.delenv(PROJECT_ROOT_ENV_KEY, raising=False)
         repo_root = Path(__file__).resolve().parents[2]
         assert Path(get_project_root()) == repo_root
 

@@ -74,7 +74,7 @@ pythonpath = ["src"]
 python_files = ["unit_test.py", "test_*.py", "*_test.py"]
 python_classes = ["MyTestCase", "Test*"]
 python_functions = ["test*"]
-addopts = "--tb=short"
+addopts = "--tb=short -m \"not real_llm\""
 markers = [
     "unit: Unit tests for individual modules (no external I/O, all dependencies mocked)",
     "e2e: End-to-end tests exercising the full bot lifecycle (may start real services)",

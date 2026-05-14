@@ -3,6 +3,7 @@ import pytest
 import asyncio
 import json
 import os
+import shutil
 import tempfile
 import uuid
 import atexit
@@ -16,6 +17,17 @@ from tests.fs_utils import rmtree_retry
 _PYTEST_WORKER_ID = os.getenv("PYTEST_XDIST_WORKER", "main")
 _TEST_APP_DIR = tempfile.mkdtemp(prefix=f"dicepp-test-{_PYTEST_WORKER_ID}-")
 os.environ["DICEPP_APP_DIR"] = _TEST_APP_DIR
+os.environ["DICEPP_PROJECT_ROOT"] = _TEST_APP_DIR
+_real_project = Path(__file__).parent.parent
+_real_template = _real_project / "config" / "bots" / "_template.json"
+_test_template = Path(_TEST_APP_DIR) / "config" / "bots" / "_template.json"
+if not _real_template.exists():
+    raise RuntimeError(f"模板文件不存在: {_real_template}。请确认 config/bots/_template.json 未被移动或删除。")
+_test_template.parent.mkdir(parents=True, exist_ok=True)
+shutil.copy(_real_template, _test_template)
+_real_global = _real_project / "config" / "global.json"
+_test_global = Path(_TEST_APP_DIR) / "config" / "global.json"
+shutil.copy(_real_global, _test_global)
 
 
 def _cleanup_test_app_dir() -> None:

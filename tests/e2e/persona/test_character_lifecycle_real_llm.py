@@ -80,13 +80,13 @@ def _set_fake_time(hour: int, minute: int) -> None:
 
     import DicePP.module.persona.life.character_life as life_cl
     import DicePP.module.persona.life.diary as life_diary
-    import DicePP.module.persona.life.observation as ob
+
     import DicePP.module.persona.data.store as ds
     import DicePP.module.persona.llm.router as lr
     import DicePP.module.persona.chat.context as cb
     import DicePP.module.persona.wall_clock as wc
 
-    for mod in (life_cl, life_diary, ob, ds, lr, cb, wc):
+    for mod in (life_cl, life_diary, ds, lr, cb, wc):
         if hasattr(mod, "persona_wall_now"):
             mod.persona_wall_now = _patched_wall_now
 
