@@ -26,6 +26,11 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 
 ## 步骤
 
+0. **门禁 — 读取文档并核验阶段状态**：
+   - 先读取文档完整内容，逐项检查「阶段状态」checklist
+   - 文档存在即表示阶段 1 已完成，无需额外核验
+   - 若阶段 3 已勾选 → 说明本阶段已有回复被确认过，当前可能是补充回复；正常继续
+   - **禁止凭跨会话记忆判断前置条件**——以文件内容为唯一依据
 1. 调用脚本读取文档到上下文：
    ```bash
    python .claude/skills/review1-raise/review_record.py read <filename>
@@ -66,6 +71,10 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 - `待澄清` 表示"真正看不懂这条 Review 的依据或背景"，使用前自问：是真的不理解，还是不同意？**不同意应用 `不采纳` 并给出反驳理由**，`待澄清` 不是规避对抗的出口
 - 标为 `待澄清` 的条目会触发 Reviewer 在 confirm 阶段提供澄清，之后本 skill 须再次运行，对这些条目补充正式回复
 
+5. 写入完成后，更新「阶段状态」checklist：将 `- [ ] 2. 作者回复` 改为 `- [x] 2. 作者回复`
+
 ## 输出
 
 完成后提示下一步：`review3-confirm <文件名>`
+
+> **注意**：若存在 `待澄清` 条目，本次回复可能不完整——阶段 2 仍可打勾（已做了能力范围内的回复），待 review3-confirm 提供澄清后，会再次触发 review2-reply 补充回复。

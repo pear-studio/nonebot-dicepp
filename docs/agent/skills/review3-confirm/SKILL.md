@@ -31,8 +31,13 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 
 ## 步骤
 
-1. 调用脚本读取文档到上下文
-2. 检查前置条件：确认文档中存在 `Reply` 子块
+0. **门禁 — 读取文档并核验阶段状态**：
+   - 先读取文档完整内容，逐项检查「阶段状态」checklist
+   - 阶段 2 未勾选 → **禁止继续**，提示用户先完成 `review2-reply`
+   - 阶段 3 已勾选 → 说明这是重复运行（如补充回复后重新确认），正常继续
+   - **禁止凭跨会话记忆判断前置条件**——以文件内容为唯一依据
+1. 调用脚本读取文档到上下文（若步骤 0 已在门禁中完成读取，可跳过）
+2. 检查前置条件：确认文档中存在 `Reply` 子块（以门禁中读取的内容为准）
 3. 逐条评估 Defender 回复，按以下分支处理：
 
    **分支 A — 正常回复（采纳/部分采纳/不采纳）**
@@ -54,7 +59,11 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - **不做最终裁定**——等 Defender 看到澄清后重新回复
 
 4. 所有 Rn 处理完毕后，在上下文中构造完整 payload
-5. **一次性写入**：通过 heredoc 直接传入 payload，**仅调用一次** `batch-update --format plain`：
+5. **一次性写入**——完成后再检查是否存在 `已共识·延后` 条目：
+   - **有** → 先不调用 batch-update，跳至步骤 6
+   - **无** → 直接调用 batch-update，跳至步骤 8
+
+   命令格式（无延后条目时使用）：
    ```bash
    python .claude/skills/review1-raise/review_record.py batch-update <filename> --format plain <<'EOF'
    Rn: R1
@@ -78,7 +87,13 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    <<<END>>>
    EOF
    ```
-6. 自动归档 `已共识·延后` 条目到 backlog：
+6. **延后条目用户确认**：
+   - 将所有 `已共识·延后` 条目汇总展示给用户，逐条列出：Rn 标题、问题表现、工作计划
+   - 请用户确认是否同意归档到 backlog
+   - 用户确认后，再执行步骤 7 的 batch-update 写入 Confirm 块
+   - 未经用户确认的延后条目不得归档
+
+7. 用户确认后，先执行 batch-update 写入 Confirm 块（命令格式同步骤 5），再自动归档 `已共识·延后` 条目到 backlog：
    - 扫描所有 `共识状态: 已共识·延后`（含 review0 产出的"用户明确·延后"）的 Rn
    - 提取 module（从 review 文档名推断）、title、symptom、plan
    - 在上下文中构造 payload，**一次**调用 `backlog.py batch-add`：
@@ -96,8 +111,11 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
      EOF
      ```
    - 用返回的 ID 列表，**一次** `review_record.py batch-update` 把 `已归档: B-...` 写回每个对应 Rn 的 Confirm 块
-7. 写入完成后，检查是否存在 `需补充回复` 条目：
-   - **有** → 向用户明确报告哪些 Rn 需 Defender 补充回复，提示运行 `review2-reply`，**本轮到此为止**
+8. 更新「阶段状态」checklist：将 `- [ ] 3. 审阅者确认` 改为 `- [x] 3. 审阅者确认`
+9. 检查是否存在 `需补充回复` 条目：
+   - **有** → 向用户明确报告哪些 Rn 需 Defender 补充回复，提示运行 `review2-reply`，**本轮到此为止**。同时：
+     - 阶段 3 checklist 保持勾选（确认意见已给出，只是等待补充回复）
+     - **去掉阶段 2 的勾**：将 `- [x] 2. 作者回复` 改为 `- [ ] 2. 作者回复`
    - **无** → 提示下一步：`review4-execute <文件名>`
    - 同时汇报本次归档结果：`归档 N 条到 backlog: B-...`
 

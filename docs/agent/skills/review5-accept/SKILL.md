@@ -26,6 +26,11 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 
 ## 步骤
 
+0. **门禁 — 读取文档并核验阶段状态**：
+   - 先读取文档完整内容，逐项检查「阶段状态」checklist
+   - 阶段 4 未勾选 → **禁止继续**，提示用户先完成 `review4-execute`
+   - 阶段 5 已勾选（验收退回后重新验收）→ 正常继续
+   - **禁止凭跨会话记忆判断前置条件**——以文件内容为唯一依据
 1. 调用脚本读取文档到上下文：
    ```bash
    python .claude/skills/review1-raise/review_record.py read <filename>
@@ -41,7 +46,9 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - 任一缺失视为验收失败，列出差异常项并退回
 5. 逐条比对：实际 diff 是否覆盖了约定的具体改点？是否有超出约定的额外改动？
 5. 构造 payload 时，对**已有 Accept 块**的 Rn（即重新验收），须先读取原有 `退回记录` 字段，将本次退回理由**追加**进去，而不是清空重写；验收通过的条目也同样携带历史退回记录（作为过程留档）
-6. 在上下文中构造完整 payload，**一次性写入**：
+6. 在上下文中构造完整 payload，**一次性写入**（同时更新阶段状态 checklist）：
+   - 全部通过：将 `- [ ] 5. 验收` 改为 `- [x] 5. 验收`
+   - 存在退回：阶段 5 保持 `[ ]`，同时**去掉阶段 4 的勾**：将 `- [x] 4. 实施` 改为 `- [ ] 4. 实施`
    ```bash
    python .claude/skills/review1-raise/review_record.py batch-update <filename> --format plain <<'EOF'
    Rn: R1
@@ -75,6 +82,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 1. 向用户报告退回的 Rn 列表及每条的具体差异
 2. 等待用户确认后，直接重走 `review4-execute`（**无需重走 reply/confirm**，共识已达成）
 3. review4 修复实施后，再次运行本阶段重新验收，携带原有退回记录追加本次结果
+4. **验收退回时**：阶段 5 保持 `[ ]`，去掉阶段 4 的勾（`[x] → [ ]`）
 
 ## 约束
 

@@ -26,7 +26,11 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 
 ## 步骤
 
-1. 调用脚本读取文档到上下文（**本 skill 禁止修改 review 文档，只读**）：
+0. **门禁 — 读取文档并核验阶段状态**：
+   - 先读取文档完整内容，逐项检查「阶段状态」checklist
+   - 阶段 3 未勾选 → **禁止继续**，提示用户先完成 `review3-confirm`
+   - **禁止凭跨会话记忆判断前置条件**——以文件内容为唯一依据
+1. 调用脚本读取文档到上下文（**仅允许更新「阶段状态」checklist，禁止修改 Rn 内容**，若步骤 0 已在门禁中完成读取，可跳过）：
    ```bash
    python .claude/skills/review1-raise/review_record.py read <filename>
    ```
@@ -43,6 +47,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 6. 修改代码
 7. 跑项目配套的测试命令验证（如构建验证、单元测试等，依项目实际情况而定）
 8. 向用户汇报完成情况和测试结果
+9. 更新「阶段状态」checklist：将 `- [ ] 4. 实施` 改为 `- [x] 4. 实施`
 
 ## 约束
 
