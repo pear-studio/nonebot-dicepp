@@ -158,6 +158,7 @@ class BotRunner:
         msg: str,
         group_id: str = "",
         dice_sequence: Optional[List[int]] = None,
+        to_me: bool = False,
     ) -> Dict[str, Any]:
         """发送消息到 Bot
 
@@ -191,7 +192,7 @@ class BotRunner:
                 raw_msg=msg,
                 sender=MessageSender(user_id, nickname),
                 group_id=group_id,
-                to_me=False,
+                to_me=to_me,
             )
 
             # 处理消息
