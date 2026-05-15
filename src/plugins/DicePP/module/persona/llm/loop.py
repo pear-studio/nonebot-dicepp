@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Literal, Any
 import asyncio
+import json
 import re
 import time
 import uuid
@@ -14,6 +15,28 @@ from .providers.openai import NonRetryableError
 
 _THINK_RE = r'<think>.*?</think>'
 _L1_MSG = {"role": "user", "content": "[系统指令] 你必须调用工具来完成任务。不要直接输出文本——只能通过调用工具来输出结果。"}
+
+_FINISH_TASK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "finish_task",
+        "description": (
+            "当你完成所有必要工作后调用此工具来结束任务。"
+            "调用后对话立即终止，不需要再生成任何后续回复或调用其它工具。"
+            "只在所有实际工具已调用完毕后才使用此工具。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "简短总结你完成了什么",
+                },
+            },
+            "required": ["summary"],
+        },
+    },
+}
 
 
 @dataclass
@@ -56,6 +79,7 @@ class AgentLoop:
         )
 
         current = list(messages)
+        all_tools = list(tools) + [_FINISH_TASK_TOOL] if tools is not None else None
         records: List[dict] = []
         trn = 0  # tool_round_num
         cb = 0   # callback_count
@@ -90,7 +114,7 @@ class AgentLoop:
             # ── generate ──
             try:
                 resp = await self.provider.generate(
-                    messages=current, tools=tools,
+                    messages=current, tools=all_tools,
                     temperature=temperature, timeout=timeout)
             except NonRetryableError:
                 raise
@@ -119,7 +143,7 @@ class AgentLoop:
 
             # ── L1 ──
             if (trn < self.max_tool_rounds and not tcs
-                    and tools
+                    and all_tools
                     and cb < self.max_round_callbacks):
                 current.append(dict(_L1_MSG))
                 cb += 1
@@ -158,6 +182,41 @@ class AgentLoop:
                     metadata=self._md(tin, tout, trn, tnames, cached, records, model, cb,
                                       int((time.monotonic() - t0) * 1000), "ok",
                                       content=resp.content or "",
+                                      uid=user_id, gid=group_id, msgs=messages, temp=temperature))
+
+            # ── finish_task 过滤 ──
+            other_tcs = [tc for tc in tcs if tc.name != "finish_task"]
+            finish_tcs = [tc for tc in tcs if tc.name == "finish_task"]
+            if finish_tcs and other_tcs:
+                logger.warning(
+                    f"finish_task 与其他工具共存（总计 {len(tcs)} 个），"
+                    f"忽略 finish_task 并执行其余 {len(other_tcs)} 个工具")
+                tcs = other_tcs
+            elif finish_tcs and not other_tcs:
+                # ── finish_task 终止 ──
+                finish_tc = finish_tcs[0]
+                try:
+                    finish_args = json.loads(finish_tc.arguments or "{}")
+                except json.JSONDecodeError:
+                    finish_args = {}
+                finish_summary = finish_args.get("summary", "")
+                records.append({"round": trn, "think": think,
+                                "tool_calls": [{"id": finish_tc.id, "name": "finish_task",
+                                                "arguments": finish_tc.arguments}],
+                                "tool_results": [], "callback": None,
+                                "finish_summary": finish_summary})
+                current.append({
+                    "role": "assistant", "content": resp.content or "",
+                    "tool_calls": [{"id": finish_tc.id, "type": "function",
+                                     "function": {"name": "finish_task",
+                                                  "arguments": finish_tc.arguments}}],
+                })
+                tnames.append("finish_task")
+                return LoopResult(
+                    final_output=resp.content or finish_summary,
+                    metadata=self._md(tin, tout, trn, tnames, cached, records, model, cb,
+                                      int((time.monotonic() - t0) * 1000), "finished",
+                                      content=resp.content or finish_summary,
                                       uid=user_id, gid=group_id, msgs=messages, temp=temperature))
 
             # ── 工具分派 ──

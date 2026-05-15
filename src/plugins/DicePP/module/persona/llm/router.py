@@ -186,14 +186,14 @@ class LLMRouter:
                 self.stats[tier_name]["errors"] += 1
                 raise
 
-            if result.metadata.get("status") == "ok":
+            if result.metadata.get("status") in ("ok", "finished"):
                 md = result.metadata
                 logger.info(
                     f"model={md.get('model', client.model)} tier={tier_name} "
                     f"latency={md.get('latency_ms', 0)/1000:.1f}s "
                     f"tools_rounds={md.get('tool_rounds', 0)} "
                     f"tools={md.get('tool_names', [])} "
-                    f"cached={md.get('cached_tokens', 0)} status=ok")
+                    f"cached={md.get('cached_tokens', 0)} status={result.metadata.get('status')}")
             result.metadata["tier"] = tier_name
 
             if result.aborted and result.abort_reason:
@@ -202,7 +202,7 @@ class LLMRouter:
             latency_ms = result.metadata.get("latency_ms", 0)
             self._latency_window[tier_name].append(latency_ms)
 
-            if result.metadata.get("status") not in ("ok", "max_rounds"):
+            if result.metadata.get("status") not in ("ok", "max_rounds", "finished"):
                 self.stats[tier_name]["errors"] += 1
 
         # flush trace hook after semaphore release（自动从 hooks 检测或使用显式参数）
