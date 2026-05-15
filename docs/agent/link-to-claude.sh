@@ -53,18 +53,25 @@ if [ -L ".claude/CLAUDE.md" ] || [ -f ".claude/CLAUDE.md" ]; then
     echo "已删除 .claude/CLAUDE.md"
 fi
 
-# 创建符号链接（使用相对路径）
+if [ -L ".claude/settings.json" ] || [ -f ".claude/settings.json" ]; then
+    rm -f .claude/settings.json
+    echo "已删除 .claude/settings.json"
+fi
+
+# 创建符号链接（使用绝对路径）
 ln -s "$REPO_ROOT/docs/agent/rules" .claude/rules
 ln -s "$REPO_ROOT/docs/agent/skills" .claude/skills
 ln -s "$REPO_ROOT/docs/agent/agents" .claude/agents
 ln -s "$REPO_ROOT/docs/agent/rules/CLAUDE.md" .claude/CLAUDE.md
+ln -s "$REPO_ROOT/docs/agent/settings.json" .claude/settings.json
 
 echo ""
 echo "符号链接创建完成:"
-echo "  .claude/rules      -> docs/agent/rules"
-echo "  .claude/skills     -> docs/agent/skills"
-echo "  .claude/agents     -> docs/agent/agents"
-echo "  .claude/CLAUDE.md  -> docs/agent/rules/CLAUDE.md"
+echo "  .claude/rules        -> docs/agent/rules"
+echo "  .claude/skills       -> docs/agent/skills"
+echo "  .claude/agents       -> docs/agent/agents"
+echo "  .claude/CLAUDE.md    -> docs/agent/rules/CLAUDE.md"
+echo "  .claude/settings.json -> docs/agent/settings.json"
 echo ""
 echo "Skills:"
 for dir in docs/agent/skills/*/; do

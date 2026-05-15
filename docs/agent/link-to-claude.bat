@@ -49,6 +49,11 @@ if exist ".claude\CLAUDE.md" (
     del ".claude\CLAUDE.md" 2>nul
     echo 已删除 .claude\CLAUDE.md
 )
+if exist ".claude\settings.json" (
+    rmdir /s /q ".claude\settings.json" 2>nul
+    del ".claude\settings.json" 2>nul
+    echo 已删除 .claude\settings.json
+)
 
 :: 创建符号链接（使用绝对路径）
 mklink /D ".claude\rules" "%cd%\docs\agent\rules"
@@ -60,13 +65,20 @@ if %ERRORLEVEL% neq 0 (
     echo Failed to create hardlink, trying symlink...
     mklink ".claude\CLAUDE.md" "%REPO_ROOT%\docs\agent\rules\CLAUDE.md" >nul 2>nul
 )
+echo Linking settings: docs\agent\settings.json -^> .claude\settings.json
+mklink /H ".claude\settings.json" "%REPO_ROOT%\docs\agent\settings.json" >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    echo Failed to create hardlink, trying symlink...
+    mklink ".claude\settings.json" "%REPO_ROOT%\docs\agent\settings.json" >nul 2>nul
+)
 
 echo.
 echo 符号链接创建完成:
-echo   .claude\rules   -^> docs\agent\rules
-echo   .claude\skills  -^> docs\agent\skills
-echo   .claude\agents  -^> docs\agent\agents
-echo   .claude\CLAUDE.md -^> docs\agent\rules\CLAUDE.md
+echo   .claude\rules        -^> docs\agent\rules
+echo   .claude\skills       -^> docs\agent\skills
+echo   .claude\agents       -^> docs\agent\agents
+echo   .claude\CLAUDE.md    -^> docs\agent\rules\CLAUDE.md
+echo   .claude\settings.json -^> docs\agent\settings.json
 echo.
 echo Skills:
 for /d %%d in (docs\agent\skills\*) do (

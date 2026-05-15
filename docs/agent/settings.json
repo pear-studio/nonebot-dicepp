@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash docs/agent/hooks/enter-worktree.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

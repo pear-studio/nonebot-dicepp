@@ -86,6 +86,7 @@ metadata:
 
 - worktree 提供独立工作区，`config/`、`data/` 等文件互不干扰
 - `.venv` 通过符号链接共享，所有 worktree 使用同一套 Python 环境
-- `.claude/{skills,rules,agents,CLAUDE.md}` 通过符号链接指向 `docs/agent/`，使 worktree 可直接使用项目技能和规范
-- `EnterWorktree` 的 hook 配置位于 `.claude/settings.json`（.venv 和 .claude/ 链接均通过同一 hook 自动创建）
+- `.claude/{skills,rules,agents,CLAUDE.md,settings.json}` 通过符号链接指向 `docs/agent/`，使 worktree 可直接使用项目技能和规范
+- `EnterWorktree` 的 hook 配置位于 `docs/agent/settings.json`，脚本位于 `docs/agent/hooks/enter-worktree.sh`（.venv 和 .claude/ 链接均通过同一 hook 自动创建）
+- `docs/agent/link-to-claude.sh` 可一键创建所有符号链接（含 settings.json）
 - 分支名建议用 `feature/简述` 或 `hotfix/简述` 格式
