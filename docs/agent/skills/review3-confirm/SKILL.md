@@ -36,6 +36,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - 阶段 2 未勾选 → **禁止继续**，提示用户先完成 `review2-reply`
    - 阶段 3 已勾选 → 说明这是重复运行（如补充回复后重新确认），正常继续
    - **禁止凭跨会话记忆判断前置条件**——以文件内容为唯一依据
+   - `batch-update` 执行时会自动校验前置阶段（stage 2），门禁不通过直接 exit 1
 1. 调用脚本读取文档到上下文（若步骤 0 已在门禁中完成读取，可跳过）
 2. 检查前置条件：确认文档中存在 `Reply` 子块（以门禁中读取的内容为准）
 3. 逐条评估 Defender 回复，按以下分支处理：
@@ -111,11 +112,9 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
      EOF
      ```
    - 用返回的 ID 列表，**一次** `review_record.py batch-update` 把 `已归档: B-...` 写回每个对应 Rn 的 Confirm 块
-8. 更新「阶段状态」checklist：将 `- [ ] 3. 审阅者确认` 改为 `- [x] 3. 审阅者确认`
+8. `batch-update` 写入完成后自动标记阶段 3 完成；若 Confirm 内容包含 `需补充回复`，自动回退阶段 2。无需手动更新 checklist
 9. 检查是否存在 `需补充回复` 条目：
-   - **有** → 向用户明确报告哪些 Rn 需 Defender 补充回复，提示运行 `review2-reply`，**本轮到此为止**。同时：
-     - 阶段 3 checklist 保持勾选（确认意见已给出，只是等待补充回复）
-     - **去掉阶段 2 的勾**：将 `- [x] 2. 作者回复` 改为 `- [ ] 2. 作者回复`
+   - **有** → 向用户明确报告哪些 Rn 需 Defender 补充回复，提示运行 `review2-reply`，**本轮到此为止**。阶段 2 已被 `batch-update` 自动回退，阶段 3 保持勾选
    - **无** → 提示下一步：`review4-execute <文件名>`
    - 同时汇报本次归档结果：`归档 N 条到 backlog: B-...`
 

@@ -21,6 +21,87 @@ if sys.platform == "win32":
 
 REVIEW_DIR = Path(".temp")
 
+# ── Stage management ──────────────────────────────────────────────
+STAGE_BLOCK_HEADER = "**阶段状态**"
+STAGE_DEFS = {
+    1: "评审发起 (review1-raise)",
+    2: "作者回复 (review2-reply)",
+    3: "审阅者确认 (review3-confirm)",
+    4: "实施 (review4-execute)",
+    5: "验收 (review5-accept)",
+}
+SECTION_TO_STAGE = {"Reply": 2, "Confirm": 3, "Accept": 5}
+GATE_REQUIRES = {2: 1, 3: 2, 4: 3, 5: 4}
+
+
+def _parse_stages(text: str) -> dict:
+    """Parse stage checklist, return {stage_num: checked}."""
+    block = re.search(
+        rf"{re.escape(STAGE_BLOCK_HEADER)}\n((?:- \[.\] \d+\..*\n?)+)",
+        text, re.MULTILINE,
+    )
+    if not block:
+        return {}
+    stages = {}
+    for m in re.finditer(r"- \[(.)\] (\d+)\.", block.group(1)):
+        stages[int(m.group(2))] = m.group(1) != " "
+    return stages
+
+
+def _ensure_stage_block(text: str, stage1_done: bool = False) -> str:
+    """Ensure stage block exists. Adds missing stage 1 to legacy blocks."""
+    if STAGE_BLOCK_HEADER in text:
+        stages = _parse_stages(text)
+        if 1 not in stages:
+            mark = "x" if stage1_done else " "
+            text = re.sub(
+                rf"({re.escape(STAGE_BLOCK_HEADER)}\n)",
+                rf"\1- [{mark}] 1. {STAGE_DEFS[1]}\n",
+                text, count=1,
+            )
+        return text
+    block_lines = [STAGE_BLOCK_HEADER]
+    for i in range(1, 6):
+        checked = "x" if (stage1_done and i == 1) else " "
+        block_lines.append(f"- [{checked}] {i}. {STAGE_DEFS[i]}")
+    block_str = "\n".join(block_lines) + "\n"
+    m = re.search(r"^(## .*)$", text, re.MULTILINE)
+    if m:
+        return text[: m.end()] + "\n\n" + block_str + "\n" + text[m.end():]
+    return block_str + "\n" + text
+
+
+def _check_gate(path: Path, text: str, target_stage: int):
+    """Check prerequisite stage is done. Exit 1 if not."""
+    required = GATE_REQUIRES.get(target_stage)
+    if required is None or required == 1:
+        return
+    stages = _parse_stages(text)
+    if not stages.get(required):
+        print(
+            f"Gate check failed: stage {required} ({STAGE_DEFS[required]}) "
+            f"not completed in {path}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _set_stage(text: str, stage: int, done: bool) -> str:
+    """Set a stage checkbox to checked or unchecked."""
+    text = _ensure_stage_block(text)
+    stages = _parse_stages(text)
+    if stages.get(stage) == done:
+        return text
+    mark = "x" if done else " "
+    new_text = re.sub(
+        rf"^( *- \[)(.)\] {stage}\. ",
+        rf"\g<1>{mark}] {stage}. ",
+        text, flags=re.MULTILINE,
+    )
+    if new_text == text:
+        print(f"Warning: stage {stage} not found in stage block", file=sys.stderr)
+    return new_text
+
 
 def get_path(filename: str) -> Path:
     path = Path(filename)
@@ -49,6 +130,7 @@ def cmd_create(args):
     else:
         tmp = None
         content = sys.stdin.read()
+    content = _ensure_stage_block(content, stage1_done=True)
     path.write_text(content, encoding="utf-8")
     if tmp is not None:
         tmp.unlink(missing_ok=True)
@@ -95,6 +177,30 @@ def cmd_update(args):
     print(path)
 
 
+def cmd_set_stage(args):
+    path = get_path(args.filename)
+    if not path.exists():
+        print(f"File not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    text = path.read_text(encoding="utf-8")
+    _check_gate(path, text, args.stage)
+    text = _set_stage(text, args.stage, done=True)
+    path.write_text(text, encoding="utf-8")
+    print(path)
+
+
+def cmd_rollback(args):
+    path = get_path(args.filename)
+    if not path.exists():
+        print(f"File not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    text = path.read_text(encoding="utf-8")
+    for stage in args.stages:
+        text = _set_stage(text, stage, done=False)
+    path.write_text(text, encoding="utf-8")
+    print(path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Review doc CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -128,6 +234,16 @@ def main():
     p_batch.add_argument("--file", "-f", help="Path to a file containing the batch payload")
     p_batch.add_argument("--format", choices=["json", "plain"], default="json", help="Payload format (default: json)")
     p_batch.set_defaults(func=cmd_batch_update)
+
+    p_set_stage = sub.add_parser("set-stage", help="Mark a review stage as completed (with gate check)")
+    p_set_stage.add_argument("filename")
+    p_set_stage.add_argument("stage", type=int, choices=[2, 3, 4, 5])
+    p_set_stage.set_defaults(func=cmd_set_stage)
+
+    p_rollback = sub.add_parser("rollback", help="Uncheck one or more review stages")
+    p_rollback.add_argument("filename")
+    p_rollback.add_argument("stages", type=int, nargs="+", choices=[2, 3, 4, 5])
+    p_rollback.set_defaults(func=cmd_rollback)
 
     args = parser.parse_args()
     args.func(args)
@@ -206,6 +322,16 @@ def cmd_batch_update(args):
             sys.exit(1)
 
     text = path.read_text(encoding="utf-8")
+
+    # Gate check: verify prerequisite stage for each section type
+    target_stages = set()
+    for item in items:
+        s = SECTION_TO_STAGE.get(item.get("section", ""))
+        if s:
+            target_stages.add(s)
+    for stage in target_stages:
+        _check_gate(path, text, stage)
+
     original_text = text
     not_found = []
 
@@ -229,6 +355,21 @@ def cmd_batch_update(args):
     if text == original_text:
         print("No changes were made.", file=sys.stderr)
         sys.exit(1)
+
+    # Auto-mark target stages as done
+    for stage in target_stages:
+        text = _set_stage(text, stage, done=True)
+
+    # Auto-rollback on special content patterns
+    if 3 in target_stages:
+        # Check if any Confirm contains 需补充回复
+        if re.search(r"共识状态:\s*需补充回复", text):
+            text = _set_stage(text, 2, done=False)
+    if 5 in target_stages:
+        # Check if any Accept contains 验收退回
+        if re.search(r"验收结论:\s*验收退回", text):
+            text = _set_stage(text, 4, done=False)
+            text = _set_stage(text, 5, done=False)
 
     path.write_text(text, encoding="utf-8")
     if tmp is not None:

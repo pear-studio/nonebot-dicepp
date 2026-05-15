@@ -56,7 +56,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - 若子 Agent 运行超过 15 分钟，说明可能陷入无限循环，主 Agent 应终止该子 Agent 并重新启动调查
    - 如有历史 review 精简信息，子 Agent 应先阅读，**避免重复提出之前已闭环（已共识·存档 或 已共识·实施）的同类问题**
 
-   **子 Agent 启动方式**：使用 `Agent` 工具，`description` 字段写明 Agent 名称与职责，`prompt` 字段开头注明 `## 审查任务` 和要审查的 diff 范围，然后 `## 审查要求` 引用对应的 prompt 文件内容。prompt 文件路径（相对于本 SKILL.md 所在目录）：
+   **子 Agent 启动方式**：使用 `Agent` 工具，`subagent_type` 固定为 `general-purpose`，`description` 字段写明 Agent 名称与职责，`prompt` 字段开头注明 `## 审查任务` 和要审查的 diff 范围，然后 `## 审查要求` 引用对应的 prompt 文件内容。prompt 文件路径（相对于本 SKILL.md 所在目录）：
 
    ### Light（1 Agent）
 
@@ -107,6 +107,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 ## 本地改动与分支 Review
 
 **阶段状态**
+- [x] 1. 评审发起 (review1-raise)
 - [ ] 2. 作者回复 (review2-reply)
 - [ ] 3. 审阅者确认 (review3-confirm)
 - [ ] 4. 实施 (review4-execute)
