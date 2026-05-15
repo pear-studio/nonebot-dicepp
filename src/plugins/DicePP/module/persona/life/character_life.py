@@ -4,6 +4,7 @@
 管理角色的全天生活事件生成和日记记录。
 事件触发时刻由角色卡 PersonaExtensions.generate_event_times() 决定（日内分钟槽位）。
 """
+import asyncio
 import json
 from nonebot.log import logger
 import random
@@ -18,6 +19,7 @@ from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
 from ..data.models import CharacterState
 from ..wall_clock import persona_wall_now
+from .event_share_queue import EventShareTaskQueue
 from .protocols import BoundaryReceiver
 
 if TYPE_CHECKING:
@@ -99,11 +101,20 @@ class CharacterLife:
         event_agent: EventGenerationAgent,
         data_store: PersonaDataStore,
         character: Character,
+        share_threshold: float,
+        *,
+        event_share_queue: Optional[EventShareTaskQueue] = None,
+        share_delay_min: int = 1,
+        share_delay_max: int = 5,
     ):
         self.config = config
         self.event_agent = event_agent
         self.data_store = data_store
         self.character = character
+        self.event_share_queue = event_share_queue
+        self._share_threshold = share_threshold
+        self._share_delay_min = share_delay_min
+        self._share_delay_max = share_delay_max
         # 当日计划槽位（自 0 点起的分钟, 槽位类型），边界槽位类型为 wake_up/good_night，日常为 system
         self._slot_minutes_today: Optional[List[Tuple[int, str]]] = None
         self._fired_slot_indices: Set[int] = set()
@@ -119,6 +130,8 @@ class CharacterLife:
         # 可选的边界接收器，用于同步波动边界和标记边界事件
         self.boundary_receiver: Optional[BoundaryReceiver] = None
         self._boundaries_loaded = False
+        # 状态读写并发锁（保护 inject_spontaneous_event 与 generate_daily_event 的 state 读写区间）
+        self._state_lock = asyncio.Lock()
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
@@ -278,6 +291,14 @@ class CharacterLife:
         self._chain_triggered_today = bool(data.get("chain_triggered"))
         # 加载上次跨天恢复日期
         self._day_transition_recovered_date = data.get("day_transition_recovered_date")
+        # 恢复波动边界（兼容旧持久化数据）
+        js = data.get("jittered_start")
+        je = data.get("jittered_end")
+        if js is not None and je is not None:
+            self._today_jittered_start = int(js)
+            self._today_jittered_end = int(je)
+        else:
+            self._regenerate_slots_for_today()
 
     async def save_persistent_state(self) -> None:
         today = self._get_today_str()
@@ -297,6 +318,8 @@ class CharacterLife:
             ],
             "chain_triggered": self._chain_triggered_today,
             "day_transition_recovered_date": self._day_transition_recovered_date,
+            "jittered_start": self._today_jittered_start,
+            "jittered_end": self._today_jittered_end,
         }
         await self.data_store.set_setting(
             PERSONA_SK_CHARACTER_LIFE,
@@ -400,6 +423,18 @@ class CharacterLife:
             today = self._get_today_str()
             now = self.config.now()
 
+            async with self._state_lock:
+                return await self._generate_daily_event_impl(today, now, slot_type)
+
+        except Exception as e:
+            logger.exception("生成生活事件失败: {}", e)
+            return []
+
+    async def _generate_daily_event_impl(
+        self, today: str, now, slot_type: str
+    ) -> List[Dict[str, Any]]:
+        """generate_daily_event 的 state-locked 实现"""
+        try:
             # 获取角色状态，初始化旧版迁移的 None 字段，处理跨天空清意向
             character_state = await self.data_store.get_character_state()
             if character_state:
@@ -521,19 +556,8 @@ class CharacterLife:
                     character_state.intention_created_at = now
                     await self.data_store.update_character_state(character_state)
 
-                # 合并 event + reaction 的原始 LLM 输出
-                raw_parts: Dict[str, Any] = {}
-                if event_result.raw_response:
-                    try:
-                        raw_parts["event"] = json.loads(event_result.raw_response)
-                    except json.JSONDecodeError:
-                        raw_parts["event"] = event_result.raw_response
-                if reaction_result.raw_response:
-                    try:
-                        raw_parts["reaction"] = json.loads(reaction_result.raw_response)
-                    except json.JSONDecodeError:
-                        raw_parts["reaction"] = reaction_result.raw_response
-                combined_raw = json.dumps(raw_parts, ensure_ascii=False) if raw_parts else ""
+                combined_raw = CharacterLife._serialize_raw_parts(
+                    event_result.raw_response, reaction_result.raw_response)
 
                 # 保存事件到数据库
                 await self.data_store.add_daily_event(
@@ -608,7 +632,7 @@ class CharacterLife:
             return event_chain
 
         except Exception as e:
-            logger.exception("生成生活事件失败: {}", e)
+            logger.exception("生成生活事件失败 (impl): {}", e)
             return []
 
     async def _get_recent_diaries(self, days: int) -> List[str]:
@@ -642,3 +666,200 @@ class CharacterLife:
             "chain_max_depth": self.config.chain_max_depth,
             "chain_force_extend_once_prob": self.config.chain_force_extend_once_prob,
         }
+
+    # ── SleepGate ──────────────────────────────────────────────
+
+    def _slot_fired(self, slot_type: str) -> bool:
+        """检查指定类型的槽位是否已触发"""
+        if not self._slot_minutes_today:
+            return False
+        for i, (_, st) in enumerate(self._slot_minutes_today):
+            if st == slot_type and i in self._fired_slot_indices:
+                return True
+        return False
+
+    async def is_awake(self) -> bool:
+        """检查角色是否清醒（供 ChatSession 睡眠门控使用）"""
+        async with self._state_lock:
+            return self._is_awake_locked()
+
+    def _is_awake_locked(self) -> bool:
+        """is_awake 的无锁实现，调用方负责持有 _state_lock"""
+        if self._today_jittered_start is None or self._today_jittered_end is None:
+            return True
+
+        now = self.config.now()
+        now_m = now.hour * 60 + now.minute
+        start = self._today_jittered_start
+        end = self._today_jittered_end
+
+        in_window: bool
+        if end >= start:
+            in_window = start <= now_m <= end
+        else:
+            in_window = now_m >= start or now_m <= end
+
+        if not in_window:
+            return False
+
+        if self._slot_fired("good_night") and not self._slot_fired("wake_up"):
+            return False
+
+        return True
+
+    @staticmethod
+    def _serialize_raw_parts(event_raw: str, reaction_raw: str) -> str:
+        raw_parts: Dict[str, Any] = {}
+        for key, raw in [("event", event_raw), ("reaction", reaction_raw)]:
+            if raw:
+                try:
+                    raw_parts[key] = json.loads(raw)
+                except json.JSONDecodeError:
+                    raw_parts[key] = raw
+        return json.dumps(raw_parts, ensure_ascii=False) if raw_parts else ""
+
+    # ── Spontaneous Event Injection ────────────────────────────
+
+    async def _get_today_event_dicts(self) -> List[Dict[str, str]]:
+        events = await self._get_today_events()
+        result: List[Dict[str, str]] = []
+        for e in events:
+            evt_time = e.created_at.strftime("%H:%M") if e.created_at else "??:??"
+            result.append({"description": e.description, "time": evt_time})
+        return result
+
+    async def inject_spontaneous_event(self, action_description: str) -> bool:
+        """注入自发事件，绕开槽位系统。
+
+        注意：此方法不检查 is_awake()，允许在睡眠期间仍有自发事件注入。
+        调用方（suggest_action executor）如需拦截，应自行检查清醒状态。
+        """
+        async with self._state_lock:
+            try:
+                return await self._inject_spontaneous_event_impl(action_description)
+            except Exception:
+                logger.exception("[spontaneous] 注入失败")
+                return False
+
+    async def _inject_spontaneous_event_impl(self, action_description: str) -> bool:
+        character_state = await self.data_store.get_character_state()
+        if not character_state:
+            return False
+        self._migrate_legacy_state(character_state)
+
+        now = self.config.now()
+        recent_diaries = await self._get_recent_diaries(3)
+        today_event_dicts = await self._get_today_event_dicts()
+
+        ongoing = self.get_ongoing_activities()
+        ongoing_context = "\n".join(
+            f"- 进行中: {a.description}" for a in ongoing
+        ) if ongoing else ""
+        state_context = (
+            f"体力{character_state.energy}/心情{character_state.mood}/健康{character_state.health}"
+        )
+        if ongoing_context:
+            state_context += "\n" + ongoing_context
+
+        context = EventContext(
+            character_name=self.character.name,
+            character_description=self.character.description,
+            world=self.character.extensions.world,
+            scenario=f"{self.character.scenario}\n\n【当前场景：{action_description}】",
+            recent_diaries=recent_diaries,
+            today_events=list(today_event_dicts),
+            permanent_state=character_state.text + ("\n当前状态: " + state_context if state_context else ""),
+            current_time=now,
+            energy=character_state.energy,
+            mood=character_state.mood,
+            health=character_state.health,
+            current_intention=character_state.current_intention,
+            intention_created_at=character_state.intention_created_at,
+        )
+
+        event_result = await self.event_agent.generate_event_result(context)
+        ed = CharacterLife._clamp_delta(event_result.energy_delta)
+        md = CharacterLife._clamp_delta(event_result.mood_delta)
+        hd = CharacterLife._clamp_delta(event_result.health_delta)
+
+        character_state.energy = max(0, min(100, character_state.energy + ed))
+        character_state.mood = max(0, min(100, character_state.mood + md))
+        character_state.health = max(0, min(100, character_state.health + hd))
+        await self.data_store.update_character_state(character_state)
+
+        reaction_result = await self.event_agent.generate_event_reaction(
+            event=event_result.description,
+            character_name=self.character.name,
+            character_description=self.character.description,
+            share_policy="optional",
+            today_events=list(today_event_dicts),
+            energy=character_state.energy,
+            mood=character_state.mood,
+            health=character_state.health,
+        )
+
+        pending_plan = reaction_result.pending_plan
+        if pending_plan is None:
+            pass
+        elif pending_plan == "":
+            character_state.current_intention = None
+            character_state.intention_created_at = None
+            await self.data_store.update_character_state(character_state)
+        else:
+            character_state.current_intention = pending_plan
+            character_state.intention_created_at = now
+            await self.data_store.update_character_state(character_state)
+
+        combined_raw = CharacterLife._serialize_raw_parts(
+            event_result.raw_response, reaction_result.raw_response)
+
+        try:
+            await self.data_store.add_daily_event(
+                date=self._get_today_str(),
+                event_type="spontaneous",
+                description=event_result.description,
+                reaction=reaction_result.reaction,
+                share_desire=reaction_result.share_desire,
+                duration_minutes=event_result.duration_minutes,
+                system_prompt_digest=event_result.system_prompt_digest,
+                raw_response=combined_raw,
+                energy_delta=event_result.energy_delta,
+                mood_delta=event_result.mood_delta,
+                health_delta=event_result.health_delta,
+                context_summary=event_result.context_summary,
+            )
+        except Exception:
+            logger.exception("[spontaneous] persist failed")
+            return False
+
+        if event_result.duration_minutes > 0:
+            self._add_ongoing_activity(
+                description=event_result.description,
+                duration_minutes=event_result.duration_minutes,
+            )
+
+        if (
+            self.event_share_queue is not None
+            and reaction_result.share_desire >= self._share_threshold
+        ):
+            event_id = f"evt_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+            delay = random.randint(
+                self._share_delay_min, self._share_delay_max,
+            )
+            try:
+                await self.event_share_queue.enqueue_event_share(
+                    event_id=event_id,
+                    event_description=event_result.description,
+                    reaction=reaction_result.reaction,
+                    share_desire=reaction_result.share_desire,
+                    delay_minutes=delay,
+                )
+            except Exception:
+                logger.exception("[spontaneous] 分享入队失败")
+
+        logger.info(
+            "[spontaneous] 注入成功 desc=%s energy=%+d mood=%+d health=%+d",
+            event_result.description[:60],
+            ed, md, hd,
+        )
+        return True

@@ -148,6 +148,7 @@ def life(temp_db, mock_event_agent, character, config):
         event_agent=mock_event_agent,
         data_store=temp_db,
         character=character,
+        share_threshold=0.4,
     )
     life.boundary_receiver = MagicMock()
     return life

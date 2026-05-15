@@ -76,6 +76,7 @@ class TestCharacterLifeBasics:
             event_agent=mock_event_agent,
             data_store=mock_data_store,
             character=character,
+            share_threshold=0.4,
         )
         life.boundary_receiver = MagicMock()
         return life
@@ -245,6 +246,7 @@ class TestCharacterLifePersistence:
             event_agent=mock_event_agent,
             data_store=mock_data_store,
             character=character,
+            share_threshold=0.4,
         )
 
     @pytest.mark.asyncio
@@ -260,7 +262,7 @@ class TestCharacterLifePersistence:
             "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
             lambda tz: fake_now,
         )
-        raw = '{"date": "2024-01-01", "slot_minutes": [480, 720, 960], "fired": [0]}'
+        raw = '{"date": "2024-01-01", "slot_minutes": [480, 720, 960], "fired": [0], "jittered_start": 420, "jittered_end": 1260}'
         mock_data_store.get_setting.return_value = raw
         await life.load_persistent_state()
         assert life._slot_minutes_today == [(480, "system"), (720, "system"), (960, "system")]
@@ -406,6 +408,7 @@ class TestCharacterLifeStatus:
             event_agent=MagicMock(),
             data_store=MagicMock(),
             character=char,
+            share_threshold=0.4,
         )
 
     def test_get_event_status(self, life, monkeypatch):

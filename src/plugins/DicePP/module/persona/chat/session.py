@@ -38,10 +38,13 @@ from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now, PERSONA_EPOCH, format_timestamp
 from ..tools.registry import ToolRegistry, ToolDomain
 from ..tools.context import ToolContext
+from ..life.protocols import SleepGate
 from ..llm.coordinator import LLMCallCoordinator
 from ..gateway.port import MessagePort
 from .segment_dispatcher import SegmentDispatcher, SegmentItem
 from .segment_state import SegmentBudgetState, SegmentLimits
+
+_DEFAULT_SLEEP_MESSAGES = ("角色正在休息，请稍后再来",)
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
@@ -131,6 +134,7 @@ class ChatSession:
         segment_dispatcher: Optional[SegmentDispatcher] = None,
         query_store: Any = None,
         resolve_db: Any = None,
+        sleep_gate: Optional[SleepGate] = None,
     ):
         self.store = store
         self.router = router
@@ -145,6 +149,7 @@ class ChatSession:
         self.segment_dispatcher = segment_dispatcher
         self.query_store = query_store
         self.resolve_db = resolve_db
+        self._sleep_gate = sleep_gate
         self._pending_messages: Dict[str, deque] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}
 
@@ -178,6 +183,17 @@ class ChatSession:
 
         try:
             is_chat_message = not message.startswith(".") or message.lower().startswith(".ai")
+
+            # 睡眠门控（仅拦截聊天消息，命令透传）
+            if is_chat_message and self._sleep_gate is not None and not await self._sleep_gate.is_awake():
+                msgs = self.character.extensions.sleep_messages
+                if msgs is None:
+                    msgs = _DEFAULT_SLEEP_MESSAGES
+                if msgs:
+                    msg = random.choice(msgs)
+                    logger.info(f"睡眠门控触发: user={user_id}, character={self.character.name}")
+                    return msg
+
             if self.config.relationship_refuse_enabled and is_chat_message:
                 if group_id:
                     history = await self.store.get_group_unified_messages(group_id, limit=1)

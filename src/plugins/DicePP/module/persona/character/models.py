@@ -42,6 +42,12 @@ class PersonaExtensions(BaseModel):
     # - []（空列表）：不使用任何示例
     # - ["...", "..."]（非空列表）：使用自定义示例
     share_message_examples: Optional[List[str]] = Field(default=None)
+    # 睡眠期间回复语（可选，不配置则使用系统默认）
+    # 语义说明：
+    # - None（或未配置）：使用系统默认回复语
+    # - []（空列表）：显式关闭门控，睡眠中也正常回复
+    # - ["...", "..."]（非空列表）：使用自定义回复语
+    sleep_messages: Optional[List[str]] = Field(default=None)
 
     def generate_event_times(
         self,

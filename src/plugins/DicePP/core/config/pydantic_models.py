@@ -253,6 +253,16 @@ class PersonaConfig(BaseModel):
     proactive_coordinator_max_failures: int = Field(default=3, ge=0, description="coordinator 连续失败上限")
     proactive_coordinator_max_iterations: int = Field(default=5, ge=1, description="coordinator 单次 submit 最大迭代次数（防刷屏）")
 
+    # ── chat → life 行动建议
+    suggest_action_min_relationship: int = Field(
+        default=40, ge=0, le=100,
+        description="suggest_action 工具的最低关系分数阈值，低于此值的用户调用不会被评估",
+    )
+    suggest_action_evaluation_timeout: int = Field(
+        default=30, ge=5, le=120,
+        description="suggest_action 评估 LLM 的超时时间（秒）",
+    )
+
     # 已移除: scheduled_events 功能由 CharacterLife 边界事件和槽位系统覆盖
 
     # ── Phase 2: 群活跃度

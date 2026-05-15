@@ -21,6 +21,7 @@ from .exceptions import (
 from .game.decay import DecayCalculator, DecayConfig
 from .gateway.pipeline import MessagePipeline, TruncateStage
 from .gateway.port import MessagePort
+from .life.action_evaluator import ActionEvaluator
 from .life.character_life import CharacterLife, CharacterLifeConfig
 from .life.diary import DiaryGenerator, DiaryConfig
 from .life.event_agent import EventGenerationAgent
@@ -28,6 +29,7 @@ from .life.proactive_config import ProactiveConfig
 from .life.proactive_scheduler import ProactiveScheduler
 from .life.event_share_queue import EventShareTaskQueue
 from .life.simulator import LifeSimulator, LifeConfig
+from .life.protocols import SleepGate
 from .life.target import TargetSelector
 from .llm.coordinator import LLMCallCoordinator
 from .llm.router import LLMRouter
@@ -38,6 +40,7 @@ from .tools.roll_dice import ROLL_DICE_TOOL, roll_dice_executor
 from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
 from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_databases_executor
 from .tools.search_query import SEARCH_QUERY_TOOL, search_query_executor
+from .tools.suggest_action import SUGGEST_ACTION_TOOL, make_suggest_action_executor
 from .chat.segment_dispatcher import SegmentDispatcher
 
 
@@ -228,6 +231,7 @@ def _build_chat(
     segment_dispatcher: Optional[SegmentDispatcher] = None,
     query_store: Any = None,
     resolve_db: Any = None,
+    sleep_gate: Optional[SleepGate] = None,
 ) -> ChatSession:
     """组装 ChatSession"""
     scoring_agent = ScoringAgent(router, timezone=config.timezone,
@@ -267,6 +271,7 @@ def _build_chat(
         segment_dispatcher=segment_dispatcher,
         query_store=query_store,
         resolve_db=resolve_db,
+        sleep_gate=sleep_gate,
     )
 
 
@@ -277,18 +282,11 @@ async def _build_life(
     coordinator: LLMCallCoordinator,
     port: MessagePort,
     decay_calculator: DecayCalculator,
-    router: LLMRouter,
+    character_life: CharacterLife,
+    event_agent: EventGenerationAgent,
+    event_share_queue: EventShareTaskQueue,
 ) -> LifeSimulator:
-    """组装 LifeSimulator 及其全部子组件"""
-    event_agent = EventGenerationAgent(router, config=config)
-    life_config = CharacterLifeConfig.from_persona(config)
-    character_life = CharacterLife(
-        config=life_config,
-        event_agent=event_agent,
-        data_store=store,
-        character=character,
-    )
-
+    """组装 LifeSimulator — 仅构造 scheduler, diary_generator 等外围组件"""
     target_selector = TargetSelector(
         data_store=store,
         bot_config=config,
@@ -311,14 +309,6 @@ async def _build_life(
     character_life.set_boundary_receiver(scheduler)
     await character_life.load_persistent_state()
     logger.info("角色生活模拟已初始化")
-
-    event_share_queue = EventShareTaskQueue(
-        data_store=store,
-        share_threshold=config.proactive_event_share_threshold,
-        max_retries=config.proactive_share_max_retries,
-        timezone=config.timezone,
-    )
-    logger.info("延迟任务队列已初始化")
 
     diary_config = DiaryConfig(
         diary_time=config.character_life_diary_time,
@@ -367,9 +357,9 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     if not config.primary_api_key:
         raise PersonaConfigError("未配置主模型 API Key (persona_ai.primary_api_key)")
 
+    # ── Step 1: 基础设施 (store, router, port)
     store = await _build_store(bot, config)
     router = _build_router(config, store)
-
     port = _build_port(bot, store)
 
     segment_dispatcher = None
@@ -377,6 +367,49 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         segment_dispatcher = SegmentDispatcher(
             message_port=port,
         )
+
+    # ── Step 2: event_agent (life 和 scheduler 共用)
+    event_agent = EventGenerationAgent(router, config=config)
+
+    # ── Step 3: event_share_queue (提前构造，供 character_life 和 _build_life 共用)
+    event_share_queue = EventShareTaskQueue(
+        data_store=store,
+        share_threshold=config.proactive_event_share_threshold,
+        max_retries=config.proactive_share_max_retries,
+        timezone=config.timezone,
+    )
+    logger.info("延迟任务队列已初始化")
+
+    # ── Step 4: character_life (提前构造，供 sleep_gate 和 suggest_action 引用)
+    life_config = CharacterLifeConfig.from_persona(config)
+    character_life = CharacterLife(
+        config=life_config,
+        event_agent=event_agent,
+        data_store=store,
+        character=character,
+        event_share_queue=event_share_queue,
+        share_threshold=config.proactive_event_share_threshold,
+        share_delay_min=config.proactive_event_share_delay_min,
+        share_delay_max=config.proactive_event_share_delay_max,
+    )
+
+    # ── Step 5: action_evaluator
+    action_evaluator = ActionEvaluator(
+        store=store,
+        router=router,
+        config=config,
+        timezone=config.timezone,
+    )
+    logger.info("ActionEvaluator 已初始化")
+
+    # ── Step 6: tool_registry (含 suggest_action executor)
+    suggest_action_executor = make_suggest_action_executor(
+        store=store,
+        action_evaluator=action_evaluator,
+        character_life=character_life,
+        min_relationship=config.suggest_action_min_relationship,
+        life_lock=character_life._state_lock,
+    )
 
     tool_registry = ToolRegistry()
     tool_registry.register(ToolDomain.CHAT, SEARCH_MEMORY_TOOL, search_memory_executor)
@@ -388,6 +421,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
     tool_registry.register(ToolDomain.CHAT, LIST_QUERY_DATABASES_TOOL, list_query_databases_executor)
     tool_registry.register(ToolDomain.CHAT, SEARCH_QUERY_TOOL, search_query_executor)
+    tool_registry.register(ToolDomain.CHAT, SUGGEST_ACTION_TOOL, suggest_action_executor)
     if config.segment_enabled:
         tool_registry.register(
             ToolDomain.CHAT,
@@ -400,6 +434,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         )
     logger.info("工具注册表与分段调度器已初始化")
 
+    # ── Step 7: coordinator, decay_calculator
     coordinator = LLMCallCoordinator(
         max_failures=config.proactive_coordinator_max_failures,
         max_iterations=config.proactive_coordinator_max_iterations,
@@ -412,6 +447,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("衰减计算器已初始化")
 
+    # ── Step 8: _build_chat (注入 sleep_gate)
     async def _resolve_query_db(user_id: str, group_id: str) -> str:
         if group_id:
             row = await bot.db.group_config.get(group_id)
@@ -430,8 +466,16 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         store, router, tool_registry, coordinator, character, config,
         decay_calculator, port, segment_dispatcher,
         query_store=bot.db.query, resolve_db=_resolve_query_db,
+        sleep_gate=character_life,
     )
-    life = await _build_life(store, character, config, coordinator, port, decay_calculator, router)
+
+    # ── Step 9: _build_life (注入预构造组件)
+    life = await _build_life(
+        store, character, config, coordinator, port, decay_calculator,
+        character_life=character_life,
+        event_agent=event_agent,
+        event_share_queue=event_share_queue,
+    )
 
     logger.info("Persona 模块初始化完成")
     return PersonaApp(

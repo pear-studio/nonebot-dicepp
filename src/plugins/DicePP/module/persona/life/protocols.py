@@ -16,3 +16,9 @@ class BoundaryReceiver(Protocol):
     """窄接口：CharacterLife 向外部通知边界事件和波动边界。"""
 
     def set_jittered_boundaries(self, start: int, end: int) -> None: ...
+
+
+class SleepGate(Protocol):
+    """窄接口：CharacterLife 向 ChatSession 提供清醒状态查询。"""
+
+    async def is_awake(self) -> bool: ...

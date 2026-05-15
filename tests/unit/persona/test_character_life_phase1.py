@@ -78,6 +78,7 @@ class TestCharacterLifePhase1:
             event_agent=mock_event_agent,
             data_store=mock_data_store,
             character=character,
+            share_threshold=0.4,
         )
         life.boundary_receiver = MagicMock()
         return life
