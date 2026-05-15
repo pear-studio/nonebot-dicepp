@@ -55,6 +55,11 @@ def _make_bot() -> MagicMock:
     cfg.proactive_coordinator_max_failures = 3
     cfg.proactive_coordinator_max_iterations = 5
     cfg.proactive_event_share_threshold = 0.6
+    cfg.proactive_event_share_delay_min = 1
+    cfg.proactive_event_share_delay_max = 5
+    cfg.proactive_share_max_retries = 2
+    cfg.suggest_action_min_relationship = 40
+    cfg.suggest_action_evaluation_timeout = 30
     cfg.proactive_always_send_users = []
     cfg.proactive_always_send_groups = []
     cfg.group_activity_min_threshold = 0.0
@@ -70,7 +75,7 @@ def _make_bot() -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_create_persona_success_registers_three_tools(monkeypatch):
-    """create_persona 成功组装后，chat 域命中三个工具定义"""
+    """create_persona 成功组装后，chat 域命中工具定义"""
     bot = _make_bot()
 
     character = Character(
@@ -134,6 +139,7 @@ async def test_create_persona_success_registers_three_tools(monkeypatch):
     assert "search_chat_history" in names, f"缺失 search_chat_history，实际注册: {names}"
     assert "roll_dice" in names, f"缺失 roll_dice，实际注册: {names}"
     assert "send_reply_segment" in names, f"缺失 send_reply_segment，实际注册: {names}"
+    assert "suggest_action" in names, f"缺失 suggest_action，实际注册: {names}"
 
     # R6: 跨组件引用一致性
     assert app.chat is not None
