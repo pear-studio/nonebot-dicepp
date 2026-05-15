@@ -1,21 +1,14 @@
 #!/usr/bin/env python3
 """
-Persona 数据库 Inspection CLI 工具
+Persona 数据库快速排查工具 — 集成多表关联的复合查询。
 
-排查 persona 模块问题时快速查询 SQLite 数据库。
+定位：不做单表 CRUD 替代（sqlite3 CLI 更快），聚焦跨表画像 + 格式化输出。
 
-常见排查模式：
-    python scripts/dev/persona_inspect.py summary --bot-id <bot_id>
-    python scripts/dev/persona_inspect.py tables --db data/bots/<bot_id>/bot_data.db
-    python scripts/dev/persona_inspect.py events --date 2026-05-06
-    python scripts/dev/persona_inspect.py relationships --user <user_id>
-    python scripts/dev/persona_inspect.py messages --user <user_id> --group <group_id> --limit 10
-    python scripts/dev/persona_inspect.py delayed-tasks
-    python scripts/dev/persona_inspect.py state
-    python scripts/dev/persona_inspect.py diary --limit 7
-    python scripts/dev/persona_inspect.py observations --group <group_id>
-    python scripts/dev/persona_inspect.py llm-traces --user <user_id>
-    python scripts/dev/persona_inspect.py group-activity
+用法:
+  python scripts/dev/persona_inspect.py user <id> --bot-id <id>
+  python scripts/dev/persona_inspect.py state --bot-id <id>
+  python scripts/dev/persona_inspect.py llm-health --bot-id <id>
+  python scripts/dev/persona_inspect.py active --bot-id <id>
 """
 
 import argparse
@@ -27,28 +20,26 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+# ═══════════════════════════════════════════════════════════
+# 基础设施
+# ═══════════════════════════════════════════════════════════
+
 def get_project_root() -> Path:
-    """从脚本位置推断项目根目录"""
-    script = Path(__file__).resolve()
-    # scripts/dev/persona_inspect.py -> 项目根目录
-    return script.parent.parent.parent
+    return Path(__file__).resolve().parent.parent.parent
 
 
 def resolve_db_path(args) -> Path:
-    """解析数据库路径"""
     if args.db:
         p = Path(args.db).resolve()
         if not p.exists():
             sys.exit(f"数据库不存在: {p}")
         return p
-
     if args.bot_id:
         db = get_project_root() / "data" / "bots" / args.bot_id / "bot_data.db"
         if not db.exists():
             sys.exit(f"数据库不存在: {db}")
         return db
-
-    # 自动推断：找 data/bots/ 下第一个有 bot_data.db 的目录
+    # 自动推断
     bots_dir = get_project_root() / "data" / "bots"
     if bots_dir.exists():
         for bot_dir in sorted(bots_dir.iterdir()):
@@ -56,12 +47,7 @@ def resolve_db_path(args) -> Path:
                 candidate = bot_dir / "bot_data.db"
                 if candidate.exists():
                     return candidate
-
-    sys.exit(
-        "无法自动定位数据库，请指定 --db 或 --bot-id\n"
-        "  --db PATH      SQLite 数据库文件路径\n"
-        "  --bot-id ID    Bot ID（自动查找 data/bots/<ID>/bot_data.db）"
-    )
+    sys.exit("无法自动定位数据库，请指定 --db 或 --bot-id")
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -70,483 +56,347 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def format_value(val: Any) -> str:
-    if val is None:
-        return "NULL"
-    if isinstance(val, str):
-        # 截断过长的字符串
-        if len(val) > 200:
-            return val[:200] + "..."
-        return val
-    return str(val)
+def table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    r = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    return r is not None
 
 
-def print_table(rows: List[sqlite3.Row], title: str = "") -> None:
-    if not rows:
-        print(f"{title} (无记录)")
-        return
+def col_exists(conn: sqlite3.Connection, table: str, col: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(r["name"] == col for r in rows)
 
-    if title:
-        print(f"\n=== {title} ===")
 
-    columns = list(rows[0].keys())
-    # 计算每列最大宽度
-    widths = {}
-    for col in columns:
-        widths[col] = len(col)
-    for row in rows:
-        for col in columns:
-            widths[col] = max(widths[col], len(format_value(row[col])))
+# ═══════════════════════════════════════════════════════════
+# 输出
+# ═══════════════════════════════════════════════════════════
 
-    # 打印表头
-    header = " | ".join(col.ljust(widths[col]) for col in columns)
+def _section(title: str) -> None:
+    print(f"\n── {title}")
+
+
+def _key_val(k: str, v: Any) -> None:
+    print(f"  {k:<20} {v}")
+
+
+def _bar(*cols: str) -> None:
+    widths = [len(c) for c in cols]
+    header = " │ ".join(cols)
     print(header)
-    print("-" * len(header))
-
-    # 打印行
-    for row in rows:
-        line = " | ".join(format_value(row[col]).ljust(widths[col]) for col in columns)
-        print(line)
+    print("─" * len(header))
 
 
-def print_json(rows: List[sqlite3.Row]) -> None:
-    data = []
-    for row in rows:
-        d = {}
-        for key in row.keys():
-            val = row[key]
-            # 处理 datetime
-            if isinstance(val, datetime):
-                val = val.isoformat()
-            d[key] = val
-        data.append(d)
-    print(json.dumps(data, ensure_ascii=False, indent=2))
+def json_output(data: Any) -> None:
+    print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
-def output(rows: List[sqlite3.Row], fmt: str, title: str = "") -> None:
-    if fmt == "json":
-        print_json(rows)
+# ═══════════════════════════════════════════════════════════
+# 子命令
+# ═══════════════════════════════════════════════════════════
+
+def cmd_user(conn: sqlite3.Connection, args) -> None:
+    """用户全貌: profile + 关系 + 最近消息 + 评分变化"""
+    uid = args.user_id
+    limit = args.limit
+
+    # ── profile ──
+    _section("用户画像")
+    if table_exists(conn, "persona_user_profiles"):
+        row = conn.execute(
+            "SELECT facts, updated_at FROM persona_user_profiles WHERE user_id=?",
+            (uid,)
+        ).fetchone()
+        if row and row["facts"]:
+            try:
+                facts = json.loads(row["facts"])
+                for k, v in facts.items():
+                    _key_val(k, v)
+            except json.JSONDecodeError:
+                print(f"  (解析失败) {row['facts'][:200]}")
+        else:
+            print("  (无画像)")
     else:
-        print_table(rows, title)
+        print("  (表不存在)")
 
+    # ── 白名单 / 静音 ──
+    if table_exists(conn, "persona_whitelist"):
+        wh = conn.execute(
+            "SELECT 1 FROM persona_whitelist WHERE id=? AND type='user'", (uid,)
+        ).fetchone()
+        _key_val("whitelisted", "是" if wh else "否")
+    if table_exists(conn, "persona_user_mute"):
+        mute = conn.execute(
+            "SELECT muted_at, reason FROM persona_user_mute WHERE user_id=?", (uid,)
+        ).fetchone()
+        if mute:
+            _key_val("muted_at", mute["muted_at"])
+            if mute["reason"]:
+                _key_val("mute_reason", mute["reason"])
+        else:
+            _key_val("muted", "否")
 
-# ========== 子命令实现 ==========
-
-
-def cmd_tables(conn: sqlite3.Connection, args) -> None:
-    """列出所有 persona 相关表和行数"""
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'persona_%' ORDER BY name"
-    )
-    tables = cursor.fetchall()
-    if not tables:
-        print("未找到 persona_ 前缀的表")
-        return
-
-    rows = []
-    for t in tables:
-        name = t["name"]
-        count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-        rows.append({"table": name, "rows": count})
-
-    if args.format == "json":
-        print_json(rows)
+    # ── 关系 ──
+    _section("好感度")
+    if table_exists(conn, "persona_user_relationships"):
+        rel = conn.execute(
+            "SELECT intimacy, passion, trust, secureness, peak_stage, "
+            "last_interaction_at, updated_at "
+            "FROM persona_user_relationships WHERE user_id=?",
+            (uid,)
+        ).fetchone()
+        if rel:
+            composite = round(
+                rel["intimacy"] * 0.3 + rel["passion"] * 0.2
+                + rel["trust"] * 0.3 + rel["secureness"] * 0.2, 2
+            )
+            _key_val("intimacy", round(rel["intimacy"], 2))
+            _key_val("passion", round(rel["passion"], 2))
+            _key_val("trust", round(rel["trust"], 2))
+            _key_val("secureness", round(rel["secureness"], 2))
+            _key_val("composite", composite)
+            _key_val("peak_stage", rel["peak_stage"])
+            _key_val("last_interaction", rel["last_interaction_at"])
+        else:
+            print("  (无关系记录)")
     else:
-        print("\n=== Persona 数据表概览 ===")
-        print(f"{'表名':<40} {'行数':>8}")
-        print("-" * 50)
-        for r in rows:
-            print(f"{r['table']:<40} {r['rows']:>8}")
+        print("  (表不存在)")
 
+    # ── 今日用量 ──
+    if table_exists(conn, "persona_usage"):
+        today = datetime.now().strftime("%Y-%m-%d")
+        usage = conn.execute(
+            "SELECT count FROM persona_usage WHERE user_id=? AND date=?",
+            (uid, today)
+        ).fetchone()
+        _key_val("今日LLM用量", usage["count"] if usage else 0)
 
-def cmd_events(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params = []
-    if args.date:
-        where.append("date = ?")
-        params.append(args.date)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    sql = f"""
-        SELECT id, date, event_type, description, reaction, share_desire, duration_minutes,
-               energy_delta, mood_delta, health_delta, created_at
-        FROM persona_daily_events
-        {where_clause}
-        ORDER BY date DESC, created_at DESC
-        LIMIT ?
-    """
-    params.append(args.limit)
-    rows = conn.execute(sql, params).fetchall()
-    output(rows, args.format, "每日事件")
+    # ── 最近消息 ──
+    _section(f"最近消息 (共 {limit} 条)")
+    if table_exists(conn, "persona_unified_messages"):
+        msgs = conn.execute(
+            "SELECT role, type, "
+            "CASE WHEN length(content)>120 THEN substr(content,1,120)||'…' ELSE content END as content, "
+            "created_at "
+            "FROM persona_unified_messages WHERE user_id=? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (uid, limit)
+        ).fetchall()
+        if msgs:
+            for m in reversed(msgs):
+                tag = "我" if m["role"] == "assistant" else "U"
+                ts = m["created_at"] or ""
+                if ts and len(ts) > 16:
+                    ts = ts[5:16]  # MM-DD HH:MM
+                print(f"  [{ts}] {tag} {m['content']}")
+        else:
+            print("  (无消息)")
+    else:
+        print("  (表不存在)")
 
-
-def _print_state(text: str, updated_at: Optional[str]) -> None:
-    print(f"\n=== 角色状态 (updated_at: {updated_at}) ===")
-    try:
-        data = json.loads(text)
-        print(json.dumps(data, ensure_ascii=False, indent=2))
-    except json.JSONDecodeError:
-        print(text)
+    # ── 评分变化 ──
+    _section(f"评分变化 (最近 {limit} 条)")
+    if table_exists(conn, "persona_score_history"):
+        digest_ok = col_exists(conn, "persona_score_history", "conversation_digest")
+        cols = (
+            "intimacy_delta, passion_delta, trust_delta, secureness_delta, "
+            "composite_before, composite_after, reason" +
+            (", conversation_digest" if digest_ok else "") +
+            ", created_at"
+        )
+        scores = conn.execute(
+            f"SELECT {cols} FROM persona_score_history "
+            "WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
+            (uid, limit)
+        ).fetchall()
+        if scores:
+            for s in reversed(scores):
+                delta = (
+                    f"i={s['intimacy_delta']:+.2f} p={s['passion_delta']:+.2f} "
+                    f"t={s['trust_delta']:+.2f} s={s['secureness_delta']:+.2f}"
+                )
+                comp = f"{s['composite_before']:.1f}→{s['composite_after']:.1f}"
+                reason = s["reason"] or ""
+                if len(reason) > 60:
+                    reason = reason[:60] + "…"
+                ts = (s["created_at"] or "")[5:16] if s["created_at"] else ""
+                print(f"  [{ts}] {comp} | {delta} | {reason}")
+        else:
+            print("  (无评分记录)")
+    else:
+        print("  (表不存在)")
 
 
 def cmd_state(conn: sqlite3.Connection, args) -> None:
-    rows = conn.execute(
-        "SELECT text, updated_at FROM persona_character_state WHERE id = 1"
-    ).fetchall()
-    if not rows:
-        print("角色状态: 未设置")
+    """角色永久状态"""
+    row = conn.execute(
+        "SELECT text, updated_at FROM persona_character_state WHERE id=1"
+    ).fetchone()
+    if not row:
+        print("(未设置)")
         return
 
-    _print_state(rows[0]["text"], rows[0]["updated_at"])
-
-
-def cmd_diary(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params = []
-    if args.date:
-        where.append("date = ?")
-        params.append(args.date)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    sql = f"""
-        SELECT date, substr(content, 1, 300) as content_preview, created_at
-        FROM persona_diary
-        {where_clause}
-        ORDER BY date DESC
-        LIMIT ?
-    """
-    params.append(args.limit)
-    rows = conn.execute(sql, params).fetchall()
-    output(rows, args.format, "日记")
-
-
-def cmd_relationships(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params = []
-    if args.user:
-        where.append("user_id = ?")
-        params.append(args.user)
-    if args.group:
-        where.append("group_id = ?")
-        params.append(args.group)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    sql = f"""
-        SELECT user_id, group_id, intimacy, passion, trust, secureness,
-               (intimacy * 0.3 + passion * 0.2 + trust * 0.3 + secureness * 0.2) as composite,
-               last_interaction_at, updated_at
-        FROM persona_user_relationships
-        {where_clause}
-        ORDER BY composite DESC
-        LIMIT ?
-    """
-    params.append(args.limit)
-    rows = conn.execute(sql, params).fetchall()
-    output(rows, args.format, "用户关系")
-
-
-def cmd_score_history(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params: list = []
-    if args.user:
-        where.append("user_id = ?")
-        params.append(args.user)
-    if args.group:
-        where.append("group_id = ?")
-        params.append(args.group)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    # conversation_digest 依赖运行时 schema patch，需兼容旧库
+    print(f"updated_at: {row['updated_at']}")
     try:
-        sql = f"""
-            SELECT user_id, group_id, intimacy_delta, passion_delta, trust_delta, secureness_delta,
-                   composite_before, composite_after, reason, conversation_digest, created_at
-            FROM persona_score_history
-            {where_clause}
-            ORDER BY created_at DESC
-            LIMIT ?
-        """
-        rows = conn.execute(sql, params + [args.limit]).fetchall()
-    except sqlite3.OperationalError as e:
-        if "conversation_digest" in str(e):
-            sql = f"""
-                SELECT user_id, group_id, intimacy_delta, passion_delta, trust_delta, secureness_delta,
-                       composite_before, composite_after, reason, created_at
-                FROM persona_score_history
-                {where_clause}
-                ORDER BY created_at DESC
-                LIMIT ?
-            """
-            rows = conn.execute(sql, params + [args.limit]).fetchall()
+        data = json.loads(row["text"])
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    except json.JSONDecodeError:
+        print(row["text"])
+
+
+def cmd_llm_health(conn: sqlite3.Connection, args) -> None:
+    """LLM 健康概览: 错误分布 + 延迟 + 今日用量"""
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    since_24h = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # ── 错误分布 (24h) ──
+    _section("LLM 状态分布 (最近 24h)")
+    statuses = conn.execute(
+        "SELECT status, COUNT(*) as cnt FROM persona_llm_traces "
+        "WHERE created_at > ? GROUP BY status ORDER BY cnt DESC",
+        (since_24h,)
+    ).fetchall()
+    if statuses:
+        for s in statuses:
+            print(f"  {s['status']:<20} {s['cnt']:>5}")
+    else:
+        print("  (无记录)")
+
+    # ── 延迟分布 ──
+    _section("延迟分布 (最近 24h, ms)")
+    latencies = conn.execute(
+        "SELECT latency_ms FROM persona_llm_traces "
+        "WHERE created_at > ? AND latency_ms IS NOT NULL AND latency_ms > 0 "
+        "ORDER BY latency_ms",
+        (since_24h,)
+    ).fetchall()
+    if latencies:
+        vals = [r["latency_ms"] for r in latencies]
+        n = len(vals)
+        def _pct(p): return vals[min(int(n * p / 100), n - 1)]
+        print(f"  count={n}  p50={_pct(50)}  p95={_pct(95)}  p99={_pct(99)}  max={vals[-1]}")
+    else:
+        print("  (无记录)")
+
+    # ── max_rounds 统计 ──
+    _section("max_rounds 次数")
+    mr_total = conn.execute(
+        "SELECT COUNT(*) FROM persona_llm_traces WHERE status='max_rounds'"
+    ).fetchone()[0]
+    mr_24h = conn.execute(
+        "SELECT COUNT(*) FROM persona_llm_traces "
+        "WHERE status='max_rounds' AND created_at > ?",
+        (since_24h,)
+    ).fetchone()[0]
+    print(f"  总计={mr_total}  最近24h={mr_24h}")
+
+    # ── 今日用量 ──
+    _section("今日用量")
+    if table_exists(conn, "persona_usage"):
+        usage = conn.execute(
+            "SELECT user_id, count FROM persona_usage WHERE date=? ORDER BY count DESC",
+            (today,)
+        ).fetchall()
+        if usage:
+            total = sum(r["count"] for r in usage)
+            print(f"  总调用: {total} 次, {len(usage)} 个用户")
+            for u in usage[:10]:
+                print(f"  {u['user_id']:<18} {u['count']:>4}")
         else:
-            raise
-    output(rows, args.format, "评分历史")
+            print("  (今日无调用)")
+    else:
+        print("  (表不存在)")
+
+    # ── 待处理任务 ──
+    if table_exists(conn, "persona_delayed_tasks"):
+        _section("延迟任务")
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM persona_delayed_tasks WHERE status='pending'"
+        ).fetchone()[0]
+        failed = conn.execute(
+            "SELECT COUNT(*) FROM persona_delayed_tasks WHERE status='failed'"
+        ).fetchone()[0]
+        print(f"  pending={pending}  failed={failed}")
 
 
-def cmd_delayed_tasks(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params = []
-    if args.status:
-        where.append("status = ?")
-        params.append(args.status)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    sql = f"""
-        SELECT id, task_type, payload, scheduled_at, status, retry_count, created_at
-        FROM persona_delayed_tasks
-        {where_clause}
-        ORDER BY scheduled_at
-        LIMIT ?
-    """
-    params.append(args.limit)
-    rows = conn.execute(sql, params).fetchall()
-    output(rows, args.format, "延迟任务")
+def cmd_active(conn: sqlite3.Connection, args) -> None:
+    """群活跃度 + 观察记录"""
+    limit = args.limit
 
-
-def cmd_messages(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params = []
-    if args.user:
-        where.append("user_id = ?")
-        params.append(args.user)
-    if args.group:
-        where.append("group_id = ?")
-        params.append(args.group)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    sql = f"""
-        SELECT id, user_id, group_id, role, substr(content, 1, 200) as content_preview, created_at
-        FROM persona_messages
-        {where_clause}
-        ORDER BY created_at DESC
-        LIMIT ?
-    """
-    params.append(args.limit)
-    rows = conn.execute(sql, params).fetchall()
-    output(rows, args.format, "消息历史")
-
-
-def cmd_observations(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params: list = []
-    if args.group:
-        where.append("group_id = ?")
-        params.append(args.group)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    # source_messages_count 依赖运行时 schema patch，需兼容旧库
-    try:
-        sql = f"""
-            SELECT group_id, what, why_remember, observed_at, source_messages_count
-            FROM persona_observations
-            {where_clause}
-            ORDER BY observed_at DESC
-            LIMIT ?
-        """
-        rows = conn.execute(sql, params + [args.limit]).fetchall()
-    except sqlite3.OperationalError as e:
-        if "source_messages_count" in str(e):
-            sql = f"""
-                SELECT group_id, what, why_remember, observed_at
-                FROM persona_observations
-                {where_clause}
-                ORDER BY observed_at DESC
-                LIMIT ?
-            """
-            rows = conn.execute(sql, params + [args.limit]).fetchall()
+    # ── 活跃群 ──
+    _section(f"群活跃度 Top {limit}")
+    if table_exists(conn, "persona_group_activity"):
+        groups = conn.execute(
+            "SELECT group_id, score, last_interaction_at, content_count_today, "
+            "daily_add_date, daily_add_total "
+            "FROM persona_group_activity ORDER BY score DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        if groups:
+            _bar("group_id", "score", "last_interaction", "today_msgs", "daily_add")
+            for g in groups:
+                ts = (g["last_interaction_at"] or "")[:16] if g["last_interaction_at"] else "-"
+                daily = f"{g['daily_add_total']:.0f}" if g["daily_add_total"] else "0"
+                print(
+                    f"{g['group_id']:<18} │ {g['score']:>6.1f} │ {ts} │ "
+                    f"{g['content_count_today']:>10} │ {daily:>9}"
+                )
         else:
-            raise
-    output(rows, args.format, "群聊观察")
-
-
-def cmd_llm_traces(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params = []
-    if args.user:
-        where.append("user_id = ?")
-        params.append(args.user)
-    if args.group:
-        where.append("group_id = ?")
-        params.append(args.group)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    sql = f"""
-        SELECT id, session_id, user_id, group_id, model, tier, status,
-               latency_ms, tokens_in, tokens_out, error, created_at
-        FROM persona_llm_traces
-        {where_clause}
-        ORDER BY created_at DESC
-        LIMIT ?
-    """
-    params.append(args.limit)
-    rows = conn.execute(sql, params).fetchall()
-    output(rows, args.format, "LLM Trace")
-
-
-def cmd_group_activity(conn: sqlite3.Connection, args) -> None:
-    where = []
-    params = []
-    if args.group:
-        where.append("group_id = ?")
-        params.append(args.group)
-    where_clause = f"WHERE {' AND '.join(where)}" if where else ""
-    sql = f"""
-        SELECT group_id, score, last_interaction_at, last_content_at, content_count_today,
-               daily_add_date, daily_add_total
-        FROM persona_group_activity
-        {where_clause}
-        ORDER BY score DESC
-        LIMIT ?
-    """
-    params.append(args.limit)
-    rows = conn.execute(sql, params).fetchall()
-    output(rows, args.format, "群活跃度")
-
-
-def cmd_summary(conn: sqlite3.Connection, args) -> None:
-    """一键汇总排查信息"""
-    # 1. 表行数
-    print("\n=== Persona 数据表概览 ===")
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'persona_%' ORDER BY name"
-    )
-    for t in cursor.fetchall():
-        name = t["name"]
-        count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
-        print(f"  {name:<45} {count:>6} 行")
-
-    # 2. 角色状态
-    print("\n=== 角色状态 ===")
-    state_rows = conn.execute(
-        "SELECT text, updated_at FROM persona_character_state WHERE id = 1"
-    ).fetchall()
-    if state_rows:
-        try:
-            data = json.loads(state_rows[0]["text"])
-            print(json.dumps(data, ensure_ascii=False, indent=2))
-        except json.JSONDecodeError:
-            print(state_rows[0]["text"])
+            print("  (无记录)")
     else:
-        print("  未设置")
+        print("  (表不存在)")
 
-    # 3. 最近日记
-    print("\n=== 最近日记 ===")
-    diary_rows = conn.execute(
-        "SELECT date, substr(content, 1, 300) as content_preview, created_at "
-        "FROM persona_diary ORDER BY date DESC LIMIT ?",
-        (args.limit,),
-    ).fetchall()
-    if diary_rows:
-        print_table(diary_rows)
+    # ── 观察记录 ──
+    _section(f"最近群聊观察 (Top {limit})")
+    if table_exists(conn, "persona_observations"):
+        if col_exists(conn, "persona_observations", "source_messages_count"):
+            sql = (
+                "SELECT group_id, substr(what,1,120) as what, "
+                "substr(why_remember,1,120) as why, observed_at, source_messages_count "
+                "FROM persona_observations ORDER BY observed_at DESC LIMIT ?"
+            )
+        else:
+            sql = (
+                "SELECT group_id, substr(what,1,120) as what, "
+                "substr(why_remember,1,120) as why, observed_at "
+                "FROM persona_observations ORDER BY observed_at DESC LIMIT ?"
+            )
+        obs = conn.execute(sql, (limit,)).fetchall()
+        if obs:
+            for o in obs:
+                ts = (o["observed_at"] or "")[:16] if o["observed_at"] else "-"
+                print(f"  [{ts}] g={o['group_id']}")
+                print(f"    what: {o['what']}")
+                print(f"    why:  {o['why']}")
+        else:
+            print("  (无记录)")
     else:
-        print("  无日记记录")
+        print("  (表不存在)")
 
-    # 4. 延迟任务
-    print("\n=== 待处理延迟任务 ===")
-    pending = conn.execute(
-        "SELECT id, task_type, payload, scheduled_at, status, retry_count "
-        "FROM persona_delayed_tasks WHERE status = 'pending' ORDER BY scheduled_at LIMIT 5"
-    ).fetchall()
-    if pending:
-        print_table(pending)
-    else:
-        print("  无待处理任务")
 
-    failed = conn.execute(
-        "SELECT id, task_type, payload, scheduled_at, status, retry_count "
-        "FROM persona_delayed_tasks WHERE status = 'failed' ORDER BY scheduled_at LIMIT 5"
-    ).fetchall()
-    if failed:
-        print("\n=== 失败延迟任务 ===")
-        print_table(failed)
-
-    # 5. 最近事件
-    print("\n=== 最近事件 ===")
-    event_rows = conn.execute(
-        "SELECT id, date, event_type, description, reaction, share_desire, duration_minutes, "
-        "energy_delta, mood_delta, health_delta, created_at "
-        "FROM persona_daily_events ORDER BY date DESC, created_at DESC LIMIT ?",
-        (args.limit,),
-    ).fetchall()
-    if event_rows:
-        print_table(event_rows)
-    else:
-        print("  无事件记录")
-
-    # 6. 关系概览（前 N）
-    print("\n=== 关系概览（top relationships） ===")
-    rels = conn.execute(
-        "SELECT user_id, group_id, intimacy, passion, trust, secureness, "
-        "(intimacy * 0.3 + passion * 0.2 + trust * 0.3 + secureness * 0.2) as composite, "
-        "last_interaction_at "
-        "FROM persona_user_relationships "
-        "ORDER BY composite DESC LIMIT 10"
-    ).fetchall()
-    if rels:
-        print_table(rels)
-    else:
-        print("  无关系记录")
-
-    # 7. LLM Trace 错误统计（最近24小时）
-    print("\n=== 最近24小时 LLM 错误统计 ===")
-    since = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-    errors = conn.execute(
-        "SELECT status, COUNT(*) as count FROM persona_llm_traces "
-        "WHERE datetime(created_at) > datetime(?) AND status != 'ok' "
-        "GROUP BY status",
-        (since,)
-    ).fetchall()
-    if errors:
-        print_table(errors)
-    else:
-        print("  无错误记录")
-
+# ═══════════════════════════════════════════════════════════
+# CLI
+# ═══════════════════════════════════════════════════════════
 
 def _build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--db", help="SQLite 数据库文件路径")
-    common.add_argument("--bot-id", help="Bot ID（自动查找 data/bots/<ID>/bot_data.db）")
-    common.add_argument("--limit", type=int, default=20, help="返回记录数上限（默认 20）")
-    common.add_argument("--user", help="按用户 ID 过滤")
-    common.add_argument("--group", help="按群 ID 过滤")
-    common.add_argument("--date", help="按日期过滤（YYYY-MM-DD）")
-    common.add_argument(
-        "--status", choices=["pending", "completed", "failed"],
-        help="按状态过滤（用于 delayed-tasks：pending / completed / failed）"
-    )
-    common.add_argument(
-        "--format", choices=["table", "json"], default="table", help="输出格式（默认 table）"
-    )
+    common.add_argument("--bot-id", help="Bot ID")
+    common.add_argument("--limit", type=int, default=10, help="返回记录数上限（默认 10）")
+    common.add_argument("--format", choices=["table", "json"], default="table")
 
     parser = argparse.ArgumentParser(
-        description="Persona 数据库 Inspection CLI 工具",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
-  %(prog)s summary --bot-id mybot
-  %(prog)s tables --db data/bots/mybot/bot_data.db
-  %(prog)s events --date 2026-05-06
-  %(prog)s relationships --user 123456
-  %(prog)s messages --user 123456 --group 789012 --limit 10
-  %(prog)s delayed-tasks --status pending
-  %(prog)s state
-  %(prog)s diary --limit 7
-  %(prog)s observations --group 789012
-  %(prog)s llm-traces --user 123456
-  %(prog)s group-activity
-  %(prog)s score-history --user 123456
-""",
+        description="Persona 数据库快速排查工具 — 跨表画像 + 格式化输出",
     )
+    sub = parser.add_subparsers(dest="command", required=True)
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    p_user = sub.add_parser("user", parents=[common], help="用户全貌 (profile + 关系 + 消息 + 评分)")
+    p_user.add_argument("user_id", help="用户 ID")
 
-    subparsers.add_parser("tables", parents=[common], help="列出所有 persona 表和行数")
-    subparsers.add_parser("events", parents=[common], help="查看每日事件")
-    subparsers.add_parser("state", parents=[common], help="查看角色状态")
-    subparsers.add_parser("diary", parents=[common], help="查看日记")
-    subparsers.add_parser("relationships", parents=[common], help="查看用户关系")
-    subparsers.add_parser("score-history", parents=[common], help="查看评分历史")
-    subparsers.add_parser("delayed-tasks", parents=[common], help="查看延迟任务")
-    subparsers.add_parser("messages", parents=[common], help="查看消息历史")
-    subparsers.add_parser("observations", parents=[common], help="查看群聊观察")
-    subparsers.add_parser("llm-traces", parents=[common], help="查看 LLM Trace")
-    subparsers.add_parser("group-activity", parents=[common], help="查看群活跃度")
-    subparsers.add_parser(
-        "summary", parents=[common],
-        help="一键汇总所有关键信息（排查模式：events → state → diary → relationships → delayed_tasks → messages）"
-    )
+    sub.add_parser("state", parents=[common], help="角色永久状态 (JSON pretty-print)")
+    sub.add_parser("llm-health", parents=[common], help="LLM 健康概览 (错误分布 + 延迟 + 用量)")
+    sub.add_parser("active", parents=[common], help="群活跃度 + 群聊观察")
 
     return parser
 
@@ -554,25 +404,23 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-
     db_path = resolve_db_path(args)
     conn = connect(db_path)
 
+    dispatch = {
+        "user": cmd_user,
+        "state": cmd_state,
+        "llm-health": cmd_llm_health,
+        "active": cmd_active,
+    }
+
     try:
-        dispatch = {
-            "tables": cmd_tables,
-            "events": cmd_events,
-            "state": cmd_state,
-            "diary": cmd_diary,
-            "relationships": cmd_relationships,
-            "score-history": cmd_score_history,
-            "delayed-tasks": cmd_delayed_tasks,
-            "messages": cmd_messages,
-            "observations": cmd_observations,
-            "llm-traces": cmd_llm_traces,
-            "group-activity": cmd_group_activity,
-            "summary": cmd_summary,
-        }
+        if args.format == "json":
+            # json mode: collect all print output isn't straightforward for
+            # the composite format, just run in table mode and state explicitly
+            print('{"error": "json mode not supported for composite commands, use table mode"}',
+                  file=sys.stderr)
+            sys.exit(1)
         dispatch[args.command](conn, args)
     finally:
         conn.close()
