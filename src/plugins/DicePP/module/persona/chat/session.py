@@ -252,7 +252,7 @@ class ChatSession:
         """coordinator chat 路径的单轮 LLM 调用。"""
         current_message = "\n".join(messages) if messages else ""
 
-        messages_for_llm = await self._build_messages(user_id, group_id, current_message)
+        messages_for_llm = await self._build_messages(user_id, group_id)
 
         response = await self._chat_with_tools(user_id, group_id, messages_for_llm)
 
@@ -793,17 +793,17 @@ class ChatSession:
     def _build_lore_sections(
         self,
         history_dicts: List[Dict[str, str]],
-        current_message: str,
     ) -> Dict[str, List[str]]:
         """构建世界书 lore 段落"""
-        return self.context_builder.build_lore_text(history_dicts, current_message)
+        return self.context_builder.build_lore_text(history_dicts)
 
     async def _build_messages(
         self,
         user_id: str,
         group_id: str,
-        current_message: str,
     ) -> List[Dict[str, str]]:
+        # 前置条件：当前用户消息已由 inbound_message_hook 写入 unified_messages，
+        # _fetch_short_term_history 返回的历史末尾即为当前消息。
         history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
         is_group = bool(group_id)
 
@@ -824,7 +824,7 @@ class ChatSession:
         rel = await self.store.get_relationship(user_id)
         warmth_label = self._resolve_warmth_label(user_id, rel)
         diary_context = await self._build_diary_context()
-        lore_sections = self._build_lore_sections(history_dicts, current_message)
+        lore_sections = self._build_lore_sections(history_dicts)
 
         debug_info = self.context_builder.build_debug_info(
             short_term_history=truncated,
@@ -840,7 +840,6 @@ class ChatSession:
             history_dicts=history_dicts,
             user_profile=profile,
             diary_context=diary_context,
-            current_message=current_message,
             warmth_label=warmth_label,
         )
 

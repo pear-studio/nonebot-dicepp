@@ -56,13 +56,12 @@ class ContextBuilder:
         history_dicts: List[Dict[str, str]],
         user_profile: Optional[UserProfile] = None,
         diary_context: str = "",
-        current_message: str = "",
         warmth_label: str = "友好",
     ) -> List[Dict[str, str]]:
         messages = []
 
         # 世界书扫描仍用 raw dicts（未格式化的 content 避免时间戳/speaker 前缀干扰匹配）
-        lore_sections = self.build_lore_text(history_dicts, current_message)
+        lore_sections = self.build_lore_text(history_dicts)
 
         # 合并所有 system 内容为一条（某些提供商如 MiniMax 不支持多条 system 消息）
         system_parts = []
@@ -76,24 +75,21 @@ class ContextBuilder:
 
         messages.append({"role": "system", "content": "\n\n".join(system_parts)})
 
-        # 追加格式化后的历史消息对
+        # 追加格式化后的历史消息对（末尾即为当前用户消息，带时间戳前缀）
         for msg in formatted_history:
             messages.append({"role": msg["role"], "content": msg["content"]})
-
-        if current_message:
-            messages.append({"role": "user", "content": current_message})
 
         return messages
 
     def build_lore_text(
         self,
         history_dicts: List[Dict[str, str]],
-        current_message: str,
     ) -> Dict[str, List[str]]:
         """扫描文本并返回按位置分类的世界书内容
 
         history_dicts 的 content 字段应为原始内容（无格式化前缀），
-        世界书关键词扫描依赖纯净文本。
+        世界书关键词扫描依赖纯净文本。末尾条目即为当前用户消息。
+        扫描是顺序无关的（集合语义，命中关键词即止）。
 
         返回结构为 {"before_char": [...], "after_char": [...]}，
         即使目前 LoreEntry 没有 position 字段，也为后续扩展留接口。
@@ -103,7 +99,7 @@ class ContextBuilder:
         if not self.character or not self.character.character_book:
             return sections
 
-        texts_to_scan = [current_message] if current_message is not None else []
+        texts_to_scan = []
         for msg in history_dicts:
             texts_to_scan.append(msg.get("content", ""))
 
@@ -355,7 +351,7 @@ class ContextBuilder:
             user_profile=user_profile,
             diary_context=diary_context,
             warmth_label=warmth_label,
-            lore_sections=lore_sections or self.build_lore_text(short_term_history, ""),
+            lore_sections=lore_sections or self.build_lore_text(short_term_history),
         )
         # short_term_history 已由调用方格式化并截断（truncated），直接统计即可
         formatted_chars = sum(len(msg.get("content", "")) for msg in short_term_history)

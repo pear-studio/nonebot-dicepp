@@ -38,8 +38,10 @@ class TestContextBuilderCharacterBook:
         profile = UserProfile(user_id="u1", facts={"name": "小明"})
         messages = builder.build(
             formatted_history=[{"role": "user", "content": "墨墨今天吃了什么？"}],
-            history_dicts=[{"role": "user", "content": "墨墨今天吃了什么？"}],
-            current_message="墨墨在睡觉",
+            history_dicts=[
+                {"role": "user", "content": "墨墨今天吃了什么？"},
+                {"role": "user", "content": "墨墨在睡觉"},
+            ],
             user_profile=profile,
         )
         system_content = messages[0]["content"]
@@ -54,8 +56,10 @@ class TestContextBuilderCharacterBook:
         builder = ContextBuilder(char, lore_token_budget=300)
         messages = builder.build(
             formatted_history=[{"role": "user", "content": "今天又在加班"}],
-            history_dicts=[{"role": "user", "content": "今天又在加班"}],
-            current_message="好累啊",
+            history_dicts=[
+                {"role": "user", "content": "今天又在加班"},
+                {"role": "user", "content": "好累啊"},
+            ],
             diary_context="今天写了日记",
         )
         system_content = messages[0]["content"]
@@ -70,8 +74,7 @@ class TestContextBuilderCharacterBook:
         builder = ContextBuilder(char, lore_token_budget=300)
         messages = builder.build(
             formatted_history=[],
-            history_dicts=[],
-            current_message="今天天气不错",
+            history_dicts=[{"role": "user", "content": "今天天气不错"}],
         )
         system_content = messages[0]["content"]
         assert "【世界书】" not in system_content
@@ -88,8 +91,8 @@ class TestContextBuilderCharacterBook:
             history_dicts=[
                 {"role": "user", "content": "墨墨好可爱"},
                 {"role": "assistant", "content": "橘猫确实很可爱"},
+                {"role": "user", "content": "墨墨在睡觉"},
             ],
-            current_message="墨墨在睡觉",
         )
         system_content = messages[0]["content"]
         assert system_content.count("苏晓的猫叫墨墨。") == 1
@@ -102,8 +105,7 @@ class TestContextBuilderCharacterBook:
         builder = ContextBuilder(char, lore_token_budget=30)
         messages = builder.build(
             formatted_history=[],
-            history_dicts=[],
-            current_message="a and b",
+            history_dicts=[{"role": "user", "content": "a and b"}],
         )
         system_content = messages[0]["content"]
         assert "【世界书】" in system_content
@@ -118,8 +120,7 @@ class TestContextBuilderCharacterBook:
         builder = ContextBuilder(char, lore_token_budget=300)
         messages = builder.build(
             formatted_history=[],
-            history_dicts=[],
-            current_message="出版社和猫",
+            history_dicts=[{"role": "user", "content": "出版社和猫"}],
         )
         system_content = messages[0]["content"]
         assert "【世界书】\n- 出版社在中关村。\n- 苏晓的猫叫墨墨。" in system_content
@@ -132,8 +133,7 @@ class TestContextBuilderCharacterBook:
         builder = ContextBuilder(char, lore_token_budget=10)
         messages = builder.build(
             formatted_history=[],
-            history_dicts=[],
-            current_message="a and b",
+            history_dicts=[{"role": "user", "content": "a and b"}],
         )
         system_content = messages[0]["content"]
         assert "【世界书】" in system_content
@@ -149,8 +149,7 @@ class TestContextBuilderCharacterBook:
         builder = ContextBuilder(char, lore_token_budget=50)
         messages = builder.build(
             formatted_history=[],
-            history_dicts=[],
-            current_message="a b c",
+            history_dicts=[{"role": "user", "content": "a b c"}],
         )
         system_content = messages[0]["content"]
         assert "x" * 20 in system_content
@@ -165,8 +164,10 @@ class TestContextBuilderCharacterBook:
         builder = ContextBuilder(char, lore_token_budget=300)
         messages = builder.build(
             formatted_history=[{"role": "user", "content": "[14:30] 墨墨今天吃了什么？"}],
-            history_dicts=[{"role": "user", "content": "墨墨今天吃了什么？"}],
-            current_message="墨墨在睡觉",
+            history_dicts=[
+                {"role": "user", "content": "墨墨今天吃了什么？"},
+                {"role": "user", "content": "墨墨在睡觉"},
+            ],
         )
         system_content = messages[0]["content"]
         assert "苏晓的猫叫墨墨。" in system_content
@@ -396,13 +397,12 @@ class TestBuildMessageStructure:
     def test_system_message_first(self):
         builder = ContextBuilder(self._make_character())
         messages = builder.build(
-            formatted_history=[],
-            history_dicts=[],
-            current_message="你好",
+            formatted_history=[{"role": "user", "content": "[14:00] 你好"}],
+            history_dicts=[{"role": "user", "content": "你好"}],
         )
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
-        assert messages[1]["content"] == "你好"
+        assert "你好" in messages[1]["content"]
 
     def test_no_short_term_text_in_system(self):
         """system 消息中不含"近期对话"文本块"""
@@ -411,12 +411,13 @@ class TestBuildMessageStructure:
             formatted_history=[
                 {"role": "user", "content": "[14:30] 你好"},
                 {"role": "assistant", "content": "[14:31] 你好呀"},
+                {"role": "user", "content": "[14:32] 新消息"},
             ],
             history_dicts=[
                 {"role": "user", "content": "你好"},
                 {"role": "assistant", "content": "你好呀"},
+                {"role": "user", "content": "新消息"},
             ],
-            current_message="新消息",
         )
         system_content = messages[0]["content"]
         assert "近期对话" not in system_content
@@ -428,36 +429,25 @@ class TestBuildMessageStructure:
             formatted_history=[
                 {"role": "user", "content": "[14:30] 你好"},
                 {"role": "assistant", "content": "[14:31] 你好呀"},
+                {"role": "user", "content": "[14:32] 新消息"},
             ],
             history_dicts=[
                 {"role": "user", "content": "你好"},
                 {"role": "assistant", "content": "你好呀"},
+                {"role": "user", "content": "新消息"},
             ],
-            current_message="新消息",
         )
         assert len(messages) == 4
         assert messages[0]["role"] == "system"
         assert messages[1] == {"role": "user", "content": "[14:30] 你好"}
         assert messages[2] == {"role": "assistant", "content": "[14:31] 你好呀"}
-        assert messages[3] == {"role": "user", "content": "新消息"}
+        assert messages[3] == {"role": "user", "content": "[14:32] 新消息"}
 
-    def test_current_message_no_timestamp(self):
-        """当前消息不含时间戳前缀"""
+    def test_system_plus_single_history_entry(self):
         builder = ContextBuilder(self._make_character())
         messages = builder.build(
-            formatted_history=[],
-            history_dicts=[],
-            current_message="你好",
-        )
-        assert messages[-1]["content"] == "你好"
-        assert not messages[-1]["content"].startswith("[")
-
-    def test_empty_history_only_system_and_current(self):
-        builder = ContextBuilder(self._make_character())
-        messages = builder.build(
-            formatted_history=[],
-            history_dicts=[],
-            current_message="你好",
+            formatted_history=[{"role": "user", "content": "[14:00] 你好"}],
+            history_dicts=[{"role": "user", "content": "你好"}],
         )
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
@@ -520,7 +510,7 @@ class TestBuildDebugInfo:
             {"role": "user", "content": "[14:30] hi"},
         ]
         info = builder.build_debug_info(short_term_history=history)
-        assert info["returned_message_count"] == 2  # 1 history + 1 current
+        assert info["returned_message_count"] == 1 + len(history)  # 1 system + N history
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -541,7 +531,10 @@ class TestContextBuilderSegmentGuide:
                 enabled=True, target_chars=30, max_chars=80, soft_limit=100, hard_limit=120
             ),
         )
-        messages = builder.build(formatted_history=[], history_dicts=[], current_message="hi")
+        messages = builder.build(
+            formatted_history=[{"role": "user", "content": "[14:00] hi"}],
+            history_dicts=[{"role": "user", "content": "hi"}],
+        )
         system = messages[0]["content"]
         assert "send_reply_segment" in system
         assert "30" in system
@@ -562,7 +555,10 @@ class TestContextBuilderSegmentGuide:
                 enabled=True, target_chars=50, max_chars=100, soft_limit=200, hard_limit=250
             ),
         )
-        messages = builder.build(formatted_history=[], history_dicts=[], current_message="hi")
+        messages = builder.build(
+            formatted_history=[{"role": "user", "content": "[14:00] hi"}],
+            history_dicts=[{"role": "user", "content": "hi"}],
+        )
         system = messages[0]["content"]
         assert "50" in system
         assert "100" in system
@@ -578,7 +574,10 @@ class TestContextBuilderSegmentGuide:
                 enabled=True, target_chars=30, max_chars=80, soft_limit=100, hard_limit=120
             ),
         )
-        messages = builder.build(formatted_history=[], history_dicts=[], current_message="hi")
+        messages = builder.build(
+            formatted_history=[{"role": "user", "content": "[14:00] hi"}],
+            history_dicts=[{"role": "user", "content": "hi"}],
+        )
         system = messages[0]["content"]
         name_idx = system.index("苏晓")
         guide_idx = system.index("【回复规则】")
@@ -588,7 +587,10 @@ class TestContextBuilderSegmentGuide:
     def test_segment_guide_disabled_when_segment_enabled_false(self):
         char = self._make_character()
         builder = ContextBuilder(char, segment_guide=None)
-        messages = builder.build(formatted_history=[], history_dicts=[], current_message="hi")
+        messages = builder.build(
+            formatted_history=[{"role": "user", "content": "[14:00] hi"}],
+            history_dicts=[{"role": "user", "content": "hi"}],
+        )
         system = messages[0]["content"]
         assert "【回复规则】" not in system
 
