@@ -141,6 +141,11 @@ class PersonaConfig(BaseModel):
         default=3, ge=0, description="LLM 不调用 send_reply_segment 时最大纠正注入次数"
     )
 
+    image_gen_style: str = Field(
+        default="anime style, high quality, clean lines",
+        description="全局默认画风描述，注入到 generate_image prompt 前缀。角色卡配置 image_gen_style 时优先使用角色卡的。",
+    )
+
     @model_validator(mode="before")
     @classmethod
     def _reject_legacy_format(cls, data):

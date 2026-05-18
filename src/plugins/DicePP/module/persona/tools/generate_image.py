@@ -8,36 +8,69 @@ from .context import ToolContext
 from .registry import ToolDef
 
 
-GENERATE_IMAGE_TOOL = ToolDef(
-    name="generate_image",
-    description="根据文字描述生成图片，返回图片 URL。适合角色想要展示某个场景、物品或形象时调用。",
-    parameters={
-        "type": "object",
-        "properties": {
-            "prompt": {
-                "type": "string",
-                "description": "图片描述（英文为佳），详细描述画面内容、风格、构图等",
+def make_generate_image_tool_def(
+    base_style: str = "",
+    character_appearance: str = "",
+) -> ToolDef:
+    """构造 generate_image 工具定义，注入当前画风和角色外貌提示。"""
+    desc = "根据文字描述生成图片，返回图片 URL。适合角色想要展示某个场景、物品或形象时调用。"
+
+    if character_appearance:
+        desc += (
+            f" 当前角色外貌已设定为「{character_appearance}」，"
+            f"请勿在 prompt 中重复描述角色外貌，专注描述场景、动作、构图、氛围等。"
+            f"可使用 <SELF_APPEARANCE> 占位符在 prompt 中精确控制外貌描述的位置。"
+        )
+    if base_style:
+        desc += f" 当前画风为「{base_style}」，已自动注入，无需在 prompt 中指定画风。"
+
+    return ToolDef(
+        name="generate_image",
+        description=desc,
+        parameters={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "图片描述（英文为佳），详细描述画面内容、风格、构图等",
+                },
             },
+            "required": ["prompt"],
         },
-        "required": ["prompt"],
-    },
-)
+    )
+
 
 _GEN_TIMEOUT = 120
 
 
-def make_generate_image_executor(get_gen_provider, handle_model_error=None):
+def make_generate_image_executor(
+    get_gen_provider,
+    handle_model_error=None,
+    *,
+    base_style: str = "",
+    character_appearance: str = "",
+):
     """创建 generate_image 工具 executor（闭包注入 router 依赖）。
 
     Args:
         get_gen_provider: callable → Optional[ImageGenProvider]
         handle_model_error: callable(provider, error) → None（可选，用于熔断回写）
+        base_style: 画风前缀（角色卡优先，fallback 到全局配置）
+        character_appearance: 角色外貌描述（来自角色卡 image_gen_appearance）
     """
 
     async def _executor(args: dict, ctx: ToolContext) -> str:
         prompt = str(args.get("prompt", "")).strip()
         if not prompt:
             return "图片生成失败：未提供 prompt 描述。"
+
+        # 1. 替换 <SELF_APPEARANCE> 占位符
+        if character_appearance:
+            prompt = prompt.replace("<SELF_APPEARANCE>", character_appearance)
+
+        # 2. 拼接画风前缀
+        if base_style:
+            prompt = f"{base_style}. {prompt}"
 
         gen_provider = get_gen_provider()
         if gen_provider is None:

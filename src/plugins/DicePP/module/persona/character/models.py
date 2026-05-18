@@ -48,6 +48,10 @@ class PersonaExtensions(BaseModel):
     # - []（空列表）：显式关闭门控，睡眠中也正常回复
     # - ["...", "..."]（非空列表）：使用自定义回复语
     sleep_messages: Optional[List[str]] = Field(default=None)
+    # 图片生成画风描述（可选），填写后覆盖全局 image_gen_style
+    image_gen_style: str = ""
+    # 图片生成角色稳定外貌描述，LLM 通过 <SELF_APPEARANCE> 占位符引用
+    image_gen_appearance: str = ""
 
     def generate_event_times(
         self,

@@ -24,16 +24,20 @@ def make_tool_def(
         name="send_reply_segment",
         description=(
             f"发送回复的一段内容。建议每段 {target_chars} 字，"
-            f"单段上限 {max_chars} 字。"
+            f"单段文本上限 {max_chars} 字。"
             f"若有多段，可多次调用本工具。"
+            f"可附带图片 URL（来自 generate_image 工具的返回结果）。"
         ),
         parameters={
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
-                    "minLength": 1,
-                    "description": "该段回复的文本内容",
+                    "description": "该段回复的文本内容（与 image_url 至少提供一个）",
+                },
+                "image_url": {
+                    "type": "string",
+                    "description": "图片 URL（来自 generate_image 返回的结果）。与 content 至少提供一个。",
                 },
                 "delay_before": {
                     "type": "number",
@@ -43,7 +47,6 @@ def make_tool_def(
                     "description": f"发送前等待秒数（0–{max_delay}）",
                 },
             },
-            "required": ["content"],
         },
     )
 
@@ -65,6 +68,7 @@ async def send_reply_segment_executor(args: Dict[str, Any], ctx: ToolContext) ->
     - dispatcher.notify(target_key, SegmentItem(...))
     """
     content: str = args.get("content", "")
+    image_url: str = args.get("image_url", "")
     delay_before: float = args.get("delay_before", DEFAULT_DELAY_BEFORE)
 
     state: Optional[SegmentBudgetState] = ctx.segment_state
@@ -73,9 +77,9 @@ async def send_reply_segment_executor(args: Dict[str, Any], ctx: ToolContext) ->
     if state is None or dispatcher is None:
         return _json_result(status="error", error="分段状态未初始化")
 
-    # 1. empty / whitespace-only
-    if content.strip() == "":
-        return _json_result(status="error", error="内容不能为空")
+    # 1. at least one of content or image_url
+    if content.strip() == "" and image_url.strip() == "":
+        return _json_result(status="error", error="content 和 image_url 至少需要提供一个")
 
     # 2. delay_before bounds
     if not (0 <= delay_before <= state.limits.max_delay):
@@ -84,7 +88,7 @@ async def send_reply_segment_executor(args: Dict[str, Any], ctx: ToolContext) ->
             error=f"delay_before 必须在 0–{state.limits.max_delay} 秒之间",
         )
 
-    # 3. per-segment char limit
+    # 3. per-segment char limit (text only; image CQ code overhead ignored)
     if len(content) > state.limits.max_chars:
         remaining = max(0, state.limits.soft_limit - state.total_chars)
         return _json_result(
@@ -123,6 +127,7 @@ async def send_reply_segment_executor(args: Dict[str, Any], ctx: ToolContext) ->
             delay_before=delay_before,
             user_id=ctx.user_id,
             group_id=ctx.group_id,
+            image_url=image_url,
         ),
     )
 

@@ -53,13 +53,13 @@ class TestValidation:
     async def test_empty_content_rejected(self, ctx):
         result = parse(await send_reply_segment_executor({"content": ""}, ctx))
         assert result["status"] == "error"
-        assert "不能为空" in result["error"]
+        assert "至少需要提供" in result["error"]
 
     @pytest.mark.asyncio
     async def test_whitespace_only_content_rejected(self, ctx):
         result = parse(await send_reply_segment_executor({"content": "   "}, ctx))
         assert result["status"] == "error"
-        assert "不能为空" in result["error"]
+        assert "至少需要提供" in result["error"]
 
     @pytest.mark.asyncio
     async def test_negative_delay_rejected(self, ctx):
@@ -148,10 +148,12 @@ class TestDispatch:
 
 
 class TestToolDef:
-    def test_schema_has_minlength(self):
+    def test_schema_has_image_url_param(self):
         schema = make_tool_def(target_chars=30, max_chars=80, max_delay=10.0)
         params = schema.parameters["properties"]
-        assert params["content"]["minLength"] == 1
+        assert "content" in params
+        assert "image_url" in params
+        assert "minLength" not in params["content"]
         assert params["delay_before"]["minimum"] == 0
         assert params["delay_before"]["maximum"] == 10.0
 

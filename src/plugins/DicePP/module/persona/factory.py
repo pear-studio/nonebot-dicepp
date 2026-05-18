@@ -42,6 +42,7 @@ from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
 from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_databases_executor
 from .tools.search_query import SEARCH_QUERY_TOOL, search_query_executor
 from .tools.suggest_action import SUGGEST_ACTION_TOOL, make_suggest_action_executor
+from .tools.generate_image import make_generate_image_tool_def, make_generate_image_executor
 
 from .chat.segment_dispatcher import SegmentDispatcher
 
@@ -431,6 +432,25 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
             ),
             send_reply_segment_executor,
         )
+
+    # ── generate_image 工具
+    base_style = (
+        character.extensions.image_gen_style
+        or config.image_gen_style
+    )
+    character_appearance = character.extensions.image_gen_appearance
+    gen_tool_def = make_generate_image_tool_def(
+        base_style=base_style,
+        character_appearance=character_appearance,
+    )
+    gen_executor = make_generate_image_executor(
+        get_gen_provider=router.get_gen_provider,
+        handle_model_error=router.handle_model_error,
+        base_style=base_style,
+        character_appearance=character_appearance,
+    )
+    tool_registry.register(ToolDomain.CHAT, gen_tool_def, gen_executor)
+
     logger.info("工具注册表与分段调度器已初始化")
 
     # ── Step 7: coordinator, decay_calculator

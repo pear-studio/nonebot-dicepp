@@ -29,6 +29,16 @@ class SegmentItem:
     delay_before: float
     user_id: str
     group_id: str = ""
+    image_url: str = ""
+
+
+def _build_msg(segment: SegmentItem) -> str:
+    parts: list[str] = []
+    if segment.image_url:
+        parts.append(f"[CQ:image,file={segment.image_url}]")
+    if segment.content.strip():
+        parts.append(segment.content)
+    return "\n".join(parts)
 
 
 class SegmentDispatcher:
@@ -163,7 +173,7 @@ class SegmentDispatcher:
                         await self._port.send(
                             segment.user_id,
                             segment.group_id,
-                            segment.content,
+                            _build_msg(segment),
                             skip_history_record=True,
                         )
                     except Exception:

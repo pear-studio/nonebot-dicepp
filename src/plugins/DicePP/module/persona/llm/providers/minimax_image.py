@@ -1,11 +1,26 @@
 """MiniMax Image Provider — 实现 ImageGenProvider 协议，封装 MiniMax image-01 API"""
 import asyncio
-import time
-from typing import Optional
 
+import httpx
 from nonebot.log import logger
 
 from .protocol import ImageGenProvider, ErrorClass
+
+_IMAGE_GEN_PATH = "/image_generation"
+_PROBE_PATH = "/chat/completions"
+_PROBE_TIMEOUT = 10
+
+# MiniMax base_resp 错误码映射 (参考 https://platform.minimaxi.com/docs/api-reference/image-generation-t2i)
+_NON_RETRYABLE_CODES = {
+    1000,  # 参数错误
+    1001,  # 模型不存在
+    1002,  # 权限不足
+    1004,  # 鉴权失败
+    1008,  # 账户余额不足
+    2013,  # 内容审核不通过
+    2056,  # 用量超限
+}
+# 2xxx 系列一般为业务/配额错误，1xxx 系列为请求/鉴权错误
 
 
 class MiniMaxImageProvider:
@@ -15,49 +30,104 @@ class MiniMaxImageProvider:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self._client = None
-
-    def _get_client(self):
-        if self._client is None:
-            try:
-                from openai import AsyncOpenAI
-                self._client = AsyncOpenAI(
-                    api_key=self.api_key,
-                    base_url=self.base_url,
-                )
-            except ImportError:
-                raise ImportError("openai package is required. Install with: pip install openai")
-        return self._client
+        self._image_url = f"{self.base_url}{_IMAGE_GEN_PATH}"
 
     async def generate_image(self, prompt: str, **kwargs) -> str:
         """调用 image-01 API 生图，返回图片 URL。"""
-        client = self._get_client()
-        size = kwargs.get("size", "1024x1024")
-        response = await asyncio.wait_for(
-            client.images.generate(
-                model=self.model,
-                prompt=prompt,
-                size=size,
-                n=1,
-            ),
-            timeout=kwargs.get("timeout", 120),
+        timeout = kwargs.get("timeout", 120)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(
+                    self._image_url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "prompt": prompt,
+                        "n": 1,
+                        "response_format": "url",
+                    },
+                )
+        except httpx.TimeoutException:
+            logger.warning(
+                f"image gen timeout: model={self.model} timeout={timeout}s"
+            )
+            raise asyncio.TimeoutError(f"image gen timeout ({timeout}s)")
+        except httpx.HTTPError as e:
+            logger.warning(
+                f"image gen HTTP transport error: model={self.model} error={e}"
+            )
+            raise RuntimeError(f"image gen HTTP error: {e}") from e
+
+        if resp.status_code != 200:
+            logger.warning(
+                f"image gen HTTP {resp.status_code}: model={self.model} "
+                f"body={resp.text[:300]}"
+            )
+            raise RuntimeError(
+                f"image gen HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+
+        body = resp.json()
+        base_resp = body.get("base_resp", {})
+        status_code = base_resp.get("status_code", -1)
+        if status_code != 0:
+            logger.warning(
+                f"image gen API error: model={self.model} "
+                f"code={status_code} msg={base_resp.get('status_msg', '')}"
+            )
+            raise RuntimeError(
+                f"image gen API error [{status_code}]: "
+                f"{base_resp.get('status_msg', 'unknown')}"
+            )
+
+        data = body.get("data")
+        if isinstance(data, list) and len(data) > 0:
+            url = data[0].get("url", "")
+        elif isinstance(data, dict):
+            # MiniMax 返回格式: {"image_urls": ["https://..."]}
+            urls = data.get("image_urls")
+            if isinstance(urls, list) and len(urls) > 0:
+                url = urls[0]
+            else:
+                url = data.get("url", "")
+        else:
+            url = ""
+
+        if not url:
+            logger.warning(
+                f"image gen empty result: model={self.model} "
+                f"data={str(data)[:200]}"
+            )
+            raise RuntimeError("MiniMax image-01 返回了空结果")
+
+        logger.info(
+            f"image gen success: model={self.model} "
+            f"prompt_len={len(prompt)} url={url[:80]}"
         )
-        if response.data and len(response.data) > 0:
-            url = response.data[0].url
-            if url:
-                return url
-        raise RuntimeError("MiniMax image-01 返回了空结果")
+        return url
 
     async def probe(self) -> bool:
-        """Health check: 通过轻量 API 调用验证可用性。"""
+        """Health check: 通过轻量 API 调用验证 API key 和端点连通性。"""
         try:
-            client = self._get_client()
-            await asyncio.wait_for(
-                client.models.list(),
-                timeout=10,
-            )
-            return True
-        except Exception:
+            async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
+                resp = await client.post(
+                    f"{self.base_url}{_PROBE_PATH}",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "gpt-3.5-turbo",
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 1,
+                    },
+                )
+                return resp.status_code in (200, 400, 401, 403, 404, 422)
+        except Exception as e:
+            logger.debug(f"image gen probe failed: {e}")
             return False
 
     @staticmethod
@@ -65,4 +135,8 @@ class MiniMaxImageProvider:
         error_msg = str(exception).lower()
         if any(k in error_msg for k in ("authentication", "unauthorized", "401", "403")):
             return ErrorClass.NON_RETRYABLE
+        # MiniMax 特定错误码（格式: "[2056]"）
+        for code in _NON_RETRYABLE_CODES:
+            if f"[{code}]" in error_msg:
+                return ErrorClass.NON_RETRYABLE
         return ErrorClass.RETRYABLE
