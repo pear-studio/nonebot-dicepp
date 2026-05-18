@@ -6,7 +6,6 @@ Persona 模块数据模型
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from enum import Enum
 from nonebot.log import logger
 
 from core.message_types import MessageType  # noqa: F401 — re-export from central location
@@ -16,12 +15,6 @@ from core.message_types import MessageType  # noqa: F401 — re-export from cent
 STAGE_FLOORS = [0.0, 20.0, 40.0, 60.0, 80.0]
 
 DEFAULT_WARMTH_LABELS = ["冷淡", "疏远", "友好", "默契", "亲密"]
-
-
-class ModelTier(str, Enum):
-    """模型层级"""
-    PRIMARY = "primary"      # 主模型（贵，用于对话）
-    AUXILIARY = "auxiliary"  # 辅助模型（便宜，用于评分/摘要）
 
 
 class ScoreDeltas(BaseModel):
@@ -257,6 +250,10 @@ class LLMTraceRecord(BaseModel):
     response: str
     tool_calls: str = ""  # JSON
     round_messages: str = ""  # JSON — 结构化轮次摘要
+    selected_provider: str = ""
+    selected_model: str = ""
+    selection_policy: str = ""
+    candidate_count: int = 0
     latency_ms: Optional[int] = None
     tokens_in: int = 0
     tokens_out: int = 0

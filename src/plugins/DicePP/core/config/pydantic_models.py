@@ -6,28 +6,61 @@ Config is loaded hierarchically by ConfigLoader:
   global defaults < global secrets < persona < account overrides < env vars
 """
 import logging
-from typing import List
+from typing import List, Literal, Optional, Dict
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
 
+class CircuitBreakerConfig(BaseModel):
+    failure_threshold: int = Field(default=3, ge=1, description="连续失败 N 次后 disabled")
+    probe_interval_seconds: int = Field(default=300, ge=10, description="disabled 模型放行探测的间隔（秒）")
+
+
+class ModelConfig(BaseModel):
+    name: str
+    category: Literal["llm", "gen"]
+    capabilities: List[str]
+    quality: float = Field(default=0.5, ge=0.0, le=1.0)
+    cost: float = Field(default=0.5, ge=0.0, le=1.0)
+    circuit_breaker: Optional[CircuitBreakerConfig] = None
+
+    @model_validator(mode="after")
+    def _validate_category_capabilities(self) -> "ModelConfig":
+        if self.category == "llm" and "text" not in self.capabilities:
+            raise ValueError(
+                f"llm 模型 '{self.name}' 必须包含 'text' capability，"
+                f"当前 capabilities={self.capabilities}。"
+                f"请检查 persona_ai.providers.<name>.models[*] 配置。"
+            )
+        if self.category == "gen":
+            non_text = [c for c in self.capabilities if c != "text"]
+            if not non_text:
+                raise ValueError(
+                    f"gen 模型 '{self.name}' 必须包含至少一个非 'text' capability，"
+                    f"当前 capabilities={self.capabilities}。"
+                    f"请检查 persona_ai.providers.<name>.models[*] 配置。"
+                )
+        return self
+
+
+class ProviderConfig(BaseModel):
+    api_key: str
+    base_url: str
+    models: List[ModelConfig]
+    max_concurrent: Optional[int] = Field(default=None, ge=1)
+
+
 class PersonaConfig(BaseModel):
     enabled: bool = False
     character_name: str = "default"
     character_path: str = "./content/characters"
-    
+
     whitelist_enabled: bool = True
-    
-    primary_api_key: str = ""
-    primary_base_url: str = "https://api.openai.com/v1"
-    primary_model: str = "gpt-4o"
-    
-    auxiliary_api_key: str = ""        # 留空时复用 primary_api_key
-    auxiliary_base_url: str = ""       # 留空时复用 primary_base_url
-    auxiliary_model: str = "gpt-4o-mini"
-    
+
+    providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
+
     max_concurrent_requests: int = 2
     chat_llm_timeout_seconds: int = Field(
         default=30,
@@ -107,6 +140,29 @@ class PersonaConfig(BaseModel):
     segment_round_callbacks_max: int = Field(
         default=3, ge=0, description="LLM 不调用 send_reply_segment 时最大纠正注入次数"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_format(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)  # 浅拷贝，避免修改调用方持有的原始 dict
+        legacy_fields = ["primary_api_key", "primary_base_url", "primary_model",
+                         "auxiliary_api_key", "auxiliary_base_url", "auxiliary_model"]
+        found = [f for f in legacy_fields if f in data]
+        # 如果同时有 providers，说明已在迁移中，允许旧字段存在（global.json 中可能残留）
+        if found and "providers" not in data:
+            raise ValueError(
+                f"检测到旧版配置字段: {found}。"
+                f"Persona AI 配置格式已升级，请使用新的 providers 结构。"
+                f"参考路径: persona_ai.providers.<name>.api_key / .base_url / .models[*].name 等。"
+                f"详细文档请参阅 CHANGELOG。"
+            )
+        elif found and "providers" in data:
+            # 迁移过渡期：从 data 中清除旧字段，避免 pydantic 报未知字段
+            for f in found:
+                data.pop(f, None)
+        return data
 
     @model_validator(mode="after")
     def _validate_segment_limits(self) -> "PersonaConfig":

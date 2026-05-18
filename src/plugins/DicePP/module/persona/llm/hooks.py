@@ -60,9 +60,6 @@ class QuotaHook:
         if not self.data_store:
             return False
         try:
-            user_config = await self.data_store.get_user_llm_config(user_id)
-            if user_config and user_config.primary_api_key:
-                return True
             if self.config and self.config.whitelist_enabled:
                 if await self.data_store.is_user_whitelisted(user_id):
                     return True
@@ -155,6 +152,10 @@ class TraceHook:
             response=metadata.get("content", ""),
             tool_calls=tool_calls_json,
             round_messages=round_json,
+            selected_provider=metadata.get("provider_name", ""),
+            selected_model=metadata.get("model_name", ""),
+            selection_policy=metadata.get("selection_policy", ""),
+            candidate_count=metadata.get("candidate_count", 0),
             latency_ms=metadata.get("latency_ms", 0),
             tokens_in=metadata.get("tokens_input", 0),
             tokens_out=metadata.get("tokens_output", 0),

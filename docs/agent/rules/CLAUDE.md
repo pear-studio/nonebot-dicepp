@@ -93,12 +93,16 @@ uv run python bot.py
 
 ## Persona AI 测试 key
 
-开发分支测试 persona 模块时，直接在 `config/secrets.json` 的 `persona_ai.primary_api_key` 字段填入测试 API Key（复用已有配置字段，不新增配置项）。
+开发分支测试 persona 模块时，在 `config/secrets.json` 的 `persona_ai.providers.<name>.api_key` 字段填入测试 API Key。
 
 ```json
 {
   "persona_ai": {
-    "primary_api_key": "sk-test-xxx"
+    "providers": {
+      "minimax": {
+        "api_key": "sk-test-xxx"
+      }
+    }
   }
 }
 ```

@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Callable, Any, Awaitable, TypeVar, Generic, List, Literal
 import asyncio
 from nonebot.log import logger
-from .router import QuotaExceeded, NonRetryableError
+from .router import QuotaExceeded
+from .providers.protocol import NonRetryableError
 
 
 NON_RETRYABLE_EXCEPTIONS = (QuotaExceeded, NonRetryableError)

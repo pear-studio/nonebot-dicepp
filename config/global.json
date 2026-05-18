@@ -88,11 +88,15 @@
     "proactive_coordinator_max_failures": 3,
     "proactive_coordinator_max_iterations": 5,
 
-    "primary_base_url": "https://api.minimaxi.com/v1",
-    "primary_model": "MiniMax-M2.7",
-    "auxiliary_api_key": "",
-    "auxiliary_base_url": "",
-    "auxiliary_model": "MiniMax-M2.7",
+    "providers": {
+      "minimax": {
+        "api_key": "",
+        "base_url": "https://api.minimaxi.com/v1",
+        "models": [
+          {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
+        ]
+      }
+    },
 
     "max_concurrent_requests": 2,
     "chat_llm_timeout_seconds": 30,

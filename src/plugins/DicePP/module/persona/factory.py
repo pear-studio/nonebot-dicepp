@@ -2,6 +2,7 @@
 
 负责从 Bot 组装所有依赖，创建 ChatSession / LifeSimulator / MessagePort。
 """
+import asyncio
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from nonebot.log import logger
@@ -41,6 +42,7 @@ from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
 from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_databases_executor
 from .tools.search_query import SEARCH_QUERY_TOOL, search_query_executor
 from .tools.suggest_action import SUGGEST_ACTION_TOOL, make_suggest_action_executor
+
 from .chat.segment_dispatcher import SegmentDispatcher
 
 
@@ -53,6 +55,7 @@ class PersonaApp:
     store: PersonaDataStore
     port: MessagePort
     segment_dispatcher: Optional[SegmentDispatcher] = None
+    all_providers_disabled: bool = False
 
     # ── 角色卡 ────────────────────────────────────────────────
 
@@ -98,9 +101,9 @@ class PersonaApp:
         router = self.chat.router
         return router.get_stats() if router else {}
 
-    def get_router_latency_percentiles(self, tier: str) -> Dict[str, float]:
+    def get_router_latency_percentiles(self, provider_name: str) -> Dict[str, float]:
         router = self.chat.router
-        return router.get_latency_percentiles(tier) if router else {}
+        return router.get_latency_percentiles(provider_name) if router else {}
 
     # ── 调度器 ────────────────────────────────────────────────
 
@@ -181,13 +184,8 @@ async def _build_store(bot: Bot, config) -> PersonaDataStore:
 def _build_router(config, store: PersonaDataStore) -> LLMRouter:
     """初始化 LLM 路由器（依赖 store 做配额检查）"""
     llm_router = LLMRouter(
-        primary_api_key=config.primary_api_key,
-        primary_base_url=config.primary_base_url,
-        primary_model=config.primary_model,
-        auxiliary_api_key=config.auxiliary_api_key,
-        auxiliary_base_url=config.auxiliary_base_url,
-        auxiliary_model=config.auxiliary_model,
-        max_concurrent=config.max_concurrent_requests,
+        providers=config.providers,
+        global_max_concurrent=config.max_concurrent_requests,
         timeout=config.chat_llm_timeout_seconds,
         daily_limit=config.daily_limit,
         quota_check_enabled=config.quota_check_enabled,
@@ -343,7 +341,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
 
     Raises:
         PersonaCharacterLoadError: 角色卡加载失败。
-        PersonaConfigError: 必填配置（如 ``primary_api_key``）缺失。
+        PersonaConfigError: 必填配置（如 ``providers``）缺失。
         PersonaStorageError: 数据库句柄不可用。
     """
     config = bot.config.persona_ai
@@ -353,9 +351,12 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
 
     character = _load_character(config)
 
-    # API Key 前置检查（在 store 初始化之前，保持异常契约）
-    if not config.primary_api_key:
-        raise PersonaConfigError("未配置主模型 API Key (persona_ai.primary_api_key)")
+    # Providers 前置检查
+    if not config.providers:
+        raise PersonaConfigError(
+            "未配置任何 LLM 提供者 (persona_ai.providers)。"
+            "请参考新格式: persona_ai.providers.<name>.api_key / .base_url / .models[*]"
+        )
 
     # ── Step 1: 基础设施 (store, router, port)
     store = await _build_store(bot, config)
@@ -477,7 +478,22 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         event_share_queue=event_share_queue,
     )
 
+    # 启动探针
+    try:
+        probe_results = await router.probe_all_models()
+    except Exception as e:
+        logger.error(f"启动探针异常: {e}")
+        probe_results = {}
+    all_disabled = router.all_providers_disabled()
+    if all_disabled:
+        logger.warning("所有模型 probe 失败！Persona AI 功能将不可用")
+
+    # 启动后台探针任务
+    router.start_probe_task()
+
     logger.info("Persona 模块初始化完成")
     return PersonaApp(
-        chat=chat, life=life, store=store, port=port, segment_dispatcher=segment_dispatcher
+        chat=chat, life=life, store=store, port=port,
+        segment_dispatcher=segment_dispatcher,
+        all_providers_disabled=all_disabled,
     )

@@ -10,8 +10,8 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 from nonebot.log import logger
 
 from ..data.store import PersonaDataStore
-from ..data.models import ModelTier
 from ..llm.loop import AgentLoop
+from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
 from ..tools.registry import ToolRegistry, ToolDef
 
@@ -163,10 +163,15 @@ class ActionEvaluator:
             make_collecting_executor(collected_args),
         )
 
-        from ..llm.router import LLMRouter
+        from ..llm.router import LLMRouter, ServiceUnavailableError
+        try:
+            provider = await self._router.select_provider(SelectionPolicy.SCORING)
+        except ServiceUnavailableError:
+            logger.warning("[ActionEvaluator] 无可用 LLM provider")
+            return ("rejected", "无可用 LLM 服务")
         hooks = self._router.make_default_hooks()
         loop = AgentLoop(
-            provider=self._router.auxiliary_client,
+            provider=provider,
             tool_registry=tool_registry,
             hooks=hooks,
             max_tool_rounds=1,

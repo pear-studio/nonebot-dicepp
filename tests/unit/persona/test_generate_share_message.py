@@ -8,6 +8,7 @@ from plugins.DicePP.module.persona.life.event_agent import (
     EventGenerationAgent, ShareMessageContext,
 )
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
+from conftest import make_mock_provider
 
 
 def _resp(content="", tool_calls=None):
@@ -24,8 +25,7 @@ class MockConfig:
 @pytest.fixture
 def mock_router():
     router = MagicMock()
-    router.auxiliary_client = MagicMock()
-    router.auxiliary_client.generate = AsyncMock()
+    router.select_provider = AsyncMock(return_value=make_mock_provider())
     router.data_store = None
     router.quota_check_enabled = False
     router.daily_limit = 20
@@ -55,7 +55,7 @@ def base_context():
 
 @pytest.mark.asyncio
 async def test_generate_share_message_success(agent, mock_router, base_context):
-    mock_router.auxiliary_client.generate.return_value = _resp(
+    mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message",
                     arguments='{"message": "刚才在公园长椅上眯了一会儿，被鸽子踩醒了"}')])
 
@@ -65,7 +65,7 @@ async def test_generate_share_message_success(agent, mock_router, base_context):
 
 @pytest.mark.asyncio
 async def test_generate_share_message_strip_quotes(agent, mock_router, base_context):
-    mock_router.auxiliary_client.generate.return_value = _resp(
+    mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message",
                     arguments='{"message": "\\"带引号的消息\\""}')])
 
@@ -76,7 +76,7 @@ async def test_generate_share_message_strip_quotes(agent, mock_router, base_cont
 @pytest.mark.asyncio
 async def test_generate_share_message_truncate_long(agent, mock_router, base_context):
     long_msg = "哈" * 300
-    mock_router.auxiliary_client.generate.return_value = _resp(
+    mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message",
                     arguments=f'{{"message": "{long_msg}"}}')])
 
@@ -87,14 +87,14 @@ async def test_generate_share_message_truncate_long(agent, mock_router, base_con
 
 @pytest.mark.asyncio
 async def test_generate_share_message_llm_error_returns_none(agent, mock_router, base_context):
-    mock_router.auxiliary_client.generate.side_effect = Exception("LLM 错误")
+    mock_router.select_provider.return_value.generate.side_effect = Exception("LLM 错误")
     result = await agent.generate_share_message(base_context)
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_generate_share_message_empty_message(agent, mock_router, base_context):
-    mock_router.auxiliary_client.generate.return_value = _resp(
+    mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message", arguments='{"message": ""}')])
 
     result = await agent.generate_share_message(base_context)
@@ -103,19 +103,19 @@ async def test_generate_share_message_empty_message(agent, mock_router, base_con
 
 @pytest.mark.asyncio
 async def test_generate_share_message_no_collected(agent, mock_router, base_context):
-    mock_router.auxiliary_client.generate.return_value = _resp(content="text without tool")
+    mock_router.select_provider.return_value.generate.return_value = _resp(content="text without tool")
     result = await agent.generate_share_message(base_context)
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_generate_share_message_few_shot_default(agent, mock_router, base_context):
-    mock_router.auxiliary_client.generate.return_value = _resp(
+    mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message", arguments='{"message": "测试消息"}')])
 
     await agent.generate_share_message(base_context)
-    assert mock_router.auxiliary_client.generate.called
-    call_kwargs = mock_router.auxiliary_client.generate.call_args.kwargs
+    assert mock_router.select_provider.return_value.generate.called
+    call_kwargs = mock_router.select_provider.return_value.generate.call_args.kwargs
     msgs = call_kwargs["messages"]
     system_prompt = msgs[0]["content"]
     assert "示例:" in system_prompt
@@ -126,11 +126,11 @@ async def test_generate_share_message_few_shot_default(agent, mock_router, base_
 @pytest.mark.asyncio
 async def test_generate_share_message_few_shot_empty_list(agent, mock_router, base_context):
     base_context.share_message_examples = []
-    mock_router.auxiliary_client.generate.return_value = _resp(
+    mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message", arguments='{"message": "测试消息"}')])
 
     await agent.generate_share_message(base_context)
-    call_kwargs = mock_router.auxiliary_client.generate.call_args.kwargs
+    call_kwargs = mock_router.select_provider.return_value.generate.call_args.kwargs
     system_prompt = call_kwargs["messages"][0]["content"]
     assert "示例:" not in system_prompt
 
@@ -138,18 +138,18 @@ async def test_generate_share_message_few_shot_empty_list(agent, mock_router, ba
 @pytest.mark.asyncio
 async def test_generate_share_message_few_shot_custom(agent, mock_router, base_context):
     base_context.share_message_examples = ["场景：下雨了\n消息：\"下雨了，记得带伞\"\n→ 好示例"]
-    mock_router.auxiliary_client.generate.return_value = _resp(
+    mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message", arguments='{"message": "测试消息"}')])
 
     await agent.generate_share_message(base_context)
-    system_prompt = mock_router.auxiliary_client.generate.call_args.kwargs["messages"][0]["content"]
+    system_prompt = mock_router.select_provider.return_value.generate.call_args.kwargs["messages"][0]["content"]
     assert "下雨了" in system_prompt
 
 
 @pytest.mark.asyncio
 async def test_generate_share_message_no_config_fallback(agent, mock_router, base_context):
     agent_no_config = EventGenerationAgent(mock_router)
-    mock_router.auxiliary_client.generate.return_value = _resp(
+    mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message", arguments='{"message": "默认行为"}')])
 
     result = await agent_no_config.generate_share_message(base_context)

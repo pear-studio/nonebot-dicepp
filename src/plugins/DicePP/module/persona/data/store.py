@@ -87,6 +87,7 @@ class PersonaDataStore:
         await self._ensure_daily_events_context_summary()
         await self._ensure_scoring_failures_table()
         await self._ensure_llm_traces_round_messages()
+        await self._ensure_llm_traces_routing_fields()
         await self._ensure_relationship_unified()
 
     async def _ensure_group_activity_daily_columns(self) -> None:
@@ -248,6 +249,22 @@ class PersonaDataStore:
             await self.db.execute(
                 "ALTER TABLE persona_llm_traces ADD COLUMN round_messages TEXT DEFAULT ''"
             )
+
+    async def _ensure_llm_traces_routing_fields(self) -> None:
+        """为 LLM trace 表增加路由决策 4 字段（兼容旧库升级）。"""
+        async with self.db.execute("PRAGMA table_info(persona_llm_traces)") as cursor:
+            rows = await cursor.fetchall()
+        col_names = {r[1] for r in rows}
+        for col, col_type in [
+            ("selected_provider", "TEXT DEFAULT ''"),
+            ("selected_model", "TEXT DEFAULT ''"),
+            ("selection_policy", "TEXT DEFAULT ''"),
+            ("candidate_count", "INTEGER DEFAULT 0"),
+        ]:
+            if col not in col_names:
+                await self.db.execute(
+                    f"ALTER TABLE persona_llm_traces ADD COLUMN {col} {col_type}"
+                )
 
     async def _ensure_relationship_unified(self) -> None:
         """将 persona_user_relationships 从 (user_id, group_id) 迁移到 user_id 主键。
@@ -695,9 +712,11 @@ class PersonaDataStore:
             """
             INSERT INTO persona_llm_traces (
                 session_id, user_id, group_id, model, tier,
-                messages, response, tool_calls, round_messages, latency_ms,
+                messages, response, tool_calls, round_messages,
+                selected_provider, selected_model, selection_policy, candidate_count,
+                latency_ms,
                 tokens_in, tokens_out, temperature, status, error, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trace.session_id,
@@ -709,6 +728,10 @@ class PersonaDataStore:
                 trace.response,
                 trace.tool_calls,
                 trace.round_messages,
+                trace.selected_provider,
+                trace.selected_model,
+                trace.selection_policy,
+                trace.candidate_count,
                 trace.latency_ms,
                 trace.tokens_in,
                 trace.tokens_out,
@@ -728,7 +751,9 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT id, session_id, user_id, group_id, model, tier,
-                   messages, response, tool_calls, round_messages, latency_ms,
+                   messages, response, tool_calls, round_messages,
+                   selected_provider, selected_model, selection_policy, candidate_count,
+                   latency_ms,
                    tokens_in, tokens_out, temperature, status, error, created_at
             FROM persona_llm_traces
             WHERE user_id = ?
@@ -751,13 +776,17 @@ class PersonaDataStore:
                     response=row[7],
                     tool_calls=row[8] or "",
                     round_messages=row[9] or "",
-                    latency_ms=row[10],
-                    tokens_in=row[11] or 0,
-                    tokens_out=row[12] or 0,
-                    temperature=row[13],
-                    status=row[14],
-                    error=row[15] or "",
-                    created_at=datetime.fromisoformat(row[16]) if row[16] else None,
+                    selected_provider=row[10] or "",
+                    selected_model=row[11] or "",
+                    selection_policy=row[12] or "",
+                    candidate_count=row[13] or 0,
+                    latency_ms=row[14],
+                    tokens_in=row[15] or 0,
+                    tokens_out=row[16] or 0,
+                    temperature=row[17],
+                    status=row[18],
+                    error=row[19] or "",
+                    created_at=datetime.fromisoformat(row[20]) if row[20] else None,
                 ))
             return traces
 

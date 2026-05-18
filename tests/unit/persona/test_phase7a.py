@@ -4,6 +4,7 @@ import asyncio
 import tempfile
 import os
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 from module.persona.llm.router import LLMRouter
 from module.persona.llm.loop import AgentLoop
@@ -11,6 +12,7 @@ from module.persona.chat.context import ContextBuilder
 from module.persona.character.models import Character
 from module.persona.data.store import PersonaDataStore
 from module.persona.data.models import LLMTraceRecord
+from conftest import make_mock_providers
 
 
 @pytest.fixture
@@ -34,21 +36,23 @@ def test_classify_error():
 
 
 def test_latency_percentiles_empty():
-    router = LLMRouter("fake", "http://localhost", "fake", max_concurrent=1)
-    p = router.get_latency_percentiles("primary")
+    router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
+    p = router.get_latency_percentiles("fake")
     assert p["p50"] == 0.0
     assert p["p90"] == 0.0
     assert p["p99"] == 0.0
 
 
 def test_latency_percentiles_per_tier():
-    router = LLMRouter("fake", "http://localhost", "fake", max_concurrent=1)
+    router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
     for v in [100, 200, 300, 400, 500]:
-        router._latency_window["primary"].append(v)
+        router._latency_window["fake"].append(v)
+    from collections import deque as _deque
+    router._latency_window["fake2"] = _deque(maxlen=100)
     for v in [50, 60, 70]:
-        router._latency_window["auxiliary"].append(v)
-    pp = router.get_latency_percentiles("primary")
-    ap = router.get_latency_percentiles("auxiliary")
+        router._latency_window["fake2"].append(v)
+    pp = router.get_latency_percentiles("fake")
+    ap = router.get_latency_percentiles("fake2")
     assert pp["p50"] == 300.0
     assert ap["p50"] == 60.0
 

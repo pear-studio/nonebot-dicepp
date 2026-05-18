@@ -82,6 +82,7 @@ class AdminDispatcher:
             ".ai admin today - 查看今天的事件和日记\n"
             ".ai admin yesterday - 查看昨天的事件和日记\n"
             ".ai admin diary - 查看今天的事件和日记\n"
+            ".ai admin probe reset <provider>/<model> - 重置 exhausted 模型\n"
             ".ai admin pause - 暂停主动消息\n"
             ".ai admin resume - 恢复主动消息"
         )
@@ -361,6 +362,31 @@ class AdminDispatcher:
             return "已恢复主动消息发送"
         return "调度器未初始化"
 
+    async def _admin_probe(self, user_id: str, group_id: str, args: List[str]) -> str:
+        if not self._is_admin(user_id):
+            return "权限不足"
+        if len(args) < 2:
+            return "用法: .ai admin probe reset <provider>/<model>"
+        if args[1] != "reset":
+            return f"未知的 probe 子命令: {args[1]}"
+        if len(args) < 3:
+            return "请指定模型: .ai admin probe reset <provider>/<model>"
+
+        model_ref = args[2]
+        if "/" not in model_ref:
+            return f"格式错误，请使用 provider/model 格式（如 minimax/MiniMax-M2.7），实际: {model_ref}"
+        parts = model_ref.split("/", 1)
+        provider_name, model_name = parts[0], parts[1]
+
+        router = self.app.get_router() if self.app else None
+        if not router:
+            return "路由器未初始化"
+
+        ok = router.reset_provider_probe(provider_name, model_name)
+        if ok:
+            return f"模型 {provider_name}/{model_name} 已从 exhausted 重置为 disabled，恢复探针循环"
+        return f"模型 {provider_name}/{model_name} 不存在或未处于 exhausted 状态"
+
     async def _handle_admin_trace(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self._is_admin(user_id):
             return "权限不足"
@@ -379,7 +405,7 @@ class AdminDispatcher:
             latency_str = f"{t.latency_ms}ms" if t.latency_ms is not None else "N/A"
             resp_preview = t.response[:200] + "..." if len(t.response) > 200 else t.response
             lines.append(
-                f"\n[{i}] {t.created_at} | model={t.model} tier={t.tier} "
+                f"\n[{i}] {t.created_at} | model={t.model} provider={t.selected_provider}/{t.selected_model} "
                 f"latency={latency_str} status={t.status}\n"
                 f"response: {resp_preview}"
             )
@@ -411,8 +437,6 @@ class AdminDispatcher:
         if not self.app.get_router():
             return "模块未初始化"
         stats = self.app.get_router_stats()
-        p_percentiles = self.app.get_router_latency_percentiles("primary")
-        a_percentiles = self.app.get_router_latency_percentiles("auxiliary")
 
         token_in_total: Optional[int] = None
         token_out_total: Optional[int] = None
@@ -421,20 +445,28 @@ class AdminDispatcher:
             token_in_total = token_in_total or 0
             token_out_total = token_out_total or 0
 
-        primary_requests = stats["primary"]["requests"]
-        primary_errors = stats["primary"]["errors"]
-        aux_requests = stats["auxiliary"]["requests"]
-        aux_errors = stats["auxiliary"]["errors"]
+        total_requests = 0
+        total_errors = 0
+        lines = []
 
-        primary_error_rate = f"{(primary_errors / max(1, primary_requests) * 100):.1f}%" if primary_requests else "0.0%"
-        aux_error_rate = f"{(aux_errors / max(1, aux_requests) * 100):.1f}%" if aux_requests else "0.0%"
+        for provider_name in sorted(stats.keys()):
+            s = stats[provider_name]
+            req = s["requests"]
+            err = s["errors"]
+            total_requests += req
+            total_errors += err
+            error_rate = f"{(err / max(1, req) * 100):.1f}%" if req else "0.0%"
+            p = self.app.get_router_latency_percentiles(provider_name)
+            p50 = p["p50"] / 1000.0
+            p90 = p["p90"] / 1000.0
+            p99 = p["p99"] / 1000.0
+            lines.append(
+                f"{provider_name}: {req} 次, 错误率 {error_rate}, "
+                f"p50/p90/p99={p50:.1f}s/{p90:.1f}s/{p99:.1f}s"
+            )
 
-        p50 = p_percentiles["p50"] / 1000.0
-        p90 = p_percentiles["p90"] / 1000.0
-        p99 = p_percentiles["p99"] / 1000.0
-        a50 = a_percentiles["p50"] / 1000.0
-        a90 = a_percentiles["p90"] / 1000.0
-        a99 = a_percentiles["p99"] / 1000.0
+        if not lines:
+            lines.append("暂无统计数据")
 
         token_str = (
             f"Token 消耗: 输入 {token_in_total} / 输出 {token_out_total}"
@@ -443,12 +475,8 @@ class AdminDispatcher:
         )
 
         return (
-            f"今日调用: {primary_requests + aux_requests} 次\n"
-            f"主模型: {primary_requests} 次, 错误率 {primary_error_rate}, "
-            f"p50/p90/p99={p50:.1f}s/{p90:.1f}s/{p99:.1f}s\n"
-            f"辅助模型: {aux_requests} 次, 错误率 {aux_error_rate}, "
-            f"p50/p90/p99={a50:.1f}s/{a90:.1f}s/{a99:.1f}s\n"
-            f"{token_str}"
+            f"今日调用: {total_requests} 次 (错误 {total_errors})\n"
+            + "\n".join(lines) + f"\n{token_str}"
         )
 
     async def _handle_admin_errors(self, user_id: str, group_id: str, args: List[str]) -> str:

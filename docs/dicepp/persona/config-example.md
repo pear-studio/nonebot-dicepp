@@ -1,6 +1,6 @@
 # Persona AI 配置说明
 
-**可复制范本**：仓库根目录 `config/global.json` 中的 `persona_ai` 对象已包含常用键、Phase 2 默认值及多条 `_comment_*` 说明；部署时在其上改 `character_name`、模型 URL 等即可。敏感项（如 `primary_api_key`）放在 `config/secrets.json`，按账号覆盖可写 `config/bots/{账号}.json`（见 `config/bots/_template.json`）。
+**可复制范本**：仓库根目录 `config/global.json` 中的 `persona_ai` 对象已包含常用键、Phase 2 默认值及多条 `_comment_*` 说明；部署时在其上改 `character_name`、`providers` 等即可。敏感项（如 `providers.<name>.api_key`）放在 `config/secrets.json`，按账号覆盖可写 `config/bots/{账号}.json`（见 `config/bots/_template.json`）。
 
 **本文档用途**：用表格列出各字段含义与注意点；与 `global.json` 不重复贴整段 JSON。更完整的设计说明见 [architecture.md](./architecture.md)。
 
@@ -15,7 +15,7 @@
 | `character_path` | string | `./content/characters` | 角色卡目录 |
 | `timezone` | string | `Asia/Shanghai` | **IANA 时区名**（`ZoneInfo`）；勿写 `UTC+8` 等。见 `global.json` 内 `_comment_timezone` |
 | `whitelist_enabled` | bool | `true` | 是否启用白名单门禁（口令未设置时仍不拦访问，见 deploy.md） |
-| `primary_api_key` 等 | string | （secrets） | 密钥建议只放 `secrets.json`；`auxiliary_*` 留空则复用 primary |
+| `providers.<name>.api_key` | string | （secrets） | 各 provider 的 API 密钥，建议只放 `secrets.json` |
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|

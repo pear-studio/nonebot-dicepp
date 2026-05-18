@@ -7,9 +7,10 @@ import json
 from typing import List, Dict, Any, Optional
 from nonebot.log import logger
 from pydantic import BaseModel
-from ..data.models import ScoreDeltas, UserProfile, RelationshipState, ModelTier
-from ..llm.router import LLMRouter
+from ..data.models import ScoreDeltas, UserProfile, RelationshipState
+from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.loop import AgentLoop, LoopResult
+from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
 from ..tools.registry import ToolRegistry, ToolDef
 from ..utils.json_helpers import safe_json_loads
@@ -87,8 +88,18 @@ class ScoringAgent:
         )
 
         hooks = self.llm_router.make_default_hooks()
+
+        try:
+            scoring_provider = await self.llm_router.select_provider(SelectionPolicy.SCORING)
+        except ServiceUnavailableError as e:
+            logger.error(f"评分: 无可用 LLM provider: {e}")
+            return ScoringAnalysisResult(
+                deltas=ScoreDeltas(), facts={},
+                parse_error=f"无可用 LLM provider: {e}",
+            )
+
         loop = AgentLoop(
-            provider=self.llm_router.auxiliary_client,
+            provider=scoring_provider,
             tool_registry=tool_registry,
             hooks=hooks, max_tool_rounds=self.max_tool_rounds,
         )
