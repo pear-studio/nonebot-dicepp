@@ -61,6 +61,83 @@
     - 确认存量数据库的旧表 DROP 是否已生效
     - 影响面：data/migrations.py、data/store.py、可能需要新增 cleanup job
 
+### [B-260515-ffd242] AgentLoop tool_results 未回传导致 LLM 重复回复
+- 创建: 2026-05-15
+- 问题表现:
+  - persona_llm_traces.round_messages 中所有 tool_results 字段恒为空数组 []
+  - TraceHook.post_llm() 在工具执行前就创建记录，硬编码 tool_results: []（hooks.py:105-112）
+  - TraceHook.add_tool_results() 方法已定义但全代码库无任何调用方（hooks.py:115-117）
+  - AgentLoop 工具执行后调 h.post_tool()，但 TraceHook 未实现该方法，调用被静默丢弃（loop.py:248-252）
+  - AgentLoop 自身的 records 正确填充了 tool_results，但放在 result.metadata["round_records"] 中，TraceHook.flush() 不使用它
+  - 后果：LLM 看不到 send_reply_segment 的执行确认，在同一轮 AgentLoop 内重复发送内容，用户收到拼接后的重复消息
+- 工作计划:
+  - 方案A：TraceHook 实现 post_tool 方法，调用 self.add_tool_results() 回填结果
+  - 方案B：TraceHook.flush() 直接使用 AgentLoop 传入的 metadata["round_records"] 替代 self.round_records
+  - 影响面：hooks.py（TraceHook）、loop.py（AgentLoop）、hook_protocol.py（ToolResult 类型）
+  - 需验证：回填后 LLM 重复回复问题是否改善；round_records JSON 序列化对已有字段的兼容性
+
+### [B-260515-7e4aa0] persona_inspect 新增 tables 和 trace 子命令，减少 sqlite3 手工排查
+- 创建: 2026-05-15
+- 问题表现:
+  - 手工 sqlite3 排查每次需 .schema 查列名，persona_llm_traces 19 列、persona_unified_messages 10 列，反复试错
+  - trace 表 user_id 字段可能为空或格式不统一，直接过滤无结果，需绕路日期范围查询
+  - trace 表 response 列只存摘要不存原文（如 "回复了梨子的问题，表示走神了，问梨子说的是去哪里。"），排查重复回复时无法直接看到实际输出
+  - 实际排查中 persona_inspect.py user 已能覆盖 80% 场景，但缺少 trace 级别的查询入口
+- 工作计划:
+  - 新增 tables 子命令：读取 sqlite_master，输出所有 persona_ 前缀表的 DDL
+  - 新增 trace 子命令：支持 --id / --user-id / --limit 过滤，输出格式化的 round_messages（每轮 think 摘要 + tool_call 名称/参数 + tool_results），绕过 response 摘要字段直接展示 LLM 实际行为
+  - 影响面：scripts/dev/persona_inspect.py、skill 文档 docs/agent/skills/persona-inspect/
+
+### [B-260518-a6ac1f] ESCAPE 报错日志不足，无法定位直接原因；排查同类工具日志问题
+- 创建: 2026-05-18
+- 问题表现:
+    - 5月15日出现 3 次 工具执行异常: ESCAPE expression must be a single character
+    - llm/loop.py:237 只记录 logger.warning(f'工具执行异常: {e}')，无堆栈、无工具名、无参数
+    - 同类日志缺陷可能存在于其他 try/except 块中（仅记 warning 无上下文）
+    - 影响：无法从日志直接确认根因，只能推测
+- 工作计划:
+    - llm/loop.py:237 改用 logger.exception() 或加 exc_info=True，同时增加工具名和关键参数
+    - 全局排查项目中其他 bare except Exception: logger.warning(f'...{e}') 的捕捉点，类似问题一并改善
+    - 影响面: llm/loop.py、可能需要搜索 src/plugins/DicePP/ 下所有类似模式
+
+### [B-260518-60cfa3] persona_inspect.py 查询已废弃的 persona_observations 表
+- 创建: 2026-05-18
+- 问题表现:
+    - `active` 子命令的"最近群聊观察"输出 "表不存在"
+    - persona_observations 表已被 migration (data/migrations.py:280) 删除
+    - persona_inspect.py:352 仍硬编码查询该表
+    - 影响: active 子命令部分功能失效
+- 工作计划:
+    - 移除 persona_inspect.py 中对 persona_observations 表的查询逻辑
+    - 替换为新版群观察机制（如基于 persona_group_activity.last_content_at 的查询）
+    - 影响面: scripts/dev/persona_inspect.py
+
+### [B-260518-f7ee13] persona_observation_buffers 是迁移遗留孤立数据
+- 创建: 2026-05-18
+- 问题表现:
+    - persona_settings 中存储了 persona_observation_buffers key
+    - 包含 3 个群的观察缓冲状态 (1033246217/861919492/1050935126)
+    - 代码中已无任何引用该 key 的读写逻辑
+    - 旧 persona_observations 表已删除，缓冲数据已无消费者
+    - 影响: 数据库中存在无用的遗留配置数据
+- 工作计划:
+    - 确认无代码依赖后，可清理 persona_settings 中的 persona_observation_buffers 条目
+    - 如新版观察机制仍需缓冲，需实现对应的读写逻辑
+    - 影响面: persona_settings 表, persona_inspect.py
+
+### [B-260518-3a57b8] update_group_content 死代码：无调用者，群内容观察功能未完成
+- 创建: 2026-05-18
+- 问题表现:
+    - store.py:1594 update_group_content 设计用于观察触发时仅更新时间不加分
+    - 代码从无任何调用者
+    - 旧 persona_observations 表已删除，新观察机制未接入
+    - 影响: 群内容活跃度(last_content_at/content_count_today)永远不会被更新，衰减策略中的内容保护分支失效
+- 工作计划:
+    - 确定是否需要群内容观察功能:
+      不需要 → 移除 update_group_content 及相关 content_ 列
+      需要 → 在消息同步或定时任务中接入 update_group_content 调用
+    - 影响面: store.py, migrations.py, models.py (GroupActivity)
+
 ## tests
 
 ### [B-260515-4e9762] 测试用例速度优化：消除真实等待、减少冗余、统一风格
