@@ -105,11 +105,11 @@ def test_global_config_overrides_pydantic_defaults(dd):
 
 
 def test_global_secrets_override_global_config(dd):
-    _write(dd.global_cfg, {"persona_ai": {"primary_model": "global-model"}})
-    _write(dd.global_secrets, {"persona_ai": {"primary_api_key": "secret_key"}})
+    _write(dd.global_cfg, {"chat_interval": 99})
+    _write(dd.global_secrets, {"nickname": "secret_nick"})
     cfg = dd.loader().load()
-    assert cfg.persona_ai.primary_api_key == "secret_key"
-    assert cfg.persona_ai.primary_model == "global-model"
+    assert cfg.chat_interval == 99
+    assert cfg.nickname == "secret_nick"
 
 
 def test_account_config_overrides_global_secrets(dd):
@@ -120,13 +120,12 @@ def test_account_config_overrides_global_secrets(dd):
 
 
 def test_account_config_deep_merge_does_not_erase_siblings(dd):
-    """Account sets persona_ai.primary_api_key; global has persona_ai.primary_model — both survive."""
-    _write(dd.global_cfg, {"persona_ai": {"primary_model": "global-model", "enabled": True}})
-    _write(dd.account_cfg("bot1"), {"persona_ai": {"primary_api_key": "my-key"}})
+    """Account sets nickname; global has chat_interval — both survive deep merge."""
+    _write(dd.global_cfg, {"chat_interval": 99, "nickname": "global_nick"})
+    _write(dd.account_cfg("bot1"), {"nickname": "account_nick"})
     cfg = dd.loader("bot1").load()
-    assert cfg.persona_ai.primary_model == "global-model"
-    assert cfg.persona_ai.primary_api_key == "my-key"
-    assert cfg.persona_ai.enabled is True
+    assert cfg.chat_interval == 99
+    assert cfg.nickname == "account_nick"
 
 
 def test_persona_fallback_when_missing(dd):

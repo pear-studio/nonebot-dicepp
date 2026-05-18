@@ -378,7 +378,6 @@ class TestQuotaExemptions:
     async def test_whitelist_user_exempt_from_quota(self, tmp_path, monkeypatch):
         """测试白名单用户豁免配额"""
         import aiosqlite
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
         from core.config.pydantic_models import PersonaConfig
 
         db_path = tmp_path / "test.db"
@@ -391,17 +390,6 @@ class TestQuotaExemptions:
 
             # 创建 mock config（启用白名单）
             config = PersonaConfig(whitelist_enabled=True)
-
-            # 创建 router（配额限制为 2 次）
-            router = LLMRouter(
-                primary_api_key="test-key",
-                primary_base_url="https://api.test.com/v1",
-                primary_model="gpt-4o",
-                daily_limit=2,
-                quota_check_enabled=True,
-                data_store=store,
-                config=config,
-            )
 
             # 白名单用户应豁免配额检查
             from plugins.DicePP.module.persona.llm.hooks import QuotaHook
@@ -429,81 +417,6 @@ class TestQuotaExemptions:
             assert await store.is_group_whitelisted("REGULAR_GROUP") is False
 
 
-class TestUserKeyClientSelection:
-    """测试用户自定义 Key 的客户端选择逻辑"""
-
-    def test_primary_client_with_user_config(self):
-        """测试主模型使用用户配置"""
-        from plugins.DicePP.module.persona.llm.router import LLMRouter, ModelTier
-        from plugins.DicePP.module.persona.data.models import UserLLMConfig
-
-        router = LLMRouter(
-            primary_api_key="default-key",
-            primary_base_url="https://default.com/v1",
-            primary_model="gpt-4o",
-        )
-
-        # 用户配置
-        user_config = UserLLMConfig(
-            user_id="U123",
-            primary_api_key="user-key",
-            primary_model="gpt-4-turbo",
-            primary_base_url="https://user.com/v1",
-        )
-
-        # 获取客户端
-        client = router._get_client_for_tier(ModelTier.PRIMARY, user_config)
-
-        # 应使用用户配置
-        assert client.api_key == "user-key"
-        assert client.model == "gpt-4-turbo"
-        assert client.base_url == "https://user.com/v1"
-
-    def test_primary_client_without_user_config(self):
-        """测试主模型没有用户配置时使用默认"""
-        from plugins.DicePP.module.persona.llm.router import LLMRouter, ModelTier
-
-        router = LLMRouter(
-            primary_api_key="default-key",
-            primary_base_url="https://default.com/v1",
-            primary_model="gpt-4o",
-        )
-
-        # 没有用户配置
-        client = router._get_client_for_tier(ModelTier.PRIMARY, None)
-
-        # 应使用默认配置
-        assert client.api_key == "default-key"
-        assert client.model == "gpt-4o"
-
-    def test_auxiliary_client_fallback_to_primary(self):
-        """测试辅助模型回退到主模型配置"""
-        from plugins.DicePP.module.persona.llm.router import LLMRouter, ModelTier
-        from plugins.DicePP.module.persona.data.models import UserLLMConfig
-
-        router = LLMRouter(
-            primary_api_key="default-key",
-            primary_base_url="https://default.com/v1",
-            primary_model="gpt-4o",
-            auxiliary_api_key="aux-key",
-            auxiliary_model="gpt-3.5",
-        )
-
-        # 用户只配置了主模型
-        user_config = UserLLMConfig(
-            user_id="U123",
-            primary_api_key="user-primary-key",
-            primary_model="user-model",
-        )
-
-        # 获取辅助模型客户端
-        client = router._get_client_for_tier(ModelTier.AUXILIARY, user_config)
-
-        # 应使用用户的主模型配置
-        assert client.api_key == "user-primary-key"
-        assert client.model == "user-model"
-
-
 class TestQuotaExceededException:
     """测试 QuotaExceeded 异常"""
 
@@ -523,6 +436,7 @@ class TestQuotaExceededException:
         from plugins.DicePP.module.persona.llm.router import LLMRouter, QuotaExceeded
         from plugins.DicePP.module.persona.llm.hooks import QuotaHook
         from plugins.DicePP.module.persona.llm.loop import AgentLoop
+        from core.config.pydantic_models import ProviderConfig, ModelConfig
 
         db_path = tmp_path / "test.db"
         async with aiosqlite.connect(str(db_path)) as db:
@@ -531,9 +445,19 @@ class TestQuotaExceededException:
 
             # 创建 router
             router = LLMRouter(
-                primary_api_key="test-key",
-                primary_base_url="https://api.test.com/v1",
-                primary_model="gpt-4o",
+                providers={
+                    "test-provider": ProviderConfig(
+                        api_key="test-key",
+                        base_url="https://api.test.com/v1",
+                        models=[
+                            ModelConfig(
+                                name="gpt-4o",
+                                category="llm",
+                                capabilities=["text"],
+                            )
+                        ],
+                    ),
+                },
                 daily_limit=0,
                 quota_check_enabled=True,
                 data_store=store,
