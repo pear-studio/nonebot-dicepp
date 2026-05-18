@@ -1,14 +1,15 @@
 """
-Hook 系统单元测试 — 注册顺序、QuotaHook 中止、BillingHook 去重、TraceHook flush
+Hook 系统单元测试 — 注册顺序、QuotaHook 中止、BillingHook 去重、TraceHook 持久化
 """
 import pytest
 import asyncio
+import json
 import aiosqlite
 from unittest.mock import Mock, AsyncMock
 
-from plugins.DicePP.module.persona.llm.hook_protocol import LoopContext, PreLLMResult, ToolResult
+from plugins.DicePP.module.persona.llm.hook_protocol import LoopContext, PreLLMResult
 from plugins.DicePP.module.persona.llm.hooks import (
-    QuotaHook, QuotaExceeded, TraceHook, BillingHook, SegmentCorrectionHook,
+    QuotaHook, TraceHook, BillingHook, SegmentCorrectionHook,
 )
 from plugins.DicePP.module.persona.llm.loop import AgentLoop, LoopResult
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
@@ -202,52 +203,94 @@ class TestBillingHook:
 
 
 class TestTraceHook:
-    """TraceHook — post_llm 累积 + flush 写入"""
+    """TraceHook — flush 持久化 AgentLoop 传入的 round_records"""
 
     @pytest.mark.asyncio
-    async def test_post_llm_accumulates_records(self):
-        hook = TraceHook(data_store=Mock(), trace_enabled=True)
+    async def test_flush_skips_when_trace_disabled(self):
+        store = Mock()
+        store.add_llm_trace = AsyncMock()
+        hook = TraceHook(data_store=store, trace_enabled=False)
 
-        resp = _resp(content="hello")
-        resp._think_raw = "<think>思考</think>"
-        resp.tool_calls = [ToolCall(id="tc_1", name="search", arguments="{}")]
+        await hook.flush("s1", {"round_records": [{"round": 0}]})
+        await asyncio.sleep(0.1)
 
-        await hook.post_llm([], resp, LoopContext(tool_round_num=0))
-        await hook.post_llm([], _resp(content="world"), LoopContext(tool_round_num=1))
-
-        assert len(hook.round_records) == 2
-        assert hook.round_records[0]["think"] == "<think>思考</think>"
-        assert hook.round_records[0]["tool_calls"] == [{"id": "tc_1", "name": "search", "arguments": "{}"}]
-        assert hook.round_records[1]["round"] == 1
-
-    @pytest.mark.asyncio
-    async def test_trace_disabled_skips(self):
-        hook = TraceHook(data_store=Mock(), trace_enabled=False)
-
-        await hook.post_llm([], _resp(), LoopContext())
-        assert len(hook.round_records) == 0
+        assert not store.add_llm_trace.called
 
     @pytest.mark.asyncio
     async def test_flush_writes_to_db(self):
         store = Mock()
         store.add_llm_trace = AsyncMock()
         hook = TraceHook(data_store=store, trace_enabled=True)
-        hook.round_records = [{"round": 0, "think": None, "tool_calls": [], "tool_results": [], "callback": None}]
 
-        await hook.flush("s1", {"model": "test", "tier": "primary", "status": "ok",
-                                "user_id": "u1", "group_id": "g1",
-                                "messages": [], "content": "hi", "tool_names": [],
-                                "latency_ms": 100, "tokens_input": 10, "tokens_output": 5,
-                                "temperature": None, "error": ""})
+        await hook.flush("s1", {
+            "model": "test", "tier": "primary", "status": "ok",
+            "user_id": "u1", "group_id": "g1",
+            "messages": [], "content": "hi", "tool_names": [],
+            "round_records": [
+                {"round": 0, "think": None, "tool_calls": [],
+                 "tool_results": [{"tool_call_id": "tc_1", "content": "ok"}],
+                 "callback": None},
+            ],
+            "latency_ms": 100, "tokens_input": 10, "tokens_output": 5,
+            "temperature": None, "error": "",
+        })
         await asyncio.sleep(0.1)
 
         assert store.add_llm_trace.called
+        trace_arg = store.add_llm_trace.call_args[0][0]
+        round_messages = json.loads(trace_arg.round_messages)
+        assert len(round_messages) == 1
+        assert round_messages[0]["tool_results"][0]["content"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_flush_round_records_from_metadata_not_own_state(self):
+        """flush 使用 metadata["round_records"]，不依赖自身状态"""
+        store = Mock()
+        store.add_llm_trace = AsyncMock()
+        hook = TraceHook(data_store=store, trace_enabled=True)
+
+        # 传入的 round_records 包含 tool_results，验证不会被空数组替代
+        await hook.flush("s1", {
+            "model": "test", "tier": "primary", "status": "ok",
+            "user_id": "u1", "group_id": "g1",
+            "messages": [], "content": "hi", "tool_names": ["search"],
+            "round_records": [
+                {"round": 0, "think": "思考", "tool_calls": [
+                    {"id": "tc_1", "name": "search", "arguments": "{}"}],
+                 "tool_results": [{"tool_call_id": "tc_1", "content": "找到结果"}],
+                 "callback": None},
+            ],
+            "latency_ms": 150, "tokens_input": 20, "tokens_output": 8,
+            "temperature": 0.7, "error": "",
+        })
+        await asyncio.sleep(0.1)
+
+        trace_arg = store.add_llm_trace.call_args[0][0]
+        round_messages = json.loads(trace_arg.round_messages)
+        assert round_messages[0]["tool_results"] == [
+            {"tool_call_id": "tc_1", "content": "找到结果"}]
+
+    @pytest.mark.asyncio
+    async def test_flush_no_round_records_graceful(self):
+        """metadata 无 round_records 时写入空数组"""
+        store = Mock()
+        store.add_llm_trace = AsyncMock()
+        hook = TraceHook(data_store=store, trace_enabled=True)
+
+        await hook.flush("s1", {"model": "test", "tier": "primary", "status": "ok",
+                                "user_id": "u1", "group_id": "g1",
+                                "messages": [], "content": "", "tool_names": [],
+                                "latency_ms": 0, "tokens_input": 0, "tokens_output": 0,
+                                "temperature": None, "error": ""})
+        await asyncio.sleep(0.1)
+
+        trace_arg = store.add_llm_trace.call_args[0][0]
+        assert json.loads(trace_arg.round_messages) == []
 
     @pytest.mark.asyncio
     async def test_flush_no_data_store_noop(self):
         hook = TraceHook(data_store=None, trace_enabled=True)
-        hook.round_records = [{"round": 0}]
-        await hook.flush("s1", {})  # shouldn't raise
+        await hook.flush("s1", {"round_records": [{"round": 0}]})  # shouldn't raise
 
     @pytest.mark.asyncio
     async def test_injects_message_false(self):

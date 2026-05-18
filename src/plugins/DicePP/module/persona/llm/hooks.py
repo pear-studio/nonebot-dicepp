@@ -2,19 +2,17 @@
 内置 Hook 集合
 
 QuotaHook(pre_llm) — 配额超限中止循环
-TraceHook(post_llm + flush) — 累计轮次记录，循环结束后写入 persona_llm_traces
+TraceHook(flush) — 循环结束后将 AgentLoop 的 round_records 写入 persona_llm_traces
 BillingHook(post_llm) — 每次 run 仅首次扣费
 SegmentCorrectionHook(post_llm) — 分段回复纠正注入
 """
-from typing import List, Dict, Optional, Any
+from typing import List, Optional, Any
 import asyncio
 import json
-import time
 
 from nonebot.log import logger
 
-from .hook_protocol import LoopHook, PreLLMResult, LoopContext, ToolResult, RoundRecord
-from .router import QuotaExceeded
+from .hook_protocol import PreLLMResult, LoopContext
 
 
 class QuotaHook:
@@ -72,7 +70,7 @@ class QuotaHook:
 
 
 class TraceHook:
-    """Trace 记录 Hook (post_llm + flush) — 从 Router._execute_and_trace 迁移"""
+    """Trace 记录 Hook (flush) — AgentLoop 维护 round_records，flush 直接持久化"""
 
     injects_message: bool = False
 
@@ -85,40 +83,10 @@ class TraceHook:
         self.data_store = data_store
         self.trace_enabled = trace_enabled
         self.trace_max_age_days = trace_max_age_days
-        self.round_records: List[dict] = []
         self._trace_tasks: set[asyncio.Task] = set()
 
-    async def post_llm(
-        self, messages: List[dict], response: Any, ctx: LoopContext
-    ) -> Optional[dict]:
-        if not self.trace_enabled:
-            return None
-
-        tool_calls_dicts = [
-            {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-            for tc in (response.tool_calls or [])
-        ]
-
-        record = {
-            "round": ctx.tool_round_num,
-            "think": getattr(response, "_think_raw", None),
-            "tool_calls": tool_calls_dicts,
-            "tool_results": [],
-            "callback": None,
-        }
-        self.round_records.append(record)
-        return None
-
-    def add_tool_results(self, results: List[dict]) -> None:
-        if self.round_records:
-            self.round_records[-1]["tool_results"] = results
-
-    def add_callback(self, callback: dict) -> None:
-        if self.round_records:
-            self.round_records[-1]["callback"] = callback
-
     async def flush(self, session_id: str, final_metadata: dict) -> None:
-        if not self.trace_enabled or not self.data_store or not self.round_records:
+        if not self.trace_enabled or not self.data_store:
             return
         try:
             await self._write_trace(session_id, final_metadata)
@@ -128,12 +96,14 @@ class TraceHook:
     async def _write_trace(self, session_id: str, metadata: dict) -> None:
         from ..data.models import LLMTraceRecord
 
+        round_records = metadata.get("round_records", [])
+
         _MAX_ROUND_MESSAGES_BYTES = 100 * 1024
-        round_json = json.dumps(self.round_records, ensure_ascii=False, default=str)
+        round_json = json.dumps(round_records, ensure_ascii=False, default=str)
         if len(round_json.encode("utf-8")) > _MAX_ROUND_MESSAGES_BYTES:
             round_json = json.dumps(
                 {"_truncated": True, "reason": "round_messages exceeded 100KB",
-                 "rounds": len(self.round_records)},
+                 "rounds": len(round_records)},
                 ensure_ascii=False,
             )
 

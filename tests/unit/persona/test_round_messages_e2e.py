@@ -37,14 +37,9 @@ async def test_round_messages_e2e():
 
     import logging
     logging.getLogger("plugins.DicePP.module.persona.data.store").setLevel(logging.WARNING)
-    await trace_hook.flush("s1", {
-        "user_id": "u1", "group_id": "g1",
-        "model": "test-model", "tier": "primary",
-        "messages": [{"role": "user", "content": "hi"}],
-        "content": "你好", "tool_names": [],
-        "latency_ms": 500, "tokens_input": 50, "tokens_output": 10,
-        "temperature": None, "status": "ok", "error": "",
-    })
+    meta = dict(result.metadata)
+    meta["tier"] = "primary"
+    await trace_hook.flush("s1", meta)
     await asyncio.sleep(0.5)
 
     cursor = await db.execute(

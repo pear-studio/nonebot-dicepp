@@ -146,17 +146,18 @@ async def test_trace_round_messages_round_trip(temp_db):
 
 @pytest.mark.asyncio
 async def test_trace_hook_disabled_does_not_write():
-    """TraceHook trace_enabled=False 时 post_llm 不累积记录"""
+    """TraceHook trace_enabled=False 时 flush 不写数据库"""
+    from unittest.mock import AsyncMock, Mock
     from module.persona.llm.hooks import TraceHook
-    hook = TraceHook(data_store=None, trace_enabled=False)
-    from module.persona.llm.hook_protocol import LoopContext
-    from module.persona.llm.providers.protocol import LLMResponse, TokenUsage
 
-    ctx = LoopContext()
-    resp = LLMResponse(content="hello", usage=TokenUsage())
-    result = await hook.post_llm([], resp, ctx)
-    assert result is None
-    assert len(hook.round_records) == 0
+    store = Mock()
+    store.add_llm_trace = AsyncMock()
+    hook = TraceHook(data_store=store, trace_enabled=False)
+
+    await hook.flush("s1", {"round_records": [{"round": 0}]})
+    await asyncio.sleep(0.05)
+
+    assert not store.add_llm_trace.called
 
 
 @pytest.mark.asyncio

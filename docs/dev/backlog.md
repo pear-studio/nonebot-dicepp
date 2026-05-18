@@ -49,21 +49,6 @@
     - 确认存量数据库的旧表 DROP 是否已生效
     - 影响面：data/migrations.py、data/store.py、可能需要新增 cleanup job
 
-### [B-260515-ffd242] AgentLoop tool_results 未回传导致 LLM 重复回复
-- 创建: 2026-05-15
-- 问题表现:
-  - persona_llm_traces.round_messages 中所有 tool_results 字段恒为空数组 []
-  - TraceHook.post_llm() 在工具执行前就创建记录，硬编码 tool_results: []（hooks.py:105-112）
-  - TraceHook.add_tool_results() 方法已定义但全代码库无任何调用方（hooks.py:115-117）
-  - AgentLoop 工具执行后调 h.post_tool()，但 TraceHook 未实现该方法，调用被静默丢弃（loop.py:248-252）
-  - AgentLoop 自身的 records 正确填充了 tool_results，但放在 result.metadata["round_records"] 中，TraceHook.flush() 不使用它
-  - 后果：LLM 看不到 send_reply_segment 的执行确认，在同一轮 AgentLoop 内重复发送内容，用户收到拼接后的重复消息
-- 工作计划:
-  - 方案A：TraceHook 实现 post_tool 方法，调用 self.add_tool_results() 回填结果
-  - 方案B：TraceHook.flush() 直接使用 AgentLoop 传入的 metadata["round_records"] 替代 self.round_records
-  - 影响面：hooks.py（TraceHook）、loop.py（AgentLoop）、hook_protocol.py（ToolResult 类型）
-  - 需验证：回填后 LLM 重复回复问题是否改善；round_records JSON 序列化对已有字段的兼容性
-
 ### [B-260515-7e4aa0] persona_inspect 新增 tables 和 trace 子命令，减少 sqlite3 手工排查
 - 创建: 2026-05-15
 - 问题表现:

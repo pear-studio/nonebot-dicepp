@@ -7,9 +7,7 @@ import asyncio
 from unittest.mock import Mock, AsyncMock
 
 from plugins.DicePP.module.persona.llm.loop import AgentLoop, LoopResult
-from plugins.DicePP.module.persona.llm.hooks import (
-    QuotaHook, TraceHook, BillingHook, SegmentCorrectionHook,
-)
+from plugins.DicePP.module.persona.llm.hooks import BillingHook
 from plugins.DicePP.module.persona.llm.hook_protocol import LoopContext
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
 
