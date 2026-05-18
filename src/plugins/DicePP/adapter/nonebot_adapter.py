@@ -119,7 +119,7 @@ class NoneBotClientProxy(ClientProxy):
                         await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
                         if not skip_hook:
                             await _trigger_post_send_hooks(
-                                all_bots, self.bot.self_id, "", str(self.bot.self_id),
+                                all_bots, self.bot.self_id, "", target.user_id,
                                 "assistant", msg_type_val, command.msg, "我", msg_id,
                             )
             elif isinstance(command, BotLeaveGroupCommand):
