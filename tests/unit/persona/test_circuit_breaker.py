@@ -37,7 +37,7 @@ class TestStateTransitions:
         cb.record_failure()  # → disabled
         prev_count = cb.failure_count
         cb.record_failure()
-        assert cb.failure_count == prev_count + 1  # count still increments
+        assert cb.failure_count == prev_count  # disabled 不再递增
         assert cb.state == "disabled"  # stays disabled
 
     def test_record_failure_ignored_when_dead(self):

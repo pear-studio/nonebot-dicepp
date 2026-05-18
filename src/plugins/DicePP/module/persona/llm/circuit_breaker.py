@@ -46,7 +46,7 @@ class CircuitBreaker:
     def record_failure(self) -> None:
         """记录一次最终失败（Provider 内部重试已耗尽）。
         所有共享状态写入在同一 async timeslice 内完成，不跨 await。"""
-        if self._state == "dead":
+        if self._state in ("dead", "disabled"):
             return
         self._failure_count += 1
         self._last_failure_time = time.monotonic()
@@ -153,11 +153,11 @@ class CircuitBreakerRegistry:
         return self._breakers.get((provider_name, model_name))
 
     def all_models_disabled(self, keys: list) -> bool:
-        """检查给定 key 列表中的所有模型是否全部不可用。"""
+        """检查给定 key 列表中的所有模型是否全部不可用。未注册的模型视为不可用。"""
         if not keys:
             return True
         return all(
-            not self.get_or_create(pn, mn).is_available()
+            not (cb := self.get(pn, mn)) or not cb.is_available()
             for pn, mn in keys
         )
 

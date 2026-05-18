@@ -64,8 +64,6 @@ class LLMRouter:
         self._model_providers: Dict[tuple, object] = {}
         # (provider_name, model_name) → ModelConfig
         self._model_configs: Dict[tuple, ModelConfig] = {}
-        # provider instance → (provider_name, model_name) 逆向查找表
-        self._provider_to_key: Dict[int, tuple] = {}
         # provider_name → asyncio.Semaphore
         self._semaphores: Dict[str, asyncio.Semaphore] = {}
 
@@ -82,6 +80,7 @@ class LLMRouter:
         # 后台探针任务
         self._probe_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
+        self._flush_tasks: set = set()
 
         logger.info(
             f"LLMRouter 初始化完成: {len(self._llm_models)} LLM 模型, "
@@ -116,7 +115,7 @@ class LLMRouter:
                         model=mconfig.name,
                         extra_params=extra_params,
                     )
-                    self._provider_to_key[id(provider)] = key
+                    provider._router_key = key
                     self._model_providers[key] = provider
                     self._model_configs[key] = mconfig
                     self._llm_models.append(key)
@@ -126,7 +125,7 @@ class LLMRouter:
                         base_url=pconfig.base_url,
                         model=mconfig.name,
                     )
-                    self._provider_to_key[id(provider)] = key
+                    provider._router_key = key
                     self._model_providers[key] = provider
                     self._model_configs[key] = mconfig
                     self._gen_models.append(key)
@@ -221,8 +220,8 @@ class LLMRouter:
         return self.get_gen_provider() is not None
 
     def get_provider_key(self, provider) -> Optional[tuple]:
-        """通过逆向查找表获取 provider 对应的 (provider_name, model_name)。"""
-        return self._provider_to_key.get(id(provider))
+        """获取 provider 对应的 (provider_name, model_name)。"""
+        return getattr(provider, '_router_key', None)
 
     def is_model_available(self, provider_name: str, model_name: str) -> bool:
         """检查指定模型是否可用（供 gen provider 调用方使用）。"""
@@ -231,7 +230,7 @@ class LLMRouter:
 
     def handle_model_error(self, provider, error: Exception) -> None:
         """根据错误分类更新熔断器状态（供 gen provider 调用方回写）。"""
-        key = self._provider_to_key.get(id(provider))
+        key = getattr(provider, '_router_key', None)
         if not key:
             return
         cb = self.circuit_breakers.get(key[0], key[1])
@@ -401,6 +400,8 @@ class LLMRouter:
                     lambda t: not t.cancelled() and (e := t.exception()) and logger.error(
                         f"Trace flush 失败: {e}")
                 )
+                task.add_done_callback(self._flush_tasks.discard)
+                self._flush_tasks.add(task)
             except RuntimeError as e:
                 logger.warning(f"无法创建 trace flush 任务: {e}")
 
@@ -479,6 +480,8 @@ class LLMRouter:
             except asyncio.CancelledError:
                 pass
             self._probe_task = None
+        if self._flush_tasks:
+            await asyncio.gather(*self._flush_tasks, return_exceptions=True)
         logger.info("LLMRouter 后台探针已停止")
 
     async def _probe_loop(self) -> None:
