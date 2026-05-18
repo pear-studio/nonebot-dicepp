@@ -168,8 +168,6 @@ async def _build_store(bot: Bot, config) -> PersonaDataStore:
         raw_db,
         group_activity_decay_per_day=config.group_activity_decay_per_day,
         group_activity_floor_whitelist=config.group_activity_floor_whitelist,
-        group_activity_decay_with_content=config.group_activity_decay_with_content,
-        group_activity_content_window_hours=config.group_activity_content_window_hours,
         timezone=config.timezone,
         unified_message_max_per_group=config.unified_message_max_per_group,
     )

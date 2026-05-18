@@ -323,9 +323,7 @@ class PersonaConfig(BaseModel):
 
     # ── Phase 2: 群活跃度
     group_activity_enabled: bool = True
-    group_activity_decay_per_day: float = 10.0           # 基础衰减（无内容时）
-    group_activity_decay_with_content: float = 5.0       # 有内容时衰减减半
-    group_activity_content_window_hours: float = 24.0    # 内容保护时间窗口（小时）
+    group_activity_decay_per_day: float = 10.0           # 每日衰减量
     group_activity_add_per_interaction: float = 2.0
     group_activity_max_daily_add: float = 20.0
     group_activity_min_threshold: float = 60.0  # 低于此值不发送主动消息

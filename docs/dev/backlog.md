@@ -100,18 +100,6 @@
     - 全局排查项目中其他 bare except Exception: logger.warning(f'...{e}') 的捕捉点，类似问题一并改善
     - 影响面: llm/loop.py、可能需要搜索 src/plugins/DicePP/ 下所有类似模式
 
-### [B-260518-60cfa3] persona_inspect.py 查询已废弃的 persona_observations 表
-- 创建: 2026-05-18
-- 问题表现:
-    - `active` 子命令的"最近群聊观察"输出 "表不存在"
-    - persona_observations 表已被 migration (data/migrations.py:280) 删除
-    - persona_inspect.py:352 仍硬编码查询该表
-    - 影响: active 子命令部分功能失效
-- 工作计划:
-    - 移除 persona_inspect.py 中对 persona_observations 表的查询逻辑
-    - 替换为新版群观察机制（如基于 persona_group_activity.last_content_at 的查询）
-    - 影响面: scripts/dev/persona_inspect.py
-
 ### [B-260518-f7ee13] persona_observation_buffers 是迁移遗留孤立数据
 - 创建: 2026-05-18
 - 问题表现:
@@ -124,19 +112,6 @@
     - 确认无代码依赖后，可清理 persona_settings 中的 persona_observation_buffers 条目
     - 如新版观察机制仍需缓冲，需实现对应的读写逻辑
     - 影响面: persona_settings 表, persona_inspect.py
-
-### [B-260518-3a57b8] update_group_content 死代码：无调用者，群内容观察功能未完成
-- 创建: 2026-05-18
-- 问题表现:
-    - store.py:1594 update_group_content 设计用于观察触发时仅更新时间不加分
-    - 代码从无任何调用者
-    - 旧 persona_observations 表已删除，新观察机制未接入
-    - 影响: 群内容活跃度(last_content_at/content_count_today)永远不会被更新，衰减策略中的内容保护分支失效
-- 工作计划:
-    - 确定是否需要群内容观察功能:
-      不需要 → 移除 update_group_content 及相关 content_ 列
-      需要 → 在消息同步或定时任务中接入 update_group_content 调用
-    - 影响面: store.py, migrations.py, models.py (GroupActivity)
 
 ## tests
 
@@ -168,3 +143,4 @@
 - 创建: 2026-05-18
 - 问题表现: generate_image 工具和 MiniMaxImageProvider 已实现，gen category 路由也已就位，但图片生成后仅返回 URL 字符串，send_reply_segment 不支持发送图片 segment，用户无法实际看到生成的图片。当前已将工具注册从 factory 中移除，保留 provider 和路由代码。
 - 工作计划: send_reply_segment 增加 image 类型支持（QQ 适配器的 CQ:image 格式）。生成完图片后 LLM 可通过 send_reply_segment 将图片 URL 以 image segment 发送。完成后重新注册 generate_image 工具。影响面: module/persona/tools/send_reply_segment.py、module/persona/tools/generate_image.py、module/persona/factory.py。
+

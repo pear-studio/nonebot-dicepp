@@ -46,8 +46,6 @@ def _make_bot() -> MagicMock:
     cfg.lore_token_budget = 300
     cfg.group_activity_decay_per_day = 10.0
     cfg.group_activity_floor_whitelist = 50.0
-    cfg.group_activity_decay_with_content = 5.0
-    cfg.group_activity_content_window_hours = 24.0
     cfg.group_max_messages = 40
     cfg.search_chat_history_max_chars = 2000
     cfg.character_life_enabled = True

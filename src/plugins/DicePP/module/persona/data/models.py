@@ -223,8 +223,6 @@ class GroupActivity(BaseModel):
     group_id: str
     score: float = 50.0  # 活跃度分数
     last_interaction_at: Optional[datetime] = None  # 最后互动时间（@bot/AI回复）
-    last_content_at: Optional[datetime] = None      # 最后内容时间（群聊观察触发）
-    content_count_today: int = 0                     # 今日内容计数（自然日）
 
 
 class DelayedTask(BaseModel):

@@ -321,54 +321,27 @@ def cmd_llm_health(conn: sqlite3.Connection, args) -> None:
 
 
 def cmd_active(conn: sqlite3.Connection, args) -> None:
-    """群活跃度 + 观察记录"""
+    """群活跃度"""
     limit = args.limit
 
     # ── 活跃群 ──
     _section(f"群活跃度 Top {limit}")
     if table_exists(conn, "persona_group_activity"):
         groups = conn.execute(
-            "SELECT group_id, score, last_interaction_at, content_count_today, "
+            "SELECT group_id, score, last_interaction_at, "
             "daily_add_date, daily_add_total "
             "FROM persona_group_activity ORDER BY score DESC LIMIT ?",
             (limit,)
         ).fetchall()
         if groups:
-            _bar("group_id", "score", "last_interaction", "today_msgs", "daily_add")
+            _bar("group_id", "score", "last_interaction", "daily_add")
             for g in groups:
                 ts = (g["last_interaction_at"] or "")[:16] if g["last_interaction_at"] else "-"
                 daily = f"{g['daily_add_total']:.0f}" if g["daily_add_total"] else "0"
                 print(
                     f"{g['group_id']:<18} │ {g['score']:>6.1f} │ {ts} │ "
-                    f"{g['content_count_today']:>10} │ {daily:>9}"
+                    f"{daily:>9}"
                 )
-        else:
-            print("  (无记录)")
-    else:
-        print("  (表不存在)")
-
-    # ── 观察记录 ──
-    _section(f"最近群聊观察 (Top {limit})")
-    if table_exists(conn, "persona_observations"):
-        if col_exists(conn, "persona_observations", "source_messages_count"):
-            sql = (
-                "SELECT group_id, substr(what,1,120) as what, "
-                "substr(why_remember,1,120) as why, observed_at, source_messages_count "
-                "FROM persona_observations ORDER BY observed_at DESC LIMIT ?"
-            )
-        else:
-            sql = (
-                "SELECT group_id, substr(what,1,120) as what, "
-                "substr(why_remember,1,120) as why, observed_at "
-                "FROM persona_observations ORDER BY observed_at DESC LIMIT ?"
-            )
-        obs = conn.execute(sql, (limit,)).fetchall()
-        if obs:
-            for o in obs:
-                ts = (o["observed_at"] or "")[:16] if o["observed_at"] else "-"
-                print(f"  [{ts}] g={o['group_id']}")
-                print(f"    what: {o['what']}")
-                print(f"    why:  {o['why']}")
         else:
             print("  (无记录)")
     else:

@@ -142,8 +142,6 @@ CREATE TABLE IF NOT EXISTS persona_group_activity (
     group_id TEXT PRIMARY KEY,
     score REAL DEFAULT 50.0,
     last_interaction_at TIMESTAMP,    -- 最后互动时间（@bot/AI回复）
-    last_content_at TIMESTAMP,        -- 最后内容时间（群聊观察触发）
-    content_count_today INTEGER DEFAULT 0,  -- 今日内容计数
     daily_add_date TEXT,              -- 当日累计加分日期 (YYYY-MM-DD)
     daily_add_total REAL DEFAULT 0    -- 当日累计加分值
 );

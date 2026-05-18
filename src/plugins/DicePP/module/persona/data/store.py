@@ -41,17 +41,12 @@ class PersonaDataStore:
         *,
         group_activity_decay_per_day: float = 10.0,
         group_activity_floor_whitelist: float = 50.0,
-        # 分层衰减配置
-        group_activity_decay_with_content: float = 5.0,  # 有内容时衰减减半
-        group_activity_content_window_hours: float = 24.0,  # 内容保护时间窗口
         timezone: str = "Asia/Shanghai",
         unified_message_max_per_group: int = 1000,
     ):
         self.db = db_connection
         self._group_activity_decay_per_day = group_activity_decay_per_day
         self._group_activity_floor_whitelist = group_activity_floor_whitelist
-        self._group_activity_decay_with_content = group_activity_decay_with_content
-        self._group_activity_content_window_hours = group_activity_content_window_hours
         self._timezone = timezone
         self._unified_message_max_per_group = unified_message_max_per_group
 
@@ -78,7 +73,6 @@ class PersonaDataStore:
     async def _apply_runtime_schema_patches(self) -> None:
         """对已有库做条件 ALTER；与 `migrations.py` 的 ``ALL_MIGRATIONS`` 互补，改 schema 时请两处同改。"""
         await self._ensure_group_activity_daily_columns()
-        await self._ensure_group_activity_content_columns()
         await self._ensure_relationship_decay_watermark_column()
         await self._ensure_relationship_miss_and_peak_columns()
         await self._ensure_score_history_conversation_digest()
@@ -105,20 +99,6 @@ class PersonaDataStore:
         if "daily_add_total" not in col_names:
             await self.db.execute(
                 "ALTER TABLE persona_group_activity ADD COLUMN daily_add_total REAL DEFAULT 0"
-            )
-
-    async def _ensure_group_activity_content_columns(self) -> None:
-        """为群活跃度表增加「内容活跃」相关列（分层衰减用）。"""
-        async with self.db.execute("PRAGMA table_info(persona_group_activity)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "last_content_at" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_group_activity ADD COLUMN last_content_at TIMESTAMP"
-            )
-        if "content_count_today" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_group_activity ADD COLUMN content_count_today INTEGER DEFAULT 0"
             )
 
     async def _ensure_relationship_decay_watermark_column(self) -> None:
@@ -1431,19 +1411,18 @@ class PersonaDataStore:
 
     async def get_group_activity(self, group_id: str) -> GroupActivity:
         """
-        获取群活跃度（惰性计算，带分层衰减）
+        获取群活跃度（惰性计算，带衰减）
 
         衰减策略：
         - 24小时内有互动（@bot/AI回复）→ 不衰减
-        - 24小时内有内容（群聊观察触发）→ 衰减减半
-        - 无内容 → 正常衰减
+        - 无互动 → 按天衰减
 
         Returns:
             GroupActivity 对象
         """
         async with self.db.execute(
             """
-            SELECT score, last_interaction_at, last_content_at, content_count_today
+            SELECT score, last_interaction_at
             FROM persona_group_activity WHERE group_id = ?
             """,
             (group_id,)
@@ -1451,17 +1430,13 @@ class PersonaDataStore:
             row = await cursor.fetchone()
 
             if not row:
-                # 新群，返回默认值
                 return GroupActivity(group_id=group_id)
 
             score = row[0]
             last_interaction = datetime.fromisoformat(row[1]) if row[1] else None
-            last_content = datetime.fromisoformat(row[2]) if row[2] else None
-            content_count = row[3] if row[3] is not None else 0
 
-            # 分层衰减计算
             now = self._wall_now()
-            decay = self._calculate_decay(now, last_interaction, last_content)
+            decay = self._calculate_decay(now, last_interaction)
             if decay > 0:
                 score = max(0.0, score - decay)
 
@@ -1469,47 +1444,31 @@ class PersonaDataStore:
                 group_id=group_id,
                 score=score,
                 last_interaction_at=last_interaction,
-                last_content_at=last_content,
-                content_count_today=content_count,
             )
 
     def _calculate_decay(
         self,
         now: datetime,
         last_interaction: Optional[datetime],
-        last_content: Optional[datetime],
     ) -> float:
         """
-        计算分层衰减量
+        计算衰减量
 
         Returns:
             应衰减的分数
         """
-        # 情况1：24小时内有互动 → 不衰减
         if last_interaction:
             hours_since_interaction = (now - last_interaction).total_seconds() / 3600
-            if hours_since_interaction < self._group_activity_content_window_hours:
+            if hours_since_interaction < 24.0:
                 return 0.0
 
-        # 情况2：24小时内有内容 → 衰减减半
-        if last_content:
-            hours_since_content = (now - last_content).total_seconds() / 3600
-            if hours_since_content < self._group_activity_content_window_hours:
-                return self._group_activity_decay_with_content
-
-        # 情况3：完全无内容 → 正常衰减（按天计算）
-        # 注意：如果两者都为 None（新群），不衰减
-        if last_interaction:
             days_since = (now - last_interaction).days
-        elif last_content:
-            days_since = (now - last_content).days
-        else:
-            return 0.0  # 新群，不衰减
+            if days_since <= 0:
+                days_since = 1
+            return float(days_since) * self._group_activity_decay_per_day
 
-        if days_since <= 0:
-            days_since = 1
-
-        return float(days_since) * self._group_activity_decay_per_day
+        # 新群，不衰减
+        return 0.0
 
     async def update_group_activity(
         self,
@@ -1523,8 +1482,7 @@ class PersonaDataStore:
 
         衰减策略：
         - 24小时内有互动 → 不衰减
-        - 24小时内有内容 → 衰减减半
-        - 无内容 → 正常衰减
+        - 无互动 → 按天衰减
 
         Args:
             group_id: 群ID
@@ -1537,7 +1495,7 @@ class PersonaDataStore:
         """
         async with self.db.execute(
             """
-            SELECT score, last_interaction_at, last_content_at, content_count_today,
+            SELECT score, last_interaction_at,
                    daily_add_date, daily_add_total
             FROM persona_group_activity
             WHERE group_id = ?
@@ -1550,21 +1508,16 @@ class PersonaDataStore:
         if not row:
             raw_score = 50.0
             last_interaction: Optional[datetime] = None
-            last_content: Optional[datetime] = None
-            content_count_today = 0
             daily_add_date: Optional[str] = None
             daily_add_total = 0.0
         else:
             raw_score = float(row[0])
             last_interaction = datetime.fromisoformat(row[1]) if row[1] else None
-            last_content = datetime.fromisoformat(row[2]) if row[2] else None
-            content_count_today = int(row[3]) if row[3] is not None else 0
-            daily_add_date = row[4]
-            daily_add_total = float(row[5]) if row[5] is not None else 0.0
+            daily_add_date = row[2]
+            daily_add_total = float(row[3]) if row[3] is not None else 0.0
 
-        # 使用分层衰减计算
         now = self._wall_now()
-        decay = self._calculate_decay(now, last_interaction, last_content)
+        decay = self._calculate_decay(now, last_interaction)
         score = max(0.0, raw_score - decay)
 
         # 检查每日加分限额
@@ -1588,15 +1541,13 @@ class PersonaDataStore:
         await self.db.execute(
             """
             INSERT INTO persona_group_activity (
-                group_id, score, last_interaction_at, last_content_at, content_count_today,
+                group_id, score, last_interaction_at,
                 daily_add_date, daily_add_total
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(group_id) DO UPDATE SET
                 score = excluded.score,
                 last_interaction_at = excluded.last_interaction_at,
-                last_content_at = excluded.last_content_at,
-                content_count_today = excluded.content_count_today,
                 daily_add_date = excluded.daily_add_date,
                 daily_add_total = excluded.daily_add_total
             """,
@@ -1604,8 +1555,6 @@ class PersonaDataStore:
                 group_id,
                 new_score,
                 now.isoformat(),
-                last_content.isoformat() if last_content else None,
-                content_count_today,
                 today_s,
                 new_daily_total,
             ),
@@ -1616,106 +1565,13 @@ class PersonaDataStore:
             group_id=group_id,
             score=new_score,
             last_interaction_at=now,
-            last_content_at=last_content,
-            content_count_today=content_count_today,
-        )
-
-    async def update_group_content(
-        self,
-        group_id: str,
-    ) -> GroupActivity:
-        """
-        更新群内容活跃度（观察触发时调用，不加分只更新时间）
-
-        用于标记群内有聊天内容（但AI未参与），减缓衰减速度。
-
-        Args:
-            group_id: 群ID
-
-        Returns:
-            更新后的 GroupActivity
-        """
-        async with self.db.execute(
-            """
-            SELECT score, last_interaction_at, last_content_at, content_count_today,
-                   daily_add_date, daily_add_total
-            FROM persona_group_activity
-            WHERE group_id = ?
-            """,
-            (group_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-
-        now = self._wall_now()
-        today_s = now.strftime("%Y-%m-%d")
-
-        if not row:
-            # 新群，初始化
-            return GroupActivity(
-                group_id=group_id,
-                score=50.0,
-                last_content_at=now,
-                content_count_today=1,
-            )
-
-        raw_score = float(row[0])
-        last_interaction = datetime.fromisoformat(row[1]) if row[1] else None
-        last_content = datetime.fromisoformat(row[2]) if row[2] else None
-        content_count_today = int(row[3]) if row[3] is not None else 0
-        daily_add_date = row[4]
-        daily_add_total = float(row[5]) if row[5] is not None else 0.0
-
-        # 检查是否需要重置今日内容计数
-        if last_content:
-            last_content_date = last_content.strftime("%Y-%m-%d")
-            if last_content_date == today_s:
-                new_content_count = content_count_today + 1
-            else:
-                new_content_count = 1
-        else:
-            new_content_count = 1
-
-        # 计算衰减后的分数（与 get_group_activity 保持一致）
-        decay = self._calculate_decay(now, last_interaction, last_content)
-        decayed_score = max(0.0, raw_score - decay)
-
-        # 内容触发不衰减，只更新时间（实际衰减在读取时计算）
-        await self.db.execute(
-            """
-            INSERT INTO persona_group_activity (
-                group_id, score, last_interaction_at, last_content_at, content_count_today,
-                daily_add_date, daily_add_total
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(group_id) DO UPDATE SET
-                last_content_at = excluded.last_content_at,
-                content_count_today = excluded.content_count_today
-            """,
-            (
-                group_id,
-                raw_score,
-                last_interaction.isoformat() if last_interaction else None,
-                now.isoformat(),
-                new_content_count,
-                daily_add_date if daily_add_date else today_s,
-                daily_add_total,
-            ),
-        )
-        await self.db.commit()
-
-        return GroupActivity(
-            group_id=group_id,
-            score=decayed_score,
-            last_interaction_at=last_interaction,
-            last_content_at=now,
-            content_count_today=new_content_count,
         )
 
     async def get_all_group_activities(self, min_score: float = 0) -> List[GroupActivity]:
-        """获取所有群活跃度（应用分层衰减）"""
+        """获取所有群活跃度（应用衰减）"""
         async with self.db.execute(
             """
-            SELECT group_id, score, last_interaction_at, last_content_at, content_count_today
+            SELECT group_id, score, last_interaction_at
             FROM persona_group_activity
             WHERE score >= ?
             ORDER BY score DESC
@@ -1727,19 +1583,14 @@ class PersonaDataStore:
             now = self._wall_now()
             for row in rows:
                 last_interaction = datetime.fromisoformat(row[2]) if row[2] else None
-                last_content = datetime.fromisoformat(row[3]) if row[3] else None
-                content_count = int(row[4]) if row[4] is not None else 0
 
-                # 应用分层衰减
-                decay = self._calculate_decay(now, last_interaction, last_content)
+                decay = self._calculate_decay(now, last_interaction)
                 score = max(0.0, row[1] - decay)
 
                 activity = GroupActivity(
                     group_id=row[0],
                     score=score,
                     last_interaction_at=last_interaction,
-                    last_content_at=last_content,
-                    content_count_today=content_count,
                 )
                 activities.append(activity)
             return activities
