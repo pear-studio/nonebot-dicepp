@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import random
 from nonebot.log import logger
 from ..data.store import PersonaDataStore
-from ..data.models import RelationshipState, ScoreEvent
+from ..data.models import RelationshipState, ScoreEvent, MessageType
 from ..character.models import Character
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now
@@ -233,7 +233,16 @@ class LifeSimulator:
                 f"_send_msg 收件人为空，丢弃消息: content={content[:30]}..."
             )
             return
-        if not await self.port.send(user_id, group_id, content):
+        effective_user_id = "assistant" if group_id else user_id
+        msg_id = await self.store.add_unified_message(
+            user_id=effective_user_id,
+            group_id=group_id or "",
+            role="assistant",
+            type=MessageType.CHAT,
+            content=content,
+            display_name="我",
+        )
+        if not await self.port.send(user_id, group_id, content, msg_id=msg_id):
             logger.warning(
                 "_send_msg 发送失败: user_id=%s group_id=%s content=%s...",
                 user_id,

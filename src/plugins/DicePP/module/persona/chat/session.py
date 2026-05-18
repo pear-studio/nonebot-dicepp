@@ -280,9 +280,21 @@ class ChatSession:
             )
         else:
             fallback_response = "LLM服务暂时不可用，请稍后再试"
-        await self._persist_assistant_message(user_id, group_id, fallback_response)
+        msg_id = await self._persist_assistant_message(user_id, group_id, fallback_response)
         await self._update_interaction(user_id, group_id, current_message, fallback_response)
-        return fallback_response
+        if self.port:
+            if not await self.port.send(user_id, group_id, fallback_response, msg_id=msg_id):
+                logger.warning(
+                    f"_coordinator_on_exhausted 发送失败: "
+                    f"user={user_id}, group={group_id}"
+                )
+            return self._SegmentedSentinel("")
+        else:
+            logger.warning(
+                f"_coordinator_on_exhausted: MessagePort 未注入，"
+                f"消息无法发送 (user={user_id}, group={group_id})"
+            )
+            return fallback_response
 
     async def _coordinator_on_result(self, user_id: str, group_id: str, result: str) -> None:
         """中间轮结果：通过 MessagePort 发送、持久化、扣减配额。
@@ -487,9 +499,9 @@ class ChatSession:
             else:
                 logger.error(f"LLM 耗尽 callback 且返回空 content: user={user_id}")
 
-        # 5.4.6: 写入历史（不依赖发送结果）
+        # 5.4.6: 写入历史，分段已由 dispatcher 实时发出，直接标记 sent_ok=1
         effective_user_id = "assistant" if group_id else user_id
-        await self.store.add_unified_message(
+        msg_id = await self.store.add_unified_message(
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",
@@ -497,6 +509,7 @@ class ChatSession:
             content=full_reply,
             display_name="我",
         )
+        await self.store.update_sent_ok(msg_id, 1)
 
         return self._SegmentedSentinel(full_reply)
 
