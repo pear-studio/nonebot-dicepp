@@ -53,7 +53,7 @@ class QuotaHook:
                 return PreLLMResult(abort=True, abort_reason="今日配额已用完")
             return PreLLMResult()
         except Exception as e:
-            logger.error(f"配额检查失败: user={ctx.user_id}, error={e}")
+            logger.error(f"配额检查失败: user={ctx.user_id}, error={e}", exc_info=True)
             return PreLLMResult(abort=True, abort_reason=f"配额检查失败: {e}")
 
     async def _is_exempt(self, user_id: str, group_id: str) -> bool:
@@ -67,7 +67,7 @@ class QuotaHook:
                     return True
             return False
         except Exception as e:
-            logger.error(f"豁免检查失败: user={user_id}, error={e}")
+            logger.error(f"豁免检查失败: user={user_id}, error={e}", exc_info=True)
             return False
 
 
@@ -123,7 +123,7 @@ class TraceHook:
         try:
             await self._write_trace(session_id, final_metadata)
         except Exception as e:
-            logger.warning(f"Trace flush 失败: {e}")
+            logger.warning(f"Trace flush 失败: {e}", exc_info=True)
 
     async def _write_trace(self, session_id: str, metadata: dict) -> None:
         from ..data.models import LLMTraceRecord

@@ -194,7 +194,7 @@ class LifeSimulator:
             if n:
                 logger.info(f"每日衰减批处理: 更新 {n} 条关系")
         except Exception as e:
-            logger.warning(f"每日衰减批处理失败: {e}")
+            logger.warning(f"每日衰减批处理失败: {e}", exc_info=True)
         return n
 
     async def generate_daily_event(self) -> List[Dict[str, Any]]:
@@ -216,7 +216,7 @@ class LifeSimulator:
             if deleted:
                 logger.info(f"清理了 {deleted} 条过期 LLM trace")
         except Exception as e:
-            logger.warning(f"清理 LLM trace 失败: {e}")
+            logger.warning(f"清理 LLM trace 失败: {e}", exc_info=True)
 
     async def _send_msg(self, msg: Dict[str, Any]) -> None:
         """通过 EventSharePort 发送单条消息"""

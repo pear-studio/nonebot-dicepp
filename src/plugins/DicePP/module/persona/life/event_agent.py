@@ -353,7 +353,7 @@ class EventGenerationAgent:
             )
 
         except Exception as e:
-            logger.error(f"事件生成失败: {e}")
+            logger.error(f"事件生成失败: {e}", exc_info=True)
             fallback_args = {
                 "description": "我正在房间里休息。",
                 "context_summary": "在房间里休息",
@@ -517,7 +517,7 @@ class EventGenerationAgent:
             )
 
         except Exception as e:
-            logger.error(f"反应生成失败: {e}")
+            logger.error(f"反应生成失败: {e}", exc_info=True)
             if share_policy == "required":
                 fallback_desire = 1.0
             elif share_policy == "never":
@@ -655,7 +655,7 @@ class EventGenerationAgent:
             return diary
 
         except Exception as e:
-            logger.error(f"日记生成失败: {e}")
+            logger.error(f"日记生成失败: {e}", exc_info=True)
             return f"今天发生了一些事，但我太累了，简单记录一下。"
 
     async def generate_share_message(self, context: ShareMessageContext) -> Optional[str]:
@@ -803,7 +803,7 @@ class EventGenerationAgent:
                     max_tool_rounds, tools[0], SelectionPolicy.SUMMARIZE
                 )
             except ServiceUnavailableError as e:
-                logger.error(f"分享消息: 无可用 provider: {e}")
+                logger.error(f"分享消息: 无可用 provider: {e}", exc_info=True)
                 return None
 
             try:
@@ -815,7 +815,7 @@ class EventGenerationAgent:
                     tools=tools, temperature=0.85, timeout=self._bg_timeout,
                 )
             except Exception as e:
-                logger.error(f"分享消息生成失败: {e}")
+                logger.error(f"分享消息生成失败: {e}", exc_info=True)
                 return None
 
             if not collected:

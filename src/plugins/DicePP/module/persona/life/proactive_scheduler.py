@@ -354,7 +354,7 @@ class ProactiveScheduler(BoundaryReceiver):
                 active_within_days=30
             )
         except Exception as e:
-            logger.error(f"获取活跃关系失败: {e}")
+            logger.error(f"获取活跃关系失败: {e}", exc_info=True)
             return []
 
     # ── 上下文格式化辅助方法 ──────────────────────────────
@@ -592,7 +592,7 @@ class ProactiveScheduler(BoundaryReceiver):
                 return {"__coordinator_buffered": True}
             return None
         except Exception as e:
-            logger.error(f"创建想念消息失败: {e}")
+            logger.error(f"创建想念消息失败: {e}", exc_info=True)
             return None
 
     def get_status(self) -> Dict:

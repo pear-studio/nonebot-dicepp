@@ -88,18 +88,6 @@
   - 新增 trace 子命令：支持 --id / --user-id / --limit 过滤，输出格式化的 round_messages（每轮 think 摘要 + tool_call 名称/参数 + tool_results），绕过 response 摘要字段直接展示 LLM 实际行为
   - 影响面：scripts/dev/persona_inspect.py、skill 文档 docs/agent/skills/persona-inspect/
 
-### [B-260518-a6ac1f] ESCAPE 报错日志不足，无法定位直接原因；排查同类工具日志问题
-- 创建: 2026-05-18
-- 问题表现:
-    - 5月15日出现 3 次 工具执行异常: ESCAPE expression must be a single character
-    - llm/loop.py:237 只记录 logger.warning(f'工具执行异常: {e}')，无堆栈、无工具名、无参数
-    - 同类日志缺陷可能存在于其他 try/except 块中（仅记 warning 无上下文）
-    - 影响：无法从日志直接确认根因，只能推测
-- 工作计划:
-    - llm/loop.py:237 改用 logger.exception() 或加 exc_info=True，同时增加工具名和关键参数
-    - 全局排查项目中其他 bare except Exception: logger.warning(f'...{e}') 的捕捉点，类似问题一并改善
-    - 影响面: llm/loop.py、可能需要搜索 src/plugins/DicePP/ 下所有类似模式
-
 ### [B-260518-f7ee13] persona_observation_buffers 是迁移遗留孤立数据
 - 创建: 2026-05-18
 - 问题表现:

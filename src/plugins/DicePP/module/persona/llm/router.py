@@ -403,7 +403,7 @@ class LLMRouter:
                 task.add_done_callback(self._flush_tasks.discard)
                 self._flush_tasks.add(task)
             except RuntimeError as e:
-                logger.warning(f"无法创建 trace flush 任务: {e}")
+                logger.warning(f"无法创建 trace flush 任务: {e}", exc_info=True)
 
     async def increment_usage(self, user_id: str) -> None:
         """增加用量计数"""
@@ -512,7 +512,7 @@ class LLMRouter:
                 # disabled 模型存在时每 60s 扫描以尽快恢复，无 disabled 时休眠 300s 省资源
                 scan_interval = 60 if disabled_keys else 300
             except Exception as e:
-                logger.warning(f"后台探针扫描异常: {e}")
+                logger.warning(f"后台探针扫描异常: {e}", exc_info=True)
                 scan_interval = 60
 
             try:

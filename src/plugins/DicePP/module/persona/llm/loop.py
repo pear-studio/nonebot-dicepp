@@ -119,7 +119,7 @@ class AgentLoop:
             except NonRetryableError:
                 raise
             except Exception as e:
-                logger.error(f"AgentLoop LLM error: {self._ce(e)} {e}")
+                logger.error(f"AgentLoop LLM error: {self._ce(e)} {e}", exc_info=True)
                 raise
 
             tr += 1
@@ -159,7 +159,7 @@ class AgentLoop:
                 try:
                     hr = await h.post_llm(current, resp, ctx)
                 except Exception as e:
-                    logger.warning(f"post_llm hook error ({type(h).__name__}): {e}")
+                    logger.warning(f"post_llm hook error ({type(h).__name__}): {e}", exc_info=True)
                     continue
                 if hr is not None and getattr(h, 'injects_message', False):
                     injected = hr
@@ -234,7 +234,7 @@ class AgentLoop:
             try:
                 tresults = await executor([tc.to_dict() for tc in tcs])
             except Exception as e:
-                logger.warning(f"工具执行异常: {e}")
+                logger.warning(f"工具执行异常: tool={tnames}, error={e}", exc_info=True)
                 tresults = [{"tool_call_id": tc.id, "content": f"工具执行失败: {e}"} for tc in tcs]
             for tr_item in tresults:
                 current.append({"role": "tool", "tool_call_id": tr_item["tool_call_id"],
@@ -249,7 +249,7 @@ class AgentLoop:
                         await h.post_tool(
                             [ToolResult(tool_call_id=r["tool_call_id"], content=r["content"]) for r in tresults], ctx)
                     except Exception as e:
-                        logger.warning(f"post_tool hook error ({type(h).__name__}): {e}")
+                        logger.warning(f"post_tool hook error ({type(h).__name__}): {e}", exc_info=True)
 
             trn += 1
             records.append({"round": trn - 1, "think": think, "tool_calls": tc_dicts,
