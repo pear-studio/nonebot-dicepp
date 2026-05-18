@@ -35,14 +35,20 @@ def _make_private_meta(msg: str, user_id: str = "user", nickname: str = "测试�
 
 
 def _default_persona_config():
-    from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+    from plugins.DicePP.core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
     return PersonaConfig(
         enabled=True,
         character_name="test_char",
         character_path="./content/characters",
-        primary_api_key="fake_key",
-        primary_base_url="http://localhost",
-        primary_model="gpt-4o",
+        providers={
+            "openai": ProviderConfig(
+                api_key="fake_key",
+                base_url="http://localhost",
+                models=[
+                    ModelConfig(name="gpt-4o", category="llm", capabilities=["text", "tool_calls"], quality=0.9, cost=0.5)
+                ],
+            ),
+        },
         group_activity_enabled=False,
         trace_enabled=False,
         whitelist_enabled=True,
@@ -215,8 +221,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
 
         self.cmd.app.chat.router = MagicMock()
         self.cmd.app.chat.router.get_stats.return_value = {
-            "primary": {"requests": 1, "errors": 0},
-            "auxiliary": {"requests": 0, "errors": 0},
+            "openai": {"requests": 1, "errors": 0},
         }
         self.cmd.app.chat.router.get_latency_percentiles.return_value = {"p50": 100, "p90": 200, "p99": 300}
 
@@ -410,31 +415,14 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         await self.cmd.process_msg(".ai join secret", meta, "join")
         assert "已开启 AI 对话" in _get_sent_content(self.cmd)
 
-    async def test_key_commands(self):
-        with patch("plugins.DicePP.module.persona.command.PersonaDataStore._get_encryption_key", return_value="fake_secret"):
-            self.store.get_user_llm_config = AsyncMock(return_value=None)
-            meta = _make_private_meta(".ai key")
-            await self.cmd.process_msg(".ai key", meta, None)
-            assert "你还没有配置个人 API Key" in _get_sent_content(self.cmd)
+    async def test_key_command_deprecated(self):
+        meta = _make_private_meta(".ai key")
+        await self.cmd.process_msg(".ai key", meta, None)
+        assert "功能升级中" in _get_sent_content(self.cmd)
 
-            self.store.get_user_llm_config = AsyncMock(return_value=UserLLMConfig(
-                user_id="user", primary_api_key="sk-xxx", primary_model="gpt-4o"
-            ))
-            meta2 = _make_private_meta(".ai key")
-            await self.cmd.process_msg(".ai key", meta2, None)
-            assert "你的 LLM 配置" in _get_sent_content(self.cmd)
-
-            meta3 = _make_private_meta(".ai key clear")
-            await self.cmd.process_msg(".ai key clear", meta3, None)
-            assert "个人 LLM 配置已清除" in _get_sent_content(self.cmd)
-
-            meta4 = _make_private_meta(".ai key config")
-            await self.cmd.process_msg(".ai key config", meta4, None)
-            assert "请提供配置内容" in _get_sent_content(self.cmd)
-
-            meta5 = _make_private_meta(".ai key config primary_key: sk-test\nprimary_model: gpt-4o")
-            await self.cmd.process_msg(".ai key config primary_key: sk-test\nprimary_model: gpt-4o", meta5, None)
-            assert "配置已保存" in _get_sent_content(self.cmd)
+        meta2 = _make_private_meta(".ai key config")
+        await self.cmd.process_msg(".ai key config", meta2, None)
+        assert "功能升级中" in _get_sent_content(self.cmd)
 
 
 @pytest.mark.integration
@@ -529,15 +517,21 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
     """
 
     async def asyncSetUp(self):
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+        from plugins.DicePP.core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
         # 与 _default_persona_config() 同源, 但启用 group_activity
         persona = PersonaConfig(
             enabled=True,
             character_name="test_char",
             character_path="./content/characters",
-            primary_api_key="fake_key",
-            primary_base_url="http://localhost",
-            primary_model="gpt-4o",
+            providers={
+                "openai": ProviderConfig(
+                    api_key="fake_key",
+                    base_url="http://localhost",
+                    models=[
+                        ModelConfig(name="gpt-4o", category="llm", capabilities=["text", "tool_calls"], quality=0.9, cost=0.5)
+                    ],
+                ),
+            },
             observe_group_enabled=False,
             group_activity_enabled=True,
             trace_enabled=False,
