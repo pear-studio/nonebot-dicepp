@@ -13,15 +13,6 @@
   "bot_default_enable": true,
   "chat_interval": 20,
 
-  "llm": {
-    "enabled": true,
-    "base_url": "https://api.minimaxi.com/anthropic/v1",
-    "model": "claude-sonnet-4-6",
-    "personality": "你是原神中的角色七七，药庐「不卜庐」的采药姑娘。你是僵尸，记忆力很差，说话简短断续，自称'七七'。你最喜欢椰奶，讨厌高温、假笑和胡桃。你珍惜一切善意，有着强烈的活下去的愿望。",
-    "max_context": 20,
-    "timeout": 10
-  },
-
   "memory_monitor": {
     "enable": false,
     "warn_percent": 80,
@@ -93,7 +84,22 @@
         "api_key": "",
         "base_url": "https://api.minimaxi.com/v1",
         "models": [
-          {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
+          {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.3, "cost": 0.3}
+        ]
+      },
+      "deepseek": {
+        "api_key": "",
+        "base_url": "https://api.deepseek.com",
+        "models": [
+          {"name": "deepseek-v4-flash", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.5, "cost": 0.5},
+          {"name": "deepseek-v4-pro", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.6, "cost": 0.6}
+        ]
+      },
+      "minimax_image": {
+        "api_key": "",
+        "base_url": "https://api.minimaxi.com/v1",
+        "models": [
+          {"name": "image-01", "category": "gen", "capabilities": ["image"], "quality": 0.5, "cost": 0.5}
         ]
       }
     },
@@ -106,8 +112,7 @@
     "max_short_term_chars": 1500,
     "max_messages": 15,
 
-    "tools_enabled": true,
-    "tools_max_rounds": 5,
+    "tools_max_rounds": 10,
 
     "max_diary_context_chars": 500,
     "lore_token_budget": 300,
@@ -145,8 +150,6 @@
 
     "group_activity_enabled": true,
     "group_activity_decay_per_day": 10.0,
-    "group_activity_decay_with_content": 5.0,
-    "group_activity_content_window_hours": 24.0,
     "group_activity_add_per_interaction": 2.0,
     "group_activity_max_daily_add": 20.0,
     "group_activity_min_threshold": 60.0,
@@ -154,15 +157,6 @@
 
     "group_chat_enabled": true,
     "group_simple_scoring": true,
-
-    "observe_group_enabled": true,
-    "observe_min_length": 5,
-    "observe_max_length": 500,
-    "observe_initial_threshold": 20,
-    "observe_max_threshold": 60,
-    "observe_min_threshold": 5,
-    "observe_max_records": 30,
-    "observe_max_buffer_size": 60,
 
     "daily_limit": 20,
     "quota_check_enabled": true,
