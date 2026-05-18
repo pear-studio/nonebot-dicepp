@@ -19,25 +19,35 @@
 ```json
 {
   "persona_ai": {
-    "primary_api_key": "your-api-key-here"
+    "providers": {
+      "minimax": {
+        "api_key": "your-api-key-here"
+      }
+    }
   }
 }
 ```
 
-如果辅助模型使用不同厂商的 Key，可一并配置：
+如果需要多个 provider（如同时使用 MiniMax 和 DeepSeek），可配置多个：
 
 ```json
 {
   "persona_ai": {
-    "primary_api_key": "sk-primary-xxx",
-    "primary_base_url": "https://api.openai.com/v1",
-    "auxiliary_api_key": "sk-aux-xxx",
-    "auxiliary_base_url": "https://api.other.com/v1"
+    "providers": {
+      "minimax": {
+        "api_key": "sk-minimax-xxx",
+        "base_url": "https://api.minimaxi.com/v1"
+      },
+      "deepseek": {
+        "api_key": "sk-deepseek-xxx",
+        "base_url": "https://api.deepseek.com/v1"
+      }
+    }
   }
 }
 ```
 
-- `auxiliary_api_key` / `auxiliary_base_url` 留空时，自动复用 `primary_*`。
+- 密钥 `api_key` 建议只写在 `secrets.json` 中，`base_url` 和 `models` 写在 `global.json`。
 - 所有配置会被深度合并进 `global.json` 的 `persona_ai` 对象，无需在 `secrets.json` 中重复写非敏感字段。
 
 ---
@@ -51,9 +61,14 @@
   "enabled": true,
   "character_name": "default",
   "character_path": "./content/characters",
-  "primary_base_url": "https://api.minimaxi.com/v1",
-  "primary_model": "MiniMax-M2.7",
-  "auxiliary_model": "MiniMax-M2.7",
+  "providers": {
+    "minimax": {
+      "base_url": "https://api.minimaxi.com/v1",
+      "models": [
+        {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
+      ]
+    }
+  },
   "max_concurrent_requests": 2,
   "timeout": 30,
   "timezone": "Asia/Shanghai",
@@ -67,9 +82,9 @@
 |------|------|
 | `character_name` | 角色卡子目录名，对应 `content/characters/{name}/character.yaml` |
 | `character_path` | 角色卡存放目录，默认 `./content/characters` |
-| `primary_model` | 主模型，用于生成对话回复 |
-| `auxiliary_model` | 辅助模型，用于评分、摘要、事件生成等后台任务 |
-| `daily_limit` | 主模型每日调用次数上限（白名单用户不受此限制） |
+| `providers.<name>` | LLM 提供者配置，每个 provider 下含 `api_key`、`base_url`、`models` 列表 |
+| `providers.<name>.models[*]` | 模型定义：`name`、`category`（llm/gen）、`capabilities`、`quality`（0-1）、`cost`（0-1） |
+| `daily_limit` | 每日调用次数上限（白名单用户不受此限制） |
 | `timezone` | 业务时区，影响日记、事件、安静时段，须为 IANA 名称（如 `Asia/Shanghai`） |
 
 > 完整字段列表见 [`config-example.md`](./config-example.md)。
@@ -152,7 +167,7 @@ docker compose up -d
 
 ### LLM 调用报错
 
-- 检查 `primary_base_url` 和 `primary_api_key` 是否正确。
+- 检查 `providers.<name>.base_url` 和 `providers.<name>.api_key` 是否正确。
 - 查看 `[persona.llm]` 日志中的 `status` 字段（`timeout` / `rate_limit` / `auth_error` 等）。
 - 开启 trace 调试（`trace_enabled: true`），用 `.ai admin errors` 查看最近错误摘要。
 

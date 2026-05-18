@@ -9,7 +9,7 @@ from typing import List, Dict, Optional, Any
 
 from nonebot.log import logger
 
-from .protocol import LLMProvider, LLMResponse, TokenUsage, ToolCall
+from .protocol import LLMProvider, LLMResponse, TokenUsage, ToolCall, ErrorClass, NonRetryableError
 
 
 _RETRYABLE_KEYWORDS = (
@@ -20,11 +20,6 @@ _RETRYABLE_KEYWORDS = (
 # 不可重试错误关键词（立即抛出 NonRetryableError）
 _NON_RETRYABLE_AUTH_KEYWORDS = ("authentication", "unauthorized", "401", "403")
 _NON_RETRYABLE_CONTENT_KEYWORDS = ("content_filter", "moderation", "content policy")
-
-
-class NonRetryableError(Exception):
-    """不可重试的 LLM 错误（认证失败、内容过滤等）"""
-    pass
 
 
 class OpenAIProvider:
@@ -41,10 +36,12 @@ class OpenAIProvider:
         api_key: str,
         base_url: str,
         model: str,
+        extra_params: Optional[Dict[str, Any]] = None,
     ):
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
+        self.extra_params = extra_params or {}
         self._client = None
 
     def _get_client(self):
@@ -112,10 +109,11 @@ class OpenAIProvider:
     ) -> LLMResponse:
         start_time = time.monotonic()
 
-        create_kwargs: Dict[str, Any] = {
+        create_kwargs: Dict[str, Any] = dict(self.extra_params)
+        create_kwargs.update({
             "model": self.model,
             "messages": messages,
-        }
+        })
         if tools:
             create_kwargs["tools"] = tools
             create_kwargs["tool_choice"] = "required"
@@ -184,3 +182,28 @@ class OpenAIProvider:
             cached = response.usage.cache_read_input_tokens
 
         return TokenUsage(input=input_tokens, output=output_tokens, cached=cached)
+
+    async def probe(self) -> bool:
+        """Health check: 发送 max_tokens=1 的 completion 请求。"""
+        client = self._get_client()
+        try:
+            await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": "ping"}],
+                    max_tokens=1,
+                ),
+                timeout=10,
+            )
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def classify_error(exception: Exception) -> ErrorClass:
+        error_msg = str(exception).lower()
+        if any(k in error_msg for k in _NON_RETRYABLE_AUTH_KEYWORDS):
+            return ErrorClass.NON_RETRYABLE
+        if any(k in error_msg for k in _NON_RETRYABLE_CONTENT_KEYWORDS):
+            return ErrorClass.NON_RETRYABLE
+        return ErrorClass.RETRYABLE

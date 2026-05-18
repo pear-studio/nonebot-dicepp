@@ -11,7 +11,7 @@ from nonebot.log import logger
 
 from .hook_protocol import LoopContext, ToolResult
 from .providers.protocol import LLMProvider
-from .providers.openai import NonRetryableError
+from .providers.protocol import NonRetryableError
 
 _THINK_RE = r'<think>.*?</think>'
 _L1_MSG = {"role": "user", "content": "[系统指令] 你必须调用工具来完成任务。不要直接输出文本——只能通过调用工具来输出结果。"}

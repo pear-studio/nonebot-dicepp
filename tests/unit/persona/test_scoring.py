@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.chat.scoring import ScoringAgent
 from plugins.DicePP.module.persona.data.models import ScoreDeltas
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
+from conftest import make_mock_provider
 
 
 def _make_generate_response(content="", tool_calls=None):
@@ -23,8 +24,7 @@ def _make_generate_response(content="", tool_calls=None):
 @pytest.fixture
 def mock_router():
     router = MagicMock()
-    router.auxiliary_client = MagicMock()
-    router.auxiliary_client.generate = AsyncMock()
+    router.select_provider = AsyncMock(return_value=make_mock_provider())
     router.data_store = None
     router.quota_check_enabled = False
     router.daily_limit = 20
@@ -45,7 +45,7 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_normal_tool_call_collection(self, agent, mock_router):
         """正常工具调用收集 → _extract_result 解析"""
-        mock_router.auxiliary_client.generate.return_value = _make_generate_response(
+        mock_router.select_provider.return_value.generate.return_value = _make_generate_response(
             tool_calls=[ToolCall(id="tc_1", name="score_relationship",
                         arguments='{"deltas": {"intimacy": 1.5, "passion": 0, "trust": 0.5, "secureness": 0}, "facts": {"爱好": "摄影"}}')],
         )
@@ -65,7 +65,7 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_empty_collected_fallback_to_parse_response(self, agent, mock_router):
         """collected 为空 → fallback 到 _parse_response(content)"""
-        mock_router.auxiliary_client.generate.return_value = _make_generate_response(
+        mock_router.select_provider.return_value.generate.return_value = _make_generate_response(
             content='{"deltas": {"intimacy": -1.0, "passion": 0, "trust": 0, "secureness": 0}, "facts": {}}',
         )
 
@@ -79,7 +79,7 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_llm_call_failure(self, agent, mock_router):
         """LLM 调用异常 → 返回 parse_error"""
-        mock_router.auxiliary_client.generate.side_effect = Exception("服务不可用")
+        mock_router.select_provider.return_value.generate.side_effect = Exception("服务不可用")
 
         result = await agent.batch_analyze(
             messages=[{"role": "user", "content": "test"}, {"role": "assistant", "content": "ok"}],
@@ -92,7 +92,7 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_empty_collected_and_empty_content(self, agent, mock_router):
         """collected 为空且 content 为空 → fallback 返回空结果"""
-        mock_router.auxiliary_client.generate.return_value = _make_generate_response(content="")
+        mock_router.select_provider.return_value.generate.return_value = _make_generate_response(content="")
 
         result = await agent.batch_analyze(
             messages=[{"role": "user", "content": "test"}, {"role": "assistant", "content": "ok"}],

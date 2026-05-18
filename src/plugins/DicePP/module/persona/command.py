@@ -24,7 +24,6 @@ from .exceptions import PersonaInitError
 from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.models import MessageType
-from .utils.privacy import mask_sensitive_string
 from .admin import AdminDispatcher
 
 
@@ -354,12 +353,7 @@ class PersonaCommand(UserCommandBase):
             else:
                 response = await self._handle_mute(user_id, False)
         elif content == "key" or content.startswith("key "):
-            # Phase 4: 用户 LLM Key 配置
-            if not is_private:
-                response = "请私聊配置"
-            else:
-                key_args = content[4:].strip() if content.startswith("key ") else ""
-                response = await self._handle_key_command(user_id, key_args)
+            response = "用户自定义 API Key 功能升级中，暂不可用。当前所有对话使用全局 provider 配置。"
         elif not content:
             if is_at_trigger:
                 response = await self._get_status(user_id, group_id, is_private)
@@ -376,10 +370,7 @@ class PersonaCommand(UserCommandBase):
                     )
                 except QuotaExceeded as e:
                     dice_log(f"[Persona] 配额超限: user={user_id}, group={group_id}")
-                    response = (
-                        f"{e}\n\n"
-                        "使用 `.ai key config` 配置自己的 API Key 可解除限制"
-                    )
+                    response = str(e)
             else:
                 response = "Persona AI 模块未启用或未初始化"
         else:
@@ -587,19 +578,26 @@ class PersonaCommand(UserCommandBase):
             else:
                 whitelist_status = "\n白名单: 未激活（所有人可用）"
 
+        # 构建已注册模型列表
+        provider_models: List[str] = []
+        for pname, pconfig in config.providers.items():
+            for m in pconfig.models:
+                provider_models.append(f"{pname}/{m.name} (category={m.category})")
+
+        models_str = ", ".join(provider_models) if provider_models else "无"
+
         if not char:
             return (
                 f"Persona AI 状态: 初始化中...\n"
                 f"角色: {config.character_name}\n"
-                f"主模型: {config.primary_model}"
+                f"已注册模型: {models_str}"
                 f"{whitelist_status}"
             )
 
         base = (
             f"Persona AI 状态: 已启用\n"
             f"角色: {char.name}\n"
-            f"主模型: {config.primary_model}\n"
-            f"辅助模型: {config.auxiliary_model or config.primary_model}"
+            f"已注册模型: {models_str}"
             f"{whitelist_status}\n"
             f"\n使用方法: @bot <消息>\n"
             f".ai status - 查看状态\n"
@@ -608,12 +606,20 @@ class PersonaCommand(UserCommandBase):
 
         if self._is_admin(user_id) and self.app.get_router():
             stats = self.app.get_router_stats()
-            p = stats["primary"]
-            a = stats["auxiliary"]
+            stat_lines = []
+            total_req = 0
+            total_err = 0
+            for pname in sorted(stats.keys()):
+                s = stats[pname]
+                total_req += s["requests"]
+                total_err += s["errors"]
+                stat_lines.append(
+                    f"{pname}: {s['requests']} 次 / {s['errors']} 错误"
+                )
+            stat_lines.append(f"合计: {total_req} 次 / {total_err} 错误")
             base += (
                 f"\n\n[管理员] LLM 统计（本次运行）\n"
-                f"主模型: {p['requests']} 次 / {p['errors']} 错误\n"
-                f"辅助模型: {a['requests']} 次 / {a['errors']} 错误"
+                + "\n".join(stat_lines)
             )
 
         return base
@@ -734,153 +740,3 @@ class PersonaCommand(UserCommandBase):
         except Exception as e:
             dice_log(f"[Persona] tick_daily 失败: {e}")
             return []
-
-    # ── Phase 4: 用户 LLM Key 配置 ──
-
-    async def _handle_key_command(self, user_id: str, args: str) -> str:
-        """处理 .ai key 命令
-
-        Args:
-            user_id: 用户ID
-            args: 命令参数，如 "", "config", "config key: value", "clear"
-        """
-        if not self.data_store:
-            return "模块未初始化"
-
-        from .data.models import UserLLMConfig
-
-        # 检查加密密钥是否设置
-        if not PersonaDataStore._get_encryption_key():
-            return "DICE_PERSONA_SECRET 未设置，请联系管理员配置加密密钥"
-
-        parts = args.split(None, 1) if args else ["", ""]
-        subcmd = parts[0] if parts else ""
-        config_content = parts[1] if len(parts) > 1 else ""
-
-        # .ai key - 查看当前配置
-        if not subcmd:
-            config = await self.data_store.get_user_llm_config(user_id)
-            if not config:
-                return (
-                    "你还没有配置个人 API Key\n"
-                    "使用 `.ai key config` 进行配置\n"
-                    "格式示例:\n"
-                    "primary_key: sk-xxx\n"
-                    "primary_model: gpt-4o"
-                )
-
-            lines = ["你的 LLM 配置:"]
-            if config.decrypt_failed:
-                lines.append("⚠️ 加密数据无法解密，请重新配置 API Key")
-            lines.append(f"主模型 Key: {mask_sensitive_string(config.primary_api_key)}")
-            if config.primary_model:
-                lines.append(f"主模型: {config.primary_model}")
-            if config.primary_base_url:
-                lines.append(f"主模型 URL: {config.primary_base_url}")
-            if config.auxiliary_api_key:
-                lines.append(f"辅助模型 Key: {mask_sensitive_string(config.auxiliary_api_key)}")
-            if config.auxiliary_model:
-                lines.append(f"辅助模型: {config.auxiliary_model}")
-            if config.auxiliary_base_url:
-                lines.append(f"辅助模型 URL: {config.auxiliary_base_url}")
-            lines.append("\n使用 `.ai key config` 修改配置")
-            lines.append("使用 `.ai key clear` 清除配置")
-            return "\n".join(lines)
-
-        # .ai key clear - 清除配置
-        if subcmd == "clear":
-            await self.data_store.clear_user_llm_config(user_id)
-            return "个人 LLM 配置已清除"
-
-        # .ai key config - 配置
-        if subcmd == "config":
-            if not config_content:
-                return (
-                    "请提供配置内容，格式示例:\n"
-                    ".ai key config\n"
-                    "primary_key: sk-xxx\n"
-                    "primary_model: gpt-4o\n"
-                    "primary_base_url: https://api.openai.com/v1\n"
-                    "\n可选字段:\n"
-                    "- primary_key: 主模型 API Key\n"
-                    "- primary_model: 主模型名称 (默认: gpt-4o)\n"
-                    "- primary_base_url: 主模型 Base URL\n"
-                    "- auxiliary_key: 辅助模型 API Key\n"
-                    "- auxiliary_model: 辅助模型名称\n"
-                    "- auxiliary_base_url: 辅助模型 Base URL"
-                )
-
-            # 解析配置内容（表单格式）
-            parsed, errors = self._parse_key_config(config_content)
-            if not parsed:
-                msg = "配置格式错误，请使用 key: value 格式"
-                if errors:
-                    msg += "\n\n注意:\n" + "\n".join(f"- {e}" for e in errors)
-                return msg
-
-            # 构建 UserLLMConfig
-            existing = await self.data_store.get_user_llm_config(user_id)
-            config = UserLLMConfig(
-                user_id=user_id,
-                primary_api_key=parsed.get("primary_key", existing.primary_api_key if existing else ""),
-                primary_base_url=parsed.get("primary_base_url", existing.primary_base_url if existing else ""),
-                primary_model=parsed.get("primary_model", existing.primary_model if existing else ""),
-                auxiliary_api_key=parsed.get("auxiliary_key", existing.auxiliary_api_key if existing else ""),
-                auxiliary_base_url=parsed.get("auxiliary_base_url", existing.auxiliary_base_url if existing else ""),
-                auxiliary_model=parsed.get("auxiliary_model", existing.auxiliary_model if existing else ""),
-            )
-
-            success = await self.data_store.save_user_llm_config(config)
-            if success:
-                reply = "配置已保存，你的个人 API Key 将用于后续对话"
-                if errors:
-                    reply += "\n\n以下行未保存:\n" + "\n".join(f"- {e}" for e in errors)
-                return reply
-            else:
-                return "配置保存失败，请联系管理员"
-
-        return f"未知命令: {subcmd}\n可用命令: .ai key, .ai key config, .ai key clear"
-
-    # R11: 有效的配置 key 名白名单
-    _VALID_KEY_CONFIG_KEYS = {
-        "primary_key", "primary_model", "primary_base_url",
-        "auxiliary_key", "auxiliary_model", "auxiliary_base_url",
-    }
-
-    @classmethod
-    def _parse_key_config(cls, content: str) -> tuple[Dict[str, str], List[str]]:
-        """解析 key config 内容（R11: 添加 key 名白名单和 URL 验证）
-
-        格式: key: value（每行一个）
-
-        Returns:
-            (解析结果字典, 错误/警告列表)
-        """
-        result: Dict[str, str] = {}
-        errors: List[str] = []
-        for line in content.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            if ":" not in line:
-                errors.append(f"无法识别的行: {line}")
-                continue
-            key, value = line.split(":", 1)
-            key = key.strip()
-            value = value.strip()
-            if not key or not value:
-                errors.append(f"key 或 value 为空: {line}")
-                continue
-            # R11: 检查 key 名是否在白名单中
-            if key not in cls._VALID_KEY_CONFIG_KEYS:
-                errors.append(f"未知的配置项: {key}")
-                continue
-            # R11: 对 URL 字段进行基础格式验证
-            if "base_url" in key and value:
-                from urllib.parse import urlparse
-                parsed = urlparse(value)
-                if parsed.scheme not in ("http", "https") or not parsed.netloc:
-                    errors.append(f"{key} 必须是有效的 http:// 或 https:// URL")
-                    continue
-            result[key] = value
-        return result, errors

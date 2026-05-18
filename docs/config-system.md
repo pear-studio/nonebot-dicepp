@@ -65,8 +65,14 @@ cp config/bots/_template.json config/bots/你的QQ号.json
     "enabled": true,
     "character_name": "default",
     "character_path": "./content/characters",
-    "primary_base_url": "https://api.minimaxi.com/v1",
-    "primary_model": "MiniMax-M2.7",
+    "providers": {
+      "minimax": {
+        "base_url": "https://api.minimaxi.com/v1",
+        "models": [
+          {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
+        ]
+      }
+    },
     "max_concurrent_requests": 2,
     "timeout": 30,
     "daily_limit": 20
@@ -79,7 +85,11 @@ cp config/bots/_template.json config/bots/你的QQ号.json
 ```json
 {
   "persona_ai": {
-    "primary_api_key": "你的API密钥"
+    "providers": {
+      "minimax": {
+        "api_key": "你的API密钥"
+      }
+    }
   }
 }
 ```

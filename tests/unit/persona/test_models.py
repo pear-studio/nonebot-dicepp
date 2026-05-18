@@ -11,7 +11,6 @@ from plugins.DicePP.module.persona.data.models import (
     ScoreDeltas,
     RelationshipState,
     UserProfile,
-    ModelTier,
 )
 from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
@@ -159,19 +158,13 @@ class TestPersonaConfig:
     def test_default_values(self):
         """测试配置默认值"""
         config = PersonaConfig()
-        
+
         assert config.enabled == False
         assert config.character_name == "default"
         assert config.whitelist_enabled == True
-        assert config.primary_model == "gpt-4o"
-        assert config.auxiliary_model == "gpt-4o-mini"
+        assert config.providers == {}
         assert config.max_concurrent_requests == 2
         assert config.daily_limit == 20
-
-    def test_model_tier_enum(self):
-        """测试模型层级枚举"""
-        assert ModelTier.PRIMARY == "primary"
-        assert ModelTier.AUXILIARY == "auxiliary"
 
     def test_segment_defaults(self):
         """测试分段回复配置默认值"""

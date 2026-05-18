@@ -438,8 +438,14 @@ make logs
   "enabled": true,
   "character_name": "default",
   "character_path": "./content/characters",
-  "primary_base_url": "https://api.minimaxi.com/v1",
-  "primary_model": "MiniMax-M2.7",
+  "providers": {
+    "minimax": {
+      "base_url": "https://api.minimaxi.com/v1",
+      "models": [
+        {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
+      ]
+    }
+  },
   "max_concurrent_requests": 2,
   "timeout": 30,
   "daily_limit": 20
@@ -450,7 +456,11 @@ make logs
 ```json
 {
   "persona_ai": {
-    "primary_api_key": "your-api-key-here"
+    "providers": {
+      "minimax": {
+        "api_key": "your-api-key-here"
+      }
+    }
   }
 }
 ```

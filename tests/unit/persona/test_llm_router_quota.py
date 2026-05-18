@@ -6,10 +6,13 @@ import asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock
 
+from unittest.mock import MagicMock
+
 from plugins.DicePP.module.persona.llm.router import LLMRouter, QuotaExceeded
 from plugins.DicePP.module.persona.llm.hooks import QuotaHook
 from plugins.DicePP.module.persona.llm.loop import AgentLoop
-from plugins.DicePP.module.persona.data.models import ModelTier, UserLLMConfig
+from plugins.DicePP.module.persona.data.models import UserLLMConfig
+from conftest import make_mock_providers
 
 
 class MockDataStore:
@@ -92,7 +95,7 @@ class TestQuotaCheck:
 
     @pytest.mark.asyncio
     async def test_quota_exceeded_raises_in_router(self, mock_store, mock_config):
-        router = LLMRouter("fake", "http://localhost", "fake", max_concurrent=1)
+        router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
         router.data_store = mock_store
         router.config = mock_config
         router.quota_check_enabled = True
@@ -110,10 +113,10 @@ class TestQuotaCheck:
 
 class TestExemptionLogic:
     @pytest.mark.asyncio
-    async def test_user_custom_key_exempt(self, mock_store, mock_config):
+    async def test_user_custom_key_no_longer_exempt(self, mock_store, mock_config):
         mock_store.set_user_config("u1", UserLLMConfig(user_id="u1", primary_api_key="sk-custom"))
         hook = QuotaHook(data_store=mock_store, config=mock_config)
-        assert await hook._is_exempt("u1", "g1") is True
+        assert await hook._is_exempt("u1", "g1") is False  # v1 不再提供 user key 豁免
 
     @pytest.mark.asyncio
     async def test_user_whitelist_exempt(self, mock_store, mock_config):
@@ -143,7 +146,7 @@ class TestExemptionLogic:
 class TestIncrementUsage:
     @pytest.mark.asyncio
     async def test_increment_usage(self, mock_store, mock_config):
-        router = LLMRouter("fake", "http://localhost", "fake", max_concurrent=1)
+        router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
         router.data_store = mock_store
         router.config = mock_config
         today = datetime.now().strftime("%Y-%m-%d")
@@ -152,7 +155,7 @@ class TestIncrementUsage:
 
     @pytest.mark.asyncio
     async def test_increment_usage_no_data_store(self):
-        router = LLMRouter("fake", "http://localhost", "fake", max_concurrent=1)
+        router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
         router.data_store = None
         await router.increment_usage("u1")
 

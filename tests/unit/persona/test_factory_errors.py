@@ -3,7 +3,7 @@
 create_persona 在 Phase 2 之后用具名异常 PersonaInitError 报告初始化失败：
 
 1. 角色卡缺失 → PersonaCharacterLoadError
-2. primary_api_key 缺失 → PersonaConfigError
+2. providers 为空 → PersonaConfigError
 3. 数据库未连接 → PersonaStorageError
 
 模块禁用（config.enabled=False）仍返回 None，不抛异常——这是合法状态。
@@ -21,11 +21,28 @@ from plugins.DicePP.module.persona.exceptions import (
 )
 
 
+def _make_providers_config():
+    """最小有效的 providers 配置"""
+    provider = MagicMock()
+    provider.api_key = "sk-test"
+    provider.base_url = "https://api.openai.com/v1"
+    provider.models = []
+    model = MagicMock()
+    model.name = "gpt-4o"
+    model.category = "llm"
+    model.capabilities = ["text", "tool_calls"]
+    model.quality = 0.9
+    model.cost = 0.5
+    model.circuit_breaker = None
+    provider.models = [model]
+    return {"openai": provider}
+
+
 def _make_bot(
     *,
     enabled: bool = True,
     character_loaded=True,
-    primary_api_key: str = "sk-test",
+    has_providers: bool = True,
     db_connected: bool = True,
 ) -> MagicMock:
     """构造最小可走 create_persona 前 3 步的 Bot mock"""
@@ -34,7 +51,7 @@ def _make_bot(
     cfg.enabled = enabled
     cfg.character_path = "/tmp/chars"
     cfg.character_name = "test"
-    cfg.primary_api_key = primary_api_key
+    cfg.providers = _make_providers_config() if has_providers else {}
     bot.config.persona_ai = cfg
 
     bot.db = MagicMock()
@@ -75,8 +92,8 @@ async def test_character_load_failure_raises(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_missing_api_key_raises(monkeypatch):
-    """primary_api_key 为空 → 抛 PersonaConfigError"""
-    bot = _make_bot(primary_api_key="")
+    """providers 为空 → 抛 PersonaConfigError"""
+    bot = _make_bot(has_providers=False)
 
     class FakeLoader:
         def __init__(self, path):
@@ -92,7 +109,7 @@ async def test_missing_api_key_raises(monkeypatch):
 
     with pytest.raises(PersonaConfigError) as excinfo:
         await create_persona(bot)
-    assert "primary_api_key" in str(excinfo.value)
+    assert "providers" in str(excinfo.value)
     assert isinstance(excinfo.value, PersonaInitError)
 
 

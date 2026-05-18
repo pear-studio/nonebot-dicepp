@@ -159,3 +159,12 @@
     - 逐步统一测试风格，清理 MyTestCase 旧命名，拆分超大文件
     - 影响面：pytest.ini / pyproject.toml marker 配置、CI 脚本、各测试文件
 
+### [B-260515-dd50eb] 用户自带 API Key 功能（.ai key config）
+- 创建: 2026-05-15
+- 问题表现: 用户可通过 .ai key config 命令提供自己的 LLM API key，覆盖全局配置。涉及计费体系、配额管理、滥用防护等一整套体系，当前设计对安全边界覆盖不足。该功能与 provider 路由重构的候选池调度、熔断器、探针等核心机制耦合过深，增加了不必要的复杂度。当前从本分支 scope 中移出，需求保留待后续独立实施。
+- 工作计划: 独立设计用户 Key 管理子系统：安全存储（加密）、配额追踪、滥用检测。实现 UserLLMConfig 数据模型（含 API key 加密存储）。实现 .ai key config 命令交互流程。Router 层集成用户 Key 覆盖逻辑（优先级高于全局配置）。影响面: module/persona/data/models.py、module/persona/command.py、module/persona/llm/router.py。
+
+### [B-260518-abc123] 图片生成输出链路完善（generate_image）
+- 创建: 2026-05-18
+- 问题表现: generate_image 工具和 MiniMaxImageProvider 已实现，gen category 路由也已就位，但图片生成后仅返回 URL 字符串，send_reply_segment 不支持发送图片 segment，用户无法实际看到生成的图片。当前已将工具注册从 factory 中移除，保留 provider 和路由代码。
+- 工作计划: send_reply_segment 增加 image 类型支持（QQ 适配器的 CQ:image 格式）。生成完图片后 LLM 可通过 send_reply_segment 将图片 URL 以 image segment 发送。完成后重新注册 generate_image 工具。影响面: module/persona/tools/send_reply_segment.py、module/persona/tools/generate_image.py、module/persona/factory.py。

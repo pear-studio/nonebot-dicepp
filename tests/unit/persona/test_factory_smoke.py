@@ -19,12 +19,22 @@ def _make_bot() -> MagicMock:
     cfg.enabled = True
     cfg.character_path = "/tmp/chars"
     cfg.character_name = "test"
-    cfg.primary_api_key = "sk-test"
-    cfg.primary_base_url = "https://api.example.com"
-    cfg.primary_model = "test-model"
-    cfg.auxiliary_api_key = ""
-    cfg.auxiliary_base_url = ""
-    cfg.auxiliary_model = ""
+
+    # 使用新 providers 结构
+    provider = MagicMock()
+    provider.api_key = "sk-test"
+    provider.base_url = "https://api.example.com"
+    provider.max_concurrent = None
+    model = MagicMock()
+    model.name = "test-model"
+    model.category = "llm"
+    model.capabilities = ["text", "tool_calls"]
+    model.quality = 0.9
+    model.cost = 0.5
+    model.circuit_breaker = None
+    provider.models = [model]
+    cfg.providers = {"openai": provider}
+
     cfg.max_concurrent_requests = 2
     cfg.chat_llm_timeout_seconds = 30
     cfg.daily_limit = 20
@@ -96,9 +106,13 @@ async def test_create_persona_success_registers_three_tools(monkeypatch):
         FakeLoader,
     )
 
+    mock_router_cls = MagicMock()
+    mock_router_cls.return_value.probe_all_models = AsyncMock(return_value={})
+    mock_router_cls.return_value.all_providers_disabled = MagicMock(return_value=False)
+    mock_router_cls.return_value.start_probe_task = MagicMock()
     monkeypatch.setattr(
         "plugins.DicePP.module.persona.factory.LLMRouter",
-        MagicMock,
+        mock_router_cls,
     )
 
     class FakeStore:

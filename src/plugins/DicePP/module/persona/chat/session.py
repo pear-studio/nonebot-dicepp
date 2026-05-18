@@ -22,7 +22,6 @@ from utils.string import estimate_tokens
 
 from ..data.store import PersonaDataStore
 from ..data.models import (
-    ModelTier,
     UserProfile,
     RelationshipState,
     ScoreEvent,
@@ -31,6 +30,7 @@ from ..data.models import (
     MessageType,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
+from ..llm.selection import SelectionPolicy
 from ..character.models import Character
 from ..chat.scoring import ScoringAgent
 from ..chat.context import ContextBuilder
@@ -413,7 +413,7 @@ class ChatSession:
         result = await self.router.run_via_loop(
             messages=messages, tools=tools,
             max_tool_rounds=self.config.tools_max_rounds,
-            model_tier=ModelTier.PRIMARY,
+            selection=SelectionPolicy.CHAT,
             user_id=user_id, group_id=group_id,
             tool_registry=self.tool_registry,
             tool_domains=[ToolDomain.CHAT], tool_ctx=ctx,

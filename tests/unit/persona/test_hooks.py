@@ -112,7 +112,7 @@ class TestQuotaHook:
         assert result.abort is False
 
     @pytest.mark.asyncio
-    async def test_custom_key_user_exempt(self, mock_store):
+    async def test_custom_key_no_longer_exempt(self, mock_store):
         mock_store.get_user_llm_config = AsyncMock(return_value=Mock(primary_api_key="sk-custom"))
         mock_store.get_daily_usage = AsyncMock(return_value=100)
 
@@ -120,7 +120,7 @@ class TestQuotaHook:
         ctx = LoopContext(user_id="u1", group_id="")
         result = await hook.pre_llm([], ctx)
 
-        assert result.abort is False  # 豁免
+        assert result.abort is True  # v1 不再提供 user key 豁免
 
     @pytest.mark.asyncio
     async def test_whitelisted_user_exempt(self, mock_store):

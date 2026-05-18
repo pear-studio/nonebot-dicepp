@@ -10,11 +10,11 @@ from typing import List, Literal, Optional
 from datetime import datetime
 import json
 from nonebot.log import logger
-from ..llm.router import LLMRouter
+from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.loop import AgentLoop, LoopResult
+from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
 from ..tools.registry import ToolRegistry, ToolDef
-from ..data.models import ModelTier
 from typing import TYPE_CHECKING
 
 # keep in sync with PersonaConfig.background_llm_timeout_seconds default
@@ -105,7 +105,7 @@ class EventContext:
 class EventGenerationAgent:
     """事件生成 Agent - 使用辅助模型"""
 
-    def _make_collect_loop(self, max_tool_rounds: int, tool_def: dict):
+    async def _make_collect_loop(self, max_tool_rounds: int, tool_def: dict, policy: SelectionPolicy):
         """创建收集型 AgentLoop——工具 executor 将参数存入 collected_args"""
         collected_args: list = []
         name = tool_def["function"]["name"]
@@ -118,8 +118,9 @@ class EventGenerationAgent:
         )
 
         hooks = self.llm_router.make_default_hooks()
+        provider = await self.llm_router.select_provider(policy)
         loop = AgentLoop(
-            provider=self.llm_router.auxiliary_client,
+            provider=provider,
             tool_registry=tool_registry,
             hooks=hooks, max_tool_rounds=max_tool_rounds,
         )
@@ -300,7 +301,7 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            loop, collected = self._make_collect_loop(max_tool_rounds, tools[0])
+            loop, collected = await self._make_collect_loop(max_tool_rounds, tools[0], SelectionPolicy.EVENT_GEN)
 
             result: LoopResult = await loop.run(
                 messages=[
@@ -469,7 +470,7 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            loop, collected = self._make_collect_loop(max_tool_rounds, tools[0])
+            loop, collected = await self._make_collect_loop(max_tool_rounds, tools[0], SelectionPolicy.EVENT_GEN)
 
             result: LoopResult = await loop.run(
                 messages=[
@@ -627,7 +628,7 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            loop, collected = self._make_collect_loop(max_tool_rounds, tools[0])
+            loop, collected = await self._make_collect_loop(max_tool_rounds, tools[0], SelectionPolicy.DIARY)
 
             result: LoopResult = await loop.run(
                 messages=[
@@ -797,7 +798,13 @@ class EventGenerationAgent:
         backoff_base = getattr(self.config, "proactive_share_backoff_base_seconds", 2) if self.config else 2
 
         for attempt in range(max_parse_retries + 1):
-            loop, collected = self._make_collect_loop(max_tool_rounds, tools[0])
+            try:
+                loop, collected = await self._make_collect_loop(
+                    max_tool_rounds, tools[0], SelectionPolicy.SUMMARIZE
+                )
+            except ServiceUnavailableError as e:
+                logger.error(f"分享消息: 无可用 provider: {e}")
+                return None
 
             try:
                 result: LoopResult = await loop.run(
