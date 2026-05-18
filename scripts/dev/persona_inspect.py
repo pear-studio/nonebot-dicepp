@@ -348,6 +348,158 @@ def cmd_active(conn: sqlite3.Connection, args) -> None:
         print("  (表不存在)")
 
 
+def cmd_tables(conn: sqlite3.Connection, _args) -> None:
+    """列出所有 persona_ 前缀表的 DDL"""
+    rows = conn.execute(
+        "SELECT name, sql FROM sqlite_master "
+        "WHERE type='table' AND name LIKE 'persona_%' "
+        "ORDER BY name"
+    ).fetchall()
+    if not rows:
+        print("(无 persona_ 前缀表)")
+        return
+    for r in rows:
+        print(f"\n── {r['name']}")
+        print(r["sql"] + ";")
+
+
+def cmd_trace(conn: sqlite3.Connection, args) -> None:
+    """LLM Trace 详情 — 展示 round_messages 结构化内容"""
+
+    # ── 查询 ──
+    where_parts = []
+    params: List[Any] = []
+
+    if args.id is not None:
+        where_parts.append("id=?")
+        params.append(args.id)
+    if args.user_id:
+        where_parts.append("(user_id=? OR user_id='')")
+        params.append(args.user_id)
+
+    where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+    has_round_msgs = col_exists(conn, "persona_llm_traces", "round_messages")
+    rm_col = ", round_messages" if has_round_msgs else ""
+
+    rows = conn.execute(
+        f"SELECT id, session_id, user_id, group_id, model, tier,"
+        f"messages, response, tool_calls, latency_ms,"
+        f"tokens_in, tokens_out, status, error, created_at{rm_col} "
+        f"FROM persona_llm_traces {where} "
+        f"ORDER BY created_at DESC LIMIT ?",
+        (*params, args.limit)
+    ).fetchall()
+
+    if not rows:
+        print("(无 trace 记录)")
+        return
+
+    # ── 列表总览 ──
+    _section(f"LLM Trace (共 {len(rows)} 条)")
+    for r in rows:
+        ts = (r["created_at"] or "")[5:16] if r["created_at"] else "-"
+        rounds_str = ""
+        if has_round_msgs and r["round_messages"]:
+            try:
+                rms = json.loads(r["round_messages"])
+                if isinstance(rms, list):
+                    rounds_str = f"{len(rms)}轮"
+            except json.JSONDecodeError:
+                rounds_str = "?"
+        latency = f"{r['latency_ms']}ms" if r["latency_ms"] else "-"
+        print(
+            f"  #{r['id']:<5} │ {ts} │ {r['status']:<8} │ "
+            f"{rounds_str:<6} │ {r['model']:<15} │ "
+            f"{latency:<8} │ {r['tokens_in']}/{r['tokens_out']}"
+        )
+
+    # ── 详情展开 ──
+    expand_rows = rows if args.full else rows[:1]
+
+    for r in expand_rows:
+        _section(f"Trace #{r['id']} 详情")
+        _key_val("status", r["status"])
+        _key_val("model", f"{r['model']} ({r['tier']})")
+        _key_val("latency", f"{r['latency_ms']}ms" if r["latency_ms"] else "-")
+        _key_val("tokens", f"{r['tokens_in']} in / {r['tokens_out']} out")
+        _key_val("user_id", r["user_id"] or "(空)")
+        if r["group_id"]:
+            _key_val("group_id", r["group_id"])
+        if r["session_id"]:
+            _key_val("session_id", r["session_id"][:40])
+
+        # error
+        if r["error"]:
+            err = r["error"]
+            if len(err) > 200:
+                err = err[:200] + "..."
+            _key_val("error", err)
+
+        # round_messages
+        if has_round_msgs and r["round_messages"]:
+            try:
+                rms = json.loads(r["round_messages"])
+                if isinstance(rms, dict) and rms.get("_truncated"):
+                    print(f"\n  ⚠ round_messages 已截断 ({rms.get('reason', '')})")
+                    if isinstance(rms.get("rounds"), list):
+                        rms = rms["rounds"]
+                    else:
+                        rms = []
+                if isinstance(rms, list):
+                    for rd in rms:
+                        rn = rd.get("round", "?")
+                        print(f"\n  [Round {rn}]")
+
+                        think = rd.get("think")
+                        if think:
+                            ts = str(think)
+                            if not args.full and len(ts) > 120:
+                                ts = ts[:120] + "..."
+                            print(f"    think:       {ts}")
+
+                        for tc in rd.get("tool_calls", []):
+                            name = tc.get("name", "?")
+                            arg_str = tc.get("arguments", "")
+                            if not args.full and len(arg_str) > 80:
+                                arg_str = arg_str[:80] + "..."
+                            print(f"    tool_call:   {name}({arg_str})")
+
+                        for tr in rd.get("tool_results", []):
+                            content = tr.get("content", "")
+                            if not args.full and len(content) > 100:
+                                content = content[:100] + "..."
+                            print(f"    tool_result: {content}")
+
+                        cb = rd.get("callback")
+                        if cb:
+                            print(f"    callback:    {cb}")
+                else:
+                    print(f"  (round_messages 格式异常: {type(rms).__name__})")
+            except json.JSONDecodeError:
+                print(f"  (round_messages 解析失败)")
+
+        elif not has_round_msgs:
+            print("  (数据库不含 round_messages 列)")
+
+        # response 预览
+        if r["response"]:
+            resp = r["response"]
+            limit = 1000 if args.full else 200
+            if len(resp) > limit:
+                resp = resp[:limit] + "..."
+            print(f"\n  response: {resp}")
+
+        # tool_calls 概要
+        if r["tool_calls"]:
+            try:
+                tcs = json.loads(r["tool_calls"])
+                names = [t.get("name", "?") for t in tcs]
+                print(f"  tools:       {', '.join(names)}")
+            except json.JSONDecodeError:
+                pass
+
+
 # ═══════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════
@@ -370,6 +522,13 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("state", parents=[common], help="角色永久状态 (JSON pretty-print)")
     sub.add_parser("llm-health", parents=[common], help="LLM 健康概览 (错误分布 + 延迟 + 用量)")
     sub.add_parser("active", parents=[common], help="群活跃度 + 群聊观察")
+    sub.add_parser("tables", parents=[common], help="列出所有 persona_ 前缀表的 DDL")
+
+    p_trace = sub.add_parser("trace", parents=[common], help="LLM Trace 详情 (含 round_messages 结构化内容)")
+    p_trace.add_argument("--id", type=int, help="指定 trace ID")
+    p_trace.add_argument("--user-id", help="按 user_id 过滤 (自动包含空 user_id)")
+    p_trace.add_argument("--full", action="store_true", help="展开所有返回 trace 的完整内容")
+    p_trace.set_defaults(limit=5)
 
     return parser
 
@@ -385,6 +544,8 @@ def main() -> None:
         "state": cmd_state,
         "llm-health": cmd_llm_health,
         "active": cmd_active,
+        "tables": cmd_tables,
+        "trace": cmd_trace,
     }
 
     try:

@@ -13,12 +13,14 @@ metadata:
 - 检查 LLM 健康状态（错误分布、延迟、max_rounds、用量）
 - 查看群活跃度概览
 - 快速了解某用户的完整 persona 数据画像
+- 排查 LLM trace 工具调用链路（think 块、tool_call/tool_result 每轮详情）
+- 查看所有 persona_ 前缀表的 DDL
 
 ## 前提条件
 
 1. 在项目根目录（包含 `scripts/dev/persona_inspect.py` 的目录）
 2. 目标 SQLite 数据库可访问（`data/bots/<bot_id>/bot_data.db` 或通过 `--db` 指定）
-3. 单表查询推荐直接用 `sqlite3` CLI，本工具专注跨表聚合
+3. 单表查询推荐直接用 `sqlite3` CLI，本工具专注跨表聚合和格式化输出
 
 ## 子命令
 
@@ -28,6 +30,8 @@ metadata:
 | `state` | 角色永久状态（JSON pretty-print） |
 | `llm-health` | LLM 健康概览：错误分布 + 延迟 p50/p95/p99 + max_rounds + 今日用量 |
 | `active` | 群活跃度 Top N + 最近群聊观察 |
+| `tables` | 列出所有 `persona_` 前缀表的 DDL |
+| `trace` | LLM Trace 详情：轮次级 think/tool_call/tool_result 格式化输出 |
 
 ## 通用选项
 
@@ -35,7 +39,15 @@ metadata:
 |------|------|--------|
 | `--db PATH` | SQLite 数据库文件路径 | 自动推断 |
 | `--bot-id ID` | Bot ID，自动查找对应数据库 | 无 |
-| `--limit N` | 返回记录数上限 | 10 |
+| `--limit N` | 返回记录数上限 | 10（trace 默认 5） |
+
+### trace 专属选项
+
+| 选项 | 说明 |
+|------|------|
+| `--id N` | 精确匹配单条 trace |
+| `--user-id UID` | 按 user_id 过滤（自动包含空 user_id 的记录） |
+| `--full` | 展开所有返回 trace 的完整内容（默认仅展开最新一条） |
 
 ## 典型排查场景
 
@@ -65,6 +77,25 @@ python scripts/dev/persona_inspect.py llm-health --bot-id <bot_id>
 python scripts/dev/persona_inspect.py active --bot-id <bot_id>
 ```
 
+### 场景5：排查 LLM 工具调用链路（某轮工具为什么失败 / LLM think 内容）
+
+```bash
+# 查看某用户最近的 trace（自动展开最新一条的 round_messages）
+python scripts/dev/persona_inspect.py trace --user-id <user_id> --bot-id <bot_id>
+
+# 查看所有 trace 的完整轮次细节
+python scripts/dev/persona_inspect.py trace --user-id <user_id> --full --bot-id <bot_id>
+
+# 查看特定 trace
+python scripts/dev/persona_inspect.py trace --id 42 --bot-id <bot_id>
+```
+
+### 场景6：查看表结构
+
+```bash
+python scripts/dev/persona_inspect.py tables --bot-id <bot_id>
+```
+
 ## 单表查询
 
 以下常见需求直接用 `sqlite3` 更快：
@@ -80,13 +111,18 @@ sqlite3 data/bots/<id>/bot_data.db \
 
 # 某用户的消息历史
 sqlite3 data/bots/<id>/bot_data.db \
-  "SELECT role, substr(content,1,100), created_at FROM persona_unified_messages
+  "SELECT role, substr(content,1,100), created_at FROM persona_messages
    WHERE user_id='<id>' ORDER BY created_at DESC LIMIT 10;"
 
-# LLM trace 详情
+# LLM trace 元数据
 sqlite3 data/bots/<id>/bot_data.db \
   "SELECT id, status, latency_ms, tokens_in, tokens_out, error, created_at
    FROM persona_llm_traces ORDER BY created_at DESC LIMIT 10;"
+
+# trace 的 round_messages（轮次级工具调用细节）
+sqlite3 data/bots/<id>/bot_data.db \
+  "SELECT id, status, round_messages FROM persona_llm_traces
+   WHERE user_id='<id>' ORDER BY created_at DESC LIMIT 3;"
 ```
 
 sqlite3 配置建议 (`~/.sqliterc`):

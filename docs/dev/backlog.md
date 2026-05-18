@@ -49,18 +49,6 @@
     - 确认存量数据库的旧表 DROP 是否已生效
     - 影响面：data/migrations.py、data/store.py、可能需要新增 cleanup job
 
-### [B-260515-7e4aa0] persona_inspect 新增 tables 和 trace 子命令，减少 sqlite3 手工排查
-- 创建: 2026-05-15
-- 问题表现:
-  - 手工 sqlite3 排查每次需 .schema 查列名，persona_llm_traces 19 列、persona_unified_messages 10 列，反复试错
-  - trace 表 user_id 字段可能为空或格式不统一，直接过滤无结果，需绕路日期范围查询
-  - trace 表 response 列只存摘要不存原文（如 "回复了梨子的问题，表示走神了，问梨子说的是去哪里。"），排查重复回复时无法直接看到实际输出
-  - 实际排查中 persona_inspect.py user 已能覆盖 80% 场景，但缺少 trace 级别的查询入口
-- 工作计划:
-  - 新增 tables 子命令：读取 sqlite_master，输出所有 persona_ 前缀表的 DDL
-  - 新增 trace 子命令：支持 --id / --user-id / --limit 过滤，输出格式化的 round_messages（每轮 think 摘要 + tool_call 名称/参数 + tool_results），绕过 response 摘要字段直接展示 LLM 实际行为
-  - 影响面：scripts/dev/persona_inspect.py、skill 文档 docs/agent/skills/persona-inspect/
-
 ### [B-260518-f7ee13] persona_observation_buffers 是迁移遗留孤立数据
 - 创建: 2026-05-18
 - 问题表现:
