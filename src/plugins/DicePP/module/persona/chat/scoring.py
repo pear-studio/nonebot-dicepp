@@ -14,7 +14,7 @@ from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
 from ..tools.registry import ToolRegistry, ToolDef
 from ..utils.json_helpers import safe_json_loads
-from ..wall_clock import persona_wall_now, format_timestamp
+from ..wall_clock import persona_wall_now, format_timestamp, format_relative_time
 
 
 class ScoringAnalysisResult(BaseModel):
@@ -160,8 +160,10 @@ class ScoringAgent:
         now = persona_wall_now(self.timezone)
         for msg in messages:
             role = "用户" if msg["role"] == "user" else "AI"
-            prefix = format_timestamp(msg.get("created_at"), now)
-            if prefix:
+            rel = format_relative_time(msg.get("created_at"), now)
+            extra = f" {rel}" if rel else ""
+            prefix = f"{format_timestamp(msg.get('created_at'), now)}{extra}"
+            if prefix.strip():
                 dialogue_lines.append(f"[{prefix}] {role}: {msg['content']}")
             else:
                 dialogue_lines.append(f"{role}: {msg['content']}")

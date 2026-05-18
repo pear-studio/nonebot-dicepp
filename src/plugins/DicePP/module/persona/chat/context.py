@@ -11,7 +11,7 @@ from utils.string import estimate_tokens
 
 from ..character.models import Character
 from ..data.models import UserProfile
-from ..wall_clock import persona_wall_now, format_timestamp
+from ..wall_clock import persona_wall_now, format_timestamp, format_relative_time
 
 DEFAULT_DELAY_BEFORE = 1.0
 
@@ -227,7 +227,9 @@ class ContextBuilder:
         result = []
         for msg in history:
             ts = format_timestamp(msg.get("created_at"), now)
-            prefix = f"[{ts}] " if ts else ""
+            rel = format_relative_time(msg.get("created_at"), now)
+            extra = f" {rel}" if rel else ""
+            prefix = f"[{ts}{extra}] " if ts else ""
             result.append({
                 "role": msg["role"],
                 "content": f"{prefix}{msg['content']}",
@@ -252,7 +254,9 @@ class ContextBuilder:
             lines = []
             for m in buffer:
                 ts = format_timestamp(m.get("created_at"), now)
-                ts_prefix = f"[{ts}] " if ts else ""
+                rel = format_relative_time(m.get("created_at"), now)
+                extra = f" {rel}" if rel else ""
+                ts_prefix = f"[{ts}{extra}] " if ts else ""
                 speaker = m.get("speaker_name") or "系统"
                 lines.append(f"{ts_prefix}[{speaker}] {m['content']}")
             result.append({"role": "user", "content": "\n".join(lines)})
@@ -263,7 +267,9 @@ class ContextBuilder:
             if role == "assistant":
                 flush_buffer()
                 ts = format_timestamp(msg.get("created_at"), now)
-                prefix = f"[{ts}] " if ts else ""
+                rel = format_relative_time(msg.get("created_at"), now)
+                extra = f" {rel}" if rel else ""
+                prefix = f"[{ts}{extra}] " if ts else ""
                 result.append({
                     "role": "assistant",
                     "content": f"{prefix}{msg['content']}",

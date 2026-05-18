@@ -465,7 +465,8 @@ class CharacterLife:
             chain_events: List[Dict[str, str]] = []
             for e in today_db_events:
                 evt_time = e.created_at.strftime("%H:%M") if e.created_at else "??:??"
-                chain_events.append({"description": e.description, "time": evt_time})
+                evt_iso = e.created_at.isoformat() if e.created_at else ""
+                chain_events.append({"description": e.description, "time": evt_time, "created_at": evt_iso})
 
             # ── 事件-反应链循环 ──
             chain_depth = 0
@@ -725,7 +726,8 @@ class CharacterLife:
         result: List[Dict[str, str]] = []
         for e in events:
             evt_time = e.created_at.strftime("%H:%M") if e.created_at else "??:??"
-            result.append({"description": e.description, "time": evt_time})
+            evt_iso = e.created_at.isoformat() if e.created_at else ""
+            result.append({"description": e.description, "time": evt_time, "created_at": evt_iso})
         return result
 
     async def inject_spontaneous_event(self, action_description: str) -> bool:

@@ -199,7 +199,7 @@ class TestFormatPrivateHistory:
             {"role": "user", "content": "你好", "created_at": _dt(30)},
         ]
         result = builder._format_private_history(history)
-        assert result[0]["content"].startswith("[14:30] ")
+        assert result[0]["content"].startswith("[14:30 ")
 
     def test_empty_list(self):
         builder = ContextBuilder(self._make_character())
@@ -471,7 +471,7 @@ class TestFormatHistory:
         result = builder.format_history(history, is_group=False)
         assert len(result) == 1
         assert result[0]["role"] == "user"
-        assert result[0]["content"].startswith("[14:30]")
+        assert result[0]["content"].startswith("[14:30 ")
 
     def test_is_group_true_dispatches_group(self):
         builder = ContextBuilder(self._make_character())

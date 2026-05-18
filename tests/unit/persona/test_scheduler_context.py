@@ -302,7 +302,8 @@ class TestFormatRecentHistory:
         msg.content = "你好"
         msg.created_at = datetime(2026, 5, 11, 9, 15)
         result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
-        assert "[05-11 09:15] 用户: 你好" in result
+        assert "[05-11 09:15" in result
+        assert "] 用户: 你好" in result
 
 
 if __name__ == "__main__":

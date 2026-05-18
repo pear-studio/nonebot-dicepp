@@ -15,7 +15,7 @@ from ..data.persist_keys import PERSONA_SK_SCHEDULER
 from ..data.models import RelationshipState, DEFAULT_WARMTH_LABELS
 from ..character.models import Character
 from ..game.decay import DecayCalculator
-from ..wall_clock import persona_wall_now, format_timestamp
+from ..wall_clock import persona_wall_now, format_timestamp, format_relative_time
 from .event_agent import EventGenerationAgent, ShareMessageContext
 from .protocols import BoundaryReceiver
 from .models import ShareTarget
@@ -398,9 +398,13 @@ class ProactiveScheduler(BoundaryReceiver):
             content = msg.content
             if len(content) > 50:
                 content = content[:47] + "..."
-            prefix = format_timestamp(getattr(msg, "created_at", None), now)
-            if prefix:
-                lines.append(f"- [{prefix}] {role_label}: {content}")
+            ts = getattr(msg, "created_at", None)
+            prefix = format_timestamp(ts, now)
+            rel = format_relative_time(ts, now)
+            extra = f" {rel}" if rel else ""
+            full_prefix = f"{prefix}{extra}"
+            if full_prefix:
+                lines.append(f"- [{full_prefix}] {role_label}: {content}")
             else:
                 lines.append(f"- {role_label}: {content}")
         text = "\n".join(lines)

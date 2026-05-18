@@ -35,7 +35,7 @@ from ..character.models import Character
 from ..chat.scoring import ScoringAgent
 from ..chat.context import ContextBuilder
 from ..game.decay import DecayCalculator
-from ..wall_clock import persona_wall_now, PERSONA_EPOCH, format_timestamp
+from ..wall_clock import persona_wall_now, PERSONA_EPOCH, format_timestamp, format_relative_time
 from ..tools.registry import ToolRegistry, ToolDomain
 from ..tools.context import ToolContext
 from ..life.protocols import SleepGate
@@ -717,7 +717,9 @@ class ChatSession:
 
             speaker_name = "我" if msg.role == "assistant" else (msg.display_name or "群友")
             ts = format_timestamp(msg.created_at, now)
-            ts_prefix = f"[{ts}] " if ts else ""
+            rel = format_relative_time(msg.created_at, now)
+            extra = f" {rel}" if rel else ""
+            ts_prefix = f"[{ts}{extra}] " if ts else ""
             formatted = f"{ts_prefix}[{speaker_name}] {content}"
             msg_cost = estimate_tokens(formatted)
 
@@ -775,8 +777,10 @@ class ChatSession:
                 summaries = []
                 for e in valid_events:
                     prefix = format_timestamp(e.created_at, wall)
+                    rel = format_relative_time(e.created_at, wall)
+                    full_prefix = f"{prefix} {rel}" if rel else prefix
                     text = e.context_summary if e.context_summary else e.description
-                    summaries.append(f"{prefix} {text}" if prefix else text)
+                    summaries.append(f"[{full_prefix}] {text}" if prefix else text)
                 diary_context = "今天发生的事：" + "；".join(summaries)
                 if len(diary_context) > max_diary_len:
                     diary_context = diary_context[:max_diary_len].rsplit('；', 1)[0] + "..."

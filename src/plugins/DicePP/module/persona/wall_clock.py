@@ -37,6 +37,46 @@ def persona_wall_now(timezone_name: str) -> datetime:
         return datetime.now()
 
 
+def format_relative_time(
+    ts: Optional[Union[datetime, str]],
+    now: datetime,
+) -> str:
+    """返回相对时间描述，用于让 LLM 感知事件与当前时刻的时间距离。
+
+    - ts: datetime / ISO str / None
+    - now: 参考时间
+    - 返回值: "刚刚" / "X分钟前" / "X小时前" / "X小时Y分钟前" / "X天前"
+    - ts 为 None / 无效 / 未来时间 返回空字符串
+    """
+    if ts is None:
+        return ""
+    if isinstance(ts, str):
+        try:
+            ts = datetime.fromisoformat(ts)
+        except ValueError:
+            return ""
+    if not isinstance(ts, datetime):
+        return ""
+
+    diff = now - ts
+    seconds = diff.total_seconds()
+
+    if seconds < 0:
+        return ""
+    if seconds < 60:
+        return "刚刚"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}分钟前"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    if seconds < 86400:
+        if minutes == 0:
+            return f"{hours}小时前"
+        return f"{hours}小时{minutes}分钟前"
+    days = int(seconds // 86400)
+    return f"{days}天前"
+
+
 def format_timestamp(
     ts: Optional[Union[datetime, str]],
     now: datetime,

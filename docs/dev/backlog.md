@@ -66,11 +66,6 @@
 - 问题表现: sent_ok 字段设计为标记消息是否送达，但多条路径不更新它：分段回复路径 (session.py _run_chat_with_tools_segmented) 未捕获 msg_id，sent_ok 恒为 0；降级回复路径 (session.py _coordinator_on_exhausted) 未传 msg_id，sent_ok 恒为 0；proactive 消息路径 (simulator._send_msg → port.send 不传 msg_id)，sent_ok 恒为 0。仅非分段回复路径正确更新 sent_ok=1。消息送达实际走 port.send 返回值和 post-send hook，sent_ok 字段作为送达信号不可信。
 - 工作计划: 方案A: 在三条缺失路径补传 msg_id（分段回复/降级回复/proactive），使 sent_ok 全面可信。方案B: 标记 sent_ok 为废弃字段，在新版 schema 中移除。影响面: session.py, simulator.py, store.py, migrations.py
 
-### [B-260518-bb14c3] system prompt 缺少当前时间，LLM 对事件时间判断产生幻觉
-- 创建: 2026-05-18
-- 问题表现: LLM 回复中把今天 17:40 发生的事说成昨天发生的事，时间引用存在幻觉。system prompt 中 daily events 仅带绝对时间戳 (HH:MM / MM-DD HH:MM)，但缺少当前时间参照，LLM 无法自行推算事件与当前时刻的相对关系。
-- 工作计划: 在 system prompt 中补充当前时间字段（如 '当前时间: 2026-05-18 17:55'），让 LLM 自行对比事件时间戳计算时间差。不需要额外增加相对时间表述。影响面: context.py _build_system_prompt
-
 ## tests
 
 ### [B-260515-4e9762] 测试用例速度优化：消除真实等待、减少冗余、统一风格

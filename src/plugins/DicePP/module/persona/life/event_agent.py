@@ -15,6 +15,7 @@ from ..llm.loop import AgentLoop, LoopResult
 from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
 from ..tools.registry import ToolRegistry, ToolDef
+from ..wall_clock import format_timestamp, format_relative_time
 from typing import TYPE_CHECKING
 
 # keep in sync with PersonaConfig.background_llm_timeout_seconds default
@@ -240,7 +241,13 @@ class EventGenerationAgent:
         if context.today_events:
             events_lines = []
             for e in context.today_events[-5:]:
-                time_str = e.get("time", "??:??")
+                created_at = e.get("created_at")
+                if created_at and context.current_time:
+                    ts = format_timestamp(created_at, context.current_time)
+                    rel = format_relative_time(created_at, context.current_time)
+                    time_str = f"{ts} {rel}" if rel else ts
+                else:
+                    time_str = e.get("time", "??:??")
                 desc = e.get("description", "")
                 events_lines.append(f"- [{time_str}] {desc}")
             events_context = (
@@ -251,7 +258,8 @@ class EventGenerationAgent:
                 "同一场景内也可以有各种不同的行为、互动或细节，不必拘泥于上述记录。"
             )
 
-        user_prompt = f"当前时间: {context.current_time.strftime('%H:%M')}{intention_text}{diary_context}{events_context}\n\n请生成一个符合世界观的生活事件，并通过 record_event 工具记录:"
+        now_str = format_timestamp(context.current_time, context.current_time) if context.current_time else "??:??"
+        user_prompt = f"当前时间: {now_str}{intention_text}{diary_context}{events_context}\n\n请生成一个符合世界观的生活事件，并通过 record_event 工具记录:"
 
         logger.debug("[prompt:system_event]\n{}", system_prompt)
         logger.debug("[prompt:user_event]\n{}", user_prompt)
@@ -415,8 +423,15 @@ class EventGenerationAgent:
         today_context = ""
         if today_events:
             events_lines = []
+            now = datetime.now()
             for e in today_events:
-                time_str = e.get("time", "??:??")
+                created_at = e.get("created_at")
+                if created_at:
+                    ts = format_timestamp(created_at, now)
+                    rel = format_relative_time(created_at, now)
+                    time_str = f"{ts} {rel}" if rel else ts
+                else:
+                    time_str = e.get("time", "??:??")
                 desc = e.get("description", "")
                 events_lines.append(f"- [{time_str}] {desc}")
             today_context = "\n今天已发生事件:\n" + "\n".join(events_lines)
@@ -584,8 +599,15 @@ class EventGenerationAgent:
 
         # 构建事件上下文（带时间戳）
         events_lines = []
+        now = datetime.now()
         for e in events:
-            time_str = e.get("time", "??:??")
+            created_at = e.get("created_at")
+            if created_at:
+                ts = format_timestamp(created_at, now)
+                rel = format_relative_time(created_at, now)
+                time_str = f"{ts} {rel}" if rel else ts
+            else:
+                time_str = e.get("time", "??:??")
             desc = e.get("description", "")
             reaction = e.get("reaction", "")
             events_lines.append(f"- [{time_str}] {desc}\n  我的反应: {reaction}")
@@ -735,11 +757,18 @@ class EventGenerationAgent:
                 if context.today_events[idx].get("description") == context.event_description:
                     skip_idx = idx
                     break
+            now = datetime.now()
             ev_lines = []
             for idx, e in enumerate(context.today_events):
                 if idx == skip_idx:
                     continue
-                time_str = e.get("time", "??:??")
+                created_at = e.get("created_at")
+                if created_at:
+                    ts = format_timestamp(created_at, now)
+                    rel = format_relative_time(created_at, now)
+                    time_str = f"{ts} {rel}" if rel else ts
+                else:
+                    time_str = e.get("time", "??:??")
                 desc = e.get("description", "")
                 ev_lines.append(f"- [{time_str}] {desc}")
             if ev_lines:
