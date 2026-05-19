@@ -1,6 +1,6 @@
 ---
 name: review3-confirm
-description: "[Reviewer] Evaluate Defender's replies: reach consensus (已共识·实施 / 已共识·存档), clarify 待澄清 items (需补充回复), or escalate to user arbitration. All Rn items must exit resolved — 待裁决 and bare 已共识 are forbidden outputs. Part of a 5-stage adversarial ping-pong review: raise(R) → reply(D) → confirm(R) → execute(D) → accept(R). Requires the user to explicitly provide the document path."
+description: "[Reviewer] Evaluate Defender's replies: reach consensus (已共识·实施 / 已共识·延后 / 已共识·否决), clarify 待澄清 items (需补充回复), or escalate to user arbitration. All Rn items must exit resolved — 待裁决 and bare 已共识 are forbidden outputs. Part of a 5-stage adversarial ping-pong review: raise(R) → reply(D) → confirm(R) → execute(D) → accept(R). Requires the user to explicitly provide the document path."
 ---
 
 # review3-confirm — 审阅者确认
@@ -20,7 +20,9 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 **追加对抗规则（Reviewer 自检清单，每条延后前必须过检）**：
 1. **"超出范围"断言必须独立验证**：当 Defender 以"超出本次范围/需要大量改动"为由拒绝时，Reviewer 必须独立检查相关文件/测试是否已存在、评估实际改动行数，不得仅凭 Defender 单方面断言就接受延后。
 2. **"引入恶化"必须同步 mitigate**：若 PR 明确恶化某项指标（如最坏情况耗时增加、可观测性损失、内存上升），Reviewer 应默认要求在同一 PR 中同步防护。不接受"trade-off"作为延后的唯一理由——若 mitigation 成本低（如加 timeout/加字段标记），必须已共识·实施。
-3. **"理由成立"必须可验证**：Defender 不采纳但"理由成立"的裁定，前提是 Defender 的技术断言可被验证或已被验证。不可验证的断言（如"改动太大""影响面太广"）不得作为"理由成立"的依据。
+3. **"理由成立"必须可验证**：Defender 不采纳但"理由成立"的裁定，前提是 Defender 的技术断言可被验证或已被验证。不可验证的断言（如"改动太大""影响面太广"）不得作为"理由成立"的依据。**当 Defender 做比较性断言（如"X 比 Y 更重/更复杂"）时，必须量化双方后对比——验证结果与断言矛盾时直接推翻，不得接受为延后。**
+4. **"行为等价，延后处理"必须拆解**：Defender 声称"行为等价"时，先判断是否存在待修问题——行为真正等价 = 无缺陷 = `已共识·否决`；行为有差异但无害 = 设计选择 = `已共识·否决`；行为有差异且有害 = `已共识·实施`。**"行为等价"不能成为延后的理由——要么没问题（否决），要么有问题就修（实施）。**
+5. **警惕已废弃状态格式**：当 Defender 的 Reply 使用旧格式 `已共识·存档` 时，这是弱防御信号——Defender 可能在回避明确的实施/否决表态。此类 Reply 必须逐条强制过上述自检清单，不得直接映射为延后或否决。
 
 ## 参数要求
 
@@ -40,7 +42,13 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - `batch-update` 执行时会自动校验前置阶段（stage 2），门禁不通过直接 exit 1
 1. 调用脚本读取文档到上下文（若步骤 0 已在门禁中完成读取，可跳过）
 2. 检查前置条件：确认文档中存在 `Reply` 子块（以门禁中读取的内容为准）
-3. 逐条评估 Defender 回复，按以下分支处理：
+3. 逐条评估 Defender 回复，按以下分支处理。**先判状态再读理由**——Defender 的 Reply 可能使用旧格式（`已共识·存档`），此时按 Defener 实际叙述映射到新状态，并强制过自检清单。
+
+   **延后 vs 否决快速判据**（建议级别问题优先走否决）：
+   - 存在真实缺陷、当前不改将来会疼 → 延后
+   - 无实际缺陷、只是风格偏好 → 否决
+   - 行为等价且无害 → 否决（没有待修问题）
+   - 行为有差异但属于有意识的设计取舍 → 否决
 
    **分支 A — 正常回复（采纳/部分采纳/不采纳）**
    - Reviewer 可自行裁定时：
