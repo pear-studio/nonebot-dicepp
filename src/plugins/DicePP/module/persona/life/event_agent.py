@@ -11,7 +11,6 @@ from datetime import datetime
 import json
 from nonebot.log import logger
 from ..llm.router import LLMRouter, ServiceUnavailableError
-from ..llm.loop import AgentLoop, LoopResult
 from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
 from ..tools.registry import ToolRegistry, ToolDef
@@ -106,8 +105,11 @@ class EventContext:
 class EventGenerationAgent:
     """事件生成 Agent - 使用辅助模型"""
 
-    async def _make_collect_loop(self, max_tool_rounds: int, tool_def: dict, policy: SelectionPolicy):
-        """创建收集型 AgentLoop——工具 executor 将参数存入 collected_args"""
+    async def _run_collecting_loop(
+        self, max_tool_rounds: int, tool_def: dict, policy: SelectionPolicy,
+        messages: List[dict], tools: List[dict], temperature: float,
+    ):
+        """通过 router.run_via_loop() 执行收集型 LLM 调用"""
         collected_args: list = []
         name = tool_def["function"]["name"]
         params = tool_def["function"]["parameters"]
@@ -119,13 +121,14 @@ class EventGenerationAgent:
         )
 
         hooks = self.llm_router.make_default_hooks()
-        provider = await self.llm_router.select_provider(policy)
-        loop = AgentLoop(
-            provider=provider,
-            tool_registry=tool_registry,
-            hooks=hooks, max_tool_rounds=max_tool_rounds,
+        result = await self.llm_router.run_via_loop(
+            messages=messages, tools=tools, temperature=temperature,
+            timeout=self._bg_timeout, selection=policy,
+            max_tool_rounds=max_tool_rounds,
+            tool_registry=tool_registry, tool_domains=["life"],
+            hooks=hooks,
         )
-        return loop, collected_args
+        return result, collected_args
 
     # ── 默认 few-shot 示例（系统默认）
     _DEFAULT_SHARE_EXAMPLES: List[str] = [
@@ -309,14 +312,13 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            loop, collected = await self._make_collect_loop(max_tool_rounds, tools[0], SelectionPolicy.EVENT_GEN)
-
-            result: LoopResult = await loop.run(
+            result, collected = await self._run_collecting_loop(
+                max_tool_rounds, tools[0], SelectionPolicy.EVENT_GEN,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools, temperature=0.9, timeout=self._bg_timeout,
+                tools=tools, temperature=0.9,
             )
 
             if not collected:
@@ -485,14 +487,13 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            loop, collected = await self._make_collect_loop(max_tool_rounds, tools[0], SelectionPolicy.EVENT_GEN)
-
-            result: LoopResult = await loop.run(
+            result, collected = await self._run_collecting_loop(
+                max_tool_rounds, tools[0], SelectionPolicy.EVENT_GEN,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools, temperature=0.9, timeout=self._bg_timeout,
+                tools=tools, temperature=0.9,
             )
 
             if not collected:
@@ -650,14 +651,13 @@ class EventGenerationAgent:
 
         try:
             max_tool_rounds = self._max_tool_rounds
-            loop, collected = await self._make_collect_loop(max_tool_rounds, tools[0], SelectionPolicy.DIARY)
-
-            result: LoopResult = await loop.run(
+            result, collected = await self._run_collecting_loop(
+                max_tool_rounds, tools[0], SelectionPolicy.DIARY,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools, temperature=0.85, timeout=self._bg_timeout,
+                tools=tools, temperature=0.85,
             )
 
             if not collected:
@@ -829,21 +829,17 @@ class EventGenerationAgent:
 
         for attempt in range(max_parse_retries + 1):
             try:
-                loop, collected = await self._make_collect_loop(
-                    max_tool_rounds, tools[0], SelectionPolicy.SUMMARIZE
-                )
-            except ServiceUnavailableError as e:
-                logger.error(f"分享消息: 无可用 provider: {e}", exc_info=True)
-                return None
-
-            try:
-                result: LoopResult = await loop.run(
+                result, collected = await self._run_collecting_loop(
+                    max_tool_rounds, tools[0], SelectionPolicy.SUMMARIZE,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    tools=tools, temperature=0.85, timeout=self._bg_timeout,
+                    tools=tools, temperature=0.85,
                 )
+            except ServiceUnavailableError as e:
+                logger.error(f"分享消息: 无可用 provider: {e}", exc_info=True)
+                return None
             except Exception as e:
                 logger.error(f"分享消息生成失败: {e}", exc_info=True)
                 return None

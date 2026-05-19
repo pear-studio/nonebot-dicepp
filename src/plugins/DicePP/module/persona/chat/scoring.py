@@ -9,7 +9,6 @@ from nonebot.log import logger
 from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState
 from ..llm.router import LLMRouter, ServiceUnavailableError
-from ..llm.loop import AgentLoop, LoopResult
 from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
 from ..tools.registry import ToolRegistry, ToolDef
@@ -90,24 +89,22 @@ class ScoringAgent:
         hooks = self.llm_router.make_default_hooks()
 
         try:
-            scoring_provider = await self.llm_router.select_provider(SelectionPolicy.SCORING)
+            result = await self.llm_router.run_via_loop(
+                messages=[{"role": "user", "content": prompt}],
+                tools=tools,
+                temperature=0.7,
+                timeout=60,
+                selection=SelectionPolicy.SCORING,
+                tool_registry=tool_registry,
+                tool_domains=["scoring"],
+                hooks=hooks,
+                max_tool_rounds=self.max_tool_rounds,
+            )
         except ServiceUnavailableError as e:
             logger.error(f"评分: 无可用 LLM provider: {e}")
             return ScoringAnalysisResult(
                 deltas=ScoreDeltas(), facts={},
                 parse_error=f"无可用 LLM provider: {e}",
-            )
-
-        loop = AgentLoop(
-            provider=scoring_provider,
-            tool_registry=tool_registry,
-            hooks=hooks, max_tool_rounds=self.max_tool_rounds,
-        )
-
-        try:
-            result: LoopResult = await loop.run(
-                messages=[{"role": "user", "content": prompt}],
-                tools=tools, temperature=0.7,
             )
         except Exception as e:
             logger.error(f"评分 LLM 调用失败: {e}")
@@ -127,6 +124,7 @@ class ScoringAgent:
             )
 
         data = collected_args[0]
+        raw_args = json.dumps(data, ensure_ascii=False)
         if not isinstance(data, dict):
             return ScoringAnalysisResult(
                 deltas=ScoreDeltas(),

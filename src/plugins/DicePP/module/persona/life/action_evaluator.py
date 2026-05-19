@@ -10,7 +10,6 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 from nonebot.log import logger
 
 from ..data.store import PersonaDataStore
-from ..llm.loop import AgentLoop
 from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
 from ..tools.registry import ToolRegistry, ToolDef
@@ -163,23 +162,10 @@ class ActionEvaluator:
             make_collecting_executor(collected_args),
         )
 
-        from ..llm.router import LLMRouter, ServiceUnavailableError
-        try:
-            provider = await self._router.select_provider(SelectionPolicy.SCORING)
-        except ServiceUnavailableError:
-            logger.warning("[ActionEvaluator] 无可用 LLM provider")
-            return ("rejected", "无可用 LLM 服务")
+        from ..llm.router import ServiceUnavailableError
         hooks = self._router.make_default_hooks()
-        loop = AgentLoop(
-            provider=provider,
-            tool_registry=tool_registry,
-            hooks=hooks,
-            max_tool_rounds=1,
-        )
-
         try:
-            from ..llm.loop import LoopResult
-            result: LoopResult = await loop.run(
+            result = await self._router.run_via_loop(
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
@@ -187,7 +173,15 @@ class ActionEvaluator:
                 tools=[RECORD_EVALUATION_TOOL],
                 temperature=0.3,
                 timeout=self._timeout,
+                selection=SelectionPolicy.SCORING,
+                tool_registry=tool_registry,
+                tool_domains=["life"],
+                hooks=hooks,
+                max_tool_rounds=1,
             )
+        except ServiceUnavailableError:
+            logger.warning("[ActionEvaluator] 无可用 LLM provider")
+            return ("rejected", "无可用 LLM 服务")
         except Exception:
             logger.exception("[ActionEvaluator] LLM 调用异常")
             return ("rejected", "LLM 调用失败")

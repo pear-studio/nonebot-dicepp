@@ -17,7 +17,7 @@ from .providers import _PROVIDER_CLASSES
 from .providers.protocol import LLMProvider, ImageGenProvider, ErrorClass
 from .circuit_breaker import CircuitBreakerRegistry
 from .selection import SelectionPolicy
-from .loop import AgentLoop, LoopResult
+from ..agent.loop import AgentLoop, LoopResult
 
 if TYPE_CHECKING:
     from ...core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
@@ -168,21 +168,6 @@ class LLMRouter:
         return candidates
 
     # ── Provider 选择 ─────────────────────────────────────────
-
-    async def select_provider(self, policy: SelectionPolicy) -> LLMProvider:
-        """按 policy 选择最佳可用的 LLM provider。"""
-        if policy.category != "llm":
-            raise ValueError(f"select_provider 仅支持 llm category，got {policy.category}")
-
-        candidates = self._build_candidates(policy)
-        if not candidates:
-            raise ServiceUnavailableError(
-                f"没有可用的 LLM 模型匹配 policy: category={policy.category}, "
-                f"capabilities={policy.required_capabilities}"
-            )
-
-        key = candidates[0]
-        return self._model_providers[key]
 
     def get_gen_provider(self) -> Optional[ImageGenProvider]:
         """返回当前最佳 gen 模型（quality 降序，过滤 disabled/dead）。"""

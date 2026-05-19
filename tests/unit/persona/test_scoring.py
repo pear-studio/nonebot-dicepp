@@ -1,5 +1,5 @@
 """
-单元测试: ScoringAgent 工具路径（使用 AgentLoop + CollectProvider）
+单元测试: ScoringAgent 工具路径（使用 router.run_via_loop）
 """
 import pytest
 from unittest.mock import MagicMock, AsyncMock
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.chat.scoring import ScoringAgent
 from plugins.DicePP.module.persona.data.models import ScoreDeltas
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
-from conftest import make_mock_provider
+from conftest import attach_mock_run_via_loop
 
 
 def _make_generate_response(content="", tool_calls=None):
@@ -24,13 +24,15 @@ def _make_generate_response(content="", tool_calls=None):
 @pytest.fixture
 def mock_router():
     router = MagicMock()
-    router.select_provider = AsyncMock(return_value=make_mock_provider())
     router.data_store = None
     router.quota_check_enabled = False
     router.daily_limit = 20
     router.trace_enabled = False
     router.trace_max_age_days = 7
     router.config = None
+    router._pending_tool_args = None
+    router._pending_final_output = "ok"
+    attach_mock_run_via_loop(router, final_output_attr="_pending_final_output")
     return router
 
 
@@ -45,10 +47,7 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_normal_tool_call_collection(self, agent, mock_router):
         """正常工具调用收集 → _extract_result 解析"""
-        mock_router.select_provider.return_value.generate.return_value = _make_generate_response(
-            tool_calls=[ToolCall(id="tc_1", name="score_relationship",
-                        arguments='{"deltas": {"intimacy": 1.5, "passion": 0, "trust": 0.5, "secureness": 0}, "facts": {"爱好": "摄影"}}')],
-        )
+        mock_router._pending_tool_args = '{"deltas": {"intimacy": 1.5, "passion": 0, "trust": 0.5, "secureness": 0}, "facts": {"爱好": "摄影"}}'
 
         result = await agent.batch_analyze(
             messages=[
@@ -65,9 +64,8 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_empty_collected_fallback_to_parse_response(self, agent, mock_router):
         """collected 为空 → fallback 到 _parse_response(content)"""
-        mock_router.select_provider.return_value.generate.return_value = _make_generate_response(
-            content='{"deltas": {"intimacy": -1.0, "passion": 0, "trust": 0, "secureness": 0}, "facts": {}}',
-        )
+        mock_router._pending_tool_args = None
+        mock_router._pending_final_output = '{"deltas": {"intimacy": -1.0, "passion": 0, "trust": 0, "secureness": 0}, "facts": {}}'
 
         result = await agent.batch_analyze(
             messages=[{"role": "user", "content": "test"}, {"role": "assistant", "content": "ok"}],
@@ -79,7 +77,7 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_llm_call_failure(self, agent, mock_router):
         """LLM 调用异常 → 返回 parse_error"""
-        mock_router.select_provider.return_value.generate.side_effect = Exception("服务不可用")
+        mock_router.run_via_loop.side_effect = Exception("服务不可用")
 
         result = await agent.batch_analyze(
             messages=[{"role": "user", "content": "test"}, {"role": "assistant", "content": "ok"}],
@@ -92,7 +90,8 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_empty_collected_and_empty_content(self, agent, mock_router):
         """collected 为空且 content 为空 → fallback 返回空结果"""
-        mock_router.select_provider.return_value.generate.return_value = _make_generate_response(content="")
+        mock_router._pending_tool_args = None
+        mock_router._pending_final_output = ""
 
         result = await agent.batch_analyze(
             messages=[{"role": "user", "content": "test"}, {"role": "assistant", "content": "ok"}],
