@@ -75,24 +75,6 @@
 - 问题表现: 用户可通过 .ai key config 命令提供自己的 LLM API key，覆盖全局配置。涉及计费体系、配额管理、滥用防护等一整套体系，当前设计对安全边界覆盖不足。该功能与 provider 路由重构的候选池调度、熔断器、探针等核心机制耦合过深，增加了不必要的复杂度。当前从本分支 scope 中移出，需求保留待后续独立实施。
 - 工作计划: 独立设计用户 Key 管理子系统：安全存储（加密）、配额追踪、滥用检测。实现 UserLLMConfig 数据模型（含 API key 加密存储）。实现 .ai key config 命令交互流程。Router 层集成用户 Key 覆盖逻辑（优先级高于全局配置）。影响面: module/persona/data/models.py、module/persona/command.py、module/persona/llm/router.py。
 
-### [B-260519-bbd19f] PersonaDataStore 按职责拆分为 4 个窄接口（Message/Relationship/Profile/Event）
-- 创建: 2026-05-19
-- 问题表现:
-  - PersonaDataStore 1700 行 60+ 方法，被无差别塞给 ChatSession、LifeSimulator、ProactiveScheduler 等所有组件
-  - ChatSession 实际只用 14 个方法，却持有整个 Store 引用，无法从签名判断数据访问边界
-  - 导致越界调用风险（如 ChatSession 可能不小心调 list_all_relationships_raw）、单测困难（必须拉起完整 SQLite）
-  - 症状案例: D4 search_memory 在数据层混入展示格式化逻辑，根源是 Store 缺乏接口约束
-- 工作计划:
-  - MessageStore: add_message / get_private_messages / get_group_messages / clear_messages / mark_sent
-  - RelationshipStore: get_relationship / init_relationship / update_relationship / list_all_relationships / add_score_event
-  - ProfileStore: get_profile / save_profile
-  - EventStore: get_daily_events / add_daily_event / get_diary / save_diary
-  - PersonaDataStore 同时实现 4 个接口，零额外对象分配
-  - ChatSession 构造参数改为 (message_store, relationship_store, profile_store, event_store)，其他组件同理按需注入
-  - 单测可精准 mock 单个窄接口，无需拉起 SQLite
-  - 影响面: data/store.py（拆分接口定义）、factory.py（注入适配）、chat/session.py、life/simulator.py、life/proactive_scheduler.py 等依赖方
-  - 风险: 中——接口拆分不改运行时行为，但涉及多个调用方签名变更
-
 ### [B-260519-164b83] LLM 错误分类体系重构：ErrorKind 枚举 + 分类唯一入口 + 分级恢复策略
 - 创建: 2026-05-19
 - 问题表现:

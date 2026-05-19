@@ -102,6 +102,10 @@ def config():
 def session(mock_store, mock_router, tool_registry, coordinator, character, config, context_builder, dispatcher, mock_port):
     return ChatSession(
         store=mock_store,
+        message_store=mock_store,
+        rel_store=mock_store,
+        profile_store=mock_store,
+        event_store=mock_store,
         router=mock_router,
         tool_registry=tool_registry,
         coordinator=coordinator,

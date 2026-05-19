@@ -21,6 +21,7 @@ from nonebot.log import logger
 from utils.string import estimate_tokens
 
 from ..data.store import PersonaDataStore
+from ..data.protocols import MessageStore, RelationshipStore, ProfileStore, EventStore
 from ..data.models import (
     UserProfile,
     RelationshipState,
@@ -121,7 +122,12 @@ class ChatSession:
 
     def __init__(
         self,
+        *,
         store: PersonaDataStore,
+        message_store: MessageStore,
+        rel_store: RelationshipStore,
+        profile_store: ProfileStore,
+        event_store: EventStore,
         router: LLMRouter,
         tool_registry: ToolRegistry,
         coordinator: LLMCallCoordinator,
@@ -137,6 +143,10 @@ class ChatSession:
         sleep_gate: Optional[SleepGate] = None,
     ):
         self.store = store
+        self._message_store = message_store
+        self._rel_store = rel_store
+        self._profile_store = profile_store
+        self._event_store = event_store
         self.router = router
         self.tool_registry = tool_registry
         self.coordinator = coordinator
@@ -196,12 +206,12 @@ class ChatSession:
 
             if self.config.relationship_refuse_enabled and is_chat_message:
                 if group_id:
-                    history = await self.store.get_group_unified_messages(group_id, limit=1)
+                    history = await self._message_store.get_group_unified_messages(group_id, limit=1)
                 else:
-                    history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=1)
+                    history = await self._message_store.get_recent_unified_messages(user_id, group_id="", limit=1)
                 is_first = len(history) == 0
                 if not is_first:
-                    rel = await self.store.get_relationship(user_id)
+                    rel = await self._rel_store.get_relationship(user_id)
                     if rel:
                         if self.decay_calculator:
                             rel = self.decay_calculator.effective_relationship(rel)
@@ -242,7 +252,7 @@ class ChatSession:
 
     async def clear_history(self, user_id: str, group_id: str) -> None:
         """清空对话历史"""
-        await self.store.clear_messages(user_id, group_id)
+        await self._message_store.clear_messages(user_id, group_id)
 
     # ── coordinator 回调 ──────────────────────────────────────
 
@@ -501,7 +511,7 @@ class ChatSession:
 
         # 5.4.6: 写入历史，分段已由 dispatcher 实时发出，直接标记 sent_ok=1
         effective_user_id = "assistant" if group_id else user_id
-        msg_id = await self.store.add_unified_message(
+        msg_id = await self._message_store.add_unified_message(
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",
@@ -509,7 +519,7 @@ class ChatSession:
             content=full_reply,
             display_name="我",
         )
-        await self.store.update_sent_ok(msg_id, 1)
+        await self._message_store.update_sent_ok(msg_id, 1)
 
         if self.segment_dispatcher:
             await self.segment_dispatcher.drain(target_key)
@@ -521,10 +531,10 @@ class ChatSession:
     async def _update_interaction(
         self, user_id: str, group_id: str, user_msg: str, assistant_msg: str
     ) -> None:
-        rel = await self.store.get_relationship(user_id)
+        rel = await self._rel_store.get_relationship(user_id)
         initial = float(self.character.extensions.initial_relationship)
         if not rel:
-            rel = await self.store.init_relationship(user_id, initial)
+            rel = await self._rel_store.init_relationship(user_id, initial)
 
         now = persona_wall_now(self.config.timezone)
         decay_event: Optional[ScoreEvent] = None
@@ -546,9 +556,9 @@ class ChatSession:
         rel.last_interaction_at = now
         rel.last_miss_sent_at = None  # 用户回应后关闭衰减开关
         rel.last_relationship_decay_applied_at = None  # 配合 last_interaction_at=now，下次衰减从新互动起算
-        await self.store.update_relationship(rel)
+        await self._rel_store.update_relationship(rel)
         if decay_event:
-            await self.store.add_score_event(decay_event)
+            await self._rel_store.add_score_event(decay_event)
             logger.info(
                 f"应用时间衰减: {user_id} 衰减 {decay_event.deltas.intimacy:.2f}, 原因: {decay_event.reason}"
             )
@@ -579,8 +589,8 @@ class ChatSession:
 
         messages_count = len(messages)
 
-        profile = await self.store.get_user_profile(user_id)
-        rel = await self.store.get_relationship(user_id)
+        profile = await self._profile_store.get_user_profile(user_id)
+        rel = await self._rel_store.get_relationship(user_id)
 
         rel_for_scoring = rel
         if rel and self.decay_calculator:
@@ -594,7 +604,7 @@ class ChatSession:
             )
         except Exception as exc:
             try:
-                await self.store.record_scoring_failure(
+                await self._rel_store.record_scoring_failure(
                     ScoringFailure(
                         user_id=user_id,
                         group_id=group_id,
@@ -615,7 +625,7 @@ class ChatSession:
                 f"评分解析失败，{messages_count} 条消息保留待重试: "
                 f"user={user_id}, parse_error={result.parse_error[:100]}"
             )
-            await self.store.record_scoring_failure(
+            await self._rel_store.record_scoring_failure(
                 ScoringFailure(
                     user_id=user_id,
                     group_id=group_id,
@@ -636,7 +646,7 @@ class ChatSession:
         if rel:
             composite_before = rel.composite_score
             rel.apply_deltas(deltas, updated_at=now)
-            await self.store.update_relationship(rel)
+            await self._rel_store.update_relationship(rel)
 
             event = ScoreEvent(
                 user_id=user_id,
@@ -647,14 +657,14 @@ class ChatSession:
                 reason="批量评分",
                 conversation_digest=self._build_conversation_digest(messages),
             )
-            await self.store.add_score_event(event)
+            await self._rel_store.add_score_event(event)
 
         if new_facts and profile:
             profile.merge_facts(new_facts, updated_at=now)
-            await self.store.save_user_profile(profile)
+            await self._profile_store.save_user_profile(profile)
         elif new_facts:
             new_profile = UserProfile(user_id=user_id, facts=new_facts)
-            await self.store.save_user_profile(new_profile)
+            await self._profile_store.save_user_profile(new_profile)
 
     @staticmethod
     def _build_conversation_digest(history: List[Dict[str, str]]) -> str:
@@ -683,14 +693,14 @@ class ChatSession:
         if limit is None:
             limit = self.config.max_messages
         if not group_id:
-            history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=limit)
+            history = await self._message_store.get_recent_unified_messages(user_id, group_id="", limit=limit)
             history_dicts = [
                 {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我", "created_at": msg.created_at}
                 for msg in history
             ]
             return history_dicts, False
 
-        history = await self.store.get_group_unified_messages(group_id, limit=None)
+        history = await self._message_store.get_group_unified_messages(group_id, limit=None)
         return self._apply_token_window(history)
 
     def _apply_token_window(
@@ -778,7 +788,7 @@ class ChatSession:
         yesterday = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
         max_diary_len = self.config.max_diary_context_chars
 
-        events = await self.store.get_daily_events(today)
+        events = await self._event_store.get_daily_events(today)
         if events:
             valid_events = [
                 e for e in events
@@ -802,7 +812,7 @@ class ChatSession:
                     diary_context = diary_context[:max_diary_len].rsplit('；', 1)[0] + "..."
                 return diary_context
 
-        diary = await self.store.get_diary(yesterday)
+        diary = await self._event_store.get_diary(yesterday)
         if diary:
             if len(diary) > max_diary_len:
                 diary = diary[:max_diary_len] + "..."
@@ -840,8 +850,8 @@ class ChatSession:
             self.config.max_history_tokens,
         )
 
-        profile = await self.store.get_user_profile(user_id)
-        rel = await self.store.get_relationship(user_id)
+        profile = await self._profile_store.get_user_profile(user_id)
+        rel = await self._rel_store.get_relationship(user_id)
         warmth_label = self._resolve_warmth_label(user_id, rel)
         diary_context = await self._build_diary_context()
         lore_sections = self._build_lore_sections(history_dicts)
@@ -869,7 +879,7 @@ class ChatSession:
         self, user_id: str, group_id: str, content: str, display_name: str = "我"
     ) -> int:
         effective_user_id = "assistant" if group_id else user_id
-        msg_id = await self.store.add_unified_message(
+        msg_id = await self._message_store.add_unified_message(
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",

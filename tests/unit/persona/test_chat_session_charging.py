@@ -72,6 +72,10 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
 
     session = ChatSession(
         store=store,
+        message_store=store,
+        rel_store=store,
+        profile_store=store,
+        event_store=store,
         router=router,
         tool_registry=MagicMock(),
         coordinator=coordinator,

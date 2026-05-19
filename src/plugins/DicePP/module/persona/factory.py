@@ -14,6 +14,7 @@ from .chat.session import ChatSession, ChatConfig
 from .chat.scoring import ScoringAgent
 from .chat.context import ContextBuilder
 from .data.store import PersonaDataStore
+from .data.protocols import MessageStore, RelationshipStore, ProfileStore, EventStore
 from .exceptions import (
     PersonaCharacterLoadError,
     PersonaConfigError,
@@ -219,6 +220,10 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
 def _build_chat(
     *,
     store: PersonaDataStore,
+    message_store: MessageStore,
+    rel_store: RelationshipStore,
+    profile_store: ProfileStore,
+    event_store: EventStore,
     router: LLMRouter,
     tool_registry: ToolRegistry,
     coordinator: LLMCallCoordinator,
@@ -257,6 +262,10 @@ def _build_chat(
     chat_config = ChatConfig.from_persona(config)
     return ChatSession(
         store=store,
+        message_store=message_store,
+        rel_store=rel_store,
+        profile_store=profile_store,
+        event_store=event_store,
         router=router,
         tool_registry=tool_registry,
         coordinator=coordinator,
@@ -484,6 +493,10 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
 
     chat = _build_chat(
         store=store,
+        message_store=store,
+        rel_store=store,
+        profile_store=store,
+        event_store=store,
         router=router,
         tool_registry=tool_registry,
         coordinator=coordinator,
