@@ -126,23 +126,6 @@
   - 影响面: llm/errors.py（新建）、llm/router.py、llm/loop.py、llm/coordinator.py、chat/session.py（兜底文案）、life/simulator.py（错误感知）
   - 风险: 中——重试策略变更需要全量 LLM 调用路径回归
 
-### [B-260519-1601ee] 消解 EventShareTaskQueue，延迟分享逻辑合并到 ProactiveScheduler
-- 创建: 2026-05-19
-- 问题表现:
-  - 事件从生成到发送经过 5 个组件、3 次调度决策（CharacterLife→LifeSimulator→EventShareTaskQueue→Scheduler→EventAgent→发送）
-  - EventShareTaskQueue 的核心价值是 SQLite 持久化 1-5 分钟延迟任务防重启丢消息
-  - 实际影响: 重启丢失未发送的事件分享对用户几乎无感知——事件已存入 persona_daily_events，分享只是主动消息通知
-  - 延迟任务队列引入额外复杂度: DelayedTask 模型、store CRUD、独立的阈值检查（与 CharacterLife 中阈值可能不一致，见 LF5）
-  - 参考: life-analyzer 报告 LF5
-- 工作计划:
-  - ProactiveScheduler 内部用 asyncio.create_task + asyncio.sleep 替代 EventShareTaskQueue
-  - 移除 event_share_queue.py（228行）、data/models.py 中 DelayedTask 模型、store.py 中对应 CRUD、migrations.py 中 persona_delayed_tasks 表定义
-  - LifeSimulator.tick() 中: event_share_queue.enqueue() 调用改为 scheduler.schedule_share(event, delay)
-  - ProactiveScheduler 新增 schedule_share() 方法，内部管理 _pending_shares: set[asyncio.Task]
-  - shutdown 时 cancel 所有 pending tasks
-  - 影响面: life/event_share_queue.py（删除）、life/proactive_scheduler.py、life/simulator.py、life/character_life.py、data/models.py、data/store.py、data/migrations.py、factory.py
-  - 风险: 中——删除持久化队列后，重启会丢失未发送的分享，但业务影响极低；需确保 Task 生命周期管理正确
-
 ### [B-260519-721203] 解除 CharacterLife 与 ProactiveScheduler 的双向耦合
 - 创建: 2026-05-19
 - 问题表现:

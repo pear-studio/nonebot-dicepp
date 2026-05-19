@@ -19,7 +19,6 @@ from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
 from ..data.models import CharacterState
 from ..wall_clock import persona_wall_now
-from .event_share_queue import EventShareTaskQueue
 from .protocols import BoundaryReceiver
 
 if TYPE_CHECKING:
@@ -103,7 +102,6 @@ class CharacterLife:
         character: Character,
         share_threshold: float,
         *,
-        event_share_queue: Optional[EventShareTaskQueue] = None,
         share_delay_min: int = 1,
         share_delay_max: int = 5,
     ):
@@ -111,7 +109,6 @@ class CharacterLife:
         self.event_agent = event_agent
         self.data_store = data_store
         self.character = character
-        self.event_share_queue = event_share_queue
         self._share_threshold = share_threshold
         self._share_delay_min = share_delay_min
         self._share_delay_max = share_delay_max
@@ -841,7 +838,7 @@ class CharacterLife:
             )
 
         if (
-            self.event_share_queue is not None
+            self.boundary_receiver is not None
             and reaction_result.share_desire >= self._share_threshold
         ):
             event_id = f"evt_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
@@ -849,7 +846,7 @@ class CharacterLife:
                 self._share_delay_min, self._share_delay_max,
             )
             try:
-                await self.event_share_queue.enqueue_event_share(
+                self.boundary_receiver.schedule_share(
                     event_id=event_id,
                     event_description=event_result.description,
                     reaction=reaction_result.reaction,
@@ -857,7 +854,7 @@ class CharacterLife:
                     delay_minutes=delay,
                 )
             except Exception:
-                logger.exception("[spontaneous] 分享入队失败")
+                logger.exception("[spontaneous] 分享调度失败")
 
         logger.info(
             "[spontaneous] 注入成功 desc=%s energy=%+d mood=%+d health=%+d",

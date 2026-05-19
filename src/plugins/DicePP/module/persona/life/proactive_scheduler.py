@@ -67,6 +67,8 @@ class ProactiveScheduler(BoundaryReceiver):
         self._jittered_start_minute: Optional[int] = None
         self._jittered_end_minute: Optional[int] = None
 
+        self._pending_shares: set[asyncio.Task] = set()
+
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
         self.character = character
@@ -503,7 +505,7 @@ class ProactiveScheduler(BoundaryReceiver):
         将事件分享给符合条件的分享目标。
 
         封装目标选择、可发送检查、mute 检查、throttle 时间更新，
-        供 LifeSimulator / EventShareTaskQueue 调用。
+        供 LifeSimulator 调用。
 
         Returns:
             成功创建的消息列表
@@ -561,6 +563,47 @@ class ProactiveScheduler(BoundaryReceiver):
                 messages.append(r)
 
         return messages
+
+    def schedule_share(
+        self,
+        event_id: str,
+        event_description: str,
+        reaction: str,
+        share_desire: float,
+        delay_minutes: int,
+    ) -> None:
+        """使用 asyncio.create_task + sleep 实现延迟事件分享，替代 SQLite 持久化队列。"""
+        async def _delayed_share():
+            try:
+                await asyncio.sleep(delay_minutes * 60)
+                if share_desire < self.config.share_threshold:
+                    logger.debug(
+                        f"延迟分享欲望不足，跳过: event_id={event_id}, desire={share_desire}"
+                    )
+                    return
+                await self.share_event_to_targets(
+                    event_description, reaction, self.config.max_shares_per_event
+                )
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception(f"延迟分享失败: event_id={event_id}")
+
+        task = asyncio.create_task(_delayed_share())
+        self._pending_shares.add(task)
+        task.add_done_callback(self._pending_shares.discard)
+        logger.debug(
+            f"延迟分享已调度: event_id={event_id}, delay={delay_minutes}min"
+        )
+
+    async def shutdown(self) -> None:
+        """取消所有 pending 延迟分享任务。"""
+        for task in list(self._pending_shares):
+            task.cancel()
+        if self._pending_shares:
+            await asyncio.gather(*self._pending_shares, return_exceptions=True)
+            self._pending_shares.clear()
+        logger.debug("ProactiveScheduler 已关闭，已取消所有 pending shares")
 
     async def _create_miss_you_message(
         self,

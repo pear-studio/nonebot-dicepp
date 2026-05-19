@@ -1,7 +1,7 @@
 """生活模拟器
 
 驱动角色生活事件、主动消息调度、日记生成。
-编排 CharacterLife、ProactiveScheduler、EventShareTaskQueue、DiaryGenerator。
+编排 CharacterLife、ProactiveScheduler、DiaryGenerator。
 """
 import asyncio
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
@@ -14,7 +14,6 @@ from ..character.models import Character
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now
 from .proactive_scheduler import ProactiveScheduler
-from .event_share_queue import EventShareTaskQueue
 from .protocols import EventSharePort
 from .diary import DiaryGenerator
 from .character_life import CharacterLife
@@ -35,7 +34,6 @@ class LifeConfig:
     trace_enabled: bool = False
     trace_max_age_days: int = 7
     score_history_max_age_days: int = 90
-    delayed_tasks_max_age_days: int = 30
     scoring_failures_max_age_days: int = 30
     daily_events_keep_days: int = 30
     diary_keep_days: int = 30
@@ -50,7 +48,6 @@ class LifeConfig:
             trace_enabled=persona.trace_enabled,
             trace_max_age_days=persona.trace_max_age_days,
             score_history_max_age_days=persona.score_history_max_age_days,
-            delayed_tasks_max_age_days=persona.delayed_tasks_max_age_days,
             scoring_failures_max_age_days=persona.scoring_failures_max_age_days,
             daily_events_keep_days=persona.daily_events_keep_days,
             diary_keep_days=persona.diary_keep_days,
@@ -66,7 +63,6 @@ class LifeSimulator:
         store: PersonaDataStore,
         character_life: CharacterLife,
         scheduler: ProactiveScheduler,
-        event_share_queue: EventShareTaskQueue,
         diary_generator: DiaryGenerator,
         character: Character,
         config: LifeConfig,
@@ -76,7 +72,6 @@ class LifeSimulator:
         self.store = store
         self.character_life = character_life
         self.scheduler = scheduler
-        self.event_share_queue = event_share_queue
         self.diary_generator = diary_generator
         self.character = character
         self.config = config
@@ -107,7 +102,7 @@ class LifeSimulator:
                     )
                     best_event = max(event_chain, key=lambda e: e.get("share_desire", 0.0))
                     if (
-                        self.event_share_queue
+                        self.scheduler
                         and best_event.get("share_desire", 0.0)
                         >= self.config.proactive_event_share_threshold
                     ):
@@ -115,7 +110,7 @@ class LifeSimulator:
                             self.config.proactive_event_share_delay_min,
                             self.config.proactive_event_share_delay_max,
                         )
-                        await self.event_share_queue.enqueue_event_share(
+                        self.scheduler.schedule_share(
                             event_id=best_event.get("event_id", ""),
                             event_description=best_event.get("description", ""),
                             reaction=best_event.get("reaction", ""),
@@ -137,27 +132,6 @@ class LifeSimulator:
             except Exception:
                 logger.exception("tick: 主动消息调度失败")
 
-        # 处理延迟队列中的事件分享
-        if self.event_share_queue and self.scheduler:
-            try:
-                delayed_msgs = await self.event_share_queue.tick(
-                    on_share=self._run_due_share
-                )
-                # 串行 await 保证消息顺序，请勿改为 gather
-                for msg in delayed_msgs:
-                    await self._send_msg(msg)
-            except Exception:
-                logger.exception("tick: 延迟事件分享处理失败")
-
-    async def _run_due_share(
-        self, description: str, reaction: str, share_desire: float
-    ) -> List[Dict]:
-        """处理到期的事件分享任务"""
-        return await self.scheduler.share_event_to_targets(
-            description,
-            reaction,
-            self.scheduler.config.max_shares_per_event,
-        )
 
     async def tick_daily(self) -> Optional[str]:
         """每日调用 — 清理 trace、关系衰减、生成日记"""
@@ -224,7 +198,6 @@ class LifeSimulator:
             await self.store.run_cleanup(
                 llm_traces_max_age_days=self.config.trace_max_age_days,
                 score_history_max_age_days=self.config.score_history_max_age_days,
-                delayed_tasks_max_age_days=self.config.delayed_tasks_max_age_days,
                 scoring_failures_max_age_days=self.config.scoring_failures_max_age_days,
                 daily_events_keep_days=self.config.daily_events_keep_days,
                 diary_keep_days=self.config.diary_keep_days,

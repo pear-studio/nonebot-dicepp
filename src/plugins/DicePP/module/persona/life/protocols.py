@@ -17,6 +17,15 @@ class BoundaryReceiver(Protocol):
 
     def set_jittered_boundaries(self, start: int, end: int) -> None: ...
 
+    def schedule_share(
+        self,
+        event_id: str,
+        event_description: str,
+        reaction: str,
+        share_desire: float,
+        delay_minutes: int,
+    ) -> None: ...
+
 
 class SleepGate(Protocol):
     """窄接口：CharacterLife 向 ChatSession 提供清醒状态查询。"""

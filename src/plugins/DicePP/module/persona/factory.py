@@ -32,7 +32,6 @@ from .life.diary import DiaryGenerator, DiaryConfig
 from .life.event_agent import EventGenerationAgent
 from .life.proactive_config import ProactiveConfig
 from .life.proactive_scheduler import ProactiveScheduler
-from .life.event_share_queue import EventShareTaskQueue
 from .life.simulator import LifeSimulator, LifeConfig
 from .life.protocols import SleepGate
 from .life.target import TargetSelector
@@ -304,7 +303,6 @@ async def _build_life(
     decay_calculator: DecayCalculator,
     character_life: CharacterLife,
     event_agent: EventGenerationAgent,
-    event_share_queue: EventShareTaskQueue,
 ) -> LifeSimulator:
     """组装 LifeSimulator — 仅构造 scheduler, diary_generator 等外围组件"""
     target_selector = TargetSelector(
@@ -346,7 +344,6 @@ async def _build_life(
         store=store,
         character_life=character_life,
         scheduler=scheduler,
-        event_share_queue=event_share_queue,
         diary_generator=diary_generator,
         character=character,
         config=life_config_obj,
@@ -401,29 +398,19 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     # ── Step 2: event_agent (life 和 scheduler 共用)
     event_agent = EventGenerationAgent(router, tool_registry, config=config)
 
-    # ── Step 3: event_share_queue (提前构造，供 character_life 和 _build_life 共用)
-    event_share_queue = EventShareTaskQueue(
-        data_store=store,
-        share_threshold=config.proactive_event_share_threshold,
-        max_retries=config.proactive_share_max_retries,
-        timezone=config.timezone,
-    )
-    logger.info("延迟任务队列已初始化")
-
-    # ── Step 4: character_life (提前构造，供 sleep_gate 和 suggest_action 引用)
+    # ── Step 3: character_life (提前构造，供 sleep_gate 和 suggest_action 引用)
     life_config = CharacterLifeConfig.from_persona(config)
     character_life = CharacterLife(
         config=life_config,
         event_agent=event_agent,
         data_store=store,
         character=character,
-        event_share_queue=event_share_queue,
         share_threshold=config.proactive_event_share_threshold,
         share_delay_min=config.proactive_event_share_delay_min,
         share_delay_max=config.proactive_event_share_delay_max,
     )
 
-    # ── Step 5: action_evaluator
+    # ── Step 4: action_evaluator
     action_evaluator = ActionEvaluator(
         store=store,
         router=router,
@@ -432,7 +419,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("ActionEvaluator 已初始化")
 
-    # ── Step 6: 注册 chat 域工具（依赖 action_evaluator, character_life 等）
+    # ── Step 5: 注册 chat 域工具（依赖 action_evaluator, character_life 等）
     suggest_action_executor = make_suggest_action_executor(
         store=store,
         action_evaluator=action_evaluator,
@@ -482,7 +469,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
 
     logger.info("工具注册表与分段调度器已初始化")
 
-    # ── Step 7: coordinator, decay_calculator
+    # ── Step 6: coordinator, decay_calculator
     coordinator = LLMCallCoordinator(
         max_failures=config.proactive_coordinator_max_failures,
         max_iterations=config.proactive_coordinator_max_iterations,
@@ -495,7 +482,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("衰减计算器已初始化")
 
-    # ── Step 8: _build_chat (注入 sleep_gate)
+    # ── Step 7: _build_chat (注入 sleep_gate)
     async def _resolve_query_db(user_id: str, group_id: str) -> str:
         if group_id:
             row = await bot.db.group_config.get(group_id)
@@ -529,12 +516,11 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         sleep_gate=character_life,
     )
 
-    # ── Step 9: _build_life (注入预构造组件)
+    # ── Step 8: _build_life (注入预构造组件)
     life = await _build_life(
         store, character, config, coordinator, port, decay_calculator,
         character_life=character_life,
         event_agent=event_agent,
-        event_share_queue=event_share_queue,
     )
 
     # 启动探针

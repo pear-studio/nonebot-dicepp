@@ -261,7 +261,6 @@ class PersonaConfig(BaseModel):
 
     # ── 数据清理 TTL
     score_history_max_age_days: int = 90
-    delayed_tasks_max_age_days: int = 30
     scoring_failures_max_age_days: int = 30
     daily_events_keep_days: int = 30
     diary_keep_days: int = 30

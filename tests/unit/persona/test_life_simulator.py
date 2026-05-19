@@ -3,12 +3,11 @@
 LifeSimulator 是 tick / tick_daily 的薄编排层，关键行为：
 
 1. tick() 调用 character_life.tick；若链中最高 share_desire 达阈值，
-   则调用 event_share_queue.enqueue_event_share 入队
+   则调用 scheduler.schedule_share 调度延迟分享
 2. tick() 调用 scheduler.tick，将返回的消息逐条 send 出去
-3. tick() 调用 event_share_queue.tick，将到期消息 send 出去
-4. tick() 内部异常不向上抛（保护调度器）
-5. tick_daily() 依次 prune_traces → decay_batch → diary，返回 diary
-6. tick_daily() 内部异常返回 None
+3. tick() 内部异常不向上抛（保护调度器）
+4. tick_daily() 依次 prune_traces → decay_batch → diary，返回 diary
+5. tick_daily() 内部异常返回 None
 """
 
 import pytest
@@ -21,7 +20,6 @@ def _make_simulator(
     *,
     event_chain=None,
     proactive_msgs=None,
-    delayed_msgs=None,
     share_threshold: float = 0.5,
     diary: str = "今天很好",
 ):
@@ -40,10 +38,7 @@ def _make_simulator(
     scheduler.config = MagicMock()
     scheduler.config.max_shares_per_event = 1
     scheduler.share_event_to_targets = AsyncMock(return_value=[])
-
-    event_share_queue = MagicMock()
-    event_share_queue.enqueue_event_share = AsyncMock()
-    event_share_queue.tick = AsyncMock(return_value=delayed_msgs or [])
+    scheduler.schedule_share = MagicMock()
 
     diary_generator = MagicMock()
     diary_generator.generate_diary = AsyncMock(return_value=diary)
@@ -66,7 +61,6 @@ def _make_simulator(
         store=store,
         character_life=character_life,
         scheduler=scheduler,
-        event_share_queue=event_share_queue,
         diary_generator=diary_generator,
         character=character,
         config=config,
@@ -77,8 +71,8 @@ def _make_simulator(
 
 
 @pytest.mark.asyncio
-async def test_tick_with_high_share_desire_enqueues_delayed_share():
-    """share_desire >= 阈值 → 进入 event_share_queue"""
+async def test_tick_with_high_share_desire_schedules_delayed_share():
+    """share_desire >= 阈值 → 调用 scheduler.schedule_share"""
     sim = _make_simulator(
         event_chain=[
             {"event_id": "e1", "description": "喝咖啡", "reaction": "很香", "share_desire": 0.8},
@@ -86,15 +80,15 @@ async def test_tick_with_high_share_desire_enqueues_delayed_share():
         share_threshold=0.5,
     )
     await sim.tick()
-    sim.event_share_queue.enqueue_event_share.assert_called_once()
-    kwargs = sim.event_share_queue.enqueue_event_share.call_args.kwargs
+    sim.scheduler.schedule_share.assert_called_once()
+    kwargs = sim.scheduler.schedule_share.call_args.kwargs
     assert kwargs["event_id"] == "e1"
     assert kwargs["share_desire"] == 0.8
 
 
 @pytest.mark.asyncio
-async def test_tick_below_threshold_does_not_enqueue():
-    """share_desire < 阈值 → 不入队"""
+async def test_tick_below_threshold_does_not_schedule():
+    """share_desire < 阈值 → 不调度"""
     sim = _make_simulator(
         event_chain=[
             {"event_id": "e1", "description": "喝咖啡", "reaction": "一般", "share_desire": 0.3},
@@ -102,12 +96,12 @@ async def test_tick_below_threshold_does_not_enqueue():
         share_threshold=0.5,
     )
     await sim.tick()
-    sim.event_share_queue.enqueue_event_share.assert_not_called()
+    sim.scheduler.schedule_share.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_tick_picks_max_share_desire_from_chain():
-    """事件链中取 share_desire 最大的入队"""
+    """事件链中取 share_desire 最大的调度分享"""
     sim = _make_simulator(
         event_chain=[
             {"event_id": "e1", "description": "a", "reaction": "x", "share_desire": 0.4},
@@ -117,8 +111,8 @@ async def test_tick_picks_max_share_desire_from_chain():
         share_threshold=0.5,
     )
     await sim.tick()
-    sim.event_share_queue.enqueue_event_share.assert_called_once()
-    kwargs = sim.event_share_queue.enqueue_event_share.call_args.kwargs
+    sim.scheduler.schedule_share.assert_called_once()
+    kwargs = sim.scheduler.schedule_share.call_args.kwargs
     assert kwargs["event_id"] == "e2"
 
 
@@ -134,18 +128,6 @@ async def test_tick_sends_proactive_messages():
     sim.port.send.assert_called_once()
     args, kwargs = sim.port.send.call_args
     assert args[0] == "u1"
-
-
-@pytest.mark.asyncio
-async def test_tick_processes_delayed_share():
-    """event_share_queue.tick 返回的消息应被发送"""
-    sim = _make_simulator(
-        delayed_msgs=[
-            {"user_id": "u2", "group_id": "g1", "content": "share"},
-        ],
-    )
-    await sim.tick()
-    assert sim.port.send.await_count == 1
 
 
 @pytest.mark.asyncio

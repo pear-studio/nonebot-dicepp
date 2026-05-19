@@ -225,17 +225,6 @@ class GroupActivity(BaseModel):
     last_interaction_at: Optional[datetime] = None  # 最后互动时间（@bot/AI回复）
 
 
-class DelayedTask(BaseModel):
-    """延迟任务"""
-    id: Optional[int] = None
-    task_type: str  # "event_share"
-    payload: Dict[str, Any]  # 包含 event_id, description, share_desire 等
-    scheduled_at: datetime
-    status: str = "pending"  # pending | completed | failed
-    retry_count: int = 0
-    created_at: Optional[datetime] = None
-
-
 class LLMTraceRecord(BaseModel):
     """LLM 调用 Trace 记录"""
     id: Optional[int] = None
