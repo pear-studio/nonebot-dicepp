@@ -217,6 +217,7 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
 
 
 def _build_chat(
+    *,
     store: PersonaDataStore,
     router: LLMRouter,
     tool_registry: ToolRegistry,
@@ -482,9 +483,17 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
             return bot.config.query.private_database
 
     chat = _build_chat(
-        store, router, tool_registry, coordinator, character, config,
-        decay_calculator, port, segment_dispatcher,
-        query_store=bot.db.query, resolve_db=_resolve_query_db,
+        store=store,
+        router=router,
+        tool_registry=tool_registry,
+        coordinator=coordinator,
+        character=character,
+        config=config,
+        decay_calculator=decay_calculator,
+        port=port,
+        segment_dispatcher=segment_dispatcher,
+        query_store=bot.db.query,
+        resolve_db=_resolve_query_db,
         sleep_gate=character_life,
     )
 
