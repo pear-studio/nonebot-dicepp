@@ -52,13 +52,14 @@ class TestDecayCalculatorEdgeCases:
     def test_within_grace_period_no_decay(self):
         config = DecayConfig(enabled=True, grace_period_hours=8)
         calc = DecayCalculator(config)
+        now = datetime.now()
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
-            last_interaction_at=datetime.now() - timedelta(hours=4),
-            last_miss_sent_at=datetime.now() - timedelta(hours=4),
+            last_interaction_at=now - timedelta(hours=4),
+            last_miss_sent_at=now - timedelta(hours=4),
         )
-        deltas, reason = calc.calculate_decay(rel)
+        deltas, reason = calc.calculate_decay(rel, now=now)
         assert deltas.intimacy == 0.0
         assert "免衰减期内" in reason
 
@@ -164,6 +165,7 @@ class TestDecayCalculatorEdgeCases:
             daily_cap=100.0,
         )
         calc = DecayCalculator(config)
+        now = datetime.now()
         rel = RelationshipState(
             user_id="u1",
             intimacy=58.0,
@@ -171,11 +173,11 @@ class TestDecayCalculatorEdgeCases:
             trust=58.0,
             secureness=58.0,
             peak_stage=2,
-            last_interaction_at=datetime.now() - timedelta(hours=1),
-            last_miss_sent_at=datetime.now() - timedelta(hours=1),
+            last_interaction_at=now - timedelta(hours=1),
+            last_miss_sent_at=now - timedelta(hours=1),
         )
         # floor = 40, current = 58, allowed_decay = 18
-        deltas, reason = calc.calculate_decay(rel)
+        deltas, reason = calc.calculate_decay(rel, now=now)
         assert abs(deltas.intimacy + 10.0) < 0.1  # raw = 10, capped by daily_cap=100, limited by allowed=18
         assert "阶段下限保护后 10.00" in reason
 
@@ -226,13 +228,14 @@ class TestDecayCalculatorEdgeCases:
     def test_should_apply_decay_false_within_grace(self):
         config = DecayConfig(enabled=True, grace_period_hours=8)
         calc = DecayCalculator(config)
+        now = datetime.now()
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
-            last_interaction_at=datetime.now() - timedelta(minutes=30),
-            last_miss_sent_at=datetime.now() - timedelta(minutes=30),
+            last_interaction_at=now - timedelta(minutes=30),
+            last_miss_sent_at=now - timedelta(minutes=30),
         )
-        assert calc.should_apply_decay(rel) is False
+        assert calc.should_apply_decay(rel, now=now) is False
 
     def test_should_apply_decay_false_when_disabled(self):
         config = DecayConfig(enabled=False)

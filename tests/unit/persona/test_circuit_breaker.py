@@ -108,12 +108,13 @@ class TestAvailability:
         cb.mark_dead("auth error")
         assert cb.is_available() is False
 
-    def test_disabled_probe_available_after_interval(self):
+    @patch('time.monotonic', return_value=1000.0)
+    def test_disabled_probe_available_after_interval(self, mock_mono):
         cb = CircuitBreaker("p1", "m1", probe_interval_seconds=300)
         # Manually set disabled with old probe time
         cb._state = "disabled"
         cb._last_probe_time = 0.0
-        assert cb.is_available() is True  # 0.0 vs now > 300s
+        assert cb.is_available() is True  # 0.0 vs 1000.0 > 300s
 
     def test_disabled_not_available_before_interval(self):
         cb = CircuitBreaker("p1", "m1", probe_interval_seconds=300)
@@ -121,7 +122,8 @@ class TestAvailability:
         cb._last_probe_time = time.monotonic()  # just now
         assert cb.is_available() is False
 
-    def test_should_probe_only_when_disabled(self):
+    @patch('time.monotonic', return_value=1000.0)
+    def test_should_probe_only_when_disabled(self, mock_mono):
         cb = CircuitBreaker("p1", "m1", probe_interval_seconds=300)
         assert cb.should_probe() is False  # active
 
@@ -130,7 +132,7 @@ class TestAvailability:
 
         cb._state = "disabled"
         cb._last_probe_time = 0.0
-        assert cb.should_probe() is True  # disabled, old probe
+        assert cb.should_probe() is True  # disabled, old probe, 1000.0 > 300s
 
     def test_on_probe_start_updates_time(self):
         cb = CircuitBreaker("p1", "m1")

@@ -68,7 +68,9 @@ async def test_share_event_to_targets_respects_min_interval_for_normal(scheduler
         target_selector=target_selector,
         coordinator=mock_coordinator,
     )
-    scheduler._last_proactive_time["user:u1"] = datetime.now()
+    now = datetime.now()
+    scheduler._now = lambda: now
+    scheduler._last_proactive_time["user:u1"] = now
 
     mock_agent = MagicMock()
     mock_agent.generate_share_message = AsyncMock(return_value="hello")
@@ -94,6 +96,7 @@ async def test_share_event_to_targets_mixed_force_and_normal(scheduler_cfg, mock
         coordinator=mock_coordinator,
     )
     now = datetime.now()
+    scheduler._now = lambda: now
     scheduler._last_proactive_time["user:u_force"] = now
     scheduler._last_proactive_time["user:u_normal"] = now
 
