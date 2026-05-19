@@ -11,19 +11,6 @@
 
 ## persona
 
-### [B-260519-7673f7] CharacterLoader 遗漏 PersonaExtensions 8 个字段
-- 创建: 2026-05-19
-- 问题表现:
-    - character/loader.py _parse_character() 仅映射了 PersonaExtensions 的 7 个字段
-    - 遗漏 refuse_messages、sleep_messages、share_message_examples、image_gen_style、image_gen_appearance、event_day_start_jitter_minutes、event_day_end_jitter_minutes 等 8 个字段
-    - 角色卡 YAML 中配置这些字段静默失效，角色表现与预期不符
-    - 参考: data-analyzer 报告 D6
-- 工作计划:
-    - 方案: 在 loader.py _parse_character() 中补全所有 PersonaExtensions 字段映射
-    - 验证: 编写单元测试覆盖所有字段的加载路径
-    - 影响面: character/loader.py、character/models.py
-    - 风险: 低——纯增量字段补全，不影响已有行为
-
 ### [B-260519-d36eb5] SegmentDispatcher Worker 退出竞态导致消息丢失
 - 创建: 2026-05-19
 - 问题表现:

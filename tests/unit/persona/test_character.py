@@ -315,6 +315,64 @@ extensions:
             chars = loader.list_characters()
             assert chars == ["alice", "bob"]
 
+    def test_load_all_extensions_fields(self):
+        """测试 PersonaExtensions 全部 14 个字段均从 YAML 正确加载"""
+        yaml_content = """
+name: 全字段角色
+extensions:
+  persona:
+    initial_relationship: 60
+    warmth_labels:
+      - 冷淡
+      - 普通
+      - 友好
+      - 亲密
+      - 挚友
+    world: 现代都市
+    daily_events_count: 8
+    event_day_start_hour: 7
+    event_day_end_hour: 23
+    event_jitter_minutes: 45
+    event_day_start_jitter_minutes: 15
+    event_day_end_jitter_minutes: 20
+    refuse_messages:
+      - 我不想理你
+      - 走开
+    share_message_examples:
+      - 今天天气真好
+    sleep_messages:
+      - zzz
+    image_gen_style: 水彩画风
+    image_gen_appearance: 黑发、高挑、戴眼镜
+"""
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            char_dir = os.path.join(tmpdir, "full_fields")
+            os.makedirs(char_dir, exist_ok=True)
+            char_file = os.path.join(char_dir, "character.yaml")
+            with open(char_file, "w", encoding="utf-8") as f:
+                f.write(yaml_content)
+
+            loader = CharacterLoader(tmpdir)
+            char = loader.load("full_fields")
+
+            assert char is not None
+            ext = char.extensions
+            assert ext.initial_relationship == 60
+            assert ext.warmth_labels == ["冷淡", "普通", "友好", "亲密", "挚友"]
+            assert ext.world == "现代都市"
+            assert ext.daily_events_count == 8
+            assert ext.event_day_start_hour == 7
+            assert ext.event_day_end_hour == 23
+            assert ext.event_jitter_minutes == 45
+            assert ext.event_day_start_jitter_minutes == 15
+            assert ext.event_day_end_jitter_minutes == 20
+            assert ext.refuse_messages == ["我不想理你", "走开"]
+            assert ext.share_message_examples == ["今天天气真好"]
+            assert ext.sleep_messages == ["zzz"]
+            assert ext.image_gen_style == "水彩画风"
+            assert ext.image_gen_appearance == "黑发、高挑、戴眼镜"
+
     def test_list_characters_skips_invalid_dirs(self):
         """测试跳过无 character.yaml 的目录"""
         with tempfile.TemporaryDirectory() as tmpdir:
