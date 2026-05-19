@@ -11,20 +11,6 @@
 
 ## persona
 
-### [B-260519-d36eb5] SegmentDispatcher Worker 退出竞态导致消息丢失
-- 创建: 2026-05-19
-- 问题表现:
-    - segment_dispatcher.py _worker_loop() finally 块以 workers.pop() -> wake_events.pop() -> queues.pop() 顺序清理
-    - 若 notify() 在 queues.pop() 之前向队列插入 segment，随后队列被销毁，segment 永久丢失
-    - 时序: (1) notify 插入 segment -> (2) notify 发现 worker 在 workers dict 中不创建新 worker -> (3) worker finally 执行 queues.pop() 删除队列 -> segment 丢失
-    - 参考: chat-analyzer 报告 CH2
-- 工作计划:
-    - 方案: 在 queues.pop() 前检查队列是否为空，非空则重新调度或直接处理
-    - 备选: 调整清理顺序为先 pop queue 再 pop workers/wake_events
-    - 验证: 编写并发竞态测试（模拟 notify 与 worker exit 的交叉时序）
-    - 影响面: chat/segment_dispatcher.py
-    - 风险: 中——并发逻辑修改需仔细验证，不当修改可能引入死锁
-
 ### [B-260519-ffb8d3] AgentLoop 提升为独立模块供 chat/life/scoring 复用
 - 创建: 2026-05-19
 - 问题表现:
@@ -38,21 +24,6 @@
     - 验证: 现有 chat/life/scoring 端到端测试通过
     - 影响面: llm/loop.py -> agent/loop.py（新建），llm/router.py，life/event_agent.py，chat/session.py
     - 风险: 中——涉及多子系统调用路径变更，需全量回归
-
-### [B-260519-a515e5] create_persona() 工厂函数拆分（183行->Builder模式）
-- 创建: 2026-05-19
-- 问题表现:
-    - factory.py create_persona() 183 行单函数，9 步线性组装，步骤间有隐式依赖
-    - 每增加子系统（如 ActionEvaluator）都需修改工厂函数，违反开闭原则
-    - _build_chat 12 个参数，位置传参脆弱
-    - 参考: core-analyzer 报告 C1、C2
-- 工作计划:
-    - 方案: 拆分为 Phase Builder（_Phase1InfraBuilder / _Phase2ToolBuilder / _Phase3AppAssembler）
-    - 备选: 引入简单 DI 容器或 Builder 模式分段构建
-    - _build_chat 参数改为 dataclass 收纳可选依赖
-    - 验证: 启动探针通过、模块初始化无回归
-    - 影响面: factory.py 主要重写，command.py 调用方适配
-    - 风险: 中——初始化流程重构，需覆盖 enabled/disabled/probe_failed 等分支
 
 ### [B-260519-7bdae0] ChatSession 职责拆分（编排/回复处理/评分触发）
 - 创建: 2026-05-19
