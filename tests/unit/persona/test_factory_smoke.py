@@ -159,6 +159,6 @@ async def test_create_persona_success_registers_three_tools(monkeypatch):
     assert app.store is not None
     assert app.port is not None
     assert app.segment_dispatcher is not None
-    assert app.chat.port is app.port
+    assert app.chat._response_handler.port is app.port
     assert app.life.scheduler is not None
     assert app.life.character_life is not None

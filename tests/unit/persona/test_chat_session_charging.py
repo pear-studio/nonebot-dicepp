@@ -62,7 +62,17 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
         scoring_interval=999,
     )
 
-    scoring_agent = MagicMock()
+    scoring_trigger = MagicMock()
+    scoring_trigger.effective_relationship = MagicMock(side_effect=lambda rel: rel)
+    scoring_trigger.on_interaction = AsyncMock()
+    scoring_trigger.update_character = MagicMock()
+
+    response_handler = MagicMock()
+    response_handler.port = None
+    response_handler.persist = AsyncMock(return_value=1)
+    response_handler.send = AsyncMock(return_value=True)
+    response_handler.persist_and_send = AsyncMock(return_value=1)
+
     context_builder = MagicMock()
     context_builder.build = MagicMock(return_value=[{"role": "user", "content": "hi"}])
     context_builder.build_debug_info = MagicMock(return_value="")
@@ -72,16 +82,13 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
 
     session = ChatSession(
         store=store,
-        message_store=store,
-        rel_store=store,
-        profile_store=store,
-        event_store=store,
         router=router,
         tool_registry=MagicMock(),
         coordinator=coordinator,
         character=character,
         config=config,
-        scoring_agent=scoring_agent,
+        scoring_trigger=scoring_trigger,
+        response_handler=response_handler,
         context_builder=context_builder,
     )
     return session
@@ -159,5 +166,5 @@ async def test_all_failures_does_not_charge():
 
     # 兜底文案
     assert result is not None
-    assert "出错了" in result
+    assert "暂时不可用" in result
     assert session.router.increment_usage.await_count == 0

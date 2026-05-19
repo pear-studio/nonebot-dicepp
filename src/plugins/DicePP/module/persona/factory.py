@@ -10,9 +10,12 @@ from core.bot import Bot
 
 from .character.loader import CharacterLoader
 from .character.models import Character
-from .chat.session import ChatSession, ChatConfig
+from .chat.session import ChatSession
+from .chat.chat_config import ChatConfig
 from .chat.scoring import ScoringAgent
 from .chat.context import ContextBuilder
+from .chat.response_handler import ResponseHandler
+from .chat.scoring_trigger import ScoringTrigger
 from .data.store import PersonaDataStore
 from .data.protocols import MessageStore, RelationshipStore, ProfileStore, EventStore
 from .exceptions import (
@@ -267,21 +270,24 @@ def _build_chat(
         segment_guide=segment_guide,
     )
     chat_config = ChatConfig.from_persona(config)
+
+    response_handler = ResponseHandler(store=store, port=port)
+    scoring_trigger = ScoringTrigger(
+        store=store, scoring_agent=scoring_agent,
+        decay_calculator=decay_calculator, character=character,
+        config=chat_config,
+    )
     return ChatSession(
         store=store,
-        message_store=message_store,
-        rel_store=rel_store,
-        profile_store=profile_store,
-        event_store=event_store,
         router=router,
         tool_registry=tool_registry,
         coordinator=coordinator,
         character=character,
         config=chat_config,
-        scoring_agent=scoring_agent,
+        scoring_trigger=scoring_trigger,
+        response_handler=response_handler,
         context_builder=context_builder,
         decay_calculator=decay_calculator,
-        port=port,
         segment_dispatcher=segment_dispatcher,
         query_store=query_store,
         resolve_db=resolve_db,

@@ -8,12 +8,10 @@
 避免注释不变量依赖人工维护。
 """
 from typing import List, Dict, Optional, Any, Tuple, TYPE_CHECKING
-from dataclasses import dataclass
 import asyncio
 import json
 import time
 import random
-from collections import deque
 from datetime import datetime, timedelta
 
 from nonebot.log import logger
@@ -21,21 +19,16 @@ from nonebot.log import logger
 from utils.string import estimate_tokens
 
 from ..data.store import PersonaDataStore
-from ..data.protocols import MessageStore, RelationshipStore, ProfileStore, EventStore
 from ..data.models import (
-    UserProfile,
     RelationshipState,
-    ScoreEvent,
-    ScoringFailure,
     UnifiedMessage,
     MessageType,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
-from ..llm.errors import ErrorKind, classify, user_message
 from ..llm.selection import SelectionPolicy
 from ..character.models import Character
-from ..chat.scoring import ScoringAgent
 from ..chat.context import ContextBuilder
+from ..chat.chat_config import ChatConfig
 from ..game.decay import DecayCalculator
 from ..wall_clock import persona_wall_now, PERSONA_EPOCH, format_timestamp, format_relative_time
 from ..tools.registry import ToolRegistry, ToolDomain
@@ -49,72 +42,12 @@ from .segment_state import SegmentBudgetState, SegmentLimits
 _DEFAULT_SLEEP_MESSAGES = ("角色正在休息，请稍后再来",)
 
 if TYPE_CHECKING:
-    from core.config.pydantic_models import PersonaConfig
-
-
-@dataclass
-class ChatConfig:
-    """对话域配置（从 PersonaConfig 中提取的子集）"""
-
-    max_history_turns: int = 10
-    max_history_tokens: int = 4000
-    max_diary_context_chars: int = 500
-    timezone: str = "Asia/Shanghai"
-    lore_token_budget: int = 300
-    tools_max_rounds: int = 5
-    relationship_refuse_enabled: bool = False
-    relationship_refuse_prob_base: float = 0.5
-    relationship_refuse_prob_max: float = 0.9
-    scoring_interval: int = 5
-    max_messages: int = 100
-    group_max_age_minutes: int = 60
-    group_context_budget_tokens: float = 2000.0
-    group_max_messages: int = 15
-    group_single_message_max_tokens: float = 500.0
-    # ── 分段回复配置
-    segment_target_chars: int = 30
-    segment_max_chars: int = 80
-    segment_soft_limit: int = 100
-    segment_hard_limit: int = 120
-    segment_count_max: int = 10
-    segment_max_delay: float = 10.0
-    segment_round_callbacks_max: int = 3
-
-    @classmethod
-    def from_persona(cls, persona: "PersonaConfig") -> "ChatConfig":
-        return cls(
-            max_history_turns=persona.max_history_turns,
-            max_history_tokens=persona.max_history_tokens,
-            max_diary_context_chars=persona.max_diary_context_chars,
-            timezone=persona.timezone,
-            lore_token_budget=persona.lore_token_budget,
-            tools_max_rounds=persona.tools_max_rounds,
-            relationship_refuse_enabled=persona.relationship_refuse_enabled,
-            relationship_refuse_prob_base=persona.relationship_refuse_prob_base,
-            relationship_refuse_prob_max=persona.relationship_refuse_prob_max,
-            scoring_interval=persona.scoring_interval,
-            max_messages=persona.max_messages,
-            group_max_age_minutes=persona.group_max_age_minutes,
-            group_context_budget_tokens=persona.group_context_budget_tokens,
-            group_max_messages=persona.group_max_messages,
-            group_single_message_max_tokens=persona.group_single_message_max_tokens,
-            segment_target_chars=persona.segment_target_chars,
-            segment_max_chars=persona.segment_max_chars,
-            segment_soft_limit=persona.segment_soft_limit,
-            segment_hard_limit=persona.segment_hard_limit,
-            segment_count_max=persona.segment_count_max,
-            segment_max_delay=persona.segment_max_delay,
-            segment_round_callbacks_max=persona.segment_round_callbacks_max,
-        )
+    from .scoring_trigger import ScoringTrigger
+    from .response_handler import ResponseHandler
 
 
 class ChatSession:
-    """对话会话管理器 — 负责单轮/多轮对话、工具调用、评分、关系更新
-
-    """
-
-    DIGEST_MAX_MESSAGES = 6
-    DIGEST_MAX_CHARS = 80
+    """对话会话管理器 — 负责对话编排、门控、上下文构建、工具调用委托"""
 
     class _SegmentedSentinel(str):
         """标记分段路径的哨兵值，继承 str 以保持与 coordinator 的兼容性。"""
@@ -123,51 +56,42 @@ class ChatSession:
 
     def __init__(
         self,
-        *,
         store: PersonaDataStore,
-        message_store: MessageStore,
-        rel_store: RelationshipStore,
-        profile_store: ProfileStore,
-        event_store: EventStore,
         router: LLMRouter,
         tool_registry: ToolRegistry,
         coordinator: LLMCallCoordinator,
         character: Character,
         config: ChatConfig,
-        scoring_agent: ScoringAgent,
+        scoring_trigger: "ScoringTrigger",
+        response_handler: "ResponseHandler",
         context_builder: ContextBuilder,
         decay_calculator: Optional[DecayCalculator] = None,
-        port: Optional[MessagePort] = None,
         segment_dispatcher: Optional[SegmentDispatcher] = None,
         query_store: Any = None,
         resolve_db: Any = None,
         sleep_gate: Optional[SleepGate] = None,
     ):
         self.store = store
-        self._message_store = message_store
-        self._rel_store = rel_store
-        self._profile_store = profile_store
-        self._event_store = event_store
         self.router = router
         self.tool_registry = tool_registry
         self.coordinator = coordinator
         self.character = character
         self.config = config
-        self.scoring_agent = scoring_agent
+        self._scoring_trigger = scoring_trigger
+        self._response_handler = response_handler
         self.context_builder = context_builder
         self.decay_calculator = decay_calculator
-        self.port = port
         self.segment_dispatcher = segment_dispatcher
         self.query_store = query_store
         self.resolve_db = resolve_db
         self._sleep_gate = sleep_gate
-        self._pending_messages: Dict[str, deque] = {}
         self._last_messages: Dict[str, Tuple[str, float]] = {}
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
         self.character = character
         self.context_builder.update_character(character)
+        self._scoring_trigger.update_character(character)
 
     # ── 公开 API ──────────────────────────────────────────────
 
@@ -207,15 +131,15 @@ class ChatSession:
 
             if self.config.relationship_refuse_enabled and is_chat_message:
                 if group_id:
-                    history = await self._message_store.get_group_unified_messages(group_id, limit=1)
+                    history = await self.store.get_group_unified_messages(group_id, limit=1)
                 else:
-                    history = await self._message_store.get_recent_unified_messages(user_id, group_id="", limit=1)
+                    history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=1)
                 is_first = len(history) == 0
                 if not is_first:
-                    rel = await self._rel_store.get_relationship(user_id)
+                    rel = await self.store.get_relationship(user_id)
                     if rel:
-                        if self.decay_calculator:
-                            rel = self.decay_calculator.effective_relationship(rel)
+                        if self._scoring_trigger:
+                            rel = self._scoring_trigger.effective_relationship(rel)
                         warmth_level, _ = rel.get_warmth_level(self.character.get_warmth_labels())
                         if warmth_level == 0:
                             score = rel.composite_score
@@ -249,12 +173,23 @@ class ChatSession:
             raise
         except Exception as exc:
             logger.exception("对话处理失败")
-            kind = classify(exc)
-            return user_message(kind)
+            return "抱歉，我出错了，请稍后再试..."
 
     async def clear_history(self, user_id: str, group_id: str) -> None:
         """清空对话历史"""
-        await self._message_store.clear_messages(user_id, group_id)
+        await self.store.clear_messages(user_id, group_id)
+
+    # ── 回复后处理 ──────────────────────────────────────────────
+
+    async def _after_response(
+        self, user_id: str, group_id: str, user_msg: str, assistant_msg: str
+    ) -> None:
+        """回复后处理聚合点：委托给 scoring_trigger.on_interaction
+
+        调用时序：在持久化完成之后、方法返回之前。
+        调用点：_coordinator_chat_call_fn 和 _coordinator_on_exhausted。
+        """
+        await self._scoring_trigger.on_interaction(user_id, group_id, user_msg, assistant_msg)
 
     # ── coordinator 回调 ──────────────────────────────────────
 
@@ -270,11 +205,11 @@ class ChatSession:
 
         if isinstance(response, self._SegmentedSentinel):
             # 分段路径：历史已由 _chat_with_tools 写入，跳过重复持久化
-            await self._update_interaction(user_id, group_id, current_message, str(response))
+            await self._after_response(user_id, group_id, current_message, str(response))
             return self._SegmentedSentinel("")
 
         # 非分段路径：持久化由 _coordinator_on_result 统一完成
-        await self._update_interaction(user_id, group_id, current_message, response)
+        await self._after_response(user_id, group_id, current_message, response)
         return response
 
     async def _coordinator_on_exhausted(
@@ -285,19 +220,16 @@ class ChatSession:
         last_exception: Optional[Exception] = None,
     ) -> str:
         """coordinator 耗尽时的兜底回复。"""
-        if last_exception is not None:
-            kind = classify(last_exception)
-            fallback_response = user_message(kind, str(last_exception))
+        if isinstance(last_exception, QuotaExceeded):
+            fallback_response = (
+                f"{last_exception}\n\n"
+                "使用 `.ai key config` 配置自己的 API Key 可解除限制"
+            )
         else:
-            fallback_response = user_message(ErrorKind.UNKNOWN)
-        msg_id = await self._persist_assistant_message(user_id, group_id, fallback_response)
-        await self._update_interaction(user_id, group_id, current_message, fallback_response)
-        if self.port:
-            if not await self.port.send(user_id, group_id, fallback_response, msg_id=msg_id):
-                logger.warning(
-                    f"_coordinator_on_exhausted 发送失败: "
-                    f"user={user_id}, group={group_id}"
-                )
+            fallback_response = "LLM服务暂时不可用，请稍后再试"
+        await self._response_handler.persist_and_send(user_id, group_id, fallback_response)
+        await self._after_response(user_id, group_id, current_message, fallback_response)
+        if self._response_handler.port is not None:
             return self._SegmentedSentinel("")
         else:
             logger.warning(
@@ -353,14 +285,7 @@ class ChatSession:
         if isinstance(result, self._SegmentedSentinel):
             return
 
-        msg_id = await self._persist_assistant_message(user_id, group_id, result)
-        if self.port:
-            await self.port.send(user_id, group_id, result, msg_id=msg_id)
-        else:
-            logger.warning(
-                f"_coordinator_on_result: MessagePort 未注入，"
-                f"消息无法发送 (user={user_id}, group={group_id})"
-            )
+        await self._response_handler.persist_and_send(user_id, group_id, result)
 
     async def _chat_via_coordinator(
         self, user_id: str, group_id: str, message: str, target_key: str
@@ -423,7 +348,7 @@ class ChatSession:
 
         ctx = ToolContext(
             user_id=user_id, group_id=group_id, store=self.store,
-            send=self.port, segment_dispatcher=self.segment_dispatcher,
+            send=self._response_handler.port, segment_dispatcher=self.segment_dispatcher,
             segment_state=segment_state,
             query=self.query_store, resolve_db=self.resolve_db,
         )
@@ -511,7 +436,7 @@ class ChatSession:
 
         # 5.4.6: 写入历史，分段已由 dispatcher 实时发出，直接标记 sent_ok=1
         effective_user_id = "assistant" if group_id else user_id
-        msg_id = await self._message_store.add_unified_message(
+        msg_id = await self.store.add_unified_message(
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",
@@ -519,164 +444,12 @@ class ChatSession:
             content=full_reply,
             display_name="我",
         )
-        await self._message_store.update_sent_ok(msg_id, 1)
+        await self.store.update_sent_ok(msg_id, 1)
 
         if self.segment_dispatcher:
             await self.segment_dispatcher.drain(target_key)
 
         return self._SegmentedSentinel(full_reply)
-
-    # ── 关系与评分 ────────────────────────────────────────────
-
-    async def _update_interaction(
-        self, user_id: str, group_id: str, user_msg: str, assistant_msg: str
-    ) -> None:
-        rel = await self._rel_store.get_relationship(user_id)
-        initial = float(self.character.extensions.initial_relationship)
-        if not rel:
-            rel = await self._rel_store.init_relationship(user_id, initial)
-
-        now = persona_wall_now(self.config.timezone)
-        decay_event: Optional[ScoreEvent] = None
-        if self.decay_calculator and self.decay_calculator.should_apply_decay(rel, now):
-            deltas, reason = self.decay_calculator.calculate_decay(rel, now=now)
-            if abs(deltas.intimacy) > 0.01:
-                composite_before = rel.composite_score
-                rel.apply_deltas(deltas, updated_at=now)
-                decay_event = ScoreEvent(
-                    user_id=user_id,
-                    group_id=group_id,
-                    deltas=deltas,
-                    composite_before=composite_before,
-                    composite_after=rel.composite_score,
-                    reason=f"time_decay: {reason}",
-                    conversation_digest="",
-                )
-
-        rel.last_interaction_at = now
-        rel.last_miss_sent_at = None  # 用户回应后关闭衰减开关
-        rel.last_relationship_decay_applied_at = None  # 配合 last_interaction_at=now，下次衰减从新互动起算
-        await self._rel_store.update_relationship(rel)
-        if decay_event:
-            await self._rel_store.add_score_event(decay_event)
-            logger.info(
-                f"应用时间衰减: {user_id} 衰减 {decay_event.deltas.intimacy:.2f}, 原因: {decay_event.reason}"
-            )
-
-        # 统一关系后 user_id 为唯一键；同一用户的私聊/群聊消息合并评分。
-        # group_id 仅记录触发评分的场景（ScoreEvent 审计字段）。
-        key = user_id
-        if key not in self._pending_messages:
-            self._pending_messages[key] = deque(maxlen=100)
-        self._pending_messages[key].append({"role": "user", "content": user_msg, "created_at": now})
-        self._pending_messages[key].append({"role": "assistant", "content": assistant_msg, "created_at": now})
-
-        if len(self._pending_messages[key]) >= self.config.scoring_interval * 2:
-            try:
-                await self._process_batch_scoring(user_id, group_id)
-            except Exception:
-                logger.exception(f"批量评分失败（不影响对话）")
-                self._pending_messages.pop(key, None)
-
-    async def _process_batch_scoring(self, user_id: str, group_id: str) -> None:
-        if not self.scoring_agent:
-            return
-
-        key = user_id
-        messages = list(self._pending_messages.get(key, []))
-        if not messages:
-            return
-
-        messages_count = len(messages)
-
-        profile = await self._profile_store.get_user_profile(user_id)
-        rel = await self._rel_store.get_relationship(user_id)
-
-        rel_for_scoring = rel
-        if rel and self.decay_calculator:
-            rel_for_scoring = self.decay_calculator.effective_relationship(rel)
-
-        try:
-            result = await self.scoring_agent.batch_analyze(
-                messages=messages,
-                current_profile=profile,
-                relationship=rel_for_scoring,
-            )
-        except Exception as exc:
-            try:
-                await self._rel_store.record_scoring_failure(
-                    ScoringFailure(
-                        user_id=user_id,
-                        group_id=group_id,
-                        messages_count=messages_count,
-                        error=f"{type(exc).__name__}: {exc}",
-                        conversation_digest=self._build_conversation_digest(messages),
-                    )
-                )
-            except Exception as record_exc:
-                logger.error(
-                    f"记录评分失败时数据库出错: {record_exc} "
-                    f"(原始异常: {type(exc).__name__}: {exc})"
-                )
-            raise
-
-        if result.parse_error:
-            logger.warning(
-                f"评分解析失败，{messages_count} 条消息保留待重试: "
-                f"user={user_id}, parse_error={result.parse_error[:100]}"
-            )
-            await self._rel_store.record_scoring_failure(
-                ScoringFailure(
-                    user_id=user_id,
-                    group_id=group_id,
-                    messages_count=messages_count,
-                    error=result.parse_error,
-                    raw_response=result.raw_response,
-                    conversation_digest=self._build_conversation_digest(messages),
-                )
-            )
-            return
-
-        # 评分成功后才清空 pending 消息
-        self._pending_messages[key] = []
-
-        deltas = result.deltas
-        new_facts = result.facts
-        now = persona_wall_now(self.config.timezone)
-        if rel:
-            composite_before = rel.composite_score
-            rel.apply_deltas(deltas, updated_at=now)
-            await self._rel_store.update_relationship(rel)
-
-            event = ScoreEvent(
-                user_id=user_id,
-                group_id=group_id,
-                deltas=deltas,
-                composite_before=composite_before,
-                composite_after=rel.composite_score,
-                reason="批量评分",
-                conversation_digest=self._build_conversation_digest(messages),
-            )
-            await self._rel_store.add_score_event(event)
-
-        if new_facts and profile:
-            profile.merge_facts(new_facts, updated_at=now)
-            await self._profile_store.save_user_profile(profile)
-        elif new_facts:
-            new_profile = UserProfile(user_id=user_id, facts=new_facts)
-            await self._profile_store.save_user_profile(new_profile)
-
-    @staticmethod
-    def _build_conversation_digest(history: List[Dict[str, str]]) -> str:
-        lines = []
-        prefix_map = {"user": "U", "assistant": "A", "tool": "T", "system": "S"}
-        for msg in history[-ChatSession.DIGEST_MAX_MESSAGES:]:
-            prefix = prefix_map.get(msg.get("role"), "?")
-            text = msg.get("content", "")
-            if len(text) > ChatSession.DIGEST_MAX_CHARS:
-                text = text[:ChatSession.DIGEST_MAX_CHARS - 3] + "..."
-            lines.append(f"{prefix}: {text}")
-        return "; ".join(lines)
 
     # ── 历史管理 ──────────────────────────────────────────────
 
@@ -693,14 +466,14 @@ class ChatSession:
         if limit is None:
             limit = self.config.max_messages
         if not group_id:
-            history = await self._message_store.get_recent_unified_messages(user_id, group_id="", limit=limit)
+            history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=limit)
             history_dicts = [
                 {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我", "created_at": msg.created_at}
                 for msg in history
             ]
             return history_dicts, False
 
-        history = await self._message_store.get_group_unified_messages(group_id, limit=None)
+        history = await self.store.get_group_unified_messages(group_id, limit=None)
         return self._apply_token_window(history)
 
     def _apply_token_window(
@@ -769,8 +542,8 @@ class ChatSession:
         initial = float(self.character.extensions.initial_relationship)
 
         if rel:
-            if self.decay_calculator:
-                rel = self.decay_calculator.effective_relationship(rel)
+            if self._scoring_trigger:
+                rel = self._scoring_trigger.effective_relationship(rel)
             _, warmth_label = rel.get_warmth_level(self.character.get_warmth_labels())
         else:
             temp_rel = RelationshipState(
@@ -788,7 +561,7 @@ class ChatSession:
         yesterday = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
         max_diary_len = self.config.max_diary_context_chars
 
-        events = await self._event_store.get_daily_events(today)
+        events = await self.store.get_daily_events(today)
         if events:
             valid_events = [
                 e for e in events
@@ -812,7 +585,7 @@ class ChatSession:
                     diary_context = diary_context[:max_diary_len].rsplit('；', 1)[0] + "..."
                 return diary_context
 
-        diary = await self._event_store.get_diary(yesterday)
+        diary = await self.store.get_diary(yesterday)
         if diary:
             if len(diary) > max_diary_len:
                 diary = diary[:max_diary_len] + "..."
@@ -850,8 +623,8 @@ class ChatSession:
             self.config.max_history_tokens,
         )
 
-        profile = await self._profile_store.get_user_profile(user_id)
-        rel = await self._rel_store.get_relationship(user_id)
+        profile = await self.store.get_user_profile(user_id)
+        rel = await self.store.get_relationship(user_id)
         warmth_label = self._resolve_warmth_label(user_id, rel)
         diary_context = await self._build_diary_context()
         lore_sections = self._build_lore_sections(history_dicts)
@@ -873,19 +646,4 @@ class ChatSession:
             warmth_label=warmth_label,
         )
 
-    # ── 辅助 ──────────────────────────────────────────────────
-
-    async def _persist_assistant_message(
-        self, user_id: str, group_id: str, content: str, display_name: str = "我"
-    ) -> int:
-        effective_user_id = "assistant" if group_id else user_id
-        msg_id = await self._message_store.add_unified_message(
-            user_id=effective_user_id,
-            group_id=group_id or "",
-            role="assistant",
-            type=MessageType.CHAT,
-            content=content,
-            display_name=display_name,
-        )
-        return msg_id
 

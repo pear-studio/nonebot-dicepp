@@ -100,20 +100,27 @@ def config():
 
 @pytest.fixture
 def session(mock_store, mock_router, tool_registry, coordinator, character, config, context_builder, dispatcher, mock_port):
+    scoring_trigger = MagicMock()
+    scoring_trigger.effective_relationship = MagicMock(side_effect=lambda rel: rel)
+    scoring_trigger.on_interaction = AsyncMock()
+    scoring_trigger.update_character = MagicMock()
+
+    response_handler = MagicMock()
+    response_handler.port = mock_port
+    response_handler.persist = AsyncMock(return_value=1)
+    response_handler.send = AsyncMock(return_value=True)
+    response_handler.persist_and_send = AsyncMock(return_value=1)
+
     return ChatSession(
         store=mock_store,
-        message_store=mock_store,
-        rel_store=mock_store,
-        profile_store=mock_store,
-        event_store=mock_store,
         router=mock_router,
         tool_registry=tool_registry,
         coordinator=coordinator,
         character=character,
         config=config,
-        scoring_agent=MagicMock(),
+        scoring_trigger=scoring_trigger,
+        response_handler=response_handler,
         context_builder=context_builder,
-        port=mock_port,
         segment_dispatcher=dispatcher,
     )
 

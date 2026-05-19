@@ -74,18 +74,26 @@ def _make_session(
     context_builder.truncate_by_turns = MagicMock(side_effect=lambda h, *a, **kw: h)
     context_builder.build_lore_text = MagicMock(return_value={})
 
+    scoring_trigger = MagicMock()
+    scoring_trigger.effective_relationship = MagicMock(side_effect=lambda rel: rel)
+    scoring_trigger.on_interaction = AsyncMock()
+    scoring_trigger.update_character = MagicMock()
+
+    response_handler = MagicMock()
+    response_handler.port = None
+    response_handler.persist = AsyncMock(return_value=1)
+    response_handler.send = AsyncMock(return_value=True)
+    response_handler.persist_and_send = AsyncMock(return_value=1)
+
     return ChatSession(
         store=store,
-        message_store=store,
-        rel_store=store,
-        profile_store=store,
-        event_store=store,
         router=router,
         tool_registry=MagicMock(),
         coordinator=LLMCallCoordinator(),
         character=character,
         config=config,
-        scoring_agent=MagicMock(),
+        scoring_trigger=scoring_trigger,
+        response_handler=response_handler,
         context_builder=context_builder,
     )
 
@@ -298,15 +306,16 @@ class TestApplyTokenWindow:
         assert truncated is True
 
 
-class TestDecayInChatSession:
-    """_update_interaction 中的惰性 decay 路径测试"""
+class TestDecayInScoringTrigger:
+    """ScoringTrigger.on_interaction 中的惰性 decay 路径测试"""
 
     @pytest.mark.asyncio
-    async def test_update_interaction_applies_decay_when_due(self):
+    async def test_on_interaction_applies_decay_when_due(self):
         """decay_calculator.should_apply_decay=True 时惰性应用衰减并写入 score_event"""
         from plugins.DicePP.module.persona.data.models import RelationshipState, ScoreDeltas
+        from plugins.DicePP.module.persona.chat.scoring_trigger import ScoringTrigger
 
-        session = _make_session()
+        store = AsyncMock()
 
         decay_calc = MagicMock()
         decay_calc.should_apply_decay = MagicMock(return_value=True)
@@ -314,21 +323,35 @@ class TestDecayInChatSession:
             ScoreDeltas(intimacy=-3.0),
             "超过7天未互动",
         ))
-        session.decay_calculator = decay_calc
+
+        character = MagicMock()
+        character.extensions.initial_relationship = 30.0
+
+        config = MagicMock()
+        config.timezone = ""
+        config.scoring_interval = 999
+
+        trigger = ScoringTrigger(
+            store=store,
+            scoring_agent=MagicMock(),
+            decay_calculator=decay_calc,
+            character=character,
+            config=config,
+        )
 
         rel = RelationshipState(user_id="u1")
-        session.store.get_relationship = AsyncMock(return_value=rel)
-        session.store.update_relationship = AsyncMock()
-        session.store.add_score_event = AsyncMock()
-        session.store.init_relationship = AsyncMock(return_value=rel)
+        store.get_relationship = AsyncMock(return_value=rel)
+        store.update_relationship = AsyncMock()
+        store.add_score_event = AsyncMock()
+        store.init_relationship = AsyncMock(return_value=rel)
 
-        await session._update_interaction("u1", "", "user_msg", "assistant_msg")
+        await trigger.on_interaction("u1", "", "user_msg", "assistant_msg")
 
         decay_calc.should_apply_decay.assert_called_once()
         decay_calc.calculate_decay.assert_called_once()
-        session.store.add_score_event.assert_awaited_once()
+        store.add_score_event.assert_awaited_once()
         # 验证写入的 score_event 包含 decay 原因
-        event = session.store.add_score_event.call_args[0][0]
+        event = store.add_score_event.call_args[0][0]
         assert "time_decay" in event.reason
 
 
