@@ -203,4 +203,9 @@ class SegmentDispatcher:
         finally:
             self._workers.pop(target_key, None)
             self._wake_events.pop(target_key, None)
-            self._queues.pop(target_key, None)
+            if queue is not None and not queue.empty():
+                if self._workers.get(target_key) is None:
+                    task = asyncio.create_task(self._worker_loop(target_key))
+                    self._workers[target_key] = task
+            else:
+                self._queues.pop(target_key, None)

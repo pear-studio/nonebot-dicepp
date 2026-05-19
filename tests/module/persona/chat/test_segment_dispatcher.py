@@ -162,3 +162,47 @@ class TestSendFailure:
         dispatcher.notify("group:1", SegmentItem("ok", 0, "u1", "g1"))
         await asyncio.sleep(0.1)
         assert mock_port.send.await_count == 2
+
+
+class TestWorkerExitRace:
+    """B-260519: worker 退出竞态导致消息丢失的修复验证。"""
+
+    @pytest.mark.asyncio
+    async def test_max_per_run_remaining_segments_not_lost(
+        self, dispatcher, mock_port
+    ):
+        """worker 因 max_per_run=3 退出后，queue 中剩余 2 条应由新 worker 接管。"""
+        for i in range(5):
+            dispatcher.notify("group:1", SegmentItem(str(i), 0, "u1", "g1"))
+        await asyncio.sleep(0.15)
+        calls = mock_port.send.await_args_list
+        contents = [c[0][2] for c in calls]
+        assert contents == ["0", "1", "2", "3", "4"], f"Got: {contents}"
+
+    @pytest.mark.asyncio
+    async def test_teardown_race_segment_not_lost(
+        self, dispatcher, mock_port
+    ):
+        """模拟 notify 在 worker finally 清理期间注入 segment 的竞态时序。"""
+        # 用 dict 子类在 workers.pop 后注入 segment，复现竞态窗口
+        class _TrackingDict(dict):
+            def pop(self, key, *args, **kwargs):
+                result = super().pop(key, *args, **kwargs)
+                dispatcher.notify(
+                    key, SegmentItem("injected", 0, "u1", "g1")
+                )
+                return result
+
+        dispatcher._workers = _TrackingDict(dispatcher._workers)
+
+        dispatcher.notify("group:1", SegmentItem("first", 0, "u1", "g1"))
+        await asyncio.sleep(1.3)  # 等 worker 超时退出
+
+        # 等注入的 segment 被新 worker 处理完
+        await asyncio.sleep(0.15)
+        calls = mock_port.send.await_args_list
+        contents = [c[0][2] for c in calls]
+        assert "injected" in contents, f"Segment lost! Got: {contents}"
+
+        # 清理，避免 event loop 关闭时残留 task 导致 warning
+        await dispatcher.shutdown()
