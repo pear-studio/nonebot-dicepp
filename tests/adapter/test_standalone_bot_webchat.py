@@ -19,6 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PLUGIN_ROOT = PROJECT_ROOT / "src" / "plugins" / "DicePP"
 
@@ -197,7 +199,8 @@ async def test_registration_failure_without_explicit_key_stays_standalone():
 
     with patch("standalone_bot.DiceBot", return_value=bot), \
          patch("standalone_bot.bind_runtime") as mock_bind, \
-         patch("standalone_bot.WebChatAdapter") as mock_adapter_cls:
+         patch("standalone_bot.WebChatAdapter") as mock_adapter_cls, \
+         patch("asyncio.sleep"):  # 跳过 lifespan 注册重试循环的 34s 等待
 
         await _run_lifespan(standalone_bot.create_app("test_bot"))
 

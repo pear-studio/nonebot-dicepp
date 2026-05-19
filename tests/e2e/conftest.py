@@ -5,6 +5,7 @@ Provides E2E-specific fixtures that build on top of the base conftest.
 """
 
 import pytest
+
 import pytest_asyncio
 from typing import List, Tuple, Optional
 
@@ -85,6 +86,20 @@ async def send_as_user(
 
     result = "\n".join([str(cmd) for cmd in cmds])
     return cmds, result
+
+
+def pytest_collection_modifyitems(items):
+    """Apply e2e marker to all tests under tests/e2e/."""
+    from pathlib import Path
+    e2e_dir = Path(__file__).parent.resolve()
+    for item in items:
+        item_path = getattr(item, "fspath", None)
+        if item_path is not None:
+            try:
+                Path(item_path).resolve().relative_to(e2e_dir)
+                item.add_marker(pytest.mark.e2e)
+            except ValueError:
+                pass
 
 
 async def send_private_as_user(

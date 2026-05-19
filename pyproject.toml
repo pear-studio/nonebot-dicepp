@@ -72,7 +72,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 python_files = ["unit_test.py", "test_*.py", "*_test.py"]
-python_classes = ["MyTestCase", "Test*"]
+python_classes = ["Test*"]
 python_functions = ["test*"]
 addopts = "--tb=short -m \"not real_llm\""
 markers = [

@@ -2,7 +2,7 @@
 单元测试: generate_share_message（使用 AgentLoop + CollectProvider）
 """
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from plugins.DicePP.module.persona.life.event_agent import (
     EventGenerationAgent, ShareMessageContext,
@@ -97,7 +97,8 @@ async def test_generate_share_message_empty_message(agent, mock_router, base_con
     mock_router.select_provider.return_value.generate.return_value = _resp(
         tool_calls=[ToolCall(id="tc_1", name="record_share_message", arguments='{"message": ""}')])
 
-    result = await agent.generate_share_message(base_context)
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await agent.generate_share_message(base_context)
     assert result is None
 
 

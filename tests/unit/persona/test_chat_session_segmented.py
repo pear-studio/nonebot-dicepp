@@ -60,7 +60,7 @@ def mock_port():
 
 @pytest.fixture
 def dispatcher(mock_port):
-    return SegmentDispatcher(message_port=mock_port, idle_seconds=300, max_per_run=20)
+    return SegmentDispatcher(message_port=mock_port, idle_seconds=0.1, max_per_run=20)
 
 
 @pytest.fixture

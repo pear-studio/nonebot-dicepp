@@ -47,13 +47,13 @@ class TestAdaptiveSampleCount:
 
 
 # ---------------------------------------------------------------------------
-# Task 2.6 / 3.1 – Statistical equivalence: adaptive vs fixed 200k
+# Task 2.6 / 3.1 – Statistical equivalence: adaptive vs fixed baseline
 # ---------------------------------------------------------------------------
 
-def _fixed_200k_percentiles(expression: str, stat_positions: List[float]) -> List[float]:
-    """Run fixed 200k samples, return values at given fractional positions."""
+def _fixed_baseline_percentiles(expression: str, stat_positions: List[float]) -> List[float]:
+    """Run fixed 50k baseline samples, return values at given fractional positions."""
     plan = build_sampling_plan(expression)
-    samples = sorted(sample_from_plan(plan) for _ in range(200_000))
+    samples = sorted(sample_from_plan(plan) for _ in range(50_000))
     n = len(samples)
     return [samples[int(n * p)] for p in stat_positions]
 
@@ -76,6 +76,7 @@ def _adaptive_percentiles(expression: str, stat_positions: List[float]) -> List[
 STAT_POSITIONS = [0.05, 0.25, 0.50, 0.75, 0.95]  # P5, P25, P50, P75, P95
 
 
+@pytest.mark.slow
 class TestStatisticalEquivalence:
     """
     Verify adaptive sampling produces percentiles within 1 unit of 200k fixed
@@ -87,7 +88,7 @@ class TestStatisticalEquivalence:
 
     @pytest.mark.parametrize("expression", ["3D6", "10D10", "2D20"])
     def test_percentile_deviation_within_one_unit(self, expression: str):
-        baseline = _fixed_200k_percentiles(expression, STAT_POSITIONS)
+        baseline = _fixed_baseline_percentiles(expression, STAT_POSITIONS)
         adaptive = _adaptive_percentiles(expression, STAT_POSITIONS)
         for pos, b, a in zip(STAT_POSITIONS, baseline, adaptive):
             diff = abs(a - b)

@@ -24,6 +24,8 @@ from tests.conftest import async_make_test_bot, async_teardown_test_bot
 from tests.helpers.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 from tests.helpers.assert_helpers import assert_contains_number
 
+pytestmark = pytest.mark.slow
+
 
 class _RollCmdBotBase(IsolatedAsyncioTestCase):
     """Base test class for roll command tests."""
