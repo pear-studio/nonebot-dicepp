@@ -29,9 +29,9 @@ async def temp_db():
 
 
 def test_classify_error():
-    assert AgentLoop._ce(asyncio.TimeoutError()) == "timeout"
-    assert AgentLoop._ce(Exception("rate limit hit")) == "rate_limit"
-    assert AgentLoop._ce(Exception("rate_limit_error occurred")) == "rate_limit"
+    assert AgentLoop._ce(asyncio.TimeoutError()) == "network_error"
+    assert AgentLoop._ce(Exception("rate limit hit")) == "rate_limited"
+    assert AgentLoop._ce(Exception("rate_limit_error occurred")) == "rate_limited"
     assert AgentLoop._ce(Exception("something else")) == "unknown"
 
 

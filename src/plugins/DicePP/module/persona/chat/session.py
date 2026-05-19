@@ -31,6 +31,7 @@ from ..data.models import (
     MessageType,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
+from ..llm.errors import ErrorKind, classify, user_message
 from ..llm.selection import SelectionPolicy
 from ..character.models import Character
 from ..chat.scoring import ScoringAgent
@@ -248,7 +249,8 @@ class ChatSession:
             raise
         except Exception as exc:
             logger.exception("对话处理失败")
-            return "抱歉，我出错了，请稍后再试..."
+            kind = classify(exc)
+            return user_message(kind)
 
     async def clear_history(self, user_id: str, group_id: str) -> None:
         """清空对话历史"""
@@ -283,13 +285,11 @@ class ChatSession:
         last_exception: Optional[Exception] = None,
     ) -> str:
         """coordinator 耗尽时的兜底回复。"""
-        if isinstance(last_exception, QuotaExceeded):
-            fallback_response = (
-                f"{last_exception}\n\n"
-                "使用 `.ai key config` 配置自己的 API Key 可解除限制"
-            )
+        if last_exception is not None:
+            kind = classify(last_exception)
+            fallback_response = user_message(kind, str(last_exception))
         else:
-            fallback_response = "LLM服务暂时不可用，请稍后再试"
+            fallback_response = user_message(ErrorKind.UNKNOWN)
         msg_id = await self._persist_assistant_message(user_id, group_id, fallback_response)
         await self._update_interaction(user_id, group_id, current_message, fallback_response)
         if self.port:

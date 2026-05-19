@@ -41,21 +41,6 @@
     - 影响面: chat/session.py（主要拆分），factory.py 组装逻辑适配
     - 风险: 中——ChatSession 是核心热路径，拆分需仔细保证行为不变
 
-### [B-260519-da1d8e] 引入 Hook Pipeline 替代硬编码 Agent Loop
-- 创建: 2026-05-19
-- 问题表现:
-    - 当前 AgentLoop while-loop 硬编码，扩展（如新增权限检查、上下文压缩）需修改核心循环
-    - Hook 协议仅 3 个钩子（pre_llm/post_llm/post_tool），缺少 agent 生命周期事件
-    - looplet composable_loop() 用 generator + hook pipeline 可在不修改核心循环的情况下新增能力
-    - 参考: ref-researcher 报告 RF1
-- 工作计划:
-    - 方案: 引入 HookPipeline，含 pre_dispatch/post_dispatch/check_done/should_stop 等标准钩子点
-    - 每个 hook 返回 HookDecision（None 放行 / Inject 注入 / Block 阻断 / Stop 终止）
-    - 兼容现有 hook 协议，渐进迁移
-    - 验证: 现有 hook（QuotaHook/BillingHook/TraceHook/SegmentCorrectionHook）在 pipeline 下行为一致
-    - 影响面: llm/loop.py（AgentLoop）、llm/hook_protocol.py（扩展）、llm/hooks.py（适配）
-    - 风险: 中——核心循环变更，需全量 AgentLoop 测试覆盖
-
 ### [B-260519-fcac7d] 统一工具执行模型（EventGenerationAgent 走 ToolRegistry）
 - 创建: 2026-05-19
 - 问题表现:
@@ -74,24 +59,6 @@
 - 创建: 2026-05-15
 - 问题表现: 用户可通过 .ai key config 命令提供自己的 LLM API key，覆盖全局配置。涉及计费体系、配额管理、滥用防护等一整套体系，当前设计对安全边界覆盖不足。该功能与 provider 路由重构的候选池调度、熔断器、探针等核心机制耦合过深，增加了不必要的复杂度。当前从本分支 scope 中移出，需求保留待后续独立实施。
 - 工作计划: 独立设计用户 Key 管理子系统：安全存储（加密）、配额追踪、滥用检测。实现 UserLLMConfig 数据模型（含 API key 加密存储）。实现 .ai key config 命令交互流程。Router 层集成用户 Key 覆盖逻辑（优先级高于全局配置）。影响面: module/persona/data/models.py、module/persona/command.py、module/persona/llm/router.py。
-
-### [B-260519-164b83] LLM 错误分类体系重构：ErrorKind 枚举 + 分类唯一入口 + 分级恢复策略
-- 创建: 2026-05-19
-- 问题表现:
-  - classify_error 逻辑在 router.py:237、router.py:335、loop.py:286 三处重复
-  - 分类粒度只有 RETRYABLE/NON_RETRYABLE 两极，所有可重试错误一刀切切换候选模型
-  - 用户侧错误反馈千篇一律（"抱歉我出错了"），不区分配额用尽/内容过滤/网络超时
-  - Life 路径异常全部 logger.exception 后静默吞掉，调度器不感知连续失败
-  - NON_RETRYABLE_EXCEPTIONS 在 coordinator.py:21 硬编码元组，新增错误类型需改多处
-- 工作计划:
-  - 新建 llm/errors.py，定义 ErrorKind 枚举（QUOTA_EXCEEDED/CONTENT_FILTERED/CONTEXT_TOO_LONG/RATE_LIMITED/TEMPORARILY_DOWN/NETWORK_ERROR/PROVIDER_ERROR）
-  - 每种 ErrorKind 绑定 recovery action：QUOTA_EXCEEDED→跳过用户告知引导/CONTEXT_TOO_LONG→compact重试/RATE_LIMITED→退避等待/TEMPORARILY_DOWN→切候选/NETWORK_ERROR→退避连败标记/PROVIDER_ERROR→标记dead告警
-  - classify() 唯一入口函数，router/loop/coordinator 统一调用
-  - router.run_via_loop 中按 ErrorKind 分支执行对应 recovery，替换当前统一的候选切换
-  - Life 路径通过 classify() 感知错误类型，连续 TEMPORARILY_DOWN 超阈值可暂停调度器
-  - 用户可见错误信息按 ErrorKind 差异化（如 QUOTA_EXCEEDED 引导配置 key）
-  - 影响面: llm/errors.py（新建）、llm/router.py、llm/loop.py、llm/coordinator.py、chat/session.py（兜底文案）、life/simulator.py（错误感知）
-  - 风险: 中——重试策略变更需要全量 LLM 调用路径回归
 
 ### [B-260519-1601ee] 消解 EventShareTaskQueue，延迟分享逻辑合并到 ProactiveScheduler
 - 创建: 2026-05-19

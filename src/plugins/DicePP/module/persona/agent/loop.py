@@ -12,6 +12,7 @@ from nonebot.log import logger
 from ..llm.hook_protocol import LoopContext, ToolResult
 from ..llm.providers.protocol import LLMProvider
 from ..llm.providers.protocol import NonRetryableError
+from ..llm.errors import classify
 
 _THINK_RE = r'<think>.*?</think>'
 _L1_MSG = {"role": "user", "content": "[系统指令] 你必须调用工具来完成任务。不要直接输出文本——只能通过调用工具来输出结果。"}
@@ -284,16 +285,7 @@ class AgentLoop:
 
     @staticmethod
     def _ce(e: Exception) -> str:
-        if isinstance(e, asyncio.TimeoutError):
-            return "timeout"
-        msg = str(e).lower()
-        if any(k in msg for k in ("rate limit", "rate_limit_error", "429")):
-            return "rate_limit"
-        if any(k in msg for k in ("timeout", "timed out")):
-            return "timeout"
-        if any(k in msg for k in ("connection", "refused", "reset")):
-            return "connection"
-        return "unknown"
+        return classify(e).value
 
     @staticmethod
     def _md(tin=0, tout=0, trn=0, tnames=None, cached=0, records=None, model="",

@@ -14,11 +14,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Callable, Any, Awaitable, TypeVar, Generic, List, Literal
 import asyncio
 from nonebot.log import logger
-from .router import QuotaExceeded
-from .providers.protocol import NonRetryableError
-
-
-NON_RETRYABLE_EXCEPTIONS = (QuotaExceeded, NonRetryableError)
+from .errors import classify
 
 T = TypeVar("T")
 
@@ -178,7 +174,7 @@ class LLMCallCoordinator:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                if isinstance(e, NON_RETRYABLE_EXCEPTIONS):
+                if not classify(e).is_retryable:
                     failures = self.max_failures
                 else:
                     failures += 1

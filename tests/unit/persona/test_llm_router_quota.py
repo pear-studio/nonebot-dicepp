@@ -162,14 +162,14 @@ class TestIncrementUsage:
 
 class TestErrorClassification:
     def test_classify_timeout(self):
-        assert AgentLoop._ce(asyncio.TimeoutError()) == "timeout"
+        assert AgentLoop._ce(asyncio.TimeoutError()) == "network_error"
 
     def test_classify_rate_limit(self):
-        assert AgentLoop._ce(Exception("rate limit hit")) == "rate_limit"
-        assert AgentLoop._ce(Exception("429 too many requests")) == "rate_limit"
+        assert AgentLoop._ce(Exception("rate limit hit")) == "rate_limited"
+        assert AgentLoop._ce(Exception("429 too many requests")) == "rate_limited"
 
     def test_classify_connection(self):
-        assert AgentLoop._ce(Exception("connection refused")) == "connection"
+        assert AgentLoop._ce(Exception("connection refused")) == "network_error"
 
     def test_classify_unknown(self):
         assert AgentLoop._ce(Exception("something else")) == "unknown"

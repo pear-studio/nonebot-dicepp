@@ -15,6 +15,7 @@ from nonebot.log import logger
 
 from .providers import _PROVIDER_CLASSES
 from .providers.protocol import LLMProvider, ImageGenProvider, ErrorClass
+from .errors import ErrorKind, classify_from_provider
 from .circuit_breaker import CircuitBreakerRegistry
 from .selection import SelectionPolicy
 from ..agent.loop import AgentLoop, LoopResult
@@ -210,12 +211,11 @@ class LLMRouter:
         cb = self.circuit_breakers.get(key[0], key[1])
         if not cb:
             return
-        classify_method = getattr(type(provider), 'classify_error', None)
-        error_class = classify_method(error) if classify_method else ErrorClass.RETRYABLE
-        if error_class == ErrorClass.NON_RETRYABLE:
-            cb.mark_dead(f"不可重试错误: {error}")
-        else:
+        kind = classify_from_provider(error, provider)
+        if kind.is_retryable:
             cb.record_failure()
+        else:
+            cb.mark_dead(f"{kind.value}: {error}")
 
     def reset_provider_probe(self, provider_name: str, model_name: str) -> bool:
         """将 exhausted 模型重置为 disabled，恢复探针循环。返回是否成功。"""
@@ -307,21 +307,20 @@ class LLMRouter:
                 except Exception as e:
                     self.stats[provider_name]["errors"] += 1
                     cb = self.circuit_breakers.get(provider_name, model_name)
+                    kind = classify_from_provider(e, provider)
                     if cb:
-                        classify_method = getattr(type(provider), 'classify_error', None)
-                        error_class = classify_method(e) if classify_method else ErrorClass.RETRYABLE
-                        if error_class == ErrorClass.NON_RETRYABLE:
-                            cb.mark_dead(f"不可重试错误: {e}")
-                        else:
+                        if kind.is_retryable:
                             cb.record_failure()
-                    if idx < len(candidates) - 1:
+                        else:
+                            cb.mark_dead(f"{kind.value}: {e}")
+                    if kind.recovery == "switch" and idx < len(candidates) - 1:
                         logger.warning(
-                            f"模型 {provider_name}/{model_name} 失败: {e}，"
+                            f"模型 {provider_name}/{model_name} 失败 [{kind.value}]: {e}，"
                             f"回退到下一个候选（{idx + 2}/{candidate_count}）"
                         )
                         continue
                     raise ServiceUnavailableError(
-                        f"所有候选模型均失败。最后错误: {e}"
+                        f"模型 {provider_name}/{model_name} 失败 [{kind.value}]: {e}"
                     ) from e
 
                 # success

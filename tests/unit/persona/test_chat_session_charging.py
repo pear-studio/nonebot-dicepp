@@ -159,5 +159,5 @@ async def test_all_failures_does_not_charge():
 
     # 兜底文案
     assert result is not None
-    assert "暂时不可用" in result
+    assert "出错了" in result
     assert session.router.increment_usage.await_count == 0
