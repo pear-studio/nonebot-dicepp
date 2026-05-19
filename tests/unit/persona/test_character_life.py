@@ -325,8 +325,6 @@ class TestCharacterLifeDiary:
         store.get_diary = AsyncMock(return_value="昨天去了公园")
         store.save_diary = AsyncMock()
         store.clear_daily_events = AsyncMock()
-        store.prune_daily_events = AsyncMock(return_value=0)
-        store.prune_diaries = AsyncMock(return_value=0)
         return store
 
     @pytest.fixture
@@ -357,8 +355,6 @@ class TestCharacterLifeDiary:
         assert result == "今天过得很充实"
         mock_event_agent.generate_diary.assert_called_once()
         mock_data_store.save_diary.assert_called_once()
-        mock_data_store.prune_daily_events.assert_called_once_with(30)
-        mock_data_store.prune_diaries.assert_called_once_with(30)
 
     @pytest.mark.asyncio
     async def test_generate_diary_includes_yesterday_context(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):

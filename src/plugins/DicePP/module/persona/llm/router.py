@@ -58,8 +58,6 @@ class LLMRouter:
 
         self.circuit_breakers = CircuitBreakerRegistry()
 
-        # provider_name → provider instance
-        self._providers: Dict[str, object] = {}
         # (provider_name, model_name) → provider instance
         self._model_providers: Dict[tuple, object] = {}
         # (provider_name, model_name) → ModelConfig
@@ -85,7 +83,7 @@ class LLMRouter:
         logger.info(
             f"LLMRouter 初始化完成: {len(self._llm_models)} LLM 模型, "
             f"{len(self._gen_models)} gen 模型, "
-            f"{len(self._providers)} providers"
+            f"{len(providers)} providers"
         )
 
     def _build_providers(self, providers: Dict[str, ProviderConfig]) -> None:

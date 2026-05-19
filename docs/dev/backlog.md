@@ -9,22 +9,6 @@
 
 ---
 
-## persona
-
-### [B-260515-15f67d] persona 存储结构优化：索引补全、数据清理策略、JSON 字段规范化
-- 创建: 2026-05-15
-- 问题表现:
-    - 18 张表，分阶段开发遗留旧表（persona_messages / persona_group_conversations / persona_observations），migration 末尾已定义 DROP 但存量数据库可能残留
-    - persona_score_history 按 user_id 查询无索引，persona_daily_events 按 date 查询无索引
-    - persona_user_profiles.facts 和 persona_delayed_tasks.payload 以 JSON 字符串存储，无法做 SQL 内字段查询
-    - persona_llm_traces（全量 messages+response）和 persona_unified_messages 无界增长，无 TTL/归档策略
-- 工作计划:
-    - 补全缺失索引：persona_score_history(user_id, created_at DESC)、persona_daily_events(date)
-    - 评估 llm_traces 和 unified_messages 的合理保留周期，增加定期清理逻辑（保留近 N 天或近 N 条）
-    - 评估 facts 字段是否需要拆分为独立属性表，或至少用 json_extract 兼容查询
-    - 确认存量数据库的旧表 DROP 是否已生效
-    - 影响面：data/migrations.py、data/store.py、可能需要新增 cleanup job
-
 ## tests
 
 ### [B-260515-4e9762] 测试用例速度优化：消除真实等待、减少冗余、统一风格

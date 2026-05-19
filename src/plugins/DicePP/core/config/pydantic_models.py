@@ -78,12 +78,9 @@ class PersonaConfig(BaseModel):
     # - max_messages: 数据库中保留的消息条数上限（user + assistant 各算一条）
     # - max_history_turns: 注入上下文的对话轮次上限（user/assistant 消息对）
     # - max_history_tokens: 注入上下文的历史 token 估算上限（基于字符统计，兜底截断）
-    max_short_term_chars: int = 1500  # 已废弃：运行时不再使用，保留字段避免配置解析报错。迁移至 max_history_turns + max_history_tokens
     max_messages: int = 15
     max_history_turns: int = 10
     max_history_tokens: int = 4000
-
-    # ── 群聊共享历史限制（token-based 动态窗口）
     # 群聊使用 token 估算（与 LLM 上下文窗口对齐），私聊使用轮次 + token 估算双重兜底（max_history_turns + max_history_tokens）。
     # 两者计量单位不同，token 估算基于字符统计，为性能考虑不引入真实 tokenizer。
     group_max_messages: int = 40  # 群聊数据库保留条数上限
@@ -146,29 +143,6 @@ class PersonaConfig(BaseModel):
         description="全局默认画风描述，注入到 generate_image prompt 前缀。角色卡配置 image_gen_style 时优先使用角色卡的。",
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_legacy_format(cls, data):
-        if not isinstance(data, dict):
-            return data
-        data = dict(data)  # 浅拷贝，避免修改调用方持有的原始 dict
-        legacy_fields = ["primary_api_key", "primary_base_url", "primary_model",
-                         "auxiliary_api_key", "auxiliary_base_url", "auxiliary_model"]
-        found = [f for f in legacy_fields if f in data]
-        # 如果同时有 providers，说明已在迁移中，允许旧字段存在（global.json 中可能残留）
-        if found and "providers" not in data:
-            raise ValueError(
-                f"检测到旧版配置字段: {found}。"
-                f"Persona AI 配置格式已升级，请使用新的 providers 结构。"
-                f"参考路径: persona_ai.providers.<name>.api_key / .base_url / .models[*].name 等。"
-                f"详细文档请参阅 CHANGELOG。"
-            )
-        elif found and "providers" in data:
-            # 迁移过渡期：从 data 中清除旧字段，避免 pydantic 报未知字段
-            for f in found:
-                data.pop(f, None)
-        return data
-
     @model_validator(mode="after")
     def _validate_segment_limits(self) -> "PersonaConfig":
         if self.segment_soft_limit > self.segment_hard_limit:
@@ -177,66 +151,6 @@ class PersonaConfig(BaseModel):
                 f"必须 <= segment_hard_limit ({self.segment_hard_limit})"
             )
         return self
-
-    @model_validator(mode="before")
-    @classmethod
-    def _warn_deprecated_timeout_fields(cls, data):
-        if not isinstance(data, dict):
-            return data
-
-        # 一对一迁移: timeout -> chat_llm_timeout_seconds
-        if "timeout" in data:
-            if "chat_llm_timeout_seconds" not in data:
-                data["chat_llm_timeout_seconds"] = data.pop("timeout")
-                logger.warning(
-                    "配置项 'timeout' 已被重命名为 'chat_llm_timeout_seconds'，"
-                    "旧值已自动迁移，请更新配置文件。"
-                )
-            else:
-                data.pop("timeout", None)
-                logger.warning(
-                    "配置项 'timeout' 已被重命名为 'chat_llm_timeout_seconds'，"
-                    "当前 'timeout' 的值将被忽略（新字段已存在）。"
-                )
-
-        # 多对一迁移: event_generation_timeout / proactive_share_timeout_seconds -> background_llm_timeout_seconds
-        bg_old_fields = ["event_generation_timeout", "proactive_share_timeout_seconds"]
-        has_old_bg = any(f in data for f in bg_old_fields)
-        if has_old_bg:
-            if "background_llm_timeout_seconds" not in data:
-                values = [data.pop(f) for f in bg_old_fields if f in data]
-                data["background_llm_timeout_seconds"] = max(values)
-                logger.warning(
-                    "配置项 'event_generation_timeout' / 'proactive_share_timeout_seconds' "
-                    "已被重命名为 'background_llm_timeout_seconds'，旧值已自动迁移（取较大值），"
-                    "请更新配置文件。"
-                )
-            else:
-                for f in bg_old_fields:
-                    data.pop(f, None)
-                logger.warning(
-                    "配置项 'event_generation_timeout' / 'proactive_share_timeout_seconds' "
-                    "已被重命名为 'background_llm_timeout_seconds'，当前旧字段的值将被忽略"
-                    "（新字段已存在）。"
-                )
-
-        # 跨语义迁移: max_short_term_chars → max_history_turns + max_history_tokens
-        # 字符数到轮次无精确公式，启发式估算：假设每轮约 300 字符。
-        if "max_short_term_chars" in data:
-            old_val = data["max_short_term_chars"]
-            if old_val != 1500:
-                if "max_history_turns" not in data:
-                    data["max_history_turns"] = max(5, old_val // 300)
-                if "max_history_tokens" not in data:
-                    data["max_history_tokens"] = old_val
-                logger.warning(
-                    "配置项 'max_short_term_chars' 已废弃，已自动迁移至 "
-                    f"'max_history_turns'={data.get('max_history_turns')} + "
-                    f"'max_history_tokens'={data.get('max_history_tokens')}。"
-                    "转换值为估算（假设每轮约 300 字符），建议手动核实。"
-                )
-
-        return data
 
     # ── Phase 4+: 群活跃度（影响主动消息频率，暂未启用）
     # group_activity_decay_days: List[int] = [1, 3, 7]
@@ -344,6 +258,14 @@ class PersonaConfig(BaseModel):
     # ── Phase 7a: LLM Trace & Observability
     trace_enabled: bool = False
     trace_max_age_days: int = 7
+
+    # ── 数据清理 TTL
+    score_history_max_age_days: int = 90
+    delayed_tasks_max_age_days: int = 30
+    scoring_failures_max_age_days: int = 30
+    daily_events_keep_days: int = 30
+    diary_keep_days: int = 30
+
     observation_store_raw_digest: bool = False
 
     # ── Phase 2: 厌倦拒绝机制配置

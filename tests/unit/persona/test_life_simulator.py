@@ -198,13 +198,11 @@ async def test_tick_daily_swallows_exceptions():
 
 
 @pytest.mark.asyncio
-async def test_tick_daily_calls_prune_traces_when_enabled():
-    """trace_enabled=True 时清理过期 trace"""
+async def test_tick_daily_calls_run_cleanup():
+    """tick_daily 调用 store.run_cleanup"""
     sim = _make_simulator()
-    sim.config.trace_enabled = True
-    sim.config.trace_max_age_days = 7
     await sim.tick_daily()
-    sim.store.prune_llm_traces.assert_called_once_with(7)
+    sim.store.run_cleanup.assert_called_once()
 
 
 @pytest.mark.asyncio

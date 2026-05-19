@@ -220,12 +220,6 @@ def test_invalid_type_raises_config_validation_error(dd):
         dd.loader().load()
 
 
-def test_invalid_nested_type_raises_error(dd):
-    _write(dd.global_cfg, {"persona_ai": {"timeout": "oops"}})
-    with pytest.raises(ConfigValidationError):
-        dd.loader().load()
-
-
 def test_valid_bool_string_accepted(dd):
     """Pydantic coerces string booleans when using lenient validators."""
     _write(dd.global_cfg, {"persona_ai": {"enabled": True}})

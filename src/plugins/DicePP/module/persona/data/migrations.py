@@ -3,10 +3,8 @@
 
 创建 Persona 模块所需的表。
 
-.. note::
-    新列/新表：除本文件 ``ALL_MIGRATIONS`` 中的 ``CREATE`` 外，若需兼容**已存在**的 SQLite 文件，
-    往往还要在 ``PersonaDataStore._apply_runtime_schema_patches`` 里做条件 ``ALTER``。
-    两处须同步维护（store 模块顶部另有交叉引用注释）。
+所有列定义直接包含在 CREATE TABLE 语句中，不再需要运行时 ALTER 补丁。
+新增索引通过 ``_ensure_indexes`` 幂等补全。
 """
 
 # 白名单表
@@ -40,6 +38,7 @@ CREATE TABLE IF NOT EXISTS persona_score_history (
     composite_before REAL,
     composite_after REAL,
     reason TEXT DEFAULT '',
+    conversation_digest TEXT DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -78,6 +77,7 @@ CREATE TABLE IF NOT EXISTS persona_daily_events (
     energy_delta INTEGER,
     mood_delta INTEGER,
     health_delta INTEGER,
+    context_summary TEXT DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -253,6 +253,16 @@ CREATE_LLM_TRACES_INDEX_CREATED_AT = """
 CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_created_at ON persona_llm_traces(created_at);
 """
 
+CREATE_SCORE_HISTORY_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_score_history_user_time
+ON persona_score_history(user_id, created_at DESC);
+"""
+
+CREATE_DAILY_EVENTS_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_daily_events_date
+ON persona_daily_events(date);
+"""
+
 ALL_MIGRATIONS = [
     CREATE_UNIFIED_MESSAGES_TABLE,
     CREATE_UNIFIED_MESSAGES_USER_INDEX,
@@ -278,8 +288,6 @@ ALL_MIGRATIONS = [
     CREATE_SCORING_FAILURES_TABLE,
     CREATE_SCORING_FAILURES_INDEX,
     CREATE_SCORING_FAILURES_INDEX_CREATED_AT,
-    # 清理旧表（新表已创建后执行，倒序避免外键约束报错）
-    "DROP TABLE IF EXISTS persona_observations",
-    "DROP TABLE IF EXISTS persona_group_conversations",
-    "DROP TABLE IF EXISTS persona_messages",
+    CREATE_SCORE_HISTORY_INDEX,
+    CREATE_DAILY_EVENTS_INDEX,
 ]

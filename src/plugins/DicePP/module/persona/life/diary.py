@@ -98,10 +98,6 @@ class DiaryGenerator:
 
             await self.store.save_diary(diary_date, diary_content)
 
-            # 清理旧数据
-            await self._prune_old_daily_events(30)
-            await self._prune_old_diaries(30)
-
             logger.info(f"生成日记: {len(diary_content)} 字")
             return diary_content
 
@@ -109,18 +105,3 @@ class DiaryGenerator:
             logger.exception(f"生成日记失败: {e}")
             return None
 
-    async def _prune_old_daily_events(self, keep_days: int) -> None:
-        try:
-            deleted = await self.store.prune_daily_events(keep_days)
-            if deleted > 0:
-                logger.info(f"清理了 {deleted} 条旧每日事件")
-        except Exception as e:
-            logger.warning(f"清理旧每日事件失败: {e}")
-
-    async def _prune_old_diaries(self, keep_days: int) -> None:
-        try:
-            deleted = await self.store.prune_diaries(keep_days)
-            if deleted > 0:
-                logger.info(f"清理了 {deleted} 条旧日记")
-        except Exception as e:
-            logger.warning(f"清理旧日记失败: {e}")

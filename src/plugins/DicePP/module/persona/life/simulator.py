@@ -31,8 +31,14 @@ class LifeConfig:
     proactive_event_share_threshold: float = 0.4
     proactive_event_share_delay_min: int = 1
     proactive_event_share_delay_max: int = 5
+    # 仅控制 LLMRouter 是否写入新 trace；不影响 run_cleanup 的清理行为
     trace_enabled: bool = False
     trace_max_age_days: int = 7
+    score_history_max_age_days: int = 90
+    delayed_tasks_max_age_days: int = 30
+    scoring_failures_max_age_days: int = 30
+    daily_events_keep_days: int = 30
+    diary_keep_days: int = 30
     timezone: str = "Asia/Shanghai"
 
     @classmethod
@@ -43,6 +49,11 @@ class LifeConfig:
             proactive_event_share_delay_max=persona.proactive_event_share_delay_max,
             trace_enabled=persona.trace_enabled,
             trace_max_age_days=persona.trace_max_age_days,
+            score_history_max_age_days=persona.score_history_max_age_days,
+            delayed_tasks_max_age_days=persona.delayed_tasks_max_age_days,
+            scoring_failures_max_age_days=persona.scoring_failures_max_age_days,
+            daily_events_keep_days=persona.daily_events_keep_days,
+            diary_keep_days=persona.diary_keep_days,
             timezone=persona.timezone,
         )
 
@@ -151,7 +162,7 @@ class LifeSimulator:
     async def tick_daily(self) -> Optional[str]:
         """每日调用 — 清理 trace、关系衰减、生成日记"""
         try:
-            await self._prune_traces()
+            await self._run_cleanup()
             await self.apply_relationship_decay_batch()
             diary = await self.diary_generator.generate_diary()
             if diary:
@@ -207,16 +218,19 @@ class LifeSimulator:
             logger.exception("手动生成事件失败")
             return []
 
-    async def _prune_traces(self) -> None:
-        """清理过期 LLM trace"""
-        if not self.config.trace_enabled:
-            return
+    async def _run_cleanup(self) -> None:
+        """统一数据清理（每日触发一次）。"""
         try:
-            deleted = await self.store.prune_llm_traces(self.config.trace_max_age_days)
-            if deleted:
-                logger.info(f"清理了 {deleted} 条过期 LLM trace")
+            await self.store.run_cleanup(
+                llm_traces_max_age_days=self.config.trace_max_age_days,
+                score_history_max_age_days=self.config.score_history_max_age_days,
+                delayed_tasks_max_age_days=self.config.delayed_tasks_max_age_days,
+                scoring_failures_max_age_days=self.config.scoring_failures_max_age_days,
+                daily_events_keep_days=self.config.daily_events_keep_days,
+                diary_keep_days=self.config.diary_keep_days,
+            )
         except Exception as e:
-            logger.warning(f"清理 LLM trace 失败: {e}", exc_info=True)
+            logger.warning(f"数据清理失败: {e}", exc_info=True)
 
     async def _send_msg(self, msg: Dict[str, Any]) -> None:
         """通过 EventSharePort 发送单条消息"""

@@ -601,18 +601,6 @@ class TestContextBuilderSegmentGuide:
 
 class TestConfigMigration:
 
-    def test_old_field_defaults_ok(self):
-        """仅含 max_short_term_chars 无新字段时，模型加载不报错且新字段取默认值"""
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-        from plugins.DicePP.module.persona.chat.session import ChatConfig
-        pc = PersonaConfig(max_short_term_chars=1500)
-        assert pc.max_history_turns == 10
-        assert pc.max_history_tokens == 4000
-        cc = ChatConfig.from_persona(pc)
-        assert cc.max_history_turns == 10
-        assert cc.max_history_tokens == 4000
-        assert cc.max_diary_context_chars == 500
-
     def test_new_fields_assembled_correctly(self):
         """ChatConfig.from_persona() 装配新字段正确"""
         from plugins.DicePP.core.config.pydantic_models import PersonaConfig
@@ -627,37 +615,6 @@ class TestConfigMigration:
         assert cc.max_history_tokens == 3000
         assert cc.max_diary_context_chars == 600
 
-    def test_old_field_migrated_when_new_fields_absent(self):
-        """R3: 仅设旧字段时自动迁移到新字段"""
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-        pc = PersonaConfig(max_short_term_chars=3000)
-        assert pc.max_history_turns == max(5, 3000 // 300)
-        assert pc.max_history_tokens == 3000
-
-    def test_old_field_ignored_when_new_fields_present(self):
-        """R3: 新旧字段同时设置时，新字段优先"""
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-        pc = PersonaConfig(
-            max_short_term_chars=500,
-            max_history_turns=15,
-            max_history_tokens=8000,
-        )
-        assert pc.max_history_turns == 15
-        assert pc.max_history_tokens == 8000
-
-    def test_both_fields_set_new_wins(self):
-        """新旧字段都设置时，新字段生效"""
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-        from plugins.DicePP.module.persona.chat.session import ChatConfig
-        pc = PersonaConfig(
-            max_short_term_chars=200,
-            max_history_turns=12,
-            max_history_tokens=5000,
-        )
-        cc = ChatConfig.from_persona(pc)
-        assert cc.max_history_turns == 12
-        assert cc.max_history_tokens == 5000
-
 
 # ═══════════════════════════════════════════════════════════════════
 # 6.7 Diary 截断独立配置
@@ -666,16 +623,14 @@ class TestConfigMigration:
 class TestDiaryContextConfig:
 
     def test_diary_uses_max_diary_context_chars(self):
-        """_build_diary_context 使用 max_diary_context_chars 而非 max_short_term_chars"""
+        """_build_diary_context 使用 max_diary_context_chars"""
         from plugins.DicePP.core.config.pydantic_models import PersonaConfig
         from plugins.DicePP.module.persona.chat.session import ChatConfig
         pc = PersonaConfig(
-            max_short_term_chars=999,
             max_diary_context_chars=300,
         )
         cc = ChatConfig.from_persona(pc)
         assert cc.max_diary_context_chars == 300
-        assert cc.max_diary_context_chars != 999
 
 
 if __name__ == "__main__":

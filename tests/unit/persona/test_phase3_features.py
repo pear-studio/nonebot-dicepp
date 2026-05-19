@@ -192,11 +192,6 @@ class TestWarmthLevelRefuse:
 class TestConfigValues:
     """测试配置值更新"""
 
-    def test_max_short_term_chars(self):
-        """max_short_term_chars 应该为 1500"""
-        config = PersonaConfig()
-        assert config.max_short_term_chars == 1500
-
     def test_max_messages(self):
         """max_messages 应该为 15"""
         config = PersonaConfig()

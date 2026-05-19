@@ -64,354 +64,10 @@ class PersonaDataStore:
         return not (group_id and group_id.strip())
 
     async def ensure_tables(self) -> None:
-        """确保所有表已创建，并应用增量 schema 补丁（与 `migrations.py` 中 CREATE 互补；运行时 ALTER 见 `_apply_runtime_schema_patches`）。"""
+        """确保所有表已创建（纯幂等 CREATE IF NOT EXISTS，不做增量补丁）。"""
         for migration in ALL_MIGRATIONS:
             await self.db.execute(migration)
-        await self._apply_runtime_schema_patches()
         await self.db.commit()
-
-    async def _apply_runtime_schema_patches(self) -> None:
-        """对已有库做条件 ALTER；与 `migrations.py` 的 ``ALL_MIGRATIONS`` 互补，改 schema 时请两处同改。"""
-        await self._ensure_group_activity_daily_columns()
-        await self._ensure_relationship_decay_watermark_column()
-        await self._ensure_relationship_miss_and_peak_columns()
-        await self._ensure_score_history_conversation_digest()
-        await self._ensure_daily_events_share_columns()
-        await self._ensure_daily_events_delta_columns()
-        await self._ensure_daily_events_context_summary()
-        await self._ensure_scoring_failures_table()
-        await self._ensure_llm_traces_round_messages()
-        await self._ensure_llm_traces_routing_fields()
-        await self._ensure_relationship_unified()
-
-    async def _ensure_group_activity_daily_columns(self) -> None:
-        """
-        为群活跃度表增加「当日累计加分」列（用于 max_daily_add）。
-        注意：若表已存在且不含这些列（从旧版本升级），则 ALTER 添加。
-        """
-        async with self.db.execute("PRAGMA table_info(persona_group_activity)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "daily_add_date" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_group_activity ADD COLUMN daily_add_date TEXT"
-            )
-        if "daily_add_total" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_group_activity ADD COLUMN daily_add_total REAL DEFAULT 0"
-            )
-
-    async def _ensure_relationship_decay_watermark_column(self) -> None:
-        """好感度表：时间衰减水位（批处理与对话去重）。"""
-        async with self.db.execute("PRAGMA table_info(persona_user_relationships)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "last_relationship_decay_applied_at" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_user_relationships "
-                "ADD COLUMN last_relationship_decay_applied_at TIMESTAMP"
-            )
-
-    async def _ensure_relationship_miss_and_peak_columns(self) -> None:
-        """好感度表：想念开关时间与历史最高阶段。"""
-        async with self.db.execute("PRAGMA table_info(persona_user_relationships)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "last_miss_sent_at" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_user_relationships "
-                "ADD COLUMN last_miss_sent_at TIMESTAMP"
-            )
-        if "peak_stage" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_user_relationships "
-                "ADD COLUMN peak_stage INTEGER DEFAULT 0"
-            )
-            # Backfill：按当前 composite_score 回填旧数据的 peak_stage
-            # 公式与 RelationshipState.composite_score 同步
-            # （权重：intimacy 0.3, passion 0.2, trust 0.3, secureness 0.2）
-            await self.db.execute(
-                """
-                UPDATE persona_user_relationships
-                SET peak_stage = CASE
-                    WHEN (intimacy*0.3+passion*0.2+trust*0.3+secureness*0.2) >= 80 THEN 4
-                    WHEN (intimacy*0.3+passion*0.2+trust*0.3+secureness*0.2) >= 60 THEN 3
-                    WHEN (intimacy*0.3+passion*0.2+trust*0.3+secureness*0.2) >= 40 THEN 2
-                    WHEN (intimacy*0.3+passion*0.2+trust*0.3+secureness*0.2) >= 20 THEN 1
-                    ELSE 0
-                END
-                WHERE peak_stage = 0
-                """
-            )
-
-    async def _ensure_score_history_conversation_digest(self) -> None:
-        async with self.db.execute("PRAGMA table_info(persona_score_history)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "conversation_digest" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_score_history ADD COLUMN conversation_digest TEXT DEFAULT ''"
-            )
-
-    async def _ensure_daily_events_share_columns(self) -> None:
-        """为每日事件表增加 share_desire 和 duration_minutes 列（Function Calling 结构化输出用）。"""
-        async with self.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "share_desire" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_daily_events ADD COLUMN share_desire REAL DEFAULT 0.0"
-            )
-        if "duration_minutes" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_daily_events ADD COLUMN duration_minutes INTEGER DEFAULT 0"
-            )
-
-    async def _ensure_daily_events_delta_columns(self) -> None:
-        """为每日事件表增加 energy_delta、mood_delta、health_delta 列。"""
-        async with self.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "energy_delta" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_daily_events ADD COLUMN energy_delta INTEGER"
-            )
-        if "mood_delta" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_daily_events ADD COLUMN mood_delta INTEGER"
-            )
-        if "health_delta" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_daily_events ADD COLUMN health_delta INTEGER"
-            )
-
-    async def _ensure_daily_events_context_summary(self) -> None:
-        """为每日事件表增加 context_summary 列，存储聊天上下文注入用的简短摘要。"""
-        async with self.db.execute("PRAGMA table_info(persona_daily_events)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "context_summary" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_daily_events ADD COLUMN context_summary TEXT DEFAULT ''"
-            )
-
-    async def _ensure_scoring_failures_table(self) -> None:
-        """确保评分失败记录表及索引已创建（兼容旧库升级）。"""
-        from .migrations import (
-            CREATE_SCORING_FAILURES_TABLE,
-            CREATE_SCORING_FAILURES_INDEX,
-            CREATE_SCORING_FAILURES_INDEX_CREATED_AT,
-        )
-        async with self.db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='persona_scoring_failures'"
-        ) as cursor:
-            row = await cursor.fetchone()
-        if row is None:
-            await self.db.execute(CREATE_SCORING_FAILURES_TABLE)
-        # 索引
-        for idx_sql in [CREATE_SCORING_FAILURES_INDEX, CREATE_SCORING_FAILURES_INDEX_CREATED_AT]:
-            await self.db.execute(idx_sql)
-        # 兼容旧库：conversation_digest 列
-        async with self.db.execute("PRAGMA table_info(persona_scoring_failures)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {r[1] for r in rows}
-        if "conversation_digest" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_scoring_failures ADD COLUMN conversation_digest TEXT DEFAULT ''"
-            )
-
-    async def _ensure_llm_traces_round_messages(self) -> None:
-        """为 LLM trace 表增加 round_messages 列（兼容旧库升级）。"""
-        async with self.db.execute("PRAGMA table_info(persona_llm_traces)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {r[1] for r in rows}
-        if "round_messages" not in col_names:
-            await self.db.execute(
-                "ALTER TABLE persona_llm_traces ADD COLUMN round_messages TEXT DEFAULT ''"
-            )
-
-    async def _ensure_llm_traces_routing_fields(self) -> None:
-        """为 LLM trace 表增加路由决策 4 字段（兼容旧库升级）。"""
-        async with self.db.execute("PRAGMA table_info(persona_llm_traces)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {r[1] for r in rows}
-        for col, col_type in [
-            ("selected_provider", "TEXT DEFAULT ''"),
-            ("selected_model", "TEXT DEFAULT ''"),
-            ("selection_policy", "TEXT DEFAULT ''"),
-            ("candidate_count", "INTEGER DEFAULT 0"),
-        ]:
-            if col not in col_names:
-                await self.db.execute(
-                    f"ALTER TABLE persona_llm_traces ADD COLUMN {col} {col_type}"
-                )
-
-    async def _ensure_relationship_unified(self) -> None:
-        """将 persona_user_relationships 从 (user_id, group_id) 迁移到 user_id 主键。
-
-        幂等：通过 PRAGMA table_info 检测 group_id 列是否存在，已迁移则跳过。
-        合并策略：取 last_interaction_at 最新行的基础数据，peak_stage 取 MAX，
-        last_miss_sent_at 取 MIN（最早非 NULL 值）。
-        崩溃恢复：若步骤 4-6 之间崩溃，_backup/_new 表残留由幂等守卫在下次
-        ensure_tables 时清理或恢复。
-        """
-        async with self.db.execute("PRAGMA table_info(persona_user_relationships)") as cursor:
-            rows = await cursor.fetchall()
-        col_names = {row[1] for row in rows}
-        if "group_id" not in col_names:
-            # 清理上次迁移可能残留的备份表（步骤 6 前崩溃所致）
-            await self.db.execute("DROP TABLE IF EXISTS persona_user_relationships_backup")
-            # 恢复：若旧表已被 RENAME 但 _new 未晋升（步骤 4a→4b 之间崩溃）
-            async with self.db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-                " AND name='persona_user_relationships_new'"
-            ) as cursor:
-                row = await cursor.fetchone()
-            if row:
-                async with self.db.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                    " AND name='persona_user_relationships'"
-                ) as cur:
-                    main_exists = await cur.fetchone()
-                if main_exists:
-                    # 主表由 ALL_MIGRATIONS 的 CREATE IF NOT EXISTS 重建为空表，
-                    # _new 中才有合并后的数据 → 替换
-                    await self.db.execute("DROP TABLE persona_user_relationships")
-                await self.db.execute(
-                    "ALTER TABLE persona_user_relationships_new"
-                    " RENAME TO persona_user_relationships"
-                )
-                await self.db.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_pur_last_interaction "
-                    "ON persona_user_relationships(last_interaction_at DESC)"
-                )
-                logger.info("关系表迁移修复: 从 _new 中间表恢复主表")
-                await self.db.commit()
-            return  # 已迁移，跳过
-
-        logger.info("开始迁移 persona_user_relationships：移除 group_id，合并同用户记录")
-
-        # 1. 创建新表（无 group_id，主键 user_id）
-        # 先清理可能残留的中间表（上次迁移中途崩溃所致）
-        await self.db.execute("DROP TABLE IF EXISTS persona_user_relationships_new")
-        # 1b. 清理脏数据：user_id 为 NULL 的行无法迁入 PRIMARY KEY 表
-        cursor = await self.db.execute(
-            "DELETE FROM persona_user_relationships WHERE user_id IS NULL"
-        )
-        if cursor.rowcount:
-            logger.warning(
-                f"关系表迁移: 清理了 {cursor.rowcount} 行 user_id IS NULL 的脏数据"
-            )
-        await self.db.execute("""
-            CREATE TABLE persona_user_relationships_new (
-                user_id TEXT PRIMARY KEY,
-                intimacy REAL DEFAULT 40.0,
-                passion REAL DEFAULT 40.0,
-                trust REAL DEFAULT 40.0,
-                secureness REAL DEFAULT 40.0,
-                last_interaction_at TIMESTAMP,
-                last_relationship_decay_applied_at TIMESTAMP,
-                last_miss_sent_at TIMESTAMP,
-                peak_stage INTEGER DEFAULT 0,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-
-        # 2. 合并数据：用 CTE + ROW_NUMBER 取最新行，JOIN 子查询取聚合值
-        await self.db.execute("""
-            INSERT INTO persona_user_relationships_new
-            SELECT
-                latest.user_id,
-                latest.intimacy,
-                latest.passion,
-                latest.trust,
-                latest.secureness,
-                latest.last_interaction_at,
-                latest.last_relationship_decay_applied_at,
-                agg.min_miss_at AS last_miss_sent_at,
-                COALESCE(agg.max_peak, 0) AS peak_stage,
-                latest.updated_at
-            FROM (
-                SELECT *,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY user_id ORDER BY last_interaction_at DESC, updated_at DESC, ROWID DESC
-                       ) AS rn
-                FROM persona_user_relationships
-            ) AS latest
-            LEFT JOIN (
-                SELECT
-                    user_id,
-                    MAX(peak_stage) AS max_peak,
-                    MIN(last_miss_sent_at) AS min_miss_at
-                FROM persona_user_relationships
-                GROUP BY user_id
-            ) AS agg ON latest.user_id = agg.user_id
-            WHERE latest.rn = 1
-        """)
-
-        # 2b. 统计冗余行数（运维用）
-        async with self.db.execute(
-            "SELECT COUNT(*) - COUNT(DISTINCT user_id) FROM persona_user_relationships"
-        ) as cursor:
-            row = await cursor.fetchone()
-            redundant = row[0] if row else 0
-            if redundant:
-                logger.info(
-                    f"关系表迁移: {redundant} 行冗余数据因 (user_id,group_id) 被合并"
-                )
-
-        # 3. 验证新表行数 = 旧表 DISTINCT user_id 数
-        async with self.db.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM persona_user_relationships"
-        ) as cursor:
-            row = await cursor.fetchone()
-            expected = row[0] if row else 0
-
-        async with self.db.execute(
-            "SELECT COUNT(*) FROM persona_user_relationships_new"
-        ) as cursor:
-            row = await cursor.fetchone()
-            actual = row[0] if row else 0
-
-        if actual != expected:
-            await self.db.execute("DROP TABLE persona_user_relationships_new")
-            raise RuntimeError(
-                f"关系表迁移行数不匹配: 期望 {expected} 行, 实际 {actual} 行. "
-                f"已回滚新表，旧数据完整保留"
-            )
-
-        # 4. 替换表：RENAME 旧表 → RENAME 新表 → DROP 旧表
-        await self.db.execute(
-            "ALTER TABLE persona_user_relationships RENAME TO persona_user_relationships_backup"
-        )
-        await self.db.execute(
-            "ALTER TABLE persona_user_relationships_new RENAME TO persona_user_relationships"
-        )
-
-        # 5. 验证新表可正常读写
-        async with self.db.execute(
-            "SELECT COUNT(*) FROM persona_user_relationships"
-        ) as cursor:
-            row = await cursor.fetchone()
-            verify_count = row[0] if row else 0
-        if verify_count != expected:
-            raise RuntimeError(
-                f"替换后验证失败: 期望 {expected} 行, 实际 {verify_count} 行"
-            )
-
-        # 6. 删除备份
-        await self.db.execute("DROP TABLE persona_user_relationships_backup")
-
-        # 7. 重建索引
-        await self.db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_pur_last_interaction "
-            "ON persona_user_relationships(last_interaction_at DESC)"
-        )
-
-        await self.db.commit()
-        logger.info(
-            f"关系表迁移完成: 从多记录合并为 {actual} 条唯一用户记录"
-        )
 
     # ========== 统一消息表 (persona_unified_messages) ==========
 
@@ -1685,6 +1341,48 @@ class PersonaDataStore:
         )
         await self.db.commit()
         return cursor.rowcount
+
+    async def prune_score_history(self, max_age_days: int) -> int:
+        cutoff = (self._wall_now() - timedelta(days=max_age_days)).isoformat()
+        cursor = await self.db.execute(
+            "DELETE FROM persona_score_history WHERE datetime(created_at) < datetime(?)",
+            (cutoff,),
+        )
+        await self.db.commit()
+        return cursor.rowcount
+
+    async def prune_delayed_tasks(self, max_age_days: int) -> int:
+        cutoff = (self._wall_now() - timedelta(days=max_age_days)).isoformat()
+        pending_cutoff = (self._wall_now() - timedelta(days=max_age_days * 3)).isoformat()
+        cursor = await self.db.execute(
+            "DELETE FROM persona_delayed_tasks WHERE created_at < ? AND "
+            "(status IN ('completed', 'failed') OR (status = 'pending' AND created_at < ?))",
+            (cutoff, pending_cutoff),
+        )
+        await self.db.commit()
+        return cursor.rowcount
+
+    async def run_cleanup(
+        self,
+        llm_traces_max_age_days: int,
+        score_history_max_age_days: int,
+        daily_events_keep_days: int,
+        diary_keep_days: int,
+        scoring_failures_max_age_days: int,
+        delayed_tasks_max_age_days: int,
+    ) -> dict:
+        """统一清理入口，返回各表删除行数。"""
+        results = {}
+        results["llm_traces"] = await self.prune_llm_traces(llm_traces_max_age_days)
+        results["score_history"] = await self.prune_score_history(score_history_max_age_days)
+        results["daily_events"] = await self.prune_daily_events(daily_events_keep_days)
+        results["diary"] = await self.prune_diaries(diary_keep_days)
+        results["scoring_failures"] = await self.prune_scoring_failures(scoring_failures_max_age_days)
+        results["delayed_tasks"] = await self.prune_delayed_tasks(delayed_tasks_max_age_days)
+        total = sum(v for v in results.values() if isinstance(v, int))
+        if total:
+            logger.info(f"Persona 数据清理完成: 共清理 {total} 条记录, 明细={results}")
+        return results
 
     # ========== Phase 3: 记忆搜索工具 ==========
 
