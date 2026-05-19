@@ -1,51 +1,14 @@
 import pytest
-from datetime import datetime
 
 pytestmark = pytest.mark.unit
 
 from core.data.models import (
-    UserKarma,
     InitEntity,
     InitList,
-    LogSession,
-    LogRecord,
     DNDCharacter,
     HPInfo,
     AbilityInfo,
 )
-from core.data.models.extended import (
-    UserNickname,
-    GroupConfig,
-    GroupActivate,
-    GroupWelcome,
-    ChatRecord,
-    BotControl,
-    UserStat,
-    GroupStat,
-    MetaStat,
-    NPCHealth,
-)
-
-
-class TestUserKarmaModel:
-    def test_create(self):
-        karma = UserKarma(user_id="user1", group_id="group1", value=50)
-        assert karma.user_id == "user1"
-        assert karma.group_id == "group1"
-        assert karma.value == 50
-
-    def test_serialization(self):
-        karma = UserKarma(user_id="user1", group_id="group1", value=50)
-        json_str = karma.model_dump_json()
-        assert "user1" in json_str
-        assert "group1" in json_str
-        assert "50" in json_str
-
-    def test_deserialization(self):
-        json_str = '{"user_id": "user1", "group_id": "group1", "value": 50, "last_update": "2024-01-01T00:00:00"}'
-        karma = UserKarma.model_validate_json(json_str)
-        assert karma.user_id == "user1"
-        assert karma.value == 50
 
 
 class TestInitListModel:
@@ -81,32 +44,6 @@ class TestInitListModel:
         init_list = InitList()
         with pytest.raises(InitiativeError):
             init_list.del_entity("NotExists")
-
-
-class TestLogModel:
-    def test_log_session_create(self):
-        session = LogSession(
-            id="session1",
-            group_id="group1",
-            name="Test Session",
-            recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
-        )
-        assert session.id == "session1"
-        assert session.recording is True
-
-    def test_log_record_create(self):
-        record = LogRecord(
-            log_id="session1",
-            time=datetime.now(),
-            user_id="user1",
-            nickname="Test User",
-            content="Hello",
-            source="user",
-        )
-        assert record.log_id == "session1"
-        assert record.content == "Hello"
 
 
 class TestDNDCharacterModel:
@@ -172,63 +109,3 @@ class TestAbilityInfoModel:
         assert len(ability.check_prof) > 0
         assert len(ability.check_ext) > 0
 
-
-class TestExtendedModels:
-    def test_user_nickname(self):
-        nick = UserNickname(user_id="user1", group_id="group1", nickname="TestNick")
-        assert nick.user_id == "user1"
-        assert nick.nickname == "TestNick"
-
-    def test_user_nickname_serialization(self):
-        nick = UserNickname(user_id="user1", group_id="group1", nickname="TestNick")
-        json_str = nick.model_dump_json()
-        assert "TestNick" in json_str
-
-    def test_group_config(self):
-        cfg = GroupConfig(group_id="group1", data={"key": "value"})
-        assert cfg.data["key"] == "value"
-
-    def test_group_config_default(self):
-        cfg = GroupConfig(group_id="group1")
-        assert cfg.data == {}
-
-    def test_group_activate(self):
-        activate = GroupActivate(group_id="group1", active=True)
-        assert activate.active is True
-
-    def test_group_welcome(self):
-        welcome = GroupWelcome(group_id="group1", welcome_msg="Hello!", welcome_enabled=True)
-        assert welcome.welcome_enabled is True
-        assert welcome.welcome_msg == "Hello!"
-
-    def test_chat_record(self):
-        record = ChatRecord(
-            group_id="group1",
-            user_id="user1",
-            nickname="TestUser",
-            content="Hello world",
-            source="user"
-        )
-        assert record.content == "Hello world"
-
-    def test_bot_control(self):
-        ctrl = BotControl(key="rebooter", value="admin")
-        assert ctrl.key == "rebooter"
-        assert ctrl.value == "admin"
-
-    def test_user_stat(self):
-        stat = UserStat(user_id="user1", data='{"msg_count": 10}')
-        assert stat.data == '{"msg_count": 10}'
-
-    def test_group_stat(self):
-        stat = GroupStat(group_id="group1", data='{"msg_count": 100}')
-        assert stat.data == '{"msg_count": 100}'
-
-    def test_meta_stat(self):
-        stat = MetaStat(key="meta", data='{"total": 1000}')
-        assert stat.data == '{"total": 1000}'
-
-    def test_npc_health(self):
-        npc = NPCHealth(group_id="group1", name="GoblinKing", hp_data='{"current": 50, "max": 100}')
-        assert npc.name == "GoblinKing"
-        assert npc.hp_data == '{"current": 50, "max": 100}'

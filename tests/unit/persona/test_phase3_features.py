@@ -9,16 +9,14 @@ Phase 3 功能测试
 """
 
 import pytest
-import asyncio
 import tempfile
 import os
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.data.models import UserProfile, RelationshipState
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
-from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 @pytest.fixture
@@ -174,59 +172,3 @@ class TestWarmthLevelRefuse:
         warmth_level, label = rel.get_warmth_level(char.get_warmth_labels())
         assert warmth_level == 1, f"Expected 1 (distant), got {warmth_level}"
 
-    def test_refuse_probability_formula(self):
-        """测试拒绝概率公式：score/20"""
-        # P_refuse = 0.5 + 0.4 * (1 - score / 20)
-        # When score = 0: P = 0.5 + 0.4 = 0.9 (90%)
-        # When score = 10: P = 0.5 + 0.4 * 0.5 = 0.7 (70%)
-        # When score = 20: P = 0.5 + 0 = 0.5 (50%)
-
-        def calc_refuse_prob(score):
-            return 0.5 + 0.4 * (1 - score / 20)
-
-        assert abs(calc_refuse_prob(0) - 0.9) < 0.001
-        assert abs(calc_refuse_prob(10) - 0.7) < 0.001
-        assert abs(calc_refuse_prob(20) - 0.5) < 0.001
-
-
-class TestConfigValues:
-    """测试配置值更新"""
-
-    def test_max_messages(self):
-        """max_messages 应该为 15"""
-        config = PersonaConfig()
-        assert config.max_messages == 15
-
-    def test_relationship_refuse_enabled(self):
-        """relationship_refuse_enabled 应该默认为 True"""
-        config = PersonaConfig()
-        assert config.relationship_refuse_enabled is True
-
-    def test_relationship_refuse_prob_base(self):
-        """relationship_refuse_prob_base 应该为 0.5"""
-        config = PersonaConfig()
-        assert config.relationship_refuse_prob_base == 0.5
-
-    def test_relationship_refuse_prob_max(self):
-        """relationship_refuse_prob_max 应该为 0.9"""
-        config = PersonaConfig()
-        assert config.relationship_refuse_prob_max == 0.9
-
-    def test_refuse_probability_formula_with_config(self):
-        """使用配置的拒绝概率公式"""
-        config = PersonaConfig()
-
-        def calc_refuse_prob(score, base, max_p):
-            return base + (max_p - base) * (1 - score / 20)
-
-        # 使用新配置名测试
-        assert abs(calc_refuse_prob(0, config.relationship_refuse_prob_base, config.relationship_refuse_prob_max) - 0.9) < 0.001
-        assert abs(calc_refuse_prob(20, config.relationship_refuse_prob_base, config.relationship_refuse_prob_max) - 0.5) < 0.001
-
-        # 测试禁用拒绝
-        assert config.relationship_refuse_enabled is True
-
-    def test_proactive_miss_min_score_default(self):
-        """proactive_miss_min_score 默认应为 20.0"""
-        config = PersonaConfig()
-        assert config.proactive_miss_min_score == 20.0

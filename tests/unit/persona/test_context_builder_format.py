@@ -37,7 +37,11 @@ class TestFormatPrivateHistory:
         assert result[0]["role"] == "user"
         assert result[1]["role"] == "assistant"
 
-    def test_timestamp_prefix(self):
+    def test_timestamp_prefix(self, monkeypatch):
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.chat.context.persona_wall_now",
+            lambda tz: _TODAY,
+        )
         builder = ContextBuilder(self._make_character())
         history = [
             {"role": "user", "content": "你好", "created_at": _dt(30)},
@@ -238,7 +242,11 @@ class TestFormatHistory:
     def _make_character(self):
         return Character(name="苏晓", description="一个温柔的AI伴侣")
 
-    def test_is_group_false_dispatches_private(self):
+    def test_is_group_false_dispatches_private(self, monkeypatch):
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.chat.context.persona_wall_now",
+            lambda tz: _TODAY,
+        )
         builder = ContextBuilder(self._make_character())
         history = [
             {"role": "user", "content": "hi", "created_at": _dt(30)},
