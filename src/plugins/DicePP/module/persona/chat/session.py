@@ -511,6 +511,9 @@ class ChatSession:
         )
         await self.store.update_sent_ok(msg_id, 1)
 
+        if self.segment_dispatcher:
+            await self.segment_dispatcher.drain(target_key)
+
         return self._SegmentedSentinel(full_reply)
 
     # ── 关系与评分 ────────────────────────────────────────────

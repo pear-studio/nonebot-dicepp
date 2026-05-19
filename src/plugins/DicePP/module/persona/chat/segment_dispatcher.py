@@ -106,6 +106,22 @@ class SegmentDispatcher:
         if wake_event is not None:
             wake_event.set()
 
+    async def drain(self, target_key: str) -> None:
+        """等待指定 target_key 的 worker 将已入队 segment 全部发出。
+
+        与 flush() 不同：drain 不丢弃消息，而是持续唤醒 worker
+        使其跳过 delay_before、逐段即时发送，直到队列耗尽 worker 退出。
+        """
+        worker = self._workers.get(target_key)
+        if worker is None or worker.done():
+            return
+
+        wake_event = self._wake_events.get(target_key)
+        while not worker.done():
+            if wake_event is not None:
+                wake_event.set()
+            await asyncio.sleep(0)
+
     async def shutdown(self) -> None:
         self._shutting_down = True
         for target_key, queue in list(self._queues.items()):
