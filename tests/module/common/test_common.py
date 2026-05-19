@@ -4,7 +4,6 @@ common 模块测试
 - 集成测试：.nn / .bot / .help / .welcome 指令行为
 """
 import pytest
-import unittest
 from unittest.async_case import IsolatedAsyncioTestCase
 
 from tests.fs_utils import rmtree_retry
@@ -13,7 +12,7 @@ from tests.fs_utils import rmtree_retry
 # ─────────────────────────── 单元测试 ───────────────────────────
 
 @pytest.mark.unit
-class TestNicknameCommandPureLogic(unittest.TestCase):
+class TestNicknameCommandPureLogic:
     """测试 NicknameCommand 中的纯函数逻辑，无需 Bot 实例"""
 
     def _cls(self):
@@ -22,29 +21,29 @@ class TestNicknameCommandPureLogic(unittest.TestCase):
 
     def test_legal_nickname_normal(self):
         cls = self._cls()
-        self.assertTrue(cls.is_legal_nickname("测试用户"))
+        assert cls.is_legal_nickname("测试用户")
 
     def test_legal_nickname_ascii(self):
         cls = self._cls()
-        self.assertTrue(cls.is_legal_nickname("dm"))
+        assert cls.is_legal_nickname("dm")
 
     def test_illegal_nickname_empty(self):
         cls = self._cls()
-        self.assertFalse(cls.is_legal_nickname(""))
+        assert not cls.is_legal_nickname("")
 
     def test_illegal_nickname_starts_with_dot(self):
         cls = self._cls()
-        self.assertFalse(cls.is_legal_nickname(".bot"))
+        assert not cls.is_legal_nickname(".bot")
 
     def test_illegal_nickname_too_long(self):
         from module.common.nickname_command import MAX_NICKNAME_LENGTH
         cls = self._cls()
-        self.assertFalse(cls.is_legal_nickname("x" * (MAX_NICKNAME_LENGTH + 1)))
+        assert not cls.is_legal_nickname("x" * (MAX_NICKNAME_LENGTH + 1))
 
     def test_legal_nickname_max_length(self):
         from module.common.nickname_command import MAX_NICKNAME_LENGTH
         cls = self._cls()
-        self.assertTrue(cls.is_legal_nickname("x" * MAX_NICKNAME_LENGTH))
+        assert cls.is_legal_nickname("x" * MAX_NICKNAME_LENGTH)
 
 
 # ─────────────────────────── 集成测试 ───────────────────────────

@@ -1,4 +1,3 @@
-import unittest
 import pytest
 from unittest.mock import MagicMock
 from module.deck.deck_command import DeckItem, ForceFinal, Deck
@@ -7,49 +6,49 @@ from module.deck.deck_command import DeckItem, ForceFinal, Deck
 # ────────────────────── DeckItem ──────────────────────
 
 @pytest.mark.unit
-class TestDeckItem(unittest.TestCase):
+class TestDeckItem:
     def test_init_default(self):
         item = DeckItem("测试内容")
-        self.assertEqual(item.content, "测试内容")
-        self.assertEqual(item.weight, 1)
-        self.assertTrue(item.redraw)
-        self.assertEqual(item.final_type, 0)
+        assert item.content == "测试内容"
+        assert item.weight == 1
+        assert item.redraw
+        assert item.final_type == 0
 
     def test_init_with_params(self):
         item = DeckItem("测试内容", weight=5, redraw=False, final_type=2)
-        self.assertEqual(item.content, "测试内容")
-        self.assertEqual(item.weight, 5)
-        self.assertFalse(item.redraw)
-        self.assertEqual(item.final_type, 2)
+        assert item.content == "测试内容"
+        assert item.weight == 5
+        assert not item.redraw
+        assert item.final_type == 2
 
     def test_weight_minimum(self):
         item = DeckItem("测试", weight=0)
-        self.assertEqual(item.weight, 1)
+        assert item.weight == 1
 
     def test_weight_negative(self):
         item = DeckItem("测试", weight=-5)
-        self.assertEqual(item.weight, 1)
+        assert item.weight == 1
 
     def test_final_type_values(self):
         for ft in [0, 1, 2]:
             item = DeckItem("测试", final_type=ft)
-            self.assertEqual(item.final_type, ft)
+            assert item.final_type == ft
 
 
 # ────────────────────── ForceFinal ──────────────────────
 
 @pytest.mark.unit
-class TestForceFinal(unittest.TestCase):
+class TestForceFinal:
     def test_init(self):
         error = ForceFinal("测试错误")
-        self.assertEqual(error.info, "测试错误")
+        assert error.info == "测试错误"
 
     def test_str(self):
         error = ForceFinal("测试错误")
-        self.assertEqual(str(error), "测试错误")
+        assert str(error) == "测试错误"
 
     def test_is_exception(self):
-        self.assertTrue(issubclass(ForceFinal, Exception))
+        assert issubclass(ForceFinal, Exception)
 
 
 # ────────────────────── Deck ──────────────────────
@@ -62,23 +61,23 @@ def _make_loc_helper():
 
 
 @pytest.mark.unit
-class TestDeckAddItem(unittest.TestCase):
+class TestDeckAddItem:
     def test_add_item_increases_weight_sum(self):
         deck = Deck("测试牌库", "/tmp")
         deck.add_item(DeckItem("A", weight=3))
         deck.add_item(DeckItem("B", weight=2))
-        self.assertEqual(deck.weight_sum, 5)
-        self.assertEqual(len(deck.items), 2)
+        assert deck.weight_sum == 5
+        assert len(deck.items) == 2
 
     def test_add_item_default_weight(self):
         deck = Deck("测试牌库", "/tmp")
         deck.add_item(DeckItem("A"))
-        self.assertEqual(deck.weight_sum, 1)
+        assert deck.weight_sum == 1
 
 
 @pytest.mark.unit
-class TestDeckDraw(unittest.TestCase):
-    def setUp(self):
+class TestDeckDraw:
+    def setup_method(self):
         self.loc = _make_loc_helper()
         self.deck = Deck("测试牌库", "/tmp")
         self.deck.add_item(DeckItem("卡牌A"))
@@ -87,13 +86,13 @@ class TestDeckDraw(unittest.TestCase):
 
     def test_draw_single_returns_content(self):
         result = self.deck.draw(1, [self.deck], self.loc)
-        self.assertTrue(len(result) >= 0)  # 有输出
+        assert len(result) >= 0  # 有输出
 
     def test_draw_multiple_times(self):
         # loc mock 返回 content，多次抽取不应抛异常
         result = self.deck.draw(3, [self.deck], self.loc)
         # draw 3 times should call format_loc_text multiple times
-        self.assertGreaterEqual(self.loc.format_loc_text.call_count, 3)
+        assert self.loc.format_loc_text.call_count >= 3
 
     def test_draw_no_redraw_exhausts_deck(self):
         """不放回抽取：在同一次 draw(times=2) 调用中第二次应触发空牌库提示"""
@@ -114,7 +113,7 @@ class TestDeckDraw(unittest.TestCase):
         loc.format_loc_text.side_effect = lambda key, **kwargs: (
             "抽取提前结束！（全部）" if key == LOC_DRAW_FIN_ALL else kwargs.get("content", "")
         )
-        with self.assertRaises(ForceFinal):
+        with pytest.raises(ForceFinal):
             deck.draw(1, [deck], loc)
 
     def test_draw_final_type_1_stops_inner(self):
@@ -154,9 +153,4 @@ class TestDeckDraw(unittest.TestCase):
                 counts["高权重卡"] += 1
             else:
                 counts["低权重卡"] += 1
-        self.assertGreater(counts["高权重卡"], counts["低权重卡"],
-                           "高权重卡牌应比低权重卡牌更频繁抽到")
-
-
-if __name__ == '__main__':
-    unittest.main()
+        assert counts["高权重卡"] > counts["低权重卡"], "高权重卡牌应比低权重卡牌更频繁抽到"

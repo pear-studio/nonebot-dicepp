@@ -4,7 +4,6 @@ query 模块测试
 - 集成测试：.查询 / .q 指令基础响应
 """
 import pytest
-import unittest
 import os
 import tempfile
 from unittest.async_case import IsolatedAsyncioTestCase
@@ -13,7 +12,7 @@ from unittest.async_case import IsolatedAsyncioTestCase
 # ─────────────────────────── 单元测试：query_database ───────────────────────────
 
 @pytest.mark.unit
-class TestCreateEmptySqliteDatabase(unittest.TestCase):
+class TestCreateEmptySqliteDatabase:
     """create_empty_sqlite_database 函数测试"""
 
     def test_creates_valid_db_file(self):
@@ -21,8 +20,8 @@ class TestCreateEmptySqliteDatabase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test_query.db")
             result = create_empty_sqlite_database(db_path)
-            self.assertTrue(result, "应成功创建数据库")
-            self.assertTrue(os.path.exists(db_path), "数据库文件应存在")
+            assert result, "应成功创建数据库"
+            assert os.path.exists(db_path), "数据库文件应存在"
 
     def test_created_db_has_data_table(self):
         """创建的数据库应包含 data 和 redirect 两张表"""
@@ -35,8 +34,8 @@ class TestCreateEmptySqliteDatabase(unittest.TestCase):
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = {row[0] for row in cursor.fetchall()}
             conn.close()
-            self.assertIn("data", tables)
-            self.assertIn("redirect", tables)
+            assert "data" in tables
+            assert "redirect" in tables
 
     def test_data_table_has_correct_columns(self):
         """data 表应包含 QUERY_DATA_FIELD_LIST 定义的所有字段"""
@@ -50,7 +49,7 @@ class TestCreateEmptySqliteDatabase(unittest.TestCase):
             columns = {row[1] for row in cursor.fetchall()}
             conn.close()
             for field in QUERY_DATA_FIELD_LIST:
-                self.assertIn(field, columns, f"data 表缺少字段 {field}")
+                assert field in columns, f"data 表缺少字段 {field}"
 
     def test_second_create_raises_or_fails(self):
         """在已存在文件上再次创建应引发异常（data 表已存在，只捕获 PermissionError 的 bug 是已知行为）"""
@@ -60,9 +59,9 @@ class TestCreateEmptySqliteDatabase(unittest.TestCase):
         try:
             db_path = os.path.join(tmpdir, "test_idem.db")
             result1 = create_empty_sqlite_database(db_path)
-            self.assertTrue(result1, "第一次创建应成功")
+            assert result1, "第一次创建应成功"
             # 第二次调用在 data 表已存在时应抛出异常（当前函数只捕获 PermissionError）
-            with self.assertRaises(Exception):
+            with pytest.raises(Exception):
                 create_empty_sqlite_database(db_path)
         finally:
             import gc
@@ -72,7 +71,7 @@ class TestCreateEmptySqliteDatabase(unittest.TestCase):
 
 
 @pytest.mark.unit
-class TestRegexpNormalize(unittest.TestCase):
+class TestRegexpNormalize:
     """regexp_normalize 函数测试"""
 
     def test_normalize_escapes_special_chars(self):
@@ -80,33 +79,33 @@ class TestRegexpNormalize(unittest.TestCase):
         from module.query.query_database import regexp_normalize
         result = regexp_normalize("(力量)")
         # '(' 和 ')' 应被转义为 '\(' 和 '\)'
-        self.assertIn("\\(", result)
-        self.assertIn("\\)", result)
+        assert "\\(" in result
+        assert "\\)" in result
         # 转义后结果应以 '\(' 开头，而非未转义的 '('
-        self.assertTrue(result.startswith("\\("), f"'(' 应被转义，实际: {result}")
+        assert result.startswith("\\("), f"'(' 应被转义，实际: {result}"
 
     def test_normalize_preserves_normal_chars(self):
         """普通汉字和字母不应被转义"""
         from module.query.query_database import regexp_normalize
         result = regexp_normalize("力量")
-        self.assertEqual(result, "力量")
+        assert result == "力量"
 
     def test_normalize_escapes_dot(self):
         """点号 '.' 应被转义"""
         from module.query.query_database import regexp_normalize
         result = regexp_normalize("v1.0")
-        self.assertIn("\\.", result)
+        assert "\\." in result
 
     def test_normalize_basic_string(self):
         from module.query.query_database import regexp_normalize
         result = regexp_normalize("火球术")
-        self.assertIsInstance(result, str)
-        self.assertTrue(len(result) > 0)
+        assert isinstance(result, str)
+        assert len(result) > 0
 
     def test_normalize_empty_string(self):
         from module.query.query_database import regexp_normalize
         result = regexp_normalize("")
-        self.assertIsInstance(result, str)
+        assert isinstance(result, str)
 
 
 # ─────────────────────────── 集成测试：.查询 指令 ───────────────────────────

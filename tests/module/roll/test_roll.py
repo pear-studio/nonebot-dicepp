@@ -1,4 +1,3 @@
-import unittest
 from typing import Callable
 
 import pytest
@@ -9,57 +8,60 @@ from module.roll.result import RollResult
 
 
 @pytest.mark.unit
-class MyTestCase(unittest.TestCase):
+class MyTestCase:
     def test_utils(self):
-        self.assertEqual(match_outer_parentheses("()"), 1)
-        self.assertEqual(match_outer_parentheses("(ABC)"), 4)
-        self.assertEqual(match_outer_parentheses("(A()A)"), 5)
-        self.assertEqual(match_outer_parentheses("(AA)))"), 3)
-        self.assertEqual(match_outer_parentheses("()ABC"), 1)
-        self.assertEqual(match_outer_parentheses("(1+2)+1"), 4)
-        self.assertEqual(match_outer_parentheses("ABC"), -1)
-        self.assertEqual(match_outer_parentheses(""), -1)
-        self.assertEqual(match_outer_parentheses("ABC()"), -1)
-        self.assertRaises(ValueError, match_outer_parentheses, "(((")
-        self.assertRaises(ValueError, match_outer_parentheses, "(A(A(A))")
+        assert match_outer_parentheses("()") == 1
+        assert match_outer_parentheses("(ABC)") == 4
+        assert match_outer_parentheses("(A()A)") == 5
+        assert match_outer_parentheses("(AA)))") == 3
+        assert match_outer_parentheses("()ABC") == 1
+        assert match_outer_parentheses("(1+2)+1") == 4
+        assert match_outer_parentheses("ABC") == -1
+        assert match_outer_parentheses("") == -1
+        assert match_outer_parentheses("ABC()") == -1
+        with pytest.raises(ValueError):
+            match_outer_parentheses("(((")
+        with pytest.raises(ValueError):
+            match_outer_parentheses("(A(A(A))")
 
-        self.assertEqual("", remove_redundant_parentheses("()"))
-        self.assertEqual("ABC", remove_redundant_parentheses("(ABC)"))
-        self.assertEqual("ABC", remove_redundant_parentheses("((ABC))"))
-        self.assertEqual("1+2", remove_redundant_parentheses("(1)+(2)"))
-        self.assertEqual("1+2", remove_redundant_parentheses("(1+2)"))
-        self.assertEqual("(1+2)+2", remove_redundant_parentheses("(1+2)+2"))
-        self.assertEqual("(1+2)*2", remove_redundant_parentheses("(1+2)*2"))
-        self.assertEqual("(A+B)*C", remove_redundant_parentheses("(A+B)*C"))
-        self.assertEqual("(A*B)+C", remove_redundant_parentheses("(A*B)+C"))
-        self.assertEqual("C*(A+B)", remove_redundant_parentheses("C*(A+B)"))
-        self.assertEqual("C+(A*B)", remove_redundant_parentheses("C+(A*B)"))
-        self.assertEqual("A*((A*B)+C)", remove_redundant_parentheses("A*((A*B)+C)"))
-        self.assertEqual("A+((A*B)+C)", remove_redundant_parentheses("A+((A*B)+C)"))
-        self.assertEqual("A+((A*B)+C)", remove_redundant_parentheses("A+((A*B)+C)"))
-        self.assertEqual("A+(A+B)+C", remove_redundant_parentheses("A+(A+B)+C"))
-        self.assertEqual("A+(A*B)+C", remove_redundant_parentheses("A+(A*B)+C"))
-        self.assertEqual("A+(A+B)*C", remove_redundant_parentheses("A+(A+B)*C"))
-        self.assertEqual("A*(A+B)+C", remove_redundant_parentheses("A*(A+B)+C"))
-        self.assertEqual("max{max2{+(5+14+5+12)}}", remove_redundant_parentheses("max{max2{+(5+14+5+12)}}"))
+        assert "" == remove_redundant_parentheses("()")
+        assert "ABC" == remove_redundant_parentheses("(ABC)")
+        assert "ABC" == remove_redundant_parentheses("((ABC))")
+        assert "1+2" == remove_redundant_parentheses("(1)+(2)")
+        assert "1+2" == remove_redundant_parentheses("(1+2)")
+        assert "(1+2)+2" == remove_redundant_parentheses("(1+2)+2")
+        assert "(1+2)*2" == remove_redundant_parentheses("(1+2)*2")
+        assert "(A+B)*C" == remove_redundant_parentheses("(A+B)*C")
+        assert "(A*B)+C" == remove_redundant_parentheses("(A*B)+C")
+        assert "C*(A+B)" == remove_redundant_parentheses("C*(A+B)")
+        assert "C+(A*B)" == remove_redundant_parentheses("C+(A*B)")
+        assert "A*((A*B)+C)" == remove_redundant_parentheses("A*((A*B)+C)")
+        assert "A+((A*B)+C)" == remove_redundant_parentheses("A+((A*B)+C)")
+        assert "A+((A*B)+C)" == remove_redundant_parentheses("A+((A*B)+C)")
+        assert "A+(A+B)+C" == remove_redundant_parentheses("A+(A+B)+C")
+        assert "A+(A*B)+C" == remove_redundant_parentheses("A+(A*B)+C")
+        assert "A+(A+B)*C" == remove_redundant_parentheses("A+(A+B)*C")
+        assert "A*(A+B)+C" == remove_redundant_parentheses("A*(A+B)+C")
+        assert "max{max2{+(5+14+5+12)}}" == remove_redundant_parentheses("max{max2{+(5+14+5+12)}}")
 
     def __show_exec_res(self, exp_str: str, checker: Callable[[str], bool] = None):
         for _ in range(100):
             exec_roll_exp(exp_str)
         res = exec_roll_exp(exp_str)
-        self.assertIsNotNone(res)
+        assert res is not None
         output = f"Values: {res.val_list} \tInfo: {res.get_info()} \tType: {res.type} \tExpression: {res.get_exp()}"
         output += f"\nFinal Output: \033[0;33m{res.get_complete_result()}"
         output = f"Origin Exp: \033[0;32m{exp_str} \033[0m\t{output}"
 
         if checker:
-            self.assertTrue(checker(res.get_complete_result()), output)
+            assert checker(res.get_complete_result()), output
         else:
             print("\t\t--- Check Result ---")
             print(output)
 
     def __show_exception(self, exp_str: str):
-        self.assertRaises(RollDiceError, exec_roll_exp, exp_str)
+        with pytest.raises(RollDiceError):
+            exec_roll_exp(exp_str)
         try:
             exec_roll_exp(exp_str)
         except RollDiceError as e:
@@ -163,7 +165,3 @@ class MyTestCase(unittest.TestCase):
         self.__show_exec_res("2D20")
         self.__show_exec_res("4D20K3")
         self.__show_exec_res("D20+D20")
-
-
-if __name__ == '__main__':
-    unittest.main()
