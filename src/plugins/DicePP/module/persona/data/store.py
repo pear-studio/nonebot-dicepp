@@ -159,19 +159,27 @@ class PersonaDataStore:
     async def get_group_unified_messages(
         self,
         group_id: str,
-        limit: int = 50,
+        limit: Optional[int] = 50,
     ) -> List[UnifiedMessage]:
         """获取群聊最近消息，时间升序返回"""
-        async with self.db.execute(
+        if limit is None:
+            sql = """
+            SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
+            FROM persona_unified_messages
+            WHERE group_id = ? AND group_id != ''
+            ORDER BY created_at DESC
             """
+            params = (group_id,)
+        else:
+            sql = """
             SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
             FROM persona_unified_messages
             WHERE group_id = ? AND group_id != ''
             ORDER BY created_at DESC
             LIMIT ?
-            """,
-            (group_id, limit),
-        ) as cursor:
+            """
+            params = (group_id, limit)
+        async with self.db.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
             messages: List[UnifiedMessage] = []
             for row in reversed(list(rows)):
