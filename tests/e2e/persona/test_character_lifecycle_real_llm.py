@@ -53,6 +53,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "sr
 
 from DicePP.module.persona.llm.router import LLMRouter
 from DicePP.module.persona.life.event_agent import EventGenerationAgent
+from DicePP.module.persona.tools.registry import ToolRegistry, ToolDomain
+from DicePP.module.persona.tools.collecting import (
+    RECORD_EVENT_TOOL,
+    RECORD_REACTION_TOOL,
+    RECORD_DIARY_ENTRY_TOOL,
+    RECORD_SHARE_MESSAGE_TOOL,
+    life_collecting_executor,
+)
 from DicePP.module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
@@ -165,7 +173,12 @@ async def _run_full_day_lifecycle() -> dict:
             daily_limit=50,
             quota_check_enabled=False,
         )
-        agent = EventGenerationAgent(router)
+        tool_registry = ToolRegistry()
+        tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
+        tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
+        tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
+        tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
+        agent = EventGenerationAgent(router, tool_registry)
         config = CharacterLifeConfig(
             enabled=True,
             slot_match_window_minutes=15,

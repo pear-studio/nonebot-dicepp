@@ -28,6 +28,24 @@ def make_mock_providers():
     return {"fake": provider}
 
 
+def _make_tool_registry():
+    """创建含 4 个 life 工具的 ToolRegistry，供测试共用。"""
+    from plugins.DicePP.module.persona.tools.registry import ToolRegistry, ToolDomain
+    from plugins.DicePP.module.persona.tools.collecting import (
+        RECORD_EVENT_TOOL,
+        RECORD_REACTION_TOOL,
+        RECORD_DIARY_ENTRY_TOOL,
+        RECORD_SHARE_MESSAGE_TOOL,
+        life_collecting_executor,
+    )
+    registry = ToolRegistry()
+    registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
+    registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
+    registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
+    registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
+    return registry
+
+
 def attach_mock_run_via_loop(router, final_output_attr=None):
     """为 mock router 添加 run_via_loop AsyncMock，支持 collecting executor。
 

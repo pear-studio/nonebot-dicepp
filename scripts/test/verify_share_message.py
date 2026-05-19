@@ -21,6 +21,14 @@ sys.path.insert(0, "src/plugins")
 from DicePP.module.persona.life.event_agent import EventGenerationAgent, ShareMessageContext
 from DicePP.module.persona.llm.router import LLMRouter
 from DicePP.module.persona.data.models import ModelTier
+from DicePP.module.persona.tools.registry import ToolRegistry, ToolDomain
+from DicePP.module.persona.tools.collecting import (
+    RECORD_EVENT_TOOL,
+    RECORD_REACTION_TOOL,
+    RECORD_DIARY_ENTRY_TOOL,
+    RECORD_SHARE_MESSAGE_TOOL,
+    life_collecting_executor,
+)
 
 
 @dataclass
@@ -283,7 +291,12 @@ async def run():
         quota_check_enabled=False,
         trace_enabled=False,
     )
-    agent = EventGenerationAgent(router, config=MockConfig())
+    tool_registry = ToolRegistry()
+    tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
+    agent = EventGenerationAgent(router, tool_registry, config=MockConfig())
 
     cases = make_cases()
     results = []

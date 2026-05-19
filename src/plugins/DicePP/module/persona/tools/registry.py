@@ -62,6 +62,12 @@ class ToolRegistry:
 
     def register(self, domain: str, tool: ToolDef, executor: Callable) -> None:
         """注册工具到指定域"""
+        if tool.name in self._tools:
+            existing_domains = [d for d, names in self._domains.items() if tool.name in names]
+            logger.warning(
+                f"工具 {tool.name} 已在域 {existing_domains} 注册，"
+                f"现由域 {domain} 覆盖（ToolDef 和 executor 均被替换）"
+            )
         self._tools[tool.name] = tool
         self._executors[tool.name] = executor
         self._domains.setdefault(domain, []).append(tool.name)

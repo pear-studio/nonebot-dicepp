@@ -11,6 +11,20 @@
 
 ## persona
 
+### [B-260519-d36eb5] SegmentDispatcher Worker 退出竞态导致消息丢失
+- 创建: 2026-05-19
+- 问题表现:
+    - segment_dispatcher.py _worker_loop() finally 块以 workers.pop() -> wake_events.pop() -> queues.pop() 顺序清理
+    - 若 notify() 在 queues.pop() 之前向队列插入 segment，随后队列被销毁，segment 永久丢失
+    - 时序: (1) notify 插入 segment -> (2) notify 发现 worker 在 workers dict 中不创建新 worker -> (3) worker finally 执行 queues.pop() 删除队列 -> segment 丢失
+    - 参考: chat-analyzer 报告 CH2
+- 工作计划:
+    - 方案: 在 queues.pop() 前检查队列是否为空，非空则重新调度或直接处理
+    - 备选: 调整清理顺序为先 pop queue 再 pop workers/wake_events
+    - 验证: 编写并发竞态测试（模拟 notify 与 worker exit 的交叉时序）
+    - 影响面: chat/segment_dispatcher.py
+    - 风险: 中——并发逻辑修改需仔细验证，不当修改可能引入死锁
+
 ### [B-260519-ffb8d3] AgentLoop 提升为独立模块供 chat/life/scoring 复用
 - 创建: 2026-05-19
 - 问题表现:
@@ -24,6 +38,21 @@
     - 验证: 现有 chat/life/scoring 端到端测试通过
     - 影响面: llm/loop.py -> agent/loop.py（新建），llm/router.py，life/event_agent.py，chat/session.py
     - 风险: 中——涉及多子系统调用路径变更，需全量回归
+
+### [B-260519-a515e5] create_persona() 工厂函数拆分（183行->Builder模式）
+- 创建: 2026-05-19
+- 问题表现:
+    - factory.py create_persona() 183 行单函数，9 步线性组装，步骤间有隐式依赖
+    - 每增加子系统（如 ActionEvaluator）都需修改工厂函数，违反开闭原则
+    - _build_chat 12 个参数，位置传参脆弱
+    - 参考: core-analyzer 报告 C1、C2
+- 工作计划:
+    - 方案: 拆分为 Phase Builder（_Phase1InfraBuilder / _Phase2ToolBuilder / _Phase3AppAssembler）
+    - 备选: 引入简单 DI 容器或 Builder 模式分段构建
+    - _build_chat 参数改为 dataclass 收纳可选依赖
+    - 验证: 启动探针通过、模块初始化无回归
+    - 影响面: factory.py 主要重写，command.py 调用方适配
+    - 风险: 中——初始化流程重构，需覆盖 enabled/disabled/probe_failed 等分支
 
 ### [B-260519-7bdae0] ChatSession 职责拆分（编排/回复处理/评分触发）
 - 创建: 2026-05-19
@@ -41,24 +70,61 @@
     - 影响面: chat/session.py（主要拆分），factory.py 组装逻辑适配
     - 风险: 中——ChatSession 是核心热路径，拆分需仔细保证行为不变
 
-### [B-260519-fcac7d] 统一工具执行模型（EventGenerationAgent 走 ToolRegistry）
+### [B-260519-da1d8e] 引入 Hook Pipeline 替代硬编码 Agent Loop
 - 创建: 2026-05-19
 - 问题表现:
-    - ToolRegistry 设计 ToolDomain.CHAT 和 ToolDomain.LIFE，但 life 域从未注册任何工具
-    - EventGenerationAgent 使用 collecting.py 的 make_collecting_executor 绕过 ToolRegistry
-    - 工具系统存在两套执行路径：chat 域走 ToolRegistry，life 域走 collecting executor
-    - 参考: tools-analyzer 报告 T1、T7
+    - 当前 AgentLoop while-loop 硬编码，扩展（如新增权限检查、上下文压缩）需修改核心循环
+    - Hook 协议仅 3 个钩子（pre_llm/post_llm/post_tool），缺少 agent 生命周期事件
+    - looplet composable_loop() 用 generator + hook pipeline 可在不修改核心循环的情况下新增能力
+    - 参考: ref-researcher 报告 RF1
 - 工作计划:
-    - 方案: 为 life 域注册正式工具（record_event/record_reaction 等），替换 collecting executor
-    - EventGenerationAgent 复用 ToolRegistry 和 AgentLoop，不再自建实例
-    - 验证: life 事件生成端到端测试，工具调用结果与 collecting 模式一致
-    - 影响面: tools/registry.py、life/event_agent.py、tools/collecting.py（可移除）
-    - 风险: 中——life 路径涉及 LLM 调用 + 工具交互，需仔细回归
+    - 方案: 引入 HookPipeline，含 pre_dispatch/post_dispatch/check_done/should_stop 等标准钩子点
+    - 每个 hook 返回 HookDecision（None 放行 / Inject 注入 / Block 阻断 / Stop 终止）
+    - 兼容现有 hook 协议，渐进迁移
+    - 验证: 现有 hook（QuotaHook/BillingHook/TraceHook/SegmentCorrectionHook）在 pipeline 下行为一致
+    - 影响面: llm/loop.py（AgentLoop）、llm/hook_protocol.py（扩展）、llm/hooks.py（适配）
+    - 风险: 中——核心循环变更，需全量 AgentLoop 测试覆盖
 
 ### [B-260515-dd50eb] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-05-15
 - 问题表现: 用户可通过 .ai key config 命令提供自己的 LLM API key，覆盖全局配置。涉及计费体系、配额管理、滥用防护等一整套体系，当前设计对安全边界覆盖不足。该功能与 provider 路由重构的候选池调度、熔断器、探针等核心机制耦合过深，增加了不必要的复杂度。当前从本分支 scope 中移出，需求保留待后续独立实施。
 - 工作计划: 独立设计用户 Key 管理子系统：安全存储（加密）、配额追踪、滥用检测。实现 UserLLMConfig 数据模型（含 API key 加密存储）。实现 .ai key config 命令交互流程。Router 层集成用户 Key 覆盖逻辑（优先级高于全局配置）。影响面: module/persona/data/models.py、module/persona/command.py、module/persona/llm/router.py。
+
+### [B-260519-bbd19f] PersonaDataStore 按职责拆分为 4 个窄接口（Message/Relationship/Profile/Event）
+- 创建: 2026-05-19
+- 问题表现:
+  - PersonaDataStore 1700 行 60+ 方法，被无差别塞给 ChatSession、LifeSimulator、ProactiveScheduler 等所有组件
+  - ChatSession 实际只用 14 个方法，却持有整个 Store 引用，无法从签名判断数据访问边界
+  - 导致越界调用风险（如 ChatSession 可能不小心调 list_all_relationships_raw）、单测困难（必须拉起完整 SQLite）
+  - 症状案例: D4 search_memory 在数据层混入展示格式化逻辑，根源是 Store 缺乏接口约束
+- 工作计划:
+  - MessageStore: add_message / get_private_messages / get_group_messages / clear_messages / mark_sent
+  - RelationshipStore: get_relationship / init_relationship / update_relationship / list_all_relationships / add_score_event
+  - ProfileStore: get_profile / save_profile
+  - EventStore: get_daily_events / add_daily_event / get_diary / save_diary
+  - PersonaDataStore 同时实现 4 个接口，零额外对象分配
+  - ChatSession 构造参数改为 (message_store, relationship_store, profile_store, event_store)，其他组件同理按需注入
+  - 单测可精准 mock 单个窄接口，无需拉起 SQLite
+  - 影响面: data/store.py（拆分接口定义）、factory.py（注入适配）、chat/session.py、life/simulator.py、life/proactive_scheduler.py 等依赖方
+  - 风险: 中——接口拆分不改运行时行为，但涉及多个调用方签名变更
+
+### [B-260519-164b83] LLM 错误分类体系重构：ErrorKind 枚举 + 分类唯一入口 + 分级恢复策略
+- 创建: 2026-05-19
+- 问题表现:
+  - classify_error 逻辑在 router.py:237、router.py:335、loop.py:286 三处重复
+  - 分类粒度只有 RETRYABLE/NON_RETRYABLE 两极，所有可重试错误一刀切切换候选模型
+  - 用户侧错误反馈千篇一律（"抱歉我出错了"），不区分配额用尽/内容过滤/网络超时
+  - Life 路径异常全部 logger.exception 后静默吞掉，调度器不感知连续失败
+  - NON_RETRYABLE_EXCEPTIONS 在 coordinator.py:21 硬编码元组，新增错误类型需改多处
+- 工作计划:
+  - 新建 llm/errors.py，定义 ErrorKind 枚举（QUOTA_EXCEEDED/CONTENT_FILTERED/CONTEXT_TOO_LONG/RATE_LIMITED/TEMPORARILY_DOWN/NETWORK_ERROR/PROVIDER_ERROR）
+  - 每种 ErrorKind 绑定 recovery action：QUOTA_EXCEEDED→跳过用户告知引导/CONTEXT_TOO_LONG→compact重试/RATE_LIMITED→退避等待/TEMPORARILY_DOWN→切候选/NETWORK_ERROR→退避连败标记/PROVIDER_ERROR→标记dead告警
+  - classify() 唯一入口函数，router/loop/coordinator 统一调用
+  - router.run_via_loop 中按 ErrorKind 分支执行对应 recovery，替换当前统一的候选切换
+  - Life 路径通过 classify() 感知错误类型，连续 TEMPORARILY_DOWN 超阈值可暂停调度器
+  - 用户可见错误信息按 ErrorKind 差异化（如 QUOTA_EXCEEDED 引导配置 key）
+  - 影响面: llm/errors.py（新建）、llm/router.py、llm/loop.py、llm/coordinator.py、chat/session.py（兜底文案）、life/simulator.py（错误感知）
+  - 风险: 中——重试策略变更需要全量 LLM 调用路径回归
 
 ### [B-260519-1601ee] 消解 EventShareTaskQueue，延迟分享逻辑合并到 ProactiveScheduler
 - 创建: 2026-05-19

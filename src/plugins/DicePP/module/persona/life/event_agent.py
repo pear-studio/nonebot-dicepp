@@ -12,8 +12,9 @@ import json
 from nonebot.log import logger
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy
-from ..tools.collecting import make_collecting_executor
-from ..tools.registry import ToolRegistry, ToolDef
+from ..tools.registry import ToolRegistry, ToolDomain
+from ..tools.collecting import RECORD_EVENT_TOOL, RECORD_REACTION_TOOL, RECORD_DIARY_ENTRY_TOOL, RECORD_SHARE_MESSAGE_TOOL
+from ..tools.context import ToolContext
 from ..wall_clock import format_timestamp, format_relative_time
 from typing import TYPE_CHECKING
 
@@ -105,31 +106,6 @@ class EventContext:
 class EventGenerationAgent:
     """事件生成 Agent - 使用辅助模型"""
 
-    async def _run_collecting_loop(
-        self, max_tool_rounds: int, tool_def: dict, policy: SelectionPolicy,
-        messages: List[dict], tools: List[dict], temperature: float,
-    ):
-        """通过 router.run_via_loop() 执行收集型 LLM 调用"""
-        collected_args: list = []
-        name = tool_def["function"]["name"]
-        params = tool_def["function"]["parameters"]
-
-        tool_registry = ToolRegistry()
-        tool_registry.register(
-            "life", ToolDef(name=name, description="", parameters=params),
-            make_collecting_executor(collected_args),
-        )
-
-        hooks = self.llm_router.make_default_hooks()
-        result = await self.llm_router.run_via_loop(
-            messages=messages, tools=tools, temperature=temperature,
-            timeout=self._bg_timeout, selection=policy,
-            max_tool_rounds=max_tool_rounds,
-            tool_registry=tool_registry, tool_domains=["life"],
-            hooks=hooks,
-        )
-        return result, collected_args
-
     # ── 默认 few-shot 示例（系统默认）
     _DEFAULT_SHARE_EXAMPLES: List[str] = [
         "场景：午后在公园长椅上打盹，被鸽子踩醒了\n"
@@ -147,9 +123,11 @@ class EventGenerationAgent:
     def __init__(
         self,
         llm_router: LLMRouter,
+        tool_registry: ToolRegistry,
         config: Optional["PersonaConfig"] = None,
     ):
         self.llm_router = llm_router
+        self.tool_registry = tool_registry
         self.config = config
         self._bg_timeout = (
             getattr(config, "background_llm_timeout_seconds", _DEFAULT_BG_TIMEOUT)
@@ -189,6 +167,19 @@ class EventGenerationAgent:
 - ±1-5: 轻微变化（日常琐事）
 - ±6-10: 明显变化（值得关注的事件）
 - ±11-20: 显著变化（重大事件，极少超过20）"""
+
+    async def _run_life_collect_loop(
+        self, messages: list, tools: list, temperature: float, selection: SelectionPolicy,
+    ) -> list:
+        collected: list = []
+        tool_ctx = ToolContext(collected_args=collected)
+        await self.llm_router.run_via_loop(
+            messages=messages, tools=tools, temperature=temperature,
+            timeout=self._bg_timeout, tool_registry=self.tool_registry,
+            tool_domains=[ToolDomain.LIFE], tool_ctx=tool_ctx,
+            selection=selection, max_tool_rounds=self._max_tool_rounds,
+        )
+        return collected
 
     async def generate_event_result(self, context: EventContext) -> EventGenerationResult:
         """
@@ -267,58 +258,17 @@ class EventGenerationAgent:
         logger.debug("[prompt:system_event]\n{}", system_prompt)
         logger.debug("[prompt:user_event]\n{}", user_prompt)
 
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "record_event",
-                    "description": "记录生成的生活事件及其对角色状态的影响",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "description": {
-                                "type": "string",
-                                "description": "事件描述，自然叙事，不强制字数上限但保持简洁",
-                            },
-                            "context_summary": {
-                                "type": "string",
-                                "minLength": 1,
-                                "description": "事件摘要，30-60字，仅包含关键事实（谁、在哪、做了什么、结果），用于聊天上下文注入",
-                            },
-                            "duration_minutes": {
-                                "type": "integer",
-                                "minimum": 0,
-                                "maximum": 2880,
-                                "description": "事件持续时间（分钟），0 表示瞬时事件，最多 48 小时",
-                            },
-                            "energy_delta": {
-                                "type": "integer",
-                                "description": "事件对体力的影响（可选，范围-20~+20）",
-                            },
-                            "mood_delta": {
-                                "type": "integer",
-                                "description": "事件对心情的影响（可选，范围-20~+20）",
-                            },
-                            "health_delta": {
-                                "type": "integer",
-                                "description": "事件对健康的影响（可选，范围-20~+20）",
-                            },
-                        },
-                        "required": ["description", "context_summary", "duration_minutes"],
-                    },
-                },
-            }
-        ]
+        tools = [RECORD_EVENT_TOOL.to_openai_format()]
 
         try:
-            max_tool_rounds = self._max_tool_rounds
-            result, collected = await self._run_collecting_loop(
-                max_tool_rounds, tools[0], SelectionPolicy.EVENT_GEN,
+            collected = await self._run_life_collect_loop(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools, temperature=0.9,
+                tools=tools,
+                temperature=0.9,
+                selection=SelectionPolicy.EVENT_GEN,
             )
 
             if not collected:
@@ -339,7 +289,7 @@ class EventGenerationAgent:
                 if val is None:
                     return None
                 try:
-                    return int(val)
+                    return max(-20, min(20, int(val)))
                 except (TypeError, ValueError):
                     return None
 
@@ -443,57 +393,17 @@ class EventGenerationAgent:
         logger.debug("[prompt:system_reaction]\n{}", system_prompt)
         logger.debug("[prompt:user_reaction]\n{}", user_prompt)
 
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "record_reaction",
-                    "description": "记录角色对事件的内心反应、分享欲望、行动倾向和意向更新",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "reaction": {
-                                "type": "string",
-                                "description": "30-80 字的内心反应，仅用于日记和上下文",
-                            },
-                            "share_desire": {
-                                "type": "number",
-                                "minimum": 0.0,
-                                "maximum": 1.0,
-                                "description": (
-                                    "角色主动想把这件事说出去的程度，0~1。锚点："
-                                    "0.0-0.2 纯个人日常/重复琐事，没必要说；"
-                                    "0.3-0.4 顺嘴可提的小事，被问才会说；"
-                                    "0.5-0.6 自然想提起的事，聊起来会主动提（小心情/新发现/吐槽）；"
-                                    "0.7-0.8 比较强的分享冲动（做了决定/情绪波动想找人说/小成就）；"
-                                    "0.9-1.0 迫不及待想说出去（强烈情绪/期待已久的成就感/兴奋念头）。"
-                                    "重复的日常动作给低分，依据是'分享价值'非'事件戏剧性'。"
-                                ),
-                            },
-                            "follow_up_action": {
-                                "type": ["string", "null"],
-                                "description": "根据当前情况，角色决定做并且已经开始做的事。如果有，填写具体描述，这会触发事件-反应链的续写。如果没有则填 null",
-                            },
-                            "pending_plan": {
-                                "type": ["string", "null"],
-                                "description": "角色产生的短期想法或计划，但还没有开始做。填写后会被记录到角色状态中供后续事件参考，但不会立即触发续写。null=保持当前备忘，空字符串=清空备忘，非空字符串=更新备忘",
-                            },
-                        },
-                        "required": ["reaction", "share_desire"],
-                    },
-                },
-            }
-        ]
+        tools = [RECORD_REACTION_TOOL.to_openai_format()]
 
         try:
-            max_tool_rounds = self._max_tool_rounds
-            result, collected = await self._run_collecting_loop(
-                max_tool_rounds, tools[0], SelectionPolicy.EVENT_GEN,
+            collected = await self._run_life_collect_loop(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools, temperature=0.9,
+                tools=tools,
+                temperature=0.9,
+                selection=SelectionPolicy.EVENT_GEN,
             )
 
             if not collected:
@@ -629,35 +539,17 @@ class EventGenerationAgent:
         logger.debug("[prompt:system_diary]\n{}", system_prompt)
         logger.debug("[prompt:user_diary]\n{}", user_prompt)
 
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "record_diary_entry",
-                    "description": "记录日记内容",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "diary": {
-                                "type": "string",
-                                "description": "日记内容，100-300字，第一人称",
-                            },
-                        },
-                        "required": ["diary"],
-                    },
-                },
-            }
-        ]
+        tools = [RECORD_DIARY_ENTRY_TOOL.to_openai_format()]
 
         try:
-            max_tool_rounds = self._max_tool_rounds
-            result, collected = await self._run_collecting_loop(
-                max_tool_rounds, tools[0], SelectionPolicy.DIARY,
+            collected = await self._run_life_collect_loop(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=tools, temperature=0.85,
+                tools=tools,
+                temperature=0.85,
+                selection=SelectionPolicy.DIARY,
             )
 
             if not collected:
@@ -801,41 +693,23 @@ class EventGenerationAgent:
         logger.debug("[prompt:system_share]\n{}", system_prompt)
         logger.debug("[prompt:user_share]\n{}", user_prompt)
 
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "record_share_message",
-                    "description": "调用此工具输出你要发给对方的分享消息。20-60字的第一人称口语消息，禁止出现角色名和第三人称描写。不要直接回复文本，必须通过此工具输出。",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "message": {
-                                "type": "string",
-                                "description": "20-60字的分享消息",
-                            },
-                        },
-                        "required": ["message"],
-                    },
-                },
-            }
-        ]
+        tools = [RECORD_SHARE_MESSAGE_TOOL.to_openai_format()]
 
         max_chars = getattr(self.config, "proactive_share_max_chars", 200) if self.config else 200
         max_chars = max(10, max_chars)
-        max_tool_rounds = self._max_tool_rounds
         max_parse_retries = 2
         backoff_base = getattr(self.config, "proactive_share_backoff_base_seconds", 2) if self.config else 2
 
         for attempt in range(max_parse_retries + 1):
             try:
-                result, collected = await self._run_collecting_loop(
-                    max_tool_rounds, tools[0], SelectionPolicy.SUMMARIZE,
+                collected = await self._run_life_collect_loop(
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    tools=tools, temperature=0.85,
+                    tools=tools,
+                    temperature=0.85,
+                    selection=SelectionPolicy.SUMMARIZE,
                 )
             except ServiceUnavailableError as e:
                 logger.error(f"分享消息: 无可用 provider: {e}", exc_info=True)

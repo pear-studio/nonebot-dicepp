@@ -23,6 +23,14 @@ from core.config.pydantic_models import PersonaConfig  # noqa: E402
 from module.persona.character.loader import CharacterLoader  # noqa: E402
 from module.persona.life.event_agent import EventGenerationAgent  # noqa: E402
 from module.persona.llm.router import LLMRouter  # noqa: E402
+from module.persona.tools.registry import ToolRegistry, ToolDomain  # noqa: E402
+from module.persona.tools.collecting import (  # noqa: E402
+    RECORD_EVENT_TOOL,
+    RECORD_REACTION_TOOL,
+    RECORD_DIARY_ENTRY_TOOL,
+    RECORD_SHARE_MESSAGE_TOOL,
+    life_collecting_executor,
+)
 
 
 # (期望区间下限, 期望区间上限, 事件描述)
@@ -110,7 +118,12 @@ async def main() -> None:
     print(f"[ok] 模型: {cfg.primary_model} (aux: {cfg.auxiliary_model or '(=primary)'})")
     print(f"[ok] 采样事件数: {len(SAMPLE_EVENTS)}\n")
 
-    agent = EventGenerationAgent(router, cfg)
+    tool_registry = ToolRegistry()
+    tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
+    agent = EventGenerationAgent(router, tool_registry, cfg)
     sem = asyncio.Semaphore(3)
 
     async def call(idx: int, lo: float, hi: float, event: str):

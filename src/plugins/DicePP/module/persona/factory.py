@@ -44,6 +44,13 @@ from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_database
 from .tools.search_query import SEARCH_QUERY_TOOL, search_query_executor
 from .tools.suggest_action import SUGGEST_ACTION_TOOL, make_suggest_action_executor
 from .tools.generate_image import make_generate_image_tool_def, make_generate_image_executor
+from .tools.collecting import (
+    RECORD_EVENT_TOOL,
+    RECORD_REACTION_TOOL,
+    RECORD_DIARY_ENTRY_TOOL,
+    RECORD_SHARE_MESSAGE_TOOL,
+    life_collecting_executor,
+)
 
 from .chat.segment_dispatcher import SegmentDispatcher
 
@@ -378,8 +385,15 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
             message_port=port,
         )
 
+    # ── tool_registry 提前创建，注册 life 域工具（无外部依赖）
+    tool_registry = ToolRegistry()
+    tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
+
     # ── Step 2: event_agent (life 和 scheduler 共用)
-    event_agent = EventGenerationAgent(router, config=config)
+    event_agent = EventGenerationAgent(router, tool_registry, config=config)
 
     # ── Step 3: event_share_queue (提前构造，供 character_life 和 _build_life 共用)
     event_share_queue = EventShareTaskQueue(
@@ -412,7 +426,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("ActionEvaluator 已初始化")
 
-    # ── Step 6: tool_registry (含 suggest_action executor)
+    # ── Step 6: 注册 chat 域工具（依赖 action_evaluator, character_life 等）
     suggest_action_executor = make_suggest_action_executor(
         store=store,
         action_evaluator=action_evaluator,
@@ -421,7 +435,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         life_lock=character_life._state_lock,
     )
 
-    tool_registry = ToolRegistry()
     tool_registry.register(ToolDomain.CHAT, SEARCH_MEMORY_TOOL, search_memory_executor)
     tool_registry.register(
         ToolDomain.CHAT,
