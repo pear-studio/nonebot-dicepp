@@ -13,8 +13,7 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from nonebot.log import logger
 
-from .providers.openai import OpenAIProvider
-from .providers.minimax_image import MiniMaxImageProvider
+from .providers import _PROVIDER_CLASSES
 from .providers.protocol import LLMProvider, ImageGenProvider, ErrorClass
 from .circuit_breaker import CircuitBreakerRegistry
 from .selection import SelectionPolicy
@@ -87,9 +86,6 @@ class LLMRouter:
         )
 
     def _build_providers(self, providers: Dict[str, ProviderConfig]) -> None:
-        # NOTE: 当前 category→provider 映射为 1:1 硬编码。
-        # 未来若新增 category 或同 category 多 provider 实现，
-        # 需重构为 registry/factory 模式（如 _PROVIDER_CLASSES = {"llm": {...}, "gen": {...}}）。
         for pname, pconfig in providers.items():
             max_conc = pconfig.max_concurrent if pconfig.max_concurrent is not None else self.global_max_concurrent
             self._semaphores[pname] = asyncio.Semaphore(max_conc)
@@ -105,33 +101,28 @@ class LLMRouter:
                     probe_interval_seconds=cb_config.probe_interval_seconds if cb_config else 300,
                 )
 
-                extra_params: Dict[str, Any] = {}  # 未来扩展点：ModelConfig 可增加 extra_params 字段，允许模型级传递供应商特定参数
-                if mconfig.category == "llm":
-                    provider = OpenAIProvider(
-                        api_key=pconfig.api_key,
-                        base_url=pconfig.base_url,
-                        model=mconfig.name,
-                        extra_params=extra_params,
-                    )
-                    provider._router_key = key
-                    self._model_providers[key] = provider
-                    self._model_configs[key] = mconfig
-                    self._llm_models.append(key)
-                elif mconfig.category == "gen":
-                    provider = MiniMaxImageProvider(
-                        api_key=pconfig.api_key,
-                        base_url=pconfig.base_url,
-                        model=mconfig.name,
-                    )
-                    provider._router_key = key
-                    self._model_providers[key] = provider
-                    self._model_configs[key] = mconfig
-                    self._gen_models.append(key)
-                else:
+                provider_cls = _PROVIDER_CLASSES.get(mconfig.category)
+                if provider_cls is None:
                     logger.warning(
                         f"模型 '{mconfig.name}' (provider={pname}) 跳过: "
-                        f"未知 category '{mconfig.category}'，当前仅支持 'llm' 和 'gen'"
+                        f"未知 category '{mconfig.category}'，已注册: {list(_PROVIDER_CLASSES.keys())}"
                     )
+                    continue
+
+                extra_params: Dict[str, Any] = {}
+                provider = provider_cls(
+                    api_key=pconfig.api_key,
+                    base_url=pconfig.base_url,
+                    model=mconfig.name,
+                    **({"extra_params": extra_params} if mconfig.category == "llm" else {}),
+                )
+                provider._router_key = key
+                self._model_providers[key] = provider
+                self._model_configs[key] = mconfig
+                if mconfig.category == "llm":
+                    self._llm_models.append(key)
+                elif mconfig.category == "gen":
+                    self._gen_models.append(key)
 
     # ── 候选池构建 ────────────────────────────────────────────
 

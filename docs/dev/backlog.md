@@ -25,19 +25,6 @@
     - 影响面: chat/segment_dispatcher.py
     - 风险: 中——并发逻辑修改需仔细验证，不当修改可能引入死锁
 
-### [B-260519-457fea] LLMRouter provider 创建硬编码 if/elif 改为注册表模式
-- 创建: 2026-05-19
-- 问题表现:
-    - router.py _build_providers() 中 category->provider class 映射为硬编码 if/elif 分支
-    - 代码自身 L90 注释承认此技术债: "未来若新增 category 需重构为 registry/factory 模式"
-    - 新增 provider 类型（如 Anthropic、Google AI）必须修改此方法
-    - 参考: llm-analyzer 报告 L2
-- 工作计划:
-    - 方案: _PROVIDER_CLASSES: Dict[str, Type] = {"llm": OpenAIProvider, "gen": MiniMaxImageProvider}，_build_providers 改为查表创建
-    - 验证: 现有 provider 注册与路由测试通过
-    - 影响面: llm/router.py、llm/providers/__init__.py
-    - 风险: 低——纯重构，不改变运行时行为
-
 ### [B-260519-ffb8d3] AgentLoop 提升为独立模块供 chat/life/scoring 复用
 - 创建: 2026-05-19
 - 问题表现:
