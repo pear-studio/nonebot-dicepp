@@ -118,3 +118,13 @@ uv run python bot.py
 3. **禁止无验证的声称**：不可在未运行测试前声称"已完成"或"测试通过"。
 4. **禁止硬编码业务耦合的默认值**：配置项应走配置系统，不可埋 magic number/string。
 5. **禁止吞掉错误**：不可忽略返回值或无理由强转类型。
+
+## Agent skills
+
+### Issue tracker
+
+本地 markdown 文件 `docs/dev/backlog.md`，由 `scripts/tools/backlog.py` CLI 管理（add/list/show/close/validate/sort）。详见 `docs/agents/issue-tracker.md`。
+
+### Domain docs
+
+Single-context 布局：`docs/CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
