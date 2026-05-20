@@ -75,6 +75,13 @@ metadata:
    可以开始开发了。开发完成后用 /pr-create 创建 Pull Request。
    ```
 
+8. **路径硬约束**
+
+   EnterWorktree 已将 CWD 切换到 worktree 目录。**从现在起，所有文件操作（Edit/Read/Write/Bash/git）必须以 worktree 根目录为绝对路径前缀，禁止使用原始仓库路径。** worktree 根目录可从 CWD 或 `git worktree list` 获取。
+
+   > 反例：`/home/ubuntu/dicepp/dev/src/.../file.py`（原始仓库路径）
+   > 正例：`/home/ubuntu/dicepp/dev/.claude/worktrees/<name>/src/.../file.py`
+
 **清理 worktree**
 
 开发完成、分支合并后，使用 `ExitWorktree` 退出并清理：
