@@ -157,6 +157,36 @@ class PersonaApp:
         return await self.life.tick_daily()
 
 
+@dataclass
+class _Infra:
+    """基础设施组件 — _build_infra 的返回容器"""
+    store: PersonaDataStore
+    router: LLMRouter
+    port: MessagePort
+    segment_dispatcher: Optional[SegmentDispatcher]
+
+
+@dataclass
+class ChatDeps:
+    """_build_chat 的依赖参数集合 — 替代 16 个独立 keyword 参数"""
+    store: PersonaDataStore
+    message_store: MessageStore
+    rel_store: RelationshipStore
+    profile_store: ProfileStore
+    event_store: EventStore
+    router: LLMRouter
+    tool_registry: ToolRegistry
+    coordinator: LLMCallCoordinator
+    character: Character
+    config: Any
+    decay_calculator: DecayCalculator
+    port: MessagePort
+    segment_dispatcher: Optional[SegmentDispatcher] = None
+    query_store: Any = None
+    resolve_db: Any = None
+    sleep_gate: Optional[SleepGate] = None
+
+
 def _load_character(config) -> Character:
     """加载角色卡"""
     character_loader = CharacterLoader(config.character_path)
@@ -226,71 +256,170 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
     return port
 
 
-def _build_chat(
-    *,
+async def _build_infra(bot: Bot, config) -> _Infra:
+    """创建基础设施组件: store / router / port / segment_dispatcher"""
+    store = await _build_store(bot, config)
+    router = _build_router(config, store)
+    port = _build_port(bot, store)
+
+    segment_dispatcher = None
+    if config.segment_enabled:
+        segment_dispatcher = SegmentDispatcher(message_port=port)
+
+    return _Infra(
+        store=store,
+        router=router,
+        port=port,
+        segment_dispatcher=segment_dispatcher,
+    )
+
+
+def _build_tooling(
     store: PersonaDataStore,
-    message_store: MessageStore,
-    rel_store: RelationshipStore,
-    profile_store: ProfileStore,
-    event_store: EventStore,
     router: LLMRouter,
-    tool_registry: ToolRegistry,
-    coordinator: LLMCallCoordinator,
-    character: Character,
     config,
-    decay_calculator: DecayCalculator,
-    port: MessagePort,
-    segment_dispatcher: Optional[SegmentDispatcher] = None,
-    query_store: Any = None,
-    resolve_db: Any = None,
-    sleep_gate: Optional[SleepGate] = None,
-) -> ChatSession:
+    character: Character,
+) -> tuple[ToolRegistry, EventGenerationAgent, CharacterLife, ActionEvaluator]:
+    """创建工具注册表、事件代理、角色生活、动作评估器"""
+    tool_registry = ToolRegistry()
+    tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
+    tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
+
+    event_agent = EventGenerationAgent(router, tool_registry, config=config)
+
+    life_config = CharacterLifeConfig.from_persona(config)
+    character_life = CharacterLife(
+        config=life_config,
+        event_agent=event_agent,
+        data_store=store,
+        character=character,
+    )
+
+    action_evaluator = ActionEvaluator(
+        store=store,
+        router=router,
+        config=config,
+        timezone=config.timezone,
+    )
+    logger.info("ActionEvaluator 已初始化")
+
+    suggest_action_executor = make_suggest_action_executor(
+        store=store,
+        action_evaluator=action_evaluator,
+        character_life=character_life,
+        min_relationship=config.suggest_action_min_relationship,
+        life_lock=character_life._state_lock,
+    )
+
+    tool_registry.register(ToolDomain.CHAT, SEARCH_MEMORY_TOOL, search_memory_executor)
+    tool_registry.register(
+        ToolDomain.CHAT,
+        SEARCH_HISTORY_TOOL,
+        make_search_history_executor(config.search_chat_history_max_chars),
+    )
+    tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
+    tool_registry.register(ToolDomain.CHAT, LIST_QUERY_DATABASES_TOOL, list_query_databases_executor)
+    tool_registry.register(ToolDomain.CHAT, SEARCH_QUERY_TOOL, search_query_executor)
+    tool_registry.register(ToolDomain.CHAT, SUGGEST_ACTION_TOOL, suggest_action_executor)
+    if config.segment_enabled:
+        tool_registry.register(
+            ToolDomain.CHAT,
+            make_tool_def(
+                target_chars=config.segment_target_chars,
+                max_chars=config.segment_max_chars,
+                max_delay=config.segment_max_delay,
+            ),
+            send_reply_segment_executor,
+        )
+
+    base_style = (
+        character.extensions.image_gen_style
+        or config.image_gen_style
+    )
+    character_appearance = character.extensions.image_gen_appearance
+    gen_tool_def = make_generate_image_tool_def(
+        base_style=base_style,
+        character_appearance=character_appearance,
+    )
+    gen_executor = make_generate_image_executor(
+        get_gen_provider=router.get_gen_provider,
+        handle_model_error=router.handle_model_error,
+        base_style=base_style,
+        character_appearance=character_appearance,
+    )
+    tool_registry.register(ToolDomain.CHAT, gen_tool_def, gen_executor)
+
+    logger.info("工具注册表与分段调度器已初始化")
+    return tool_registry, event_agent, character_life, action_evaluator
+
+
+def _make_resolve_query_db(bot: Bot):
+    """返回 _build_chat 所需的 resolve_db 回调（闭包捕获 bot）"""
+    async def _resolve_query_db(user_id: str, group_id: str) -> str:
+        if group_id:
+            row = await bot.db.group_config.get(group_id)
+            if row and row.data:
+                return row.data.get("query_database", bot.config.mode.default)
+            return bot.config.mode.default
+        else:
+            row = await bot.db.user_stat.get(user_id)
+            if row and row.data:
+                db = row.data.get("query_database")
+                if db:
+                    return db
+            return bot.config.query.private_database
+    return _resolve_query_db
+
+
+def _build_chat(deps: ChatDeps) -> ChatSession:
     """组装 ChatSession"""
-    scoring_agent = ScoringAgent(router, timezone=config.timezone,
-                                 max_tool_rounds=config.background_llm_max_tool_rounds)
+    scoring_agent = ScoringAgent(deps.router, timezone=deps.config.timezone,
+                                 max_tool_rounds=deps.config.background_llm_max_tool_rounds)
     from .chat.context import SegmentGuide
 
     segment_guide = None
-    if config.segment_enabled:
+    if deps.config.segment_enabled:
         segment_guide = SegmentGuide(
             enabled=True,
-            target_chars=config.segment_target_chars,
-            max_chars=config.segment_max_chars,
-            soft_limit=config.segment_soft_limit,
-            hard_limit=config.segment_hard_limit,
+            target_chars=deps.config.segment_target_chars,
+            max_chars=deps.config.segment_max_chars,
+            soft_limit=deps.config.segment_soft_limit,
+            hard_limit=deps.config.segment_hard_limit,
         )
 
     context_builder = ContextBuilder(
-        character,
-        max_history_turns=config.max_history_turns,
-        max_history_tokens=config.max_history_tokens,
-        timezone=config.timezone,
-        lore_token_budget=config.lore_token_budget,
+        deps.character,
+        max_history_turns=deps.config.max_history_turns,
+        max_history_tokens=deps.config.max_history_tokens,
+        timezone=deps.config.timezone,
+        lore_token_budget=deps.config.lore_token_budget,
         segment_guide=segment_guide,
     )
-    chat_config = ChatConfig.from_persona(config)
+    chat_config = ChatConfig.from_persona(deps.config)
 
-    response_handler = ResponseHandler(store=store, port=port)
+    response_handler = ResponseHandler(store=deps.store, port=deps.port)
     scoring_trigger = ScoringTrigger(
-        store=store, scoring_agent=scoring_agent,
-        decay_calculator=decay_calculator, character=character,
+        store=deps.store, scoring_agent=scoring_agent,
+        decay_calculator=deps.decay_calculator, character=deps.character,
         config=chat_config,
     )
     return ChatSession(
-        store=store,
-        router=router,
-        tool_registry=tool_registry,
-        coordinator=coordinator,
-        character=character,
+        store=deps.store,
+        router=deps.router,
+        tool_registry=deps.tool_registry,
+        coordinator=deps.coordinator,
+        character=deps.character,
         config=chat_config,
         scoring_trigger=scoring_trigger,
         response_handler=response_handler,
         context_builder=context_builder,
-        decay_calculator=decay_calculator,
-        segment_dispatcher=segment_dispatcher,
-        query_store=query_store,
-        resolve_db=resolve_db,
-        sleep_gate=sleep_gate,
+        decay_calculator=deps.decay_calculator,
+        segment_dispatcher=deps.segment_dispatcher,
+        query_store=deps.query_store,
+        resolve_db=deps.resolve_db,
+        sleep_gate=deps.sleep_gate,
     )
 
 
@@ -370,103 +499,17 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
 
     character = _load_character(config)
 
-    # Providers 前置检查
     if not config.providers:
         raise PersonaConfigError(
             "未配置任何 LLM 提供者 (persona_ai.providers)。"
             "请参考新格式: persona_ai.providers.<name>.api_key / .base_url / .models[*]"
         )
 
-    # ── Step 1: 基础设施 (store, router, port)
-    store = await _build_store(bot, config)
-    router = _build_router(config, store)
-    port = _build_port(bot, store)
-
-    segment_dispatcher = None
-    if config.segment_enabled:
-        segment_dispatcher = SegmentDispatcher(
-            message_port=port,
-        )
-
-    # ── tool_registry 提前创建，注册 life 域工具（无外部依赖）
-    tool_registry = ToolRegistry()
-    tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
-    tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
-    tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
-    tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
-
-    # ── Step 2: event_agent (life 和 scheduler 共用)
-    event_agent = EventGenerationAgent(router, tool_registry, config=config)
-
-    # ── Step 3: character_life (提前构造，供 sleep_gate 和 suggest_action 引用)
-    life_config = CharacterLifeConfig.from_persona(config)
-    character_life = CharacterLife(
-        config=life_config,
-        event_agent=event_agent,
-        data_store=store,
-        character=character,
+    infra = await _build_infra(bot, config)
+    tool_registry, event_agent, character_life, _ = _build_tooling(
+        infra.store, infra.router, config, character,
     )
 
-    # ── Step 4: action_evaluator
-    action_evaluator = ActionEvaluator(
-        store=store,
-        router=router,
-        config=config,
-        timezone=config.timezone,
-    )
-    logger.info("ActionEvaluator 已初始化")
-
-    # ── Step 5: 注册 chat 域工具（依赖 action_evaluator, character_life 等）
-    suggest_action_executor = make_suggest_action_executor(
-        store=store,
-        action_evaluator=action_evaluator,
-        character_life=character_life,
-        min_relationship=config.suggest_action_min_relationship,
-        life_lock=character_life._state_lock,
-    )
-
-    tool_registry.register(ToolDomain.CHAT, SEARCH_MEMORY_TOOL, search_memory_executor)
-    tool_registry.register(
-        ToolDomain.CHAT,
-        SEARCH_HISTORY_TOOL,
-        make_search_history_executor(config.search_chat_history_max_chars),
-    )
-    tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
-    tool_registry.register(ToolDomain.CHAT, LIST_QUERY_DATABASES_TOOL, list_query_databases_executor)
-    tool_registry.register(ToolDomain.CHAT, SEARCH_QUERY_TOOL, search_query_executor)
-    tool_registry.register(ToolDomain.CHAT, SUGGEST_ACTION_TOOL, suggest_action_executor)
-    if config.segment_enabled:
-        tool_registry.register(
-            ToolDomain.CHAT,
-            make_tool_def(
-                target_chars=config.segment_target_chars,
-                max_chars=config.segment_max_chars,
-                max_delay=config.segment_max_delay,
-            ),
-            send_reply_segment_executor,
-        )
-
-    # ── generate_image 工具
-    base_style = (
-        character.extensions.image_gen_style
-        or config.image_gen_style
-    )
-    character_appearance = character.extensions.image_gen_appearance
-    gen_tool_def = make_generate_image_tool_def(
-        base_style=base_style,
-        character_appearance=character_appearance,
-    )
-    gen_executor = make_generate_image_executor(
-        get_gen_provider=router.get_gen_provider,
-        handle_model_error=router.handle_model_error,
-        base_style=base_style,
-        character_appearance=character_appearance,
-    )
-    tool_registry.register(ToolDomain.CHAT, gen_tool_def, gen_executor)
-
-    logger.info("工具注册表与分段调度器已初始化")
-
-    # ── Step 6: coordinator, decay_calculator
     coordinator = LLMCallCoordinator(
         max_failures=config.proactive_coordinator_max_failures,
         max_iterations=config.proactive_coordinator_max_iterations,
@@ -479,63 +522,44 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("衰减计算器已初始化")
 
-    # ── Step 7: _build_chat (注入 sleep_gate)
-    async def _resolve_query_db(user_id: str, group_id: str) -> str:
-        if group_id:
-            row = await bot.db.group_config.get(group_id)
-            if row and row.data:
-                return row.data.get("query_database", bot.config.mode.default)
-            return bot.config.mode.default
-        else:
-            row = await bot.db.user_stat.get(user_id)
-            if row and row.data:
-                db = row.data.get("query_database")
-                if db:
-                    return db
-            return bot.config.query.private_database
-
-    chat = _build_chat(
-        store=store,
-        message_store=store,
-        rel_store=store,
-        profile_store=store,
-        event_store=store,
-        router=router,
+    chat = _build_chat(ChatDeps(
+        store=infra.store,
+        message_store=infra.store,
+        rel_store=infra.store,
+        profile_store=infra.store,
+        event_store=infra.store,
+        router=infra.router,
         tool_registry=tool_registry,
         coordinator=coordinator,
         character=character,
         config=config,
         decay_calculator=decay_calculator,
-        port=port,
-        segment_dispatcher=segment_dispatcher,
+        port=infra.port,
+        segment_dispatcher=infra.segment_dispatcher,
         query_store=bot.db.query,
-        resolve_db=_resolve_query_db,
+        resolve_db=_make_resolve_query_db(bot),
         sleep_gate=character_life,
-    )
+    ))
 
-    # ── Step 8: _build_life (注入预构造组件)
     life = await _build_life(
-        store, character, config, coordinator, port, decay_calculator,
+        infra.store, character, config, coordinator, infra.port, decay_calculator,
         character_life=character_life,
         event_agent=event_agent,
     )
 
-    # 启动探针
     try:
-        probe_results = await router.probe_all_models()
+        await infra.router.probe_all_models()
     except Exception as e:
         logger.error(f"启动探针异常: {e}")
-        probe_results = {}
-    all_disabled = router.all_providers_disabled()
+    all_disabled = infra.router.all_providers_disabled()
     if all_disabled:
         logger.warning("所有模型 probe 失败！Persona AI 功能将不可用")
 
-    # 启动后台探针任务
-    router.start_probe_task()
+    infra.router.start_probe_task()
 
     logger.info("Persona 模块初始化完成")
     return PersonaApp(
-        chat=chat, life=life, store=store, port=port,
-        segment_dispatcher=segment_dispatcher,
+        chat=chat, life=life, store=infra.store, port=infra.port,
+        segment_dispatcher=infra.segment_dispatcher,
         all_providers_disabled=all_disabled,
     )
