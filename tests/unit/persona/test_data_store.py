@@ -35,10 +35,10 @@ class TestMessageCRUD:
     async def test_add_and_get_recent_messages(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        await store.add_unified_message("u1", "", "user", MessageType.CHAT, "hello")
-        await store.add_unified_message("u1", "", "assistant", MessageType.CHAT, "hi")
+        await store.add_message_stream("u1", "", "user", MessageType.CHAT, "hello")
+        await store.add_message_stream("u1", "", "assistant", MessageType.CHAT, "hi")
 
-        msgs = await store.get_recent_unified_messages("u1", limit=10)
+        msgs = await store.get_recent_messages("u1", limit=10)
         assert len(msgs) == 2
         assert msgs[0].role == "user"
         assert msgs[0].content == "hello"
@@ -50,9 +50,9 @@ class TestMessageCRUD:
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
         for i in range(5):
-            await store.add_unified_message("u1", "", "user", MessageType.CHAT, f"msg{i}")
+            await store.add_message_stream("u1", "", "user", MessageType.CHAT, f"msg{i}")
 
-        msgs = await store.get_recent_unified_messages("u1", limit=3)
+        msgs = await store.get_recent_messages("u1", limit=3)
         assert len(msgs) == 3
         assert msgs[0].content == "msg2"
         assert msgs[1].content == "msg3"
@@ -62,60 +62,61 @@ class TestMessageCRUD:
     async def test_clear_messages(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        await store.add_unified_message("u1", "", "user", MessageType.CHAT, "hello")
+        await store.add_message_stream("u1", "", "user", MessageType.CHAT, "hello")
         await store.clear_messages("u1", "")
 
-        msgs = await store.get_recent_unified_messages("u1", limit=10)
+        msgs = await store.get_recent_messages("u1", limit=10)
         assert len(msgs) == 0
 
     @pytest.mark.asyncio
-    async def test_prune_unified(self, temp_db):
+    async def test_prune_message_stream(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        # 修改上限以便测试
-        store._unified_message_max_per_group = 2
+        # 修改上限以便测试，并关闭限频
+        store._message_stream_max_per_group = 2
+        store._PRUNE_INTERVAL_WRITES = 1
         for i in range(5):
-            await store.add_unified_message("u1", "", "user", MessageType.CHAT, f"msg{i}")
+            await store.add_message_stream("u1", "", "user", MessageType.CHAT, f"msg{i}")
 
-        await store._retain_unified("", "u1")
-        msgs = await store.get_recent_unified_messages("u1", limit=10)
+        await store._retain_message_stream("", "u1")
+        msgs = await store.get_recent_messages("u1", limit=10)
         assert len(msgs) == 2
         assert msgs[0].content == "msg3"
         assert msgs[1].content == "msg4"
 
     @pytest.mark.asyncio
-    async def test_get_group_unified_messages(self, temp_db):
+    async def test_get_group_messages(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "hello", "Alice")
-        await store.add_unified_message("u2", "g1", "user", MessageType.COMMAND, "hi", "Bob")
-        await store.add_unified_message("bot", "g1", "assistant", MessageType.CHAT, "welcome", "我")
+        await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "hello", "Alice")
+        await store.add_message_stream("u2", "g1", "user", MessageType.COMMAND, "hi", "Bob")
+        await store.add_message_stream("bot", "g1", "assistant", MessageType.CHAT, "welcome", "我")
 
-        msgs = await store.get_group_unified_messages("g1", limit=10)
+        msgs = await store.get_group_messages("g1", limit=10)
         assert len(msgs) == 3
         assert msgs[0].content == "hello"
         assert msgs[1].content == "hi"
         assert msgs[2].content == "welcome"
 
     @pytest.mark.asyncio
-    async def test_search_unified_messages_keyword(self, temp_db):
+    async def test_search_messages_keyword(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "奈雪的茶很好喝", "A")
-        await store.add_unified_message("u2", "g1", "user", MessageType.CHAT, "今天天气不错", "B")
+        await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "奈雪的茶很好喝", "A")
+        await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "今天天气不错", "B")
 
-        results = await store.search_unified_messages("g1", keyword="奈雪", limit=10)
+        results = await store.search_messages("g1", keyword="奈雪", limit=10)
         assert len(results) == 1
         assert results[0].content == "奈雪的茶很好喝"
 
     @pytest.mark.asyncio
-    async def test_search_unified_messages_type_filter(self, temp_db):
+    async def test_search_messages_type_filter(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "chat msg", "A")
-        await store.add_unified_message("u2", "g1", "user", MessageType.COMMAND, ".r 1d20", "B")
+        await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "chat msg", "A")
+        await store.add_message_stream("u2", "g1", "user", MessageType.COMMAND, ".r 1d20", "B")
 
-        results = await store.search_unified_messages("g1", type=MessageType.COMMAND, limit=10)
+        results = await store.search_messages("g1", type=MessageType.COMMAND, limit=10)
         assert len(results) == 1
         assert results[0].content == ".r 1d20"
 
@@ -123,28 +124,28 @@ class TestMessageCRUD:
     async def test_clear_messages_exact_match(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "u1 in g1")
-        await store.add_unified_message("u2", "g1", "user", MessageType.CHAT, "u2 in g1")
+        await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "u1 in g1")
+        await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "u2 in g1")
 
         await store.clear_messages("u1", "g1")
-        msgs_u1 = await store.get_recent_unified_messages("u1", "g1", limit=10)
-        msgs_u2 = await store.get_recent_unified_messages("u2", "g1", limit=10)
+        msgs_u1 = await store.get_recent_messages("u1", "g1", limit=10)
+        msgs_u2 = await store.get_recent_messages("u2", "g1", limit=10)
         assert len(msgs_u1) == 0  # u1 的消息被清除
         assert len(msgs_u2) == 1  # u2 的消息未被清除
 
     @pytest.mark.asyncio
-    async def test_count_unified_messages(self, temp_db):
+    async def test_count_messages(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        assert await store.count_unified_messages("u1", "") == 0
-        assert await store.count_unified_messages("u1", "g1") == 0
+        assert await store.count_messages("u1", "") == 0
+        assert await store.count_messages("u1", "g1") == 0
 
-        await store.add_unified_message("u1", "", "user", MessageType.CHAT, "private")
-        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "group1")
-        await store.add_unified_message("u1", "g1", "user", MessageType.CHAT, "group2")
+        await store.add_message_stream("u1", "", "user", MessageType.CHAT, "private")
+        await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "group1")
+        await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "group2")
 
-        assert await store.count_unified_messages("u1", "") == 1
-        assert await store.count_unified_messages("u1", "g1") == 2
+        assert await store.count_messages("u1", "") == 1
+        assert await store.count_messages("u1", "g1") == 2
 
 class TestWhitelistCRUD:
     """测试白名单 CRUD"""

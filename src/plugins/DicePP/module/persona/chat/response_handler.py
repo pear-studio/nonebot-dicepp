@@ -30,7 +30,7 @@ class ResponseHandler:
         content: str,
         display_name: str = "我",
     ) -> int:
-        """持久化 assistant 消息到 unified_messages 表
+        """持久化 assistant 消息到 message_stream 表
 
         - 群聊: effective_user_id = "assistant"
         - 私聊: effective_user_id = user_id
@@ -39,7 +39,7 @@ class ResponseHandler:
             入库消息的 msg_id
         """
         effective_user_id = "assistant" if group_id else user_id
-        msg_id = await self._store.add_unified_message(
+        msg_id = await self._store.add_message_stream(
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",

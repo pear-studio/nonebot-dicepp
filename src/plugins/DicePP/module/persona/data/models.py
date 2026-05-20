@@ -129,7 +129,7 @@ class UserLLMConfig(BaseModel):
 
 
 class UnifiedMessage(BaseModel):
-    """统一消息表模型，替代 Message / GroupConversation"""
+    """统一消息流表模型"""
     id: Optional[int] = None
     user_id: str
     group_id: str = ""
@@ -137,7 +137,6 @@ class UnifiedMessage(BaseModel):
     type: MessageType = MessageType.CHAT
     content: str
     display_name: str = ""
-    sent_ok: int = 0
     created_at: Optional[datetime] = None
 
 

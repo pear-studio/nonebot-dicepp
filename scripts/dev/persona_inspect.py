@@ -173,12 +173,13 @@ def cmd_user(conn: sqlite3.Connection, args) -> None:
 
     # ── 最近消息 ──
     _section(f"最近消息 (共 {limit} 条)")
-    if table_exists(conn, "persona_unified_messages"):
+    if table_exists(conn, "message_stream") or table_exists(conn, "persona_unified_messages"):
+        tbl = "message_stream" if table_exists(conn, "message_stream") else "persona_unified_messages"
         msgs = conn.execute(
             "SELECT role, type, "
             "CASE WHEN length(content)>120 THEN substr(content,1,120)||'…' ELSE content END as content, "
             "created_at "
-            "FROM persona_unified_messages WHERE user_id=? "
+            f"FROM {tbl} WHERE user_id=? "
             "ORDER BY created_at DESC LIMIT ?",
             (uid, limit)
         ).fetchall()

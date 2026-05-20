@@ -156,9 +156,9 @@ CREATE TABLE IF NOT EXISTS persona_user_mute (
 );
 """
 
-# 统一消息表 (替代 persona_messages + persona_group_conversations)
-CREATE_UNIFIED_MESSAGES_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_unified_messages (
+# 统一消息流表 (替代 persona_messages + persona_group_conversations)
+CREATE_MESSAGE_STREAM_TABLE = """
+CREATE TABLE IF NOT EXISTS message_stream (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id      TEXT NOT NULL,
     group_id     TEXT NOT NULL DEFAULT '',
@@ -166,19 +166,31 @@ CREATE TABLE IF NOT EXISTS persona_unified_messages (
     type         TEXT NOT NULL DEFAULT 'chat',
     content      TEXT NOT NULL,
     display_name TEXT NOT NULL DEFAULT '',
-    sent_ok      INTEGER NOT NULL DEFAULT 0,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
-CREATE_UNIFIED_MESSAGES_USER_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_umsgs_user_time
-ON persona_unified_messages(user_id, created_at DESC);
+CREATE_MESSAGE_STREAM_USER_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_msgstream_user_time
+ON message_stream(user_id, created_at DESC);
 """
 
-CREATE_UNIFIED_MESSAGES_GROUP_INDEX = """
-CREATE INDEX IF NOT EXISTS idx_umsgs_group_time
-ON persona_unified_messages(group_id, created_at DESC);
+CREATE_MESSAGE_STREAM_GROUP_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_msgstream_group_time
+ON message_stream(group_id, created_at DESC);
+"""
+
+# 旧表迁移: persona_unified_messages → message_stream
+RENAME_LEGACY_TABLE = """
+ALTER TABLE persona_unified_messages RENAME TO message_stream;
+"""
+
+DROP_LEGACY_USER_INDEX = """
+DROP INDEX IF EXISTS idx_umsgs_user_time;
+"""
+
+DROP_LEGACY_GROUP_INDEX = """
+DROP INDEX IF EXISTS idx_umsgs_group_time;
 """
 
 # 用户 LLM 配置表 (Phase 4)
@@ -246,9 +258,9 @@ ON persona_daily_events(date);
 """
 
 ALL_MIGRATIONS = [
-    CREATE_UNIFIED_MESSAGES_TABLE,
-    CREATE_UNIFIED_MESSAGES_USER_INDEX,
-    CREATE_UNIFIED_MESSAGES_GROUP_INDEX,
+    CREATE_MESSAGE_STREAM_TABLE,
+    CREATE_MESSAGE_STREAM_USER_INDEX,
+    CREATE_MESSAGE_STREAM_GROUP_INDEX,
     CREATE_WHITELIST_TABLE,
     CREATE_SETTINGS_TABLE,
     CREATE_SCORE_HISTORY_TABLE,

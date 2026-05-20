@@ -391,7 +391,7 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         self.store.get_relationship = AsyncMock(return_value=rel)
         self.store.get_user_profile = AsyncMock(return_value=UserProfile(user_id="user", facts={"name": "Xiao"}))
         self.store.get_recent_score_events = AsyncMock(return_value=[])
-        self.store.get_recent_unified_messages = AsyncMock(return_value=[])
+        self.store.get_recent_messages = AsyncMock(return_value=[])
         self.cmd.app.get_decay_calculator = MagicMock(return_value=None)
         meta = _make_private_meta(".ai profile")
         await self.cmd.process_msg(".ai profile", meta, None)

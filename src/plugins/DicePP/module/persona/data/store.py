@@ -25,7 +25,10 @@ from .models import (
     LLMTraceRecord, CharacterState,
     ScoringFailure, UnifiedMessage, MessageType, DEFAULT_WARMTH_LABELS,
 )
-from .migrations import ALL_MIGRATIONS
+from .migrations import (
+    ALL_MIGRATIONS, RENAME_LEGACY_TABLE,
+    DROP_LEGACY_USER_INDEX, DROP_LEGACY_GROUP_INDEX,
+)
 
 
 class PersonaDataStore:
@@ -35,6 +38,10 @@ class PersonaDataStore:
     DEFAULT_DIARY_DAYS_PRIVATE = 7
     DEFAULT_DIARY_DAYS_GROUP = 3
 
+    # 消息流裁剪限频：每 N 次写入或每 M 秒触发一次实际裁剪
+    _PRUNE_INTERVAL_WRITES = 50
+    _PRUNE_INTERVAL_SECONDS = 300
+
     def __init__(
         self,
         db_connection: aiosqlite.Connection,
@@ -42,13 +49,15 @@ class PersonaDataStore:
         group_activity_decay_per_day: float = 10.0,
         group_activity_floor_whitelist: float = 50.0,
         timezone: str = "Asia/Shanghai",
-        unified_message_max_per_group: int = 1000,
+        message_stream_max_per_group: int = 1000,
     ):
         self.db = db_connection
         self._group_activity_decay_per_day = group_activity_decay_per_day
         self._group_activity_floor_whitelist = group_activity_floor_whitelist
         self._timezone = timezone
-        self._unified_message_max_per_group = unified_message_max_per_group
+        self._message_stream_max_per_group = message_stream_max_per_group
+        self._msg_stream_write_count = 0
+        self._last_prune_at: Optional[datetime] = None
 
     def _wall_now(self) -> datetime:
         """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
@@ -64,14 +73,36 @@ class PersonaDataStore:
         return not (group_id and group_id.strip())
 
     async def ensure_tables(self) -> None:
-        """确保所有表已创建（纯幂等 CREATE IF NOT EXISTS，不做增量补丁）。"""
+        """确保所有表已创建，并对旧表名做透明迁移。"""
+        # 如果旧表 persona_unified_messages 存在，先重命名到 message_stream
+        try:
+            await self.db.execute(RENAME_LEGACY_TABLE)
+            await self.db.execute(DROP_LEGACY_USER_INDEX)
+            await self.db.execute(DROP_LEGACY_GROUP_INDEX)
+            await self.db.commit()
+        except Exception:
+            pass  # 旧表不存在或已迁移，无需处理
         for migration in ALL_MIGRATIONS:
             await self.db.execute(migration)
         await self.db.commit()
 
-    # ========== 统一消息表 (persona_unified_messages) ==========
+    # ========== 消息流表 (message_stream) ==========
 
-    async def add_unified_message(
+    @staticmethod
+    def _row_to_message(row: tuple) -> UnifiedMessage:
+        """将数据库行反序列化为 UnifiedMessage。"""
+        return UnifiedMessage(
+            id=row[0],
+            user_id=row[1],
+            group_id=row[2],
+            role=row[3],
+            type=MessageType(row[4]),
+            content=row[5],
+            display_name=row[6] or "",
+            created_at=datetime.fromisoformat(row[7]) if row[7] else None,
+        )
+
+    async def add_message_stream(
         self,
         user_id: str,
         group_id: str,
@@ -80,11 +111,11 @@ class PersonaDataStore:
         content: str,
         display_name: str = "",
     ) -> int:
-        """写入一条统一消息，返回 last_insert_rowid。写入后自动触发保留裁剪。"""
+        """写入一条消息流记录，返回 last_insert_rowid。写入后按限频触发保留裁剪。"""
         now_iso = self._wall_now().isoformat()
         cursor = await self.db.execute(
             """
-            INSERT INTO persona_unified_messages
+            INSERT INTO message_stream
             (user_id, group_id, role, type, content, display_name, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
@@ -92,10 +123,10 @@ class PersonaDataStore:
         )
         await self.db.commit()
         rowid = cursor.lastrowid
-        await self._retain_unified(group_id, user_id)
+        await self._retain_message_stream(group_id, user_id)
         return rowid
 
-    async def get_recent_unified_messages(
+    async def get_recent_messages(
         self,
         user_id: str,
         group_id: str = "",
@@ -104,8 +135,8 @@ class PersonaDataStore:
         """获取最近消息（按 user_id + group_id），时间升序返回"""
         async with self.db.execute(
             """
-            SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
-            FROM persona_unified_messages
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at
+            FROM message_stream
             WHERE user_id = ? AND group_id = ?
             ORDER BY created_at DESC
             LIMIT ?
@@ -113,20 +144,7 @@ class PersonaDataStore:
             (user_id, group_id, limit),
         ) as cursor:
             rows = await cursor.fetchall()
-            messages: List[UnifiedMessage] = []
-            for row in reversed(list(rows)):
-                messages.append(UnifiedMessage(
-                    id=row[0],
-                    user_id=row[1],
-                    group_id=row[2],
-                    role=row[3],
-                    type=MessageType(row[4]),
-                    content=row[5],
-                    display_name=row[6] or "",
-                    sent_ok=row[7],
-                    created_at=datetime.fromisoformat(row[8]) if row[8] else None,
-                ))
-            return messages
+            return [self._row_to_message(r) for r in reversed(list(rows))]
 
     async def get_earliest_message_time(self, user_id: str, group_id: str = "") -> Optional[datetime]:
         """获取用户最早消息时间（ORDER BY created_at ASC LIMIT 1）
@@ -135,7 +153,7 @@ class PersonaDataStore:
         """
         async with self.db.execute(
             """
-            SELECT created_at FROM persona_unified_messages
+            SELECT created_at FROM message_stream
             WHERE user_id = ? AND group_id = ?
             ORDER BY created_at ASC
             LIMIT 1
@@ -147,16 +165,16 @@ class PersonaDataStore:
                 return datetime.fromisoformat(row[0])
             return None
 
-    async def count_unified_messages(self, user_id: str, group_id: str = "") -> int:
+    async def count_messages(self, user_id: str, group_id: str = "") -> int:
         """统计用户消息数量（使用 SELECT COUNT(*) 避免全量加载）"""
         async with self.db.execute(
-            "SELECT COUNT(*) FROM persona_unified_messages WHERE user_id = ? AND group_id = ?",
+            "SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = ?",
             (user_id, group_id),
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
 
-    async def get_group_unified_messages(
+    async def get_group_messages(
         self,
         group_id: str,
         limit: Optional[int] = 50,
@@ -164,16 +182,16 @@ class PersonaDataStore:
         """获取群聊最近消息，时间升序返回"""
         if limit is None:
             sql = """
-            SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
-            FROM persona_unified_messages
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at
+            FROM message_stream
             WHERE group_id = ? AND group_id != ''
             ORDER BY created_at DESC
             """
             params = (group_id,)
         else:
             sql = """
-            SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
-            FROM persona_unified_messages
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at
+            FROM message_stream
             WHERE group_id = ? AND group_id != ''
             ORDER BY created_at DESC
             LIMIT ?
@@ -181,22 +199,9 @@ class PersonaDataStore:
             params = (group_id, limit)
         async with self.db.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
-            messages: List[UnifiedMessage] = []
-            for row in reversed(list(rows)):
-                messages.append(UnifiedMessage(
-                    id=row[0],
-                    user_id=row[1],
-                    group_id=row[2],
-                    role=row[3],
-                    type=MessageType(row[4]),
-                    content=row[5],
-                    display_name=row[6] or "",
-                    sent_ok=row[7],
-                    created_at=datetime.fromisoformat(row[8]) if row[8] else None,
-                ))
-            return messages
+            return [self._row_to_message(r) for r in reversed(list(rows))]
 
-    async def search_unified_messages(
+    async def search_messages(
         self,
         group_id: str,
         *,
@@ -208,7 +213,7 @@ class PersonaDataStore:
         hours_back: Optional[int] = None,
         limit: int = 5,
     ) -> List[UnifiedMessage]:
-        """搜索统一消息表，时间升序返回
+        """搜索消息流表，时间升序返回
 
         参数优先级：hours_back 与 start_time/end_time 互斥。
         """
@@ -244,8 +249,8 @@ class PersonaDataStore:
 
         where_clause = " AND ".join(conditions)
         sql = f"""
-            SELECT id, user_id, group_id, role, type, content, display_name, sent_ok, created_at
-            FROM persona_unified_messages
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at
+            FROM message_stream
             WHERE {where_clause}
             ORDER BY created_at DESC
             LIMIT ?
@@ -254,92 +259,87 @@ class PersonaDataStore:
 
         async with self.db.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
-            messages: List[UnifiedMessage] = []
-            for row in reversed(list(rows)):
-                messages.append(UnifiedMessage(
-                    id=row[0],
-                    user_id=row[1],
-                    group_id=row[2],
-                    role=row[3],
-                    type=MessageType(row[4]),
-                    content=row[5],
-                    display_name=row[6] or "",
-                    sent_ok=row[7],
-                    created_at=datetime.fromisoformat(row[8]) if row[8] else None,
-                ))
-            return messages
+            return [self._row_to_message(r) for r in reversed(list(rows))]
 
-    async def update_sent_ok(self, msg_id: int, sent_ok: int = 1) -> None:
-        """回填消息发送状态"""
-        await self.db.execute(
-            "UPDATE persona_unified_messages SET sent_ok = ? WHERE id = ?",
-            (sent_ok, msg_id),
-        )
-        await self.db.commit()
-
-    async def _prune_unified_private(self, user_id: str) -> None:
+    async def _prune_message_stream_private(self, user_id: str) -> None:
         """私聊按 user_id 维度保留最近 N 条"""
         async with self.db.execute(
-            "SELECT COUNT(*) FROM persona_unified_messages WHERE user_id = ? AND group_id = ''",
+            "SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = ''",
             (user_id,),
         ) as cursor:
             row = await cursor.fetchone()
-            if row and row[0] <= self._unified_message_max_per_group:
+            if row and row[0] <= self._message_stream_max_per_group:
                 return
         await self.db.execute(
             """
-            DELETE FROM persona_unified_messages
+            DELETE FROM message_stream
             WHERE user_id = ? AND group_id = ''
               AND id NOT IN (
-                SELECT id FROM persona_unified_messages
+                SELECT id FROM message_stream
                 WHERE user_id = ? AND group_id = ''
                 ORDER BY created_at DESC, id DESC
                 LIMIT ?
             )
             """,
-            (user_id, user_id, self._unified_message_max_per_group),
+            (user_id, user_id, self._message_stream_max_per_group),
         )
         await self.db.commit()
 
-    async def _prune_unified_group(self, group_id: str) -> None:
+    async def _prune_message_stream_group(self, group_id: str) -> None:
         """群聊按 group_id 维度保留最近 N 条"""
         async with self.db.execute(
-            "SELECT COUNT(*) FROM persona_unified_messages WHERE group_id = ? AND group_id != ''",
+            "SELECT COUNT(*) FROM message_stream WHERE group_id = ? AND group_id != ''",
             (group_id,),
         ) as cursor:
             row = await cursor.fetchone()
-            if row and row[0] <= self._unified_message_max_per_group:
+            if row and row[0] <= self._message_stream_max_per_group:
                 return
         await self.db.execute(
             """
-            DELETE FROM persona_unified_messages
+            DELETE FROM message_stream
             WHERE group_id = ? AND group_id != ''
               AND id NOT IN (
-                SELECT id FROM persona_unified_messages
+                SELECT id FROM message_stream
                 WHERE group_id = ? AND group_id != ''
                 ORDER BY created_at DESC, id DESC
                 LIMIT ?
             )
             """,
-            (group_id, group_id, self._unified_message_max_per_group),
+            (group_id, group_id, self._message_stream_max_per_group),
         )
         await self.db.commit()
 
-    async def _retain_unified(self, group_id: str, user_id: str) -> None:
-        """写入后触发保留策略：私聊按 user_id，群聊按 group_id"""
+    def _tick_and_check_prune(self, now: datetime) -> bool:
+        """递增计数器并判断是否应触发裁剪：每 N 次写入或每 M 秒"""
+        self._msg_stream_write_count += 1
+        if self._msg_stream_write_count >= self._PRUNE_INTERVAL_WRITES:
+            return True
+        if self._last_prune_at is None:
+            return True
+        if (now - self._last_prune_at).total_seconds() >= self._PRUNE_INTERVAL_SECONDS:
+            return True
+        return False
+
+    async def _retain_message_stream(self, group_id: str, user_id: str) -> None:
+        """写入后触发保留策略：私聊按 user_id，群聊按 group_id（限频）"""
         if not user_id and not group_id:
             return
+        now = self._wall_now()
+        if not self._tick_and_check_prune(now):
+            return
+        self._msg_stream_write_count = 0
+        self._last_prune_at = now
         if group_id:
-            await self._prune_unified_group(group_id)
+            await self._prune_message_stream_group(group_id)
         else:
-            await self._prune_unified_private(user_id)
+            await self._prune_message_stream_private(user_id)
 
     # ========== 消息相关 ==========
 
     async def clear_messages(self, user_id: str, group_id: str) -> None:
         """清空指定用户+群组的消息（精确匹配 user_id AND group_id）"""
         await self.db.execute(
-            "DELETE FROM persona_unified_messages WHERE user_id = ? AND group_id = ?",
+            "DELETE FROM message_stream WHERE user_id = ? AND group_id = ?",
             (user_id, group_id),
         )
         await self.db.commit()

@@ -25,17 +25,16 @@ def _make_session(
 ) -> ChatSession:
     """构造最小可运行 ChatSession（mock 全部依赖）"""
     store = AsyncMock()
-    store.get_recent_unified_messages = AsyncMock(return_value=[])
-    store.get_group_unified_messages = AsyncMock(return_value=[])
-    store.add_unified_message = AsyncMock(return_value=1)
-    store._retain_unified = AsyncMock()
+    store.get_recent_messages = AsyncMock(return_value=[])
+    store.get_group_messages = AsyncMock(return_value=[])
+    store.add_message_stream = AsyncMock(return_value=1)
+    store._retain_message_stream = AsyncMock()
     store.add_score_event = AsyncMock()
     store.update_relationship = AsyncMock()
     store.init_relationship = AsyncMock()
     store.get_relationship = AsyncMock(return_value=relationship)
     store.get_user_profile = AsyncMock(return_value=None)
     store.save_user_profile = AsyncMock()
-    store.update_sent_ok = AsyncMock()
 
     router = MagicMock()
     router.increment_usage = AsyncMock()
@@ -157,7 +156,7 @@ async def test_refuse_triggers_at_warmth_zero(monkeypatch):
     )
 
     # 历史已有消息，绕开 is_first 分支
-    session.store.get_recent_unified_messages = AsyncMock(return_value=[
+    session.store.get_recent_messages = AsyncMock(return_value=[
         MagicMock(role="user", content="prev"),
     ])
 
@@ -184,7 +183,7 @@ async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch):
         refuse_messages=["...（已读不回）"],
     )
 
-    session.store.get_recent_unified_messages = AsyncMock(return_value=[
+    session.store.get_recent_messages = AsyncMock(return_value=[
         MagicMock(role="user", content="prev"),
     ])
 

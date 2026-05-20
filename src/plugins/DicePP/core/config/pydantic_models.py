@@ -97,10 +97,10 @@ class PersonaConfig(BaseModel):
         default=180,
         description="search_chat_history 工具返回内容的最大字符数（超出截断）",
     )
-    unified_message_max_per_group: int = Field(
+    message_stream_max_per_group: int = Field(
         default=1000,
         ge=10,
-        description="统一消息表每组/用户保留上限（写入后触发清理）",
+        description="消息流表每组/用户保留上限（写入后按限频触发清理）",
     )
 
     # ── Phase 3: 工具调用

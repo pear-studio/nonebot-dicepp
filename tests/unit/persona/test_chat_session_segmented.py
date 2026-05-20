@@ -24,9 +24,9 @@ from plugins.DicePP.module.persona.chat.context import ContextBuilder
 @pytest.fixture
 def mock_store():
     store = MagicMock(spec=PersonaDataStore)
-    store.get_group_unified_messages = AsyncMock(return_value=[])
-    store.get_recent_unified_messages = AsyncMock(return_value=[])
-    store.add_unified_message = AsyncMock(return_value=1)
+    store.get_group_messages = AsyncMock(return_value=[])
+    store.get_recent_messages = AsyncMock(return_value=[])
+    store.add_message_stream = AsyncMock(return_value=1)
     store.get_relationship = AsyncMock(return_value=None)
     store.get_user_profile = AsyncMock(return_value=None)
     store.get_user_llm_config = AsyncMock(return_value=None)
@@ -234,7 +234,7 @@ class TestFallback:
         # buffer 未被清空
         assert len(segment_state.buffer) == 4
         # 历史写入的是 buffer 内容，不是多余文本
-        history_call = mock_store.add_unified_message.call_args
+        history_call = mock_store.add_message_stream.call_args
         assert history_call is not None
         history_content = history_call[1]["content"]
         assert "段落1" in history_content
@@ -279,7 +279,7 @@ class TestFallback:
         mock_logger.error.assert_called_once()
         assert "耗尽 callback 且返回空 content" in mock_logger.error.call_args[0][0]
         # 历史写入 buffer 原内容
-        history_call = mock_store.add_unified_message.call_args
+        history_call = mock_store.add_message_stream.call_args
         assert history_call is not None
         history_content = history_call[1]["content"]
         assert "A" in history_content

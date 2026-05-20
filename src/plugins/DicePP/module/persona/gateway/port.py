@@ -49,7 +49,7 @@ class MessagePort(EventSharePort):
         把"分段消息不记历史"的决策留在分段域。
 
         :param skip_history_record: None 时默认 False（不跳过历史）。群聊分段调度等特殊路径可显式传 True。
-        :param msg_id: 统一消息表中的行 ID，用于 post_send_hook 回填 sent_ok。
+        :param msg_id: message_stream 表中的行 ID，供 post_send_hook 使用。
         """
         if skip_history_record is None:
             skip_history_record = False

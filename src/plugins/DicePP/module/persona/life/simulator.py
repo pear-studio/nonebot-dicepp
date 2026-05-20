@@ -240,7 +240,7 @@ class LifeSimulator:
             )
             return
         effective_user_id = "assistant" if group_id else user_id
-        msg_id = await self.store.add_unified_message(
+        msg_id = await self.store.add_message_stream(
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",

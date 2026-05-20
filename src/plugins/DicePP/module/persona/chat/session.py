@@ -131,9 +131,9 @@ class ChatSession:
 
             if self.config.relationship_refuse_enabled and is_chat_message:
                 if group_id:
-                    history = await self.store.get_group_unified_messages(group_id, limit=1)
+                    history = await self.store.get_group_messages(group_id, limit=1)
                 else:
-                    history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=1)
+                    history = await self.store.get_recent_messages(user_id, group_id="", limit=1)
                 is_first = len(history) == 0
                 if not is_first:
                     rel = await self.store.get_relationship(user_id)
@@ -434,9 +434,9 @@ class ChatSession:
             else:
                 logger.error(f"LLM 耗尽 callback 且返回空 content: user={user_id}")
 
-        # 5.4.6: 写入历史，分段已由 dispatcher 实时发出，直接标记 sent_ok=1
+        # 5.4.6: 写入历史，分段已由 dispatcher 实时发出
         effective_user_id = "assistant" if group_id else user_id
-        msg_id = await self.store.add_unified_message(
+        msg_id = await self.store.add_message_stream(
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",
@@ -444,7 +444,6 @@ class ChatSession:
             content=full_reply,
             display_name="我",
         )
-        await self.store.update_sent_ok(msg_id, 1)
 
         if self.segment_dispatcher:
             await self.segment_dispatcher.drain(target_key)
@@ -466,14 +465,14 @@ class ChatSession:
         if limit is None:
             limit = self.config.max_messages
         if not group_id:
-            history = await self.store.get_recent_unified_messages(user_id, group_id="", limit=limit)
+            history = await self.store.get_recent_messages(user_id, group_id="", limit=limit)
             history_dicts = [
                 {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我", "created_at": msg.created_at}
                 for msg in history
             ]
             return history_dicts, False
 
-        history = await self.store.get_group_unified_messages(group_id, limit=None)
+        history = await self.store.get_group_messages(group_id, limit=None)
         return self._apply_token_window(history)
 
     def _apply_token_window(

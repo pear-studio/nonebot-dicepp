@@ -150,7 +150,7 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
             content="hello",
             display_name="小明",
         )
-        self.store.add_unified_message.assert_awaited_once_with(
+        self.store.add_message_stream.assert_awaited_once_with(
             user_id="u1",
             group_id="g1",
             role="user",
@@ -214,8 +214,8 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
 
         self.store.is_group_whitelisted = AsyncMock(return_value=True)
         self.store.update_group_activity = AsyncMock()
-        self.store.add_unified_message = AsyncMock(return_value=1)
-        self.store._retain_unified = AsyncMock()
+        self.store.add_message_stream = AsyncMock(return_value=1)
+        self.store._retain_message_stream = AsyncMock()
 
         self.cmd.app = MagicMock()
         self.cmd.app.chat_with_user = AsyncMock(

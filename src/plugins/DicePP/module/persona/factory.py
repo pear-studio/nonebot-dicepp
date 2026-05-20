@@ -210,7 +210,7 @@ async def _build_store(bot: Bot, config) -> PersonaDataStore:
         group_activity_decay_per_day=config.group_activity_decay_per_day,
         group_activity_floor_whitelist=config.group_activity_floor_whitelist,
         timezone=config.timezone,
-        unified_message_max_per_group=config.unified_message_max_per_group,
+        message_stream_max_per_group=config.message_stream_max_per_group,
     )
     try:
         await store.ensure_tables()
@@ -244,7 +244,7 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
     async def _on_delivery_failed(user_id: str, group_id: str, content: str, error: str = "") -> None:
         try:
             from .data.models import MessageType
-            await store.add_unified_message(
+            await store.add_message_stream(
                 user_id=user_id, group_id=group_id, role="assistant",
                 type=MessageType.SYSTEM_NOTICE, content=f"[发送失败] {content}",
             )

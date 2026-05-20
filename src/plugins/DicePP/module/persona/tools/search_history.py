@@ -154,7 +154,7 @@ def make_search_history_executor(max_chars: int = 200):
         type_val = args.get("type")
         msg_type = MessageType(type_val) if type_val else None
 
-        results = await ctx.store.search_unified_messages(
+        results = await ctx.store.search_messages(
             group_id=ctx.group_id,
             keyword=keyword,
             type=msg_type,

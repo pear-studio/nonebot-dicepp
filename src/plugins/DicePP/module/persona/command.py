@@ -126,24 +126,23 @@ class PersonaCommand(UserCommandBase):
     ) -> None:
         """消息发送后记录器回调（跨模块 bot 回复统一入流）
 
-        - msg_id 非 None：仅回填 sent_ok=1（persona 聊天路径已通过 _persist_assistant_message 写入）
-        - msg_id 为 None：直接写入 unified_messages（非 persona 命令回复路径）
+        - msg_id 非 None：persona 聊天路径已自行写入，无需处理
+        - msg_id 为 None：直接写入 message_stream（非 persona 命令回复路径）
         """
         if not self.data_store:
             return
         try:
             if msg_id is not None:
-                await self.data_store.update_sent_ok(msg_id, 1)
-            else:
-                msg_type = MessageType.from_str(type)
-                await self.data_store.add_unified_message(
-                    user_id=user_id,
-                    group_id=group_id,
-                    role=role,
-                    type=msg_type,
-                    content=content,
-                    display_name=display_name,
-                )
+                return  # persona 聊天路径已在 ChatSession 等调用方写入
+            msg_type = MessageType.from_str(type)
+            await self.data_store.add_message_stream(
+                user_id=user_id,
+                group_id=group_id,
+                role=role,
+                type=msg_type,
+                content=content,
+                display_name=display_name,
+            )
         except Exception as e:
             dice_log(f"[Persona] 出站记录器写入失败: {e}")
 
@@ -163,7 +162,7 @@ class PersonaCommand(UserCommandBase):
             msg_type = MessageType.from_str(type)
             if type not in (MessageType.CHAT.value, MessageType.COMMAND.value, MessageType.SYSTEM_NOTICE.value):
                 dice_log(f"[Persona] 未知 message_type='{type}'，fallback 到 CHAT")
-            await self.data_store.add_unified_message(
+            await self.data_store.add_message_stream(
                 user_id=user_id,
                 group_id=group_id,
                 role=role,
@@ -530,7 +529,7 @@ class PersonaCommand(UserCommandBase):
                 lines.append(f"  认识: 1 天")
 
             try:
-                message_count = await self.data_store.count_unified_messages(user_id, group_id)
+                message_count = await self.data_store.count_messages(user_id, group_id)
                 lines.append(f"  互动: {message_count} 次")
             except Exception:
                 lines.append(f"  互动: 0 次")

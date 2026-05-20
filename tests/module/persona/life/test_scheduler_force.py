@@ -22,7 +22,7 @@ def mock_data_store():
     store.is_user_muted = AsyncMock(return_value=False)
     store.get_relationship = AsyncMock(return_value=None)
     store.get_user_profile = AsyncMock(return_value=None)
-    store.get_recent_unified_messages = AsyncMock(return_value=[])
+    store.get_recent_messages = AsyncMock(return_value=[])
     return store
 
 

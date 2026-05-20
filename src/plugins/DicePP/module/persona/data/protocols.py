@@ -19,9 +19,9 @@ from .models import (
 
 
 class MessageStore(Protocol):
-    """persona_unified_messages 表 CRUD + 搜索"""
+    """message_stream 表 CRUD + 搜索"""
 
-    async def add_unified_message(
+    async def add_message_stream(
         self,
         user_id: str,
         group_id: str,
@@ -31,14 +31,14 @@ class MessageStore(Protocol):
         display_name: str = "",
     ) -> int: ...
 
-    async def get_recent_unified_messages(
+    async def get_recent_messages(
         self,
         user_id: str,
         group_id: str = "",
         limit: int = 20,
     ) -> List[UnifiedMessage]: ...
 
-    async def get_group_unified_messages(
+    async def get_group_messages(
         self,
         group_id: str,
         limit: Optional[int] = 50,
@@ -48,11 +48,11 @@ class MessageStore(Protocol):
         self, user_id: str, group_id: str = ""
     ) -> Optional[datetime]: ...
 
-    async def count_unified_messages(
+    async def count_messages(
         self, user_id: str, group_id: str = ""
     ) -> int: ...
 
-    async def search_unified_messages(
+    async def search_messages(
         self,
         group_id: str,
         *,
@@ -66,8 +66,6 @@ class MessageStore(Protocol):
     ) -> List[UnifiedMessage]: ...
 
     async def clear_messages(self, user_id: str, group_id: str) -> None: ...
-
-    async def update_sent_ok(self, msg_id: int, sent_ok: int = 1) -> None: ...
 
 
 class RelationshipStore(Protocol):
