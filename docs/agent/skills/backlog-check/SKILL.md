@@ -66,6 +66,7 @@ description: "核实和清理所有 backlog 条目，删除过时项，按时间
    ```bash
    python scripts/tools/backlog.py sort
    ```
+   （按 模块→优先级→类型→改动量 自动排序，写入时已自动执行，此处为显式确认）
 
 8. **汇报**：
    ```

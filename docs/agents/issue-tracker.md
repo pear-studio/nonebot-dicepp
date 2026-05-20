@@ -11,6 +11,9 @@ Issues 以结构化条目存储在 `docs/dev/backlog.md`，通过 `scripts/tools
 ```
 ### [B-YYMMDD-xxxxxx] 标题
 - 创建: YYYY-MM-DD
+- 优先级: P0/P1/P2
+- 类型: bug/feature/refactor
+- 改动量: S/M/L/XL
 - 问题表现: ...
 - 工作计划: ...
 ```

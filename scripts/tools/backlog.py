@@ -37,10 +37,18 @@ BACKLOG_PATH = Path("docs/dev/backlog.md")
 
 ID_RE = re.compile(r"^B-\d{6}-[0-9a-f]{6}$")
 ENTRY_HEADER_RE = re.compile(r"^### \[(B-\d{6}-[0-9a-f]{6})\] (.*)$")
-FIELD_RE = re.compile(r"^- (创建|问题表现|工作计划):\s*(.*)$")
+FIELD_RE = re.compile(r"^- (创建|优先级|类型|改动量|问题表现|工作计划):\s*(.*)$")
 INDENT_RE = re.compile(r"^  (.*)$")  # 2-space indent → 字段多行内容
 
-FIELD_KEYS = ("创建", "问题表现", "工作计划")
+FIELD_KEYS = ("创建", "优先级", "类型", "改动量", "问题表现", "工作计划")
+
+PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
+TYPE_ORDER = {"bug": 0, "feature": 1, "refactor": 2}
+EFFORT_ORDER = {"S": 0, "M": 1, "L": 2, "XL": 3}
+
+VALID_PRIORITIES = frozenset(PRIORITY_ORDER)
+VALID_TYPES = frozenset(TYPE_ORDER)
+VALID_EFFORTS = frozenset(EFFORT_ORDER)
 
 
 @dataclass
@@ -48,9 +56,21 @@ class BacklogItem:
     id: str
     module: str
     title: str
+    priority: str = ""
+    type: str = ""
+    effort: str = ""
     created: str = ""
     symptom: str = ""
     plan: str = ""
+
+    @property
+    def sort_key(self) -> tuple[int, int, int, str]:
+        return (
+            PRIORITY_ORDER.get(self.priority, 99),
+            TYPE_ORDER.get(self.type, 99),
+            EFFORT_ORDER.get(self.effort, 99),
+            self.id,
+        )
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -62,6 +82,18 @@ class BacklogItem:
             errors.append("缺少 module")
         if not self.title:
             errors.append("缺少 title")
+        if not self.priority:
+            errors.append("缺少优先级")
+        elif self.priority not in VALID_PRIORITIES:
+            errors.append(f"优先级非法: {self.priority}（允许: P0/P1/P2）")
+        if not self.type:
+            errors.append("缺少类型")
+        elif self.type not in VALID_TYPES:
+            errors.append(f"类型非法: {self.type}（允许: bug/feature/refactor）")
+        if not self.effort:
+            errors.append("缺少改动量")
+        elif self.effort not in VALID_EFFORTS:
+            errors.append(f"改动量非法: {self.effort}（允许: S/M/L/XL）")
         if not self.symptom:
             errors.append("缺少问题表现")
         if not self.plan:
@@ -71,6 +103,9 @@ class BacklogItem:
     def to_md(self) -> str:
         lines = [f"### [{self.id}] {self.title}"]
         lines.append(f"- 创建: {self.created}")
+        lines.append(f"- 优先级: {self.priority}")
+        lines.append(f"- 类型: {self.type}")
+        lines.append(f"- 改动量: {self.effort}")
         lines.append(_render_field("问题表现", self.symptom))
         lines.append(_render_field("工作计划", self.plan))
         lines.append("")
@@ -134,6 +169,12 @@ def parse_backlog(path: Path) -> tuple[list[str], dict[str, list[BacklogItem]]]:
             current_item.symptom = body
         elif current_field == "工作计划":
             current_item.plan = body
+        elif current_field == "优先级":
+            current_item.priority = body
+        elif current_field == "类型":
+            current_item.type = body
+        elif current_field == "改动量":
+            current_item.effort = body
         current_field = None
         field_buffer = []
 
@@ -185,15 +226,19 @@ def parse_backlog(path: Path) -> tuple[list[str], dict[str, list[BacklogItem]]]:
             val = fm.group(2)
             if key == "创建":
                 current_item.created = val
+            elif key == "优先级":
+                current_item.priority = val
+            elif key == "类型":
+                current_item.type = val
+            elif key == "改动量":
+                current_item.effort = val
             elif key in ("问题表现", "工作计划"):
                 if val:
-                    # 单行写法：值就在冒号后
                     if key == "问题表现":
                         current_item.symptom = val
                     else:
                         current_item.plan = val
                 else:
-                    # 多行写法：等待后续缩进块
                     current_field = key
                     field_buffer = []
             i += 1
@@ -226,7 +271,7 @@ def _write_backlog(path: Path, preamble: list[str], modules: dict[str, list[Back
     lines.append("")
 
     for mod in sorted(modules.keys()):
-        items = modules[mod]
+        items = sorted(modules[mod], key=lambda it: it.sort_key)
         if not items:
             continue
         lines.append(f"## {mod}")
@@ -270,6 +315,9 @@ def cmd_add(args):
         id=_gen_id(args.module, args.title, args.symptom or ""),
         module=args.module,
         title=args.title,
+        priority=args.priority,
+        type=args.type,
+        effort=args.effort,
         created=_today(),
         symptom=args.symptom,
         plan=args.plan,
@@ -302,6 +350,9 @@ def _parse_batch_payload(text: str) -> list[dict[str, str]]:
     label_to_key = {
         "Module": "module",
         "Title": "title",
+        "Priority": "priority",
+        "Type": "type",
+        "Effort": "effort",
         "Symptom": "symptom",
         "Plan": "plan",
     }
@@ -368,6 +419,9 @@ def cmd_batch_add(args):
             ),
             module=raw.get("module", ""),
             title=raw.get("title", ""),
+            priority=raw.get("priority", ""),
+            type=raw.get("type", ""),
+            effort=raw.get("effort", ""),
             created=_today(),
             symptom=raw.get("symptom", ""),
             plan=raw.get("plan", ""),
@@ -401,7 +455,7 @@ def cmd_list(args):
         print("无 backlog 项")
         return
     for item in items:
-        print(f"[{item.id}] {item.module} — {item.title}")
+        print(f"[{item.id}] {item.module} {item.priority} {item.type} {item.effort} — {item.title}")
 
 
 def cmd_show(args):
@@ -414,6 +468,9 @@ def cmd_show(args):
                 print(f"模块:     {item.module}")
                 print(f"标题:     {item.title}")
                 print(f"创建:     {item.created}")
+                print(f"优先级:   {item.priority}")
+                print(f"类型:     {item.type}")
+                print(f"改动量:   {item.effort}")
                 print("问题表现:")
                 for line in item.symptom.splitlines() or [""]:
                     print(f"  {line}")
@@ -466,9 +523,9 @@ def cmd_sort(args):
     path = _resolve_path(args.file)
     preamble, modules = parse_backlog(path)
     for mod in modules:
-        modules[mod].sort(key=lambda it: it.id)
+        modules[mod].sort(key=lambda it: it.sort_key)
     _write_backlog(path, preamble, modules, dry_run=args.dry_run)
-    print("已按 ID 排序")
+    print("已按 优先级→类型→改动量 排序")
 
 
 def cmd_validate(args):
@@ -489,6 +546,18 @@ def cmd_validate(args):
             all_ids.add(item.id)
             if not item.title:
                 errors.append(f"[{item.id}] 缺少标题")
+            if not item.priority:
+                errors.append(f"[{item.id}] 缺少优先级")
+            elif item.priority not in VALID_PRIORITIES:
+                errors.append(f"[{item.id}] 优先级非法: {item.priority}")
+            if not item.type:
+                errors.append(f"[{item.id}] 缺少类型")
+            elif item.type not in VALID_TYPES:
+                errors.append(f"[{item.id}] 类型非法: {item.type}")
+            if not item.effort:
+                errors.append(f"[{item.id}] 缺少改动量")
+            elif item.effort not in VALID_EFFORTS:
+                errors.append(f"[{item.id}] 改动量非法: {item.effort}")
             if not item.symptom:
                 errors.append(f"[{item.id}] 缺少问题表现")
             if not item.plan:
@@ -514,6 +583,9 @@ def main():
     p_add = sub.add_parser("add", help="新增单条 backlog")
     p_add.add_argument("--module", "-m", required=True)
     p_add.add_argument("--title", "-t", required=True)
+    p_add.add_argument("--priority", "-p", required=True, choices=["P0", "P1", "P2"])
+    p_add.add_argument("--type", required=True, choices=["bug", "feature", "refactor"])
+    p_add.add_argument("--effort", "-e", required=True, choices=["S", "M", "L", "XL"])
     p_add.add_argument("--symptom", required=True, help="问题表现（必填，可含换行）")
     p_add.add_argument("--plan", required=True, help="工作计划（必填，可含换行）")
     p_add.set_defaults(func=cmd_add)

@@ -13,8 +13,11 @@ description: "根据汇报文件或用户给出的信息，新增 backlog 条目
 
 ## 字段约束
 
-每条 backlog 仅两项内容字段（外加 ID/模块/标题/创建日期）：
+每条 backlog 包含五项必填内容字段（外加 ID/模块/标题/创建日期）：
 
+- **优先级**（必填）：P0(阻塞，卡住开发/测试流程或核心功能不可用) / P1(应该修，持续在痛) / P2(可修可不修，改善项)
+- **类型**（必填）：bug / feature / refactor
+- **改动量**（必填）：S(<30行单文件) / M(<300行单模块) / L(300~999行单模块) / XL(≥1000行或跨模块)，不含测试和文档行数
 - **问题表现**（必填）：症状、错误日志、量化指标、复现路径。要写得让一个月后没上下文的人也能看懂在说什么。
   - 写作 checklist：症状 / 现场数据 / 错误日志 / 量化指标 / 影响后果。能贴日志原文就贴。
 - **工作计划**（必填）：可能的修复方向、需要先验证的假设、影响范围、风险点。
@@ -38,6 +41,9 @@ description: "根据汇报文件或用户给出的信息，新增 backlog 条目
 1. 依次向用户询问必填字段：
    - `module`（模块名）
    - `title`（标题，一句话概括）
+   - `priority`（优先级：P0/P1/P2）
+   - `type`（类型：bug/feature/refactor）
+   - `effort`（改动量：S/M/L/XL）
    - `symptom`（问题表现，按 checklist 展开）
    - `plan`（工作计划，按 checklist 展开）
 
@@ -46,6 +52,9 @@ description: "根据汇报文件或用户给出的信息，新增 backlog 条目
    即将录入以下 backlog：
    - 模块: ...
    - 标题: ...
+   - 优先级: P1
+   - 类型: bug
+   - 改动量: M
    - 问题表现:
      - ...
      - ...
@@ -59,6 +68,7 @@ description: "根据汇报文件或用户给出的信息，新增 backlog 条目
    ```bash
    python scripts/tools/backlog.py add \
      --module <M> --title <T> \
+     --priority <P> --type <T> --effort <E> \
      --symptom "$(cat symptom.txt)" \
      --plan "$(cat plan.txt)"
    ```
@@ -84,11 +94,14 @@ description: "根据汇报文件或用户给出的信息，新增 backlog 条目
 
 ## batch-add payload 格式
 
-条目之间用 `<<<END>>>` 分隔。每条内部 4 个 Key（`Module`/`Title`/`Symptom`/`Plan`），冒号后跟单行值，或空冒号后跟多行续行直到下一个 Key 或分隔符：
+条目之间用 `<<<END>>>` 分隔。每条内部 7 个 Key（`Module`/`Title`/`Priority`/`Type`/`Effort`/`Symptom`/`Plan`），冒号后跟单行值，或 Symptom/Plan 可空冒号后跟多行续行直到下一个 Key 或分隔符：
 
 ```
 Module: persona
 Title: 评分失败持久化记录
+Priority: P1
+Type: bug
+Effort: M
 Symptom:
   - persona_score_history 4月19日后停止写入
   - 评分失败仅 logger.warning，无任何持久化记录
@@ -100,16 +113,21 @@ Plan:
 <<<END>>>
 Module: persona
 Title: ...
+Priority: P2
+Type: feature
+Effort: S
 Symptom: 单行也可以这样写
 Plan: 单行计划
 <<<END>>>
 ```
 
-注意：Key 名固定为 `Module`/`Title`/`Symptom`/`Plan`（首字母大写），其他变体不识别。
+注意：Key 名固定为 `Module`/`Title`/`Priority`/`Type`/`Effort`/`Symptom`/`Plan`（首字母大写），其他变体不识别。
 
 ## 约束
 
-- `symptom` 和 `plan` 必填，不得为空（脚本 validate 会拦截）
+- `priority`/`type`/`effort`/`symptom`/`plan` 必填，不得为空（脚本 validate 会拦截）
+- `priority` 只能为 P0/P1/P2，`type` 只能为 bug/feature/refactor，`effort` 只能为 S/M/L/XL
 - 录入前必须经过用户确认（哪怕模式 C 也要展示 preview）
 - 一次调用可录入多条，但每条独立生成 ID
+- 插入后自动按 模块→优先级→类型→改动量 排序
 - 不修改 review 文档或业务代码，只操作 backlog
