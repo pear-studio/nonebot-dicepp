@@ -76,7 +76,6 @@ class TestCharacterLifeBasics:
             event_agent=mock_event_agent,
             data_store=mock_data_store,
             character=character,
-            share_threshold=0.4,
         )
         life.boundary_receiver = MagicMock()
         return life
@@ -246,7 +245,6 @@ class TestCharacterLifePersistence:
             event_agent=mock_event_agent,
             data_store=mock_data_store,
             character=character,
-            share_threshold=0.4,
         )
 
     @pytest.mark.asyncio
@@ -404,7 +402,6 @@ class TestCharacterLifeStatus:
             event_agent=MagicMock(),
             data_store=MagicMock(),
             character=char,
-            share_threshold=0.4,
         )
 
     def test_get_event_status(self, life, monkeypatch):

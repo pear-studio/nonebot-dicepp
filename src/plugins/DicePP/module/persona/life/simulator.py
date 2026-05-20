@@ -100,27 +100,28 @@ class LifeSimulator:
                     logger.info(
                         f"角色生活事件: {event_chain[0].get('description', '')[:50]}..."
                     )
-                    best_event = max(event_chain, key=lambda e: e.get("share_desire", 0.0))
-                    if (
-                        self.scheduler
-                        and best_event.get("share_desire", 0.0)
-                        >= self.config.proactive_event_share_threshold
-                    ):
-                        delay = random.randint(
-                            self.config.proactive_event_share_delay_min,
-                            self.config.proactive_event_share_delay_max,
-                        )
-                        self.scheduler.schedule_share(
-                            event_id=best_event.get("event_id", ""),
-                            event_description=best_event.get("description", ""),
-                            reaction=best_event.get("reaction", ""),
-                            share_desire=best_event.get("share_desire", 0.0),
-                            delay_minutes=delay,
-                        )
+                    self._schedule_share_from_chain(event_chain)
             except asyncio.TimeoutError:
                 logger.warning("tick: 角色生活事件生成超时（>300s），跳过本次以避免阻塞 proactive 系统")
             except Exception:
                 logger.exception("tick: 角色生活事件生成失败")
+
+            # 消费自发事件待分享信息（drain 保证不丢并发注入的事件）
+            for desc, reaction, share_desire in self.character_life.drain_pending_shares():
+                if not self.scheduler:
+                    break
+                if share_desire >= self.config.proactive_event_share_threshold:
+                    delay = random.randint(
+                        self.config.proactive_event_share_delay_min,
+                        self.config.proactive_event_share_delay_max,
+                    )
+                    self.scheduler.schedule_share(
+                        event_id="",
+                        event_description=desc,
+                        reaction=reaction,
+                        share_desire=share_desire,
+                        delay_minutes=delay,
+                    )
 
         # 运行主动消息调度器
         if self.scheduler:
@@ -145,6 +146,24 @@ class LifeSimulator:
         except Exception as e:
             logger.exception(f"tick_daily 失败: {e}")
             return None
+
+    def _schedule_share_from_chain(self, event_chain: List[Dict[str, Any]]) -> None:
+        """从事件链中选取分享欲望最高的事件，调度分享。"""
+        if not self.scheduler:
+            return
+        best_event = max(event_chain, key=lambda e: e.get("share_desire", 0.0))
+        if best_event.get("share_desire", 0.0) >= self.config.proactive_event_share_threshold:
+            delay = random.randint(
+                self.config.proactive_event_share_delay_min,
+                self.config.proactive_event_share_delay_max,
+            )
+            self.scheduler.schedule_share(
+                event_id=best_event.get("event_id", ""),
+                event_description=best_event.get("description", ""),
+                reaction=best_event.get("reaction", ""),
+                share_desire=best_event.get("share_desire", 0.0),
+                delay_minutes=delay,
+            )
 
     async def apply_relationship_decay_batch(self) -> int:
         """每日批处理：将长时间未互动用户的时间衰减写入数据库。返回写库条数。"""

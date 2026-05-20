@@ -16,22 +16,6 @@
 - 问题表现: 用户可通过 .ai key config 命令提供自己的 LLM API key，覆盖全局配置。涉及计费体系、配额管理、滥用防护等一整套体系，当前设计对安全边界覆盖不足。该功能与 provider 路由重构的候选池调度、熔断器、探针等核心机制耦合过深，增加了不必要的复杂度。当前从本分支 scope 中移出，需求保留待后续独立实施。
 - 工作计划: 独立设计用户 Key 管理子系统：安全存储（加密）、配额追踪、滥用检测。实现 UserLLMConfig 数据模型（含 API key 加密存储）。实现 .ai key config 命令交互流程。Router 层集成用户 Key 覆盖逻辑（优先级高于全局配置）。影响面: module/persona/data/models.py、module/persona/command.py、module/persona/llm/router.py。
 
-### [B-260519-721203] 解除 CharacterLife 与 ProactiveScheduler 的双向耦合
-- 创建: 2026-05-19
-- 问题表现:
-  - CharacterLife 当前持有 event_share_queue 依赖并自行判断 share_threshold，职责越界
-  - CharacterLife.set_boundary_receiver(scheduler) 建立双向耦合——CharacterLife 需要通知 Scheduler 时间边界
-  - CharacterLife 构造参数包含 share_threshold、share_delay_min、share_delay_max 等调度域参数（factory.py:391-393）
-  - 事件分享的"是否发、何时发、发给谁"决策分散在 CharacterLife 和 ProactiveScheduler 两处
-- 工作计划:
-  - CharacterLife 职责收敛为仅事件生成，tick() 返回 EventResult（含 share_desire），不做调度决策
-  - 移除 CharacterLife 对 event_share_queue 的依赖，移除 share_threshold/share_delay 参数
-  - set_boundary_receiver() 保留但简化——仅同步 jittered 时间边界到 Scheduler，不在 CharacterLife 内部触发分享
-  - LifeSimulator.tick() 统一负责决策: 获取事件 → 判断 share_desire ≥ threshold → 调用 scheduler.schedule_share()
-  - ProactiveScheduler 成为所有外发消息的唯一调度入口
-  - 影响面: life/character_life.py、life/simulator.py、life/proactive_scheduler.py、factory.py
-  - 风险: 中——CharacterLife 接口变更需更新所有调用方和测试
-
 ### [B-260519-8c972e] persona_unified_messages 改名为 message_stream 并简化双写路径
 - 创建: 2026-05-19
 - 问题表现:

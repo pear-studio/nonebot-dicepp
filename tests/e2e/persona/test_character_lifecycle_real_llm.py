@@ -194,7 +194,6 @@ async def _run_full_day_lifecycle() -> dict:
             event_agent=agent,
             data_store=store,
             character=character,
-            share_threshold=0.4,
         )
         life.boundary_receiver = MagicMock()
         diary_generator = DiaryGenerator(

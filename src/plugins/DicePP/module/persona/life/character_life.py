@@ -100,18 +100,11 @@ class CharacterLife:
         event_agent: EventGenerationAgent,
         data_store: PersonaDataStore,
         character: Character,
-        share_threshold: float,
-        *,
-        share_delay_min: int = 1,
-        share_delay_max: int = 5,
     ):
         self.config = config
         self.event_agent = event_agent
         self.data_store = data_store
         self.character = character
-        self._share_threshold = share_threshold
-        self._share_delay_min = share_delay_min
-        self._share_delay_max = share_delay_max
         # 当日计划槽位（自 0 点起的分钟, 槽位类型），边界槽位类型为 wake_up/good_night，日常为 system
         self._slot_minutes_today: Optional[List[Tuple[int, str]]] = None
         self._fired_slot_indices: Set[int] = set()
@@ -129,6 +122,8 @@ class CharacterLife:
         self._boundaries_loaded = False
         # 状态读写并发锁（保护 inject_spontaneous_event 与 generate_daily_event 的 state 读写区间）
         self._state_lock = asyncio.Lock()
+        # 待处理的自发事件分享信息，由 LifeSimulator.tick() 消费
+        self._pending_shares: List[Tuple[str, str, float]] = []
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
@@ -837,24 +832,12 @@ class CharacterLife:
                 duration_minutes=event_result.duration_minutes,
             )
 
-        if (
-            self.boundary_receiver is not None
-            and reaction_result.share_desire >= self._share_threshold
-        ):
-            event_id = f"evt_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
-            delay = random.randint(
-                self._share_delay_min, self._share_delay_max,
-            )
-            try:
-                self.boundary_receiver.schedule_share(
-                    event_id=event_id,
-                    event_description=event_result.description,
-                    reaction=reaction_result.reaction,
-                    share_desire=reaction_result.share_desire,
-                    delay_minutes=delay,
-                )
-            except Exception:
-                logger.exception("[spontaneous] 分享调度失败")
+        if reaction_result.share_desire > 0:
+            self._pending_shares.append((
+                event_result.description,
+                reaction_result.reaction,
+                reaction_result.share_desire,
+            ))
 
         logger.info(
             "[spontaneous] 注入成功 desc=%s energy=%+d mood=%+d health=%+d",
@@ -862,3 +845,12 @@ class CharacterLife:
             ed, md, hd,
         )
         return True
+
+    def drain_pending_shares(self) -> List[Tuple[str, str, float]]:
+        """取出并清除所有待分享的自发事件信息，供 LifeSimulator 消费。
+
+        sync 实现：list copy + clear 之间无 await 点，asyncio 单线程模型下天然安全。
+        """
+        shares = list(self._pending_shares)
+        self._pending_shares.clear()
+        return shares

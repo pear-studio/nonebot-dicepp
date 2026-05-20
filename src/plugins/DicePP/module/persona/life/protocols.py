@@ -13,18 +13,9 @@ class EventSharePort(SendPort, Protocol):
 
 
 class BoundaryReceiver(Protocol):
-    """窄接口：CharacterLife 向外部通知边界事件和波动边界。"""
+    """窄接口：CharacterLife 向外部同步当日活跃时间波动边界。"""
 
     def set_jittered_boundaries(self, start: int, end: int) -> None: ...
-
-    def schedule_share(
-        self,
-        event_id: str,
-        event_description: str,
-        reaction: str,
-        share_desire: float,
-        delay_minutes: int,
-    ) -> None: ...
 
 
 class SleepGate(Protocol):

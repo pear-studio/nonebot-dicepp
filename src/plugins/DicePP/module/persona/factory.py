@@ -405,9 +405,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         event_agent=event_agent,
         data_store=store,
         character=character,
-        share_threshold=config.proactive_event_share_threshold,
-        share_delay_min=config.proactive_event_share_delay_min,
-        share_delay_max=config.proactive_event_share_delay_max,
     )
 
     # ── Step 4: action_evaluator

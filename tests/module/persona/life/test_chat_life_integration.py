@@ -43,7 +43,7 @@ class TestSleepGate:
         cfg = _make_cfg()
         event_agent = MagicMock()
         store = AsyncMock()
-        life = CharacterLife(config=cfg, event_agent=event_agent, data_store=store, character=char, share_threshold=0.4)
+        life = CharacterLife(config=cfg, event_agent=event_agent, data_store=store, character=char)
         life._today_jittered_start = start
         life._today_jittered_end = end
         if good_night_fired or wake_up_fired:
@@ -237,7 +237,7 @@ class TestInjectSpontaneousEvent:
         cfg = _make_cfg()
         event_agent = MagicMock()
         store = AsyncMock()
-        life = CharacterLife(config=cfg, event_agent=event_agent, data_store=store, character=char, share_threshold=0.4)
+        life = CharacterLife(config=cfg, event_agent=event_agent, data_store=store, character=char)
         assert hasattr(life, '_state_lock')
         assert isinstance(life._state_lock, asyncio.Lock)
 
@@ -248,7 +248,7 @@ class TestInjectSpontaneousEvent:
         event_agent = MagicMock()
         store = AsyncMock()
         store.get_character_state = AsyncMock(return_value=None)
-        life = CharacterLife(config=cfg, event_agent=event_agent, data_store=store, character=char, share_threshold=0.4)
+        life = CharacterLife(config=cfg, event_agent=event_agent, data_store=store, character=char)
         result = await life.inject_spontaneous_event("测试行动")
         assert result is False
 
@@ -260,7 +260,7 @@ class TestInjectSpontaneousEvent:
         store = AsyncMock()
         cs = CharacterState(energy=50, mood=50, health=50)
         store.get_character_state = AsyncMock(return_value=cs)
-        life = CharacterLife(config=cfg, event_agent=event_agent, data_store=store, character=char, share_threshold=0.4)
+        life = CharacterLife(config=cfg, event_agent=event_agent, data_store=store, character=char)
 
         call_order = []
 
