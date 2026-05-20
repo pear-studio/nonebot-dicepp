@@ -34,18 +34,3 @@
   - 影响面: data/migrations.py、data/store.py、data/models.py、command.py、chat/session.py、life/simulator.py、life/proactive_scheduler.py、tools/search_history.py、factory.py（共 9 个文件）
   - 风险: 中——表名变更需要 ALTER TABLE RENAME TO 或创建新表迁移数据；双写简化需仔细验证各发送路径
 
-### [B-260519-a515e5] create_persona() 工厂函数拆分（183行->Builder模式）
-- 创建: 2026-05-19
-- 问题表现:
-    - factory.py create_persona() 183 行单函数，9 步线性组装，步骤间有隐式依赖
-    - 每增加子系统（如 ActionEvaluator）都需修改工厂函数，违反开闭原则
-    - _build_chat 12 个参数，位置传参脆弱
-    - 参考: core-analyzer 报告 C1、C2
-- 工作计划:
-    - 方案: 拆分为 Phase Builder（_Phase1InfraBuilder / _Phase2ToolBuilder / _Phase3AppAssembler）
-    - 备选: 引入简单 DI 容器或 Builder 模式分段构建
-    - _build_chat 参数改为 dataclass 收纳可选依赖
-    - 验证: 启动探针通过、模块初始化无回归
-    - 影响面: factory.py 主要重写，command.py 调用方适配
-    - 风险: 中——初始化流程重构，需覆盖 enabled/disabled/probe_failed 等分支
-
