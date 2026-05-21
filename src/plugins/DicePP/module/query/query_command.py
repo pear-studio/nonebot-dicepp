@@ -21,7 +21,7 @@ from core.data.query_store import (
     QUERY_REDIRECT_FIELD_LIST,
     QueryStoreError,
 )
-from .query_utils import command_split
+from core.query_utils import command_split
 from utils.time import get_current_date_raw
 from utils.data import yield_deduplicate
 
@@ -337,7 +337,6 @@ class QueryCommand(UserCommandBase):
         #self.item_uuid_dict: Dict[int, QueryItem] = {}  # key为item uuid
         #self.src_uuid_dict: Dict[int, QuerySource] = {}  # key为source uuid
         self.record_dict: Dict[MessagePort, QueryRecord] = {}
-        #CONNECTED_QUERY_DATABASES: Dict[str] = {}
         self.record_clean_flag: int = 0
 
         reg_loc = bot.loc_helper.register_loc_text

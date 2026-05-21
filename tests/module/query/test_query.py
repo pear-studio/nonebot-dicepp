@@ -1,35 +1,38 @@
 """
 query 模块测试
-- 单元测试：query_database 中的纯函数（create_empty_sqlite_database / regexp_normalize 等）
+- 单元测试：QueryStore.create_empty_database / regexp_normalize 等
 - 集成测试：.查询 / .q 指令基础响应
 """
 import pytest
 import os
+import asyncio
 import tempfile
 from unittest.async_case import IsolatedAsyncioTestCase
 
 
-# ─────────────────────────── 单元测试：query_database ───────────────────────────
+# ─────────────────────────── 单元测试：QueryStore.create_empty_database ─────────
 
 @pytest.mark.unit
 class TestCreateEmptySqliteDatabase:
-    """create_empty_sqlite_database 函数测试"""
+    """QueryStore.create_empty_database 函数测试"""
 
     def test_creates_valid_db_file(self):
-        from module.query.query_database import create_empty_sqlite_database
+        from core.data.query_store import QueryStore
+        store = QueryStore()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test_query.db")
-            result = create_empty_sqlite_database(db_path)
+            result = asyncio.run(store.create_empty_database(db_path))
             assert result, "应成功创建数据库"
             assert os.path.exists(db_path), "数据库文件应存在"
 
     def test_created_db_has_data_table(self):
         """创建的数据库应包含 data 和 redirect 两张表"""
         import sqlite3
-        from module.query.query_database import create_empty_sqlite_database
+        from core.data.query_store import QueryStore
+        store = QueryStore()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test_query.db")
-            create_empty_sqlite_database(db_path)
+            asyncio.run(store.create_empty_database(db_path))
             conn = sqlite3.connect(db_path)
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = {row[0] for row in cursor.fetchall()}
@@ -40,10 +43,11 @@ class TestCreateEmptySqliteDatabase:
     def test_data_table_has_correct_columns(self):
         """data 表应包含 QUERY_DATA_FIELD_LIST 定义的所有字段"""
         import sqlite3
-        from module.query.query_database import create_empty_sqlite_database, QUERY_DATA_FIELD_LIST
+        from core.data.query_store import QueryStore, QUERY_DATA_FIELD_LIST
+        store = QueryStore()
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test_query.db")
-            create_empty_sqlite_database(db_path)
+            asyncio.run(store.create_empty_database(db_path))
             conn = sqlite3.connect(db_path)
             cursor = conn.execute("PRAGMA table_info(data)")
             columns = {row[1] for row in cursor.fetchall()}
@@ -52,20 +56,21 @@ class TestCreateEmptySqliteDatabase:
                 assert field in columns, f"data 表缺少字段 {field}"
 
     def test_second_create_raises_or_fails(self):
-        """在已存在文件上再次创建应引发异常（data 表已存在，只捕获 PermissionError 的 bug 是已知行为）"""
+        """在已存在文件上再次创建应引发异常（data 表已存在）"""
         import sqlite3
-        from module.query.query_database import create_empty_sqlite_database
+        from core.data.query_store import QueryStore
+        store = QueryStore()
         tmpdir = tempfile.mkdtemp()
         try:
             db_path = os.path.join(tmpdir, "test_idem.db")
-            result1 = create_empty_sqlite_database(db_path)
+            result1 = asyncio.run(store.create_empty_database(db_path))
             assert result1, "第一次创建应成功"
-            # 第二次调用在 data 表已存在时应抛出异常（当前函数只捕获 PermissionError）
+            # 第二次调用在 data 表已存在时应抛出异常
             with pytest.raises(Exception):
-                create_empty_sqlite_database(db_path)
+                asyncio.run(store.create_empty_database(db_path))
         finally:
             import gc
-            gc.collect()  # 强制 GC，关闭可能残留的 sqlite 连接
+            gc.collect()
             import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -76,34 +81,32 @@ class TestRegexpNormalize:
 
     def test_normalize_escapes_special_chars(self):
         """regexp_normalize 应转义正则特殊字符"""
-        from module.query.query_database import regexp_normalize
+        from core.data.query_store import regexp_normalize
         result = regexp_normalize("(力量)")
-        # '(' 和 ')' 应被转义为 '\(' 和 '\)'
         assert "\\(" in result
         assert "\\)" in result
-        # 转义后结果应以 '\(' 开头，而非未转义的 '('
         assert result.startswith("\\("), f"'(' 应被转义，实际: {result}"
 
     def test_normalize_preserves_normal_chars(self):
         """普通汉字和字母不应被转义"""
-        from module.query.query_database import regexp_normalize
+        from core.data.query_store import regexp_normalize
         result = regexp_normalize("力量")
         assert result == "力量"
 
     def test_normalize_escapes_dot(self):
         """点号 '.' 应被转义"""
-        from module.query.query_database import regexp_normalize
+        from core.data.query_store import regexp_normalize
         result = regexp_normalize("v1.0")
         assert "\\." in result
 
     def test_normalize_basic_string(self):
-        from module.query.query_database import regexp_normalize
+        from core.data.query_store import regexp_normalize
         result = regexp_normalize("火球术")
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_normalize_empty_string(self):
-        from module.query.query_database import regexp_normalize
+        from core.data.query_store import regexp_normalize
         result = regexp_normalize("")
         assert isinstance(result, str)
 
