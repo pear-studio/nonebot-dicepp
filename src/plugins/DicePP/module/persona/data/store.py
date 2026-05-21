@@ -42,6 +42,9 @@ class PersonaDataStore:
     _PRUNE_INTERVAL_WRITES = 50
     _PRUNE_INTERVAL_SECONDS = 300
 
+    # SYSTEM_LOG 过滤条件，用于所有面向外部的 message_stream 查询
+    _EXCLUDE_SYSTEM_LOG = "type != 'system_log'"
+
     def __init__(
         self,
         db_connection: aiosqlite.Connection,
@@ -134,10 +137,11 @@ class PersonaDataStore:
     ) -> List[UnifiedMessage]:
         """获取最近消息（按 user_id + group_id），时间升序返回"""
         async with self.db.execute(
-            """
+            f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at
             FROM message_stream
             WHERE user_id = ? AND group_id = ?
+              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at DESC
             LIMIT ?
             """,
@@ -152,9 +156,9 @@ class PersonaDataStore:
         group_id 非空时查群聊，为空时查私聊。
         """
         async with self.db.execute(
-            """
+            f"""
             SELECT created_at FROM message_stream
-            WHERE user_id = ? AND group_id = ?
+            WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at ASC
             LIMIT 1
             """,
@@ -168,7 +172,7 @@ class PersonaDataStore:
     async def count_messages(self, user_id: str, group_id: str = "") -> int:
         """统计用户消息数量（使用 SELECT COUNT(*) 避免全量加载）"""
         async with self.db.execute(
-            "SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = ?",
+            f"SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
             (user_id, group_id),
         ) as cursor:
             row = await cursor.fetchone()
@@ -181,18 +185,18 @@ class PersonaDataStore:
     ) -> List[UnifiedMessage]:
         """获取群聊最近消息，时间升序返回"""
         if limit is None:
-            sql = """
+            sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at
             FROM message_stream
-            WHERE group_id = ? AND group_id != ''
+            WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at DESC
             """
             params = (group_id,)
         else:
-            sql = """
+            sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at
             FROM message_stream
-            WHERE group_id = ? AND group_id != ''
+            WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at DESC
             LIMIT ?
             """
@@ -222,7 +226,7 @@ class PersonaDataStore:
         if (start_time is None) != (end_time is None):
             raise ValueError("start_time 和 end_time 必须同时提供或同时省略")
 
-        conditions = ["group_id = ?", "group_id != ''"]
+        conditions = ["group_id = ?", "group_id != ''", PersonaDataStore._EXCLUDE_SYSTEM_LOG]
         params: List[Any] = [group_id]
 
         if keyword:
@@ -261,19 +265,80 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [self._row_to_message(r) for r in reversed(list(rows))]
 
+    async def get_daily_message_stats(self, date: str) -> Dict[str, int]:
+        """获取某日 bot 主动发送消息统计（排除 SYSTEM_LOG）"""
+        async with self.db.execute(
+            f"""
+            SELECT COUNT(*) as sent,
+                   COUNT(DISTINCT user_id) as covered
+            FROM message_stream
+            WHERE role = 'assistant' AND date(created_at) = ?
+              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            """,
+            (date,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return {"sent": row[0] if row else 0, "covered": row[1] if row else 0}
+
+    async def get_daily_interactive_users(self, date: str) -> tuple:
+        """获取某日互动用户统计：当日数、历史数、新增数"""
+        async with self.db.execute(
+            f"""
+            SELECT COUNT(DISTINCT user_id)
+            FROM message_stream
+            WHERE role = 'user' AND date(created_at) = ?
+              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            """,
+            (date,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            yesterday_users = row[0] if row else 0
+
+        async with self.db.execute(
+            f"""
+            SELECT COUNT(DISTINCT user_id)
+            FROM message_stream
+            WHERE role = 'user' AND date(created_at) < ?
+              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            """,
+            (date,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            before_users = row[0] if row else 0
+
+        async with self.db.execute(
+            f"""
+            SELECT COUNT(DISTINCT user_id)
+            FROM message_stream
+            WHERE role = 'user' AND date(created_at) = ?
+              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+              AND user_id NOT IN (
+                SELECT DISTINCT user_id FROM message_stream
+                WHERE role = 'user' AND date(created_at) < ?
+                  AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+              )
+            """,
+            (date, date),
+        ) as cursor:
+            row = await cursor.fetchone()
+            new_users = row[0] if row else 0
+
+        return (yesterday_users, before_users, new_users)
+
     async def _prune_message_stream_private(self, user_id: str) -> None:
         """私聊按 user_id 维度保留最近 N 条"""
         async with self.db.execute(
-            "SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = ''",
+            f"SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
             (user_id,),
         ) as cursor:
             row = await cursor.fetchone()
             if row and row[0] <= self._message_stream_max_per_group:
                 return
         await self.db.execute(
-            """
+            f"""
             DELETE FROM message_stream
             WHERE user_id = ? AND group_id = ''
+              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
               AND id NOT IN (
                 SELECT id FROM message_stream
                 WHERE user_id = ? AND group_id = ''
@@ -288,16 +353,17 @@ class PersonaDataStore:
     async def _prune_message_stream_group(self, group_id: str) -> None:
         """群聊按 group_id 维度保留最近 N 条"""
         async with self.db.execute(
-            "SELECT COUNT(*) FROM message_stream WHERE group_id = ? AND group_id != ''",
+            f"SELECT COUNT(*) FROM message_stream WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
             (group_id,),
         ) as cursor:
             row = await cursor.fetchone()
             if row and row[0] <= self._message_stream_max_per_group:
                 return
         await self.db.execute(
-            """
+            f"""
             DELETE FROM message_stream
             WHERE group_id = ? AND group_id != ''
+              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
               AND id NOT IN (
                 SELECT id FROM message_stream
                 WHERE group_id = ? AND group_id != ''
@@ -333,6 +399,14 @@ class PersonaDataStore:
             await self._prune_message_stream_group(group_id)
         else:
             await self._prune_message_stream_private(user_id)
+        await self._prune_system_log()
+
+    async def _prune_system_log(self) -> None:
+        """清理 30 天前的 SYSTEM_LOG 消息（不占用户配额，独立过期淘汰）"""
+        await self.db.execute(
+            "DELETE FROM message_stream WHERE type = 'system_log' AND created_at < date('now', '-30 days')"
+        )
+        await self.db.commit()
 
     # ========== 消息相关 ==========
 

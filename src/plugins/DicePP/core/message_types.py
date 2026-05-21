@@ -10,6 +10,7 @@ class MessageType(StrEnum):
     CHAT = "chat"
     COMMAND = "command"
     SYSTEM_NOTICE = "system_notice"
+    SYSTEM_LOG = "system_log"
 
     @classmethod
     def from_str(cls: Type[T], value: str) -> T:

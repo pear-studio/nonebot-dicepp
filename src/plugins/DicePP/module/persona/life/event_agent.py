@@ -742,3 +742,50 @@ class EventGenerationAgent:
             return message
 
         return None
+
+    @staticmethod
+    async def generate_report_opening(
+        llm_router: LLMRouter,
+        character_name: str,
+        character_description: str,
+        summary: str,
+    ) -> Optional[str]:
+        """生成日报开场白 — 辅助 tier，无工具调用，直接取文本回复。
+
+        Returns:
+            2-3 句角色口吻文本，失败时返回 None（调用方降级为模板）
+        """
+        system_prompt = f"""你是{character_name}，正在向你的主人汇报昨天的运行情况。
+
+角色设定:
+{character_description or '一个友好、尽责的AI助手'}
+
+请用第一人称"我"，以轻松自然的语气写2-3句话，作为每日报告的简短开场白。要点：
+1. 提及昨天发生了一些事（参考摘要），语气根据角色个性自然表达
+2. 不要复述具体数据，数据会由系统附加在报告中
+3. 像日常聊天一样自然，不要生硬的"汇报如下""数据汇总"等公文用语
+4. 不需要落款署名
+
+摘要信息:
+{summary}"""
+
+        user_prompt = "请用第一人称写2-3句日报开场白："
+
+        try:
+            result = await llm_router.run_via_loop(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                selection=SelectionPolicy.SUMMARIZE,
+                temperature=0.85,
+                tools=None,
+                max_tool_rounds=0,
+            )
+            text = (result.final_output or "").strip().strip('"').strip("'")
+            if not text:
+                return None
+            return text[:200]
+        except Exception:
+            logger.warning("generate_report_opening 失败，降级为纯模板", exc_info=True)
+            return None

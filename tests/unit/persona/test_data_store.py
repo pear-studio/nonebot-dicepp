@@ -147,6 +147,39 @@ class TestMessageCRUD:
         assert await store.count_messages("u1", "") == 1
         assert await store.count_messages("u1", "g1") == 2
 
+    @pytest.mark.asyncio
+    async def test_get_recent_messages_excludes_system_log(self, temp_db):
+        """SYSTEM_LOG 消息不出现在 get_recent_messages 结果中"""
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream("u1", "", "user", MessageType.CHAT, "hello")
+        await store.add_message_stream("u1", "", "assistant", MessageType.SYSTEM_LOG, "daily report")
+        await store.add_message_stream("u1", "", "user", MessageType.CHAT, "world")
+
+        msgs = await store.get_recent_messages("u1", limit=10)
+        assert len(msgs) == 2
+        assert msgs[0].content == "hello"
+        assert msgs[1].content == "world"
+
+    @pytest.mark.asyncio
+    async def test_system_log_persisted_but_hidden(self, temp_db):
+        """SYSTEM_LOG 消息写入 message_stream 但不出现在上下文查询中"""
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream("u1", "", "assistant", MessageType.SYSTEM_LOG, "report")
+
+        # get_recent_messages 不返回
+        msgs = await store.get_recent_messages("u1", limit=10)
+        assert len(msgs) == 0
+
+        # 但仍在数据库中（通过原始查询验证）
+        cursor = await store.db.execute(
+            "SELECT COUNT(*) FROM message_stream WHERE type = ?",
+            (MessageType.SYSTEM_LOG.value,),
+        )
+        row = await cursor.fetchone()
+        assert row[0] == 1
+
 class TestWhitelistCRUD:
     """测试白名单 CRUD"""
 

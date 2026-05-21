@@ -25,6 +25,9 @@ from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
 from .data.models import MessageType
 from .admin import AdminDispatcher
+from .report.daily_report import DailyReportGenerator
+from .gateway.port import MessagePort
+from .gateway.pipeline import MessagePipeline, TruncateStage
 
 
 @custom_user_command("PersonaAI", priority=DPP_COMMAND_PRIORITY_DEFAULT, flag=DPP_COMMAND_FLAG_FUN)
@@ -46,6 +49,8 @@ class PersonaCommand(UserCommandBase):
         self._async_tick_daily_task: Optional[asyncio.Task] = None
         # 管理员子命令分发器（在 delay_init 后由外部补齐）
         self._admin_handlers: Dict[str, Callable] = {}
+        # 日报生成器（生命周期独立于 PersonaApp）
+        self.report_generator: Optional[DailyReportGenerator] = None
 
     def _require_app(self) -> Optional[str]:
         """检查 app 和 data_store 是否已初始化，返回错误信息或 None"""
@@ -60,6 +65,7 @@ class PersonaCommand(UserCommandBase):
             app=self.app,
             data_store=self.data_store,
             init_error=self.init_error,
+            report_generator=self.report_generator,
         )
 
     def delay_init(self) -> List[str]:
@@ -70,6 +76,16 @@ class PersonaCommand(UserCommandBase):
 
         if not self.enabled:
             return ["Persona AI 模块已禁用"]
+
+        # 创建日报生成器（独立于 PersonaApp，app 初始为 None）
+        pipeline = MessagePipeline()
+        pipeline.add(TruncateStage(2000))
+        report_port = MessagePort(self.bot, pipeline=pipeline)
+        self.report_generator = DailyReportGenerator(
+            bot=self.bot,
+            port=report_port,
+            config=config,
+        )
 
         # 注册异步初始化任务
         async def init_persona():
@@ -84,6 +100,9 @@ class PersonaCommand(UserCommandBase):
                 return []
             if self.app:
                 self.data_store = self.app.store
+                # 注入 app 引用到日报生成器
+                if self.report_generator:
+                    self.report_generator.set_app(self.app)
                 # 注册消息发送后跨模块通知 hook（先注销旧 hook 再注册，防止热重载后重复）
                 if hasattr(self, "_post_send_hook_unregister"):
                     self._post_send_hook_unregister()
@@ -160,7 +179,7 @@ class PersonaCommand(UserCommandBase):
             return
         try:
             msg_type = MessageType.from_str(type)
-            if type not in (MessageType.CHAT.value, MessageType.COMMAND.value, MessageType.SYSTEM_NOTICE.value):
+            if type not in (MessageType.CHAT.value, MessageType.COMMAND.value, MessageType.SYSTEM_NOTICE.value, MessageType.SYSTEM_LOG.value):
                 dice_log(f"[Persona] 未知 message_type='{type}'，fallback 到 CHAT")
             await self.data_store.add_message_stream(
                 user_id=user_id,
@@ -317,7 +336,8 @@ class PersonaCommand(UserCommandBase):
         # 处理 admin 命令
         if cmd == "admin" or hint == "admin":
             response = await self._handle_admin(user_id, group_id, args)
-            await self._send(user_id, group_id, response)
+            if response:
+                await self._send(user_id, group_id, response)
             return []
 
         # 处理 profile 命令
@@ -713,6 +733,8 @@ class PersonaCommand(UserCommandBase):
                 diary = await self.app.tick_daily()
                 if diary:
                     dice_log(f"[Persona] 生成日记: {len(diary)} 字")
+                if self.report_generator and self.config.daily_report_enabled:
+                    await self.report_generator.generate_and_send(diary)
 
             # 清理已完成的任务
             dt = self._async_tick_daily_task
@@ -735,6 +757,8 @@ class PersonaCommand(UserCommandBase):
             diary = loop.run_until_complete(self.app.tick_daily())
             if diary:
                 dice_log(f"[Persona] 生成日记: {len(diary)} 字")
+            if self.report_generator and self.config.daily_report_enabled:
+                loop.run_until_complete(self.report_generator.generate_and_send(diary))
             return []
         except Exception as e:
             dice_log(f"[Persona] tick_daily 失败: {e}")
