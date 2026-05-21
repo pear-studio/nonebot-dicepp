@@ -438,14 +438,12 @@ class Bot:
         # self.start_up()
         # await self.delay_init_command()
 
-    def register_command(self):
-        from core.command.user_cmd import USER_COMMAND_CLS_DICT
-        command_cls_dict = USER_COMMAND_CLS_DICT
-        command_names = command_cls_dict.keys()
-        command_names = sorted(command_names, key=lambda n: command_cls_dict[n].priority)  # 按优先级排序
-        for command_name in command_names:
-            command_cls = command_cls_dict[command_name]
-            self.command_dict[command_name] = command_cls(bot=self)  # 默认的Dict是有序的, 所以之后用values拿到的也是有序的
+    def register_command(self, registry=None):
+        from core.command.user_cmd import CommandRegistry, DEFAULT_REGISTRY
+        if registry is None:
+            registry = DEFAULT_REGISTRY
+        for command_cls in registry.get_sorted_commands():
+            self.command_dict[command_cls.__name__] = command_cls(bot=self)
 
     def delay_init(self):
         """在载入本地化文本和配置等数据后调用"""

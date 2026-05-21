@@ -55,25 +55,6 @@
     - 影响面: module/character/dnd5e/, module/character/base/, core/data/json_object.py
     - 风险: 旧 JsonObject 的 serialize/deserialize 语义可能与 Pydantic model_dump/model_validate 有细微差异
 
-## command
-
-### [B-260520-fe4aaa] 命令注册机制深化 — 用 CommandRegistry 替代全局字典注册
-- 创建: 2026-05-20
-- 优先级: P1
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-    - 命令注册依赖 import 副作用: @custom_user_command 装饰器写入全局 USER_COMMAND_CLS_DICT
-    - module/__init__.py 必须按精确顺序 import 所有模块
-    - 测试无法只注册需要的命令子集，必须编排完整模块导入链
-    - 全局 dict 是 hypothetical seam (只有一个 adapter: 全量生产注册)
-- 工作计划:
-    - 引入 CommandRegistry 类，支持 registry.register(MyCommand) 和 registry.register_all([...])
-    - Bot.register_command() 接收 registry 作为参数而非读取全局状态
-    - 测试可创建独立 registry，只注入需要的命令
-    - 影响面: core/command/user_cmd.py, core/bot/dicebot.py, module/__init__.py, 所有命令类
-    - 风险: 命令装饰器注册是隐式全局约定，改显式后需保证所有命令都被注册（遗漏检测）
-
 ## persona
 
 ### [B-260521-a751ba] persona_llm_traces 表缺少 selected_provider 列

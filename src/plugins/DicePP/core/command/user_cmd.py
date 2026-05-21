@@ -1,5 +1,7 @@
+from __future__ import annotations
 import abc
-from typing import List, Tuple, Dict, Type, Any
+from contextlib import contextmanager
+from typing import List, Tuple, Dict, Type, Any, Optional
 
 from core.bot import Bot
 from core.communication import MessageMetaData
@@ -7,6 +9,49 @@ from core.communication import MessageMetaData
 from core.command.const import *
 from core.command.bot_cmd import BotCommandBase
 from core.message_types import MessageType
+
+
+class CommandRegistry:
+    """命令注册表，管理 UserCommandBase 子类的注册与查询。"""
+
+    def __init__(self):
+        self._commands: Dict[str, Type[UserCommandBase]] = {}
+
+    def register(self, cls: Type[UserCommandBase]) -> Type[UserCommandBase]:
+        self._commands[cls.__name__] = cls
+        return cls
+
+    def register_all(self, classes: List[Type[UserCommandBase]]) -> None:
+        for cls in classes:
+            self.register(cls)
+
+    def get_sorted_commands(self) -> List[Type[UserCommandBase]]:
+        return sorted(self._commands.values(), key=lambda c: c.priority)
+
+    def __len__(self) -> int:
+        return len(self._commands)
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._commands
+
+
+DEFAULT_REGISTRY = CommandRegistry()
+_current_registry: CommandRegistry = DEFAULT_REGISTRY
+
+
+@contextmanager
+def use_registry(registry: CommandRegistry):
+    """上下文管理器：在 with 块内切换命令注册目标。
+
+    用途：测试中创建独立 registry，只导入所需命令。
+    """
+    global _current_registry
+    prev = _current_registry
+    _current_registry = registry
+    try:
+        yield registry
+    finally:
+        _current_registry = prev
 
 
 class UserCommandBase(metaclass=abc.ABCMeta):
@@ -145,7 +190,7 @@ def custom_user_command(readable_name: str,
         cls.flag = flag
         cls.cluster = cluster
         cls.permission_require = permission_require
-        USER_COMMAND_CLS_DICT[cls.__name__] = cls
+        _current_registry.register(cls)
         return cls
 
     return custom_inner
@@ -170,6 +215,3 @@ class CommandError(Exception):
 
     def __str__(self):
         return f"[Command] [Error] {self.info}"
-
-
-USER_COMMAND_CLS_DICT: Dict[str, Type[UserCommandBase]] = {}
