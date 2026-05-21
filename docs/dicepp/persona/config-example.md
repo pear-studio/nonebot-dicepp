@@ -11,6 +11,8 @@
 | 配置项 | 类型 | 示例 / 默认 | 说明 |
 |--------|------|-------------|------|
 | `enabled` | bool | `true` | 是否启用 Persona 模块 |
+| `daily_report_enabled` | bool | `true` | 是否启用每日综合日报（含 LLM 开场白与运营统计），每日 tick_daily 时发送给 Master |
+| `daily_report_voice_enabled` | bool | `true` | 日报是否使用 LLM 角色口吻开场白，关闭则用纯模板 |
 | `character_name` | string | `default` | 角色卡文件名（不含路径），对应 `character_path` 下 yaml |
 | `character_path` | string | `./content/characters` | 角色卡目录 |
 | `timezone` | string | `Asia/Shanghai` | **IANA 时区名**（`ZoneInfo`）；勿写 `UTC+8` 等。见 `global.json` 内 `_comment_timezone` |

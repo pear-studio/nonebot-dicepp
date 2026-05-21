@@ -12,6 +12,7 @@ from core.bot import Bot
 
 from .factory import PersonaApp
 from .data.store import PersonaDataStore
+from .report.daily_report import DailyReportGenerator
 from .wall_clock import persona_wall_now
 from .game.decay import STAGE_FLOORS
 
@@ -25,6 +26,7 @@ class AdminDispatcher:
         app: Optional[PersonaApp] = None,
         data_store: Optional[PersonaDataStore] = None,
         init_error: Optional[str] = None,
+        report_generator: Optional[DailyReportGenerator] = None,
     ):
         self.bot = bot
         self.app = app
@@ -32,6 +34,7 @@ class AdminDispatcher:
         self.init_error = init_error
         self.config = bot.config.persona_ai if bot else None
         self._whitelist_confirm_pending: Dict[str, float] = {}
+        self._report_generator = report_generator
 
     def _is_admin(self, user_id: str) -> bool:
         return user_id in self.bot.config.admin or user_id in self.bot.config.master
@@ -42,13 +45,16 @@ class AdminDispatcher:
         """分发 admin 子命令"""
         if not self._is_admin(user_id):
             return "权限不足"
-        if not self.data_store:
-            return "模块未初始化"
         if not args:
             return self._help_text()
+        subcmd = args[0]
+        # snapshot 不依赖 PersonaApp 和 data_store，独立可用
+        if subcmd == "snapshot":
+            return await self._admin_snapshot(user_id, group_id, args)
+        if not self.data_store:
+            return "模块未初始化"
         if self.app is None:
             return "模块未初始化"
-        subcmd = args[0]
         handler = getattr(self, f"_admin_{subcmd}", None)
         if handler is None and subcmd in ("trace", "stats", "errors"):
             handler = getattr(self, f"_handle_admin_{subcmd}", None)
@@ -84,7 +90,8 @@ class AdminDispatcher:
             ".ai admin diary - 查看今天的事件和日记\n"
             ".ai admin probe reset <provider>/<model> - 重置 exhausted 模型\n"
             ".ai admin pause - 暂停主动消息\n"
-            ".ai admin resume - 恢复主动消息"
+            ".ai admin resume - 恢复主动消息\n"
+            ".ai admin snapshot - 查看当前运营快照"
         )
 
     # ── admin 子命令 ──────────────────────────────────────────
@@ -361,6 +368,14 @@ class AdminDispatcher:
             self.app.resume_scheduler()
             return "已恢复主动消息发送"
         return "调度器未初始化"
+
+    async def _admin_snapshot(self, user_id: str, group_id: str, args: List[str]) -> str:
+        if not self._report_generator:
+            return "日报生成器未初始化"
+        success = await self._report_generator.send_snapshot_to(user_id, group_id)
+        if not success:
+            return "快照发送失败"
+        return ""
 
     async def _admin_probe(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self._is_admin(user_id):

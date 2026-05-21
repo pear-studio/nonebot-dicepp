@@ -137,3 +137,29 @@ async def test_send_failure_callback_exception_still_returns_false():
     result = await port.send("u1", "", "oops")
 
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_send_with_system_log_message_type():
+    """message_type=SYSTEM_LOG 时透传到 BotSendMsgCommand"""
+    bot = _make_bot()
+    port = MessagePort(bot)
+    from plugins.DicePP.core.message_types import MessageType
+
+    await port.send("u1", "", "daily report", message_type=MessageType.SYSTEM_LOG)
+
+    cmd = bot.proxy.process_bot_command.await_args.args[0]
+    assert cmd.message_type == MessageType.SYSTEM_LOG
+
+
+@pytest.mark.asyncio
+async def test_send_default_message_type_is_chat():
+    """未指定 message_type 时默认为 CHAT"""
+    bot = _make_bot()
+    port = MessagePort(bot)
+    from plugins.DicePP.core.message_types import MessageType
+
+    await port.send("u1", "g1", "hello")
+
+    cmd = bot.proxy.process_bot_command.await_args.args[0]
+    assert cmd.message_type == MessageType.CHAT

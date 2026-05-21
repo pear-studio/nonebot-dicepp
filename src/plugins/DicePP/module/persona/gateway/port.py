@@ -38,6 +38,7 @@ class MessagePort(EventSharePort):
         *,
         skip_history_record: Optional[bool] = None,
         msg_id: Optional[int] = None,
+        message_type: MessageType = MessageType.CHAT,
     ) -> bool:
         """单条消息发送，默认记录历史。
 
@@ -50,6 +51,7 @@ class MessagePort(EventSharePort):
 
         :param skip_history_record: None 时默认 False（不跳过历史）。群聊分段调度等特殊路径可显式传 True。
         :param msg_id: message_stream 表中的行 ID，供 post_send_hook 使用。
+        :param message_type: 消息类型，默认 CHAT。日报路径传 SYSTEM_LOG。
         """
         if skip_history_record is None:
             skip_history_record = False
@@ -68,6 +70,7 @@ class MessagePort(EventSharePort):
                 a.content,
                 skip_history_record=a.skip_history_record,
                 msg_id=msg_id,
+                message_type=message_type,
             )
             return True
         except Exception as e:
@@ -91,6 +94,7 @@ class MessagePort(EventSharePort):
         content: str,
         skip_history_record: bool = False,
         msg_id: Optional[int] = None,
+        message_type: MessageType = MessageType.CHAT,
     ) -> None:
         proxy = getattr(self._bot, "proxy", None)
         if proxy is None:
@@ -102,7 +106,7 @@ class MessagePort(EventSharePort):
         else:
             port = PrivateMessagePort(user_id)
         cmd = BotSendMsgCommand(self._bot.account, content, [port])
-        cmd.message_type = MessageType.CHAT
+        cmd.message_type = message_type
         if skip_history_record:
             cmd.skip_history_record = True
         if msg_id is not None:

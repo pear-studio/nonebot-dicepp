@@ -54,6 +54,8 @@ class ProviderConfig(BaseModel):
 
 class PersonaConfig(BaseModel):
     enabled: bool = False
+    daily_report_enabled: bool = True
+    daily_report_voice_enabled: bool = True
     character_name: str = "default"
     character_path: str = "./content/characters"
 
