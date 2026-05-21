@@ -382,14 +382,14 @@ class Bot:
             except (AttributeError, TypeError, KeyError, RuntimeError):
                 dice_log(str(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111")[0]))
         # 给Master发送每日更新通知（Persona 日报启用时跳过）
-        # 检查 persona command 实例的实际运行状态，而非 config 静态值：
+        # 检查 PersonaCommand 实例的实际运行状态，而非 config 静态值：
         # config.enabled=True 但 PersonaApp 初始化失败时，实例 enabled=False，
         # 此处应与实例状态同步，避免日报和旧通知双双缺失。
-        persona_running = False
-        for command in self.command_dict.values():
-            if hasattr(command, "enabled") and command.enabled:
-                persona_running = True
-                break
+        from plugins.DicePP.module.persona.command import PersonaCommand
+        persona_running = any(
+            isinstance(cmd, PersonaCommand) and cmd.enabled
+            for cmd in self.command_dict.values()
+        )
         if not (persona_running and self.config.persona_ai.daily_report_enabled):
             from core.localization import LOC_DAILY_UPDATE
             feedback = self.loc_helper.format_loc_text(LOC_DAILY_UPDATE)

@@ -754,11 +754,7 @@ class PersonaCommand(UserCommandBase):
                     self._async_tick_daily_task = asyncio.create_task(_run_daily())
                 return []
 
-            diary = loop.run_until_complete(self.app.tick_daily())
-            if diary:
-                dice_log(f"[Persona] 生成日记: {len(diary)} 字")
-            if self.report_generator and self.config.daily_report_enabled:
-                loop.run_until_complete(self.report_generator.generate_and_send(diary))
+            # unreachable: get_running_loop() 成功时 loop.is_running() 必为 True
             return []
         except Exception as e:
             dice_log(f"[Persona] tick_daily 失败: {e}")
