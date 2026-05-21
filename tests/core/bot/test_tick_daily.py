@@ -24,7 +24,7 @@ async def test_tick_daily_awaits_async_command_tick_daily():
     bot.db.group_stat.upsert_many = AsyncMock()
 
     # 其他依赖 mocks
-    bot.register_task = MagicMock()
+    bot.scheduler = MagicMock()
     bot.clear_expired_data = AsyncMock(return_value=[])
     bot.loc_helper.format_loc_text = MagicMock(return_value="")
     bot.send_msg_to_master = AsyncMock()
@@ -67,7 +67,7 @@ async def test_tick_daily_skips_command_on_exception():
     bot.db.user_stat.upsert_many = AsyncMock()
     bot.db.group_stat.list_all = AsyncMock(return_value=[])
     bot.db.group_stat.upsert_many = AsyncMock()
-    bot.register_task = MagicMock()
+    bot.scheduler = MagicMock()
     bot.clear_expired_data = AsyncMock(return_value=[])
     bot.loc_helper.format_loc_text = MagicMock(return_value="")
     bot.send_msg_to_master = AsyncMock()

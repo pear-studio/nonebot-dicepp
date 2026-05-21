@@ -119,7 +119,7 @@ class PersonaCommand(UserCommandBase):
             return []
 
         self._register_admin_handlers()
-        self.bot.register_task(init_persona, is_async=True, timeout=30)
+        self.bot.scheduler.schedule(init_persona, is_async=True, timeout=30)
 
         return [f"Persona AI 模块加载中 (角色: {config.character_name})"]
 

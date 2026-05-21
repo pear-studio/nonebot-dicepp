@@ -31,30 +31,6 @@
     - 影响面: adapter/nonebot_adapter.py, adapter/standalone_proxy.py, adapter/web_chat_proxy.py, core/command/user_cmd.py
     - 风险: dispatch 接口需同时满足三种 adapter (NoneBot/Standalone/WebChat) 的差异化需求
 
-## bot
-
-### [B-260520-b6f605] 从 Bot 中提取 TaskScheduler 模块，消除 todo_tasks 耦合
-- 创建: 2026-05-20
-- 优先级: P1
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-  Bot 持有 todo_tasks: Dict 并直接操作其内部结构，命令层可随意篡改（master_command 直接 todo_tasks={} 清空）
-  process_async_task 原地修改可变 bot_commands 列表，接口副作用不透明
-  register_task / process_async_task 无法独立测试，必须构造完整 Bot 实例
-  shell/bot_runner 直接调用 process_async_task，绕过 tick_loop 的正常路径
-- 工作计划:
-  新建 core/bot/task_scheduler.py: TaskScheduler 类
-    - schedule(task, is_async, timeout, timeout_callback) 注册任务
-    - async process(free_time) -> List[BotCommandBase] 纯返回值，消除副作用
-    - clear_all() 替代直接清空 dict
-    - error_handler 通过构造函数注入，dice_log 直接 import
-  修改 core/bot/dicebot.py: 移除 todo_tasks/register_task/process_async_task，Bot 持有 self._scheduler
-  迁移 4 个命令调用方: register_task -> bot._scheduler.schedule
-  迁移 shell/bot_runner.py: process_async_task -> bot._scheduler.process
-  影响面: core/bot/dicebot.py, master_command.py, persona/command.py, roll_dice_command.py, shell/bot_runner.py
-  风险: process() 返回值合并语义需与 tick_loop 的 bot_commands 累积逻辑对齐
-
 ## character
 
 ### [B-260520-368eba] 角色卡模型统一 — 删除旧 JsonObject 体系，全量迁移到 Pydantic

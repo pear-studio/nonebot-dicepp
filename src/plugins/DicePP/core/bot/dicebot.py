@@ -3,7 +3,7 @@ import asyncio
 import datetime
 import inspect
 import random
-from typing import List, Optional, Dict, Callable, Union, Set, Awaitable, Protocol, runtime_checkable
+from typing import List, Optional, Dict, Callable, Set, Awaitable, Protocol, runtime_checkable
 from random import choice
 
 from utils.logger import dice_log, get_exception_info
@@ -12,6 +12,7 @@ from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PE
 from core.config import Paths
 from core.config.loader import ConfigLoader, ConfigValidationError
 from core.config.pydantic_models import BotConfig
+from core.bot.task_scheduler import TaskScheduler
 from core.persona import PersonaLoader
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
@@ -100,7 +101,7 @@ class Bot:
         self.command_dict: Dict[str, command.UserCommandBase] = {}
 
         self.tick_task: Optional[asyncio.Task] = None
-        self.todo_tasks: Dict[Union[Callable, asyncio.Task], Dict] = {}
+        self.scheduler = TaskScheduler(error_handler=self.handle_exception)
         self._no_tick: bool = no_tick
 
         # Some packaged runs may receive events before on_bot_connect completes.
@@ -166,17 +167,6 @@ class Bot:
         # Apply persona overrides after commands have registered their loc keys
         self.loc_helper.set_persona(self.config.persona)
 
-    def register_task(self, task: Callable, is_async: bool = True, timeout: float = 10, timeout_callback: Optional[Callable] = None):
-        """
-        Args:
-            task: 等待执行的任务, 必须没有参数, 必须返回 List[BotCommandBase]
-            is_async: task是否已经是异步函数, 如不是, 将会在其他线程上运行task; 若为同步函数, timeout必须为0
-            timeout: 超时时间, 单位秒, 为0代表不会超时
-            timeout_callback: 超时后调用的回调函数, 必须为同步函数, 同样也应该返回 List[BotCommandBase]
-        """
-        assert is_async or timeout == 0
-        self.todo_tasks[task] = {"init": False, "is_async": is_async, "timeout": timeout, "callback": timeout_callback}
-
     async def tick_loop(self):
         from core.command import BotCommandBase
         loop = asyncio.get_event_loop()
@@ -220,13 +210,13 @@ class Bot:
                     async def update_group_info():
                         await self.update_group_info_all()
                         return []
-                    self.register_task(update_group_info, timeout=3600)
+                    self.scheduler.schedule(update_group_info, timeout=3600)
                     # 更新计时器
                     time_counter[1] = loop_begin_time
 
-                if self.todo_tasks:
+                if self.scheduler.pending:
                     free_time = max(loop_begin_time + 1 - loop.time(), 0.25)
-                    await self.process_async_task(bot_commands, free_time, loop)
+                    bot_commands += await self.scheduler.process(free_time)
 
                 if self.proxy:
                     for command in bot_commands:
@@ -237,52 +227,6 @@ class Bot:
             # 最多每秒执行一次循环
             free_time = max(loop_begin_time + 1 - loop.time(), 0)
             await asyncio.sleep(free_time)
-
-    async def process_async_task(self, bot_commands, free_time: float, loop):
-        init_task = [(task, info) for task, info in self.todo_tasks.items() if not info["init"]]
-        for func, info in init_task:
-            func: Callable
-            del self.todo_tasks[func]
-            if not info["is_async"]:
-                dice_log(f"[Async Task] Init Sync: {func.__name__}")
-
-                async def task_wrapper():
-                    future = loop.run_in_executor(None, func)
-                    await future
-                    return future.result()
-
-                task: asyncio.Task = asyncio.create_task(task_wrapper())
-            else:
-                dice_log(f"[Async Task] Init Async: {func.__name__}")
-                task: asyncio.Task = asyncio.create_task(func())
-            info["init"] = True
-            self.todo_tasks[task] = info
-
-        dice_log(f"[Async Task] Try: "
-                 f"{[(task.get_coro().cr_code.co_name, self.todo_tasks[task]['timeout']) for task in self.todo_tasks.keys()]}"
-                 f" for {free_time} s")
-        try:
-            done_tasks, pending_tasks = await asyncio.wait(self.todo_tasks.keys(), timeout=free_time)
-            task: asyncio.Task
-            for task in done_tasks:
-                try:
-                    bot_commands += task.result()
-                except (AttributeError, TypeError, RuntimeError):
-                    dice_log(str(self.handle_exception(f"Async Task: CODE114")[0]))
-                del self.todo_tasks[task]
-                dice_log(f"[Async Task] Finish {task.get_coro().cr_code.co_name}")
-            for task in pending_tasks:
-                if self.todo_tasks[task]["timeout"] > 0:
-                    self.todo_tasks[task]["timeout"] -= free_time
-                    if self.todo_tasks[task]["timeout"] < 0:
-                        dice_log(f"[Async Task] Timeout: {task.get_coro().cr_code.co_name}")
-                        if self.todo_tasks[task]["callback"]:
-                            dice_log(f"[Async Task] Timeout callback: {self.todo_tasks[task]['callback'].__name__}")
-                            bot_commands += self.todo_tasks[task]["callback"]()
-                        task.cancel()
-                        del self.todo_tasks[task]
-        except (AttributeError, TypeError, KeyError, RuntimeError):
-            dice_log(str(self.handle_exception(f"Async Task: CODE112")[0]))
 
     async def _check_memory_and_handle(self) -> None:
         """内存监控：检查内存使用情况，必要时发送警告或触发重启"""
@@ -370,7 +314,7 @@ class Bot:
             res = await self.clear_expired_data()
             return res
 
-        self.register_task(clear_expired_data, timeout=3600)
+        self.scheduler.schedule(clear_expired_data, timeout=3600)
 
         # 调用每个command的tick_daily方法
         for command in self.command_dict.values():

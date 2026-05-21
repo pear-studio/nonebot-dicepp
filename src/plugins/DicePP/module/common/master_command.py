@@ -118,7 +118,7 @@ class MasterCommand(UserCommandBase):
                 return []
             
             import asyncio
-            self.bot.register_task(delayed_reboot, timeout=delay_sec + 30)
+            self.bot.scheduler.schedule(delayed_reboot, timeout=delay_sec + 30)
             feedback = f"已安排延迟重启，将在 {delay_sec} 秒后执行"
         elif arg_str.startswith("send"):
             arg_list = arg_str[4:].split(":", 2)
@@ -141,14 +141,14 @@ class MasterCommand(UserCommandBase):
                     update_feedback += f"\n{group_info.group_name}({group_info.group_id}): 群成员{group_info.member_count}/{group_info.max_member_count}"
                 return [BotSendMsgCommand(self.bot.account, update_feedback, [port])]
 
-            self.bot.register_task(async_task, timeout=60, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "更新超时!", [port])])
+            self.bot.scheduler.schedule(async_task, timeout=60, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "更新超时!", [port])])
             feedback = "更新开始..."
         elif arg_str == "clean":
             async def clear_expired_data():
                 res = await self.bot.clear_expired_data()
                 return res
 
-            self.bot.register_task(clear_expired_data, timeout=3600)
+            self.bot.scheduler.schedule(clear_expired_data, timeout=3600)
             feedback = "清理开始..."
         elif arg_str == "debug-tick":
             feedback = f"异步任务状态: {self.bot.tick_task.get_name()} Done:{self.bot.tick_task.done()} Cancelled:{self.bot.tick_task.cancelled()}\n" \
@@ -156,7 +156,7 @@ class MasterCommand(UserCommandBase):
         elif arg_str == "redo-tick":
             import asyncio
             self.bot.tick_task = asyncio.create_task(self.bot.tick_loop())
-            self.bot.todo_tasks = {}
+            self.bot.scheduler.clear_all()
             feedback = "Redo tick finish!"
         elif arg_str == "log-clean":
             # 立即删除本Bot data_path/logs 下所有文件
