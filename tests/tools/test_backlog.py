@@ -33,6 +33,9 @@ class TestAdd:
             "add",
             "--module", "roll",
             "--title", "Dice balance check",
+            "--priority", "P1",
+            "--type", "feature",
+            "--effort", "M",
             "--symptom", "d0 边界未覆盖, 输出概率分布偏移",
             "--plan", "增补 d0 单测, 评估随机分布拦截",
         )
@@ -50,6 +53,9 @@ class TestAdd:
             "add",
             "--module", "roll",
             "--title", "X",
+            "--priority", "P1",
+            "--type", "feature",
+            "--effort", "M",
             "--symptom", "",
             "--plan", "p",
         )
@@ -59,22 +65,19 @@ class TestAdd:
     def test_add_duplicate_id_rejected(self, tmp_dir):
         # 同秒内同 module/title/symptom 会生成相同 ID, 应被拒绝
         backlog = tmp_dir / "backlog.md"
-        run(
+        args = [
             "--file", str(backlog),
             "add",
             "--module", "roll",
             "--title", "Dice balance check",
+            "--priority", "P1",
+            "--type", "feature",
+            "--effort", "M",
             "--symptom", "d0 边界未覆盖",
             "--plan", "增补单测",
-        )
-        rc, out, err = run(
-            "--file", str(backlog),
-            "add",
-            "--module", "roll",
-            "--title", "Dice balance check",
-            "--symptom", "d0 边界未覆盖",
-            "--plan", "增补单测",
-        )
+        ]
+        run(*args)
+        rc, out, err = run(*args)
         assert rc != 0
         assert "已存在" in err
 
@@ -86,11 +89,17 @@ class TestBatchAdd:
         payload_file.write_text(
             "Module: roll\n"
             "Title: Batch A\n"
+            "Priority: P1\n"
+            "Type: feature\n"
+            "Effort: M\n"
             "Symptom: 单行问题表现\n"
             "Plan: 单行工作计划\n"
             "<<<END>>>\n"
             "Module: persona\n"
             "Title: Batch B\n"
+            "Priority: P2\n"
+            "Type: bug\n"
+            "Effort: S\n"
             "Symptom: 另一条单行\n"
             "Plan: 另一条计划\n"
             "<<<END>>>\n",
@@ -117,6 +126,9 @@ class TestBatchAdd:
         payload_file.write_text(
             "Module: persona\n"
             "Title: 多行测试\n"
+            "Priority: P1\n"
+            "Type: bug\n"
+            "Effort: L\n"
             "Symptom:\n"
             "  - 现象 1\n"
             "  - 现象 2\n"
@@ -150,6 +162,7 @@ class TestListShow:
         run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "Item1",
+            "--priority", "P1", "--type", "feature", "--effort", "M",
             "--symptom", "s", "--plan", "p",
         )
         rc, out, _ = run("--file", str(backlog), "list")
@@ -168,6 +181,7 @@ class TestClosePrune:
         rc, bid, _ = run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "ToClose",
+            "--priority", "P1", "--type", "feature", "--effort", "M",
             "--symptom", "s", "--plan", "p",
         )
         assert rc == 0
@@ -184,11 +198,13 @@ class TestClosePrune:
         rc1, b1, _ = run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "A",
+            "--priority", "P1", "--type", "feature", "--effort", "M",
             "--symptom", "s", "--plan", "p",
         )
         rc2, b2, _ = run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "B",
+            "--priority", "P1", "--type", "feature", "--effort", "M",
             "--symptom", "s", "--plan", "p",
         )
         b1 = b1.strip()
@@ -210,11 +226,13 @@ class TestSortValidate:
         run(
             "--file", str(backlog),
             "add", "--module", "zmod", "--title", "Z",
+            "--priority", "P1", "--type", "feature", "--effort", "M",
             "--symptom", "s", "--plan", "p",
         )
         run(
             "--file", str(backlog),
             "add", "--module", "amod", "--title", "A",
+            "--priority", "P1", "--type", "feature", "--effort", "M",
             "--symptom", "s", "--plan", "p",
         )
 
@@ -228,6 +246,7 @@ class TestSortValidate:
         run(
             "--file", str(backlog),
             "add", "--module", "roll", "--title", "V",
+            "--priority", "P1", "--type", "feature", "--effort", "M",
             "--symptom", "s", "--plan", "p",
         )
         rc, out, _ = run("--file", str(backlog), "validate")
@@ -241,6 +260,9 @@ class TestSortValidate:
             "# Backlog\n\n---\n\n## roll\n\n"
             "### [B-260506-000000] Bad\n"
             "- 创建: 2026-05-06\n"
+            "- 优先级: P0\n"
+            "- 类型: bug\n"
+            "- 改动量: S\n"
             "\n",
             encoding="utf-8",
         )
