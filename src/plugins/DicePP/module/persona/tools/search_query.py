@@ -1,7 +1,7 @@
 """搜索规则资料库工具"""
 import json
 from core.data.query_store import QueryStoreError
-from module.query.query_utils import command_split
+from core.query_utils import command_split
 from .context import ToolContext
 from .registry import ToolDef
 

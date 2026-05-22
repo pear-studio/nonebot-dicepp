@@ -9,13 +9,13 @@ from core.config.basic import Paths
 from utils import col_based_workbook_to_dict, create_parent_dir, read_xlsx
 
 
-# 查询资料库表结构（与 module/query/query_database.py 保持一致）
+# 查询资料库表结构
 QUERY_DATA_FIELD_LIST = ["名称", "英文", "来源", "分类", "标签", "内容"]
 QUERY_REDIRECT_FIELD_LIST = ["名称", "重定向"]
 QUERY_DATA_FIELD = ",".join(QUERY_DATA_FIELD_LIST)
 QUERY_REDIRECT_FIELD = ",".join(QUERY_REDIRECT_FIELD_LIST)
 
-# xlsx 解析映射（与 module/query/query_database.py 保持一致）
+# xlsx 解析映射
 QIF_NAME = "Name"
 QIF_NAME_EN = "NameEN"
 QIF_FROM = "From"

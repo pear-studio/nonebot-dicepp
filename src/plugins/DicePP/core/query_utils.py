@@ -3,7 +3,7 @@
 契约:
 - command_split("") / command_split("  ") → 返回 []；command_split("# / &") → 返回 ["/"]（`/` 非特殊前缀，作为普通 token 收集）
 - 此模块为独立函数集合，零依赖。
-修改时需同时通过 tests/module/query/ (.查询路径) 和 persona 工具测试验证。
+修改时需同时通过 tests/module/query/ 和 persona 工具测试验证。
 """
 from typing import List
 
