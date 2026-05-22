@@ -25,6 +25,7 @@ class ModelConfig(BaseModel):
     quality: float = Field(default=0.5, ge=0.0, le=1.0)
     cost: float = Field(default=0.5, ge=0.0, le=1.0)
     circuit_breaker: Optional[CircuitBreakerConfig] = None
+    max_prompt_chars: Optional[int] = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _validate_category_capabilities(self) -> "ModelConfig":

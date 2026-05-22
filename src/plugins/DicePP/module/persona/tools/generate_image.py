@@ -80,6 +80,18 @@ def make_generate_image_executor(
             )
             return "图片生成功能暂时不可用，请稍后重试"
 
+        # 3. 检查 prompt 长度
+        max_chars = getattr(gen_provider, "max_prompt_chars", None)
+        if max_chars is not None and len(prompt) > max_chars:
+            logger.warning(
+                f"generate_image: prompt 过长 ({len(prompt)}/{max_chars} 字符)，"
+                f"返回错误消息给 LLM 以触发重试"
+            )
+            return (
+                f"图片生成 prompt 过长（当前 {len(prompt)} 字符，上限 {max_chars} 字符）。"
+                f"请缩短 prompt 描述后重试。"
+            )
+
         try:
             result = await asyncio.wait_for(
                 gen_provider.generate_image(prompt),
@@ -95,6 +107,12 @@ def make_generate_image_executor(
             return "图片生成超时，请稍后重试"
         except Exception as e:
             logger.warning(f"generate_image: 调用失败: {e}")
+            # MiniMax 1000=参数错误，prompt 过长是其中一种，返回重试消息不触发熔断
+            if "[1000]" in str(e):
+                return (
+                    f"图片生成 prompt 可能过长被远端拒绝。"
+                    f"请进一步缩短 prompt 描述后重试。"
+                )
             if handle_model_error:
                 handle_model_error(gen_provider, e)
             return f"图片生成失败: {e}"
