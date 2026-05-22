@@ -211,7 +211,7 @@ class RollDiceCommand(UserCommandBase):
                 exp_result = await get_roll_exp_result(exp_str)
                 exp_feedback = self.format_loc(LOC_ROLL_EXP, expression=exp_str, expectation=exp_result)
                 return [BotSendMsgCommand(self.bot.account, exp_feedback, [port])]
-            self.bot.register_task(roll_exp_task, timeout=30, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "计算超时!", [port])])
+            self.bot.scheduler.schedule(roll_exp_task, timeout=30, timeout_callback=lambda: [BotSendMsgCommand(self.bot.account, "计算超时!", [port])])
 
             feedback = self.format_loc(LOC_ROLL_EXP_START)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]

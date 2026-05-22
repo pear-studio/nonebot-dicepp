@@ -123,18 +123,18 @@ class BotRunner:
             await self.bot.delay_init_command()
 
             # no_tick=True 时 tick_loop 不运行，需要手动处理待办任务（如 persona 异步初始化）
-            if self.bot._no_tick and self.bot.todo_tasks:
+            if self.bot._no_tick and self.bot.scheduler.pending:
                 completed = False
                 for _ in range(BotRunner.TODO_MAX_WAIT_ITERATIONS):  # 最多等待 30 秒
-                    await self.bot.process_async_task([], BotRunner.TODO_POLL_INTERVAL, asyncio.get_running_loop())
-                    if not self.bot.todo_tasks:
+                    await self.bot.scheduler.process(BotRunner.TODO_POLL_INTERVAL)
+                    if not self.bot.scheduler.pending:
                         completed = True
                         break
                     await asyncio.sleep(BotRunner.TODO_POLL_INTERVAL)
                 if completed:
-                    logging.info("todo_tasks 处理完成")
+                    logging.info("pending tasks 处理完成")
                 else:
-                    logging.warning("todo_tasks 等待超时（30s），仍有未完成任务")
+                    logging.warning("pending tasks 等待超时（30s），仍有未完成任务")
 
             self._started = True
         finally:
