@@ -36,25 +36,6 @@
   影响面: core/bot/dicebot.py, master_command.py, persona/command.py, roll_dice_command.py, shell/bot_runner.py
   风险: process() 返回值合并语义需与 tick_loop 的 bot_commands 累积逻辑对齐
 
-## character
-
-### [B-260520-368eba] 角色卡模型统一 — 删除旧 JsonObject 体系，全量迁移到 Pydantic
-- 创建: 2026-05-20
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-    - 相同领域概念 (HPInfo, AbilityInfo, DNDCharacter 等) 存在两套模型
-    - 旧体系: module/character/base/ 用自定义 JsonObject + serialize()/deserialize()
-    - 新体系: core/data/models/character.py 用 Pydantic BaseModel
-    - module/character/dnd5e/services.py 同时从两套导入
-    - 理解角色卡数据模型需要跨三个目录阅读
-- 工作计划:
-    - 将 module/character/dnd5e/ 所有消费者迁移到 core/data/models/ 的 Pydantic 模型
-    - 删除 module/character/base/ 和 core/data/json_object.py
-    - 影响面: module/character/dnd5e/, module/character/base/, core/data/json_object.py
-    - 风险: 旧 JsonObject 的 serialize/deserialize 语义可能与 Pydantic model_dump/model_validate 有细微差异
-
 ## persona
 
 ### [B-260521-a751ba] persona_llm_traces 表缺少 selected_provider 列
