@@ -54,17 +54,6 @@
 - 问题表现: MiniMax image-01 对参数错误（prompt length must be less than 1500）也返回 code=2013，被 classify_error 笼统判为 NON_RETRYABLE，导致 provider 被永久标记 dead，后续所有图片请求失败
 - 工作计划: minimax_image.py 的 classify_error 对 2013 做细分：status_msg 含 content/moderation/审核 → NON_RETRYABLE，含 params/invalid/length → RETRYABLE
 
-### [B-260522-a8953d] 图片生成 prompt 超 1500 字符限制，需配置化 + 截断 + LLM 重试
-- 创建: 2026-05-22
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现: 七七 image_gen_appearance ~1050 字符 + image_gen_style ~150 + LLM prompt，超过 MiniMax image-01 的 1500 字符上限，导致生成失败并把 provider 标记为 dead
-- 工作计划:
-  1. global.json persona_ai 新增 image_gen_prompt_max_chars 配置项（默认 1500）
-  2. executor 超限时返回明确错误信息给 LLM（含当前长度、上限），让 LLM 缩短 prompt 重试
-  3. 缩短角色卡 image_gen_appearance 到 ~450 字符，只保留核心视觉锚点（体型、紫发、粉瞳、紫色衣裙、符咒、绷带袜、珠串、笔记）
-
 ### [B-260515-dd50eb] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-05-15
 - 优先级: P2
