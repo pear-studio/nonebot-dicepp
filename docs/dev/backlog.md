@@ -57,14 +57,6 @@
 
 ## persona
 
-### [B-260521-a751ba] persona_llm_traces 表缺少 selected_provider 列
-- 创建: 2026-05-21
-- 优先级: P0
-- 类型: bug
-- 改动量: S
-- 问题表现: 每次写入 LLM trace 时触发 OperationalError: table persona_llm_traces has no column named selected_provider
-- 工作计划: 在 data/migrations.py 新增迁移，为 persona_llm_traces 表添加 selected_provider TEXT 列
-
 ### [B-260522-6a8ed6] generate_image tool description 引导过弱，LLM 不使用 SELF_APPEARANCE 导致角色外貌丢失
 - 创建: 2026-05-22
 - 优先级: P1
