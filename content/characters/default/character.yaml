@@ -40,6 +40,15 @@ extensions:
     event_day_start_hour: 8
     event_day_end_hour: 22
     event_jitter_minutes: 60
+    event_day_start_jitter_minutes: 30
+    event_day_end_jitter_minutes: 30
+
+    # 图片生成
+    image_gen_style: ""
+    image_gen_appearance: ""
+
+    # 睡眠回复语（使用系统默认）
+    # sleep_messages: null
 
     # 定时触发事件
     scheduled_events:
