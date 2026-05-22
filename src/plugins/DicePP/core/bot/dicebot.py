@@ -110,8 +110,7 @@ class Bot:
         self._delay_init_done: bool = False
 
         # 消息发送后跨模块通知 hook 列表
-        # 设计意图：adapter 层发送群/私聊消息后，允许各模块订阅并记录。
-        # 长期路径：引入轻量级事件总线彻底解耦。
+        # adapter 层发送消息后触发 hook，各模块通过注册 hook 实现日志记录等横切关注点。
         self._post_send_hooks: List[PostSendHook] = []
 
         # 消息入站记录 hook 列表
@@ -480,6 +479,10 @@ class Bot:
                 await self.hub_manager.load_config()
             except Exception as exc:
                 dice_log(f"[DiceHub] 读取 Hub 配置失败，将使用内置默认值: {exc}")
+
+            # 注册日志记录 hook，消除 adapter -> log_command 反向导入
+            from module.common.log_command import register_log_hooks
+            register_log_hooks(self)
 
             init_info: List[str] = []
             for command in self.command_dict.values():

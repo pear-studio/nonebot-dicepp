@@ -24,37 +24,58 @@ def _normalize_web_user_id(user_id: str) -> str:
 
 class WebChatProxy(ClientProxy):
     def __init__(self, adapter: WebChatAdapter) -> None:
+        super().__init__()
         self._adapter = adapter
+        self._command_handlers = {
+            BotDelayCommand: self._handle_delay,
+            BotLeaveGroupCommand: self._handle_leave_group,
+            BotSendMsgCommand: self._handle_send_msg,
+            BotSendForwardMsgCommand: self._handle_send_forward_msg,
+            BotSendFileCommand: self._handle_send_file,
+        }
 
-    async def process_bot_command(self, command: BotCommandBase):
-        if isinstance(command, BotDelayCommand):
-            await asyncio.sleep(command.seconds)
-            return
-        if isinstance(command, BotLeaveGroupCommand):
-            return
-
+    def _resolve_and_check_target(self, command: BotCommandBase) -> tuple[str, str] | None:
         user_id, correlation_id = self._resolve_turn_target(command)
         if not user_id:
             dice_log(f"[WebChat] skip outbound command without web target: {command.__class__.__name__}")
-            return
+            return None
+        return user_id, correlation_id
 
-        if isinstance(command, BotSendMsgCommand):
-            await self._adapter.send_bot_message(user_id=user_id, content=command.msg, correlation_id=correlation_id)
-            return
-        if isinstance(command, BotSendForwardMsgCommand):
-            for segment in command.msg:
-                await self._adapter.send_bot_message(user_id=user_id, content=segment, correlation_id=correlation_id)
-            return
-        if isinstance(command, BotSendFileCommand):
-            text = f"[文件暂不支持网页显示，请在QQ中查看] {command.display_name}"
-            await self._adapter.send_bot_message(user_id=user_id, content=text, correlation_id=correlation_id)
-            return
+    async def _handle_delay(self, command: BotDelayCommand) -> None:
+        await asyncio.sleep(command.seconds)
 
+    async def _handle_leave_group(self, command: BotLeaveGroupCommand) -> None:
+        return
+
+    async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
+        target = self._resolve_and_check_target(command)
+        if target is None:
+            return
+        user_id, correlation_id = target
+        await self._adapter.send_bot_message(user_id=user_id, content=command.msg, correlation_id=correlation_id)
+
+    async def _handle_send_forward_msg(self, command: BotSendForwardMsgCommand) -> None:
+        target = self._resolve_and_check_target(command)
+        if target is None:
+            return
+        user_id, correlation_id = target
+        for segment in command.msg:
+            await self._adapter.send_bot_message(user_id=user_id, content=segment, correlation_id=correlation_id)
+
+    async def _handle_send_file(self, command: BotSendFileCommand) -> None:
+        target = self._resolve_and_check_target(command)
+        if target is None:
+            return
+        user_id, correlation_id = target
+        text = f"[文件暂不支持网页显示，请在QQ中查看] {command.display_name}"
+        await self._adapter.send_bot_message(user_id=user_id, content=text, correlation_id=correlation_id)
+
+    async def _handle_unknown(self, command: BotCommandBase) -> None:
+        target = self._resolve_and_check_target(command)
+        if target is None:
+            return
+        user_id, correlation_id = target
         await self._adapter.send_bot_message(user_id=user_id, content=str(command), correlation_id=correlation_id)
-
-    async def process_bot_command_list(self, command_list: List[BotCommandBase]):
-        for command in command_list:
-            await self.process_bot_command(command)
 
     async def get_group_list(self) -> List[GroupInfo]:
         info = GroupInfo(group_id=DEFAULT_GROUP_ID)

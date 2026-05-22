@@ -22,7 +22,7 @@ from core.communication import RequestData, FriendRequestData, JoinGroupRequestD
 from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotSendForwardMsgCommand, BotSendFileCommand
 from utils.logger import dice_log
 
-from module.common.log_command import append_log_record, delete_log_record_by_message_id  # type: ignore
+from module.common.log_command import delete_log_record_by_message_id
 
 from adapter.client_proxy import ClientProxy
 
@@ -90,129 +90,140 @@ async def _trigger_post_send_hooks(
 
 class NoneBotClientProxy(ClientProxy):
     def __init__(self, bot: NoneBot):
+        super().__init__()
         self.bot = bot
+        self._command_handlers = {
+            BotSendMsgCommand: self._handle_send_msg,
+            BotLeaveGroupCommand: self._handle_leave_group,
+            BotSendForwardMsgCommand: self._handle_send_forward_msg,
+            BotSendFileCommand: self._handle_send_file,
+            BotDelayCommand: self._handle_delay,
+        }
 
-    # noinspection PyBroadException
-    async def process_bot_command(self, command: BotCommandBase):
+    async def process_bot_command(self, command: BotCommandBase) -> None:
         dice_log(f"[OneBot] [BotCommand] {command}")
         try:
-            if isinstance(command, BotSendMsgCommand):
-                from core.message_types import MessageType
-                raw_type = getattr(command, "message_type", None)
-                msg_type_val = MessageType.from_str(raw_type).value if raw_type else "command"
-                msg_id = getattr(command, "msg_id", None)
-                skip_hook = getattr(command, "skip_history_record", False)
-
-                for target in command.targets:
-                    if target.group_id:
-                        await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
-                        try:
-                            append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", command.msg)
-                        except Exception:
-                            pass
-                        if not skip_hook:
-                            await _trigger_post_send_hooks(
-                                all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
-                                "assistant", msg_type_val, command.msg, "我", msg_id,
-                            )
-                    else:
-                        await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
-                        if not skip_hook:
-                            await _trigger_post_send_hooks(
-                                all_bots, self.bot.self_id, "", target.user_id,
-                                "assistant", msg_type_val, command.msg, "我", msg_id,
-                            )
-            elif isinstance(command, BotLeaveGroupCommand):
-                await self.bot.set_group_leave(group_id=int(command.target_group_id))
-            elif isinstance(command, BotSendForwardMsgCommand):
-                try:
-                    for target in command.targets:
-                        await self.bot.call_api("send_group_forward_msg", group_id=int(target.group_id), messages=command.msg_json_list)
-                        # 合并转发中的每条子消息分别记录（保持原顺序）
-                        try:
-                            for sub_msg in command.msg:
-                                append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", sub_msg)
-                        except Exception:
-                            pass
-                except:
-                    if target.group_id:
-                        await self.bot.send_group_msg(group_id=int(target.group_id), message="合并转发失败！")
-                        for target in command.targets:
-                            for msg in command.msg:
-                                await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(msg))
-                                try:
-                                    append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", msg)
-                                except Exception:
-                                    pass
-                    else:
-                        await self.bot.send_group_msg(user_id=int(target.used_id), message="合并转发失败！")
-                        for target in command.targets:
-                            for msg in command.msg:
-                                await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(msg))
-            elif isinstance(command, BotSendFileCommand):
-                for target in command.targets:
-                    display_name = command.display_name
-                    folder_name = None
-                    real_name = display_name
-                    if '/' in display_name:
-                        folder_name, real_name = display_name.split('/', 1)
-                        folder_name = folder_name.strip() or None
-                        real_name = real_name.strip() or display_name.split('/', 1)[1]
-                    folder_id = None
-                    if folder_name:
-                        # 仅检查是否已存在该文件夹，不尝试创建；未找到时不写入None，便于下次再次尝试
-                        cache = _group_folder_cache.setdefault(target.group_id, {})
-                        if folder_name in cache and cache[folder_name]:
-                            folder_id = cache[folder_name]
-                        else:
-                            try:
-                                root_files = await self.bot.call_api("get_group_root_files", group_id=int(target.group_id))
-                                folders_list = root_files.get('folders') or []
-                                for fd in folders_list:
-                                    # 兼容不同实现的键名
-                                    name_candidate = fd.get('folder_name') or fd.get('name') or fd.get('file_name')
-                                    if name_candidate == folder_name:
-                                        folder_id = fd.get('folder_id') or fd.get('id')
-                                        break
-                                if folder_id:
-                                    cache[folder_name] = folder_id  # 仅缓存成功找到的
-                            except Exception:
-                                pass
-                    try:
-                        primary_done = False
-                        try:
-                            if folder_id:
-                                await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name, folder=folder_id)
-                            else:
-                                await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name)
-                            primary_done = True
-                        except Exception as e1:
-                            # 记录日志并尝试一次根目录回退
-                            dice_log(f"[OneBot][Upload][PrimaryFail] group={target.group_id} file={real_name} err={e1}")
-                            if folder_id:  # 若是因文件夹失败，再尝试根目录
-                                try:
-                                    await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name)
-                                    primary_done = True
-                                except Exception as e2:
-                                    dice_log(f"[OneBot][Upload][FallbackFail] group={target.group_id} file={real_name} err={e2}")
-                        if primary_done:
-                            try:
-                                append_log_record(all_bots[self.bot.self_id], target.group_id, str(self.bot.self_id), await all_bots[self.bot.self_id].get_nickname(self.bot.self_id, target.group_id) or "Bot", f"[文件]{real_name}")
-                            except Exception:
-                                pass
-                        else:
-                            await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
-                    except Exception as ex_outer:
-                        dice_log(f"[OneBot][Upload][Unexpected] group={target.group_id} file={real_name} err={ex_outer}")
-                        await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
-            elif isinstance(command, BotDelayCommand):
-                await asyncio.sleep(command.seconds)
-            else:
-                raise NotImplementedError("未定义的BotCommand类型")
+            await super().process_bot_command(command)
         except ActionFailed as e:
             dice_log(f"[OneBot] [ActionFailed] {e}")
         except Exception as e:
             dice_log(f"[OneBot] [UnknownException] {e}")
+
+    async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
+        from core.message_types import MessageType
+        raw_type = getattr(command, "message_type", None)
+        msg_type_val = MessageType.from_str(raw_type).value if raw_type else "command"
+        msg_id = getattr(command, "msg_id", None)
+        skip_hook = getattr(command, "skip_history_record", False)
+
+        for target in command.targets:
+            if target.group_id:
+                await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
+                if not skip_hook:
+                    await _trigger_post_send_hooks(
+                        all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
+                        "assistant", msg_type_val, command.msg, "我", msg_id,
+                    )
+            else:
+                await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
+                if not skip_hook:
+                    await _trigger_post_send_hooks(
+                        all_bots, self.bot.self_id, "", target.user_id,
+                        "assistant", msg_type_val, command.msg, "我", msg_id,
+                    )
+
+    async def _handle_leave_group(self, command: BotLeaveGroupCommand) -> None:
+        await self.bot.set_group_leave(group_id=int(command.target_group_id))
+
+    async def _handle_send_forward_msg(self, command: BotSendForwardMsgCommand) -> None:
+        try:
+            for target in command.targets:
+                await self.bot.call_api("send_group_forward_msg", group_id=int(target.group_id), messages=command.msg_json_list)
+                try:
+                    for sub_msg in command.msg:
+                        await _trigger_post_send_hooks(
+                            all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
+                            "assistant", "forward", sub_msg, "我", None,
+                        )
+                except Exception:
+                    pass
+        except Exception:
+            for target in command.targets:
+                if target.group_id:
+                    await self.bot.send_group_msg(group_id=int(target.group_id), message="合并转发失败！")
+                    for msg in command.msg:
+                        await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(msg))
+                        try:
+                            await _trigger_post_send_hooks(
+                                all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
+                                "assistant", "command", msg, "我", None,
+                            )
+                        except Exception:
+                            pass
+                else:
+                    await self.bot.send_private_msg(user_id=int(target.user_id), message="合并转发失败！")
+                    for msg in command.msg:
+                        await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(msg))
+
+    async def _handle_send_file(self, command: BotSendFileCommand) -> None:
+        for target in command.targets:
+            display_name = command.display_name
+            folder_name = None
+            real_name = display_name
+            if '/' in display_name:
+                folder_name, real_name = display_name.split('/', 1)
+                folder_name = folder_name.strip() or None
+                real_name = real_name.strip() or display_name.split('/', 1)[1]
+            folder_id = None
+            if folder_name:
+                cache = _group_folder_cache.setdefault(target.group_id, {})
+                if folder_name in cache and cache[folder_name]:
+                    folder_id = cache[folder_name]
+                else:
+                    try:
+                        root_files = await self.bot.call_api("get_group_root_files", group_id=int(target.group_id))
+                        folders_list = root_files.get('folders') or []
+                        for fd in folders_list:
+                            name_candidate = fd.get('folder_name') or fd.get('name') or fd.get('file_name')
+                            if name_candidate == folder_name:
+                                folder_id = fd.get('folder_id') or fd.get('id')
+                                break
+                        if folder_id:
+                            cache[folder_name] = folder_id
+                    except Exception:
+                        pass
+            try:
+                primary_done = False
+                try:
+                    if folder_id:
+                        await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name, folder=folder_id)
+                    else:
+                        await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name)
+                    primary_done = True
+                except Exception as e1:
+                    dice_log(f"[OneBot][Upload][PrimaryFail] group={target.group_id} file={real_name} err={e1}")
+                    if folder_id:
+                        try:
+                            await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name)
+                            primary_done = True
+                        except Exception as e2:
+                            dice_log(f"[OneBot][Upload][FallbackFail] group={target.group_id} file={real_name} err={e2}")
+                if primary_done:
+                    try:
+                        await _trigger_post_send_hooks(
+                            all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
+                            "assistant", "file", f"[文件]{real_name}", "我", None,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
+            except Exception as ex_outer:
+                dice_log(f"[OneBot][Upload][Unexpected] group={target.group_id} file={real_name} err={ex_outer}")
+                await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
+
+    async def _handle_delay(self, command: BotDelayCommand) -> None:
+        await asyncio.sleep(command.seconds)
 
     async def process_bot_command_list(self, command_list: List[BotCommandBase]):
         if len(command_list) > 1:

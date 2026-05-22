@@ -12,24 +12,29 @@
 
 ---
 
-## adapter
+## bot
 
-### [B-260520-de976f] Adapter 命令分发深化 — 消除 isinstance 级联与模块反向导入
+### [B-260520-b6f605] 从 Bot 中提取 TaskScheduler 模块，消除 todo_tasks 耦合
 - 创建: 2026-05-20
 - 优先级: P1
 - 类型: refactor
 - 改动量: M
 - 问题表现:
-    - NoneBotClientProxy.process_bot_command() 用 isinstance 级联检查 6 种 BotCommandBase 子类
-    - StandaloneClientProxy 和 WebChatProxy 部分复制了相同分支
-    - 新增 BotCommand 子类需在三个 proxy 中追加入口
-    - nonebot_adapter.py 直接从 module.common.log_command 导入 append_log_record，破坏依赖方向
+  Bot 持有 todo_tasks: Dict 并直接操作其内部结构，命令层可随意篡改（master_command 直接 todo_tasks={} 清空）
+  process_async_task 原地修改可变 bot_commands 列表，接口副作用不透明
+  register_task / process_async_task 无法独立测试，必须构造完整 Bot 实例
+  shell/bot_runner 直接调用 process_async_task，绕过 tick_loop 的正常路径
 - 工作计划:
-    - 在 BotCommandBase 上引入自描述 dispatch 方法，命令自身声明发送行为
-    - adapter 只做平台格式翻译，不再用 isinstance 分发
-    - 日志记录改用 Bot._post_send_hooks 统一路径，消除 adapter -> module 反向导入
-    - 影响面: adapter/nonebot_adapter.py, adapter/standalone_proxy.py, adapter/web_chat_proxy.py, core/command/user_cmd.py
-    - 风险: dispatch 接口需同时满足三种 adapter (NoneBot/Standalone/WebChat) 的差异化需求
+  新建 core/bot/task_scheduler.py: TaskScheduler 类
+    - schedule(task, is_async, timeout, timeout_callback) 注册任务
+    - async process(free_time) -> List[BotCommandBase] 纯返回值，消除副作用
+    - clear_all() 替代直接清空 dict
+    - error_handler 通过构造函数注入，dice_log 直接 import
+  修改 core/bot/dicebot.py: 移除 todo_tasks/register_task/process_async_task，Bot 持有 self._scheduler
+  迁移 4 个命令调用方: register_task -> bot._scheduler.schedule
+  迁移 shell/bot_runner.py: process_async_task -> bot._scheduler.process
+  影响面: core/bot/dicebot.py, master_command.py, persona/command.py, roll_dice_command.py, shell/bot_runner.py
+  风险: process() 返回值合并语义需与 tick_loop 的 bot_commands 累积逻辑对齐
 
 ## character
 
