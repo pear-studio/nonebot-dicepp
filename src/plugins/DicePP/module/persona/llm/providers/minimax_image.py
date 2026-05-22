@@ -1,5 +1,6 @@
 """MiniMax Image Provider — 实现 ImageGenProvider 协议，封装 MiniMax image-01 API"""
 import asyncio
+from typing import Optional
 
 import httpx
 from nonebot.log import logger
@@ -12,7 +13,6 @@ _PROBE_TIMEOUT = 10
 
 # MiniMax base_resp 错误码映射 (参考 https://platform.minimaxi.com/docs/api-reference/image-generation-t2i)
 _NON_RETRYABLE_CODES = {
-    1000,  # 参数错误
     1001,  # 模型不存在
     1002,  # 权限不足
     1004,  # 鉴权失败
@@ -26,10 +26,12 @@ _NON_RETRYABLE_CODES = {
 class MiniMaxImageProvider:
     """MiniMax image-01 图片生成提供者"""
 
-    def __init__(self, api_key: str, base_url: str, model: str = "image-01"):
+    def __init__(self, api_key: str, base_url: str, model: str = "image-01",
+                 max_prompt_chars: Optional[int] = None):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.max_prompt_chars = max_prompt_chars
         self._image_url = f"{self.base_url}{_IMAGE_GEN_PATH}"
 
     async def generate_image(self, prompt: str, **kwargs) -> str:

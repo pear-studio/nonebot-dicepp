@@ -99,7 +99,7 @@
         "api_key": "",
         "base_url": "https://api.minimaxi.com/v1",
         "models": [
-          {"name": "image-01", "category": "gen", "capabilities": ["image"], "quality": 0.5, "cost": 0.5}
+          {"name": "image-01", "category": "gen", "capabilities": ["image"], "quality": 0.5, "cost": 0.5, "max_prompt_chars": 1500}
         ]
       }
     },

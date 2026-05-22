@@ -72,6 +72,8 @@ class LLMProvider(Protocol):
 class ImageGenProvider(Protocol):
     """图片生成供应商协议"""
 
+    max_prompt_chars: Optional[int] = None
+
     async def generate_image(self, prompt: str, **kwargs) -> str:
         """生成图片，返回 URL。"""
         ...

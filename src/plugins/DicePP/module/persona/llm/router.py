@@ -114,12 +114,16 @@ class LLMRouter:
                     continue
 
                 extra_params: Dict[str, Any] = {}
-                provider = provider_cls(
+                provider_kwargs: Dict[str, Any] = dict(
                     api_key=pconfig.api_key,
                     base_url=pconfig.base_url,
                     model=mconfig.name,
-                    **({"extra_params": extra_params} if mconfig.category == "llm" else {}),
                 )
+                if mconfig.category == "gen" and mconfig.max_prompt_chars is not None:
+                    provider_kwargs["max_prompt_chars"] = mconfig.max_prompt_chars
+                if mconfig.category == "llm":
+                    provider_kwargs["extra_params"] = extra_params
+                provider = provider_cls(**provider_kwargs)
                 provider._router_key = key
                 self._model_providers[key] = provider
                 self._model_configs[key] = mconfig
