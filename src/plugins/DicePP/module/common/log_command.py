@@ -633,6 +633,36 @@ def append_log_record(bot: Bot, group_id: str, user_id: str, nickname: str, cont
         pass
 
 
+def register_log_hooks(bot: Bot) -> None:
+    """注册 post_send_hook 以记录 bot 发出的消息到日志。
+
+    消除 adapter 层对 log_command 模块的直接导入依赖：
+    adapter 只负责触发 _post_send_hooks，日志记录由此 hook 统一完成。
+    """
+
+    async def _log_post_send(
+        group_id: str,
+        user_id: str,
+        role: str,
+        type: str,
+        content: str,
+        display_name: str,
+        msg_id: Optional[int] = None,
+    ) -> None:
+        if not group_id:
+            return
+        try:
+            nickname = await bot.get_nickname(bot.account, group_id)
+            if not nickname or nickname in ("UNDEF_NAME", "----"):
+                nickname = display_name or "Bot"
+            append_log_record(bot, group_id, user_id, nickname, content,
+                            str(msg_id) if msg_id else None)
+        except Exception:
+            pass
+
+    bot.add_post_send_hook(_log_post_send)
+
+
 class _StatsFormatter:
     @staticmethod
     def format(log_entry: Dict[str, Any]) -> str:

@@ -18,28 +18,33 @@ DEFAULT_USER_ID = "10001"
 
 class StandaloneClientProxy(ClientProxy):
     def __init__(self) -> None:
+        super().__init__()
         self._outputs: List[str] = []
         self._lock = asyncio.Lock()
+        self._command_handlers = {
+            BotSendMsgCommand: self._handle_send_msg,
+            BotSendForwardMsgCommand: self._handle_send_forward_msg,
+            BotDelayCommand: self._handle_delay,
+        }
 
-    async def process_bot_command(self, command: BotCommandBase):
+    async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
         dice_log(f"[Standalone] [BotCommand] {command}")
-        if isinstance(command, BotSendMsgCommand):
-            async with self._lock:
-                self._outputs.append(command.msg)
-            return
-        if isinstance(command, BotSendForwardMsgCommand):
-            async with self._lock:
-                self._outputs.extend(command.msg)
-            return
-        if isinstance(command, BotDelayCommand):
-            await asyncio.sleep(command.seconds)
-            return
+        async with self._lock:
+            self._outputs.append(command.msg)
+
+    async def _handle_send_forward_msg(self, command: BotSendForwardMsgCommand) -> None:
+        dice_log(f"[Standalone] [BotCommand] {command}")
+        async with self._lock:
+            self._outputs.extend(command.msg)
+
+    async def _handle_delay(self, command: BotDelayCommand) -> None:
+        dice_log(f"[Standalone] [BotCommand] {command}")
+        await asyncio.sleep(command.seconds)
+
+    async def _handle_unknown(self, command: BotCommandBase) -> None:
+        dice_log(f"[Standalone] [BotCommand] {command}")
         async with self._lock:
             self._outputs.append(str(command))
-
-    async def process_bot_command_list(self, command_list: List[BotCommandBase]):
-        for command in command_list:
-            await self.process_bot_command(command)
 
     async def get_group_list(self) -> List[GroupInfo]:
         info = GroupInfo(group_id=DEFAULT_GROUP_ID)
@@ -76,4 +81,3 @@ class StandaloneClientProxy(ClientProxy):
             outputs = list(self._outputs)
             self._outputs.clear()
             return outputs
-

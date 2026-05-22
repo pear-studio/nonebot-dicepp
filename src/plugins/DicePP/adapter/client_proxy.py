@@ -1,18 +1,28 @@
 import abc
-from typing import List
+from typing import Callable, Dict, List
 
 from core.command import BotCommandBase
 from core.communication import GroupInfo, GroupMemberInfo
 
 
 class ClientProxy(metaclass=abc.ABCMeta):
-    @abc.abstractmethod
-    async def process_bot_command(self, command: BotCommandBase):
-        pass
+    def __init__(self) -> None:
+        # 使用 type() 精确匹配，无 MRO 遍历。子类必须显式注册自己的 handler。
+        self._command_handlers: Dict[type, Callable] = {}
 
-    @abc.abstractmethod
-    async def process_bot_command_list(self, command_list: List[BotCommandBase]):
-        pass
+    async def process_bot_command(self, command: BotCommandBase) -> None:
+        handler = self._command_handlers.get(type(command))
+        if handler is not None:
+            await handler(command)
+        else:
+            await self._handle_unknown(command)
+
+    async def _handle_unknown(self, command: BotCommandBase) -> None:
+        raise NotImplementedError(f"未定义的BotCommand类型: {type(command).__name__}")
+
+    async def process_bot_command_list(self, command_list: List[BotCommandBase]) -> None:
+        for command in command_list:
+            await self.process_bot_command(command)
 
     @abc.abstractmethod
     async def get_group_list(self) -> List[GroupInfo]:
