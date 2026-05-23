@@ -153,10 +153,10 @@ class TestMetadataConstruction:
         provider = Mock()
         provider.retryable_errors = frozenset()
         provider.generate = AsyncMock(side_effect=[
-            _resp(content="", tool_calls=[ToolCall(id="1", name="search_memory", arguments="{}")], finish="tool_calls"),
+            _resp(content="", tool_calls=[ToolCall(id="1", name="search_persona", arguments="{}")], finish="tool_calls"),
             _resp(content="", tool_calls=[
                 ToolCall(id="2", name="roll_dice", arguments='{"expr":"1d6"}'),
-                ToolCall(id="3", name="search_memory", arguments='{"query":"x"}'),
+                ToolCall(id="3", name="search_persona", arguments='{"query":"x"}'),
             ], finish="tool_calls"),
             _resp(content="done"),
         ])
@@ -164,17 +164,17 @@ class TestMetadataConstruction:
         tool_registry = Mock()
         tool_registry.make_executor_for = Mock(return_value=AsyncMock(
             side_effect=lambda tcs: [{"tool_call_id": tc["id"], "content": "ok"} for tc in tcs]))
-        tool_registry._domains = {"chat": ["search_memory", "roll_dice"]}
+        tool_registry._domains = {"chat": ["search_persona", "roll_dice"]}
 
         loop = AgentLoop(provider=provider, tool_registry=tool_registry, max_tool_rounds=3,
                          max_round_callbacks=0)
         result = await loop.run(
             messages=[{"role": "user", "content": "test"}],
-            tools=[{"type": "function", "function": {"name": "search_memory"}},
+            tools=[{"type": "function", "function": {"name": "search_persona"}},
                    {"type": "function", "function": {"name": "roll_dice"}}], tool_domains=["chat"])
 
         assert result.metadata["tool_rounds"] == 2
-        assert result.metadata["tool_names"] == ["search_memory", "roll_dice"]
+        assert result.metadata["tool_names"] == ["search_persona", "roll_dice"]
 
     @pytest.mark.asyncio
     async def test_tokens_aggregated_across_rounds(self):

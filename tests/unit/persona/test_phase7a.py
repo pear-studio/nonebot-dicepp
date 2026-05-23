@@ -108,7 +108,7 @@ async def test_trace_round_messages_round_trip(temp_db):
         {
             "round": 0,
             "think": "<think>需要查记忆</think>",
-            "tool_calls": [{"id": "tc_1", "name": "search_memory", "arguments": '{"q":"猫"}'}],
+            "tool_calls": [{"id": "tc_1", "name": "search_persona", "arguments": '{"q":"猫"}'}],
             "tool_results": [{"tool_call_id": "tc_1", "content": "找到 3 条记忆"}],
             "callback": None,
         },
@@ -138,7 +138,7 @@ async def test_trace_round_messages_round_trip(temp_db):
     assert len(stored_rr) == 2
     assert stored_rr[0]["round"] == 0
     assert stored_rr[0]["think"] == "<think>需要查记忆</think>"
-    assert stored_rr[0]["tool_calls"][0]["name"] == "search_memory"
+    assert stored_rr[0]["tool_calls"][0]["name"] == "search_persona"
     assert stored_rr[0]["tool_results"][0]["content"] == "找到 3 条记忆"
     assert stored_rr[1]["round"] == 1
     assert stored_rr[1]["think"] == "<think>准备回复</think>"

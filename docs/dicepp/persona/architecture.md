@@ -49,7 +49,7 @@
 | **游戏层** | `game/` | 四维好感度模型、时间衰减计算 |
 | **生活层** | `life/` | 角色生活模拟、主动消息调度、延迟任务队列、日记生成 |
 | **网关层** | `gateway/` | 消息发送管道与端口 |
-| **工具层** | `tools/` | 工具注册表、search_memory / search_history / roll_dice |
+| **工具层** | `tools/` | 工具注册表、search_persona / search_knowledge / roll_dice |
 | **辅助层** | `utils/` | JSON 辅助函数等 |
 
 ---
@@ -356,7 +356,7 @@ Agent 已按功能归属分散到对应域，本节仅作跨域索引：
 
 - **`registry.py`**: `ToolDef` / `ToolRegistry` / `ToolDomain` 定义。按域注册工具，支持按域获取定义列表和生成闭包 executor
 - **`collecting.py`**: life 域收集型工具的 `ToolDef` 常量（`RECORD_EVENT_TOOL` / `RECORD_REACTION_TOOL` / `RECORD_DIARY_ENTRY_TOOL` / `RECORD_SHARE_MESSAGE_TOOL`）及通用收集 executor `life_collecting_executor`；保留 `make_collecting_executor()` 兼容旧路径（供 `scoring.py` 使用）
-- **`search_memory` / `search_history` / `roll_dice`**: 三个已实现的 chat 域工具
+- **`search_persona` / `search_knowledge` / `roll_dice`**: 三个已实现的 chat 域工具
 
 ---
 

@@ -61,7 +61,7 @@ class TestOpenAIProvider:
         tc = Mock()
         tc.id = "call_abc"
         tc.function = Mock()
-        tc.function.name = "search_memory"
+        tc.function.name = "search_persona"
         tc.function.arguments = '{"query":"猫"}'
 
         mock_client = Mock()
@@ -71,15 +71,15 @@ class TestOpenAIProvider:
 
         resp = await provider.generate(
             messages=[{"role": "user", "content": "搜索猫"}],
-            tools=[{"type": "function", "function": {"name": "search_memory"}}],
+            tools=[{"type": "function", "function": {"name": "search_persona"}}],
         )
 
         assert resp.finish_reason == "tool_calls"
         assert len(resp.tool_calls) == 1
         assert resp.tool_calls[0].id == "call_abc"
-        assert resp.tool_calls[0].name == "search_memory"
+        assert resp.tool_calls[0].name == "search_persona"
         assert resp.tool_calls[0].arguments == '{"query":"猫"}'
-        assert resp.tool_calls[0].to_dict() == {"id": "call_abc", "name": "search_memory", "arguments": '{"query":"猫"}'}
+        assert resp.tool_calls[0].to_dict() == {"id": "call_abc", "name": "search_persona", "arguments": '{"query":"猫"}'}
 
     @pytest.mark.asyncio
     async def test_cached_tokens_extraction(self, provider):

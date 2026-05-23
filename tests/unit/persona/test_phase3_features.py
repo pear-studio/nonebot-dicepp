@@ -113,7 +113,7 @@ class TestSearchMemory:
             query="nonexistent_word_xyz",
             search_type="profile"
         )
-        assert "未找到" in result
+        assert result == ""
 
     @pytest.mark.asyncio
     async def test_search_all_includes_profile(self, temp_db):

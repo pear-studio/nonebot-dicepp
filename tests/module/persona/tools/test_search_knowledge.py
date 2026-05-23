@@ -5,13 +5,13 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
-async def test_search_query_summary_mode(fresh_bot, tmp_path):
-    """search_query — 摘要模式返回 snippet"""
+async def test_search_knowledge_summary_mode(fresh_bot, tmp_path):
+    """search_knowledge — 摘要模式返回 snippet"""
     bot, _proxy = fresh_bot
 
-    from module.persona.tools.search_query import (
-        SEARCH_QUERY_TOOL,
-        search_query_executor,
+    from module.persona.tools.search_knowledge import (
+        SEARCH_KNOWLEDGE_TOOL,
+        search_knowledge_executor,
     )
     from module.persona.tools.context import ToolContext
 
@@ -36,7 +36,7 @@ async def test_search_query_summary_mode(fresh_bot, tmp_path):
             user_id="test_user", group_id="",
             query=bot.db.query, resolve_db=_resolve_db,
         )
-        result = await search_query_executor({"keyword": "火球术"}, ctx)
+        result = await search_knowledge_executor({"keyword": "火球术"}, ctx)
         data = json.loads(result)
 
         assert "results" in data
@@ -54,11 +54,11 @@ async def test_search_query_summary_mode(fresh_bot, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_search_query_detail_mode(fresh_bot, tmp_path):
-    """search_query — 详情模式返回完整 content"""
+async def test_search_knowledge_detail_mode(fresh_bot, tmp_path):
+    """search_knowledge — 详情模式返回完整 content"""
     bot, _proxy = fresh_bot
 
-    from module.persona.tools.search_query import search_query_executor
+    from module.persona.tools.search_knowledge import search_knowledge_executor
     from module.persona.tools.context import ToolContext
 
     db_name = "SQDETAIL"
@@ -81,7 +81,7 @@ async def test_search_query_detail_mode(fresh_bot, tmp_path):
             user_id="test_user", group_id="",
             query=bot.db.query, resolve_db=_resolve_db,
         )
-        result = await search_query_executor(
+        result = await search_knowledge_executor(
             {"keyword": "火球术", "detail_index": 0}, ctx,
         )
         data = json.loads(result)
@@ -94,11 +94,11 @@ async def test_search_query_detail_mode(fresh_bot, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_search_query_database_not_found(fresh_bot):
-    """search_query — 数据库不存在时的降级"""
+async def test_search_knowledge_database_not_found(fresh_bot):
+    """search_knowledge — 数据库不存在时的降级"""
     bot, _proxy = fresh_bot
 
-    from module.persona.tools.search_query import search_query_executor
+    from module.persona.tools.search_knowledge import search_knowledge_executor
     from module.persona.tools.context import ToolContext
 
     async def _resolve_db(user_id, group_id):
@@ -108,16 +108,16 @@ async def test_search_query_database_not_found(fresh_bot):
         user_id="test_user", group_id="",
         query=bot.db.query, resolve_db=_resolve_db,
     )
-    result = await search_query_executor({"keyword": "火球术"}, ctx)
+    result = await search_knowledge_executor({"keyword": "火球术"}, ctx)
     assert "未加载" in result
 
 
 @pytest.mark.asyncio
-async def test_search_query_empty_keyword(fresh_bot, tmp_path):
-    """search_query — 空关键词降级"""
+async def test_search_knowledge_empty_keyword(fresh_bot, tmp_path):
+    """search_knowledge — 空关键词降级"""
     bot, _proxy = fresh_bot
 
-    from module.persona.tools.search_query import search_query_executor
+    from module.persona.tools.search_knowledge import search_knowledge_executor
     from module.persona.tools.context import ToolContext
 
     db_name = "SQEMPTY"
@@ -134,31 +134,31 @@ async def test_search_query_empty_keyword(fresh_bot, tmp_path):
             query=bot.db.query, resolve_db=_resolve_db,
         )
         # keyword 只是纯特殊字符
-        result = await search_query_executor({"keyword": "# &"}, ctx)
+        result = await search_knowledge_executor({"keyword": "# &"}, ctx)
         assert "为空" in result or "关键词" in result
     finally:
         await bot.db.query.disconnect_database(db_name)
 
 
 @pytest.mark.asyncio
-async def test_search_query_query_unavailable(fresh_bot):
-    """search_query — query 不可用时的降级"""
+async def test_search_knowledge_query_unavailable(fresh_bot):
+    """search_knowledge — query 不可用时的降级"""
     bot, _proxy = fresh_bot
 
-    from module.persona.tools.search_query import search_query_executor
+    from module.persona.tools.search_knowledge import search_knowledge_executor
     from module.persona.tools.context import ToolContext
 
     ctx = ToolContext(user_id="test_user", group_id="")
-    result = await search_query_executor({"keyword": "火球术"}, ctx)
+    result = await search_knowledge_executor({"keyword": "火球术"}, ctx)
     assert "不可用" in result
 
 
 @pytest.mark.asyncio
-async def test_search_query_detail_index_out_of_range(fresh_bot, tmp_path):
-    """search_query — detail_index 越界降级"""
+async def test_search_knowledge_detail_index_out_of_range(fresh_bot, tmp_path):
+    """search_knowledge — detail_index 越界降级"""
     bot, _proxy = fresh_bot
 
-    from module.persona.tools.search_query import search_query_executor
+    from module.persona.tools.search_knowledge import search_knowledge_executor
     from module.persona.tools.context import ToolContext
 
     db_name = "SQINDEX"
@@ -181,7 +181,7 @@ async def test_search_query_detail_index_out_of_range(fresh_bot, tmp_path):
             user_id="test_user", group_id="",
             query=bot.db.query, resolve_db=_resolve_db,
         )
-        result = await search_query_executor(
+        result = await search_knowledge_executor(
             {"keyword": "火球术", "detail_index": 99}, ctx,
         )
         assert "超出" in result
@@ -190,11 +190,11 @@ async def test_search_query_detail_index_out_of_range(fresh_bot, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_search_query_build_query_fallback(fresh_bot, tmp_path):
-    """search_query — query fallback 忽略结构化参数"""
+async def test_search_knowledge_build_query_fallback(fresh_bot, tmp_path):
+    """search_knowledge — query fallback 忽略结构化参数"""
     bot, _proxy = fresh_bot
 
-    from module.persona.tools.search_query import search_query_executor
+    from module.persona.tools.search_knowledge import search_knowledge_executor
     from module.persona.tools.context import ToolContext
 
     db_name = "SQFALLBACK"
@@ -218,7 +218,7 @@ async def test_search_query_build_query_fallback(fresh_bot, tmp_path):
             query=bot.db.query, resolve_db=_resolve_db,
         )
         # query 参数存在时应忽略 keyword
-        result = await search_query_executor(
+        result = await search_knowledge_executor(
             {"keyword": "不存在的词条", "query": "火球术"}, ctx,
         )
         data = json.loads(result)

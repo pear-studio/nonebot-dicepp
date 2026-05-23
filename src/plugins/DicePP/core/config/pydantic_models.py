@@ -96,9 +96,11 @@ class PersonaConfig(BaseModel):
         default=180,
         description="单条消息 token 上限（基于字符统计的估算值，超长先截断）",
     )
-    search_chat_history_max_chars: int = Field(
+    search_max_chars: int = Field(
         default=180,
-        description="search_chat_history 工具返回内容的最大字符数（超出截断）",
+        validation_alias="search_chat_history_max_chars",
+        serialization_alias="search_chat_history_max_chars",
+        description="搜索结果中每条消息的最大字符数",
     )
     message_stream_max_per_group: int = Field(
         default=1000,

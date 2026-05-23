@@ -5,8 +5,8 @@ from core.query_utils import command_split
 from .context import ToolContext
 from .registry import ToolDef
 
-SEARCH_QUERY_TOOL = ToolDef(
-    name="search_query",
+SEARCH_KNOWLEDGE_TOOL = ToolDef(
+    name="search_knowledge",
     description=(
         "搜索 TRPG 规则资料库。提供 keyword（关键词）进行名称匹配，"
         "可选 tags（标签过滤）、category（分类过滤）、source（来源过滤）。"
@@ -82,7 +82,7 @@ def _build_query(args: dict) -> str:
     return " ".join(p for p in parts if p)
 
 
-async def search_query_executor(args: dict, ctx: ToolContext) -> str:
+async def search_knowledge_executor(args: dict, ctx: ToolContext) -> str:
     if ctx.query is None:
         return "规则资料库查询功能不可用"
 
