@@ -4,6 +4,7 @@
 编排 CharacterLife、ProactiveScheduler、DiaryGenerator。
 """
 import asyncio
+import time
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from dataclasses import dataclass
 import random
@@ -93,9 +94,15 @@ class LifeSimulator:
         # 尝试生成生活事件
         if self.character_life:
             try:
+                t0 = time.monotonic()
                 event_chain = await asyncio.wait_for(
                     self.character_life.tick(), timeout=300
                 )
+                elapsed_cl = time.monotonic() - t0
+                if elapsed_cl > 60:
+                    logger.warning(
+                        f"tick: 角色生活事件生成耗时 {elapsed_cl:.1f}s (>60s)"
+                    )
                 if event_chain:
                     logger.info(
                         f"角色生活事件: {event_chain[0].get('description', '')[:50]}..."

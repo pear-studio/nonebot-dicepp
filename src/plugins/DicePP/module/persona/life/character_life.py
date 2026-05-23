@@ -6,6 +6,7 @@
 """
 import asyncio
 import json
+import time
 from nonebot.log import logger
 import random
 import uuid
@@ -349,11 +350,16 @@ class CharacterLife:
 
         win = max(1, self.config.slot_match_window_minutes)
 
+        remaining = len(slots) - len(self._fired_slot_indices)
         for i, (slot_m, slot_type) in enumerate(slots):
             if i in self._fired_slot_indices:
                 continue
             if abs(now_m - slot_m) > win:
                 continue
+            logger.debug(
+                f"tick 槽位触发: slot={i}/{len(slots)} type={slot_type} "
+                f"plan={slot_m}min now={now_m}min remaining={remaining}"
+            )
             event_chain = await self.generate_daily_event(slot_type)
             if event_chain:
                 self._fired_slot_indices.add(i)
@@ -415,8 +421,15 @@ class CharacterLife:
             today = self._get_today_str()
             now = self.config.now()
 
+            t0 = time.monotonic()
             async with self._state_lock:
-                return await self._generate_daily_event_impl(today, now, slot_type)
+                result = await self._generate_daily_event_impl(today, now, slot_type)
+            elapsed_ge = time.monotonic() - t0
+            if elapsed_ge > 30:
+                logger.warning(
+                    f"generate_daily_event 耗时 {elapsed_ge:.1f}s (>30s) slot_type={slot_type}"
+                )
+            return result
 
         except Exception as e:
             logger.exception("生成生活事件失败: {}", e)

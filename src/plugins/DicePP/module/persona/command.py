@@ -695,7 +695,11 @@ class PersonaCommand(UserCommandBase):
             loop = asyncio.get_running_loop()
 
             async def _run_tick() -> None:
+                t0 = time.monotonic()
                 await self.app.tick()
+                elapsed = time.monotonic() - t0
+                if elapsed > 10:
+                    dice_log(f"[Persona] tick 耗时 {elapsed:.1f}s (>10s)，可能阻塞后续槽位")
 
             # 清理已完成的任务（消费结果，不返回命令）
             t = self._async_tick_task
