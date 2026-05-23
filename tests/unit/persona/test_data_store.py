@@ -369,7 +369,7 @@ class TestSearchMemory:
     async def test_search_memory_not_found(self, temp_db):
         store = temp_db
         result = await store.search_memory("u1", "", "xyz", "all")
-        assert result == "未找到相关记忆"
+        assert result == ""
 
 
 class TestCharacterStateCRUD:

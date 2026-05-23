@@ -1,7 +1,7 @@
 """create_persona 成功路径 smoke 测试
 
 覆盖 Round 4 R1 第 7 步：工具注册表在组装时不抛异常，
-且三个工具（search_memory / search_history / roll_dice）正确注册到 chat 域。
+且工具（search_persona / roll_dice 等）正确注册到 chat 域。
 """
 
 import pytest
@@ -47,7 +47,7 @@ def _make_bot() -> MagicMock:
     cfg.group_activity_decay_per_day = 10.0
     cfg.group_activity_floor_whitelist = 50.0
     cfg.group_max_messages = 40
-    cfg.search_chat_history_max_chars = 2000
+    cfg.search_max_chars = 2000
     cfg.character_life_enabled = True
     cfg.character_life_jitter_minutes = 15
     cfg.character_life_min_event_interval_minutes = 5
@@ -82,7 +82,7 @@ def _make_bot() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_create_persona_success_registers_three_tools(monkeypatch):
+async def test_create_persona_success_registers_tools(monkeypatch):
     """create_persona 成功组装后，chat 域命中工具定义"""
     bot = _make_bot()
 
@@ -147,8 +147,7 @@ async def test_create_persona_success_registers_three_tools(monkeypatch):
     definitions = app.chat.tool_registry.get_definitions_for(ToolDomain.CHAT)
     names = {d["function"]["name"] for d in definitions}
 
-    assert "search_memory" in names, f"缺失 search_memory，实际注册: {names}"
-    assert "search_chat_history" in names, f"缺失 search_chat_history，实际注册: {names}"
+    assert "search_persona" in names, f"缺失 search_persona，实际注册: {names}"
     assert "roll_dice" in names, f"缺失 roll_dice，实际注册: {names}"
     assert "send_reply_segment" in names, f"缺失 send_reply_segment，实际注册: {names}"
     assert "suggest_action" in names, f"缺失 suggest_action，实际注册: {names}"

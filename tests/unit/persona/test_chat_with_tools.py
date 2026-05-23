@@ -14,7 +14,7 @@ from plugins.DicePP.module.persona.llm.loop import AgentLoop, LoopResult
 class MockToolCallFactory:
     """创建模拟 ToolCall"""
     @staticmethod
-    def make(id="tc_1", name="search_memory", arguments='{"query":"test"}'):
+    def make(id="tc_1", name="search_persona", arguments='{"query":"test"}'):
         return ToolCall(id=id, name=name, arguments=arguments)
 
 
@@ -76,7 +76,7 @@ class TestAgentLoopPureText:
         provider = Mock()
         provider.retryable_errors = frozenset()
         provider.generate = AsyncMock(side_effect=[
-            _resp(content="", tool_calls=[ToolCall("tc_1", "search_memory", '{"query":"猫"}')], finish="tool_calls"),
+            _resp(content="", tool_calls=[ToolCall("tc_1", "search_persona", '{"query":"猫"}')], finish="tool_calls"),
             _resp(content="我记得你喜欢猫！"),  # L1 fires
             _resp(content="我记得你喜欢猫！"),  # return after L1
         ])
@@ -86,23 +86,23 @@ class TestAgentLoopPureText:
             {"tool_call_id": "tc_1", "content": "找到猫相关记忆"}
         ])
         tool_registry.make_executor_for = Mock(return_value=mock_exec)
-        tool_registry._domains = {"chat": ["search_memory"]}
+        tool_registry._domains = {"chat": ["search_persona"]}
 
         loop = AgentLoop(provider=provider, tool_registry=tool_registry, max_round_callbacks=1)
         result = await loop.run(
             messages=[{"role": "user", "content": "你记得我喜欢什么动物吗？"}],
-            tools=[{"type": "function", "function": {"name": "search_memory"}}],
+            tools=[{"type": "function", "function": {"name": "search_persona"}}],
             tool_domains=["chat"],
         )
 
         assert result.final_output == "我记得你喜欢猫！"
         assert result.metadata["tool_rounds"] == 1
-        assert "search_memory" in result.metadata["tool_names"]
+        assert "search_persona" in result.metadata["tool_names"]
         assert result.metadata["callback_count"] == 1
 
         rr = result.metadata["round_records"]
         assert len(rr) == 3
-        assert rr[0]["tool_calls"] == [{"id": "tc_1", "name": "search_memory", "arguments": '{"query":"猫"}'}]
+        assert rr[0]["tool_calls"] == [{"id": "tc_1", "name": "search_persona", "arguments": '{"query":"猫"}'}]
         assert rr[0]["tool_results"] == [{"tool_call_id": "tc_1", "content": "找到猫相关记忆"}]
 
     @pytest.mark.asyncio
@@ -111,7 +111,7 @@ class TestAgentLoopPureText:
         provider = Mock()
         provider.retryable_errors = frozenset()
         provider.generate = AsyncMock(side_effect=[
-            _resp(content="", tool_calls=[ToolCall("tc_1", "search_memory", '{}')], finish="tool_calls"),
+            _resp(content="", tool_calls=[ToolCall("tc_1", "search_persona", '{}')], finish="tool_calls"),
             _resp(content="fallback response"),  # L1 fires
             _resp(content="fallback response"),  # return after L1
         ])
@@ -119,12 +119,12 @@ class TestAgentLoopPureText:
         tool_registry = Mock()
         mock_exec = AsyncMock(side_effect=Exception("数据库连接失败"))
         tool_registry.make_executor_for = Mock(return_value=mock_exec)
-        tool_registry._domains = {"chat": ["search_memory"]}
+        tool_registry._domains = {"chat": ["search_persona"]}
 
         loop = AgentLoop(provider=provider, tool_registry=tool_registry, max_round_callbacks=1)
         result = await loop.run(
             messages=[{"role": "user", "content": "test"}],
-            tools=[{"type": "function", "function": {"name": "search_memory"}}],
+            tools=[{"type": "function", "function": {"name": "search_persona"}}],
             tool_domains=["chat"],
         )
 
@@ -139,20 +139,20 @@ class TestAgentLoopPureText:
         provider.retryable_errors = frozenset()
 
         def _make_resp(n):
-            return _resp(content="", tool_calls=[ToolCall(f"tc_{n}", "search_memory", '{}')], finish="tool_calls")
+            return _resp(content="", tool_calls=[ToolCall(f"tc_{n}", "search_persona", '{}')], finish="tool_calls")
 
         provider.generate = AsyncMock(side_effect=[_make_resp(1), _make_resp(2)])
 
         tool_registry = Mock()
         tool_registry.make_executor_for = Mock(return_value=AsyncMock(
             return_value=[{"tool_call_id": "tc_x", "content": "result"}]))
-        tool_registry._domains = {"chat": ["search_memory"]}
+        tool_registry._domains = {"chat": ["search_persona"]}
 
         loop = AgentLoop(provider=provider, tool_registry=tool_registry,
                          max_tool_rounds=2, max_round_callbacks=0)
         result = await loop.run(
             messages=[{"role": "user", "content": "test"}],
-            tools=[{"type": "function", "function": {"name": "search_memory"}}],
+            tools=[{"type": "function", "function": {"name": "search_persona"}}],
             tool_domains=["chat"],
         )
 

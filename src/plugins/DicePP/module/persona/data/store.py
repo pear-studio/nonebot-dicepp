@@ -1497,7 +1497,7 @@ class PersonaDataStore:
                     if query.lower() in key.lower() or query.lower() in str(value).lower():
                         matched_facts.append(f"{key}: {value}")
                 if matched_facts:
-                    results.append("【用户档案】\n" + "\n".join(matched_facts))
+                    results.append("【用户档案】\n" + "\n".join(matched_facts[:limit]))
 
         # 2. 搜索日记
         # R8/R11: 根据场景自动调整搜索范围（仅当用户未指定时）
@@ -1514,7 +1514,7 @@ class PersonaDataStore:
 
         if results:
             return "\n\n".join(results)
-        return "未找到相关记忆"
+        return ""
 
     async def _search_diaries(
         self,
