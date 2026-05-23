@@ -138,6 +138,7 @@ class QueryStore:
 
     async def create_empty_database(self, path: str) -> bool:
         """创建一个空白查询数据库。"""
+        conn = None
         try:
             create_parent_dir(path)
             conn = await aiosqlite.connect(path)
@@ -155,10 +156,12 @@ class QueryStore:
                 + ");"
             )
             await conn.commit()
-            await conn.close()
             return True
         except PermissionError:
             return False
+        finally:
+            if conn is not None:
+                await conn.close()
 
     async def _get_conn(self, db_name: str) -> aiosqlite.Connection:
         conn = self._conns.get(db_name)
