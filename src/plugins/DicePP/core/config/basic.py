@@ -5,6 +5,19 @@ from utils.logger import dice_log
 from utils.frozen import get_project_root
 
 
+def _resolve_data_dir(project_root: Path) -> Path:
+    """允许 admin 后台为每个实例独立指定 data 目录（多实例隔离）。
+
+    - 设置 DICEPP_DATA_DIR=/path/to/instance/data 后，所有 bot 数据/日志/
+      运行时状态都落到该目录；config 与 content 仍读项目根。
+    - 未设置时维持默认行为 PROJECT_ROOT/data。
+    """
+    override = os.environ.get("DICEPP_DATA_DIR")
+    if override:
+        return Path(override).resolve()
+    return project_root / "data"
+
+
 class Paths:
     PROJECT_ROOT: Path = Path(get_project_root())
 
@@ -13,7 +26,7 @@ class Paths:
     CONFIG_SECRETS:      Path = CONFIG_DIR / "secrets.json"
     CONFIG_BOTS_DIR:     Path = CONFIG_DIR / "bots"
 
-    DATA_DIR:      Path = PROJECT_ROOT / "data"
+    DATA_DIR:      Path = _resolve_data_dir(PROJECT_ROOT)
     DATA_BOTS_DIR: Path = DATA_DIR / "bots"
     LOCAL_IMG_DIR: Path = DATA_DIR / "local_images"
 

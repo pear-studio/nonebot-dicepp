@@ -184,3 +184,7 @@ nul
 
 # 本地 superpowers 文档
 docs/superpowers/
+
+# admin WebUI 引导脚本下载到项目内的运行时目录
+/bin/
+/.python/
