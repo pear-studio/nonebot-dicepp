@@ -113,3 +113,20 @@ class GroupTeam(BaseModel):
     members: list[str] = Field(default_factory=list)
     auto_rename_ob: bool = True
     last_update: datetime = Field(default_factory=datetime.now)
+
+
+class GroupMacro(BaseModel):
+    """群级宏
+
+    跟 UserMacro 类似但作用域为整个群。主持人 `.hb 宏 X = Y` 后，
+    群里所有成员的消息都会被 X→Y 替换。在 process_message 中群宏
+    先于用户宏执行（让群宏铺路，用户宏在此基础上进一步定制）。
+    """
+    group_id: str
+    key: str
+    raw: str = ""
+    args: list[str] = Field(default_factory=list)
+    target: str = ""
+    command_split: str = ""
+    creator_id: str = ""   # 审计：哪位主持人创建的
+    last_update: datetime = Field(default_factory=datetime.now)

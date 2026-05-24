@@ -29,6 +29,15 @@ class Paths:
         return cls.DATA_BOTS_DIR / bot_id
 
     @classmethod
+    def group_homebrew_dir(cls, bot_id: str, group_id: str) -> Path:
+        """群级私设资料库目录：data/bots/<bot_id>/group_homebrew/<group_id>/
+
+        独立于 .mode 切换 —— 私设始终对该群可见，不受当前模式影响。
+        目录里放多个 .db 文件（schema 与 QueryStore 公共库相同）+ meta.json。
+        """
+        return cls.bot_data_dir(bot_id) / "group_homebrew" / group_id
+
+    @classmethod
     def ensure_dirs(cls) -> None:
         for d in [
             cls.CONFIG_DIR, cls.CONFIG_BOTS_DIR,

@@ -125,6 +125,58 @@ class QueryStore:
     def list_databases(self) -> List[str]:
         return list(self._conns.keys())
 
+    # ── 群级私设（homebrew）支持 ─────────────────────────────────────────
+    # 群私设 db 用 "__hb__<group_id>__<filename>" 命名空间，避免与公共
+    # query 库冲突。这些 db 文件存在 data/bots/<bot_id>/group_homebrew/
+    # <group_id>/ 下，独立于 .mode 切换；search() 调用时会自动追加群里
+    # 已加载的所有 hb db，并按 "私设优先" 合并结果。
+
+    _HB_PREFIX = "__hb__"
+
+    @classmethod
+    def _hb_db_name(cls, group_id: str, filename: str) -> str:
+        base = filename[:-3] if filename.endswith(".db") else filename
+        return f"{cls._HB_PREFIX}{group_id}__{base}"
+
+    @classmethod
+    def is_homebrew_db(cls, db_name: str) -> bool:
+        return db_name.startswith(cls._HB_PREFIX)
+
+    @classmethod
+    def homebrew_group_of(cls, db_name: str) -> Optional[str]:
+        if not cls.is_homebrew_db(db_name):
+            return None
+        rest = db_name[len(cls._HB_PREFIX):]
+        parts = rest.split("__", 1)
+        return parts[0] if parts else None
+
+    async def connect_group_homebrew(self, group_id: str, dir_path: str) -> List[str]:
+        """加载某群的私设目录下所有 .db 文件，返回加载成功的 db_name 列表。"""
+        loaded: List[str] = []
+        if not group_id or not dir_path or not os.path.isdir(dir_path):
+            return loaded
+        for fname in sorted(os.listdir(dir_path)):
+            if not fname.endswith(".db"):
+                continue
+            full = os.path.join(dir_path, fname)
+            db_name = self._hb_db_name(group_id, fname)
+            if db_name in self._conns:
+                continue
+            try:
+                conn = await aiosqlite.connect(full)
+                await conn.execute("PRAGMA journal_mode=WAL;")
+                await conn.create_function("regexp", 2, regexp)
+                self._conns[db_name] = conn
+                loaded.append(db_name)
+            except (PermissionError, OSError):
+                continue
+        return loaded
+
+    def list_group_databases(self, group_id: str) -> List[str]:
+        """列出某群已加载的所有私设 db_name（不含公共库）。"""
+        prefix = f"{self._HB_PREFIX}{group_id}__"
+        return [n for n in self._conns if n.startswith(prefix)]
+
     async def disconnect_database(self, db_name: str) -> None:
         conn = self._conns.get(db_name)
         if conn is None:
@@ -628,22 +680,33 @@ class QueryStore:
             if not self.has_database(db):
                 raise QueryStoreError(f"数据库未加载: {db}")
 
-        # 主库搜索
-        all_results = await self._search_single_db(
-            databases[0], query_tokens, fulltext, max_total + 1, 0,
-        )
+        # 群聊内私设优先：先收集所有私设 db（databases[1:]）的结果，再追加公共
+        # 主库（databases[0]），同名条目以私设为准（先入为主，跳过后到的同名）
+        all_results: List[dict] = []
+        seen_names: Set[str] = set()
 
-        # 私设库合并（私设覆盖同名主库条目）
+        # 私设结果在前
         for hb_db in databases[1:]:
             hb_results = await self._search_single_db(
                 hb_db, query_tokens, fulltext, max_total + 1, 0,
             )
-            for hb in hb_results[::-1]:
-                for main in all_results[::-1]:
-                    if hb["name"] == main["name"]:
-                        all_results.remove(main)
-                if hb["content"].strip():
-                    all_results.append(hb)
+            for r in hb_results:
+                if not r.get("content", "").strip():
+                    continue
+                if r["name"] in seen_names:
+                    continue
+                seen_names.add(r["name"])
+                all_results.append(r)
+
+        # 公共主库追加，跳过被私设覆盖的同名条目
+        main_results = await self._search_single_db(
+            databases[0], query_tokens, fulltext, max_total + 1, 0,
+        )
+        for r in main_results:
+            if r["name"] in seen_names:
+                continue
+            seen_names.add(r["name"])
+            all_results.append(r)
 
         total = len(all_results)
         if total > max_total:

@@ -27,6 +27,7 @@ from .models import (
     UserVariable,
     UserFavor,
     UserMacro,
+    GroupMacro,
 )
 
 
@@ -59,6 +60,7 @@ class BotDatabase:
         self._macro: Optional[Repository[UserMacro]] = None
         self._point: Optional[Repository[UserPoint]] = None
         self._group_team: Optional[Repository[GroupTeam]] = None
+        self._group_macro: Optional[Repository[GroupMacro]] = None
         self.query: QueryStore = QueryStore()
         self._migration_runner: Optional[MigrationRunner] = None
 
@@ -176,6 +178,12 @@ class BotDatabase:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._group_team
 
+    @property
+    def group_macro(self) -> Repository[GroupMacro]:
+        if self._group_macro is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._group_macro
+
     async def connect(self) -> None:
         # allow idempotent connect() (some packaged runs may receive events early)
         if self._db is not None and self._log_db is not None:
@@ -227,6 +235,7 @@ class BotDatabase:
         self._macro = None
         self._point = None
         self._group_team = None
+        self._group_macro = None
         self._migration_runner = None
 
         # 关闭 query 数据库连接
@@ -354,4 +363,8 @@ class BotDatabase:
 
         self._group_team = Repository[GroupTeam](
             self._db, GroupTeam, "group_team", ["group_id"]
+        )
+
+        self._group_macro = Repository[GroupMacro](
+            self._db, GroupMacro, "group_macro", ["group_id", "key"]
         )

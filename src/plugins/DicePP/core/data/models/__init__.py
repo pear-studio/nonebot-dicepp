@@ -32,6 +32,7 @@ from .extended import (
     UserVariable,
     UserFavor,
     UserMacro,
+    GroupMacro,
 )
 from .hub_config import HubConfig
 
@@ -64,6 +65,7 @@ __all__ = [
     "UserVariable",
     "UserFavor",
     "UserMacro",
+    "GroupMacro",
     "GroupTeam",
     # 角色常量
     "CHAR_INFO_KEY_HP",
