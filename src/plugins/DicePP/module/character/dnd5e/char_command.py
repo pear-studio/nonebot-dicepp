@@ -8,11 +8,13 @@ import re
 from core.bot import Bot
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import BotCommandBase, BotSendMsgCommand, BotSetGroupCardCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
 from core.data.models import DNDCharacter
-from module.character.dnd5e.services import CharacterService, HPService, gen_template_char
+from module.character.dnd5e.services import (
+    CharacterService, HPService, gen_template_char, format_character_card_nickname,
+)
 
 LOC_CHAR_SET = "char_set"
 LOC_CHAR_MISS = "char_miss"
@@ -120,6 +122,7 @@ class CharacterDNDCommand(UserCommandBase):
 
             elif content.startswith("记录"):  # 记录角色卡
                 content = content[2:].strip()
+                extra_cmds: List[BotCommandBase] = []
                 try:
                     new_char = CharacterService.parse(content, meta.group_id, meta.user_id)
                     await self.bot.db.characters_dnd.save(new_char)
@@ -127,8 +130,27 @@ class CharacterDNDCommand(UserCommandBase):
                     # 设置昵称
                     if new_char.name:
                         await self.bot.update_nickname(meta.user_id, meta.group_id, new_char.name)
+                    # 自动改群名片：名称|HP/MaxHP|AC|被动察觉
+                    # 群消息 + 骰娘有管理员权限时生效；权限不足时 OneBot 会 ActionFailed
+                    # 在 NoneBotClientProxy 内被 dice_log 捕获，不影响 .角色卡 主流程反馈
+                    if meta.group_id:
+                        try:
+                            fallback_nick = await self.bot.get_nickname(meta.user_id, meta.group_id)
+                        except (RuntimeError, AttributeError):
+                            fallback_nick = meta.nickname or meta.user_id
+                        card = format_character_card_nickname(new_char, fallback_nick or "")
+                        extra_cmds.append(BotSetGroupCardCommand(
+                            bot_id=self.bot.account,
+                            group_id=meta.group_id,
+                            user_id=meta.user_id,
+                            card=card,
+                        ))
                 except AssertionError as e:
                     feedback = e.args[0]
+
+                # 把改名指令跟反馈消息一起 return（保留与其他 case 的统一结构）
+                if extra_cmds:
+                    return [BotSendMsgCommand(self.bot.account, feedback, [port])] + extra_cmds
 
             elif content.startswith("清除"):  # 清除角色卡
                 await self.bot.db.characters_dnd.delete(meta.group_id, meta.user_id)

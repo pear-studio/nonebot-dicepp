@@ -213,6 +213,8 @@ CHAR_INFO_KEY_ABILITY = "$属性$"
 CHAR_INFO_KEY_PROF = "$熟练$"
 CHAR_INFO_KEY_EXT = "$额外加值$"
 CHAR_INFO_KEY_NAME = "$姓名$"
+CHAR_INFO_KEY_AC = "$AC$"
+CHAR_INFO_KEY_PP = "$被动察觉$"
 
 
 class AbilityInfo(BaseModel):
@@ -307,6 +309,10 @@ class DNDCharacter(BaseModel):
     ability_info: AbilityInfo = Field(default_factory=AbilityInfo)
     spell_info: SpellInfo = Field(default_factory=SpellInfo)
     money_info: MoneyInfo = Field(default_factory=MoneyInfo)
+    # 用于 .team desc 与设置角色卡时自动改群名片 (名称|HP/MaxHP|AC|被动察觉)
+    # 默认 0 → 显示 "-"，不影响老数据
+    ac: int = 0
+    passive_perception: int = 0
     is_init: bool = False
 
     def get_char_info(self) -> str:

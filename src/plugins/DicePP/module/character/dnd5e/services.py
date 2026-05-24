@@ -29,6 +29,7 @@ from core.data.models import (
     CHAR_INFO_KEY_HP, CHAR_INFO_KEY_HP_DICE,
     CHAR_INFO_KEY_NAME, CHAR_INFO_KEY_LEVEL, CHAR_INFO_KEY_ABILITY,
     CHAR_INFO_KEY_PROF, CHAR_INFO_KEY_EXT,
+    CHAR_INFO_KEY_AC, CHAR_INFO_KEY_PP,
     ABILITY_LIST, ABILITY_NUM,
     SKILL_LIST, SKILL_NUM, SKILL_PARENT_DICT, SKILL_SYNONYM_DICT,
     SAVING_LIST, SAVING_PARENT_DICT,
@@ -48,7 +49,24 @@ CHAR_INFO_KEY_LIST = [
     CHAR_INFO_KEY_ABILITY,
     CHAR_INFO_KEY_PROF,
     CHAR_INFO_KEY_EXT,
+    CHAR_INFO_KEY_AC,
+    CHAR_INFO_KEY_PP,
 ]
+
+
+def format_character_card_nickname(char: DNDCharacter, fallback: str = "") -> str:
+    """生成跑团群名片：名称|HP/MaxHP|AC|被动察觉
+
+    缺字段显示 `-`。fallback 用于 name 缺失时兜底（一般传用户原昵称）。
+    群名片硬上限 60 字符（OneBot 实测），超长截断 name 部分。
+    """
+    name = (char.name or fallback or "").strip()[:24]
+    hp_cur = getattr(char.hp_info, "hp_cur", 0)
+    hp_max = getattr(char.hp_info, "hp_max", 0)
+    hp_field = f"{hp_cur}/{hp_max}" if hp_max else (str(hp_cur) if hp_cur else "-")
+    ac = char.ac if char.ac else "-"
+    pp = char.passive_perception if char.passive_perception else "-"
+    return f"{name}|{hp_field}|{ac}|{pp}"
 
 
 def _read_data_from_str_to_dict(input_str: str, output_dict: Dict[str, str]) -> None:
@@ -552,6 +570,22 @@ class CharacterService:
 
         AbilityService.initialize(ability_info, level_str, ability_info_list, prof_list, ext_dict)
 
+        # 可选字段：AC 与 被动察觉（用于 .team desc 和角色卡群名片）
+        ac_val = 0
+        pp_val = 0
+        ac_str = char_info_dict[CHAR_INFO_KEY_AC]
+        if ac_str:
+            try:
+                ac_val = int(ac_str)
+            except ValueError:
+                raise AssertionError(f"无效的 AC: {ac_str}（应为整数）")
+        pp_str = char_info_dict[CHAR_INFO_KEY_PP]
+        if pp_str:
+            try:
+                pp_val = int(pp_str)
+            except ValueError:
+                raise AssertionError(f"无效的被动察觉: {pp_str}（应为整数）")
+
         # 创建角色
         character = DNDCharacter(
             group_id=group_id,
@@ -559,6 +593,8 @@ class CharacterService:
             name=name_str,
             hp_info=hp_info,
             ability_info=ability_info,
+            ac=ac_val,
+            passive_perception=pp_val,
             is_init=True,
         )
 
