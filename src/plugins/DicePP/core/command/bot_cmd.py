@@ -89,6 +89,27 @@ class BotSendForwardMsgCommand(BotCommandBase):
         s += '\n\t'.join([str(target) for target in self.targets])
         return s
 
+class BotSetGroupCardCommand(BotCommandBase):
+    """设置群成员名片（群内限定，需要骰娘有群管理员权限）
+
+    用于 .team 系列指令自动把非 team 成员改名为 "ob"。OneBot v11 对应
+    API: set_group_card(group_id, user_id, card)。卡片为空字符串时清除
+    群名片，恢复显示用户原昵称。
+    """
+
+    def __init__(self, bot_id: str, group_id: str, user_id: str, card: str):
+        self.bot_id = bot_id
+        self.group_id = group_id
+        self.user_id = user_id
+        self.card = card
+
+    def __str__(self):
+        return (f"Bot \033[0;37m{self.bot_id}\033[0m set group "
+                f"\033[0;33m{self.group_id}\033[0m member "
+                f"\033[0;33m{self.user_id}\033[0m card to "
+                f"\033[0;33m{self.card!r}\033[0m")
+
+
 class BotSendFileCommand(BotCommandBase):
     """
     上传文件（群内限定）

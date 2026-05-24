@@ -22,6 +22,7 @@ from .extended import (
     GroupConfig,
     GroupActivate,
     GroupWelcome,
+    GroupTeam,
     ChatRecord,
     BotControl,
     UserStat,
@@ -63,6 +64,7 @@ __all__ = [
     "UserVariable",
     "UserFavor",
     "UserMacro",
+    "GroupTeam",
     # 角色常量
     "CHAR_INFO_KEY_HP",
     "CHAR_INFO_KEY_HP_DICE",

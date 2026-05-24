@@ -19,7 +19,7 @@ from core.bot import Bot as DicePPBot
 from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, GroupInfo
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
-from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotSendForwardMsgCommand, BotSendFileCommand
+from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotSendForwardMsgCommand, BotSendFileCommand, BotSetGroupCardCommand
 from utils.logger import dice_log
 
 from module.common.log_command import delete_log_record_by_message_id
@@ -97,6 +97,7 @@ class NoneBotClientProxy(ClientProxy):
             BotLeaveGroupCommand: self._handle_leave_group,
             BotSendForwardMsgCommand: self._handle_send_forward_msg,
             BotSendFileCommand: self._handle_send_file,
+            BotSetGroupCardCommand: self._handle_set_group_card,
             BotDelayCommand: self._handle_delay,
         }
 
@@ -221,6 +222,15 @@ class NoneBotClientProxy(ClientProxy):
             except Exception as ex_outer:
                 dice_log(f"[OneBot][Upload][Unexpected] group={target.group_id} file={real_name} err={ex_outer}")
                 await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
+
+    async def _handle_set_group_card(self, command: BotSetGroupCardCommand) -> None:
+        # OneBot v11 标准 API set_group_card；需要骰娘在该群有管理员权限，否则 ActionFailed
+        await self.bot.call_api(
+            "set_group_card",
+            group_id=int(command.group_id),
+            user_id=int(command.user_id),
+            card=command.card,
+        )
 
     async def _handle_delay(self, command: BotDelayCommand) -> None:
         await asyncio.sleep(command.seconds)

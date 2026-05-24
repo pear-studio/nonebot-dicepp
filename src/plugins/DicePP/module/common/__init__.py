@@ -12,3 +12,5 @@ from .reload_config_command import ReloadConfigCommand
 from .macro_command import MacroCommand
 from .variable_command import VariableCommand
 from .point_command import PointCommand
+# 队伍指令 + 自动改名 ob
+from .team_command import TeamCommand

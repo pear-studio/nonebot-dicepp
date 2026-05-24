@@ -783,6 +783,15 @@ class Bot:
                     if feedback:
                         bot_commands += [BotSendMsgCommand(self.account, choice(feedback.split("|")), [GroupMessagePort(data.group_id)])]
 
+                # 队伍模式：若该群启用了 team 且新成员不在 team 中，自动改群名片为 ob
+                try:
+                    from module.common.team_command import auto_rename_ob_for_new_member
+                    bot_commands += await auto_rename_ob_for_new_member(
+                        self, data.group_id, data.user_id
+                    )
+                except Exception:
+                    dice_log(f"[Team] [Notice] 自动改名 ob 失败: {get_exception_info()}")
+
         if self.proxy:
             for command in bot_commands:
                 await self.proxy.process_bot_command(command)

@@ -7,6 +7,7 @@ from .runner import MigrationExecutionError, MigrationRunResult, MigrationRunner
 from .v1_baseline import BaselineMigrationV1
 from .v2_hub_config import HubConfigMigrationV2
 from .v3_macros_points import MacrosPointsMigrationV3
+from .v4_group_team import GroupTeamMigrationV4
 
 
 def default_registry() -> MigrationRegistry:
@@ -15,6 +16,7 @@ def default_registry() -> MigrationRegistry:
             BaselineMigrationV1(),
             HubConfigMigrationV2(),
             MacrosPointsMigrationV3(),
+            GroupTeamMigrationV4(),
         ]
     )
 
