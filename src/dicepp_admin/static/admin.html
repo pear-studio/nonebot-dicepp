@@ -1,0 +1,1758 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DicePP 管理后台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.5/dist/cdn.min.js"></script>
+  <style>
+    :root {
+      --bg: #f6efe2;
+      --bg-2: #ece0c6;
+      --ink: #2b231a;
+      --muted: #75644d;
+      --card: #fffaf0;
+      --line: rgba(116, 89, 60, 0.18);
+      --accent: #2a7d6a;
+      --accent-2: #1d5e50;
+      --warn: #b76e2c;
+      --bad: #b73a3a;
+      --ok: #2a7d6a;
+    }
+    html, body { background: var(--bg); color: var(--ink); height: 100%; }
+    body {
+      background:
+        radial-gradient(1200px 700px at -12% -10%, #ffd9a5 0%, transparent 55%),
+        radial-gradient(1000px 620px at 110% 0%, #b7efe9 0%, transparent 52%),
+        linear-gradient(140deg, var(--bg), var(--bg-2));
+      font-family: "IBM Plex Sans", "Source Han Sans SC", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 22px rgba(75, 47, 23, 0.08); }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 8px; font-size: 14px; font-weight: 500; transition: all 0.15s; border: 1px solid transparent; cursor: pointer; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: var(--accent-2); }
+    .btn-secondary { background: transparent; color: var(--ink); border-color: var(--line); }
+    .btn-secondary:hover { background: rgba(0,0,0,0.04); }
+    .btn-danger { background: var(--bad); color: white; }
+    .btn-danger:hover { filter: brightness(0.92); }
+    .btn-sm { padding: 3px 10px; font-size: 12px; }
+    .btn-icon { padding: 4px 8px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .input, .textarea, .select { width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: white; font-size: 14px; color: var(--ink); }
+    .input:focus, .textarea:focus, .select:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; font-weight: 500; }
+    .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); padding: 0 16px; overflow-x: auto; }
+    .tab { padding: 10px 14px; font-size: 14px; color: var(--muted); border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+    .tab:hover { color: var(--ink); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .badge-ok { background: rgba(42,125,106,0.12); color: var(--accent-2); }
+    .badge-off { background: rgba(0,0,0,0.06); color: var(--muted); }
+    .badge-warn { background: rgba(183,110,44,0.16); color: var(--warn); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { text-align: left; padding: 8px 10px; font-weight: 600; color: var(--muted); background: rgba(0,0,0,0.025); border-bottom: 1px solid var(--line); }
+    td { padding: 8px 10px; border-bottom: 1px solid rgba(0,0,0,0.04); vertical-align: top; }
+    tr:hover td { background: rgba(42,125,106,0.04); }
+    .toast { position: fixed; right: 20px; bottom: 20px; padding: 12px 18px; border-radius: 10px; color: white; box-shadow: 0 8px 24px rgba(0,0,0,0.2); z-index: 1000; max-width: 400px; }
+    .toast.ok { background: var(--accent); }
+    .toast.err { background: var(--bad); }
+    .modal-bg { position: fixed; inset: 0; background: rgba(43, 35, 26, 0.4); backdrop-filter: blur(2px); z-index: 100; }
+    .modal { background: var(--card); border-radius: 16px; padding: 24px; max-width: 520px; width: calc(100% - 40px); box-shadow: 0 30px 60px rgba(0,0,0,0.25); }
+    .modal-lg { max-width: 760px; }
+    .scrollable { max-height: 60vh; overflow: auto; }
+    .pre-log { background: #1f2620; color: #d8e6c0; padding: 12px; border-radius: 8px; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow: auto; max-height: 480px; }
+    .empty { padding: 60px 20px; text-align: center; color: var(--muted); }
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body x-data="app()" x-init="boot()" x-cloak>
+
+<!-- ========== 加载中 ========== -->
+<template x-if="state === 'loading'">
+  <div class="flex items-center justify-center" style="height: 100vh;">
+    <div class="text-center">
+      <div class="text-2xl font-bold mb-2" style="color: var(--accent-2);">DicePP</div>
+      <div class="text-sm" style="color: var(--muted);">连接管理后台...</div>
+    </div>
+  </div>
+</template>
+
+<!-- ========== 首次设密码 ========== -->
+<template x-if="state === 'setup'">
+  <div class="flex items-center justify-center" style="min-height: 100vh;">
+    <div class="card p-8" style="width: 420px;">
+      <h1 class="text-xl font-bold mb-1">欢迎使用 DicePP</h1>
+      <p class="text-sm mb-6" style="color: var(--muted);">首次启动，请设置管理员密码（至少 6 位）</p>
+      <form @submit.prevent="doSetup()" class="space-y-4">
+        <div>
+          <label class="label">管理员用户名</label>
+          <input type="text" class="input" x-model="setupForm.username" placeholder="admin（默认）" />
+        </div>
+        <div>
+          <label class="label">密码</label>
+          <input type="password" class="input" x-model="setupForm.password" required minlength="6" />
+        </div>
+        <div>
+          <label class="label">再次输入密码</label>
+          <input type="password" class="input" x-model="setupForm.confirm" required minlength="6" />
+        </div>
+        <button type="submit" class="btn btn-primary w-full justify-center" :disabled="busy">设置并登录</button>
+      </form>
+    </div>
+  </div>
+</template>
+
+<!-- ========== 登录页 ========== -->
+<template x-if="state === 'login'">
+  <div class="flex items-center justify-center" style="min-height: 100vh;">
+    <div class="card p-8" style="width: 380px;">
+      <h1 class="text-xl font-bold mb-1">DicePP 管理后台</h1>
+      <p class="text-sm mb-6" style="color: var(--muted);">请登录</p>
+      <form @submit.prevent="doLogin()" class="space-y-4">
+        <div>
+          <label class="label">用户名</label>
+          <input type="text" class="input" x-model="loginForm.username" placeholder="admin" />
+        </div>
+        <div>
+          <label class="label">密码</label>
+          <input type="password" class="input" x-model="loginForm.password" required />
+        </div>
+        <button type="submit" class="btn btn-primary w-full justify-center" :disabled="busy">登录</button>
+      </form>
+    </div>
+  </div>
+</template>
+
+<!-- ========== 主界面 ========== -->
+<template x-if="state === 'main'">
+  <div class="flex" style="height: 100vh;">
+
+    <!-- 左侧栏 -->
+    <aside class="card flex flex-col" style="width: 280px; margin: 12px 0 12px 12px; border-radius: 14px;">
+      <div class="p-4 border-b" style="border-color: var(--line);">
+        <div class="font-bold text-lg" style="color: var(--accent-2);">DicePP</div>
+        <div class="text-xs" style="color: var(--muted);">骰娘管理后台</div>
+      </div>
+
+      <div class="flex-1 overflow-auto p-2">
+        <div class="flex items-center justify-between px-2 py-2">
+          <div class="text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">骰娘实例</div>
+          <button class="btn btn-sm btn-primary" @click="modal.createInstance = true">+ 新建</button>
+        </div>
+        <template x-if="instances.length === 0">
+          <div class="text-sm px-3 py-6 text-center" style="color: var(--muted);">还没有骰娘<br/>点击「+ 新建」创建第一个</div>
+        </template>
+        <template x-for="inst in instances" :key="inst.id">
+          <div class="rounded-lg p-3 mb-1.5 cursor-pointer"
+               :class="selectedId === inst.id ? 'ring-2 ring-offset-1' : 'hover:bg-black/5'"
+               :style="selectedId === inst.id ? 'background: rgba(42,125,106,0.1); --tw-ring-color: var(--accent);' : ''"
+               @click="selectInstance(inst.id)">
+            <div class="flex items-center justify-between">
+              <div class="font-semibold text-sm truncate" x-text="inst.name"></div>
+              <span :class="inst.running ? 'badge badge-ok' : 'badge badge-off'" x-text="inst.running ? '运行中' : '已停止'"></span>
+            </div>
+            <div class="text-xs mt-1" style="color: var(--muted);">
+              <span x-text="inst.qq_id ? 'QQ: ' + inst.qq_id : '未绑定 QQ'"></span>
+              · <span x-text="'端口 ' + inst.port"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div class="border-t p-3 flex items-center gap-2" style="border-color: var(--line);">
+        <div class="flex-1 text-xs" style="color: var(--muted);">
+          <span x-text="me.username"></span>
+        </div>
+        <button class="btn btn-sm btn-secondary" @click="modal.llonebot = true" title="LLOneBot">LL</button>
+        <button class="btn btn-sm btn-secondary" @click="modal.audit = true" title="审计日志">📋</button>
+        <button class="btn btn-sm btn-secondary" @click="modal.changePw = true" title="改密码">🔑</button>
+        <button class="btn btn-sm btn-secondary" @click="doLogout()" title="退出">⏏</button>
+      </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="flex-1 flex flex-col" style="margin: 12px; min-width: 0;">
+
+      <!-- 未选实例时的占位 -->
+      <template x-if="!selectedId">
+        <div class="card flex-1 flex items-center justify-center">
+          <div class="empty">
+            <div class="text-xl font-semibold mb-2">未选择实例</div>
+            <div>点击左侧实例卡片，或者「+ 新建」创建一个</div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 选中实例 -->
+      <template x-if="selectedId && selected">
+        <div class="card flex-1 flex flex-col overflow-hidden">
+
+          <!-- 顶部信息栏 -->
+          <div class="p-4 flex items-center gap-3 border-b" style="border-color: var(--line);">
+            <div class="flex-1">
+              <div class="flex items-center gap-2">
+                <h2 class="text-lg font-bold" x-text="selected.name"></h2>
+                <span :class="selected.running ? 'badge badge-ok' : 'badge badge-off'" x-text="selected.running ? '运行中' : '已停止'"></span>
+              </div>
+              <div class="text-xs mt-0.5" style="color: var(--muted);">
+                <span x-text="'ID: ' + selected.id"></span>
+                · <span x-text="'端口 ' + selected.port"></span>
+                <span x-show="selected.qq_id"> · QQ <span x-text="selected.qq_id"></span></span>
+              </div>
+            </div>
+            <template x-if="!selected.running">
+              <button class="btn btn-primary" @click="startInstance(selected.id)">▶ 启动</button>
+            </template>
+            <template x-if="selected.running">
+              <button class="btn btn-secondary" @click="stopInstance(selected.id)">⏸ 停止</button>
+            </template>
+            <button class="btn btn-secondary" @click="syncLlonebotForSelected()" title="把本实例的反向 WS 端口写入 LLOneBot 配置">同步 LL 配置</button>
+            <button class="btn btn-secondary" @click="refreshSelected()" title="刷新">↻</button>
+            <button class="btn btn-secondary btn-icon" @click="modal.instanceSettings = true" title="设置">⚙</button>
+          </div>
+
+          <!-- Tab 切换 -->
+          <div class="tabs">
+            <template x-for="t in tabs" :key="t.key">
+              <div class="tab" :class="tab === t.key ? 'active' : ''"
+                   @click="switchTab(t.key)" x-text="t.label"></div>
+            </template>
+          </div>
+
+          <!-- Tab 内容 -->
+          <div class="flex-1 overflow-auto p-4">
+
+            <!-- 概览 -->
+            <template x-if="tab === 'overview'">
+              <div class="space-y-4">
+                <div class="grid grid-cols-3 gap-4">
+                  <div class="card p-4">
+                    <div class="text-xs uppercase tracking-wider" style="color: var(--muted);">状态</div>
+                    <div class="text-xl font-bold mt-1" :class="selected.running ? 'text-emerald-700' : 'text-gray-500'"
+                         x-text="selected.running ? '运行中' : '已停止'"></div>
+                  </div>
+                  <div class="card p-4">
+                    <div class="text-xs uppercase tracking-wider" style="color: var(--muted);">端口</div>
+                    <div class="text-xl font-bold mt-1" x-text="selected.port"></div>
+                    <div class="text-xs mt-1" style="color: var(--muted);">反向 WS: ws://127.0.0.1:<span x-text="selected.port"></span>/onebot/v11/ws</div>
+                  </div>
+                  <div class="card p-4">
+                    <div class="text-xs uppercase tracking-wider" style="color: var(--muted);">已绑定 QQ</div>
+                    <div class="text-xl font-bold mt-1" x-text="selected.qq_id || '—'"></div>
+                  </div>
+                </div>
+
+                <div class="card p-4">
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="font-semibold">实时日志</div>
+                    <button class="btn btn-sm btn-secondary" @click="refreshLog()">↻ 刷新</button>
+                  </div>
+                  <div class="pre-log" x-text="runtimeLog || '（日志为空）'"></div>
+                </div>
+
+                <div class="card p-4">
+                  <div class="font-semibold mb-3">连接 QQ 步骤</div>
+                  <ol class="space-y-2 text-sm" style="color: var(--muted);">
+                    <li>1. 确保 LLOneBot 已就绪（左下角「LL」按钮 → 点「自动获取」）</li>
+                    <li>2. 确认实例已填好 QQ 号（点右上角「⚙」设置）</li>
+                    <li>3. 点本行右上「同步 LL 配置」，admin 会预先写好反向 WS 端口</li>
+                    <li>4. 点左下「LL」按钮 → 启动 LLOneBot，扫码登录 QQ
+                      <span class="font-semibold" x-text="selected.qq_id ? ' ' + selected.qq_id : ''"></span>
+                    </li>
+                    <li>5. 点上方「启动」按钮启动本实例（端口 <code class="bg-black/5 px-1 rounded" x-text="selected.port"></code>）</li>
+                    <li>6. 在 QQ 群里输入 <code class="bg-black/5 px-1 rounded">.help</code> 测试</li>
+                  </ol>
+                  <div class="mt-3 text-xs p-3 rounded" style="background: rgba(183,110,44,0.08); color: var(--warn);">
+                    <b>多开提示：</b>每个实例使用不同端口（自动分配）。本实例端口
+                    <b x-text="selected.port"></b>，对应的反向 WS 地址：
+                    <code class="bg-black/5 px-1 rounded">ws://127.0.0.1:<span x-text="selected.port"></span>/onebot/v11/ws</code>。
+                    点「同步 LL 配置」会把这个地址自动写到 LLOneBot 里 QQ <b x-text="selected.qq_id || '（未填）'"></b> 对应的配置文件，无需手动设置。
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- 跑团日志 -->
+            <template x-if="tab === 'logs'">
+              <div x-data="logsView()" x-init="$nextTick(() => loadBots())">
+                <div class="flex gap-3 mb-4">
+                  <div style="width: 200px;">
+                    <label class="label">QQ 账号</label>
+                    <select class="select" x-model="botId" @change="loadSessions()">
+                      <option value="">（选择）</option>
+                      <template x-for="b in bots" :key="b"><option :value="b" x-text="b"></option></template>
+                    </select>
+                  </div>
+                  <div style="width: 200px;">
+                    <label class="label">按群过滤</label>
+                    <input class="input" x-model="filterGroup" placeholder="群号（可空）" @change="loadSessions()" />
+                  </div>
+                  <div class="flex-1"></div>
+                  <button class="btn btn-secondary self-end" @click="loadSessions()">刷新</button>
+                </div>
+
+                <div class="grid gap-4" style="grid-template-columns: 320px 1fr;">
+                  <!-- 会话列表 -->
+                  <div class="card overflow-hidden">
+                    <div class="px-3 py-2 border-b font-semibold text-sm" style="border-color: var(--line);">日志会话</div>
+                    <div style="max-height: 560px; overflow: auto;">
+                      <template x-if="sessions.length === 0">
+                        <div class="empty text-sm">没有跑团日志</div>
+                      </template>
+                      <template x-for="s in sessions" :key="s.id">
+                        <div class="p-3 border-b cursor-pointer hover:bg-black/5"
+                             style="border-color: var(--line);"
+                             :class="selectedLogId === s.id ? 'bg-emerald-50' : ''"
+                             @click="selectLog(s.id)">
+                          <div class="font-semibold text-sm" x-text="s.name"></div>
+                          <div class="text-xs mt-0.5" style="color: var(--muted);">
+                            群 <span x-text="s.group_id"></span> · <span x-text="formatDate(s.updated_at)"></span>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- 记录列表 -->
+                  <div class="card overflow-hidden flex flex-col">
+                    <div class="px-3 py-2 border-b flex items-center gap-2" style="border-color: var(--line);">
+                      <input class="input" style="max-width: 240px;" x-model="filterKeyword" placeholder="关键词搜索" @keyup.enter="loadRecords()" />
+                      <input class="input" style="max-width: 140px;" x-model="filterUser" placeholder="按用户" @keyup.enter="loadRecords()" />
+                      <div class="flex-1"></div>
+                      <button class="btn btn-sm btn-secondary" @click="loadRecords()">查询</button>
+                      <a class="btn btn-sm btn-secondary" :href="exportUrl('txt')" :class="!selectedLogId ? 'opacity-50 pointer-events-none' : ''">导出 TXT</a>
+                      <a class="btn btn-sm btn-secondary" :href="exportUrl('md')" :class="!selectedLogId ? 'opacity-50 pointer-events-none' : ''">导出 MD</a>
+                      <button class="btn btn-sm btn-danger" :disabled="!selectedLogId" @click="deleteSession()">删整段</button>
+                    </div>
+                    <div style="max-height: 560px; overflow: auto;">
+                      <template x-if="!selectedLogId">
+                        <div class="empty text-sm">选择左侧会话查看记录</div>
+                      </template>
+                      <template x-for="r in records" :key="r.id">
+                        <div class="px-3 py-2 border-b text-sm group" style="border-color: var(--line);">
+                          <div class="flex items-baseline gap-2">
+                            <span class="font-semibold" x-text="r.nickname || r.user_id"></span>
+                            <span class="text-xs" style="color: var(--muted);" x-text="r.time"></span>
+                            <button class="ml-auto opacity-0 group-hover:opacity-100 btn btn-sm btn-secondary" @click="deleteRecord(r.id)">删</button>
+                          </div>
+                          <div class="mt-1 whitespace-pre-wrap" x-text="r.content"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- 群聊查询 -->
+            <template x-if="tab === 'chat'">
+              <div x-data="chatView()" x-init="$nextTick(() => loadBots())">
+                <div class="flex gap-3 mb-4">
+                  <div style="width: 180px;">
+                    <label class="label">QQ 账号</label>
+                    <select class="select" x-model="botId">
+                      <option value="">（选择）</option>
+                      <template x-for="b in bots" :key="b"><option :value="b" x-text="b"></option></template>
+                    </select>
+                  </div>
+                  <div style="width: 160px;">
+                    <label class="label">群号</label>
+                    <input class="input" x-model="filterGroup" />
+                  </div>
+                  <div style="width: 160px;">
+                    <label class="label">用户</label>
+                    <input class="input" x-model="filterUser" />
+                  </div>
+                  <div class="flex-1">
+                    <label class="label">关键词</label>
+                    <input class="input" x-model="filterKeyword" @keyup.enter="loadChat()" />
+                  </div>
+                  <button class="btn btn-primary self-end" @click="loadChat()">搜索</button>
+                </div>
+                <div class="card overflow-auto" style="max-height: 600px;">
+                  <table>
+                    <thead>
+                      <tr><th>群</th><th>用户</th><th>更新时间</th><th>原始数据</th></tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="records.length === 0">
+                        <tr><td colspan="4" class="empty">先选择 QQ 号并查询</td></tr>
+                      </template>
+                      <template x-for="r in records" :key="r.rowid || JSON.stringify(r)">
+                        <tr>
+                          <td x-text="r.group_id"></td>
+                          <td x-text="r.user_id"></td>
+                          <td x-text="r.updated_at"></td>
+                          <td><code class="text-xs" x-text="(r.data || '').slice(0, 200)"></code></td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </template>
+
+            <!-- 群配置 -->
+            <template x-if="tab === 'groups'">
+              <div x-data="groupsView()" x-init="$nextTick(() => loadBots())">
+                <div class="flex gap-3 mb-4 items-end">
+                  <div style="width: 180px;">
+                    <label class="label">QQ 账号</label>
+                    <select class="select" x-model="botId" @change="loadAll()">
+                      <option value="">（选择）</option>
+                      <template x-for="b in bots" :key="b"><option :value="b" x-text="b"></option></template>
+                    </select>
+                  </div>
+                  <div class="flex gap-1">
+                    <button class="btn btn-sm" :class="subTab === 'config' ? 'btn-primary' : 'btn-secondary'" @click="subTab = 'config'">配置</button>
+                    <button class="btn btn-sm" :class="subTab === 'activate' ? 'btn-primary' : 'btn-secondary'" @click="subTab = 'activate'">启停</button>
+                    <button class="btn btn-sm" :class="subTab === 'welcome' ? 'btn-primary' : 'btn-secondary'" @click="subTab = 'welcome'">欢迎语</button>
+                  </div>
+                  <div class="flex-1"></div>
+                  <button class="btn btn-secondary" @click="loadAll()">刷新</button>
+                </div>
+                <div class="card overflow-auto" style="max-height: 560px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>关键字段</th>
+                        <th>data (JSON)</th>
+                        <th>更新时间</th>
+                        <th style="width: 100px;">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="currentRecords().length === 0">
+                        <tr><td colspan="4" class="empty">无数据</td></tr>
+                      </template>
+                      <template x-for="r in currentRecords()" :key="recordKey(r)">
+                        <tr>
+                          <td><code class="text-xs" x-text="keyDisplay(r)"></code></td>
+                          <td><code class="text-xs whitespace-pre-wrap" x-text="dataPreview(r)"></code></td>
+                          <td x-text="r.updated_at"></td>
+                          <td>
+                            <button class="btn btn-sm btn-secondary" @click="editRecord(r)">编辑</button>
+                            <button class="btn btn-sm btn-danger" @click="deleteRecord(r)">删</button>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </template>
+
+            <!-- 角色卡 -->
+            <template x-if="tab === 'characters'">
+              <div x-data="charactersView()" x-init="$nextTick(() => loadBots())">
+                <div class="flex gap-3 mb-4 items-end">
+                  <div style="width: 180px;">
+                    <label class="label">QQ 账号</label>
+                    <select class="select" x-model="botId" @change="load()">
+                      <option value="">（选择）</option>
+                      <template x-for="b in bots" :key="b"><option :value="b" x-text="b"></option></template>
+                    </select>
+                  </div>
+                  <div class="flex-1">
+                    <label class="label">用户/角色名搜索</label>
+                    <input class="input" x-model="filterKw" />
+                  </div>
+                  <button class="btn btn-secondary" @click="load()">刷新</button>
+                </div>
+                <div class="card overflow-auto" style="max-height: 560px;">
+                  <table>
+                    <thead><tr><th>关键字段</th><th>角色数据预览</th><th>更新</th><th style="width: 100px;">操作</th></tr></thead>
+                    <tbody>
+                      <template x-if="filtered().length === 0">
+                        <tr><td colspan="4" class="empty">无角色卡数据</td></tr>
+                      </template>
+                      <template x-for="r in filtered()" :key="recordKey(r)">
+                        <tr>
+                          <td><code class="text-xs" x-text="keyDisplay(r)"></code></td>
+                          <td><code class="text-xs whitespace-pre-wrap" x-text="dataPreview(r)"></code></td>
+                          <td x-text="r.updated_at"></td>
+                          <td>
+                            <button class="btn btn-sm btn-secondary" @click="editRecord(r)">编辑</button>
+                            <button class="btn btn-sm btn-danger" @click="deleteRecord(r)">删</button>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </template>
+
+            <!-- 牌堆 -->
+            <template x-if="tab === 'decks'">
+              <div x-data="filesView('decks')" x-init="$nextTick(() => load())">
+                <div class="flex gap-2 mb-4 items-center">
+                  <div class="font-semibold">牌堆文件</div>
+                  <div class="flex-1"></div>
+                  <button class="btn btn-sm btn-secondary" @click="newFile()">+ 新建</button>
+                  <button class="btn btn-sm btn-secondary" @click="load()">刷新</button>
+                </div>
+                <div class="grid gap-4" style="grid-template-columns: 280px 1fr;">
+                  <div class="card overflow-hidden">
+                    <div style="max-height: 560px; overflow: auto;">
+                      <template x-for="f in files" :key="f.name">
+                        <div class="p-3 border-b cursor-pointer hover:bg-black/5"
+                             style="border-color: var(--line);"
+                             :class="selectedName === f.name ? 'bg-emerald-50' : ''"
+                             @click="selectFile(f.name)">
+                          <div class="font-semibold text-sm" x-text="f.name"></div>
+                          <div class="text-xs mt-0.5" style="color: var(--muted);" x-text="formatSize(f.size)"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="card p-3 flex flex-col" style="min-height: 560px;">
+                    <template x-if="!selectedName">
+                      <div class="empty">选择左侧文件，或点「+ 新建」</div>
+                    </template>
+                    <template x-if="selectedName">
+                      <div class="flex flex-col h-full">
+                        <div class="flex items-center mb-2">
+                          <div class="font-semibold" x-text="selectedName"></div>
+                          <div class="flex-1"></div>
+                          <button class="btn btn-sm btn-primary" @click="save()">保存</button>
+                          <button class="btn btn-sm btn-danger ml-2" @click="del()">删除</button>
+                        </div>
+                        <textarea class="textarea flex-1 font-mono text-xs" x-model="content" style="min-height: 480px;"></textarea>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- 随机生成器 -->
+            <template x-if="tab === 'random'">
+              <div x-data="filesView('random')" x-init="$nextTick(() => load())">
+                <div class="flex gap-2 mb-4 items-center">
+                  <div class="font-semibold">随机生成器</div>
+                  <div class="flex-1"></div>
+                  <button class="btn btn-sm btn-secondary" @click="newFile()">+ 新建</button>
+                  <button class="btn btn-sm btn-secondary" @click="load()">刷新</button>
+                </div>
+                <div class="grid gap-4" style="grid-template-columns: 280px 1fr;">
+                  <div class="card overflow-hidden">
+                    <div style="max-height: 560px; overflow: auto;">
+                      <template x-for="f in files" :key="f.name">
+                        <div class="p-3 border-b cursor-pointer hover:bg-black/5"
+                             style="border-color: var(--line);"
+                             :class="selectedName === f.name ? 'bg-emerald-50' : ''"
+                             @click="selectFile(f.name)">
+                          <div class="font-semibold text-sm" x-text="f.name"></div>
+                          <div class="text-xs mt-0.5" style="color: var(--muted);" x-text="formatSize(f.size)"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="card p-3 flex flex-col" style="min-height: 560px;">
+                    <template x-if="!selectedName">
+                      <div class="empty">选择左侧文件，或点「+ 新建」</div>
+                    </template>
+                    <template x-if="selectedName">
+                      <div class="flex flex-col h-full">
+                        <div class="flex items-center mb-2">
+                          <div class="font-semibold" x-text="selectedName"></div>
+                          <div class="flex-1"></div>
+                          <button class="btn btn-sm btn-primary" @click="save()">保存</button>
+                        </div>
+                        <textarea class="textarea flex-1 font-mono text-xs" x-model="content" style="min-height: 480px;"></textarea>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- 查询库 -->
+            <template x-if="tab === 'querydb'">
+              <div x-data="queryDbView()" x-init="$nextTick(() => load())">
+                <div class="flex gap-3 mb-4 items-end">
+                  <div style="width: 260px;">
+                    <label class="label">查询数据库</label>
+                    <select class="select" x-model="dbName" @change="loadEntries()">
+                      <option value="">（选择数据库）</option>
+                      <template x-for="d in databases" :key="d.name">
+                        <option :value="d.name" x-text="d.name + ' · data:' + (d.tables.data || 0) + ' redirect:' + (d.tables.redirect || 0)"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div class="flex gap-1">
+                    <button class="btn btn-sm" :class="table === 'data' ? 'btn-primary' : 'btn-secondary'"
+                            @click="table = 'data'; loadEntries()">条目</button>
+                    <button class="btn btn-sm" :class="table === 'redirect' ? 'btn-primary' : 'btn-secondary'"
+                            @click="table = 'redirect'; loadEntries()">重定向</button>
+                  </div>
+                  <div class="flex-1">
+                    <label class="label">关键词</label>
+                    <input class="input" x-model="kw" @keyup.enter="loadEntries()" placeholder="搜索任意字段" />
+                  </div>
+                  <button class="btn btn-secondary self-end" @click="loadEntries()">查询</button>
+                  <button class="btn btn-primary self-end" @click="newEntry()" :disabled="!dbName">+ 新条目</button>
+                  <button class="btn btn-secondary self-end" @click="newDb()">+ 新建库</button>
+                  <button class="btn btn-danger self-end" @click="deleteDb()" :disabled="!dbName">删除库</button>
+                </div>
+
+                <div class="text-xs mb-2" style="color: var(--muted);">
+                  共 <b x-text="total"></b> 条 · 当前显示 <b x-text="entries.length"></b> 条
+                </div>
+
+                <div class="card overflow-auto" style="max-height: 560px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <template x-for="f in fields" :key="f"><th x-text="f"></th></template>
+                        <th style="width: 100px;">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="entries.length === 0">
+                        <tr><td :colspan="fields.length + 1" class="empty">无条目</td></tr>
+                      </template>
+                      <template x-for="e in entries" :key="e.rowid">
+                        <tr>
+                          <template x-for="f in fields" :key="f">
+                            <td><code class="text-xs" x-text="String(e[f] ?? '').slice(0, 120)"></code></td>
+                          </template>
+                          <td>
+                            <button class="btn btn-sm btn-secondary" @click="editEntry(e)">编辑</button>
+                            <button class="btn btn-sm btn-danger" @click="deleteEntry(e)">删</button>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- 编辑条目内嵌弹窗 -->
+                <template x-if="editing">
+                  <div class="modal-bg flex items-center justify-center" @click.self="editing = null">
+                    <div class="modal modal-lg">
+                      <h3 class="text-lg font-bold mb-3" x-text="editing.rowid ? '编辑条目' : '新增条目'"></h3>
+                      <div class="space-y-3 scrollable">
+                        <template x-for="f in fields" :key="f">
+                          <div>
+                            <label class="label" x-text="f"></label>
+                            <template x-if="f === '内容'">
+                              <textarea class="textarea font-mono text-xs" rows="6" x-model="editing.values[f]"></textarea>
+                            </template>
+                            <template x-if="f !== '内容'">
+                              <input class="input" x-model="editing.values[f]" />
+                            </template>
+                          </div>
+                        </template>
+                      </div>
+                      <div class="flex justify-end gap-2 pt-4">
+                        <button class="btn btn-secondary" @click="editing = null">取消</button>
+                        <button class="btn btn-primary" @click="saveEntry()">保存</button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- SQLite 浏览器 -->
+            <template x-if="tab === 'sqlite'">
+              <div x-data="sqliteView()" x-init="$nextTick(() => loadBots())">
+                <div class="flex gap-3 mb-4 items-end">
+                  <div style="width: 180px;">
+                    <label class="label">QQ 账号</label>
+                    <select class="select" x-model="botId" @change="loadTables()">
+                      <option value="">（选择）</option>
+                      <template x-for="b in bots" :key="b"><option :value="b" x-text="b"></option></template>
+                    </select>
+                  </div>
+                  <div style="width: 240px;">
+                    <label class="label">表</label>
+                    <select class="select" x-model="table" @change="loadRows()">
+                      <option value="">（选择表）</option>
+                      <template x-for="t in tables" :key="t.name"><option :value="t.name" x-text="t.name + ' (' + t.count + ')'"></option></template>
+                    </select>
+                  </div>
+                  <div class="flex-1">
+                    <label class="label">关键词</label>
+                    <input class="input" x-model="kw" @keyup.enter="loadRows()" />
+                  </div>
+                  <button class="btn btn-secondary self-end" @click="loadRows()">查询</button>
+                </div>
+                <div class="card overflow-auto" style="max-height: 600px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <template x-for="c in columns" :key="c"><th x-text="c"></th></template>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <template x-if="rows.length === 0">
+                        <tr><td :colspan="columns.length || 1" class="empty">无数据</td></tr>
+                      </template>
+                      <template x-for="(r, i) in rows" :key="i">
+                        <tr>
+                          <template x-for="c in columns" :key="c">
+                            <td><code class="text-xs" x-text="String(r[c] ?? '').slice(0, 120)"></code></td>
+                          </template>
+                        </tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </template>
+
+          </div>
+        </div>
+      </template>
+    </main>
+  </div>
+</template>
+
+<!-- ========== 弹窗：新建实例 ========== -->
+<template x-if="modal.createInstance">
+  <div class="modal-bg flex items-center justify-center" @click.self="modal.createInstance = false">
+    <div class="modal">
+      <h3 class="text-lg font-bold mb-1">新建骰娘实例</h3>
+      <p class="text-sm mb-4" style="color: var(--muted);">每个实例独立运行、独立数据库、独立端口，互不影响</p>
+      <form @submit.prevent="createInstance()" class="space-y-3">
+        <div>
+          <label class="label">实例名称</label>
+          <input class="input" x-model="createForm.name" placeholder="例：跑团骰娘" required />
+        </div>
+        <div>
+          <label class="label">绑定 QQ 号（强烈推荐立刻填，方便 LLOneBot 自动配置）</label>
+          <input class="input" x-model="createForm.qq_id" placeholder="123456" />
+        </div>
+        <div>
+          <label class="label">主人 QQ（master）</label>
+          <input class="input" x-model="createForm.master_qq" placeholder="你的 QQ 号" />
+        </div>
+        <div class="text-xs p-3 rounded" style="background: rgba(42,125,106,0.08); color: var(--muted);">
+          <b>关于多开：</b>每个实例会自动分配一个独立端口（从 8080 开始递增，自动避让被占用的）。
+          填入 QQ 号后，admin 会自动在 LLOneBot 里为该 QQ 写入对应的反向 WS 配置 —— 你只需扫码登录，无需手动设置端口。
+        </div>
+        <div class="flex gap-2 pt-2">
+          <button type="button" class="btn btn-secondary flex-1 justify-center" @click="modal.createInstance = false">取消</button>
+          <button type="submit" class="btn btn-primary flex-1 justify-center" :disabled="busy">创建</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<!-- ========== 弹窗：实例设置 ========== -->
+<template x-if="modal.instanceSettings && selected">
+  <div class="modal-bg flex items-center justify-center" @click.self="modal.instanceSettings = false">
+    <div class="modal">
+      <h3 class="text-lg font-bold mb-4">实例设置</h3>
+      <form @submit.prevent="saveInstanceSettings()" class="space-y-3">
+        <div>
+          <label class="label">实例名称</label>
+          <input class="input" x-model="instanceEditForm.name" />
+        </div>
+        <div>
+          <label class="label">QQ 号</label>
+          <input class="input" x-model="instanceEditForm.qq_id" />
+        </div>
+        <div>
+          <label class="label">主人 QQ</label>
+          <input class="input" x-model="instanceEditForm.master_qq" />
+        </div>
+        <div>
+          <label class="label">反向 WS Access Token（可空）</label>
+          <input class="input" x-model="instanceEditForm.access_token" />
+        </div>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" x-model="instanceEditForm.auto_start" />
+          后台启动时自动启动该实例（暂未实现）
+        </label>
+        <div class="border-t pt-3 mt-4" style="border-color: var(--line);">
+          <div class="text-sm font-semibold text-red-700 mb-2">危险操作</div>
+          <button type="button" class="btn btn-danger btn-sm" @click="deleteInstance(false)">删除实例（保留数据）</button>
+          <button type="button" class="btn btn-danger btn-sm ml-2" @click="deleteInstance(true)">删除实例 + 数据</button>
+        </div>
+        <div class="flex gap-2 pt-2">
+          <button type="button" class="btn btn-secondary flex-1 justify-center" @click="modal.instanceSettings = false">取消</button>
+          <button type="submit" class="btn btn-primary flex-1 justify-center">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<!-- ========== 弹窗：LLOneBot ========== -->
+<template x-if="modal.llonebot">
+  <div class="modal-bg flex items-center justify-center" @click.self="modal.llonebot = false">
+    <div class="modal modal-lg">
+      <h3 class="text-lg font-bold mb-2">LLOneBot 协议端</h3>
+      <p class="text-sm mb-4" style="color: var(--muted);">QQ 协议接入层。LLOneBot 是单例进程，所有 QQ 号共享一个进程，admin 会根据实例自动生成反向 WS 配置。</p>
+
+      <!-- 状态卡 -->
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <div class="card p-3">
+          <div class="text-xs uppercase tracking-wider" style="color: var(--muted);">整合包</div>
+          <div class="text-lg font-bold mt-1"
+               :class="llonebot.acquired ? 'text-emerald-700' : 'text-gray-500'"
+               x-text="llonebot.acquired ? '✓ 已就绪' : '✗ 未获取'"></div>
+          <div class="text-xs mt-1" style="color: var(--muted); word-break: break-all;"
+               x-text="llonebot.bundle_dir || ''"></div>
+        </div>
+        <div class="card p-3">
+          <div class="text-xs uppercase tracking-wider" style="color: var(--muted);">运行状态</div>
+          <div class="text-lg font-bold mt-1"
+               :class="llonebot.running ? 'text-emerald-700' : 'text-gray-500'"
+               x-text="llonebot.running ? '● 运行中' : '○ 已停止'"></div>
+        </div>
+      </div>
+
+      <!-- 操作区 -->
+      <div class="flex flex-wrap gap-2 mb-4">
+        <button class="btn btn-primary" @click="autoAcquireLlonebot()" :disabled="busy">
+          🔍 自动获取
+        </button>
+        <template x-if="llonebot.acquired && !llonebot.running">
+          <button class="btn btn-primary" @click="startGlobalLlonebot()">▶ 启动 LLOneBot</button>
+        </template>
+        <template x-if="llonebot.running">
+          <button class="btn btn-secondary" @click="stopGlobalLlonebot()">⏸ 停止 LLOneBot</button>
+        </template>
+        <button class="btn btn-secondary" @click="openLlonebot()">↻ 刷新</button>
+      </div>
+
+      <!-- 未找到时的指引 -->
+      <template x-if="!llonebot.acquired">
+        <div class="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm mb-3">
+          <div class="font-semibold mb-1">如何让 admin 找到 LLOneBot？</div>
+          <ol class="space-y-1" style="color: var(--muted);">
+            <li>1. 点上面「自动获取」会扫描以下位置：</li>
+            <template x-for="p in (llonebot._scan_paths || [])"><div class="ml-4 text-xs"><code x-text="p"></code></div></template>
+            <li>2. 如果你已经有 β 版整合包，可把整个 <code class="bg-black/5 px-1 rounded">LLONEBOT</code> 文件夹放到上述任一位置，再点「自动获取」</li>
+            <li>3. 或者去
+              <a class="text-blue-600 underline" href="https://github.com/LLOneBot/LuckyLilliaBot/releases" target="_blank">LuckyLilliaBot Releases</a>
+              下载整合包，解压到项目同级
+            </li>
+            <li>4. 实在不行，下方手动指定 llbot.exe 完整路径</li>
+          </ol>
+        </div>
+      </template>
+
+      <!-- 手动指定路径 -->
+      <div class="mb-4">
+        <label class="label">手动指定 llbot.exe 路径（覆盖自动检测）</label>
+        <div class="flex gap-2">
+          <input class="input flex-1" x-model="llonebot.config.llbot_path" placeholder="C:\\...\\LLONEBOT\\llbot.exe" />
+          <button class="btn btn-primary" @click="saveLlonebotConfig()">保存</button>
+        </div>
+      </div>
+
+      <!-- 已配置的 QQ → 端口 映射 -->
+      <template x-if="llonebot.acquired">
+        <div class="card overflow-hidden">
+          <div class="px-3 py-2 border-b font-semibold text-sm flex items-center" style="border-color: var(--line);">
+            <span>QQ → DicePP 实例映射</span>
+            <span class="ml-2 text-xs font-normal" style="color: var(--muted);">（已写入 LLOneBot 配置的 QQ 号）</span>
+            <div class="flex-1"></div>
+            <button class="btn btn-sm btn-secondary" @click="syncAllInstances()">↻ 全量同步</button>
+          </div>
+          <table>
+            <thead><tr><th>QQ 号</th><th>反向 WS 端口</th><th>归属实例</th><th>配置文件</th></tr></thead>
+            <tbody>
+              <template x-if="!llonebot.configured_qqs || llonebot.configured_qqs.length === 0">
+                <tr><td colspan="4" class="empty">还没有任何 QQ 配置。新建实例并填 QQ 号后，会自动生成配置。</td></tr>
+              </template>
+              <template x-for="q in (llonebot.configured_qqs || [])" :key="q.qq_id">
+                <tr>
+                  <td class="font-semibold" x-text="q.qq_id"></td>
+                  <td><code class="text-xs" x-text="q.reverse_ws_url"></code></td>
+                  <td x-text="qqToInstanceName(q.qq_id)"></td>
+                  <td><code class="text-xs" style="word-break: break-all;" x-text="q.config_file"></code></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <div class="flex justify-end pt-4">
+        <button class="btn btn-secondary" @click="modal.llonebot = false">关闭</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ========== 弹窗：审计日志 ========== -->
+<template x-if="modal.audit">
+  <div class="modal-bg flex items-center justify-center" @click.self="modal.audit = false">
+    <div class="modal modal-lg">
+      <h3 class="text-lg font-bold mb-3">审计日志</h3>
+      <div class="card overflow-auto scrollable">
+        <table>
+          <thead><tr><th>时间</th><th>操作员</th><th>动作</th><th>目标</th><th>详情</th><th>IP</th></tr></thead>
+          <tbody>
+            <template x-if="auditLogs.length === 0">
+              <tr><td colspan="6" class="empty">尚无审计记录</td></tr>
+            </template>
+            <template x-for="r in auditLogs" :key="r.id">
+              <tr>
+                <td x-text="formatDate(new Date(r.ts * 1000).toISOString())"></td>
+                <td x-text="r.operator"></td>
+                <td><code class="text-xs" x-text="r.action"></code></td>
+                <td><code class="text-xs" x-text="r.target || ''"></code></td>
+                <td class="text-xs" x-text="r.detail || ''"></td>
+                <td class="text-xs" x-text="r.ip || ''"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="flex justify-end pt-3 gap-2">
+        <button class="btn btn-secondary" @click="loadAudit()">刷新</button>
+        <button class="btn btn-secondary" @click="modal.audit = false">关闭</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ========== 弹窗：改密 ========== -->
+<template x-if="modal.changePw">
+  <div class="modal-bg flex items-center justify-center" @click.self="modal.changePw = false">
+    <div class="modal">
+      <h3 class="text-lg font-bold mb-3">修改密码</h3>
+      <form @submit.prevent="changePassword()" class="space-y-3">
+        <div>
+          <label class="label">旧密码</label>
+          <input type="password" class="input" x-model="changePwForm.old" required />
+        </div>
+        <div>
+          <label class="label">新密码（至少 6 位）</label>
+          <input type="password" class="input" x-model="changePwForm.new" required minlength="6" />
+        </div>
+        <div>
+          <label class="label">再次输入新密码</label>
+          <input type="password" class="input" x-model="changePwForm.confirm" required minlength="6" />
+        </div>
+        <div class="flex gap-2 pt-2">
+          <button type="button" class="btn btn-secondary flex-1 justify-center" @click="modal.changePw = false">取消</button>
+          <button type="submit" class="btn btn-primary flex-1 justify-center" :disabled="busy">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<!-- ========== 弹窗：编辑 JSON 数据 ========== -->
+<template x-if="modal.editJson">
+  <div class="modal-bg flex items-center justify-center" @click.self="modal.editJson = false">
+    <div class="modal modal-lg">
+      <h3 class="text-lg font-bold mb-2">编辑记录</h3>
+      <div class="text-xs mb-3" style="color: var(--muted);">
+        表 <code x-text="editJsonForm.table"></code> · 关键字段 <code x-text="JSON.stringify(editJsonForm.keys)"></code>
+      </div>
+      <textarea class="textarea font-mono text-xs" x-model="editJsonForm.dataStr" style="min-height: 400px;"></textarea>
+      <div class="text-xs mt-1" style="color: var(--muted);">直接编辑 JSON。保存后会写入数据库的 data 字段。</div>
+      <div class="flex justify-end gap-2 pt-3">
+        <button class="btn btn-secondary" @click="modal.editJson = false">取消</button>
+        <button class="btn btn-primary" @click="saveEditJson()">保存</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ========== Toast ========== -->
+<template x-if="toast.message">
+  <div class="toast" :class="toast.type">
+    <span x-text="toast.message"></span>
+  </div>
+</template>
+
+<script>
+function app() {
+  return {
+    state: 'loading',          // loading | setup | login | main
+    me: { username: null },
+    busy: false,
+    toast: { message: '', type: 'ok', _timer: null },
+
+    instances: [],
+    selectedId: null,
+    selected: null,
+    runtimeLog: '',
+
+    tabs: [
+      { key: 'overview',   label: '概览' },
+      { key: 'logs',       label: '跑团日志' },
+      { key: 'chat',       label: '群聊查询' },
+      { key: 'groups',     label: '群配置' },
+      { key: 'characters', label: '角色卡' },
+      { key: 'decks',      label: '牌堆' },
+      { key: 'random',     label: '随机生成器' },
+      { key: 'querydb',    label: '查询库' },
+      { key: 'sqlite',     label: 'SQLite' },
+    ],
+    tab: 'overview',
+
+    setupForm: { username: '', password: '', confirm: '' },
+    loginForm: { username: 'admin', password: '' },
+    changePwForm: { old: '', new: '', confirm: '' },
+    createForm: { name: '', qq_id: '', master_qq: '' },
+    instanceEditForm: { name: '', qq_id: '', master_qq: '', access_token: '', auto_start: false },
+    editJsonForm: { table: '', keys: {}, dataStr: '', _onSave: null },
+
+    llonebot: { acquired: false, running: false, bundle_dir: null, llbot_exe: null,
+                configured_qqs: [], config: { llbot_path: '' }, scan_results: [],
+                _scan_paths: [] },
+    auditLogs: [],
+
+    modal: {
+      createInstance: false,
+      instanceSettings: false,
+      llonebot: false,
+      audit: false,
+      changePw: false,
+      editJson: false,
+    },
+
+    // ─── 启动 ─────────────────────────────────────────────────
+    async boot() {
+      try {
+        const s = await this.fetchJSON('/api/auth/status');
+        if (!s.initialized)  { this.state = 'setup'; return; }
+        if (!s.logged_in)    { this.state = 'login'; return; }
+        this.me.username = s.username;
+        this.state = 'main';
+        await this.loadInstances();
+      } catch (e) {
+        this.state = 'login';
+      }
+    },
+
+    // ─── 鉴权 ─────────────────────────────────────────────────
+    async doSetup() {
+      if (this.setupForm.password !== this.setupForm.confirm) {
+        return this.showToast('两次输入的密码不一致', 'err');
+      }
+      this.busy = true;
+      try {
+        await this.fetchJSON('/api/auth/setup', {
+          method: 'POST',
+          body: JSON.stringify({
+            username: this.setupForm.username || 'admin',
+            password: this.setupForm.password,
+          }),
+        });
+        this.me.username = this.setupForm.username || 'admin';
+        this.state = 'main';
+        await this.loadInstances();
+        this.showToast('设置成功，已自动登录');
+      } finally { this.busy = false; }
+    },
+
+    async doLogin() {
+      this.busy = true;
+      try {
+        const r = await this.fetchJSON('/api/auth/login', {
+          method: 'POST', body: JSON.stringify(this.loginForm),
+        });
+        this.me.username = r.username;
+        this.state = 'main';
+        await this.loadInstances();
+      } finally { this.busy = false; }
+    },
+
+    async doLogout() {
+      await this.fetchJSON('/api/auth/logout', { method: 'POST' });
+      this.state = 'login';
+      this.loginForm = { username: this.me.username || 'admin', password: '' };
+    },
+
+    async changePassword() {
+      if (this.changePwForm.new !== this.changePwForm.confirm) {
+        return this.showToast('两次输入的密码不一致', 'err');
+      }
+      this.busy = true;
+      try {
+        await this.fetchJSON('/api/auth/change_password', {
+          method: 'POST',
+          body: JSON.stringify({ old_password: this.changePwForm.old, new_password: this.changePwForm.new }),
+        });
+        this.modal.changePw = false;
+        this.changePwForm = { old: '', new: '', confirm: '' };
+        this.showToast('密码已修改');
+      } finally { this.busy = false; }
+    },
+
+    // ─── 实例 ─────────────────────────────────────────────────
+    async loadInstances() {
+      const r = await this.fetchJSON('/api/instances');
+      this.instances = r.instances || [];
+      if (this.selectedId) {
+        this.selected = this.instances.find(x => x.id === this.selectedId) || null;
+      }
+    },
+
+    async selectInstance(id) {
+      this.selectedId = id;
+      this.selected = this.instances.find(x => x.id === id) || null;
+      this.tab = 'overview';
+      this.runtimeLog = '';
+      await this.refreshLog();
+    },
+
+    async refreshSelected() {
+      await this.loadInstances();
+      await this.refreshLog();
+    },
+
+    async refreshLog() {
+      if (!this.selectedId) return;
+      try {
+        const r = await this.fetchJSON('/api/instances/' + this.selectedId + '/log?tail=300');
+        this.runtimeLog = r.log || '';
+      } catch (e) { this.runtimeLog = ''; }
+    },
+
+    switchTab(k) { this.tab = k; },
+
+    async createInstance() {
+      this.busy = true;
+      try {
+        const inst = await this.fetchJSON('/api/instances', {
+          method: 'POST', body: JSON.stringify(this.createForm),
+        });
+        this.modal.createInstance = false;
+        const qq = this.createForm.qq_id;
+        this.createForm = { name: '', qq_id: '', master_qq: '' };
+        await this.loadInstances();
+        this.selectInstance(inst.id);
+        if (qq) {
+          this.showToast(`实例已创建：QQ ${qq} → 端口 ${inst.port}（LLOneBot 反向 WS 已自动配置）`);
+        } else {
+          this.showToast(`实例已创建，端口 ${inst.port}。建议尽快在「⚙ 设置」里填 QQ 号`);
+        }
+      } finally { this.busy = false; }
+    },
+
+    async startInstance(id) {
+      try {
+        await this.fetchJSON('/api/instances/' + id + '/start', { method: 'POST' });
+        this.showToast('正在启动...');
+        setTimeout(() => this.refreshSelected(), 1500);
+      } catch (e) { /* shown */ }
+    },
+
+    async stopInstance(id) {
+      if (!confirm('确定要停止实例吗？')) return;
+      await this.fetchJSON('/api/instances/' + id + '/stop', { method: 'POST' });
+      this.showToast('已停止');
+      setTimeout(() => this.refreshSelected(), 500);
+    },
+
+    saveInstanceSettings() {
+      this._patchInstance(this.instanceEditForm);
+    },
+    async _patchInstance(patch) {
+      try {
+        await this.fetchJSON('/api/instances/' + this.selectedId, {
+          method: 'PATCH', body: JSON.stringify(patch),
+        });
+        this.modal.instanceSettings = false;
+        await this.loadInstances();
+        this.showToast('已保存');
+      } catch (e) {}
+    },
+
+    async deleteInstance(removeData) {
+      if (!confirm(removeData ? '将彻底删除该实例和所有数据，无法恢复，确认？' : '删除实例（保留数据目录）？')) return;
+      try {
+        await this.fetchJSON('/api/instances/' + this.selectedId + '?remove_data=' + (removeData ? 'true' : 'false'),
+          { method: 'DELETE' });
+        this.selectedId = null;
+        this.selected = null;
+        this.modal.instanceSettings = false;
+        await this.loadInstances();
+        this.showToast('已删除');
+      } catch (e) {}
+    },
+
+    // 监听 modal 打开，预填表单
+    $watch_dummy() {}, // alpine watcher 在 init 里手动加
+
+    // ─── LLOneBot ────────────────────────────────────────────
+    async openLlonebot() {
+      const r = await this.fetchJSON('/api/llonebot/status');
+      // 把扫描候选路径暴露给 UI（用 detected scan_results 反推）
+      r._scan_paths = (r.scan_results && r.scan_results.length)
+        ? r.scan_results
+        : ['..\\DicePPBOT\\LLONEBOT', '..\\LLONEBOT', '~\\Desktop\\LLONEBOT', '~\\Documents\\LLONEBOT'];
+      if (!r.config) r.config = { llbot_path: '' };
+      this.llonebot = r;
+    },
+    async saveLlonebotConfig() {
+      const path = this.llonebot.config.llbot_path;
+      await this.fetchJSON('/api/llonebot/config', {
+        method: 'POST', body: JSON.stringify({ llbot_path: path }),
+      });
+      this.showToast('已保存');
+      await this.openLlonebot();
+    },
+    async autoAcquireLlonebot() {
+      this.busy = true;
+      try {
+        const r = await this.fetchJSON('/api/llonebot/auto_acquire', { method: 'POST' });
+        if (r.status === 'acquired') {
+          this.showToast('已从 ' + (r.copied_from || '本地') + ' 复制 LLOneBot');
+        } else if (r.status === 'already_acquired') {
+          this.showToast('LLOneBot 已就绪');
+        } else if (r.status === 'not_found') {
+          this.showToast('未在本地找到 LLOneBot 整合包，请按指引手动获取', 'err');
+        } else {
+          this.showToast(r.message || '获取失败', 'err');
+        }
+        await this.openLlonebot();
+        await this.loadInstances();  // 配置可能被新生成
+      } finally { this.busy = false; }
+    },
+    async startGlobalLlonebot() {
+      const r = await this.fetchJSON('/api/llonebot/start', { method: 'POST' });
+      if (r.status === 'started') {
+        this.showToast('LLOneBot 已启动。请在弹出窗口里登录所有需要的 QQ');
+      } else if (r.status === 'already_running') {
+        this.showToast('LLOneBot 已在运行');
+      } else if (r.status === 'not_found') {
+        this.showToast('未找到 LLOneBot，请先「自动获取」', 'err');
+      } else {
+        this.showToast('启动失败: ' + (r.message || '未知'), 'err');
+      }
+      setTimeout(() => this.openLlonebot(), 800);
+    },
+    async stopGlobalLlonebot() {
+      if (!confirm('确认停止 LLOneBot？所有已登录的 QQ 都会下线。')) return;
+      await this.fetchJSON('/api/llonebot/stop', { method: 'POST' });
+      this.showToast('已停止');
+      setTimeout(() => this.openLlonebot(), 500);
+    },
+    async syncLlonebotForSelected() {
+      if (!this.selected) return;
+      if (!this.selected.qq_id) {
+        return this.showToast('请先在「⚙ 设置」里填实例的 QQ 号', 'err');
+      }
+      const r = await this.fetchJSON('/api/llonebot/sync_config', {
+        method: 'POST', body: JSON.stringify({ instance_id: this.selected.id }),
+      });
+      if (r.status === 'ok') {
+        this.showToast('已写入 LLOneBot 配置：QQ ' + this.selected.qq_id + ' → 端口 ' + this.selected.port);
+      } else if (r.status === 'no_bundle') {
+        this.showToast('请先在 LLOneBot 弹窗里「自动获取」整合包', 'err');
+      } else if (r.status === 'no_qq') {
+        this.showToast('请先填实例 QQ 号', 'err');
+      } else {
+        this.showToast(r.message || '同步失败', 'err');
+      }
+    },
+    async syncAllInstances() {
+      let n = 0;
+      for (const inst of this.instances) {
+        if (!inst.qq_id) continue;
+        try {
+          await this.fetchJSON('/api/llonebot/sync_config', {
+            method: 'POST', body: JSON.stringify({ instance_id: inst.id }),
+          });
+          n++;
+        } catch (e) {}
+      }
+      this.showToast('已同步 ' + n + ' 个实例的反向 WS 配置');
+      await this.openLlonebot();
+    },
+    qqToInstanceName(qq) {
+      const inst = this.instances.find(x => x.qq_id === qq);
+      return inst ? inst.name + '（端口 ' + inst.port + '）' : '— 未绑定 —';
+    },
+
+    // ─── 审计 ────────────────────────────────────────────────
+    async loadAudit() {
+      const r = await this.fetchJSON('/api/audit?limit=200');
+      this.auditLogs = r.logs || [];
+    },
+
+    // ─── 编辑 JSON ──────────────────────────────────────────
+    openEditJson(table, keys, data, onSave) {
+      this.editJsonForm = {
+        table, keys,
+        dataStr: typeof data === 'string' ? data : JSON.stringify(data, null, 2),
+        _onSave: onSave,
+      };
+      this.modal.editJson = true;
+    },
+    async saveEditJson() {
+      let parsed;
+      try { parsed = JSON.parse(this.editJsonForm.dataStr); }
+      catch (e) { return this.showToast('JSON 格式错误', 'err'); }
+      if (this.editJsonForm._onSave) {
+        await this.editJsonForm._onSave(parsed);
+      }
+      this.modal.editJson = false;
+    },
+
+    // ─── 工具 ────────────────────────────────────────────────
+    showToast(message, type='ok') {
+      if (this.toast._timer) clearTimeout(this.toast._timer);
+      this.toast = { message, type, _timer: setTimeout(() => this.toast = { message: '', type, _timer: null }, 3200) };
+    },
+    formatDate(iso) {
+      if (!iso) return '';
+      try { return new Date(iso).toLocaleString('zh-CN', { hour12: false }); }
+      catch (e) { return iso; }
+    },
+    async fetchJSON(url, opts={}) {
+      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      const r = await fetch(url, { ...opts, headers, credentials: 'same-origin' });
+      let body = null;
+      try { body = await r.json(); } catch (e) {}
+      if (!r.ok) {
+        const msg = (body && body.message) || ('请求失败：' + r.status);
+        this.showToast(msg, 'err');
+        throw new Error(msg);
+      }
+      return body;
+    },
+  };
+}
+
+// ───── 子组件：跑团日志 ─────
+function logsView() {
+  return {
+    bots: [],
+    botId: '',
+    sessions: [],
+    selectedLogId: null,
+    records: [],
+    filterGroup: '',
+    filterKeyword: '',
+    filterUser: '',
+    async loadBots() {
+      const root = this.$root;
+      try {
+        const r = await root.fetchJSON('/api/instances/' + root.selectedId + '/bots');
+        this.bots = r.bots || [];
+        if (this.bots.length) { this.botId = this.bots[0]; await this.loadSessions(); }
+      } catch (e) {}
+    },
+    async loadSessions() {
+      if (!this.botId) return;
+      const root = this.$root;
+      const q = this.filterGroup ? '?group_id=' + encodeURIComponent(this.filterGroup) : '';
+      const r = await root.fetchJSON('/api/logs/' + root.selectedId + '/' + this.botId + '/sessions' + q);
+      this.sessions = r.sessions || [];
+    },
+    async selectLog(id) { this.selectedLogId = id; await this.loadRecords(); },
+    async loadRecords() {
+      if (!this.selectedLogId) return;
+      const root = this.$root;
+      const params = new URLSearchParams();
+      if (this.filterKeyword) params.set('keyword', this.filterKeyword);
+      if (this.filterUser) params.set('user_id', this.filterUser);
+      params.set('limit', '500');
+      const r = await root.fetchJSON('/api/logs/' + root.selectedId + '/' + this.botId + '/sessions/' + this.selectedLogId + '/records?' + params.toString());
+      this.records = r.records || [];
+    },
+    exportUrl(fmt) {
+      const root = this.$root;
+      if (!this.selectedLogId || !this.botId) return '#';
+      return '/api/logs/' + root.selectedId + '/' + this.botId + '/sessions/' + this.selectedLogId + '/export?fmt=' + fmt;
+    },
+    async deleteSession() {
+      if (!confirm('确认删除整个日志会话？')) return;
+      const root = this.$root;
+      await root.fetchJSON('/api/logs/' + root.selectedId + '/' + this.botId + '/sessions/' + this.selectedLogId, { method: 'DELETE' });
+      this.selectedLogId = null;
+      this.records = [];
+      await this.loadSessions();
+      root.showToast('已删除');
+    },
+    async deleteRecord(rid) {
+      const root = this.$root;
+      await root.fetchJSON('/api/logs/' + root.selectedId + '/' + this.botId + '/records/' + rid, { method: 'DELETE' });
+      await this.loadRecords();
+    },
+    formatDate(iso) { return this.$root.formatDate(iso); },
+  };
+}
+
+// ───── 子组件：群聊查询 ─────
+function chatView() {
+  return {
+    bots: [], botId: '', records: [],
+    filterGroup: '', filterUser: '', filterKeyword: '',
+    async loadBots() {
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/instances/' + root.selectedId + '/bots');
+      this.bots = r.bots || [];
+      if (this.bots.length) this.botId = this.bots[0];
+    },
+    async loadChat() {
+      const root = this.$root;
+      if (!this.botId) return root.showToast('请选 QQ 账号', 'err');
+      const params = new URLSearchParams();
+      if (this.filterGroup) params.set('group_id', this.filterGroup);
+      if (this.filterUser) params.set('user_id', this.filterUser);
+      if (this.filterKeyword) params.set('keyword', this.filterKeyword);
+      const r = await root.fetchJSON('/api/logs/' + root.selectedId + '/' + this.botId + '/chat?' + params.toString());
+      this.records = r.records || [];
+    },
+  };
+}
+
+// ───── 子组件：群配置 ─────
+function groupsView() {
+  return {
+    bots: [], botId: '',
+    subTab: 'config',
+    config: { records: [] },
+    activate: { records: [] },
+    welcome: { records: [] },
+    async loadBots() {
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/instances/' + root.selectedId + '/bots');
+      this.bots = r.bots || [];
+      if (this.bots.length) { this.botId = this.bots[0]; await this.loadAll(); }
+    },
+    async loadAll() {
+      if (!this.botId) return;
+      const root = this.$root;
+      const base = '/api/data/' + root.selectedId + '/' + this.botId;
+      this.config = await root.fetchJSON(base + '/group_configs').catch(() => ({records:[]}));
+      this.activate = await root.fetchJSON(base + '/group_activate').catch(() => ({records:[]}));
+      this.welcome = await root.fetchJSON(base + '/group_welcome').catch(() => ({records:[]}));
+    },
+    currentRecords() {
+      return ({ config: this.config, activate: this.activate, welcome: this.welcome }[this.subTab] || {}).records || [];
+    },
+    currentTable() {
+      return { config: 'group_config', activate: 'group_activate', welcome: 'group_welcome' }[this.subTab];
+    },
+    keyDisplay(r) {
+      const parts = [];
+      for (const k of Object.keys(r)) {
+        if (['data', 'data_parsed', 'updated_at'].includes(k)) continue;
+        parts.push(`${k}=${r[k]}`);
+      }
+      return parts.join(' / ');
+    },
+    keyFields(r) {
+      const o = {};
+      for (const k of Object.keys(r)) {
+        if (['data', 'data_parsed', 'updated_at'].includes(k)) continue;
+        o[k] = r[k];
+      }
+      return o;
+    },
+    recordKey(r) { return JSON.stringify(this.keyFields(r)); },
+    dataPreview(r) {
+      if (r.data_parsed) return JSON.stringify(r.data_parsed, null, 2).slice(0, 300);
+      return (r.data || '').slice(0, 300);
+    },
+    editRecord(r) {
+      const root = this.$root;
+      const table = this.currentTable();
+      const keys = this.keyFields(r);
+      root.openEditJson(table, keys, r.data_parsed ?? r.data, async (parsed) => {
+        await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.botId + '/table/' + table + '/record', {
+          method: 'PUT', body: JSON.stringify({ keys, data: parsed }),
+        });
+        await this.loadAll();
+        root.showToast('已保存');
+      });
+    },
+    async deleteRecord(r) {
+      if (!confirm('确认删除？')) return;
+      const root = this.$root;
+      const table = this.currentTable();
+      await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.botId + '/table/' + table + '/record', {
+        method: 'DELETE', body: JSON.stringify({ keys: this.keyFields(r) }),
+      });
+      await this.loadAll();
+    },
+  };
+}
+
+// ───── 子组件：角色卡 ─────
+function charactersView() {
+  return {
+    bots: [], botId: '',
+    data: { records: [], columns: [] },
+    filterKw: '',
+    async loadBots() {
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/instances/' + root.selectedId + '/bots');
+      this.bots = r.bots || [];
+      if (this.bots.length) { this.botId = this.bots[0]; await this.load(); }
+    },
+    async load() {
+      if (!this.botId) return;
+      const root = this.$root;
+      this.data = await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.botId + '/characters').catch(() => ({records:[]}));
+    },
+    filtered() {
+      if (!this.filterKw) return this.data.records;
+      const kw = this.filterKw.toLowerCase();
+      return this.data.records.filter(r => JSON.stringify(r).toLowerCase().includes(kw));
+    },
+    keyFields(r) {
+      const o = {};
+      for (const k of Object.keys(r)) {
+        if (['data', 'data_parsed', 'updated_at'].includes(k)) continue;
+        o[k] = r[k];
+      }
+      return o;
+    },
+    keyDisplay(r) {
+      return Object.entries(this.keyFields(r)).map(([k, v]) => `${k}=${v}`).join(' / ');
+    },
+    recordKey(r) { return JSON.stringify(this.keyFields(r)); },
+    dataPreview(r) {
+      if (r.data_parsed) return JSON.stringify(r.data_parsed, null, 2).slice(0, 300);
+      return (r.data || '').slice(0, 300);
+    },
+    editRecord(r) {
+      const root = this.$root;
+      const table = this._tableName();
+      const keys = this.keyFields(r);
+      root.openEditJson(table, keys, r.data_parsed ?? r.data, async (parsed) => {
+        await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.botId + '/table/' + table + '/record', {
+          method: 'PUT', body: JSON.stringify({ keys, data: parsed }),
+        });
+        await this.load();
+        root.showToast('已保存');
+      });
+    },
+    async deleteRecord(r) {
+      if (!confirm('确认删除该角色卡？')) return;
+      const root = this.$root;
+      const table = this._tableName();
+      await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.botId + '/table/' + table + '/record', {
+        method: 'DELETE', body: JSON.stringify({ keys: this.keyFields(r) }),
+      });
+      await this.load();
+    },
+    _tableName() {
+      // 第一条记录里推断（characters API 内部已尝试多个表名）
+      const r = this.data.records[0];
+      if (!r) return 'dnd_characters';
+      // 从 columns 找不到表名，只能假设当前 API 返回的就是该表
+      return this.data._table || 'dnd_characters';
+    },
+  };
+}
+
+// ───── 子组件：文件管理（牌堆 / 随机） ─────
+function filesView(kind) {
+  return {
+    kind,
+    files: [],
+    selectedName: null,
+    content: '',
+    async load() {
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.kind);
+      this.files = r.files || [];
+    },
+    async selectFile(name) {
+      this.selectedName = name;
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.kind + '/' + encodeURIComponent(name));
+      this.content = r.content || '';
+    },
+    newFile() {
+      const name = prompt('新文件名（含后缀，如 deck1.txt）');
+      if (!name) return;
+      this.selectedName = name;
+      this.content = '';
+    },
+    async save() {
+      const root = this.$root;
+      await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.kind + '/' + encodeURIComponent(this.selectedName), {
+        method: 'PUT', body: JSON.stringify({ content: this.content }),
+      });
+      root.showToast('已保存');
+      await this.load();
+    },
+    async del() {
+      if (this.kind !== 'decks') return;
+      if (!confirm('确认删除？')) return;
+      const root = this.$root;
+      await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.kind + '/' + encodeURIComponent(this.selectedName), { method: 'DELETE' });
+      this.selectedName = null;
+      this.content = '';
+      await this.load();
+    },
+    formatSize(n) {
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / 1024 / 1024).toFixed(2) + ' MB';
+    },
+  };
+}
+
+// ───── 子组件：查询库 ─────
+function queryDbView() {
+  return {
+    databases: [],
+    dbName: '',
+    table: 'data',
+    kw: '',
+    fields: [],
+    entries: [],
+    total: 0,
+    editing: null,
+    async load() {
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/query_db');
+      this.databases = r.databases || [];
+      if (this.databases.length && !this.dbName) {
+        this.dbName = this.databases[0].name;
+        await this.loadEntries();
+      }
+    },
+    async loadEntries() {
+      if (!this.dbName) { this.entries = []; this.total = 0; return; }
+      const root = this.$root;
+      const params = new URLSearchParams();
+      params.set('table', this.table);
+      params.set('limit', '300');
+      if (this.kw) params.set('keyword', this.kw);
+      const r = await root.fetchJSON('/api/query_db/' + encodeURIComponent(this.dbName) + '/entries?' + params.toString());
+      this.fields = r.fields || [];
+      this.entries = r.entries || [];
+      this.total = r.total || 0;
+    },
+    newEntry() {
+      const values = {};
+      for (const f of this.fields) values[f] = '';
+      this.editing = { rowid: null, values };
+    },
+    editEntry(e) {
+      const values = {};
+      for (const f of this.fields) values[f] = e[f] ?? '';
+      this.editing = { rowid: e.rowid, values };
+    },
+    async saveEntry() {
+      const root = this.$root;
+      const r = await root.fetchJSON(
+        '/api/query_db/' + encodeURIComponent(this.dbName) + '/entries?table=' + this.table,
+        { method: 'PUT', body: JSON.stringify(this.editing) }
+      );
+      if (r.ok) {
+        this.editing = null;
+        await this.loadEntries();
+        root.showToast('已保存');
+      } else {
+        root.showToast(r.message || '保存失败', 'err');
+      }
+    },
+    async deleteEntry(e) {
+      if (!confirm('确认删除该条目？')) return;
+      const root = this.$root;
+      await root.fetchJSON(
+        '/api/query_db/' + encodeURIComponent(this.dbName) + '/entries/' + e.rowid + '?table=' + this.table,
+        { method: 'DELETE' }
+      );
+      await this.loadEntries();
+    },
+    async newDb() {
+      const name = prompt('新数据库文件名（不含 .db 后缀）');
+      if (!name) return;
+      const root = this.$root;
+      try {
+        await root.fetchJSON('/api/query_db', { method: 'POST', body: JSON.stringify({ name }) });
+        root.showToast('已创建');
+        await this.load();
+      } catch (e) {}
+    },
+    async deleteDb() {
+      if (!this.dbName) return;
+      if (!confirm('确认彻底删除数据库 ' + this.dbName + '？无法恢复')) return;
+      const root = this.$root;
+      await root.fetchJSON('/api/query_db/' + encodeURIComponent(this.dbName), { method: 'DELETE' });
+      this.dbName = '';
+      this.entries = [];
+      this.total = 0;
+      await this.load();
+      root.showToast('已删除');
+    },
+  };
+}
+
+// ───── 子组件：SQLite ─────
+function sqliteView() {
+  return {
+    bots: [], botId: '',
+    tables: [], table: '',
+    rows: [], columns: [], kw: '',
+    async loadBots() {
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/instances/' + root.selectedId + '/bots');
+      this.bots = r.bots || [];
+      if (this.bots.length) { this.botId = this.bots[0]; await this.loadTables(); }
+    },
+    async loadTables() {
+      if (!this.botId) return;
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.botId + '/tables');
+      this.tables = r.tables || [];
+      this.table = ''; this.rows = []; this.columns = [];
+    },
+    async loadRows() {
+      if (!this.table) return;
+      const root = this.$root;
+      const q = this.kw ? '&q=' + encodeURIComponent(this.kw) : '';
+      const r = await root.fetchJSON('/api/data/' + root.selectedId + '/' + this.botId + '/table/' + this.table + '?limit=500' + q);
+      this.rows = r.records || [];
+      this.columns = r.columns || [];
+    },
+  };
+}
+
+// 监听弹窗打开时预填或刷新数据
+document.addEventListener('alpine:init', () => {
+  Alpine.effect(() => {});  // 占位
+});
+</script>
+
+<script>
+// 弹窗打开时的副作用：等组件就绪后再 hook 进 root scope
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    const root = document.querySelector('[x-data]');
+    if (!root || !root._x_dataStack) return;
+    const ctx = root._x_dataStack[0];
+    if (!ctx) return;
+    // 实例设置弹窗：填充表单
+    Alpine.effect(() => {
+      if (ctx.modal.instanceSettings && ctx.selected) {
+        ctx.instanceEditForm = {
+          name: ctx.selected.name || '',
+          qq_id: ctx.selected.qq_id || '',
+          master_qq: ctx.selected.master_qq || '',
+          access_token: ctx.selected.access_token || '',
+          auto_start: !!ctx.selected.auto_start,
+        };
+      }
+    });
+    // LLOneBot 弹窗：拉状态
+    Alpine.effect(() => {
+      if (ctx.modal.llonebot) ctx.openLlonebot();
+    });
+    // 审计弹窗：拉数据
+    Alpine.effect(() => {
+      if (ctx.modal.audit) ctx.loadAudit();
+    });
+  }, 200);
+});
+</script>
+
+</body>
+</html>
