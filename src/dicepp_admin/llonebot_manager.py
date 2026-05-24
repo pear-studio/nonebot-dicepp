@@ -17,12 +17,23 @@ import shutil
 import socket
 import subprocess
 import time
+import urllib.request
+import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from dicepp_admin.config import AdminPaths
 
 logger = logging.getLogger("dicepp.admin.llonebot")
+
+
+# LuckyLilliaBot 公开 release 资产
+_RELEASE_REPO = "LLOneBot/LuckyLilliaBot"
+_RELEASE_ASSET = "LLBot-Desktop-win-x64.zip"
+# 不调 GitHub API 时的兜底版本（已在 release 列表里验证存在）
+_FALLBACK_TAG = "v7.12.14"
+# 下载超时（秒）— 86MB 文件，国内代理一般 1-3 分钟
+_DOWNLOAD_TIMEOUT = 600
 
 
 _LL_CONFIG_FILE = AdminPaths.LLONEBOT_DIR / "config.json"
@@ -206,6 +217,211 @@ def auto_acquire() -> Dict:
         "message": "已从本地复制 LLONEBOT 整合包",
         "bundle_dir": str(dst),
         "copied_from": str(src),
+    }
+
+
+# ─── 公网下载 ────────────────────────────────────────────────────────────
+
+def _latest_release_tag() -> Optional[str]:
+    """从 GitHub API 拉最新 release 的 tag。"""
+    api_url = f"https://api.github.com/repos/{_RELEASE_REPO}/releases/latest"
+    try:
+        req = urllib.request.Request(api_url, headers={"User-Agent": "DicePP-Admin/0.1"})
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 (trusted)
+            data = json.loads(resp.read())
+            tag = data.get("tag_name")
+            if isinstance(tag, str) and tag:
+                return tag
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        logger.warning("fetch latest release tag failed: %s", e)
+    return None
+
+
+def _backup_existing_login_data() -> Optional[Path]:
+    """把现有 bin/llonebot/data/ 备份到 _preserved_data，便于 download 后还原。"""
+    if not _BUNDLE_DIR_DEFAULT.exists():
+        return None
+    existing_data = _BUNDLE_DIR_DEFAULT / "data"
+    if not existing_data.exists() or not any(existing_data.iterdir()):
+        return None
+    preserved = AdminPaths.LLONEBOT_DIR / "_preserved_data"
+    try:
+        if preserved.exists():
+            shutil.rmtree(preserved)
+        shutil.copytree(existing_data, preserved)
+        return preserved
+    except OSError as e:
+        logger.warning("backup login data failed: %s", e)
+        return None
+
+
+def _restore_login_data(preserved: Optional[Path], dst: Path) -> None:
+    """把备份的 data/ 还原到新 bundle 的 data/。"""
+    if preserved is None or not preserved.exists():
+        return
+    try:
+        new_data = dst / "data"
+        new_data.mkdir(parents=True, exist_ok=True)
+        for item in preserved.iterdir():
+            target = new_data / item.name
+            if item.is_file():
+                shutil.copy2(item, target)
+            elif item.is_dir():
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.copytree(item, target)
+        shutil.rmtree(preserved)
+    except OSError as e:
+        logger.warning("restore login data failed: %s", e)
+
+
+def _download_with_progress(url: str, dest: Path,
+                            progress_cb: Optional[Callable[[int, int], None]] = None) -> int:
+    """流式下载，返回字节数。失败抛 OSError / ValueError。"""
+    req = urllib.request.Request(url, headers={"User-Agent": "DicePP-Admin/0.1"})
+    total = 0
+    with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT) as resp:  # noqa: S310
+        content_length = 0
+        try:
+            content_length = int(resp.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            content_length = 0
+        with open(dest, 'wb') as f:
+            while True:
+                chunk = resp.read(1024 * 256)  # 256 KB 块
+                if not chunk:
+                    break
+                f.write(chunk)
+                total += len(chunk)
+                if progress_cb:
+                    try:
+                        progress_cb(total, content_length)
+                    except Exception:
+                        pass
+    return total
+
+
+def _find_llbot_exe(root: Path) -> Optional[Path]:
+    """在解压目录里递归找 llbot.exe。"""
+    if not root.exists():
+        return None
+    for p in root.rglob("llbot.exe"):
+        return p
+    return None
+
+
+def download_release(tag: Optional[str] = None,
+                     use_mirror: bool = True) -> Dict:
+    """从 LuckyLilliaBot GitHub release 下载 Windows 桌面版整合包到 bin/llonebot/。
+
+    Args:
+        tag: 指定 release tag（如 'v7.12.14'），None 表示自动拉最新；API 失败时
+             回退到 _FALLBACK_TAG
+        use_mirror: 是否优先用 gh-proxy 国内代理（国内用户必须开，否则慢/失败）
+
+    Returns:
+        {status, message, bundle_dir?, downloaded_bytes?, tag?}
+    """
+    # 1. 决定 tag
+    if not tag:
+        tag = _latest_release_tag() or _FALLBACK_TAG
+    asset = _RELEASE_ASSET
+    base_path = f"{_RELEASE_REPO}/releases/download/{tag}/{asset}"
+
+    # 2. 候选 URL：国内代理优先，官方兜底
+    urls: List[str] = []
+    if use_mirror:
+        urls.append(f"https://gh-proxy.com/https://github.com/{base_path}")
+    urls.append(f"https://github.com/{base_path}")
+
+    # 3. 备份现有登录态（user 已登录的 QQ 配置）
+    preserved = _backup_existing_login_data()
+
+    AdminPaths.LLONEBOT_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_zip = AdminPaths.LLONEBOT_DIR / f"_dl_{int(time.time())}.zip"
+
+    # 4. 下载（按 url 顺序尝试）
+    bytes_downloaded = 0
+    last_error = ""
+    used_url = ""
+    for url in urls:
+        logger.info("downloading LLOneBot from %s", url)
+        try:
+            bytes_downloaded = _download_with_progress(url, tmp_zip)
+            used_url = url
+            break
+        except (OSError, ValueError) as e:
+            last_error = f"{type(e).__name__}: {e}"
+            logger.warning("download from %s failed: %s", url, last_error)
+            if tmp_zip.exists():
+                tmp_zip.unlink()
+            continue
+
+    if bytes_downloaded == 0:
+        return {
+            "status": "download_failed",
+            "message": f"所有下载源都失败: {last_error}",
+            "tried_urls": urls,
+        }
+
+    # 5. 解压到临时目录
+    extract_tmp = AdminPaths.LLONEBOT_DIR / "_extract_tmp"
+    if extract_tmp.exists():
+        shutil.rmtree(extract_tmp)
+    extract_tmp.mkdir(parents=True)
+    try:
+        with zipfile.ZipFile(tmp_zip) as zf:
+            zf.extractall(extract_tmp)
+    except (zipfile.BadZipFile, OSError) as e:
+        tmp_zip.unlink(missing_ok=True)
+        return {"status": "extract_failed", "message": str(e)}
+
+    # 6. 找 llbot.exe
+    llbot_path = _find_llbot_exe(extract_tmp)
+    if llbot_path is None:
+        shutil.rmtree(extract_tmp, ignore_errors=True)
+        tmp_zip.unlink(missing_ok=True)
+        return {
+            "status": "no_llbot_exe",
+            "message": "解压包内未找到 llbot.exe，可能是 release 资产结构变更",
+        }
+
+    # 7. 清理旧 bundle，把含 llbot.exe 的目录移到 bin/llonebot/
+    dst = _BUNDLE_DIR_DEFAULT
+    if dst.exists():
+        try:
+            shutil.rmtree(dst)
+        except OSError as e:
+            shutil.rmtree(extract_tmp, ignore_errors=True)
+            tmp_zip.unlink(missing_ok=True)
+            return {"status": "cleanup_failed", "message": str(e)}
+
+    try:
+        bundle_root = llbot_path.parent
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(bundle_root), str(dst))
+    except OSError as e:
+        return {"status": "move_failed", "message": str(e)}
+    finally:
+        shutil.rmtree(extract_tmp, ignore_errors=True)
+        tmp_zip.unlink(missing_ok=True)
+
+    # 8. 还原登录态
+    _restore_login_data(preserved, dst)
+
+    # 9. 更新 config
+    cfg = _load_config()
+    cfg["bundle_dir"] = str(dst)
+    cfg["llbot_path"] = str(dst / "llbot.exe")
+    _save_config(cfg)
+
+    return {
+        "status": "downloaded",
+        "message": f"已下载 LuckyLilliaBot {tag}（{bytes_downloaded // (1024 * 1024)} MB）",
+        "bundle_dir": str(dst),
+        "downloaded_bytes": bytes_downloaded,
+        "tag": tag,
+        "source_url": used_url,
     }
 
 

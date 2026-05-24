@@ -881,8 +881,12 @@
 
       <!-- 操作区 -->
       <div class="flex flex-wrap gap-2 mb-4">
-        <button class="btn btn-primary" @click="autoAcquireLlonebot()" :disabled="busy">
-          🔍 自动获取
+        <button class="btn btn-secondary" @click="autoAcquireLlonebot()" :disabled="busy">
+          🔍 扫描本地
+        </button>
+        <button class="btn btn-primary" @click="downloadLlonebotRelease()" :disabled="busy || llonebot.downloading">
+          <span x-show="!llonebot.downloading">📥 从官方下载</span>
+          <span x-show="llonebot.downloading">下载中... 请勿关闭窗口</span>
         </button>
         <template x-if="llonebot.acquired && !llonebot.running">
           <button class="btn btn-primary" @click="startGlobalLlonebot()">▶ 启动 LLOneBot</button>
@@ -898,14 +902,14 @@
         <div class="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm mb-3">
           <div class="font-semibold mb-1">如何让 admin 找到 LLOneBot？</div>
           <ol class="space-y-1" style="color: var(--muted);">
-            <li>1. 点上面「自动获取」会扫描以下位置：</li>
+            <li><b>方式 A（推荐）</b>：点上面「📥 从官方下载」从 LuckyLilliaBot GitHub release 自动下载约 86MB 整合包。
+              国内通过 gh-proxy 代理通常 1-3 分钟。</li>
+            <li><b>方式 B</b>：如果你已经有 β 版整合包，可把整个 <code class="bg-black/5 px-1 rounded">LLONEBOT</code> 文件夹放到下列任一位置，再点「🔍 扫描本地」：</li>
             <template x-for="p in (llonebot._scan_paths || [])"><div class="ml-4 text-xs"><code x-text="p"></code></div></template>
-            <li>2. 如果你已经有 β 版整合包，可把整个 <code class="bg-black/5 px-1 rounded">LLONEBOT</code> 文件夹放到上述任一位置，再点「自动获取」</li>
-            <li>3. 或者去
+            <li><b>方式 C</b>：手动去
               <a class="text-blue-600 underline" href="https://github.com/LLOneBot/LuckyLilliaBot/releases" target="_blank">LuckyLilliaBot Releases</a>
-              下载整合包，解压到项目同级
-            </li>
-            <li>4. 实在不行，下方手动指定 llbot.exe 完整路径</li>
+              下载 <code class="bg-black/5 px-1 rounded">LLBot-Desktop-win-x64.zip</code> 后解压到项目同级目录</li>
+            <li><b>方式 D（最后手段）</b>：下方手动指定 llbot.exe 完整路径</li>
           </ol>
         </div>
       </template>
@@ -1281,13 +1285,44 @@ function app() {
         } else if (r.status === 'already_acquired') {
           this.showToast('LLOneBot 已就绪');
         } else if (r.status === 'not_found') {
-          this.showToast('未在本地找到 LLOneBot 整合包，请按指引手动获取', 'err');
+          this.showToast('未在本地找到 LLOneBot 整合包。试试「📥 从官方下载」', 'err');
         } else {
           this.showToast(r.message || '获取失败', 'err');
         }
         await this.openLlonebot();
         await this.loadInstances();  // 配置可能被新生成
       } finally { this.busy = false; }
+    },
+    async downloadLlonebotRelease() {
+      if (!confirm(
+        '将从 LuckyLilliaBot GitHub release 下载 Windows 桌面版整合包(约 86 MB)。\n' +
+        '国内通过 gh-proxy 加速,通常 1-3 分钟。\n' +
+        '下载中请勿关闭浏览器,完成后会自动配置所有已绑定 QQ 的实例。'
+      )) return;
+      this.busy = true;
+      this.llonebot.downloading = true;
+      try {
+        // 5 分钟超时,86MB 文件加 gh-proxy 通常足够
+        const r = await this.fetchJSON('/api/llonebot/download_release', {
+          method: 'POST',
+          body: JSON.stringify({ tag: null, use_mirror: true }),
+        });
+        if (r.status === 'downloaded') {
+          const mb = Math.round((r.downloaded_bytes || 0) / (1024 * 1024));
+          this.showToast(`✓ 已下载 ${r.tag} (${mb} MB)`);
+        } else if (r.status === 'download_failed') {
+          this.showToast('下载失败: ' + r.message + '。可能是网络问题,试试手动下载', 'err');
+        } else if (r.status === 'extract_failed' || r.status === 'no_llbot_exe') {
+          this.showToast('解压失败: ' + r.message + '。可能 release 资产结构变了', 'err');
+        } else {
+          this.showToast(r.message || ('未知状态: ' + r.status), 'err');
+        }
+        await this.openLlonebot();
+        await this.loadInstances();
+      } finally {
+        this.busy = false;
+        this.llonebot.downloading = false;
+      }
     },
     async startGlobalLlonebot() {
       const r = await this.fetchJSON('/api/llonebot/start', { method: 'POST' });

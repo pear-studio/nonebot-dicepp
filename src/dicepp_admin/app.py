@@ -257,26 +257,54 @@ def llonebot_config(body: _LlbotConfigBody, request: Request,
     return cfg
 
 
+def _sync_all_instance_llonebot_configs() -> None:
+    """LLOneBot 整合包就位后，把所有已绑定 QQ 的实例都同步一遍反向 WS 配置。"""
+    for inst in instance_manager.list_instances():
+        if inst.get("qq_id"):
+            try:
+                llonebot_manager.generate_config(
+                    inst["qq_id"], inst["port"], inst.get("access_token", "")
+                )
+            except Exception as e:
+                logger.warning(
+                    "post-acquire sync failed for instance %s qq %s: %s",
+                    inst.get("id"), inst.get("qq_id"), e,
+                )
+
+
 @app.post("/api/llonebot/auto_acquire")
 def llonebot_auto_acquire(request: Request,
                           session: Dict = Depends(auth.require_auth)) -> Dict:
     result = llonebot_manager.auto_acquire()
     audit.log(session["username"], "llonebot.auto_acquire",
               detail=result.get("status"), ip=_client_ip(request))
-    # 自动获取成功后，把所有已绑定 QQ 的实例都同步一遍配置
     if result.get("status") in ("acquired", "already_acquired"):
-        for inst in instance_manager.list_instances():
-            if inst.get("qq_id"):
-                try:
-                    llonebot_manager.generate_config(
-                        inst["qq_id"], inst["port"], inst.get("access_token", "")
-                    )
-                except Exception as e:
-                    # 单个实例 sync 失败不应阻止其他实例继续同步
-                    logger.warning(
-                        "auto_acquire post-sync failed for instance %s qq %s: %s",
-                        inst.get("id"), inst.get("qq_id"), e,
-                    )
+        _sync_all_instance_llonebot_configs()
+    return result
+
+
+class _LlbotDownloadBody(BaseModel):
+    tag: Optional[str] = None       # 'v7.12.14' 等，None=自动拉最新
+    use_mirror: bool = True         # 国内用 gh-proxy
+
+
+@app.post("/api/llonebot/download_release")
+def llonebot_download_release(body: _LlbotDownloadBody, request: Request,
+                              session: Dict = Depends(auth.require_auth)) -> Dict:
+    """从 LuckyLilliaBot GitHub release 直接下载 Windows 整合包到 bin/llonebot/。
+
+    用于本地没有 LLOneBot 整合包、且无法通过扫描复制获取的场景。86MB 下载，
+    国内通过 gh-proxy 通常 1-3 分钟。
+    """
+    result = llonebot_manager.download_release(
+        tag=body.tag, use_mirror=body.use_mirror,
+    )
+    audit.log(session["username"], "llonebot.download_release",
+              detail=f"tag={result.get('tag')} status={result.get('status')} "
+                     f"bytes={result.get('downloaded_bytes', 0)}",
+              ip=_client_ip(request))
+    if result.get("status") == "downloaded":
+        _sync_all_instance_llonebot_configs()
     return result
 
 
