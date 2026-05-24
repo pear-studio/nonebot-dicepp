@@ -17,9 +17,11 @@ def make_generate_image_tool_def(
 
     if character_appearance:
         desc += (
-            f" 当前角色外貌已设定为「{character_appearance}」，"
-            f"请勿在 prompt 中重复描述角色外貌，专注描述场景、动作、构图、氛围等。"
-            f"可使用 <SELF_APPEARANCE> 占位符在 prompt 中精确控制外貌描述的位置。"
+            f" 当前角色外貌已设定为「{character_appearance}」。"
+            f" 生成图片时，必须在 prompt 中使用 <SELF_APPEARANCE> 占位符来引用当前角色外貌。"
+            f" 该占位符会被自动替换为角色的外貌描述，不使用则生成图片不包含角色特征。"
+            f" 场景、动作、构图、氛围等其他描述照常围绕占位符组织。"
+            f" 纯风景画（画面中无人物）可省略占位符。"
         )
     if base_style:
         desc += f" 当前画风为「{base_style}」，已自动注入，无需在 prompt 中指定画风。"
