@@ -184,3 +184,8 @@ nul
 
 # 本地 superpowers 文档
 docs/superpowers/
+
+# WebUI 部署引导生成的运行时目录（不提交）
+bin/
+.python/
+data/
