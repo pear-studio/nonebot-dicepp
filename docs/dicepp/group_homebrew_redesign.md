@@ -202,30 +202,31 @@ WebUI 加新 tab **「私设」**（在「查询库」tab 旁）：
 
 ---
 
-## 待 maintainer 确认的设计决策
+## 设计决策（已确认）
 
-请 pear 在合本设计稿前先确认：
-
-1. **数据库优先级**：合并查询时，**公共 db 在前**（主流）还是**群私设在前**（"重写覆盖"风格）？
-   - 提案：用 meta.json 的 `priority` 字段控制，默认公共 > 私设
-2. **群宏 vs 用户宏的执行顺序**：先群宏后用户宏（提案）？还是反过来？
-3. **xlsx 字段 schema**：保持现有 6 字段（名称/英文/来源/分类/标签/内容），还是借机引入新字段（如「等级」「学派」等 DND 专有字段，可空）？
-4. **命令开头**：保留 `.hb` 还是改名为 `.私设`？两者并存？
-5. **跨群共享**：是否支持一个私设包同时挂多个群？（例：友群共用同一份 NPC 库）
-   - 提案：v5 不做，等 v6 再说
-6. **权限模型**：`.hb add` 要不要允许 master/骰管理远程对其他群操作？
-   - 提案：v5 只允许群内本群管理员，简化权限
+| # | 决策点 | 最终方案 | 来源 |
+|---|---|---|---|
+| 1 | 数据库优先级 | **群私设在前**，同名条目以私设为准 | maintainer 反馈 |
+| 2 | 群宏 vs 用户宏 | **先群宏后用户宏**（群宏铺路，用户宏个人定制） | 默认提案 |
+| 3 | xlsx 字段 schema | **保留现有 6 字段**（名称/英文/来源/分类/标签/内容），不引入新字段 | 默认提案，避免破坏现有私设包 |
+| 4 | 命令开头 | **`.hb` / `.私设` / `.房规` / `.homebrew` 全部并存**（HBExtCommand 同时接受） | 默认提案 |
+| 5 | 跨群共享 | **不做**，每个群独立目录 `group_homebrew/<group>/` | maintainer 反馈 |
+| 6 | 权限模型 | **群内本群管理员**（`permission_require=1`），不开放跨群远控 | 默认提案 |
+| 7 | mode 切换影响 | **完全独立**，私设不会随 `.mode DND5E ↔ COC` 切换失效 | maintainer 反馈 |
 
 ---
 
-## 实施流程（如设计被采纳）
+## 实施进度
 
-1. 本设计稿 PR（本 PR）→ pear 确认设计
-2. 拆三个实施 PR：
-   - `feat/homebrew-data-layer` — 模型 + migration + query 引擎重构（兼容旧调用）
-   - `feat/homebrew-commands` — `.hb` 命令族重写
-   - `feat/homebrew-admin-ui` — admin 后台「私设」tab
-3. 老 xlsx 迁移工具单独发，作为 v5 → v6 间的辅助
+设计采纳后已拆三个实施 PR：
+
+| PR | 主题 | 状态 |
+|---|---|---|
+| `feat/homebrew-data-layer` (#51) | GroupMacro 模型 + migration v5 + QueryStore.search 私设优先重写 + Paths.group_homebrew_dir | ✅ 已开 |
+| `feat/homebrew-commands` (#52) | `.hb add/del/list/宏/db` 子指令 + 群宏 helper + dicebot 集成 | ✅ 已开 |
+| `feat/homebrew-admin-ui` (#53) | admin 后台「私设」tab + `/api/homebrew/*` + xlsx 拖拽上传 | ✅ 已开 |
+
+老 xlsx 迁移工具未做（v5 阶段决定保留旧 `.hb 导入` 命令兼容，旧目录里的 db 用户可手动复制到新位置 `data/bots/<bot>/group_homebrew/<group>/` 即可）。
 
 ---
 
