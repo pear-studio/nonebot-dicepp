@@ -558,7 +558,8 @@ class QueryCommand(UserCommandBase):
         # 私设查询库（重写：群级 group_homebrew/<group_id>/*.db，独立于 .mode，私设优先）
         # 兼容：group_config 显式 query_homebrew=false 则禁用；否则默认启用
         homebrew_databases: List[str] = []
-        homebrew_database = ""  # 兼容旧 search_item 单 db 入参
+        homebrew_database = ""  # 兼容旧 search_item 单 db 入参（第一个 hb db）
+        extra_hb_dbs: Optional[List[str]] = None  # 多 hb db 透传给 search_item
         if meta.group_id:
             hb_enabled = True
             group_row = await self.bot.db.group_config.get(meta.group_id)
@@ -571,9 +572,10 @@ class QueryCommand(UserCommandBase):
                 if os.path.isdir(hb_dir):
                     await self.bot.db.query.connect_group_homebrew(meta.group_id, hb_dir)
                 homebrew_databases = self.bot.db.query.list_group_databases(meta.group_id)
-                # 单 db 兼容：用第一个；query_feedback 等老接口只关心是否非空
                 if homebrew_databases:
                     homebrew_database = homebrew_databases[0]
+                    if len(homebrew_databases) > 1:
+                        extra_hb_dbs = homebrew_databases[1:]
 
         # 判断功能开关
         if not self.bot.config.query.enable:
@@ -594,6 +596,7 @@ class QueryCommand(UserCommandBase):
                     source_port,
                     search_mode=(0 if mode == "query" else 1),
                     show_mode=show_mode,
+                    extra_hb_dbs=extra_hb_dbs,
                 )
                 if feedback:
                     feedback = self.format_loc(LOC_QUERY_RESULT, result = feedback)
@@ -612,7 +615,8 @@ class QueryCommand(UserCommandBase):
                         feedback = record.choose_edit_target(index)
                     else:
                         item = record.data[index]
-                        result = await self.query_feedback(database, homebrew_database, item, source_port)
+                        result = await self.query_feedback(database, homebrew_database, item, source_port,
+                                                            extra_hb_dbs=extra_hb_dbs)
                         feedback = self.format_loc(LOC_QUERY_RESULT, result=result)
             else:
                 index = int(arg_str)
@@ -928,6 +932,7 @@ class QueryCommand(UserCommandBase):
         port: MessagePort,
         search_mode: int,
         show_mode: int = 0,
+        extra_hb_dbs: Optional[List[str]] = None,
     ) -> str:
         """
         查询信息, 返回输出给用户的字符串, 若给出选项将会记录信息以便响应用户之后的快速查询.
@@ -949,6 +954,7 @@ class QueryCommand(UserCommandBase):
                 homebrew_database if not edit_flag else "",
                 query_keywords,
                 search_mode,
+                extra_hb_dbs=extra_hb_dbs if not edit_flag else None,
             )
         except QueryError:
             return self.format_loc(LOC_QUERY_TOO_MUCH_RESULT)
@@ -966,7 +972,8 @@ class QueryCommand(UserCommandBase):
                 self.record_dict[port].edit_flag = edit_flag
                 feedback = self.record_dict[port].choose_edit_target(0)
             else:
-                feedback = await self.query_feedback(database, homebrew_database, poss_result[0], port)
+                feedback = await self.query_feedback(database, homebrew_database, poss_result[0], port,
+                                                     extra_hb_dbs=extra_hb_dbs)
         else:  # len(poss_result) > 1  找到多个结果, 记录当前信息并提示用户选择
             # 记录当前信息以备将来查询或编辑
             self.record_dict[port] = QueryRecord(poss_result, database, get_current_date_raw(), poss_result_num)
@@ -1005,6 +1012,7 @@ class QueryCommand(UserCommandBase):
         homebrew_database: str,
         query_keywords: str,
         search_mode: int = 0,
+        extra_hb_dbs: Optional[List[str]] = None,
     ) -> List[QueryData]:
         poss_result: List[QueryData] = []
         if not self.bot.db.query.has_database(database):
@@ -1018,17 +1026,28 @@ class QueryCommand(UserCommandBase):
             return poss_result
         poss_result = await self.search_item(
             database, query_command_list, search_mode, homebrew_database,
+            extra_hb_dbs=extra_hb_dbs,
         )
         return poss_result
 
     async def search_item(
         self, database: str, query_command_list: List[str],
         search_mode: int = 0, homebrew_database: str = "",
+        extra_hb_dbs: Optional[List[str]] = None,
     ) -> List[QueryData]:
-        """搜索合规的对象（适配层：调用 QueryStore.search() + dict→QueryData）。"""
+        """搜索合规的对象（适配层：调用 QueryStore.search() + dict→QueryData）。
+
+        extra_hb_dbs 用于把一个群下所有私设 db 全部塞进查询（按 #50 设计：
+        群级私设是「附加」语义，多 db 全部参与合并），homebrew_database 作为
+        老调用方的兼容入口；两者都传时去重。
+        """
         databases = [database]
         if homebrew_database:
             databases.append(homebrew_database)
+        if extra_hb_dbs:
+            for d in extra_hb_dbs:
+                if d and d not in databases:
+                    databases.append(d)
 
         try:
             result = await self.bot.db.query.search(
@@ -1057,6 +1076,7 @@ class QueryCommand(UserCommandBase):
         homebrew_database: str,
         item: QueryData,
         port: MessagePort,
+        extra_hb_dbs: Optional[List[str]] = None,
     ) -> str:
         """
         生成查询到目标的返回文本，包括处理嵌套查询
@@ -1073,7 +1093,8 @@ class QueryCommand(UserCommandBase):
                     if "|" in command:
                         extra_command = command.split("|")
                         command = extra_command.pop(0)
-                    extra_items = await self.query_item(database, homebrew_database, command)
+                    extra_items = await self.query_item(database, homebrew_database, command,
+                                                         extra_hb_dbs=extra_hb_dbs)
                     item_lines[index] = "[ " + self.format_items_list_feedback(extra_items,len(sub_query_items)) + " ]"
                     # 处理专用的附加指令
                     for excmd in extra_command:
