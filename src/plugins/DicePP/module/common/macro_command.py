@@ -89,8 +89,11 @@ def parse_macro_definition(raw: str, command_split: str) -> UserMacro:
     )
 
 
-def apply_macro_once(macro: UserMacro, text: str) -> str:
-    """对 text 应用一次宏替换。命中则返回展开后的字符串，否则返回原文。"""
+def apply_macro_once(macro, text: str) -> str:
+    """对 text 应用一次宏替换。命中则返回展开后的字符串，否则返回原文。
+
+    接受 UserMacro 或 GroupMacro（鸭子类型 — 都有 key/args/target 字段）。
+    """
     pattern_str = ":".join([re.escape(macro.key)] + ["(.*)"] * len(macro.args))
     try:
         pattern = re.compile(pattern_str)
@@ -109,29 +112,56 @@ def apply_macro_once(macro: UserMacro, text: str) -> str:
     return pattern.sub(repl, text)
 
 
-async def apply_user_macros(bot: Bot, user_id: str, text: str,
-                            max_passes: int = 3, max_length: int = 500) -> str:
-    """对消息文本应用某用户的所有宏。最多 max_passes 轮、长度上限 max_length。
-
-    集成在 Bot.process_message 入口，preprocess_msg 之后、命令分发之前。
-    bot.db.macro 在 db 未 connect 时会 raise RuntimeError，调用方需自行兜底。
-    """
-    if not user_id or not text:
-        return text
-    macros: List[UserMacro] = await bot.db.macro.list_by(user_id=user_id)
+def _apply_macro_list(macros: list, text: str,
+                      max_passes: int, max_length: int) -> str:
     if not macros:
         return text
-
     out = text
     for _ in range(max_passes):
         prev = out
         for m in macros:
             out = apply_macro_once(m, out)
             if len(out) > max_length:
-                return prev  # 超长则回退
+                return prev
         if out == prev:
             break
     return out
+
+
+async def apply_user_macros(bot: Bot, user_id: str, text: str,
+                            max_passes: int = 3, max_length: int = 500) -> str:
+    """对消息文本应用某用户的所有宏（UserMacro，按 user_id 隔离）。
+
+    bot.db.macro 在 db 未 connect 时会 raise RuntimeError，调用方需自行兜底。
+    """
+    if not user_id or not text:
+        return text
+    macros: List[UserMacro] = await bot.db.macro.list_by(user_id=user_id)
+    return _apply_macro_list(macros, text, max_passes, max_length)
+
+
+async def apply_group_macros(bot: Bot, group_id: str, text: str,
+                             max_passes: int = 3, max_length: int = 500) -> str:
+    """对消息文本应用某群的所有群级宏（GroupMacro）。
+
+    bot.db.group_macro 在 db 未 connect 时会 raise RuntimeError，调用方需自行兜底。
+    """
+    if not group_id or not text:
+        return text
+    macros = await bot.db.group_macro.list_by(group_id=group_id)
+    return _apply_macro_list(macros, text, max_passes, max_length)
+
+
+async def apply_user_and_group_macros(bot: Bot, user_id: str,
+                                      group_id: str, text: str) -> str:
+    """先群宏后用户宏的统一入口。
+
+    群宏先于用户宏执行（让群宏铺路，用户宏在此基础上进一步定制）。
+    集成在 Bot.process_message — preprocess_msg 之后、命令分发之前。
+    """
+    text = await apply_group_macros(bot, group_id, text)
+    text = await apply_user_macros(bot, user_id, text)
+    return text
 
 
 # ─── 命令实现 ───────────────────────────────────────────────────────────

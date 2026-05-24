@@ -555,22 +555,25 @@ class QueryCommand(UserCommandBase):
             if source_port in self.record_dict:
                 del self.record_dict[source_port]
 
-        # 私设查询库
-        query_homebrew = False
+        # 私设查询库（重写：群级 group_homebrew/<group_id>/*.db，独立于 .mode，私设优先）
+        # 兼容：group_config 显式 query_homebrew=false 则禁用；否则默认启用
+        homebrew_databases: List[str] = []
+        homebrew_database = ""  # 兼容旧 search_item 单 db 入参
         if meta.group_id:
+            hb_enabled = True
             group_row = await self.bot.db.group_config.get(meta.group_id)
             if group_row and group_row.data:
-                query_homebrew = group_row.data.get("query_homebrew", False)
-        if meta.group_id and query_homebrew:
-            homebrew_database = "HB" + meta.group_id
-            if not self.bot.db.query.has_database(homebrew_database):
-                homebrew_path: str = os.path.join(self.bot.data_path, "QueryHomebrew", homebrew_database + ".db")
-                if os.path.exists(homebrew_path):
-                    await self.bot.db.query.connect_path(homebrew_path)
-                else:
-                    homebrew_database = ""
-        else:
-            homebrew_database = ""
+                # 老用户显式关闭 query_homebrew 时尊重设置
+                if group_row.data.get("query_homebrew") is False:
+                    hb_enabled = False
+            if hb_enabled:
+                hb_dir = str(Paths.group_homebrew_dir(self.bot.account, meta.group_id))
+                if os.path.isdir(hb_dir):
+                    await self.bot.db.query.connect_group_homebrew(meta.group_id, hb_dir)
+                homebrew_databases = self.bot.db.query.list_group_databases(meta.group_id)
+                # 单 db 兼容：用第一个；query_feedback 等老接口只关心是否非空
+                if homebrew_databases:
+                    homebrew_database = homebrew_databases[0]
 
         # 判断功能开关
         if not self.bot.config.query.enable:

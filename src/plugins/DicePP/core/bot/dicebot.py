@@ -556,11 +556,13 @@ class Bot:
 
         msg = preprocess_msg(msg)  # 转换中文符号, 转换小写等等
 
-        # 展开用户定义的宏（.define）：在命令分发前把消息文本里能匹配的宏替换掉。
-        # apply_user_macros 内部对没定义宏的用户会快速返回原文，对错误也会兜底返回原文。
+        # 展开宏：群宏先（GroupMacro，主持人用 .hb 宏 定义）、用户宏后（UserMacro，.define）。
+        # 群宏给该群所有人共享，给基础规则铺路；用户宏在此基础上进一步个人定制。
         try:
-            from module.common.macro_command import apply_user_macros
-            msg = await apply_user_macros(self, meta.user_id, msg)
+            from module.common.macro_command import apply_user_and_group_macros
+            msg = await apply_user_and_group_macros(
+                self, meta.user_id, meta.group_id, msg
+            )
         except Exception:
             dice_log(f"[Macro] [Expand] 宏展开失败，回退原始消息: {get_exception_info()}")
 
