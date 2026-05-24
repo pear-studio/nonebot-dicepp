@@ -466,7 +466,7 @@ def logs_records(instance_id: str, bot_id: str, log_id: str,
 
 @app.get("/api/logs/{instance_id}/{bot_id}/sessions/{log_id}/export")
 def logs_export(instance_id: str, bot_id: str, log_id: str,
-                fmt: str = Query("txt", regex="^(txt|md)$"),
+                fmt: str = Query("txt", pattern="^(txt|md)$"),
                 session: Dict = Depends(auth.require_auth)) -> Response:
     content = log_api.export_log_session(instance_id, bot_id, log_id, fmt)
     if content is None:
@@ -545,7 +545,7 @@ def query_db_delete(name: str, request: Request,
 
 @app.get("/api/query_db/{name}/entries")
 def query_db_entries(name: str,
-                     table: str = Query("data", regex="^(data|redirect)$"),
+                     table: str = Query("data", pattern="^(data|redirect)$"),
                      offset: int = Query(0, ge=0),
                      limit: int = Query(100, ge=1, le=1000),
                      keyword: Optional[str] = Query(None),
@@ -557,7 +557,7 @@ def query_db_entries(name: str,
 
 @app.put("/api/query_db/{name}/entries")
 def query_db_entry_upsert(name: str, body: _QueryEntryBody, request: Request,
-                          table: str = Query("data", regex="^(data|redirect)$"),
+                          table: str = Query("data", pattern="^(data|redirect)$"),
                           session: Dict = Depends(auth.require_auth)) -> Dict:
     result = query_db_api.upsert_entry(name, table, body.rowid, body.values)
     audit.log(session["username"],
@@ -568,7 +568,7 @@ def query_db_entry_upsert(name: str, body: _QueryEntryBody, request: Request,
 
 @app.delete("/api/query_db/{name}/entries/{rowid}")
 def query_db_entry_delete(name: str, rowid: int, request: Request,
-                          table: str = Query("data", regex="^(data|redirect)$"),
+                          table: str = Query("data", pattern="^(data|redirect)$"),
                           session: Dict = Depends(auth.require_auth)) -> Dict:
     result = query_db_api.delete_entry(name, table, rowid)
     audit.log(session["username"], "query_db.delete_entry",
@@ -578,7 +578,7 @@ def query_db_entry_delete(name: str, rowid: int, request: Request,
 
 @app.get("/api/query_db/{name}/distinct/{field}")
 def query_db_distinct(name: str, field: str,
-                      table: str = Query("data", regex="^(data|redirect)$"),
+                      table: str = Query("data", pattern="^(data|redirect)$"),
                       session: Dict = Depends(auth.require_auth)) -> Dict:
     return {"values": query_db_api.get_distinct_values(name, field, table)}
 
@@ -632,7 +632,7 @@ def homebrew_db_delete(instance_id: str, bot_id: str, group_id: str, db_name: st
 
 @app.get("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}/entries")
 def homebrew_entries(instance_id: str, bot_id: str, group_id: str, db_name: str,
-                     table: str = Query("data", regex="^(data|redirect)$"),
+                     table: str = Query("data", pattern="^(data|redirect)$"),
                      offset: int = Query(0, ge=0),
                      limit: int = Query(200, ge=1, le=1000),
                      keyword: Optional[str] = Query(None),
@@ -645,7 +645,7 @@ def homebrew_entries(instance_id: str, bot_id: str, group_id: str, db_name: str,
 @app.put("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}/entries")
 def homebrew_entry_upsert(instance_id: str, bot_id: str, group_id: str, db_name: str,
                           body: _HBEntryBody, request: Request,
-                          table: str = Query("data", regex="^(data|redirect)$"),
+                          table: str = Query("data", pattern="^(data|redirect)$"),
                           session: Dict = Depends(auth.require_auth)) -> Dict:
     result = homebrew_api.upsert_entry(
         instance_id, bot_id, group_id, db_name, table, body.rowid, body.values,
@@ -659,7 +659,7 @@ def homebrew_entry_upsert(instance_id: str, bot_id: str, group_id: str, db_name:
 @app.delete("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}/entries/{rowid}")
 def homebrew_entry_delete(instance_id: str, bot_id: str, group_id: str, db_name: str,
                           rowid: int, request: Request,
-                          table: str = Query("data", regex="^(data|redirect)$"),
+                          table: str = Query("data", pattern="^(data|redirect)$"),
                           session: Dict = Depends(auth.require_auth)) -> Dict:
     result = homebrew_api.delete_entry(
         instance_id, bot_id, group_id, db_name, table, rowid,
