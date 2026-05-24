@@ -4,12 +4,12 @@ import atexit
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Body, Cookie, Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from dicepp_admin import audit, auth, data_api, instance_manager, llonebot_manager, log_api, query_db_api, ui
+from dicepp_admin import audit, auth, data_api, homebrew_api, instance_manager, llonebot_manager, log_api, query_db_api, ui
 from dicepp_admin.config import AdminPaths, DEFAULT_USERNAME
 
 app = FastAPI(title="DicePP Admin", version="0.1.0", docs_url="/admin/docs", openapi_url="/admin/openapi.json")
@@ -574,6 +574,115 @@ def query_db_distinct(name: str, field: str,
                       table: str = Query("data", regex="^(data|redirect)$"),
                       session: Dict = Depends(auth.require_auth)) -> Dict:
     return {"values": query_db_api.get_distinct_values(name, field, table)}
+
+
+# ─── Homebrew（群级私设） ───────────────────────────────────────────────
+
+class _HBEntryBody(BaseModel):
+    rowid: Optional[int] = None
+    values: Dict[str, str]
+
+
+class _HBCreateDbBody(BaseModel):
+    name: str
+
+
+@app.get("/api/homebrew/{instance_id}/{bot_id}/groups")
+def homebrew_groups(instance_id: str, bot_id: str,
+                    session: Dict = Depends(auth.require_auth)) -> Dict:
+    return {"groups": homebrew_api.list_groups_with_homebrew(instance_id, bot_id)}
+
+
+@app.get("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs")
+def homebrew_dbs(instance_id: str, bot_id: str, group_id: str,
+                 session: Dict = Depends(auth.require_auth)) -> Dict:
+    return {"dbs": homebrew_api.list_databases(instance_id, bot_id, group_id)}
+
+
+@app.post("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs")
+def homebrew_db_create(instance_id: str, bot_id: str, group_id: str,
+                       body: _HBCreateDbBody, request: Request,
+                       session: Dict = Depends(auth.require_auth)) -> Dict:
+    result = homebrew_api.create_database(instance_id, bot_id, group_id, body.name)
+    audit.log(session["username"], "homebrew.db_create",
+              target=f"{instance_id}/{bot_id}/{group_id}/{body.name}",
+              ip=_client_ip(request))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail={"message": result.get("message")})
+    return result
+
+
+@app.delete("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}")
+def homebrew_db_delete(instance_id: str, bot_id: str, group_id: str, db_name: str,
+                       request: Request,
+                       session: Dict = Depends(auth.require_auth)) -> Dict:
+    result = homebrew_api.delete_database(instance_id, bot_id, group_id, db_name)
+    audit.log(session["username"], "homebrew.db_delete",
+              target=f"{instance_id}/{bot_id}/{group_id}/{db_name}",
+              ip=_client_ip(request))
+    return result
+
+
+@app.get("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}/entries")
+def homebrew_entries(instance_id: str, bot_id: str, group_id: str, db_name: str,
+                     table: str = Query("data", regex="^(data|redirect)$"),
+                     offset: int = Query(0, ge=0),
+                     limit: int = Query(200, ge=1, le=1000),
+                     keyword: Optional[str] = Query(None),
+                     session: Dict = Depends(auth.require_auth)) -> Dict:
+    return homebrew_api.list_entries(
+        instance_id, bot_id, group_id, db_name, table, offset, limit, keyword,
+    )
+
+
+@app.put("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}/entries")
+def homebrew_entry_upsert(instance_id: str, bot_id: str, group_id: str, db_name: str,
+                          body: _HBEntryBody, request: Request,
+                          table: str = Query("data", regex="^(data|redirect)$"),
+                          session: Dict = Depends(auth.require_auth)) -> Dict:
+    result = homebrew_api.upsert_entry(
+        instance_id, bot_id, group_id, db_name, table, body.rowid, body.values,
+    )
+    audit.log(session["username"], "homebrew.upsert" if body.rowid else "homebrew.insert",
+              target=f"{instance_id}/{bot_id}/{group_id}/{db_name}/{body.rowid or ''}",
+              ip=_client_ip(request))
+    return result
+
+
+@app.delete("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}/entries/{rowid}")
+def homebrew_entry_delete(instance_id: str, bot_id: str, group_id: str, db_name: str,
+                          rowid: int, request: Request,
+                          table: str = Query("data", regex="^(data|redirect)$"),
+                          session: Dict = Depends(auth.require_auth)) -> Dict:
+    result = homebrew_api.delete_entry(
+        instance_id, bot_id, group_id, db_name, table, rowid,
+    )
+    audit.log(session["username"], "homebrew.delete",
+              target=f"{instance_id}/{bot_id}/{group_id}/{db_name}/{rowid}",
+              ip=_client_ip(request))
+    return result
+
+
+@app.post("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}/upload")
+async def homebrew_upload(instance_id: str, bot_id: str, group_id: str, db_name: str,
+                          file: UploadFile = File(...),
+                          session: Dict = Depends(auth.require_auth),
+                          request: Request = None) -> Dict:  # type: ignore[assignment]
+    contents = await file.read()
+    if len(contents) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail={"message": "xlsx 文件最大 20 MB"})
+    result = homebrew_api.upload_xlsx(instance_id, bot_id, group_id, db_name, contents)
+    audit.log(session["username"], "homebrew.upload",
+              target=f"{instance_id}/{bot_id}/{group_id}/{db_name}",
+              detail=f"inserted={result.get('inserted', 0)} skipped={result.get('skipped', 0)}",
+              ip=_client_ip(request) if request else None)
+    return result
+
+
+@app.get("/api/homebrew/{instance_id}/{bot_id}/{group_id}/macros")
+def homebrew_macros(instance_id: str, bot_id: str, group_id: str,
+                    session: Dict = Depends(auth.require_auth)) -> Dict:
+    return {"macros": homebrew_api.list_group_macros(instance_id, bot_id, group_id)}
 
 
 # ─── Audit ───────────────────────────────────────────────────────────────

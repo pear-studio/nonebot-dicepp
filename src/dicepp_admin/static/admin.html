@@ -727,6 +727,161 @@
               </div>
             </template>
 
+            <!-- 私设（群级附加数据库 + 群宏） -->
+            <template x-if="tab === 'homebrew'">
+              <div x-data="homebrewView()" x-init="$nextTick(() => loadBots())">
+                <div class="flex gap-3 mb-4 items-end">
+                  <div style="width: 160px;">
+                    <label class="label">QQ 账号</label>
+                    <select class="select" x-model="botId" @change="loadGroups()">
+                      <option value="">（选择）</option>
+                      <template x-for="b in bots" :key="b"><option :value="b" x-text="b"></option></template>
+                    </select>
+                  </div>
+                  <div style="width: 200px;">
+                    <label class="label">群</label>
+                    <select class="select" x-model="groupId" @change="loadDbs(); loadMacros()">
+                      <option value="">（选择）</option>
+                      <template x-for="g in groups" :key="g.group_id">
+                        <option :value="g.group_id" x-text="g.group_id + ' (' + g.db_count + ' 个 db)'"></option>
+                      </template>
+                    </select>
+                  </div>
+                  <div class="flex-1">
+                    <label class="label">手动指定 group_id (若该群尚无私设)</label>
+                    <input class="input" x-model="manualGroupId" placeholder="123456789" />
+                  </div>
+                  <button class="btn btn-secondary self-end" @click="useManualGroup()">使用</button>
+                </div>
+
+                <template x-if="!groupId">
+                  <div class="empty">先选 QQ 账号和群（或手动输入 group_id 后点「使用」）。
+                  <br/>没有群？让群主在群里 <code>.hb add 名称|...</code> 一次会自动创建私设目录。</div>
+                </template>
+
+                <template x-if="groupId">
+                  <div>
+                    <!-- DB 列表 + 创建 + 上传 -->
+                    <div class="card p-3 mb-3">
+                      <div class="flex items-center gap-2 mb-2">
+                        <div class="font-semibold">私设数据库</div>
+                        <div class="flex-1"></div>
+                        <button class="btn btn-sm btn-secondary" @click="newDb()">+ 新建 db</button>
+                        <button class="btn btn-sm btn-secondary" @click="loadDbs()">刷新</button>
+                      </div>
+                      <div class="flex flex-wrap gap-2">
+                        <template x-if="dbs.length === 0">
+                          <div class="text-xs" style="color: var(--muted);">暂无 db。新建一个或上传 xlsx 自动创建</div>
+                        </template>
+                        <template x-for="d in dbs" :key="d.name">
+                          <div class="card px-3 py-2 cursor-pointer"
+                               :class="dbName === d.name ? 'ring-2 ring-offset-1' : ''"
+                               :style="dbName === d.name ? '--tw-ring-color: var(--accent);' : ''"
+                               @click="selectDb(d.name)">
+                            <div class="font-semibold text-sm" x-text="d.name"></div>
+                            <div class="text-xs" style="color: var(--muted);"
+                                 x-text="'条目 ' + d.data_rows + ' · 重定向 ' + d.redirect_rows"></div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- 上传 xlsx + 条目操作 -->
+                    <template x-if="dbName">
+                      <div>
+                        <div class="card p-3 mb-3 flex items-center gap-3">
+                          <div class="font-semibold" x-text="dbName"></div>
+                          <input type="file" accept=".xlsx" @change="onFile($event)" class="text-xs" />
+                          <button class="btn btn-sm btn-primary" :disabled="!pendingFile || busy" @click="upload()">📤 上传 xlsx</button>
+                          <span class="text-xs" style="color: var(--muted);" x-text="uploadHint"></span>
+                          <div class="flex-1"></div>
+                          <button class="btn btn-sm btn-secondary" @click="newEntry()">+ 新条目</button>
+                          <button class="btn btn-sm btn-danger" @click="deleteDb()">删 db</button>
+                        </div>
+
+                        <div class="card p-3 mb-3 flex gap-2">
+                          <input class="input flex-1" x-model="kw" placeholder="按字段值搜索" @keyup.enter="loadEntries()" />
+                          <button class="btn btn-secondary" @click="loadEntries()">查询</button>
+                        </div>
+
+                        <div class="card overflow-auto" style="max-height: 500px;">
+                          <table>
+                            <thead>
+                              <tr>
+                                <template x-for="f in fields" :key="f"><th x-text="f"></th></template>
+                                <th style="width: 100px;">操作</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-if="entries.length === 0">
+                                <tr><td :colspan="fields.length + 1" class="empty">无条目</td></tr>
+                              </template>
+                              <template x-for="e in entries" :key="e.rowid">
+                                <tr>
+                                  <template x-for="f in fields" :key="f">
+                                    <td><code class="text-xs" x-text="String(e[f] ?? '').slice(0, 120)"></code></td>
+                                  </template>
+                                  <td>
+                                    <button class="btn btn-sm btn-secondary" @click="editEntry(e)">编辑</button>
+                                    <button class="btn btn-sm btn-danger" @click="deleteEntry(e)">删</button>
+                                  </td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- 群宏（只读，编辑走 .hb 宏 命令） -->
+                    <div class="card p-3 mt-4">
+                      <div class="flex items-center mb-2">
+                        <div class="font-semibold">群宏（GroupMacro）</div>
+                        <div class="text-xs ml-2" style="color: var(--muted);">编辑/删除通过 QQ 群内 .hb 宏 指令</div>
+                        <div class="flex-1"></div>
+                        <button class="btn btn-sm btn-secondary" @click="loadMacros()">刷新</button>
+                      </div>
+                      <template x-if="macros.length === 0">
+                        <div class="text-xs" style="color: var(--muted);">本群尚无群宏。例：<code>.hb 宏 队友 队友A,队友B,队友C</code></div>
+                      </template>
+                      <template x-for="m in macros" :key="m.key">
+                        <div class="text-sm py-1 border-b" style="border-color: var(--line);">
+                          <code class="text-xs font-bold" x-text="m.key"></code>
+                          <span class="text-xs ml-2" style="color: var(--muted);" x-text="'data: ' + (m.data || '').slice(0, 200)"></span>
+                        </div>
+                      </template>
+                    </div>
+
+                    <!-- 编辑条目弹窗 -->
+                    <template x-if="editing">
+                      <div class="modal-bg flex items-center justify-center" @click.self="editing = null">
+                        <div class="modal modal-lg">
+                          <h3 class="text-lg font-bold mb-3" x-text="editing.rowid ? '编辑条目' : '新增条目'"></h3>
+                          <div class="space-y-3 scrollable">
+                            <template x-for="f in fields" :key="f">
+                              <div>
+                                <label class="label" x-text="f"></label>
+                                <template x-if="f === '内容'">
+                                  <textarea class="textarea font-mono text-xs" rows="6" x-model="editing.values[f]"></textarea>
+                                </template>
+                                <template x-if="f !== '内容'">
+                                  <input class="input" x-model="editing.values[f]" />
+                                </template>
+                              </div>
+                            </template>
+                          </div>
+                          <div class="flex justify-end gap-2 pt-4">
+                            <button class="btn btn-secondary" @click="editing = null">取消</button>
+                            <button class="btn btn-primary" @click="saveEntry()">保存</button>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+
             <!-- SQLite 浏览器 -->
             <template x-if="tab === 'sqlite'">
               <div x-data="sqliteView()" x-init="$nextTick(() => loadBots())">
@@ -1064,6 +1219,7 @@ function app() {
       { key: 'decks',      label: '牌堆' },
       { key: 'random',     label: '随机生成器' },
       { key: 'querydb',    label: '查询库' },
+      { key: 'homebrew',   label: '私设' },
       { key: 'sqlite',     label: 'SQLite' },
     ],
     tab: 'overview',
@@ -1744,6 +1900,166 @@ function businessTableView(kind) {
         method: 'DELETE', body: JSON.stringify({ keys }),
       });
       await this.load();
+    },
+  };
+}
+
+// ───── 子组件：私设（群级附加数据库 + 群宏） ─────
+function homebrewView() {
+  return {
+    bots: [], botId: '',
+    groups: [], groupId: '', manualGroupId: '',
+    dbs: [], dbName: '',
+    entries: [], fields: [], total: 0, kw: '',
+    macros: [],
+    editing: null,
+    pendingFile: null, uploadHint: '', busy: false,
+
+    async loadBots() {
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/instances/' + root.selectedId + '/bots');
+      this.bots = r.bots || [];
+      if (this.bots.length) { this.botId = this.bots[0]; await this.loadGroups(); }
+    },
+    async loadGroups() {
+      if (!this.botId) return;
+      const root = this.$root;
+      const r = await root.fetchJSON('/api/homebrew/' + root.selectedId + '/' + this.botId + '/groups');
+      this.groups = r.groups || [];
+    },
+    useManualGroup() {
+      const g = (this.manualGroupId || '').trim();
+      if (!g) { this.$root.showToast('请输入 group_id', 'err'); return; }
+      this.groupId = g;
+      this.loadDbs(); this.loadMacros();
+    },
+    async loadDbs() {
+      if (!this.botId || !this.groupId) return;
+      const root = this.$root;
+      const r = await root.fetchJSON(
+        '/api/homebrew/' + root.selectedId + '/' + this.botId + '/' + this.groupId + '/dbs'
+      );
+      this.dbs = r.dbs || [];
+      if (this.dbs.length && !this.dbName) { this.dbName = this.dbs[0].name; await this.loadEntries(); }
+    },
+    async selectDb(name) {
+      this.dbName = name;
+      await this.loadEntries();
+    },
+    async loadEntries() {
+      if (!this.dbName) return;
+      const root = this.$root;
+      const params = new URLSearchParams();
+      params.set('limit', '500');
+      if (this.kw) params.set('keyword', this.kw);
+      const r = await root.fetchJSON(
+        '/api/homebrew/' + root.selectedId + '/' + this.botId + '/' + this.groupId +
+        '/dbs/' + encodeURIComponent(this.dbName) + '/entries?' + params.toString()
+      );
+      this.fields = r.fields || [];
+      this.entries = r.entries || [];
+      this.total = r.total || 0;
+    },
+    async newDb() {
+      const name = prompt('新数据库文件名（不含 .db 后缀）');
+      if (!name) return;
+      const root = this.$root;
+      const fullName = name.endsWith('.db') ? name : name + '.db';
+      try {
+        await root.fetchJSON(
+          '/api/homebrew/' + root.selectedId + '/' + this.botId + '/' + this.groupId + '/dbs',
+          { method: 'POST', body: JSON.stringify({ name: fullName }) }
+        );
+        await this.loadDbs();
+        this.dbName = fullName;
+        await this.loadEntries();
+        root.showToast('已创建 ' + fullName);
+      } catch (e) {}
+    },
+    async deleteDb() {
+      if (!confirm('确认删除整个 db 文件 ' + this.dbName + '？无法恢复。')) return;
+      const root = this.$root;
+      await root.fetchJSON(
+        '/api/homebrew/' + root.selectedId + '/' + this.botId + '/' + this.groupId +
+        '/dbs/' + encodeURIComponent(this.dbName),
+        { method: 'DELETE' }
+      );
+      this.dbName = '';
+      this.entries = [];
+      await this.loadDbs();
+      root.showToast('已删除');
+    },
+    newEntry() {
+      const values = {};
+      for (const f of this.fields) values[f] = '';
+      this.editing = { rowid: null, values };
+    },
+    editEntry(e) {
+      const values = {};
+      for (const f of this.fields) values[f] = e[f] ?? '';
+      this.editing = { rowid: e.rowid, values };
+    },
+    async saveEntry() {
+      const root = this.$root;
+      const r = await root.fetchJSON(
+        '/api/homebrew/' + root.selectedId + '/' + this.botId + '/' + this.groupId +
+        '/dbs/' + encodeURIComponent(this.dbName) + '/entries',
+        { method: 'PUT', body: JSON.stringify(this.editing) }
+      );
+      if (r.ok) {
+        this.editing = null;
+        await this.loadEntries();
+        root.showToast('已保存');
+      } else {
+        root.showToast(r.message || '保存失败', 'err');
+      }
+    },
+    async deleteEntry(e) {
+      if (!confirm('确认删除该条目？')) return;
+      const root = this.$root;
+      await root.fetchJSON(
+        '/api/homebrew/' + root.selectedId + '/' + this.botId + '/' + this.groupId +
+        '/dbs/' + encodeURIComponent(this.dbName) + '/entries/' + e.rowid,
+        { method: 'DELETE' }
+      );
+      await this.loadEntries();
+    },
+    onFile(ev) {
+      const f = ev.target.files && ev.target.files[0];
+      this.pendingFile = f || null;
+      this.uploadHint = f ? f.name + ' (' + (f.size / 1024).toFixed(1) + ' KB)' : '';
+    },
+    async upload() {
+      if (!this.pendingFile || !this.dbName) return;
+      const root = this.$root;
+      const fd = new FormData();
+      fd.append('file', this.pendingFile);
+      this.busy = true;
+      try {
+        const r = await fetch(
+          '/api/homebrew/' + root.selectedId + '/' + this.botId + '/' + this.groupId +
+          '/dbs/' + encodeURIComponent(this.dbName) + '/upload',
+          { method: 'POST', body: fd, credentials: 'same-origin' }
+        );
+        const body = await r.json();
+        if (!r.ok || !body.ok) {
+          root.showToast(body.message || ('上传失败: ' + r.status), 'err');
+        } else {
+          root.showToast('导入完成：新增 ' + body.inserted + ' 跳过 ' + body.skipped);
+          this.pendingFile = null;
+          this.uploadHint = '';
+          await this.loadDbs();
+          await this.loadEntries();
+        }
+      } finally { this.busy = false; }
+    },
+    async loadMacros() {
+      if (!this.botId || !this.groupId) return;
+      const root = this.$root;
+      const r = await root.fetchJSON(
+        '/api/homebrew/' + root.selectedId + '/' + this.botId + '/' + this.groupId + '/macros'
+      );
+      this.macros = r.macros || [];
     },
   };
 }
