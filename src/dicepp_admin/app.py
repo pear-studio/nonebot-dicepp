@@ -1,6 +1,7 @@
 """DicePP WebUI 后台主应用：汇总所有 API 路由 + 服务静态 HTML。"""
 import asyncio
 import atexit
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 
 from dicepp_admin import audit, auth, data_api, homebrew_api, instance_manager, llonebot_manager, log_api, query_db_api, ui
 from dicepp_admin.config import AdminPaths, DEFAULT_USERNAME
+
+logger = logging.getLogger("dicepp.admin.app")
 
 app = FastAPI(title="DicePP Admin", version="0.1.0", docs_url="/admin/docs", openapi_url="/admin/openapi.json")
 
@@ -268,8 +271,12 @@ def llonebot_auto_acquire(request: Request,
                     llonebot_manager.generate_config(
                         inst["qq_id"], inst["port"], inst.get("access_token", "")
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    # 单个实例 sync 失败不应阻止其他实例继续同步
+                    logger.warning(
+                        "auto_acquire post-sync failed for instance %s qq %s: %s",
+                        inst.get("id"), inst.get("qq_id"), e,
+                    )
     return result
 
 

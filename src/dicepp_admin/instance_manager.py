@@ -14,6 +14,7 @@ admin 后台自身重启后，原本由它 spawn 的 DicePP 子进程可能仍�
 3. is_running() 优先看 Popen.poll()，回退查 psutil
 """
 import json
+import logging
 import os
 import shutil
 import socket
@@ -24,6 +25,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
+
+logger = logging.getLogger("dicepp.admin.instance")
 
 try:
     import psutil  # 用于持久化检测；α 主依赖里已有
@@ -213,13 +216,21 @@ def delete_instance(instance_id: str, remove_data: bool = False) -> None:
     if inst and inst.get("qq_id") and llonebot_manager.is_acquired():
         try:
             llonebot_manager.clear_config(inst["qq_id"])
-        except OSError:
-            pass
+        except OSError as e:
+            # 配置文件已被外部删除等情况；不影响实例删除主流程
+            logger.warning(
+                "delete_instance(%s): clear llonebot config for qq %s failed: %s",
+                instance_id, inst.get("qq_id"), e,
+            )
     if remove_data and inst and inst.get("data_dir"):
         try:
             shutil.rmtree(inst["data_dir"], ignore_errors=True)
-        except OSError:
-            pass
+        except OSError as e:
+            # ignore_errors=True 已尽量降低失败概率；若仍失败提示用户手动清
+            logger.warning(
+                "delete_instance(%s): rmtree(%s) failed: %s",
+                instance_id, inst["data_dir"], e,
+            )
 
 
 # ─── 进程控制 ────────────────────────────────────────────────────────────
@@ -388,12 +399,17 @@ def stop_instance(instance_id: str) -> None:
                     proc.kill()
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
-    except (OSError, ValueError):
+    except (OSError, ValueError) as outer_e:
+        # 主路径终止失败（如 send_signal 后 wait 时管道已关闭），尝试 fallback kill
         if ref.popen is not None:
             try:
                 ref.popen.kill()
-            except OSError:
-                pass
+            except OSError as kill_e:
+                # fallback kill 也失败：进程可能已被 OS 回收或权限问题
+                logger.warning(
+                    "stop_instance(%s): fallback kill failed (outer=%s, kill=%s)",
+                    instance_id, outer_e, kill_e,
+                )
 
     _patch_inst_field(instance_id, pid=None)
 
