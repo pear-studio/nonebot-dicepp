@@ -17,9 +17,11 @@ _NON_RETRYABLE_CODES = {
     1002,  # 权限不足
     1004,  # 鉴权失败
     1008,  # 账户余额不足
-    2013,  # 内容审核不通过
     2056,  # 用量超限
 }
+# 2013 在 classify_error 中单独细分，不在集合中一刀切
+# - invalid params → 参数错误，可重试
+# - content/moderation → 内容审核，不可重试
 # 2xxx 系列一般为业务/配额错误，1xxx 系列为请求/鉴权错误
 
 
@@ -136,6 +138,11 @@ class MiniMaxImageProvider:
     def classify_error(exception: Exception) -> ErrorClass:
         error_msg = str(exception).lower()
         if any(k in error_msg for k in ("authentication", "unauthorized", "401", "403")):
+            return ErrorClass.NON_RETRYABLE
+        # 2013 细分：MiniMax 复用此码表示参数错误和内容审核
+        if "[2013]" in error_msg:
+            if "invalid params" in error_msg:
+                return ErrorClass.RETRYABLE
             return ErrorClass.NON_RETRYABLE
         # MiniMax 特定错误码（格式: "[2056]"）
         for code in _NON_RETRYABLE_CODES:

@@ -30,14 +30,6 @@
     - 影响面：data/store.py:268 get_daily_message_stats、report/daily_report.py:318 _collect_proactive_coverage
     - 风险：低，只改标签文案
 
-### [B-260522-97227f] minimax_image 错误码 2013 误判为不可重试，参数错误应允许重试
-- 创建: 2026-05-22
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现: MiniMax image-01 对参数错误（prompt length must be less than 1500）也返回 code=2013，被 classify_error 笼统判为 NON_RETRYABLE，导致 provider 被永久标记 dead，后续所有图片请求失败
-- 工作计划: minimax_image.py 的 classify_error 对 2013 做细分：status_msg 含 content/moderation/审核 → NON_RETRYABLE，含 params/invalid/length → RETRYABLE
-
 ### [B-260515-dd50eb] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-05-15
 - 优先级: P2
