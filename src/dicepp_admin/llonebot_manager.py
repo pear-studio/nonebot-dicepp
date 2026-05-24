@@ -11,6 +11,7 @@
    由整合包默认值（3080/3010 等）固定，不与 DicePP 实例冲突。
 """
 import json
+import logging
 import os
 import shutil
 import socket
@@ -20,6 +21,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from dicepp_admin.config import AdminPaths
+
+logger = logging.getLogger("dicepp.admin.llonebot")
 
 
 _LL_CONFIG_FILE = AdminPaths.LLONEBOT_DIR / "config.json"
@@ -186,9 +189,12 @@ def auto_acquire() -> Dict:
                         shutil.rmtree(target)
                     shutil.copytree(item, target)
             shutil.rmtree(preserved_data)
-        except OSError:
+        except OSError as e:
             # 还原失败不致命：用户重新登录即可，已复制的整合包仍可用
-            pass
+            logger.warning(
+                "auto_acquire: restore preserved llonebot login data failed: %s",
+                e,
+            )
 
     cfg = _load_config()
     cfg["bundle_dir"] = str(dst)
