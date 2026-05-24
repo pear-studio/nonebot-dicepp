@@ -1,95 +1,181 @@
-"""
-简单的COC相关指令
-"""
+"""COC 7th 属性投骰指令 .coc
 
-from typing import List, Tuple, Any
+输出 9 项基础属性 (STR/CON/SIZ/DEX/APP/INT/POW/EDU/LUCK) 加 5 项衍生
+属性 (HP/MP/DB/Build/MOV)，方便玩家直接生成 COC7 调查员。
+
+不做完整角色卡（按 maintainer 决策：β 的 COC 模块实际是 dnd5e 复制
+粘贴，没真正实现 COC7，α 暂不补完整规则；.coc 只投属性）。
+"""
 import random
+from typing import Any, List, Tuple
 
 from core.bot import Bot
-from core.command.const import *
-from core.command import UserCommandBase, custom_user_command
-from core.command import BotCommandBase, BotSendMsgCommand
-from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core import localization
+from core.command.const import (
+    DPP_COMMAND_FLAG_DND,
+    DPP_COMMAND_FLAG_FUN,
+    DPP_COMMAND_PRIORITY_DEFAULT,
+)
+from core.command import (
+    BotCommandBase,
+    BotSendMsgCommand,
+    UserCommandBase,
+    custom_user_command,
+)
+from core.communication import (
+    GroupMessagePort,
+    MessageMetaData,
+    PrivateMessagePort,
+)
+
 
 LOC_COC_RES = "coc_result"
 LOC_COC_RES_NOREASON = "coc_result_noreason"
 
-CFG_ROLL_COC_ENABLE = "roll_coc_enable"
-
 MAX_COC_TIMES = 10
-MAX_COC_RESULT_LEN = 50
+MAX_COC_REASON_LEN = 50
+
+# COC7 属性下标
+_STR, _CON, _SIZ, _DEX, _APP, _INT, _POW, _EDU, _LUCK = range(9)
+_ATTR_NAMES = ["力量", "体质", "体型", "敏捷", "外貌", "智力", "意志", "教育", "幸运"]
+
+
+def _roll_attrs() -> List[int]:
+    """生成一组 COC7 基础属性（9 项）"""
+    def d6(n: int) -> int:
+        return sum(random.randint(1, 6) for _ in range(n))
+
+    return [
+        d6(3) * 5,         # 力量 STR
+        d6(3) * 5,         # 体质 CON
+        (d6(2) + 6) * 5,   # 体型 SIZ
+        d6(3) * 5,         # 敏捷 DEX
+        d6(3) * 5,         # 外貌 APP
+        (d6(2) + 6) * 5,   # 智力 INT
+        d6(3) * 5,         # 意志 POW
+        (d6(2) + 6) * 5,   # 教育 EDU
+        d6(3) * 5,         # 幸运 LUCK
+    ]
+
+
+# DB/Build 表（基于 STR + SIZ 总和）— COC7 核心规则
+_DB_TABLE = [
+    (64,  "-2",   -2),
+    (84,  "-1",   -1),
+    (124, "0",     0),
+    (164, "+1d4", +1),
+    (204, "+1d6", +2),
+    (284, "+2d6", +3),
+    (364, "+3d6", +4),
+    (444, "+4d6", +5),
+    (524, "+5d6", +6),
+]
+
+
+def _derive_db_build(str_val: int, siz_val: int) -> Tuple[str, int]:
+    total = str_val + siz_val
+    for upper, db, build in _DB_TABLE:
+        if total <= upper:
+            return db, build
+    # 525+：每多 80 点加 1d6 / +1
+    extra = (total - 444) // 80
+    db = f"+{4 + extra}d6"
+    build = 5 + extra
+    return db, build
+
+
+def _derive_mov(str_val: int, dex_val: int, siz_val: int) -> int:
+    """成人 MOV，简化版（不考虑年龄修正，.coc 没有年龄输入）"""
+    if str_val < siz_val and dex_val < siz_val:
+        return 7
+    if str_val > siz_val and dex_val > siz_val:
+        return 9
+    # STR/DEX 任一 >= SIZ
+    return 8
+
+
+def _format_one(attrs: List[int]) -> str:
+    """渲染一组属性 + 衍生属性"""
+    base_line = "[" + " ".join(
+        f"{_ATTR_NAMES[i]}{attrs[i]}" for i in range(9)
+    ) + "]"
+
+    hp = (attrs[_CON] + attrs[_SIZ]) // 10
+    mp = attrs[_POW] // 5
+    db, build = _derive_db_build(attrs[_STR], attrs[_SIZ])
+    mov = _derive_mov(attrs[_STR], attrs[_DEX], attrs[_SIZ])
+
+    derived = f"HP {hp} | MP {mp} | DB {db} | 体格 {build} | MOV {mov}"
+    total_no_luck = sum(attrs[:8])
+    total_all = sum(attrs)
+    return f"{base_line}\n  → {derived}\n  → 合计 {total_no_luck}（不含幸运 {attrs[_LUCK]}） / 总和 {total_all}"
 
 
 @custom_user_command(readable_name="COC属性指令",
                      priority=DPP_COMMAND_PRIORITY_DEFAULT,
                      flag=DPP_COMMAND_FLAG_FUN | DPP_COMMAND_FLAG_DND)
 class UtilsCOCCommand(UserCommandBase):
-    """
-    .coc指令, 相当于3#2d6*5+30与6#3d6*5, 可以重复投多次, 如.coc5
+    """.coc 指令：生成 COC 7th 调查员属性（含衍生 HP/MP/DB/Build/MOV）。
+
+    用法：
+        .coc           生成一组
+        .coc 3         生成 3 组
+        .coc 2 测试    生成 2 组并标注原因
     """
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
-        bot.loc_helper.register_loc_text(LOC_COC_RES, "{name} COC人物作成——{reason}:\n{result}", ".coc返回的内容 name为用户昵称, reason为原因")
-        bot.loc_helper.register_loc_text(LOC_COC_RES_NOREASON, "{name} COC人物作成:\n{result}", ".coc返回的内容（无原因） name为用户昵称")
+        bot.loc_helper.register_loc_text(
+            LOC_COC_RES,
+            "{name} COC人物作成——{reason}:\n{result}",
+            ".coc 返回的内容 name 为用户昵称, reason 为原因",
+        )
+        bot.loc_helper.register_loc_text(
+            LOC_COC_RES_NOREASON,
+            "{name} COC人物作成:\n{result}",
+            ".coc 返回的内容（无原因） name 为用户昵称",
+        )
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
-        should_proc: bool = msg_str.startswith(".coc")
-        should_pass: bool = False
-        msg_str = msg_str[4:].strip()
-        args = msg_str.split(" ", 1)
-        reason = args[1].strip()[:MAX_COC_RESULT_LEN] if len(args) > 1 else ""
+        if not msg_str.startswith(".coc"):
+            return False, False, None
+        rest = msg_str[4:].strip()
+        args = rest.split(" ", 1)
+        reason = args[1].strip()[:MAX_COC_REASON_LEN] if len(args) > 1 else ""
         try:
             times = int(args[0])
-            assert 1 <= times <= MAX_COC_TIMES
-        except (ValueError, AssertionError):
+            if not (1 <= times <= MAX_COC_TIMES):
+                raise ValueError
+        except (ValueError, IndexError):
             times = 1
-        return should_proc, should_pass, (times, reason)
+        return True, False, (times, reason)
 
-    async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
-        port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
-        # 判断功能开关（有群内config作为代替）
-        #try:
-            #assert (int(self.bot.cfg_helper.get_config(CFG_ROLL_COC_ENABLE)[0]) != 0)
-        #except AssertionError:
-            #feedback = self.bot.loc_helper.format_loc_text(localization.LOC_FUNC_DISABLE, func=self.readable_name)
-            #return [BotSendMsgCommand(self.bot.account, feedback, [port])]
-        # 解析语句
-        times: int
-        reason: str
+    async def process_msg(self, msg_str: str, meta: MessageMetaData,
+                          hint: Any) -> List[BotCommandBase]:
+        port = (GroupMessagePort(meta.group_id)
+                if meta.group_id else PrivateMessagePort(meta.user_id))
         times, reason = hint
 
-        coc_result = []
-        for _ in range(times):
-            attr_result: List[int] = []
-			# COC你丫怎么没得用for循环啊(恼)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(3)])*5)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(3)])*5)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(2)])*5 + 30)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(3)])*5)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(3)])*5)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(2)])*5 + 30)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(3)])*5)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(2)])*5 + 30)
-            attr_result.append(sum([random.randint(1, 6) for _ in range(3)])*5)
-            # COC你丫怎么还得一个一个str啊(恼)
-            attr_result_str = "[力量" + str(attr_result[0]) + " 体质" + str(attr_result[1]) + " 体型" + str(attr_result[2]) + " 敏捷" + str(attr_result[3]) + " 外貌" + str(attr_result[4]) + " 智力" + str(attr_result[5]) + " 意志" + str(attr_result[6]) + " 教育" + str(attr_result[7]) + " 幸运" + str(attr_result[8]) + "]"
-            coc_result.append(f"合计{sum(attr_result[:8])}/{sum(attr_result)} : {attr_result_str}")
-        result = "\n".join(coc_result)
+        groups = [_format_one(_roll_attrs()) for _ in range(times)]
+        result = "\n\n".join(groups) if times > 1 else groups[0]
 
         user_name = await self.bot.get_nickname(meta.user_id, meta.group_id)
         if reason:
-            feedback: str = self.format_loc(LOC_COC_RES, name=user_name, reason=reason, result=result)
+            feedback = self.format_loc(LOC_COC_RES, name=user_name,
+                                       reason=reason, result=result)
         else:
-            feedback: str = self.format_loc(LOC_COC_RES_NOREASON, name=user_name, result=result)
+            feedback = self.format_loc(LOC_COC_RES_NOREASON, name=user_name,
+                                       result=result)
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def get_help(self, keyword: str, meta: MessageMetaData) -> str:
-        if keyword == "coc":  # help后的接着的内容
-            feedback: str = ".coc [次数] [原因] 相当于4D6K3"
-            return feedback
+        if keyword == "coc":
+            return (
+                ".coc 生成 COC 7th 调查员属性（9 项基础 + HP/MP/DB/体格/MOV 衍生）\n"
+                "  .coc           生成一组\n"
+                "  .coc 3         生成 3 组\n"
+                "  .coc 2 测试    生成 2 组并标注原因"
+            )
         return ""
 
     def get_description(self) -> str:
-        return ".coc COC属性生成"  # help指令中返回的内容
+        return ".coc COC 7th 调查员属性生成（含衍生属性）"
