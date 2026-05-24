@@ -1,4 +1,7 @@
-"""共享测试工具 — mock provider / router 工厂函数"""
+"""共享测试工具 — mock provider / router 工厂函数、temp_db fixture"""
+import pytest
+import tempfile
+import os
 from unittest.mock import MagicMock, AsyncMock
 
 from plugins.DicePP.module.persona.llm.loop import LoopResult
@@ -68,3 +71,17 @@ def attach_mock_run_via_loop(router, final_output_attr=None):
         return LoopResult(final_output=final_output, metadata={"status": "ok"})
 
     router.run_via_loop = AsyncMock(side_effect=_mock)
+
+
+@pytest.fixture
+async def temp_db():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+    import aiosqlite
+    from plugins.DicePP.module.persona.data.store import PersonaDataStore
+
+    async with aiosqlite.connect(db_path) as db:
+        store = PersonaDataStore(db)
+        await store.ensure_tables()
+        yield store
+    os.unlink(db_path)

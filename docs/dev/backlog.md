@@ -14,21 +14,21 @@
 
 ## persona
 
-### [B-260522-8dcb27] 日报"主动消息覆盖"统计口径错误——统计全部 bot 消息而非主动消息
+### [B-260522-6a8ed6] generate_image tool description 引导过弱，LLM 不使用 SELF_APPEARANCE 导致角色外貌丢失
 - 创建: 2026-05-22
 - 优先级: P1
 - 类型: bug
 - 改动量: S
-- 问题表现:
-    - get_daily_message_stats（data/store.py:268）统计 role='assistant' AND type!='system_log' 的全部消息
-    - 5月22日日报显示 67 条，实际构成：64 条命令响应 + 3 条被动聊天回复，真正主动消息为 0
-    - 日报第三段 _collect_proactive_coverage（daily_report.py:318）标签为"主动消息覆盖"，严重误导
-    - 该统计实际反映 bot 全局回复量，与"主动消息"无关
-- 工作计划:
-    - 方案A（推荐）：将日报标签从"主动消息覆盖"改为"Bot 消息覆盖"，SQL 不变
-    - 方案B：新增专门统计主动消息的字段，需在 message_stream 中区分主动/被动消息
-    - 影响面：data/store.py:268 get_daily_message_stats、report/daily_report.py:318 _collect_proactive_coverage
-    - 风险：低，只改标签文案
+- 问题表现: tool description 中引导语气过弱(可使用)，LLM 不引用角色外貌占位符，最终图片 prompt 缺少角色特征，生成图片主角不对
+- 工作计划: 强化 tool description：展示外貌描述原文 + 明确引导 + 说明原因 + 纯风景例外。改 generate_image.py 的 make_generate_image_tool_def
+
+### [B-260522-97227f] minimax_image 错误码 2013 误判为不可重试，参数错误应允许重试
+- 创建: 2026-05-22
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现: MiniMax image-01 对参数错误（prompt length must be less than 1500）也返回 code=2013，被 classify_error 笼统判为 NON_RETRYABLE，导致 provider 被永久标记 dead，后续所有图片请求失败
+- 工作计划: minimax_image.py 的 classify_error 对 2013 做细分：status_msg 含 content/moderation/审核 → NON_RETRYABLE，含 params/invalid/length → RETRYABLE
 
 ### [B-260515-dd50eb] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-05-15

@@ -265,65 +265,81 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [self._row_to_message(r) for r in reversed(list(rows))]
 
-    async def get_daily_message_stats(self, date: str) -> Dict[str, int]:
-        """获取某日 bot 主动发送消息统计（排除 SYSTEM_LOG）"""
-        async with self.db.execute(
-            f"""
-            SELECT COUNT(*) as sent,
-                   COUNT(DISTINCT user_id) as covered
-            FROM message_stream
-            WHERE role = 'assistant' AND date(created_at) = ?
-              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
-            """,
-            (date,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            return {"sent": row[0] if row else 0, "covered": row[1] if row else 0}
+    async def get_daily_chat_stats(self, date: str) -> Dict[str, Any]:
+        """获取某日 persona 聊天统计（仅 type='chat'，排除 SYSTEM_LOG）"""
+        chat_filter = f"type = 'chat' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}"
 
-    async def get_daily_interactive_users(self, date: str) -> tuple:
-        """获取某日互动用户统计：当日数、历史数、新增数"""
         async with self.db.execute(
             f"""
-            SELECT COUNT(DISTINCT user_id)
+            SELECT
+                SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END),
+                COUNT(DISTINCT user_id),
+                COUNT(DISTINCT CASE WHEN group_id != '' THEN group_id END)
             FROM message_stream
-            WHERE role = 'user' AND date(created_at) = ?
-              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            WHERE {chat_filter} AND date(created_at) = ?
             """,
             (date,),
         ) as cursor:
             row = await cursor.fetchone()
-            yesterday_users = row[0] if row else 0
+
+        bot = row[0] or 0
+        user = row[1] or 0
+        users = row[2] or 0
+        groups = row[3] or 0
 
         async with self.db.execute(
             f"""
             SELECT COUNT(DISTINCT user_id)
             FROM message_stream
-            WHERE role = 'user' AND date(created_at) < ?
-              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
-            """,
-            (date,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            before_users = row[0] if row else 0
-
-        async with self.db.execute(
-            f"""
-            SELECT COUNT(DISTINCT user_id)
-            FROM message_stream
-            WHERE role = 'user' AND date(created_at) = ?
-              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            WHERE {chat_filter} AND date(created_at) = ?
               AND user_id NOT IN (
                 SELECT DISTINCT user_id FROM message_stream
-                WHERE role = 'user' AND date(created_at) < ?
-                  AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+                WHERE {chat_filter} AND date(created_at) < ?
               )
             """,
             (date, date),
         ) as cursor:
             row = await cursor.fetchone()
-            new_users = row[0] if row else 0
+        new_users = row[0] if row else 0
 
-        return (yesterday_users, before_users, new_users)
+        async with self.db.execute(
+            f"""
+            SELECT user_id, MAX(display_name) as name, COUNT(*) as cnt
+            FROM message_stream
+            WHERE {chat_filter} AND date(created_at) = ? AND role = 'user'
+            GROUP BY user_id ORDER BY cnt DESC LIMIT 3
+            """,
+            (date,),
+        ) as cursor:
+            top_user_rows = await cursor.fetchall()
+
+        async with self.db.execute(
+            f"""
+            SELECT group_id, COUNT(*) as cnt
+            FROM message_stream
+            WHERE {chat_filter} AND date(created_at) = ?
+              AND group_id != ''
+            GROUP BY group_id ORDER BY cnt DESC LIMIT 3
+            """,
+            (date,),
+        ) as cursor:
+            top_group_rows = await cursor.fetchall()
+
+        return {
+            "bot": bot,
+            "user": user,
+            "users": users,
+            "new_users": new_users,
+            "groups": groups,
+            "top_users": [
+                {"user_id": r[0], "display_name": r[1] or "", "cnt": r[2]}
+                for r in top_user_rows
+            ],
+            "top_groups": [
+                {"group_id": r[0], "cnt": r[1]} for r in top_group_rows
+            ],
+        }
 
     async def _prune_message_stream_private(self, user_id: str) -> None:
         """私聊按 user_id 维度保留最近 N 条"""

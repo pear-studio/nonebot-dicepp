@@ -163,16 +163,10 @@ class DailyReportGenerator:
         for item in await self._collect_character_state():
             lines.append(f"  {item}")
 
-        # 主动消息覆盖
+        # 对话概览
         lines.append("")
-        lines.append("主动消息覆盖:")
-        for item in await self._collect_proactive_coverage():
-            lines.append(f"  {item}")
-
-        # 互动用户
-        lines.append("")
-        lines.append("昨日互动用户:")
-        for item in await self._collect_interactive_users():
+        lines.append("对话概览:")
+        for item in await self._collect_chat_overview():
             lines.append(f"  {item}")
 
         return lines
@@ -315,29 +309,36 @@ class DailyReportGenerator:
         except Exception:
             return [_DATA_UNAVAILABLE]
 
-    async def _collect_proactive_coverage(self) -> Any:
-        """收集主动消息覆盖数据（bot 发出的消息覆盖情况）"""
+    async def _collect_chat_overview(self) -> Any:
+        """收集 persona 聊天概览（仅 type='chat'）"""
         try:
             if not self._store:
                 return [_DATA_UNAVAILABLE]
             yesterday = (persona_wall_now(self._config.timezone) - timedelta(days=1)).strftime("%Y-%m-%d")
-            stats = await self._store.get_daily_message_stats(yesterday)
-            sent = stats.get("sent", 0)
-            covered = stats.get("covered", 0)
-            return [f"昨日发送: {sent} 条，覆盖 {covered} 人"]
-        except Exception:
-            return [_DATA_UNAVAILABLE]
+            stats = await self._store.get_daily_chat_stats(yesterday)
 
-    async def _collect_interactive_users(self) -> Any:
-        """收集昨日互动用户数（新增/总计）"""
-        try:
-            if not self._store:
-                return [_DATA_UNAVAILABLE]
-            yesterday = (persona_wall_now(self._config.timezone) - timedelta(days=1)).strftime("%Y-%m-%d")
-            yesterday_users, before_users, new_users = await self._store.get_daily_interactive_users(yesterday)
-            return [
-                f"昨日互动: {yesterday_users} 人（新增 {new_users}）",
-            ]
+            lines = []
+            total = stats["bot"] + stats["user"]
+            lines.append(f"聊天消息: {total} 条（Bot 回复 {stats['bot']} / 用户发言 {stats['user']}）")
+
+            parts = [f"{stats['users']} 人"]
+            if stats["new_users"]:
+                parts.append(f"新增 {stats['new_users']}")
+            parts.append(f"覆盖 {stats['groups']} 个群")
+            lines.append(f"参与: {'，'.join(parts)}")
+
+            if stats["top_users"]:
+                lines.append("活跃用户 Top 3:")
+                for u in stats["top_users"]:
+                    label = f"{u['display_name']}({u['user_id']})" if u["display_name"] else u["user_id"]
+                    lines.append(f"  {label}: {u['cnt']} 条")
+
+            if stats["top_groups"]:
+                lines.append("活跃群 Top 3:")
+                for g in stats["top_groups"]:
+                    lines.append(f"  {g['group_id']}: {g['cnt']} 条")
+
+            return lines
         except Exception:
             return [_DATA_UNAVAILABLE]
 
