@@ -44,12 +44,24 @@ $openJob = Start-Job -ScriptBlock {
 } -ArgumentList $AdminUrl, $AdminPort
 
 Push-Location $ProjectRoot
+$adminExit = 0
 try {
-    # 前台运行后端（用户关窗口即停）
+    # 前台运行后端（用户 Ctrl+C 停止；启动失败立即返回非 0）
     & $UvExe run python -m dicepp_admin
+    $adminExit = $LASTEXITCODE
 }
 finally {
     Pop-Location
     Stop-Job $openJob -ErrorAction SilentlyContinue
     Remove-Job $openJob -ErrorAction SilentlyContinue
+}
+
+if ($adminExit -ne 0) {
+    Write-Host ""
+    Write-Host "[错误] WebUI 后端异常退出 (exit code $adminExit)" -ForegroundColor Red
+    Write-Host "常见原因：" -ForegroundColor Yellow
+    Write-Host "  - Python 依赖缺失（首次启动失败请重跑「启动骰娘.bat」让 uv sync 重装）" -ForegroundColor Yellow
+    Write-Host "  - 端口 $AdminPort 被占用（设环境变量 DPP_ADMIN_PORT 改端口）" -ForegroundColor Yellow
+    Write-Host "  - 配置损坏（删除 data\admin\ 让其重新初始化）" -ForegroundColor Yellow
+    throw "admin 启动失败 (exit code $adminExit)"
 }
