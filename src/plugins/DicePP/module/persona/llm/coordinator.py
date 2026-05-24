@@ -105,7 +105,9 @@ class LLMCallCoordinator:
                 return SubmitResult.buffered()
             self._executing[target_key] = True
             if message is not None:
-                self._pending_messages[target_key] = [message]
+                if target_key not in self._pending_messages:
+                    self._pending_messages[target_key] = []
+                self._pending_messages[target_key].append(message)
 
         try:
             result = await self._run_loop(
@@ -169,8 +171,6 @@ class LLMCallCoordinator:
                 result = await call_fn(messages)
                 failures = 0
                 had_success = True
-                if not continue_on_buffered:
-                    return result
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -202,6 +202,10 @@ class LLMCallCoordinator:
                     f"(failures={failures}, iterations={iterations})"
                 )
                 continue
+
+            # share 路径：成功且无缓冲时直接退出（失败走下方 on_exhausted 逻辑）
+            if not continue_on_buffered and had_success:
+                return result
 
             # 退出循环
             if failures >= self.max_failures and not had_success:

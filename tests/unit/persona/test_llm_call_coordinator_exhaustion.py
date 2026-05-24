@@ -277,6 +277,95 @@ class TestLLMCallCoordinatorExhaustion:
         assert share_result.value == "share_msg"
 
     @pytest.mark.asyncio
+    async def test_share_continue_on_buffered_detected(self):
+        """share 路径 (continue_on_buffered=False) 执行期间有缓冲消息时应继续迭代
+
+        share 完成后检测到 has_buffered，应继续处理缓冲消息而非直接退出。
+        max_iterations=5 兜底防止 share 被无限延长。
+        """
+        coordinator = LLMCallCoordinator()
+        barrier = asyncio.Event()
+        started = asyncio.Event()
+        call_count = 0
+
+        async def share_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                started.set()
+                await barrier.wait()
+            return f"share_{call_count}"
+
+        share_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", None, share_fn, continue_on_buffered=False
+            )
+        )
+        await started.wait()
+
+        # share 执行期间缓冲 chat 消息
+        chat_task = asyncio.create_task(
+            coordinator.submit("user:1", "chat_msg", AsyncMock(return_value="reply"))
+        )
+        chat_result = await chat_task
+        assert chat_result.status == "buffered"
+        assert coordinator._has_buffered.get("user:1") is True
+
+        barrier.set()
+        share_result = await share_task
+        assert share_result.status == "success"
+        # share_fn 被调用 2 次：第 1 次正常执行，第 2 次处理缓冲消息
+        assert call_count == 2
+        assert share_result.value == "share_2"
+        # 缓冲消息已被消费，状态已清理
+        assert coordinator._has_buffered.get("user:1") is None
+
+    @pytest.mark.asyncio
+    async def test_pending_messages_preserved_across_submits(self):
+        """share 退出后缓冲消息保留，下一次 chat submit 追加而非覆盖
+
+        share (continue_on_buffered=False) 不处理缓冲消息时，消息留在
+        _pending_messages。下一次 chat submit 获取执行权时应追加新消息，
+        而非覆盖旧消息。
+        """
+        # 此测试验证 B1 修复（append 代替 overwrite）的独立价值。
+        # 使用默认 continue_on_buffered=True + 手动设置 _executing
+        # 来模拟 share 不检查 buffered 的旧行为，排除 B2 修复的干扰。
+        coordinator = LLMCallCoordinator()
+        seen_messages = []
+
+        # 模拟 share 执行中：直接设置 _executing
+        key = "user:1"
+        coordinator._executing[key] = True
+
+        # chat 提交 → buffered
+        chat_a = await coordinator.submit(
+            key, "msg_A", AsyncMock(return_value="rA")
+        )
+        assert chat_a.status == "buffered"
+        assert coordinator._pending_messages.get(key) == ["msg_A"]
+
+        # 模拟 share 退出：清除 _executing 和 _has_buffered，
+        # 但保留 _pending_messages（finally 块逻辑）
+        coordinator._executing.pop(key, None)
+        coordinator._has_buffered.pop(key, None)
+
+        # 验证缓冲消息残留
+        assert coordinator._pending_messages.get(key) is not None
+
+        # 新 chat submit：应追加 msg_B，而非覆盖 msg_A
+        async def chat_fn(messages):
+            seen_messages.extend(messages)
+            return "reply"
+
+        chat_b = await coordinator.submit(key, "msg_B", chat_fn)
+        assert chat_b.status == "success"
+        assert chat_b.value == "reply"
+        assert "msg_A" in seen_messages
+        assert "msg_B" in seen_messages
+        assert len(seen_messages) == 2
+
+    @pytest.mark.asyncio
     async def test_iteration_exhaustion_does_not_call_on_exhausted_when_had_success(self, coordinator):
         """超过 MAX_ITERATIONS 且 had_success=True 时不应调用 on_exhausted"""
         call_count = 0

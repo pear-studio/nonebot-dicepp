@@ -54,6 +54,83 @@ class TestFormatPrivateHistory:
         result = builder._format_private_history([])
         assert result == []
 
+    def test_merge_consecutive_user_messages(self):
+        """连续 user 消息合并为单条，保证 user/assistant 交替"""
+        builder = ContextBuilder(self._make_character())
+        history = [
+            {"role": "user", "content": "消息A", "created_at": _dt(30)},
+            {"role": "user", "content": "消息B", "created_at": _dt(31)},
+            {"role": "assistant", "content": "回复", "created_at": _dt(32)},
+            {"role": "user", "content": "消息C", "created_at": _dt(33)},
+        ]
+        result = builder._format_private_history(history)
+        assert len(result) == 3
+        assert result[0]["role"] == "user"
+        assert "消息A" in result[0]["content"]
+        assert "消息B" in result[0]["content"]
+        assert "\n" in result[0]["content"]
+        assert result[1]["role"] == "assistant"
+        assert result[2]["role"] == "user"
+        assert "消息C" in result[2]["content"]
+
+    def test_merge_all_user_messages(self):
+        """全部为 user 消息时合并为单条"""
+        builder = ContextBuilder(self._make_character())
+        history = [
+            {"role": "user", "content": "A", "created_at": _dt(30)},
+            {"role": "user", "content": "B", "created_at": _dt(31)},
+            {"role": "user", "content": "C", "created_at": _dt(32)},
+        ]
+        result = builder._format_private_history(history)
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+        assert "A" in result[0]["content"]
+        assert "B" in result[0]["content"]
+        assert "C" in result[0]["content"]
+
+    def test_all_assistant_messages(self):
+        """纯 assistant 消息不触发 buffer flush，逐条输出"""
+        builder = ContextBuilder(self._make_character())
+        history = [
+            {"role": "assistant", "content": "回复1", "created_at": _dt(30)},
+            {"role": "assistant", "content": "回复2", "created_at": _dt(31)},
+        ]
+        result = builder._format_private_history(history)
+        assert len(result) == 2
+        assert result[0]["role"] == "assistant"
+        assert result[1]["role"] == "assistant"
+
+    def test_nonstandard_role_treated_as_user(self):
+        """非 assistant 的 role（如 system）被缓冲为 user"""
+        builder = ContextBuilder(self._make_character())
+        history = [
+            {"role": "system", "content": "系统消息", "created_at": _dt(30)},
+            {"role": "user", "content": "用户消息", "created_at": _dt(31)},
+        ]
+        result = builder._format_private_history(history)
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+        assert "系统消息" in result[0]["content"]
+        assert "用户消息" in result[0]["content"]
+
+    def test_three_consecutive_users_then_assistant(self):
+        """3 条连续 user 后接 assistant，user 全部合并"""
+        builder = ContextBuilder(self._make_character())
+        history = [
+            {"role": "user", "content": "A", "created_at": _dt(30)},
+            {"role": "user", "content": "B", "created_at": _dt(31)},
+            {"role": "user", "content": "C", "created_at": _dt(32)},
+            {"role": "assistant", "content": "回复", "created_at": _dt(33)},
+        ]
+        result = builder._format_private_history(history)
+        assert len(result) == 2
+        assert result[0]["role"] == "user"
+        assert "A" in result[0]["content"]
+        assert "B" in result[0]["content"]
+        assert "C" in result[0]["content"]
+        assert result[1]["role"] == "assistant"
+        assert "回复" in result[1]["content"]
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 6.2 群聊格式化 _format_group_history

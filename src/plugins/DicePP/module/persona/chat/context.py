@@ -220,20 +220,46 @@ class ContextBuilder:
         return "\n\n".join(parts)
 
     def _format_private_history(self, history: List[Dict]) -> List[Dict[str, str]]:
-        """私聊历史格式化：按 role 直接映射，content 加 [HH:MM] 时间戳前缀"""
+        """私聊历史格式化：连续非 assistant 消息合并为单条 user
+
+        连续 user 消息换行拼接，保证 user/assistant 交替输出，满足
+        truncate_by_turns 的输入契约。
+        """
         if not history:
             return []
         now = persona_wall_now(self.timezone)
-        result = []
+        result: List[Dict[str, str]] = []
+        buffer: List[Dict] = []
+
+        def flush_buffer():
+            if not buffer:
+                return
+            lines = []
+            for m in buffer:
+                ts = format_timestamp(m.get("created_at"), now)
+                rel = format_relative_time(m.get("created_at"), now)
+                extra = f" {rel}" if rel else ""
+                prefix = f"[{ts}{extra}] " if ts else ""
+                lines.append(f"{prefix}{m['content']}")
+            result.append({"role": "user", "content": "\n".join(lines)})
+            buffer.clear()
+
         for msg in history:
-            ts = format_timestamp(msg.get("created_at"), now)
-            rel = format_relative_time(msg.get("created_at"), now)
-            extra = f" {rel}" if rel else ""
-            prefix = f"[{ts}{extra}] " if ts else ""
-            result.append({
-                "role": msg["role"],
-                "content": f"{prefix}{msg['content']}",
-            })
+            role = msg.get("role", "user")
+            if role == "assistant":
+                flush_buffer()
+                ts = format_timestamp(msg.get("created_at"), now)
+                rel = format_relative_time(msg.get("created_at"), now)
+                extra = f" {rel}" if rel else ""
+                prefix = f"[{ts}{extra}] " if ts else ""
+                result.append({
+                    "role": "assistant",
+                    "content": f"{prefix}{msg['content']}",
+                })
+            else:
+                buffer.append(msg)
+
+        flush_buffer()
         return result
 
     def _format_group_history(self, history: List[Dict]) -> List[Dict[str, str]]:
