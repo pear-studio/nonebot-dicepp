@@ -664,10 +664,10 @@ def homebrew_entry_delete(instance_id: str, bot_id: str, group_id: str, db_name:
 
 
 @app.post("/api/homebrew/{instance_id}/{bot_id}/{group_id}/dbs/{db_name}/upload")
-async def homebrew_upload(instance_id: str, bot_id: str, group_id: str, db_name: str,
+async def homebrew_upload(request: Request,
+                          instance_id: str, bot_id: str, group_id: str, db_name: str,
                           file: UploadFile = File(...),
-                          session: Dict = Depends(auth.require_auth),
-                          request: Request = None) -> Dict:  # type: ignore[assignment]
+                          session: Dict = Depends(auth.require_auth)) -> Dict:
     contents = await file.read()
     if len(contents) > 20 * 1024 * 1024:
         raise HTTPException(status_code=413, detail={"message": "xlsx 文件最大 20 MB"})
@@ -675,7 +675,7 @@ async def homebrew_upload(instance_id: str, bot_id: str, group_id: str, db_name:
     audit.log(session["username"], "homebrew.upload",
               target=f"{instance_id}/{bot_id}/{group_id}/{db_name}",
               detail=f"inserted={result.get('inserted', 0)} skipped={result.get('skipped', 0)}",
-              ip=_client_ip(request) if request else None)
+              ip=_client_ip(request))
     return result
 
 
