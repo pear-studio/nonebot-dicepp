@@ -110,6 +110,23 @@ class TestGenerateDiary:
         result = await agent.generate_diary(events=[], character_name="角色", character_description="描述")
         assert result == "今天没什么特别的事发生。"
 
+    @pytest.mark.asyncio
+    async def test_generate_diary_includes_date_in_prompt(self, agent, mock_router, monkeypatch):
+        """日记 prompt 必须包含真实日期，防止 LLM 错误推断月份（B-260522-8859d5）"""
+        fake_now = datetime(2026, 5, 23, 14, 30, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.event_agent.persona_wall_now",
+            lambda tz: fake_now,
+        )
+        mock_router._mock_tool_args = {"diary": "今天过得真充实"}
+
+        await agent.generate_diary(
+            events=[{"description": "事件", "reaction": "反应"}],
+            character_name="角色", character_description="描述")
+
+        user_msg = mock_router.run_via_loop.call_args.kwargs["messages"][1]["content"]
+        assert "当前日期: 2026年05月23日" in user_msg
+
 
 class TestGenerateEventResult:
     @pytest.fixture
@@ -187,6 +204,20 @@ class TestGenerateEventResult:
             world="", scenario="", recent_diaries=[], today_events=[],
             current_time=datetime(2024, 1, 1, 10, 0)))
         assert "休息" in result.description
+
+    @pytest.mark.asyncio
+    async def test_generate_event_result_includes_date_in_prompt(self, agent, mock_router):
+        """事件 prompt 必须包含真实日期，防止 LLM 错误推断月份（B-260522-8859d5）"""
+        mock_router._mock_tool_args = {"description": "窗外下雨了", "context_summary": "窗外下雨", "duration_minutes": 30}
+
+        await agent.generate_event_result(EventContext(
+            character_name="小雨", character_description="温柔的少女",
+            world="", scenario="", recent_diaries=[], today_events=[],
+            current_time=datetime(2024, 1, 1, 10, 0)))
+
+        user_msg = mock_router.run_via_loop.call_args.kwargs["messages"][1]["content"]
+        assert "当前日期: 2024年01月01日" in user_msg
+        assert "当前时间: 10:00" in user_msg
 
 
 class TestGenerateEventReaction:

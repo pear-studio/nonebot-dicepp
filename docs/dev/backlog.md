@@ -22,22 +22,6 @@
 - 问题表现: tool description 中引导语气过弱(可使用)，LLM 不引用角色外貌占位符，最终图片 prompt 缺少角色特征，生成图片主角不对
 - 工作计划: 强化 tool description：展示外貌描述原文 + 明确引导 + 说明原因 + 纯风景例外。改 generate_image.py 的 make_generate_image_tool_def
 
-### [B-260522-8859d5] 事件/日记生成 LLM prompt 缺少真实日期，导致日记月份错误（11月 vs 5月）
-- 创建: 2026-05-22
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - 日记内容日期为"11月21日~25日"对应真实日期 5月18~22日，LLM 自行推断起始月份后每天递增
-    - 事件描述中也出现"11月23日。下午。"等错误日期
-    - 根因：event_agent.py 的 generate_event_result（L256）和 generate_diary（L531）的 user_prompt 均未注入真实日期
-    - 前一天日记作为上下文传给 LLM，错误日期自我强化
-- 工作计划:
-    - 在 generate_event_result 的 user_prompt 中加上"当前日期: 2026年5月23日"
-    - 在 generate_diary 的 user_prompt 中加上日期
-    - 影响面：life/event_agent.py:256~257 user_prompt、life/event_agent.py:531~537 user_prompt
-    - 风险：低，纯 prompt 修改，不影响数据流
-
 ### [B-260522-8dcb27] 日报"主动消息覆盖"统计口径错误——统计全部 bot 消息而非主动消息
 - 创建: 2026-05-22
 - 优先级: P1

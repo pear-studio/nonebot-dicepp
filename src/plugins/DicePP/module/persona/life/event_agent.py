@@ -15,7 +15,7 @@ from ..llm.selection import SelectionPolicy
 from ..tools.registry import ToolRegistry, ToolDomain
 from ..tools.collecting import RECORD_EVENT_TOOL, RECORD_REACTION_TOOL, RECORD_DIARY_ENTRY_TOOL, RECORD_SHARE_MESSAGE_TOOL
 from ..tools.context import ToolContext
-from ..wall_clock import format_timestamp, format_relative_time
+from ..wall_clock import format_timestamp, format_relative_time, persona_wall_now
 from typing import TYPE_CHECKING
 
 # keep in sync with PersonaConfig.background_llm_timeout_seconds default
@@ -253,7 +253,8 @@ class EventGenerationAgent:
             )
 
         now_str = format_timestamp(context.current_time, context.current_time) if context.current_time else "??:??"
-        user_prompt = f"当前时间: {now_str}{intention_text}{diary_context}{events_context}\n\n请生成一个符合世界观的生活事件，并通过 record_event 工具记录:"
+        date_str = context.current_time.strftime("%Y年%m月%d日") if context.current_time else ""
+        user_prompt = f"当前日期: {date_str}\n当前时间: {now_str}{intention_text}{diary_context}{events_context}\n\n请生成一个符合世界观的生活事件，并通过 record_event 工具记录:"
 
         logger.debug("[prompt:system_event]\n{}", system_prompt)
         logger.debug("[prompt:user_event]\n{}", user_prompt)
@@ -528,7 +529,12 @@ class EventGenerationAgent:
         if yesterday_diary:
             yesterday_context = f"\n\n昨天的日记:\n{yesterday_diary[:200]}..."
 
-        user_prompt = f"""今天最终状态:
+        tz = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
+        now = persona_wall_now(tz)
+        date_str = now.strftime("%Y年%m月%d日")
+
+        user_prompt = f"""当前日期: {date_str}
+今天最终状态:
 {state_text}{intention_text}
 
 今天发生的事情:
