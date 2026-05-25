@@ -252,10 +252,14 @@ class ContextBuilder:
                 rel = format_relative_time(msg.get("created_at"), now)
                 extra = f" {rel}" if rel else ""
                 prefix = f"[{ts}{extra}] " if ts else ""
-                result.append({
+                entry: Dict[str, str] = {
                     "role": "assistant",
                     "content": f"{prefix}{msg['content']}",
-                })
+                }
+                run_id = msg.get("agent_run_id", "")
+                if run_id:
+                    entry["agent_run_id"] = run_id
+                result.append(entry)
             else:
                 buffer.append(msg)
 
@@ -296,10 +300,14 @@ class ContextBuilder:
                 rel = format_relative_time(msg.get("created_at"), now)
                 extra = f" {rel}" if rel else ""
                 prefix = f"[{ts}{extra}] " if ts else ""
-                result.append({
+                entry: Dict[str, str] = {
                     "role": "assistant",
                     "content": f"{prefix}{msg['content']}",
-                })
+                }
+                run_id = msg.get("agent_run_id", "")
+                if run_id:
+                    entry["agent_run_id"] = run_id
+                result.append(entry)
             else:
                 buffer.append(msg)
 
@@ -307,10 +315,76 @@ class ContextBuilder:
         return result
 
     def format_history(self, history: List[Dict], is_group: bool) -> List[Dict[str, str]]:
-        """格式化历史消息统一入口，根据 is_group 派发私聊/群聊路径"""
+        """格式化历史消息统一入口，根据 is_group 派发私聊/群聊路径
+
+        Phase M1: 格式化后自动合并同一 agent_run_id 的连续 assistant segments，
+        避免 LLM 看到多条连续 assistant 消息破坏 user/assistant 交替契约。
+        """
         if is_group:
-            return self._format_group_history(history)
-        return self._format_private_history(history)
+            formatted = self._format_group_history(history)
+        else:
+            formatted = self._format_private_history(history)
+        return self.merge_same_run_segments(formatted)
+
+    @staticmethod
+    def merge_same_run_segments(
+        formatted: List[Dict[str, str]],
+    ) -> List[Dict[str, str]]:
+        """合并同一 agent_run_id 的连续 assistant segments
+
+        同一 run 的连续 assistant 消息在 DB 中按 segment_index 分开存储，
+        读取端应聚合成一条 assistant context message，不破坏 user/assistant 交替。
+        如果输入中没有 agent_run_id 标记，则不做合并。
+
+        Args:
+            formatted: format_history 初始输出（可能含 agent_run_id 标记）
+
+        Returns:
+            合并后的历史列表
+        """
+        if not formatted:
+            return []
+
+        merged: List[Dict[str, str]] = []
+        buffer: List[Dict[str, str]] = []
+        last_run_id: Optional[str] = None
+
+        def flush_buffer():
+            if not buffer:
+                return
+            if len(buffer) == 1:
+                merged.extend(buffer)
+            else:
+                # 合并多条 assistant 消息为一条
+                combined_content = "\n".join(m.get("content", "") for m in buffer)
+                merged.append({
+                    "role": "assistant",
+                    "content": combined_content,
+                })
+            buffer.clear()
+
+        for entry in formatted:
+            role = entry.get("role", "")
+            run_id = entry.get("agent_run_id", "")
+
+            if role == "assistant" and run_id:
+                # assistant + 有 agent_run_id → 尝试合并
+                if run_id == last_run_id:
+                    # 同 run，继续缓冲
+                    buffer.append(entry)
+                else:
+                    # 不同 run 或第一个
+                    flush_buffer()
+                    buffer.append(entry)
+                    last_run_id = run_id
+            else:
+                # 非 assistant 或没有 agent_run_id → 刷新缓冲并原样输出
+                flush_buffer()
+                last_run_id = None
+                merged.append(entry)
+
+        flush_buffer()
+        return merged
 
     def truncate_by_turns(
         self, history: List[Dict[str, str]], max_turns: int, max_tokens: int

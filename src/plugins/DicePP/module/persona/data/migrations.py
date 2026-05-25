@@ -257,6 +257,70 @@ CREATE INDEX IF NOT EXISTS idx_daily_events_date
 ON persona_daily_events(date);
 """
 
+# Agent Runtime 表 (Phase M1)
+CREATE_AGENT_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_agent_runs (
+    run_id TEXT PRIMARY KEY,
+    turn_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    group_id TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP,
+    final_reason TEXT DEFAULT '',
+    provider TEXT DEFAULT '',
+    model TEXT DEFAULT '',
+    tokens_in INTEGER DEFAULT 0,
+    tokens_out INTEGER DEFAULT 0,
+    tool_rounds INTEGER DEFAULT 0,
+    warning_count INTEGER DEFAULT 0,
+    sink_failure_count INTEGER DEFAULT 0,
+    error TEXT DEFAULT ''
+);
+"""
+
+CREATE_AGENT_EVENTS_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_agent_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(run_id, seq)
+);
+"""
+
+CREATE_AGENT_EVENTS_RUN_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_agent_events_run_seq
+ON persona_agent_events(run_id, seq);
+"""
+
+CREATE_AGENT_EVENTS_TYPE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_agent_events_type
+ON persona_agent_events(event_type);
+"""
+
+# message_stream 扩展列（Phase M1），用 ALTER TABLE 以避免影响已有 schema
+ALTER_MESSAGE_STREAM_ADD_AGENT_RUN_ID = """
+ALTER TABLE message_stream ADD COLUMN agent_run_id TEXT DEFAULT '';
+"""
+
+ALTER_MESSAGE_STREAM_ADD_TURN_ID = """
+ALTER TABLE message_stream ADD COLUMN turn_id TEXT DEFAULT '';
+"""
+
+ALTER_MESSAGE_STREAM_ADD_SEGMENT_INDEX = """
+ALTER TABLE message_stream ADD COLUMN segment_index INTEGER DEFAULT -1;
+"""
+
+ALTER_MESSAGE_STREAM_ADD_SEGMENT_PHASE = """
+ALTER TABLE message_stream ADD COLUMN segment_phase TEXT DEFAULT '';
+"""
+
+# 新表迁移统一追加到 ALL_MIGRATIONS
 ALL_MIGRATIONS = [
     CREATE_MESSAGE_STREAM_TABLE,
     CREATE_MESSAGE_STREAM_USER_INDEX,
@@ -282,4 +346,17 @@ ALL_MIGRATIONS = [
     CREATE_SCORING_FAILURES_INDEX_CREATED_AT,
     CREATE_SCORE_HISTORY_INDEX,
     CREATE_DAILY_EVENTS_INDEX,
+    # Phase M1: Agent Runtime
+    CREATE_AGENT_RUNS_TABLE,
+    CREATE_AGENT_EVENTS_TABLE,
+    CREATE_AGENT_EVENTS_RUN_INDEX,
+    CREATE_AGENT_EVENTS_TYPE_INDEX,
+]
+
+# message_stream 扩展列 ALTER TABLE（独立列表，因 SQLite 的 ADD COLUMN 非幂等）
+ALTER_MESSAGE_STREAM_COLUMNS = [
+    ALTER_MESSAGE_STREAM_ADD_AGENT_RUN_ID,
+    ALTER_MESSAGE_STREAM_ADD_TURN_ID,
+    ALTER_MESSAGE_STREAM_ADD_SEGMENT_INDEX,
+    ALTER_MESSAGE_STREAM_ADD_SEGMENT_PHASE,
 ]

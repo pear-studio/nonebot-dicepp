@@ -11,10 +11,33 @@
 import asyncio
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from plugins.DicePP.module.persona.chat.session import ChatSession, ChatConfig
 from plugins.DicePP.module.persona.llm.coordinator import LLMCallCoordinator
+
+
+@pytest.fixture(autouse=True)
+def mock_agent_runtime():
+    """Mock AgentRuntime.run_chat — 模拟 UsageSink 计费行为"""
+    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+    from plugins.DicePP.module.persona.agent.loop import AgentRunResult
+
+    original = AgentRuntime.run_chat
+    result = AgentRunResult(
+        run_id="test", turn_id="test", status="completed",
+        final_reason="direct_content", final_text="reply",
+        delivery_performed=False,
+    )
+
+    async def fake_run_chat(self, messages, user_id, group_id, **kwargs):
+        # 模拟 UsageSink 在 AgentLoop 首次 LLM 调用后的计费
+        await self._router.increment_usage(user_id)
+        return result
+
+    AgentRuntime.run_chat = fake_run_chat
+    yield
+    AgentRuntime.run_chat = original
 
 
 def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
@@ -33,15 +56,6 @@ def _make_session(coordinator: LLMCallCoordinator) -> ChatSession:
 
     router = MagicMock()
     router.increment_usage = AsyncMock()
-    from plugins.DicePP.module.persona.llm.loop import LoopResult
-
-    async def _run_via_loop(*args, **kwargs):
-        # BillingHook 在首次 post_llm 时调用 increment_usage
-        user_id = kwargs.get("user_id", "")
-        await router.increment_usage(user_id)
-        return LoopResult(final_output="reply", metadata={"tool_rounds": 0, "callback_count": 0})
-
-    router.run_via_loop = AsyncMock(side_effect=_run_via_loop)
     router.data_store = None
     router.quota_check_enabled = False
     router.daily_limit = 20
@@ -118,7 +132,7 @@ async def test_buffered_merge_charges_per_call():
     async def slow_chat_call(user_id, group_id, messages):
         nonlocal call_count
         call_count += 1
-        # 模拟 BillingHook 在 _chat_with_tools 内的计费行为
+        # 模拟 AgentRuntime 内部计费行为
         await session.router.increment_usage(user_id)
         if call_count == 1:
             first_started.set()

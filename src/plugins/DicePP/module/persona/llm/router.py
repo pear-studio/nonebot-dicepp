@@ -18,7 +18,7 @@ from .providers.protocol import LLMProvider, ImageGenProvider, ErrorClass
 from .errors import ErrorKind, classify_from_provider
 from .circuit_breaker import CircuitBreakerRegistry
 from .selection import SelectionPolicy
-from ..agent.loop import AgentLoop, LoopResult
+from ..agent.old_loop import OldAgentLoop as AgentLoop, LoopResult
 
 if TYPE_CHECKING:
     from ..tools.registry import ToolRegistry

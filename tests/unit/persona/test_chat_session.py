@@ -10,11 +10,34 @@ import random
 from datetime import datetime, timedelta
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from plugins.DicePP.module.persona.chat.session import ChatSession, ChatConfig
 from plugins.DicePP.module.persona.data.models import DailyEvent, RelationshipState
 from plugins.DicePP.module.persona.llm.coordinator import LLMCallCoordinator
+
+
+@pytest.fixture(autouse=True)
+def mock_agent_runtime():
+    """Mock AgentRuntime.run_chat — 避免依赖真实 LLM 调用"""
+    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+    from plugins.DicePP.module.persona.agent.loop import AgentRunResult
+
+    original = AgentRuntime.run_chat
+    result = AgentRunResult(
+        run_id="test", turn_id="test", status="completed",
+        final_reason="direct_content", final_text="reply",
+        delivery_performed=False,
+    )
+    calls: list = []
+
+    async def fake_run_chat(self, messages, user_id, group_id, **kwargs):
+        calls.append((messages, user_id, group_id))
+        return result
+
+    AgentRuntime.run_chat = fake_run_chat
+    yield calls
+    AgentRuntime.run_chat = original
 
 
 def _make_session(
@@ -38,9 +61,6 @@ def _make_session(
 
     router = MagicMock()
     router.increment_usage = AsyncMock()
-    from plugins.DicePP.module.persona.llm.loop import LoopResult
-    router.run_via_loop = AsyncMock(return_value=LoopResult(
-        final_output="reply", metadata={"tool_rounds": 0, "callback_count": 0}))
     router.data_store = None
     router.quota_check_enabled = False
     router.daily_limit = 20
@@ -98,7 +118,7 @@ def _make_session(
 
 
 @pytest.mark.asyncio
-async def test_dedup_within_5_seconds_returns_none():
+async def test_dedup_within_5_seconds_returns_none(mock_agent_runtime):
     """5 秒内重复消息直接返回 None，不进入 LLM 路径"""
     session = _make_session()
 
@@ -108,8 +128,8 @@ async def test_dedup_within_5_seconds_returns_none():
     # 立刻发送相同消息：应被去重
     again = await session.chat("u1", "", "你好")
     assert again is None
-    # 第二次不应触发任何 router 调用
-    assert session.router.run_via_loop.await_count <= 1
+    # 第二次不应触发额外的 agent 调用（去重前最多 1 次）
+    assert len(mock_agent_runtime) <= 1
 
 
 @pytest.mark.asyncio
@@ -125,25 +145,25 @@ async def test_dedup_different_message_not_skipped():
 
 
 @pytest.mark.asyncio
-async def test_first_private_message_goes_through_coordinator():
+async def test_first_private_message_goes_through_coordinator(mock_agent_runtime):
     """私聊首次对话走标准 LLM 路径"""
     session = _make_session()
     result = await session.chat("u1", "", "你好")
     assert result is not None
-    assert session.router.run_via_loop.await_count == 1
+    assert len(mock_agent_runtime) == 1
 
 
 @pytest.mark.asyncio
-async def test_first_group_message_goes_through_coordinator():
+async def test_first_group_message_goes_through_coordinator(mock_agent_runtime):
     """群聊首次对话走标准 LLM 路径"""
     session = _make_session()
     result = await session.chat("u1", "g1", "大家好")
     assert result is not None
-    assert session.router.run_via_loop.await_count == 1
+    assert len(mock_agent_runtime) == 1
 
 
 @pytest.mark.asyncio
-async def test_refuse_triggers_at_warmth_zero(monkeypatch):
+async def test_refuse_triggers_at_warmth_zero(monkeypatch, mock_agent_runtime):
     """warmth_level=0 时按概率返回 refuse 文案，跳过 LLM"""
     rel = RelationshipState(
         user_id="u1",
@@ -166,7 +186,7 @@ async def test_refuse_triggers_at_warmth_zero(monkeypatch):
     result = await session.chat("u1", "", "你好")
 
     assert result == "...（已读不回）"
-    assert session.router.run_via_loop.await_count == 0
+    assert len(mock_agent_runtime) == 0
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,7 @@ from .models import (
 from .migrations import (
     ALL_MIGRATIONS, RENAME_LEGACY_TABLE,
     DROP_LEGACY_USER_INDEX, DROP_LEGACY_GROUP_INDEX,
+    ALTER_MESSAGE_STREAM_COLUMNS,
 )
 
 
@@ -87,6 +88,12 @@ class PersonaDataStore:
             pass  # 旧表不存在或已迁移，无需处理
         for migration in ALL_MIGRATIONS:
             await self.db.execute(migration)
+        # Phase M1: message_stream 扩展列（幂等 ALTER TABLE）
+        for alter_sql in ALTER_MESSAGE_STREAM_COLUMNS:
+            try:
+                await self.db.execute(alter_sql)
+            except Exception:
+                pass  # 列已存在时忽略
         await self.db.commit()
 
     # ========== 消息流表 (message_stream) ==========
@@ -103,6 +110,7 @@ class PersonaDataStore:
             content=row[5],
             display_name=row[6] or "",
             created_at=datetime.fromisoformat(row[7]) if row[7] else None,
+            agent_run_id=row[8] if len(row) > 8 else "",
         )
 
     async def add_message_stream(
@@ -113,16 +121,30 @@ class PersonaDataStore:
         type: MessageType,
         content: str,
         display_name: str = "",
+        *,
+        agent_run_id: str = "",
+        turn_id: str = "",
+        segment_index: int = -1,
+        segment_phase: str = "",
     ) -> int:
-        """写入一条消息流记录，返回 last_insert_rowid。写入后按限频触发保留裁剪。"""
+        """写入一条消息流记录，返回 last_insert_rowid。写入后按限频触发保留裁剪。
+
+        新增参数 (Phase M1):
+            agent_run_id: 所属 Agent run ID
+            turn_id: 所属 turn ID
+            segment_index: 分段序号 (>=0)
+            segment_phase: 分段阶段 ("interim" / "final")
+        """
         now_iso = self._wall_now().isoformat()
         cursor = await self.db.execute(
             """
             INSERT INTO message_stream
-            (user_id, group_id, role, type, content, display_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (user_id, group_id, role, type, content, display_name, created_at,
+             agent_run_id, turn_id, segment_index, segment_phase)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, group_id, role, type.value, content, display_name, now_iso),
+            (user_id, group_id, role, type.value, content, display_name, now_iso,
+             agent_run_id, turn_id, segment_index, segment_phase),
         )
         await self.db.commit()
         rowid = cursor.lastrowid
@@ -1700,5 +1722,144 @@ class PersonaDataStore:
         )
         await self.db.commit()
         return True
+
+    # ========== Agent Runtime (Phase M1) ==========
+
+    async def insert_agent_run(
+        self,
+        run_id: str,
+        turn_id: str,
+        user_id: str,
+        group_id: str,
+        mode: str,
+        *,
+        started_at: Optional[str] = None,
+    ) -> None:
+        """创建 agent run 记录。"""
+        now = started_at or self._wall_now().isoformat()
+        await self.db.execute(
+            """
+            INSERT INTO persona_agent_runs
+                (run_id, turn_id, user_id, group_id, mode, started_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, turn_id, user_id, group_id, mode, now),
+        )
+        await self.db.commit()
+
+    async def update_agent_run(
+        self,
+        run_id: str,
+        **updates: Any,
+    ) -> None:
+        """更新 agent run 记录。支持字段：status, finished_at, final_reason,
+        provider, model, tokens_in, tokens_out, tool_rounds,
+        warning_count, sink_failure_count, error。"""
+        allowed = {
+            "status", "finished_at", "final_reason",
+            "provider", "model",
+            "tokens_in", "tokens_out", "tool_rounds",
+            "warning_count", "sink_failure_count", "error",
+        }
+        cols = []
+        vals: list = []
+        for key, val in updates.items():
+            if key not in allowed:
+                logger.warning(f"update_agent_run: 忽略未知字段 {key}")
+                continue
+            cols.append(f"{key} = ?")
+            vals.append(val)
+        if not cols:
+            return
+        vals.append(run_id)
+        await self.db.execute(
+            f"UPDATE persona_agent_runs SET {', '.join(cols)} WHERE run_id = ?",
+            vals,
+        )
+        await self.db.commit()
+
+    async def get_agent_run(self, run_id: str) -> Optional[dict]:
+        """获取 agent run 记录，返回 dict 或 None。"""
+        async with self.db.execute(
+            """
+            SELECT run_id, turn_id, user_id, group_id, mode,
+                   status, started_at, finished_at, final_reason,
+                   provider, model, tokens_in, tokens_out, tool_rounds,
+                   warning_count, sink_failure_count, error
+            FROM persona_agent_runs WHERE run_id = ?
+            """,
+            (run_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "run_id": row[0],
+            "turn_id": row[1],
+            "user_id": row[2],
+            "group_id": row[3],
+            "mode": row[4],
+            "status": row[5],
+            "started_at": row[6],
+            "finished_at": row[7],
+            "final_reason": row[8],
+            "provider": row[9],
+            "model": row[10],
+            "tokens_in": row[11],
+            "tokens_out": row[12],
+            "tool_rounds": row[13],
+            "warning_count": row[14],
+            "sink_failure_count": row[15],
+            "error": row[16],
+        }
+
+    async def insert_agent_event(
+        self,
+        run_id: str,
+        seq: int,
+        event_type: str,
+        payload_json: str,
+        *,
+        created_at: Optional[str] = None,
+    ) -> None:
+        """写入一条 agent 事件记录。"""
+        now = created_at or self._wall_now().isoformat()
+        await self.db.execute(
+            """
+            INSERT INTO persona_agent_events
+                (run_id, seq, event_type, payload_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (run_id, seq, event_type, payload_json, now),
+        )
+        await self.db.commit()
+
+    async def get_agent_events(
+        self,
+        run_id: str,
+    ) -> List[dict]:
+        """获取指定 run 的所有事件，按 seq 升序。"""
+        async with self.db.execute(
+            """
+            SELECT id, run_id, seq, event_type, payload_json, schema_version, created_at
+            FROM persona_agent_events
+            WHERE run_id = ?
+            ORDER BY seq ASC
+            """,
+            (run_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "run_id": r[1],
+                "seq": r[2],
+                "event_type": r[3],
+                "payload_json": r[4],
+                "schema_version": r[5],
+                "created_at": r[6],
+            }
+            for r in rows
+        ]
 
 

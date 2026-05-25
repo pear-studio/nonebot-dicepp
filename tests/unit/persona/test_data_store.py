@@ -390,12 +390,21 @@ class TestCharacterStateCRUD:
 
 
 class TestGetDailyChatStats:
-    """get_daily_chat_stats — 仅统计 type='chat' 消息，排除 SYSTEM_LOG"""
+    """get_daily_chat_stats — 仅统计 type='chat' 消息，排除 SYSTEM_LOG
+
+    使用 store._wall_now() 动态获取日期，避免硬编码日期因运行日期不同而失效。
+    """
+
+    @pytest.fixture
+    def today(self, temp_db):
+        """返回 store 墙钟的当前日期字符串，与插入消息的 created_at 对齐。"""
+        from plugins.DicePP.module.persona.wall_clock import persona_wall_now
+        return persona_wall_now("Asia/Shanghai").strftime("%Y-%m-%d")
 
     @pytest.mark.asyncio
-    async def test_empty_db_returns_zeros(self, temp_db):
+    async def test_empty_db_returns_zeros(self, temp_db, today):
         store = temp_db
-        stats = await store.get_daily_chat_stats("2026-05-24")
+        stats = await store.get_daily_chat_stats(today)
         assert stats["bot"] == 0
         assert stats["user"] == 0
         assert stats["users"] == 0
@@ -405,10 +414,9 @@ class TestGetDailyChatStats:
         assert stats["top_groups"] == []
 
     @pytest.mark.asyncio
-    async def test_counts_only_chat_messages(self, temp_db):
+    async def test_counts_only_chat_messages(self, temp_db, today):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
         # Chat 消息 — 应计入
         await store.add_message_stream("u1", "g1", "assistant", MessageType.CHAT, "hi", "Bot")
         await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "hello", "Alice")
@@ -419,17 +427,16 @@ class TestGetDailyChatStats:
         # System_log — 不应计入
         await store.add_message_stream("u1", "g1", "assistant", MessageType.SYSTEM_LOG, "report", "Bot")
 
-        stats = await store.get_daily_chat_stats(date)
+        stats = await store.get_daily_chat_stats(today)
         assert stats["bot"] == 1
         assert stats["user"] == 2
         assert stats["users"] == 3  # u1, u2, u3
         assert stats["groups"] == 2  # g1, g2
 
     @pytest.mark.asyncio
-    async def test_top_users_ordering_and_display_name(self, temp_db):
+    async def test_top_users_ordering_and_display_name(self, temp_db, today):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "a", "Charlie")
         await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "b", "Alice")
         await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "c", "Alice")
@@ -438,7 +445,7 @@ class TestGetDailyChatStats:
         await store.add_message_stream("u3", "g1", "user", MessageType.CHAT, "f", "Bob")
         await store.add_message_stream("u4", "g1", "user", MessageType.CHAT, "g", "")  # 无 display_name
 
-        stats = await store.get_daily_chat_stats(date)
+        stats = await store.get_daily_chat_stats(today)
         assert len(stats["top_users"]) == 3
         assert stats["top_users"][0]["user_id"] == "u3"  # 3 条
         assert stats["top_users"][1]["user_id"] == "u2"  # 2 条
@@ -450,24 +457,22 @@ class TestGetDailyChatStats:
         # u4 not in top 3
 
     @pytest.mark.asyncio
-    async def test_top_users_no_display_name_falls_back_to_id(self, temp_db):
+    async def test_top_users_no_display_name_falls_back_to_id(self, temp_db, today):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "hi", "")
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "there", "")
 
-        stats = await store.get_daily_chat_stats(date)
+        stats = await store.get_daily_chat_stats(today)
         assert len(stats["top_users"]) == 1
         assert stats["top_users"][0]["user_id"] == "u1"
         assert stats["top_users"][0]["display_name"] == ""
         assert stats["top_users"][0]["cnt"] == 2
 
     @pytest.mark.asyncio
-    async def test_top_groups_ordering(self, temp_db):
+    async def test_top_groups_ordering(self, temp_db, today):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "a")
         await store.add_message_stream("u2", "g2", "user", MessageType.CHAT, "b")
         await store.add_message_stream("u3", "g2", "user", MessageType.CHAT, "c")
@@ -476,37 +481,38 @@ class TestGetDailyChatStats:
         await store.add_message_stream("u6", "g3", "user", MessageType.CHAT, "f")
         await store.add_message_stream("u7", "g4", "user", MessageType.CHAT, "g")
 
-        stats = await store.get_daily_chat_stats(date)
+        stats = await store.get_daily_chat_stats(today)
         assert len(stats["top_groups"]) == 3
         assert stats["top_groups"][0] == {"group_id": "g3", "cnt": 3}
         assert stats["top_groups"][1] == {"group_id": "g2", "cnt": 2}
         assert stats["top_groups"][2] == {"group_id": "g1", "cnt": 1}
 
     @pytest.mark.asyncio
-    async def test_group_id_empty_string_excluded(self, temp_db):
+    async def test_group_id_empty_string_excluded(self, temp_db, today):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
         # 私聊消息 group_id="" — 不应计入 groups
         await store.add_message_stream("u1", "", "user", MessageType.CHAT, "private")
 
-        stats = await store.get_daily_chat_stats(date)
+        stats = await store.get_daily_chat_stats(today)
         assert stats["groups"] == 0
         assert stats["top_groups"] == []
 
     @pytest.mark.asyncio
-    async def test_new_users_only_counts_first_time_chatters(self, temp_db):
+    async def test_new_users_only_counts_first_time_chatters(self, temp_db, today):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        today = "2026-05-24"
-        earlier = "2026-05-23"
+        from datetime import datetime, timedelta
+
+        today_dt = datetime.strptime(today, "%Y-%m-%d")
+        yesterday = (today_dt - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # u1 has chatted before → not new
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "old", "Old")
-        # Manually update created_at to earlier date
+        # Manually update created_at to yesterday
         await store.db.execute(
             "UPDATE message_stream SET created_at = ? WHERE user_id = ?",
-            (f"{earlier}T10:00:00", "u1"),
+            (f"{yesterday}T10:00:00", "u1"),
         )
         await store.db.commit()
 
@@ -517,14 +523,13 @@ class TestGetDailyChatStats:
         assert stats["new_users"] == 1
 
     @pytest.mark.asyncio
-    async def test_less_than_three_users_returns_all(self, temp_db):
+    async def test_less_than_three_users_returns_all(self, temp_db, today):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "hi")
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "again")
 
-        stats = await store.get_daily_chat_stats(date)
+        stats = await store.get_daily_chat_stats(today)
         assert len(stats["top_users"]) == 1
         assert stats["top_users"][0]["user_id"] == "u1"
         assert stats["top_users"][0]["cnt"] == 2

@@ -414,7 +414,6 @@ def _build_chat(deps: ChatDeps) -> ChatSession:
         response_handler=response_handler,
         context_builder=context_builder,
         decay_calculator=deps.decay_calculator,
-        segment_dispatcher=deps.segment_dispatcher,
         query_store=deps.query_store,
         resolve_db=deps.resolve_db,
         sleep_gate=deps.sleep_gate,

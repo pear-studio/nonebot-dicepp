@@ -22,10 +22,8 @@ from ..data.store import PersonaDataStore
 from ..data.models import (
     RelationshipState,
     UnifiedMessage,
-    MessageType,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
-from ..llm.selection import SelectionPolicy
 from ..character.models import Character
 from ..chat.context import ContextBuilder
 from ..chat.chat_config import ChatConfig
@@ -36,8 +34,6 @@ from ..tools.context import ToolContext
 from ..life.protocols import SleepGate
 from ..llm.coordinator import LLMCallCoordinator
 from ..gateway.port import MessagePort
-from .segment_dispatcher import SegmentDispatcher, SegmentItem
-from .segment_state import SegmentBudgetState, SegmentLimits
 
 _DEFAULT_SLEEP_MESSAGES = ("角色正在休息，请稍后再来",)
 
@@ -66,7 +62,6 @@ class ChatSession:
         response_handler: "ResponseHandler",
         context_builder: ContextBuilder,
         decay_calculator: Optional[DecayCalculator] = None,
-        segment_dispatcher: Optional[SegmentDispatcher] = None,
         query_store: Any = None,
         resolve_db: Any = None,
         sleep_gate: Optional[SleepGate] = None,
@@ -81,7 +76,6 @@ class ChatSession:
         self._response_handler = response_handler
         self.context_builder = context_builder
         self.decay_calculator = decay_calculator
-        self.segment_dispatcher = segment_dispatcher
         self.query_store = query_store
         self.resolve_db = resolve_db
         self._sleep_gate = sleep_gate
@@ -328,127 +322,40 @@ class ChatSession:
     async def _chat_with_tools(
         self, user_id: str, group_id: str, messages: List[Dict],
     ) -> str:
-        target_key = SegmentDispatcher.target_key(user_id, group_id)
+        from ..agent.runtime import AgentRuntime
+        from ..agent.tool_bridge import build_registry
+        from ..agent.request import AgentRunLimits
 
-        if self.segment_dispatcher:
-            await self.segment_dispatcher.flush(target_key)
+        limits = AgentRunLimits(
+            max_tool_rounds=self.config.tools_max_rounds,
+        )
 
-        tools = self.tool_registry.get_definitions_for(ToolDomain.CHAT)
-
-        segment_state = None
-        if self.segment_dispatcher:
-            segment_limits = SegmentLimits(
-                max_chars=self.config.segment_max_chars,
-                soft_limit=self.config.segment_soft_limit,
-                hard_limit=self.config.segment_hard_limit,
-                count_max=self.config.segment_count_max,
-                max_delay=self.config.segment_max_delay,
-            )
-            segment_state = SegmentBudgetState(limits=segment_limits)
+        runtime = AgentRuntime(
+            router=self.router,
+            store=self.store,
+            port=self._response_handler.port,
+            limits=limits,
+        )
 
         ctx = ToolContext(
             user_id=user_id, group_id=group_id, store=self.store,
-            send=self._response_handler.port, segment_dispatcher=self.segment_dispatcher,
-            segment_state=segment_state,
+            send=self._response_handler.port,
             query=self.query_store, resolve_db=self.resolve_db,
         )
 
-        # 组装 Hooks（通过 Router 工厂方法避免重复构造逻辑）
-        hooks = self.router.make_default_hooks(
-            include_billing=True, include_segment=bool(segment_state))
-
-        result = await self.router.run_via_loop(
-            messages=messages, tools=tools,
-            max_tool_rounds=self.config.tools_max_rounds,
-            selection=SelectionPolicy.CHAT,
-            user_id=user_id, group_id=group_id,
-            tool_registry=self.tool_registry,
-            tool_domains=[ToolDomain.CHAT], tool_ctx=ctx,
-            hooks=hooks,
+        new_registry = build_registry(
+            self.tool_registry, [ToolDomain.CHAT], ctx=ctx,
         )
 
-        if result.aborted:
-            raise QuotaExceeded(result.abort_reason)
-
-        metadata = result.metadata
-        content = result.final_output or ""
-
-        if metadata.get("tool_rounds", 0) > 0:
-            logger.debug(
-                f"工具调用完成: user={user_id}, "
-                f"rounds={metadata.get('tool_rounds')}, "
-                f"tools={metadata.get('tool_names')}, "
-                f"cached={metadata.get('cached_tokens', 0)}")
-
-        if self.segment_dispatcher:
-            return await self._run_chat_with_tools_segmented(
-                user_id, group_id, target_key, content, metadata, segment_state)
-
-        return content
-
-    async def _run_chat_with_tools_segmented(
-        self,
-        user_id: str,
-        group_id: str,
-        target_key: str,
-        content: str,
-        metadata: Dict[str, Any],
-        segment_state: SegmentBudgetState,
-    ) -> str:
-        """分段路径：拼接回复、兜底处理、历史写入"""
-        full_reply = "".join(segment_state.buffer)
-
-        # 5.4.4 / 5.4.5: 兜底 — callback 用尽且 LLM 仍未分段
-        if metadata.get("callback_count", 0) >= self.config.segment_round_callbacks_max:
-            if content:
-                # 若 buffer 已有成功发送的分段，说明 LLM 已发完内容、
-                # 最后一轮多输出了一句状态文本，保留 buffer 忽略 content。
-                # 此处兜底与 ContextBuilder 分段引导 prompt 共同防御 LLM 多余输出，
-                # 修改任一需确认另一是否需要同步。
-                if segment_state.buffer:
-                    logger.warning(
-                        f"LLM 已发送 {segment_state.segment_count} 段后输出额外文本，已忽略: "
-                        f"user={user_id}, extra={content[:80]!r}"
-                    )
-                else:
-                    fallback_content = content[:self.config.segment_hard_limit]
-                    logger.warning(
-                        f"LLM 忽略分段工具，使用兜底: user={user_id}, "
-                        f"fallback_len={len(fallback_content)}"
-                    )
-                    if self.segment_dispatcher:
-                        await self.segment_dispatcher.flush(target_key)
-                    segment_state.buffer.append(fallback_content)
-                    segment_state.total_chars += len(fallback_content)
-                    segment_state.segment_count += 1
-                    self.segment_dispatcher.notify(
-                        target_key,
-                        SegmentItem(
-                            content=fallback_content,
-                            delay_before=0.0,
-                            user_id=user_id,
-                            group_id=group_id,
-                        ),
-                    )
-                    full_reply = "".join(segment_state.buffer)
-            else:
-                logger.error(f"LLM 耗尽 callback 且返回空 content: user={user_id}")
-
-        # 5.4.6: 写入历史，分段已由 dispatcher 实时发出
-        effective_user_id = "assistant" if group_id else user_id
-        msg_id = await self.store.add_message_stream(
-            user_id=effective_user_id,
-            group_id=group_id or "",
-            role="assistant",
-            type=MessageType.CHAT,
-            content=full_reply,
-            display_name="我",
+        result = await runtime.run_chat(
+            messages=messages, user_id=user_id, group_id=group_id,
+            tool_registry=new_registry,
         )
 
-        if self.segment_dispatcher:
-            await self.segment_dispatcher.drain(target_key)
+        if result.delivery_performed and result.final_reason != "direct_content":
+            return self._SegmentedSentinel(result.final_text)
 
-        return self._SegmentedSentinel(full_reply)
+        return result.final_text
 
     # ── 历史管理 ──────────────────────────────────────────────
 
