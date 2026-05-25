@@ -171,6 +171,8 @@ class ScoringTrigger:
                 messages=messages,
                 current_profile=profile,
                 relationship=rel_for_scoring,
+                user_id=user_id,
+                group_id=group_id,
             )
         except Exception as exc:
             await self._store.record_scoring_failure(

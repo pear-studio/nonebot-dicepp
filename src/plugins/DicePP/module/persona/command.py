@@ -397,8 +397,8 @@ class PersonaCommand(UserCommandBase):
 
         # 发送回复
         # - response is None：去重命中或未进入 chat 路径，静默早退
-        # - response 是 falsy 但非 None（_SegmentedSentinel("")）：分段路径已通过
-        #   调度器实时发送，仍需更新群活跃度，但跳过再次 _send
+        # - response 是空字符串但非 None：分段路径已通过调度器实时发送，
+        #   仍需更新群活跃度，但跳过再次 _send
         if response is None:
             return []
 

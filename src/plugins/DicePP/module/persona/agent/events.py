@@ -42,6 +42,10 @@ class AgentRunFinishedPayload:
     reason: str
     delivery_performed: bool
     final_text: str
+    tokens_input: int = 0
+    tokens_output: int = 0
+    provider: str = ""
+    model: str = ""
 
 
 @dataclass
@@ -163,6 +167,17 @@ class ToolCallSkippedPayload:
     tool_call_id: str
     tool_name: str
     reason: str
+
+
+# ── Structured collection payloads ────────────────────────────────
+
+
+@dataclass
+class StructuredOutputCollectedPayload:
+    """结构化采集工具完成事件 — 标记一条 STATE_WRITE 采集记录。"""
+    tool_call_id: str
+    tool_name: str
+    arguments: dict
 
 
 # ── Delivery / action payloads ──────────────────────────────────

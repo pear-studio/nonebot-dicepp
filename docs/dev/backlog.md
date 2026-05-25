@@ -34,6 +34,32 @@
     - M3 清理 old_loop.py 时一并删除 import asyncio
     - 当前 M1 阶段不动旧代码，避免引入不必要风险
 
+### [B-260525-060854] 工具元数据 DRY 违反：Pydantic schema 与旧 ToolDef 双维护
+- 创建: 2026-05-25
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - _COLLECTING_TOOL_META(6 项) + 旧 ToolDef(6 项) + 新 Pydantic Args(6 个 model) 三层元数据重复
+    - name/description/参数约束在三处独立定义需手动同步
+- 工作计划:
+    - 修复方向: 以 Pydantic model 为单一事实来源，由 model_json_schema() 自动推导旧格式 tool definition
+    - 影响面: ToolSpec/LLMGateway/ToolRegistry 多层需改动
+    - 风险点: 高风险，M3 规划中清理
+
+### [B-260525-b537b2] AgentRuntime.run() 与 run_chat() 装配逻辑重复
+- 创建: 2026-05-25
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - AgentRuntime.run() 和 run_chat() 约 18 行装配逻辑完全一致，唯一差异是 sinks 列表和 quota 预检
+    - 两处重复增加后续维护同步成本
+- 工作计划:
+    - 修复方向: 提取私有方法 _build_event_bus() 或 _run_internal()
+    - 影响面: runtime.py 内部重构，对外无 API 变更
+    - 风险点: 需验证不破坏两路径行为差异；M3 统一处理
+
 ## roll
 
 ### [B-260520-be2315] 掷骰引擎统一 — 删除 Legacy 引擎，全量迁移到 AST 引擎

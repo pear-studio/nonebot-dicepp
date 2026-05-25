@@ -56,7 +56,7 @@ def make_suggest_action_executor(
             try:
                 async with life_lock:
                     ongoing = [a.description for a in character_life.get_ongoing_activities()]
-                    result, reason = await action_evaluator.evaluate(action_idea, ongoing)
+                    result, reason = await action_evaluator.evaluate(action_idea, ongoing, user_id=user_id)
                     logger.info(
                         "[suggest_action] EVAL user=%s result=%s reason=%s",
                         user_id, result, reason,

@@ -128,6 +128,7 @@ class ActionEvaluator:
         self,
         action_idea: str,
         ongoing_descriptions: Optional[List[str]] = None,
+        user_id: str = "",
     ) -> Tuple[str, str]:
         """评估行动可行性，返回 (result, reason)。"""
         try:
@@ -147,44 +148,87 @@ class ActionEvaluator:
                 ongoing_descriptions=ongoing_descriptions or [],
             )
 
-            return await self._call_llm(user_prompt)
+            return await self._call_llm(user_prompt, user_id=user_id)
 
         except Exception:
             logger.exception("[ActionEvaluator] 评估失败")
             return ("rejected", "评估异常，默认拒绝")
 
-    async def _call_llm(self, user_prompt: str) -> Tuple[str, str]:
-        collected_args: list = []
-        tool_registry = ToolRegistry()
-        tool_registry.register(
-            "life",
-            ToolDef(name="record_evaluation", description="", parameters=RECORD_EVALUATION_TOOL["function"]["parameters"]),
-            make_collecting_executor(collected_args),
-        )
-
+    async def _call_llm(self, user_prompt: str, user_id: str = "") -> Tuple[str, str]:
         from ..llm.router import ServiceUnavailableError
-        hooks = self._router.make_default_hooks()
-        try:
-            result = await self._router.run_via_loop(
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                tools=[RECORD_EVALUATION_TOOL],
-                temperature=0.3,
-                timeout=self._timeout,
-                selection=SelectionPolicy.SCORING,
-                tool_registry=tool_registry,
-                tool_domains=["life"],
-                hooks=hooks,
-                max_tool_rounds=1,
+
+        # ── 新路径: AgentRuntime（store 存在时） ──
+        if self._store is not None:
+            from ..agent.runtime import AgentRuntime
+            from ..agent.request import AgentRunLimits
+            from ..agent.tool_bridge import build_collecting_registry
+
+            collected_args: list = []
+
+            async def _collect(args: dict) -> str:
+                collected_args.append(args)
+                return "ok"
+
+            runtime = AgentRuntime(
+                router=self._router,
+                store=self._store,
+                limits=AgentRunLimits(max_tool_rounds=1),
             )
-        except ServiceUnavailableError:
-            logger.warning("[ActionEvaluator] 无可用 LLM provider")
-            return ("rejected", "无可用 LLM 服务")
-        except Exception:
-            logger.exception("[ActionEvaluator] LLM 调用异常")
-            return ("rejected", "LLM 调用失败")
+            tool_registry = build_collecting_registry(_collect)
+
+            try:
+                await runtime.run(
+                    messages=[
+                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    user_id=user_id,
+                    group_id="",
+                    tool_registry=tool_registry,
+                    required_tools=["record_evaluation"],
+                    temperature=0.3,
+                    timeout=self._timeout,
+                    selection=SelectionPolicy.SCORING,
+                    mode="structured_collect",
+                )
+            except ServiceUnavailableError:
+                logger.warning("[ActionEvaluator] 无可用 LLM provider")
+                return ("rejected", "无可用 LLM 服务")
+            except Exception:
+                logger.exception("[ActionEvaluator] LLM 调用异常")
+                return ("rejected", "LLM 调用失败")
+
+        # ── 旧路径: run_via_loop（store 为 None 时使用，向后兼容） ──
+        else:
+            collected_args: list = []
+            tool_registry = ToolRegistry()
+            tool_registry.register(
+                "life",
+                ToolDef(name="record_evaluation", description="", parameters=RECORD_EVALUATION_TOOL["function"]["parameters"]),
+                make_collecting_executor(collected_args),
+            )
+            hooks = self._router.make_default_hooks()
+            try:
+                await self._router.run_via_loop(
+                    messages=[
+                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    tools=[RECORD_EVALUATION_TOOL],
+                    temperature=0.3,
+                    timeout=self._timeout,
+                    selection=SelectionPolicy.SCORING,
+                    tool_registry=tool_registry,
+                    tool_domains=["life"],
+                    hooks=hooks,
+                    max_tool_rounds=1,
+                )
+            except ServiceUnavailableError:
+                logger.warning("[ActionEvaluator] 无可用 LLM provider")
+                return ("rejected", "无可用 LLM 服务")
+            except Exception:
+                logger.exception("[ActionEvaluator] LLM 调用异常")
+                return ("rejected", "LLM 调用失败")
 
         if not collected_args:
             logger.warning("[ActionEvaluator] LLM 未调用 record_evaluation 工具")

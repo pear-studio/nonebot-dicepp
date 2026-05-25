@@ -21,6 +21,7 @@ from .actions import EffectKind
 from .event_bus import AgentEventBus
 from .events import (
     DeclaredActionProducedPayload,
+    StructuredOutputCollectedPayload,
     ToolArgumentsInvalidPayload,
     ToolArgumentsValidatedPayload,
     ToolCallRequestedPayload,
@@ -207,6 +208,18 @@ class ToolExecutor:
             ),
             state,
         )
+
+        # STATE_WRITE 工具额外产生结构化采集事件，形成清晰的审计记录
+        if spec.effect == EffectKind.STATE_WRITE:
+            await self._event_bus.emit(
+                "StructuredOutputCollected",
+                StructuredOutputCollectedPayload(
+                    tool_call_id=tc_id,
+                    tool_name=tc_name,
+                    arguments=parsed.model_dump(),
+                ),
+                state,
+            )
 
         return {"tool_call_id": tc_id, "content": str(content)}
 

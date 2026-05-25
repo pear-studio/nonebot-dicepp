@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from nonebot.log import logger
 
-from .actions import EffectKind
+from .actions import EffectKind, SendMessageAction, GenerateImageAction
 from .event_bus import AgentEventBus
 from .events import (
     AgentRunFinishedPayload,
@@ -39,6 +39,7 @@ from .request import AgentRunLimits, ToolUseMode
 from .sinks import DeliverySink, ImageGenerationSink
 from .state import AgentRunState
 from .tool_executor import ToolExecutor, ToolRegistry
+from ..llm.selection import SelectionPolicy
 
 _THINK_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL)
 
@@ -102,6 +103,7 @@ class AgentLoop:
         required_tools: Optional[List[str]] = None,
         temperature: Optional[float] = None,
         timeout: Optional[int] = None,
+        selection: Optional[SelectionPolicy] = None,
     ) -> AgentRunResult:
         """执行一次 Agent run。
 
@@ -130,6 +132,7 @@ class AgentLoop:
                 tool_use_mode=tool_use_mode,
                 required_tools=required_tools,
                 temperature=temperature,
+                selection=selection or SelectionPolicy.CHAT,
             )
 
             await self._event_bus.emit(
@@ -160,10 +163,12 @@ class AgentLoop:
                         reason="llm_error",
                         delivery_performed=False,
                         final_text="",
+                        tokens_input=total_tokens_in,
+                        tokens_output=total_tokens_out,
                     ),
                     state,
                 )
-                return self._build_result(state, "failed", "llm_error", 0, 0)
+                return self._build_result(state, "failed", "llm_error", total_tokens_in, total_tokens_out)
 
             total_tokens_in += result.usage.get("input", 0)
             total_tokens_out += result.usage.get("output", 0)
@@ -227,6 +232,10 @@ class AgentLoop:
                         reason="direct_content",
                         delivery_performed=True,
                         final_text=final_text,
+                        tokens_input=total_tokens_in,
+                        tokens_output=total_tokens_out,
+                        provider=provider,
+                        model=model,
                     ),
                     state,
                 )
@@ -299,13 +308,13 @@ class AgentLoop:
                         ordered_results.append(tr)
                         continue
 
-                    send_action = type("SendMessageAction", (), {
-                        "content": seg_content,
-                        "phase": phase,
-                        "delay_before": action_data.get("delay_before", 1.0),
-                        "segment_index": idx,
-                        "action_id": action_id,
-                    })
+                    send_action = SendMessageAction(
+                        content=seg_content,
+                        phase=phase,
+                        delay_before=action_data.get("delay_before", 1.0),
+                        segment_index=idx,
+                        action_id=action_id,
+                    )
 
                     await self._delivery.handle_send(
                         send_action,
@@ -338,10 +347,10 @@ class AgentLoop:
                     except (json.JSONDecodeError, TypeError):
                         action_data = {}
 
-                    gen_action = type("GenerateImageAction", (), {
-                        "prompt": action_data.get("prompt", result_content),
-                        "action_id": action_id,
-                    })
+                    gen_action = GenerateImageAction(
+                        prompt=action_data.get("prompt", result_content),
+                        action_id=action_id,
+                    )
 
                     observation = await self._image.handle_generate(gen_action)
                     tr["content"] = observation
@@ -367,6 +376,10 @@ class AgentLoop:
                         reason="terminal_final_segment",
                         delivery_performed=True,
                         final_text=state.final_text,
+                        tokens_input=total_tokens_in,
+                        tokens_output=total_tokens_out,
+                        provider=provider,
+                        model=model,
                     ),
                     state,
                 )

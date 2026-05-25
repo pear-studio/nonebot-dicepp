@@ -32,6 +32,7 @@ from .sinks import DeliverySink, ImageGenerationSink, UsageSink, RunSummarySink
 from .state import AgentRunState
 from .tool_executor import ToolExecutor, ToolRegistry
 from .tool_bridge import build_registry
+from ..llm.selection import SelectionPolicy
 
 
 def new_run_id() -> str:
@@ -150,6 +151,100 @@ class AgentRuntime:
             required_tools=["send_reply_segment"],
             temperature=temperature,
             timeout=timeout,
+            selection=SelectionPolicy.CHAT,
+        )
+
+        return result
+
+    async def run(
+        self,
+        messages: List[dict],
+        user_id: str,
+        group_id: str,
+        tool_registry: ToolRegistry,
+        *,
+        mode: str = "agent",
+        tools: Optional[List[dict]] = None,
+        tool_use_mode: ToolUseMode = ToolUseMode.REQUIRED_ONE_OF,
+        required_tools: Optional[List[str]] = None,
+        selection: SelectionPolicy = SelectionPolicy.SCORING,
+        temperature: Optional[float] = None,
+        timeout: Optional[int] = None,
+    ) -> AgentRunResult:
+        """执行一次 Agent run（通用路径，供 scoring/life 等非 chat 场景使用）。
+
+        与 run_chat 的区别：
+        - 默认使用 REQUIRED_ONE_OF 和 SCORING 策略
+        - 不设置 DeliverySink / ImageGenerationSink
+        - 不执行配额预检（配额由调用方控制）
+        """
+        run_id = new_run_id()
+        turn_id = new_turn_id()
+
+        # 初始化 state
+        state = AgentRunState(
+            run_id=run_id,
+            turn_id=turn_id,
+            user_id=user_id,
+            group_id=group_id,
+            mode=mode,
+        )
+
+        # 事件存储
+        event_store = EventStore(self._store)
+
+        # 事件总线 + sinks
+        usage_sink = UsageSink(self._router)
+        summary_sink = RunSummarySink(event_store)
+
+        sinks = [usage_sink, summary_sink]
+        bus = AgentEventBus(event_store=event_store, sinks=sinks)
+
+        # LLMGateway
+        gateway = LLMGateway(router=self._router, event_bus=bus)
+
+        # ToolExecutor
+        executor = ToolExecutor(registry=tool_registry, event_bus=bus)
+
+        # Loop（通用路径不需要 DeliverySink / ImageGenerationSink）
+        loop = AgentLoop(
+            llm_gateway=gateway,
+            tool_executor=executor,
+            event_bus=bus,
+            limits=self._limits,
+        )
+
+        # 写 persona_agent_runs
+        await event_store.write_run(
+            run_id=run_id, turn_id=turn_id,
+            user_id=user_id, group_id=group_id,
+            mode=mode,
+        )
+
+        # 事件：RunStarted
+        await bus.emit(
+            "AgentRunStarted",
+            AgentRunStartedPayload(
+                run_id=run_id, turn_id=turn_id,
+                user_id=user_id, group_id=group_id,
+                mode=mode,
+            ),
+            state,
+        )
+
+        # 工具定义
+        tool_defs = tools or tool_registry.get_openai_schemas()
+
+        # 执行 loop
+        result = await loop.run(
+            messages=messages,
+            state=state,
+            tools=tool_defs,
+            tool_use_mode=tool_use_mode,
+            required_tools=required_tools,
+            temperature=temperature,
+            timeout=timeout,
+            selection=selection,
         )
 
         return result

@@ -182,6 +182,22 @@ class RunSummarySink:
             if error:
                 updates["error"] = error
 
+            tokens_input = payload.get("tokens_input", 0)
+            if tokens_input:
+                updates["tokens_in"] = tokens_input
+
+            tokens_output = payload.get("tokens_output", 0)
+            if tokens_output:
+                updates["tokens_out"] = tokens_output
+
+            provider = payload.get("provider", "")
+            if provider:
+                updates["provider"] = provider
+
+            model = payload.get("model", "")
+            if model:
+                updates["model"] = model
+
             try:
                 await self._event_store.update_run(state.run_id, **updates)
             except Exception as e:

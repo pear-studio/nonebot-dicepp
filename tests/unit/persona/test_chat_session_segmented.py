@@ -130,16 +130,17 @@ def session(mock_store, mock_router, tool_registry, coordinator, character, conf
 
 class TestFlagLifecycle:
     @pytest.mark.asyncio
-    async def test_segmented_sentinel_returned_by_chat_with_tools(self, session):
+    async def test_delivery_performed_flag_set_by_chat_with_tools(self, session):
         result = await session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
-        assert isinstance(result, session._SegmentedSentinel)
+        assert result == "hello"
+        assert session._delivery_performed is True
 
     @pytest.mark.asyncio
-    async def test_chat_via_coordinator_returns_falsy_sentinel_for_segmented(self, session):
+    async def test_chat_via_coordinator_returns_empty_str_for_delivery_performed(self, session):
         result = await session._chat_via_coordinator("u1", "", "hi", "user:u1")
         assert result is not None
-        assert not result
-        assert isinstance(result, ChatSession._SegmentedSentinel)
+        assert result == ""
+        assert session._delivery_performed is True
 
     @pytest.mark.asyncio
     async def test_exception_does_not_produce_sentinel(self, session):
@@ -159,19 +160,18 @@ class TestFlagLifecycle:
 
 class TestReturnSemantics:
     @pytest.mark.asyncio
-    async def test_chat_returns_falsy_sentinel_for_segmented(self, session):
-        # AgentRuntime mock returns delivery_performed=True → falsy _SegmentedSentinel
+    async def test_chat_returns_empty_str_for_delivery_performed(self, session):
+        # AgentRuntime mock returns delivery_performed=True → 空字符串
         result = await session.chat("u1", "", "hello")
         assert result is not None
-        assert not result
-        assert isinstance(result, ChatSession._SegmentedSentinel)
+        assert result == ""
 
     @pytest.mark.asyncio
-    async def test_chat_returns_falsy_for_segmented_mode(self, session):
-        """分段模式下 chat 返回 falsy sentinel"""
+    async def test_chat_returns_empty_str_for_segmented_mode(self, session):
+        """分段模式下 chat 返回空字符串"""
         result = await session.chat("u1", "", "hello")
         assert result is not None
-        assert not result
+        assert result == ""
 
 
 class TestSegmentCorrectionHook:

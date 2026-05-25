@@ -11,6 +11,13 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from pydantic import BaseModel, Field
 from typing import Literal
 
+from ..tools.collecting import (
+    RecordDiaryEntryArgs,
+    RecordEventArgs,
+    RecordReactionArgs,
+    RecordScoreArgs,
+    RecordShareMessageArgs,
+)
 from ..tools.context import ToolContext
 from ..tools.registry import ToolRegistry as OldToolRegistry
 from .actions import EffectKind
@@ -63,6 +70,21 @@ class GenerateImageArgs(BaseModel):
     prompt: str = Field(..., description="图片描述")
 
 
+# ── 旧 ScoringAgent / ActionEvaluator 工具 Args Schema（桥接兼容）──
+
+
+class ScoreRelationshipArgs(BaseModel):
+    """score_relationship 参数 — ScoringAgent 当前使用"""
+    deltas: Dict[str, float] = Field(default_factory=dict, description="好感度变化，含 intimacy/passion/trust/secureness")
+    facts: Dict[str, Any] = Field(default_factory=dict, description="提取的用户事实")
+
+
+class RecordEvaluationArgs(BaseModel):
+    """record_evaluation 参数 — ActionEvaluator 当前使用"""
+    result: Literal["approved", "rejected", "deferred"] = Field(..., description="评估结果")
+    reason: str = Field(default="", description="评估理由")
+
+
 # ── 工具名 → args_schema 映射 ──────────────────────────────────
 
 _ARGS_SCHEMA_MAP: Dict[str, Type[BaseModel]] = {
@@ -73,9 +95,23 @@ _ARGS_SCHEMA_MAP: Dict[str, Type[BaseModel]] = {
     "suggest_action": SuggestActionArgs,
     "send_reply_segment": SendReplySegmentArgs,
     "generate_image": GenerateImageArgs,
+    # M2: 结构化采集工具
+    "record_event": RecordEventArgs,
+    "record_reaction": RecordReactionArgs,
+    "record_diary_entry": RecordDiaryEntryArgs,
+    "record_share_message": RecordShareMessageArgs,
+    "record_score": RecordScoreArgs,
+    # M2: 旧工具名桥接兼容
+    "record_evaluation": RecordEvaluationArgs,
+    "score_relationship": ScoreRelationshipArgs,
 }
 
 _EXTERNAL_TOOLS = {"send_reply_segment", "generate_image"}
+_STATE_WRITE_TOOLS = {
+    "record_event", "record_reaction", "record_diary_entry",
+    "record_share_message", "record_score",
+    "record_evaluation", "score_relationship",
+}
 
 
 def _make_pure_spec(
@@ -123,6 +159,32 @@ def _make_external_spec(
     )
 
 
+def _make_state_write_spec(
+    name: str,
+    desc: str,
+    args_schema: Type[BaseModel],
+    old_executor_fn: Callable,
+) -> ToolSpec:
+    """创建 STATE_WRITE 工具的 ToolSpec（包装旧 executor 闭包）。"""
+
+    async def _exec(**kwargs: Any) -> str:
+        tc = [{
+            "id": name,
+            "name": name,
+            "arguments": json.dumps(kwargs, ensure_ascii=False),
+        }]
+        results = await old_executor_fn(tc)
+        return results[0]["content"] if results else ""
+
+    return ToolSpec(
+        name=name,
+        description=desc,
+        args_schema=args_schema,
+        effect=EffectKind.STATE_WRITE,
+        executor=_exec,
+    )
+
+
 def build_registry(
     old_registry: OldToolRegistry,
     domains: List[str],
@@ -147,9 +209,54 @@ def build_registry(
 
         if name in _EXTERNAL_TOOLS:
             spec = _make_external_spec(name, desc, args_schema)
+        elif name in _STATE_WRITE_TOOLS:
+            spec = _make_state_write_spec(name, desc, args_schema, old_executor_fn)
         else:
             spec = _make_pure_spec(name, desc, args_schema, old_executor_fn)
 
+        reg.register(spec)
+
+    return reg
+
+
+# ── 结构化采集工具专用注册 ──────────────────────────────────────
+
+
+_COLLECTING_TOOL_META: List[tuple] = [
+    ("record_event", "记录生成的生活事件及其对角色状态的影响", RecordEventArgs),
+    ("record_reaction", "记录角色对事件的内心反应、分享欲望、行动倾向和意向更新", RecordReactionArgs),
+    ("record_diary_entry", "记录日记内容", RecordDiaryEntryArgs),
+    ("record_share_message", "调用此工具输出你要发给对方的分享消息。20-60字的第一人称口语消息", RecordShareMessageArgs),
+    ("record_score", "记录评分结果：好感度变化和用户事实提取", RecordScoreArgs),
+    ("record_evaluation", "记录行动可行性评估结果", RecordEvaluationArgs),
+]
+
+
+def build_collecting_registry(
+    executor_fn: Callable[[Dict[str, Any]], Awaitable[str]],
+) -> ToolRegistry:
+    """构建结构化采集工具的新 ToolRegistry，所有工具标记为 STATE_WRITE。
+
+    Args:
+        executor_fn: 统一的收集型 executor，签名 async (args: dict) -> str。
+                     由调用方提供（如包装 DB 写入或闭包收集）。
+
+    Returns:
+        新 ToolRegistry，包含 6 个 STATE_WRITE 工具。
+    """
+    reg = ToolRegistry()
+
+    for name, desc, args_schema in _COLLECTING_TOOL_META:
+        async def _exec(**kwargs: Any) -> str:
+            return await executor_fn(kwargs)
+
+        spec = ToolSpec(
+            name=name,
+            description=desc,
+            args_schema=args_schema,
+            effect=EffectKind.STATE_WRITE,
+            executor=_exec,
+        )
         reg.register(spec)
 
     return reg

@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from unittest.async_case import IsolatedAsyncioTestCase
 
 from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.chat.session import ChatSession
 from plugins.DicePP.module.persona.data.models import (
     RelationshipState,
     UserProfile,
@@ -174,7 +173,7 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
 
 @pytest.mark.integration
 class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
-    """R4 回归: 分段路径下 chat_with_user 返回 falsy `_SegmentedSentinel`(空字符串子类)，
+    """R4 回归: 分段路径下 chat_with_user 返回空字符串（delivery 已由 runtime 完成），
     群活跃度仍需更新, 但 _send 不应被再次调用 (消息已通过 dispatcher 实时发出)
     """
 
@@ -219,7 +218,7 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
 
         self.cmd.app = MagicMock()
         self.cmd.app.chat_with_user = AsyncMock(
-            return_value=ChatSession._SegmentedSentinel("")
+            return_value=""
         )
 
     async def test_segmented_response_updates_activity_without_resend(self):

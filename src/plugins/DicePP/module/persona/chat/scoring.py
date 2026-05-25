@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from nonebot.log import logger
 from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState
+from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy
 from ..tools.collecting import make_collecting_executor
@@ -28,78 +29,119 @@ class ScoringAgent:
     """评分 Agent - 批量分析对话提取用户档案和好感度变化"""
 
     def __init__(self, llm_router: LLMRouter, timezone: str = "Asia/Shanghai",
-                 max_tool_rounds: int = 3):
+                 max_tool_rounds: int = 3,
+                 store: Optional[PersonaDataStore] = None):
         self.llm_router = llm_router
         self.timezone = timezone
         self.max_tool_rounds = max_tool_rounds
+        self._store = store
 
     async def batch_analyze(
         self,
         messages: List[Dict[str, str]],
         current_profile: Optional[UserProfile] = None,
         relationship: Optional[RelationshipState] = None,
+        user_id: str = "",
+        group_id: str = "",
     ) -> ScoringAnalysisResult:
+        collected_args: list = []
+
+        # ── 新路径: AgentRuntime（store 存在时） ──
+        if self._store is not None:
+            tool_name = "record_score"
+            from ..agent.runtime import AgentRuntime
+            from ..agent.request import AgentRunLimits
+            from ..agent.tool_bridge import build_collecting_registry
+
+            runtime = AgentRuntime(
+                router=self.llm_router,
+                store=self._store,
+                limits=AgentRunLimits(max_tool_rounds=self.max_tool_rounds),
+            )
+
+            async def _collect(args: dict) -> str:
+                collected_args.append(args)
+                return "ok"
+
+            tool_registry = build_collecting_registry(_collect)
+
+        # ── 旧路径: run_via_loop（向后兼容，store 为 None 时使用） ──
+        else:
+            tool_name = "score_relationship"
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "description": "输出好感度变化分析和用户事实提取结果",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "deltas": {
+                                    "type": "object",
+                                    "properties": {
+                                        "intimacy": {"type": "number", "description": "亲密度变化，范围 -5.0 到 +5.0"},
+                                        "passion": {"type": "number", "description": "激情变化"},
+                                        "trust": {"type": "number", "description": "信任变化"},
+                                        "secureness": {"type": "number", "description": "安全感变化"},
+                                    },
+                                    "required": ["intimacy", "passion", "trust", "secureness"],
+                                },
+                                "facts": {
+                                    "type": "object",
+                                    "description": "提取或更新的用户事实，key-value 形式",
+                                },
+                            },
+                            "required": ["deltas", "facts"],
+                        },
+                    },
+                }
+            ]
+
+            old_tool_registry = ToolRegistry()
+            old_tool_registry.register(
+                "scoring",
+                ToolDef(name=tool_name, description="评分工具",
+                        parameters=tools[0]["function"]["parameters"]),
+                make_collecting_executor(collected_args),
+            )
+
         prompt = self._build_analysis_prompt(
             messages,
             current_profile or UserProfile(user_id="", facts={}),
-            relationship
+            relationship,
+            tool_name=tool_name,
         )
-
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "score_relationship",
-                    "description": "输出好感度变化分析和用户事实提取结果",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "deltas": {
-                                "type": "object",
-                                "properties": {
-                                    "intimacy": {"type": "number", "description": "亲密度变化，范围 -5.0 到 +5.0"},
-                                    "passion": {"type": "number", "description": "激情变化"},
-                                    "trust": {"type": "number", "description": "信任变化"},
-                                    "secureness": {"type": "number", "description": "安全感变化"},
-                                },
-                                "required": ["intimacy", "passion", "trust", "secureness"],
-                            },
-                            "facts": {
-                                "type": "object",
-                                "description": "提取或更新的用户事实，key-value 形式",
-                            },
-                        },
-                        "required": ["deltas", "facts"],
-                    },
-                },
-            }
-        ]
-
-        collected_args: list = []
-        tool_name = tools[0]["function"]["name"]
-
-        tool_registry = ToolRegistry()
-        tool_registry.register(
-            "scoring",
-            ToolDef(name=tool_name, description="评分工具",
-                    parameters=tools[0]["function"]["parameters"]),
-            make_collecting_executor(collected_args),
-        )
-
-        hooks = self.llm_router.make_default_hooks()
 
         try:
-            result = await self.llm_router.run_via_loop(
-                messages=[{"role": "user", "content": prompt}],
-                tools=tools,
-                temperature=0.7,
-                timeout=60,
-                selection=SelectionPolicy.SCORING,
-                tool_registry=tool_registry,
-                tool_domains=["scoring"],
-                hooks=hooks,
-                max_tool_rounds=self.max_tool_rounds,
-            )
+            if self._store is not None:
+                runtime_result = await runtime.run(
+                    messages=[{"role": "user", "content": prompt}],
+                    user_id=user_id,
+                    group_id=group_id,
+                    tool_registry=tool_registry,
+                    required_tools=["record_score"],
+                    temperature=0.7,
+                    timeout=60,
+                    mode="structured_collect",
+                    selection=SelectionPolicy.SCORING,
+                )
+                content = runtime_result.final_text or ""
+            else:
+                hooks = self.llm_router.make_default_hooks()
+                result = await self.llm_router.run_via_loop(
+                    messages=[{"role": "user", "content": prompt}],
+                    tools=tools,
+                    temperature=0.7,
+                    timeout=60,
+                    selection=SelectionPolicy.SCORING,
+                    tool_registry=old_tool_registry,
+                    tool_domains=["scoring"],
+                    hooks=hooks,
+                    max_tool_rounds=self.max_tool_rounds,
+                )
+                content = result.final_output or ""
+
         except ServiceUnavailableError as e:
             logger.error(f"评分: 无可用 LLM provider: {e}")
             return ScoringAnalysisResult(
@@ -112,8 +154,6 @@ class ScoringAgent:
                 deltas=ScoreDeltas(), facts={},
                 parse_error=f"LLM 调用失败: {type(e).__name__}: {e}",
             )
-
-        content = result.final_output or ""
 
         if not collected_args:
             raw_response = content if content else ""
@@ -153,6 +193,7 @@ class ScoringAgent:
         messages: List[Dict[str, str]],
         profile: UserProfile,
         relationship: Optional[RelationshipState] = None,
+        tool_name: str = "score_relationship",
     ) -> str:
         dialogue_lines = []
         now = persona_wall_now(self.timezone)
@@ -188,7 +229,7 @@ class ScoringAgent:
 ## 已知的用户信息
 {existing_facts}
 
-你必须通过调用 score_relationship 工具来输出结果，不要直接回复文本。
+你必须通过调用 {tool_name} 工具来输出结果，不要直接回复文本。
 
 注意：
 - 好感度变化基于用户的态度、话题深度、情感表达
@@ -223,9 +264,18 @@ class ScoringAgent:
             return default
 
     def _extract_result(self, data: dict) -> tuple[ScoreDeltas, Dict[str, Any]]:
-        """从解析的数据中提取结果"""
-        # 提取 deltas
-        deltas_data = data.get("deltas", {})
+        """从解析的数据中提取结果
+
+        兼容两种输入格式：
+        - 新格式 (record_score): 扁平字段 {intimacy, passion, trust, secureness, facts}
+        - 旧格式 (score_relationship): 嵌套 {deltas: {...}, facts: {...}}
+        """
+        # 判断格式：有 "deltas" 键 → 旧格式；否则 → 新格式
+        if "deltas" in data and isinstance(data["deltas"], dict):
+            deltas_data = data["deltas"]
+        else:
+            deltas_data = data  # 扁平格式，直接取根级字段
+
         if not isinstance(deltas_data, dict):
             deltas_data = {}
         deltas = ScoreDeltas(

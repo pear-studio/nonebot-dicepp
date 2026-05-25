@@ -45,11 +45,6 @@ if TYPE_CHECKING:
 class ChatSession:
     """对话会话管理器 — 负责对话编排、门控、上下文构建、工具调用委托"""
 
-    class _SegmentedSentinel(str):
-        """标记分段路径的哨兵值，继承 str 以保持与 coordinator 的兼容性。"""
-
-        pass
-
     def __init__(
         self,
         store: PersonaDataStore,
@@ -79,6 +74,7 @@ class ChatSession:
         self.query_store = query_store
         self.resolve_db = resolve_db
         self._sleep_gate = sleep_gate
+        self._delivery_performed = False
         self._last_messages: Dict[str, Tuple[str, float]] = {}
 
     def update_character(self, character: Character) -> None:
@@ -197,13 +193,11 @@ class ChatSession:
 
         response = await self._chat_with_tools(user_id, group_id, messages_for_llm)
 
-        if isinstance(response, self._SegmentedSentinel):
-            # 分段路径：历史已由 _chat_with_tools 写入，跳过重复持久化
-            await self._after_response(user_id, group_id, current_message, str(response))
-            return self._SegmentedSentinel("")
-
-        # 非分段路径：持久化由 _coordinator_on_result 统一完成
         await self._after_response(user_id, group_id, current_message, response)
+
+        if self._delivery_performed:
+            return ""
+
         return response
 
     async def _coordinator_on_exhausted(
@@ -224,7 +218,8 @@ class ChatSession:
         await self._response_handler.persist_and_send(user_id, group_id, fallback_response)
         await self._after_response(user_id, group_id, current_message, fallback_response)
         if self._response_handler.port is not None:
-            return self._SegmentedSentinel("")
+            self._delivery_performed = True
+            return ""
         else:
             logger.warning(
                 f"_coordinator_on_exhausted: MessagePort 未注入，"
@@ -276,7 +271,8 @@ class ChatSession:
            同 E 时间轴
            → coordinator 跑 3 轮 → 3 次扣费
         """
-        if isinstance(result, self._SegmentedSentinel):
+        if self._delivery_performed:
+            self._delivery_performed = False
             return
 
         await self._response_handler.persist_and_send(user_id, group_id, result)
@@ -312,8 +308,6 @@ class ChatSession:
         )
         if result.status == "success":
             # 最终轮计费由 BillingHook 处理（每次 AgentLoop.run() 首次 post_llm 扣费）。
-            # _SegmentedSentinel 是 str 子类，直接透传——
-            # 调用方用 `is None` 区分"未进入 chat"，用 `bool()` 区分"是否需要再发"
             return result.value
         return fallback_response if fallback_response is not None else None
 
@@ -352,8 +346,12 @@ class ChatSession:
             tool_registry=new_registry,
         )
 
+        if result.status != "completed":
+            logger.error(f"AgentRun 失败: status={result.status}, reason={result.final_reason}")
+            return "抱歉，我出错了，请稍后再试..."
+
         if result.delivery_performed and result.final_reason != "direct_content":
-            return self._SegmentedSentinel(result.final_text)
+            self._delivery_performed = True
 
         return result.final_text
 

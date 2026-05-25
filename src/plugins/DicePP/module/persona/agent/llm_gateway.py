@@ -89,6 +89,9 @@ class LLMGateway:
         Raises:
             QuotaExceeded: 额度超限
             ServiceUnavailableError: 所有候选均不可用
+
+        Note:
+            配额检查由调用方（AgentRuntime）负责，Gateway 层不做配额校验。
         """
         policy = request.selection
         candidates = self._router.build_candidates(policy)

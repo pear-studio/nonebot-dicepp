@@ -31,22 +31,34 @@ class EventSink(Protocol):
 
 
 class EventStore:
-    """事件持久化层 — 封装 PersonaDataStore 的 agent 事件写入。"""
+    """事件持久化层 — 封装 PersonaDataStore 的 agent 事件写入。
 
-    def __init__(self, data_store: PersonaDataStore) -> None:
+    store 为 None 时所有写入静默跳过（用于离线/测试场景）。
+    """
+
+    def __init__(self, data_store: Optional[PersonaDataStore] = None) -> None:
         self._store = data_store
 
     async def write_run(self, run_id: str, turn_id: str, user_id: str,
                         group_id: str, mode: str) -> None:
+        if not self._store:
+            logger.debug("EventStore: store is None, skipping write_run")
+            return
         await self._store.insert_agent_run(
             run_id=run_id, turn_id=turn_id, user_id=user_id,
             group_id=group_id, mode=mode,
         )
 
     async def update_run(self, run_id: str, **updates: Any) -> None:
+        if not self._store:
+            logger.debug("EventStore: store is None, skipping update_run")
+            return
         await self._store.update_agent_run(run_id, **updates)
 
     async def write_event(self, event: AgentEvent) -> None:
+        if not self._store:
+            logger.debug("EventStore: store is None, skipping write_event")
+            return
         await self._store.insert_agent_event(
             run_id=event.run_id,
             seq=event.seq,
@@ -56,6 +68,9 @@ class EventStore:
         )
 
     async def get_events(self, run_id: str) -> List[dict]:
+        if not self._store:
+            logger.debug("EventStore: store is None, skipping get_events")
+            return []
         return await self._store.get_agent_events(run_id)
 
 

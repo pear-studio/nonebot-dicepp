@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, AsyncMock
 
 from plugins.DicePP.module.persona.factory import PersonaApp
 from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.chat.session import ChatSession
 
 
 def _make_app() -> PersonaApp:
@@ -63,17 +62,15 @@ async def test_update_character_handles_missing_scheduler():
 
 
 @pytest.mark.asyncio
-async def test_chat_with_user_returns_falsy_when_segmented():
-    """分段模式下 ChatSession.chat 返回 falsy `_SegmentedSentinel`，PersonaApp 应透传"""
+async def test_chat_with_user_returns_empty_str_when_delivery_performed():
+    """分段模式下 ChatSession.chat 返回空字符串（delivery 已由 runtime 完成），PersonaApp 应透传"""
     app = _make_app()
-    sentinel = ChatSession._SegmentedSentinel("")
-    app.chat.chat = AsyncMock(return_value=sentinel)
+    app.chat.chat = AsyncMock(return_value="")
 
     result = await app.chat_with_user("u1", "g1", "hello", "nick")
 
     assert result is not None
-    assert not result
-    assert isinstance(result, ChatSession._SegmentedSentinel)
+    assert result == ""
     app.chat.chat.assert_awaited_once_with("u1", "g1", "hello", "nick")
 
 
