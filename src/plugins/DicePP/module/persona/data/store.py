@@ -9,6 +9,7 @@ import json
 from nonebot.log import logger
 import os
 import base64
+import sqlite3
 import aiosqlite
 from pydantic import ValidationError
 
@@ -92,8 +93,9 @@ class PersonaDataStore:
         for alter_sql in ALTER_MESSAGE_STREAM_COLUMNS:
             try:
                 await self.db.execute(alter_sql)
-            except Exception:
-                pass  # 列已存在时忽略
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    raise
         await self.db.commit()
 
     # ========== 消息流表 (message_stream) ==========

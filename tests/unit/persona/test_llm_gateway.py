@@ -6,7 +6,7 @@ from plugins.DicePP.module.persona.agent.llm_gateway import LLMGateway, LLMReque
 from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventStore
 from plugins.DicePP.module.persona.agent.state import AgentRunState
 from plugins.DicePP.module.persona.agent.request import ToolUseMode
-from plugins.DicePP.module.persona.llm.router import LLMRouter, QuotaExceeded, ServiceUnavailableError
+from plugins.DicePP.module.persona.llm.router import LLMRouter, ServiceUnavailableError
 from plugins.DicePP.module.persona.llm.selection import SelectionPolicy
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
 
@@ -75,9 +75,12 @@ class TestLLMGateway:
         sem.__aenter__ = AsyncMock()
         sem.__aexit__ = AsyncMock(return_value=None)
 
-        # _acquire_semaphore 被 spec 包装后 return_value 设置不生效，
+        # acquire_semaphore 被 spec 包装后 return_value 设置不生效，
         # 直接用 side_effect 让任意调用都返回 sem
-        router._acquire_semaphore.side_effect = lambda key=None: sem
+        router.acquire_semaphore.side_effect = lambda key=None: sem
+
+        # get_model_provider 委托到 _model_providers dict
+        router.get_model_provider.side_effect = lambda k: router._model_providers[k]
         return router
 
     @pytest.fixture
@@ -96,9 +99,9 @@ class TestLLMGateway:
     async def test_complete_success(self, gateway, mock_router):
         provider = Mock()
         provider.generate = AsyncMock(return_value=_make_llm_resp(content="hello"))
-        mock_router._build_candidates.return_value = [("p1", "m1")]
+        mock_router.build_candidates.return_value = [("p1", "m1")]
         mock_router._model_providers = {("p1", "m1"): provider}
-        mock_router._acquire_semaphore.return_value = Mock()
+        mock_router.acquire_semaphore.return_value = Mock()
         mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
 
         state = _make_state()
@@ -115,7 +118,7 @@ class TestLLMGateway:
 
     @pytest.mark.asyncio
     async def test_complete_no_candidates(self, gateway, mock_router):
-        mock_router._build_candidates.return_value = []
+        mock_router.build_candidates.return_value = []
         state = _make_state()
         req = _make_request()
 
@@ -129,9 +132,9 @@ class TestLLMGateway:
         provider1.generate = AsyncMock(side_effect=RuntimeError("timeout"))
         provider2 = Mock()
         provider2.generate = AsyncMock(return_value=_make_llm_resp(content="fallback ok"))
-        mock_router._build_candidates.return_value = [("p1", "m1"), ("p2", "m2")]
+        mock_router.build_candidates.return_value = [("p1", "m1"), ("p2", "m2")]
         mock_router._model_providers = {("p1", "m1"): provider1, ("p2", "m2"): provider2}
-        mock_router._acquire_semaphore.return_value = Mock()
+        mock_router.acquire_semaphore.return_value = Mock()
         mock_router.stats = {"p1": {"requests": 0, "errors": 0}, "p2": {"requests": 0, "errors": 0}}
 
         state = _make_state()
@@ -147,9 +150,9 @@ class TestLLMGateway:
         provider1.generate = AsyncMock(side_effect=RuntimeError("err1"))
         provider2 = Mock()
         provider2.generate = AsyncMock(side_effect=RuntimeError("err2"))
-        mock_router._build_candidates.return_value = [("p1", "m1"), ("p2", "m2")]
+        mock_router.build_candidates.return_value = [("p1", "m1"), ("p2", "m2")]
         mock_router._model_providers = {("p1", "m1"): provider1, ("p2", "m2"): provider2}
-        mock_router._acquire_semaphore.return_value = Mock()
+        mock_router.acquire_semaphore.return_value = Mock()
         mock_router.stats = {"p1": {"requests": 0, "errors": 0}, "p2": {"requests": 0, "errors": 0}}
 
         state = _make_state()
@@ -165,9 +168,9 @@ class TestLLMGateway:
         provider.generate = AsyncMock(return_value=_make_llm_resp(
             content="", tool_calls=[tc],
         ))
-        mock_router._build_candidates.return_value = [("p1", "m1")]
+        mock_router.build_candidates.return_value = [("p1", "m1")]
         mock_router._model_providers = {("p1", "m1"): provider}
-        mock_router._acquire_semaphore.return_value = Mock()
+        mock_router.acquire_semaphore.return_value = Mock()
         mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
 
         state = _make_state()
@@ -177,35 +180,6 @@ class TestLLMGateway:
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0]["name"] == "search"
         assert result.tool_calls[0]["id"] == "tc_1"
-
-    @pytest.mark.asyncio
-    async def test_check_quota_exceeded(self, mock_router, mock_event_store):
-        mock_router.quota_check_enabled = True
-        mock_router.data_store = Mock()
-        mock_router.data_store.get_daily_usage = AsyncMock(return_value=20)
-        mock_router.daily_limit = 10
-        mock_router.config = Mock()
-        mock_router.config.timezone = "Asia/Shanghai"
-
-        bus = AgentEventBus(event_store=mock_event_store)
-        gateway = LLMGateway(router=mock_router, event_bus=bus)
-
-        with pytest.raises(QuotaExceeded):
-            await gateway.check_quota("u1")
-
-    @pytest.mark.asyncio
-    async def test_check_quota_ok(self, mock_router, mock_event_store):
-        mock_router.quota_check_enabled = True
-        mock_router.data_store = Mock()
-        mock_router.data_store.get_daily_usage = AsyncMock(return_value=3)
-        mock_router.daily_limit = 10
-        mock_router.config = Mock()
-        mock_router.config.timezone = "Asia/Shanghai"
-
-        bus = AgentEventBus(event_store=mock_event_store)
-        gateway = LLMGateway(router=mock_router, event_bus=bus)
-
-        await gateway.check_quota("u1")  # no exception
 
     @pytest.mark.asyncio
     async def test_increment_usage(self, mock_router, mock_event_store):

@@ -134,7 +134,7 @@ class LLMRouter:
 
     # ── 候选池构建 ────────────────────────────────────────────
 
-    def _build_candidates(self, policy: SelectionPolicy) -> List[tuple]:
+    def build_candidates(self, policy: SelectionPolicy) -> List[tuple]:
         """三步筛选 + 排序，返回排序后的 (provider_name, model_name) 候选列表。"""
         model_list = self._llm_models if policy.category == "llm" else self._gen_models
 
@@ -236,13 +236,17 @@ class LLMRouter:
         )
         return True
 
-    def _acquire_semaphore(self, key: tuple) -> Any:
+    def acquire_semaphore(self, key: tuple) -> Any:
         provider_name = key[0]
         sem = self._semaphores.get(provider_name)
         if sem is None:
             sem = asyncio.Semaphore(self.global_max_concurrent)
             self._semaphores[provider_name] = sem
         return sem
+
+    def get_model_provider(self, key: tuple) -> object:
+        """返回 key 对应的 provider 实例。"""
+        return self._model_providers[key]
 
     # ── AgentLoop 执行 ────────────────────────────────────────
 
@@ -266,7 +270,7 @@ class LLMRouter:
         actual_timeout = timeout if timeout is not None else self.timeout
         policy = selection or SelectionPolicy.CHAT
 
-        candidates = self._build_candidates(policy)
+        candidates = self.build_candidates(policy)
         if not candidates:
             raise ServiceUnavailableError(
                 f"没有可用的模型匹配 policy: category={policy.category}, "
@@ -280,7 +284,7 @@ class LLMRouter:
             provider = self._model_providers[key]
             provider_name = key[0]
             model_name = key[1]
-            sem = self._acquire_semaphore(key)
+            sem = self.acquire_semaphore(key)
 
             async with sem:
                 self.stats[provider_name]["requests"] += 1

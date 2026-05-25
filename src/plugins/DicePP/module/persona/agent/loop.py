@@ -174,15 +174,6 @@ class AgentLoop:
             content = result.content or ""
             tool_calls = result.tool_calls
 
-            # 提取 think 标签并过滤
-            think_text = self._extract_think(content)
-
-            if tool_calls:
-                # tool_calls + content: content 忽略，只进 trace
-                content_ignored = bool(content.strip())
-            else:
-                content_ignored = False
-
             # ── L1 纠正：没有调工具且工具已提供 ──
             if (round_index < self._limits.max_corrections
                     and not tool_calls
@@ -399,6 +390,7 @@ class AgentLoop:
                     continue
                 else:
                     # correction 耗尽
+                    state.warning_count += 1
                     await self._event_bus.emit(
                         "AgentWarning",
                         AgentWarningPayload(
@@ -460,7 +452,7 @@ class AgentLoop:
             tokens_input=tokens_in,
             tokens_output=tokens_out,
             tool_rounds=state.tool_rounds,
-            warning_count=state.correction_count,
+            warning_count=state.warning_count,
             sink_failure_count=len(state.sink_failures),
             error=state.error,
             provider=provider,

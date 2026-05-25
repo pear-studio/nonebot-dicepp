@@ -22,6 +22,18 @@
 - 问题表现: 用户可通过 .ai key config 命令提供自己的 LLM API key，覆盖全局配置。涉及计费体系、配额管理、滥用防护等一整套体系，当前设计对安全边界覆盖不足。该功能与 provider 路由重构的候选池调度、熔断器、探针等核心机制耦合过深，增加了不必要的复杂度。当前从本分支 scope 中移出，需求保留待后续独立实施。
 - 工作计划: 独立设计用户 Key 管理子系统：安全存储（加密）、配额追踪、滥用检测。实现 UserLLMConfig 数据模型（含 API key 加密存储）。实现 .ai key config 命令交互流程。Router 层集成用户 Key 覆盖逻辑（优先级高于全局配置）。影响面: module/persona/data/models.py、module/persona/command.py、module/persona/llm/router.py。
 
+### [B-260525-c7668c] old_loop.py 清除未使用的 import asyncio
+- 创建: 2026-05-25
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现:
+    - old_loop.py 中存在 import asyncio 但代码中未使用
+    - 旧代码迁移至 old_loop.py 时引入的残留
+- 工作计划:
+    - M3 清理 old_loop.py 时一并删除 import asyncio
+    - 当前 M1 阶段不动旧代码，避免引入不必要风险
+
 ## roll
 
 ### [B-260520-be2315] 掷骰引擎统一 — 删除 Legacy 引擎，全量迁移到 AST 引擎

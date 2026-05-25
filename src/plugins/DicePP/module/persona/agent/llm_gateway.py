@@ -70,20 +70,6 @@ class LLMGateway:
         self._router = router
         self._event_bus = event_bus
 
-    async def check_quota(self, user_id: str) -> None:
-        """配额预检。由 AgentRuntime 在 run 开始前调用。"""
-        if not self._router.quota_check_enabled:
-            return
-        if not self._router.data_store:
-            return
-        from ..wall_clock import persona_wall_now
-        tz = self._router.config.timezone if self._router.config else "Asia/Shanghai"
-        today = persona_wall_now(tz).strftime("%Y-%m-%d")
-        count = await self._router.data_store.get_daily_usage(user_id, today)
-        if count >= self._router.daily_limit:
-            raise QuotaExceeded(
-                f"今日额度已用完 ({count}/{self._router.daily_limit})")
-
     async def complete(
         self,
         request: LLMRequest,
@@ -105,7 +91,7 @@ class LLMGateway:
             ServiceUnavailableError: 所有候选均不可用
         """
         policy = request.selection
-        candidates = self._router._build_candidates(policy)
+        candidates = self._router.build_candidates(policy)
         if not candidates:
             raise ServiceUnavailableError(
                 f"没有可用的模型匹配 policy: {policy}"
@@ -115,10 +101,10 @@ class LLMGateway:
         total_candidates = len(candidates)
 
         for idx, key in enumerate(candidates):
-            provider = self._router._model_providers[key]
+            provider = self._router.get_model_provider(key)
             provider_name = key[0]
             model_name = key[1]
-            sem = self._router._acquire_semaphore(key)
+            sem = self._router.acquire_semaphore(key)
 
             # 事件：候选选择
             await self._event_bus.emit(

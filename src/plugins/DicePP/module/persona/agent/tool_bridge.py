@@ -171,6 +171,10 @@ def _dynamic_model(name: str, parameters: dict) -> Type[BaseModel]:
             default = prop.get("default", None)
             if default is not None:
                 fields[key] = (Opt[py_type], Field(default=default))
+            elif py_type is list:
+                fields[key] = (Opt[py_type], Field(default_factory=list))
+            elif py_type is dict:
+                fields[key] = (Opt[py_type], Field(default_factory=dict))
             else:
                 fields[key] = (Opt[py_type], None)
 

@@ -56,7 +56,7 @@ class TestSingleCandidateSuccess:
         mock_result.aborted = False
         mock_result.abort_reason = ""
 
-        with patch.object(router, '_build_candidates', return_value=[("p1", "m1")]):
+        with patch.object(router, 'build_candidates', return_value=[("p1", "m1")]):
             with patch('plugins.DicePP.module.persona.llm.router.AgentLoop') as MockLoop:
                 mock_loop = MagicMock()
                 mock_loop.run = AsyncMock(return_value=mock_result)
@@ -97,7 +97,7 @@ class TestExceptionFallback:
 
         candidates = [("p1", "m1"), ("p1", "m2")]
 
-        with patch.object(router, '_build_candidates', return_value=candidates):
+        with patch.object(router, 'build_candidates', return_value=candidates):
             with patch('plugins.DicePP.module.persona.llm.router.AgentLoop') as MockLoop:
                 mock_loop1 = MagicMock()
                 mock_loop1.run = AsyncMock(side_effect=Exception("rate limit hit"))
@@ -120,7 +120,7 @@ class TestExceptionFallback:
 
         candidates = [("p1", "m1")]
 
-        with patch.object(router, '_build_candidates', return_value=candidates):
+        with patch.object(router, 'build_candidates', return_value=candidates):
             with patch('plugins.DicePP.module.persona.llm.router.AgentLoop') as MockLoop:
                 mock_loop = MagicMock()
                 mock_loop.run = AsyncMock(side_effect=Exception("fatal error"))
@@ -149,7 +149,7 @@ class TestTimeoutNoFallback:
 
         candidates = [("p1", "m1"), ("p1", "m2")]
 
-        with patch.object(router, '_build_candidates', return_value=candidates):
+        with patch.object(router, 'build_candidates', return_value=candidates):
             with patch('plugins.DicePP.module.persona.llm.router.AgentLoop') as MockLoop:
                 mock_loop = MagicMock()
                 mock_loop.run = AsyncMock(side_effect=asyncio.TimeoutError())

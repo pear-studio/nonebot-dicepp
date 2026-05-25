@@ -158,14 +158,13 @@ class RunSummarySink:
         if evt_type == "AgentWarning":
             self._warning_count += 1
 
-        if evt_type.startswith("AgentRunFinished") or evt_type.startswith("AgentRunFailed") \
-                or evt_type.startswith("AgentRunAborted"):
+        if evt_type in {"AgentRunFinished", "AgentRunFailed", "AgentRunAborted"}:
             status_map = {
                 "AgentRunFinished": "completed",
                 "AgentRunFailed": "failed",
                 "AgentRunAborted": "aborted",
             }
-            status = next((v for k, v in status_map.items() if evt_type.startswith(k)), "unknown")
+            status = status_map.get(evt_type, "unknown")
             payload = event.payload
             updates: Dict[str, Any] = {
                 "status": status,

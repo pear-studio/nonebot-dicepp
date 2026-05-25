@@ -26,6 +26,7 @@ class AgentRunState:
 
     tool_rounds: int = 0
     correction_count: int = 0
+    warning_count: int = 0
     interim_segment_count: int = 0
 
     sink_failures: List[str] = field(default_factory=list)

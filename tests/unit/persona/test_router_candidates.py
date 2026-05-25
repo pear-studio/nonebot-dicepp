@@ -1,4 +1,4 @@
-"""LLMRouter._build_candidates 排序与过滤单元测试"""
+"""LLMRouter.build_candidates 排序与过滤单元测试"""
 import pytest
 from unittest.mock import MagicMock
 
@@ -46,7 +46,7 @@ class TestCategoryIsolation:
             ("p1", "gpt-4", llm_cfg),
             ("p2", "dalle", gen_cfg),
         ])
-        candidates = router._build_candidates(SelectionPolicy.CHAT)
+        candidates = router.build_candidates(SelectionPolicy.CHAT)
         assert len(candidates) == 1
         assert candidates[0] == ("p1", "gpt-4")
 
@@ -58,7 +58,7 @@ class TestCategoryIsolation:
             ("p2", "dalle", gen_cfg),
         ])
         gen_policy = SelectionPolicy(category="gen", required_capabilities=("image",), prefer_quality=True, prefer_cost=False)
-        candidates = router._build_candidates(gen_policy)
+        candidates = router.build_candidates(gen_policy)
         assert len(candidates) == 1
         assert candidates[0] == ("p2", "dalle")
 
@@ -71,20 +71,20 @@ class TestCapabilityFilter:
             ("p1", "m1", text_only),
             ("p2", "m2", text_tools),
         ])
-        candidates = router._build_candidates(SelectionPolicy.SCORING)
+        candidates = router.build_candidates(SelectionPolicy.SCORING)
         assert len(candidates) == 1
         assert candidates[0] == ("p2", "m2")
 
     def test_exact_capability_match(self):
         cfg = _make_model_config("m1", capabilities=["text", "tool_calls"])
         router = _make_router_with_models([("p1", "m1", cfg)])
-        candidates = router._build_candidates(SelectionPolicy.SCORING)
+        candidates = router.build_candidates(SelectionPolicy.SCORING)
         assert len(candidates) == 1
 
     def test_superset_capability_passes(self):
         cfg = _make_model_config("m1", capabilities=["text", "tool_calls", "vision"])
         router = _make_router_with_models([("p1", "m1", cfg)])
-        candidates = router._build_candidates(SelectionPolicy.SCORING)
+        candidates = router.build_candidates(SelectionPolicy.SCORING)
         assert len(candidates) == 1
 
 
@@ -96,7 +96,7 @@ class TestQualitySort:
             ("p1", "low", low_q),
             ("p2", "high", high_q),
         ])
-        candidates = router._build_candidates(SelectionPolicy.CHAT)
+        candidates = router.build_candidates(SelectionPolicy.CHAT)
         assert candidates[0] == ("p2", "high")
 
     def test_cost_ascending_for_scoring(self):
@@ -106,7 +106,7 @@ class TestQualitySort:
             ("p1", "expensive", expensive),
             ("p2", "cheap", cheap),
         ])
-        candidates = router._build_candidates(SelectionPolicy.SCORING)
+        candidates = router.build_candidates(SelectionPolicy.SCORING)
         assert candidates[0] == ("p2", "cheap")
 
 
@@ -119,7 +119,7 @@ class TestCircuitBreakerFilter:
         mock_cb.is_available.return_value = False
         router.circuit_breakers.get.return_value = mock_cb
 
-        candidates = router._build_candidates(SelectionPolicy.CHAT)
+        candidates = router.build_candidates(SelectionPolicy.CHAT)
         assert len(candidates) == 0
 
     def test_available_model_passes(self):
@@ -130,7 +130,7 @@ class TestCircuitBreakerFilter:
         mock_cb.is_available.return_value = True
         router.circuit_breakers.get.return_value = mock_cb
 
-        candidates = router._build_candidates(SelectionPolicy.CHAT)
+        candidates = router.build_candidates(SelectionPolicy.CHAT)
         assert len(candidates) == 1
 
     def test_no_circuit_breaker_passes(self):
@@ -138,7 +138,7 @@ class TestCircuitBreakerFilter:
         router = _make_router_with_models([("p1", "m1", cfg)])
         router.circuit_breakers.get.return_value = None
 
-        candidates = router._build_candidates(SelectionPolicy.CHAT)
+        candidates = router.build_candidates(SelectionPolicy.CHAT)
         assert len(candidates) == 1
 
 
@@ -151,5 +151,5 @@ class TestLexicographicTieBreak:
             ("provider_b", "m1", cfg_b),
             ("provider_a", "m1", cfg_a),
         ])
-        candidates = router._build_candidates(SelectionPolicy.CHAT)
+        candidates = router.build_candidates(SelectionPolicy.CHAT)
         assert candidates[0] == ("provider_a", "m1")
