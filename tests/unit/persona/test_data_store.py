@@ -392,6 +392,11 @@ class TestCharacterStateCRUD:
 class TestGetDailyChatStats:
     """get_daily_chat_stats — 仅统计 type='chat' 消息，排除 SYSTEM_LOG"""
 
+    def _freeze_store_time(self, store, now: datetime | None = None) -> datetime:
+        fixed_now = now or datetime(2026, 5, 24, 12, 0, 0)
+        store._wall_now = lambda: fixed_now
+        return fixed_now
+
     @pytest.mark.asyncio
     async def test_empty_db_returns_zeros(self, temp_db):
         store = temp_db
@@ -408,7 +413,7 @@ class TestGetDailyChatStats:
     async def test_counts_only_chat_messages(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
+        date = self._freeze_store_time(store).date().isoformat()
         # Chat 消息 — 应计入
         await store.add_message_stream("u1", "g1", "assistant", MessageType.CHAT, "hi", "Bot")
         await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "hello", "Alice")
@@ -429,7 +434,7 @@ class TestGetDailyChatStats:
     async def test_top_users_ordering_and_display_name(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
+        date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "a", "Charlie")
         await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "b", "Alice")
         await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "c", "Alice")
@@ -453,7 +458,7 @@ class TestGetDailyChatStats:
     async def test_top_users_no_display_name_falls_back_to_id(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
+        date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "hi", "")
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "there", "")
 
@@ -467,7 +472,7 @@ class TestGetDailyChatStats:
     async def test_top_groups_ordering(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
+        date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "a")
         await store.add_message_stream("u2", "g2", "user", MessageType.CHAT, "b")
         await store.add_message_stream("u3", "g2", "user", MessageType.CHAT, "c")
@@ -486,7 +491,7 @@ class TestGetDailyChatStats:
     async def test_group_id_empty_string_excluded(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
+        date = self._freeze_store_time(store).date().isoformat()
         # 私聊消息 group_id="" — 不应计入 groups
         await store.add_message_stream("u1", "", "user", MessageType.CHAT, "private")
 
@@ -498,8 +503,9 @@ class TestGetDailyChatStats:
     async def test_new_users_only_counts_first_time_chatters(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        today = "2026-05-24"
-        earlier = "2026-05-23"
+        fixed_now = self._freeze_store_time(store)
+        today = fixed_now.date().isoformat()
+        earlier = (fixed_now - timedelta(days=1)).date().isoformat()
 
         # u1 has chatted before → not new
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "old", "Old")
@@ -520,7 +526,7 @@ class TestGetDailyChatStats:
     async def test_less_than_three_users_returns_all(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        date = "2026-05-24"
+        date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "hi")
         await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "again")
 

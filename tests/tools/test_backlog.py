@@ -13,6 +13,7 @@ def run(*args, cwd=None, input_text="") -> tuple[int, str, str]:
         [sys.executable, str(BACKLOG_PY), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=cwd,
         input=input_text,
     )
@@ -41,7 +42,7 @@ class TestAdd:
         )
         assert rc == 0
         assert out.startswith("B-")
-        text = backlog.read_text()
+        text = backlog.read_text(encoding="utf-8")
         assert "Dice balance check" in text
         assert "roll" in text
 
@@ -115,7 +116,7 @@ class TestBatchAdd:
         assert len(lines) == 2
         assert lines[0].startswith("B-")
         assert lines[1].startswith("B-")
-        text = backlog.read_text()
+        text = backlog.read_text(encoding="utf-8")
         assert "Batch A" in text
         assert "Batch B" in text
 
@@ -238,7 +239,7 @@ class TestSortValidate:
 
         rc, _, _ = run("--file", str(backlog), "sort")
         assert rc == 0
-        text = backlog.read_text()
+        text = backlog.read_text(encoding="utf-8")
         assert text.index("amod") < text.index("zmod")
 
     def test_validate_pass(self, tmp_dir):
