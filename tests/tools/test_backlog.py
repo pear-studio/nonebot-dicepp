@@ -64,9 +64,8 @@ class TestAdd:
         assert "校验失败" in err
 
     def test_add_duplicate_id_rejected(self, tmp_dir):
-        # 同秒内同 module/title/symptom 会生成相同 ID, 应被拒绝
         backlog = tmp_dir / "backlog.md"
-        args = [
+        base_args = [
             "--file", str(backlog),
             "add",
             "--module", "roll",
@@ -77,8 +76,8 @@ class TestAdd:
             "--symptom", "d0 边界未覆盖",
             "--plan", "增补单测",
         ]
-        run(*args)
-        rc, out, err = run(*args)
+        run(*base_args, "--id", "B-250101-aaa000")
+        rc, out, err = run(*base_args, "--id", "B-250101-aaa000")
         assert rc != 0
         assert "已存在" in err
 
