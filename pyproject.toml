@@ -82,12 +82,14 @@ markers = [
     "real_llm: Tests that call real LLM APIs (cost money, require API key)",
     "integration: Integration tests for command flow",
     "slow: Tests that take a long time to run",
+    "compatibility: Compatibility corpus tests for product-level behavior contracts",
     "karma: Tests for karma system",
     "log: Tests for logging system",
 ]
 
 # ── coverage 配置（替代 .coveragerc）─────────────────────────────────────────
 [tool.coverage.run]
+branch = true
 source = ["src/plugins/DicePP"]
 omit = [
     "*/tests/*",
@@ -98,6 +100,7 @@ omit = [
 
 [tool.coverage.report]
 show_missing = true
+fail_under = 60
 
 # ── 版本号自动递增 ────────────────────────────────────────────────────────────
 # 使用: uv run bump-my-version bump patch/minor/major

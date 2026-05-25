@@ -22,6 +22,8 @@ from module.roll.ast_engine import exec_roll_exp_ast
 from module.roll.ast_engine.errors import RollEngineError, RollSyntaxError, RollLimitError, RollRuntimeError
 from module.roll.karma_runtime import set_runtime, reset_runtime
 
+pytestmark = pytest.mark.compatibility
+
 
 @dataclass
 class CorpusEntry:
