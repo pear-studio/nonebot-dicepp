@@ -374,7 +374,16 @@ class ChatSession:
         if not group_id:
             history = await self.store.get_recent_messages(user_id, group_id="", limit=limit)
             history_dicts = [
-                {"role": msg.role, "content": msg.content, "speaker_name": "你" if msg.role == "user" else "我", "created_at": msg.created_at}
+                {
+                    "role": msg.role,
+                    "content": msg.content,
+                    "speaker_name": "你" if msg.role == "user" else "我",
+                    "created_at": msg.created_at,
+                    "agent_run_id": msg.agent_run_id,
+                    "turn_id": msg.turn_id,
+                    "segment_index": msg.segment_index,
+                    "segment_phase": msg.segment_phase,
+                }
                 for msg in history
             ]
             return history_dicts, False
@@ -436,6 +445,10 @@ class ChatSession:
                 "content": content,
                 "speaker_name": speaker_name,
                 "created_at": msg.created_at,
+                "agent_run_id": msg.agent_run_id,
+                "turn_id": msg.turn_id,
+                "segment_index": msg.segment_index,
+                "segment_phase": msg.segment_phase,
             })
             total_tokens += msg_cost
 

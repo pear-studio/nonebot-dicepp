@@ -127,6 +127,7 @@ class LLMGateway:
                         tools=request.tools,
                         temperature=request.temperature,
                         timeout=timeout or self._router.timeout,
+                        tool_choice=_tool_choice_for(request),
                     )
                 except Exception as e:
                     self._router.stats[provider_name]["errors"] += 1
@@ -232,3 +233,13 @@ def _normalize_tool_calls(resp: LLMResponse) -> List[dict]:
             "arguments": args,
         })
     return result
+
+
+def _tool_choice_for(request: LLMRequest) -> Optional[str]:
+    if not request.tools:
+        return None
+    if request.tool_use_mode == ToolUseMode.AUTO:
+        return "auto"
+    if request.tool_use_mode in {ToolUseMode.REQUIRED, ToolUseMode.REQUIRED_ONE_OF}:
+        return "required"
+    return None

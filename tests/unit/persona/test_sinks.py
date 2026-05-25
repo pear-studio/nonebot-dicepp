@@ -56,6 +56,7 @@ class TestDeliverySink:
         assert result == ""
         port.send.assert_called_once_with(
             user_id="u1", group_id="g1", content="hello",
+            skip_history_record=True,
         )
         store.add_message_stream.assert_called_once()
         call_kwargs = store.add_message_stream.call_args[1]

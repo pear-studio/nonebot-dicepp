@@ -55,6 +55,7 @@ class LLMProvider(Protocol):
         tools: Optional[List[dict]] = None,
         temperature: Optional[float] = None,
         timeout: int = 60,
+        tool_choice: Optional[str] = None,
     ) -> LLMResponse:
         ...
 

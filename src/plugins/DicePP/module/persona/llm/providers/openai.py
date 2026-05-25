@@ -62,14 +62,15 @@ class OpenAIProvider:
         tools: Optional[List[dict]] = None,
         temperature: Optional[float] = None,
         timeout: int = 60,
+        tool_choice: Optional[str] = None,
     ) -> LLMResponse:
-        """执行单次 LLM 调用，含指数退避重试。有 tools 时固定 tool_choice="required"。"""
+        """执行单次 LLM 调用，含指数退避重试。"""
         client = self._get_client()
         retry_delay = 2
 
         for attempt in range(4):
             try:
-                return await self._call(client, messages, tools, temperature, timeout)
+                return await self._call(client, messages, tools, temperature, timeout, tool_choice)
             except NonRetryableError:
                 raise
             except asyncio.TimeoutError as e:
@@ -106,6 +107,7 @@ class OpenAIProvider:
         tools: Optional[List[dict]],
         temperature: Optional[float],
         timeout: int,
+        tool_choice: Optional[str],
     ) -> LLMResponse:
         start_time = time.monotonic()
 
@@ -116,7 +118,7 @@ class OpenAIProvider:
         })
         if tools:
             create_kwargs["tools"] = tools
-            create_kwargs["tool_choice"] = "required"
+            create_kwargs["tool_choice"] = tool_choice or "auto"
         if temperature is not None:
             create_kwargs["temperature"] = temperature
 

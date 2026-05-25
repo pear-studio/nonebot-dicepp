@@ -49,6 +49,7 @@ class DeliverySink:
             user_id=user_id,
             group_id=group_id,
             content=action.content,
+            skip_history_record=True,
         )
 
         if success:

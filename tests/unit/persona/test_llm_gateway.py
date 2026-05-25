@@ -33,7 +33,6 @@ def _make_request(**kwargs) -> LLMRequest:
         tool_use_mode=ToolUseMode.AUTO,
     )
     defaults.update(kwargs)
-    _ = defaults.pop("tools", None)
     return LLMRequest(**defaults)
 
 
@@ -180,6 +179,41 @@ class TestLLMGateway:
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0]["name"] == "search"
         assert result.tool_calls[0]["id"] == "tc_1"
+
+    @pytest.mark.asyncio
+    async def test_auto_tool_mode_passes_auto_choice(self, gateway, mock_router):
+        provider = Mock()
+        provider.generate = AsyncMock(return_value=_make_llm_resp(content="hello"))
+        mock_router.build_candidates.return_value = [("p1", "m1")]
+        mock_router._model_providers = {("p1", "m1"): provider}
+        mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
+
+        state = _make_state()
+        req = _make_request(
+            tools=[{"type": "function", "function": {"name": "search"}}],
+            tool_use_mode=ToolUseMode.AUTO,
+        )
+        await gateway.complete(req, state)
+
+        assert provider.generate.call_args.kwargs["tool_choice"] == "auto"
+
+    @pytest.mark.asyncio
+    async def test_required_tool_mode_passes_required_choice(self, gateway, mock_router):
+        provider = Mock()
+        provider.generate = AsyncMock(return_value=_make_llm_resp(content="hello"))
+        mock_router.build_candidates.return_value = [("p1", "m1")]
+        mock_router._model_providers = {("p1", "m1"): provider}
+        mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
+
+        state = _make_state()
+        req = _make_request(
+            tools=[{"type": "function", "function": {"name": "send_reply_segment"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["send_reply_segment"],
+        )
+        await gateway.complete(req, state)
+
+        assert provider.generate.call_args.kwargs["tool_choice"] == "required"
 
     @pytest.mark.asyncio
     async def test_increment_usage(self, mock_router, mock_event_store):

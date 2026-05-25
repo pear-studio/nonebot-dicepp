@@ -174,11 +174,16 @@ class AgentLoop:
             content = result.content or ""
             tool_calls = result.tool_calls
 
-            # ── L1 纠正：没有调工具且工具已提供 ──
+            required_tool_output = (
+                bool(tools)
+                and tool_use_mode in {ToolUseMode.REQUIRED, ToolUseMode.REQUIRED_ONE_OF}
+            )
+
+            # ── L1 纠正：要求工具输出时，不能直接输出文本或空响应 ──
             if (round_index < self._limits.max_corrections
                     and not tool_calls
                     and tools
-                    and not content.strip()):
+                    and (not content.strip() or required_tool_output)):
                 state.messages.append(dict(_L1_CORRECTION_MSG))
                 state.correction_count += 1
                 round_index += 1
@@ -192,6 +197,22 @@ class AgentLoop:
                     state,
                 )
                 continue
+
+            if required_tool_output and not tool_calls:
+                state.warning_count += 1
+                await self._event_bus.emit(
+                    "AgentWarning",
+                    AgentWarningPayload(
+                        code="required_tool_missing",
+                        message="模型在强制工具输出模式下未调用工具",
+                        round_index=round_index,
+                    ),
+                    state,
+                )
+                return self._build_result(state, "max_corrections",
+                                          "required_tool_missing",
+                                          total_tokens_in, total_tokens_out,
+                                          provider, model)
 
             # ── 无工具 + 有内容 → 直接返回 ──
             if not tool_calls and content.strip():
@@ -240,19 +261,25 @@ class AgentLoop:
             state.tool_rounds += 1
             round_index += 1
 
-            # ── 处理 EXTERNAL_ACTION 结果 ──
+            # ── 按调用顺序处理 EXTERNAL_ACTION 结果 ──
             delivery_performed_this_round = False
             has_pending_observation = False
             interim_found = False
+            skip_rest = False
+            ordered_results: List[dict] = []
 
             for idx, (tc, tr) in enumerate(zip(tool_calls, tool_results)):
                 tc_name = tc["name"]
-                tc_id = tc["id"]
                 result_content = tr["content"]
                 action_id = tr.get("_action_id")
 
+                if skip_rest:
+                    tr["content"] = "跳过：前面的工具已产生最终输出"
+                    ordered_results.append(tr)
+                    continue
+
                 # send_reply_segment → DeliverySink
-                if tc_name == "send_reply_segment" and action_id and self._delivery:
+                if tc_name == "send_reply_segment":
                     # 从 result_content 解析 phase（executor 返回的 JSON）
                     try:
                         action_data = json.loads(result_content)
@@ -261,6 +288,16 @@ class AgentLoop:
 
                     phase = action_data.get("phase", "final")
                     seg_content = action_data.get("content", result_content)
+
+                    if phase == "final" and has_pending_observation:
+                        tr["content"] = "跳过：前面有待回填 observation，等待下一轮"
+                        skip_rest = True
+                        ordered_results.append(tr)
+                        continue
+
+                    if not action_id or not self._delivery:
+                        ordered_results.append(tr)
+                        continue
 
                     send_action = type("SendMessageAction", (), {
                         "content": seg_content,
@@ -291,6 +328,9 @@ class AgentLoop:
                     # send_reply_segment 不回填模型
                     tr["content"] = "已发送"
 
+                    if phase == "final":
+                        skip_rest = True
+
                 # generate_image → ImageGenerationSink
                 elif tc_name == "generate_image" and action_id and self._image:
                     try:
@@ -306,43 +346,6 @@ class AgentLoop:
                     observation = await self._image.handle_generate(gen_action)
                     tr["content"] = observation
                     has_pending_observation = True
-
-            # ── 顺序规则处理 ──
-            # rule: observation 后面的 terminal action 跳过
-            # rule: terminal action 后面的非 terminal tool 跳过
-            skip_rest = False
-            ordered_results: List[dict] = []
-            for tc, tr in zip(tool_calls, tool_results):
-                if skip_rest:
-                    tr["content"] = "跳过：前面的工具已产生最终输出"
-                    ordered_results.append(tr)
-                    continue
-
-                tc_name = tc["name"]
-
-                if tc_name == "send_reply_segment":
-                    try:
-                        action_data = json.loads(tr["content"])
-                        phase = action_data.get("phase", "final")
-                    except (json.JSONDecodeError, TypeError):
-                        phase = "final"
-
-                    if phase == "final" and has_pending_observation:
-                        # observation 后的 final segment 跳过
-                        tr["content"] = "跳过：前面有待回填 observation，等待下一轮"
-                        skip_rest = True
-                    elif phase == "final":
-                        # final segment 后跳过其余工具
-                        skip_rest = True
-                    elif phase == "interim":
-                        pass  # interim 可以出现在 observation 前
-
-                elif tc_name == "generate_image":
-                    has_pending_observation = True
-
-                elif has_pending_observation:
-                    # observation 后的非 terminal 工具正常执行（已经是观察的一部分）
-                    pass
 
                 ordered_results.append(tr)
 

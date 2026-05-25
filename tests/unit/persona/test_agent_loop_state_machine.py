@@ -344,6 +344,8 @@ class TestAgentLoopGenerateImage:
 
         # image 后面的 final segment 应被跳过
         assert result.status == "completed"
+        mock_image.handle_generate.assert_called_once()
+        mock_delivery.handle_send.assert_not_called()
 
 
 class TestAgentLoopCorrections:
@@ -367,6 +369,38 @@ class TestAgentLoopCorrections:
         assert result.final_text == "final"
         assert result.status == "completed"
         assert state.correction_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_required_one_of_plain_content_triggers_correction(self, loop, mock_llm, mock_executor, mock_delivery, mock_event_bus):
+        """REQUIRED_ONE_OF 下纯文本不能直接结束，应先纠正为工具输出。"""
+        mock_llm.complete.side_effect = [
+            _make_gateway_result(content="直接回复"),
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("send_reply_segment", json.dumps({
+                    "content": "工具回复", "phase": "final", "delay_before": 0.0,
+                }))],
+            ),
+        ]
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", json.dumps({
+                "content": "工具回复", "phase": "final", "delay_before": 0.0,
+            }), _action_id="act_1"),
+        ]
+        state = _make_state()
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "hi"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "send_reply_segment"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["send_reply_segment"],
+        )
+
+        assert result.final_reason == "terminal_final_segment"
+        assert result.final_text == "工具回复"
+        assert state.correction_count == 1
+        mock_delivery.handle_send.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_empty_response_handled(self, loop, mock_llm, mock_executor, mock_event_bus):

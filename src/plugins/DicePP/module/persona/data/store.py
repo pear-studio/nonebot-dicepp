@@ -113,6 +113,9 @@ class PersonaDataStore:
             display_name=row[6] or "",
             created_at=datetime.fromisoformat(row[7]) if row[7] else None,
             agent_run_id=row[8] if len(row) > 8 else "",
+            turn_id=row[9] if len(row) > 9 else "",
+            segment_index=row[10] if len(row) > 10 else -1,
+            segment_phase=row[11] if len(row) > 11 else "",
         )
 
     async def add_message_stream(
@@ -162,7 +165,8 @@ class PersonaDataStore:
         """获取最近消息（按 user_id + group_id），时间升序返回"""
         async with self.db.execute(
             f"""
-            SELECT id, user_id, group_id, role, type, content, display_name, created_at
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at,
+                   agent_run_id, turn_id, segment_index, segment_phase
             FROM message_stream
             WHERE user_id = ? AND group_id = ?
               AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
@@ -210,7 +214,8 @@ class PersonaDataStore:
         """获取群聊最近消息，时间升序返回"""
         if limit is None:
             sql = f"""
-            SELECT id, user_id, group_id, role, type, content, display_name, created_at
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at,
+                   agent_run_id, turn_id, segment_index, segment_phase
             FROM message_stream
             WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at DESC
@@ -218,7 +223,8 @@ class PersonaDataStore:
             params = (group_id,)
         else:
             sql = f"""
-            SELECT id, user_id, group_id, role, type, content, display_name, created_at
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at,
+                   agent_run_id, turn_id, segment_index, segment_phase
             FROM message_stream
             WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at DESC
@@ -277,7 +283,8 @@ class PersonaDataStore:
 
         where_clause = " AND ".join(conditions)
         sql = f"""
-            SELECT id, user_id, group_id, role, type, content, display_name, created_at
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at,
+                   agent_run_id, turn_id, segment_index, segment_phase
             FROM message_stream
             WHERE {where_clause}
             ORDER BY created_at DESC
