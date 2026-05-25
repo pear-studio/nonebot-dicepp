@@ -40,6 +40,14 @@ class TaskScheduler:
                 key.cancel()
         self._tasks.clear()
 
+    async def shutdown(self):
+        pending = [key for key in self._tasks.keys() if isinstance(key, asyncio.Task)]
+        for task in pending:
+            task.cancel()
+        self._tasks.clear()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
     async def process(self, free_time: float) -> List:
         """处理已注册的异步任务，返回完成的 BotCommandBase 列表。
 

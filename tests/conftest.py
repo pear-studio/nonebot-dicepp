@@ -1,6 +1,7 @@
 import sys
 import pytest
 import asyncio
+import hashlib
 import json
 import os
 import shutil
@@ -30,11 +31,91 @@ _test_global = Path(_TEST_APP_DIR) / "config" / "global.json"
 shutil.copy(_real_global, _test_global)
 
 
+def _hash_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _snapshot_files(root: Path, pattern: str = "**/*") -> dict[str, str]:
+    if not root.exists():
+        return {}
+    snapshot = {}
+    for path in root.glob(pattern):
+        if path.is_file():
+            snapshot[str(path.relative_to(root))] = _hash_file(path) or ""
+    return snapshot
+
+
+_PROTECTED_FILES = [
+    _real_project / "config" / "secrets.json",
+    _real_project / "config" / "global.json",
+    _real_project / "config" / "bots" / "_template.json",
+]
+_PROTECTED_FILE_BASELINE = {path: _hash_file(path) for path in _PROTECTED_FILES}
+_GENERATED_DIR_BASELINE = {
+    _real_project / "data": _snapshot_files(_real_project / "data"),
+    _real_project / "src" / "plugins" / "DicePP" / "Data": _snapshot_files(
+        _real_project / "src" / "plugins" / "DicePP" / "Data"
+    ),
+}
+_TEST_BOT_CONFIG_BASELINE = _snapshot_files(
+    _real_project / "config" / "bots",
+    "test*.json",
+)
+
+
 def _cleanup_test_app_dir() -> None:
     rmtree_retry(_TEST_APP_DIR)
 
 
 atexit.register(_cleanup_test_app_dir)
+
+
+def _assert_snapshot_unchanged(name: str, baseline: dict[str, str], current: dict[str, str]) -> list[str]:
+    problems = []
+    added = sorted(set(current) - set(baseline))
+    removed = sorted(set(baseline) - set(current))
+    modified = sorted(path for path in set(current) & set(baseline) if current[path] != baseline[path])
+    if added:
+        problems.append(f"{name} added files:\n" + "\n".join(f"  - {path}" for path in added[:20]))
+    if removed:
+        problems.append(f"{name} removed files:\n" + "\n".join(f"  - {path}" for path in removed[:20]))
+    if modified:
+        problems.append(f"{name} modified files:\n" + "\n".join(f"  - {path}" for path in modified[:20]))
+    return problems
+
+
+def _assert_no_real_repo_pollution() -> None:
+    problems = []
+    for path, expected_hash in _PROTECTED_FILE_BASELINE.items():
+        current_hash = _hash_file(path)
+        if current_hash != expected_hash:
+            problems.append(f"protected file changed: {path}")
+
+    for root, baseline in _GENERATED_DIR_BASELINE.items():
+        problems.extend(_assert_snapshot_unchanged(str(root), baseline, _snapshot_files(root)))
+
+    current_test_configs = _snapshot_files(_real_project / "config" / "bots", "test*.json")
+    problems.extend(
+        _assert_snapshot_unchanged(
+            str(_real_project / "config" / "bots" / "test*.json"),
+            _TEST_BOT_CONFIG_BASELINE,
+            current_test_configs,
+        )
+    )
+
+    if problems:
+        joined = "\n\n".join(problems)
+        raise AssertionError(
+            "Test pollution detected in the real repository.\n"
+            "Ordinary tests must write through DICEPP_PROJECT_ROOT into the pytest temp app dir.\n\n"
+            f"{joined}"
+        )
 
 # Add DicePP source path to sys.path
 dicepp_path = Path(__file__).parent.parent / "src" / "plugins" / "DicePP"
@@ -163,7 +244,10 @@ def fresh_bot():
     rmtree_retry(test_path)
 
 
-def pytest_sessionfinish(session, exitstatus):
+@pytest.fixture(scope="session", autouse=True)
+def _test_session_cleanup_and_pollution_check():
+    yield
+    _assert_no_real_repo_pollution()
     _cleanup_test_app_dir()
 
 

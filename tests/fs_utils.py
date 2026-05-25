@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import shutil
 import time
+from pathlib import Path
 
 DEFAULT_MAX_ATTEMPTS = 20
 DEFAULT_SLEEP_S = 0.05
@@ -17,14 +18,27 @@ def rmtree_retry(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     sleep_s: float = DEFAULT_SLEEP_S,
 ) -> None:
-    """删除目录树；遇 PermissionError 时短暂重试，最后 ignore_errors 兜底。"""
+    """删除目录树；遇 PermissionError 时短暂重试，最终失败直接抛错。"""
     p = os.fspath(path)
     if not p or not os.path.exists(p):
         return
+
+    last_error: PermissionError | None = None
     for _ in range(max_attempts):
         try:
             shutil.rmtree(p)
             return
-        except PermissionError:
+        except PermissionError as exc:
+            last_error = exc
             time.sleep(sleep_s)
-    shutil.rmtree(p, ignore_errors=True)
+
+    remaining = []
+    root = Path(p)
+    if root.exists():
+        remaining = [str(child.relative_to(root)) for child in root.rglob("*")][:20]
+    details = "\n".join(f"  - {item}" for item in remaining) or "  <none listed>"
+    raise PermissionError(
+        f"Failed to remove test directory after {max_attempts} attempts: {p}\n"
+        "Possible leaked SQLite connection, file handle, or background task.\n"
+        f"Remaining entries:\n{details}"
+    ) from last_error
