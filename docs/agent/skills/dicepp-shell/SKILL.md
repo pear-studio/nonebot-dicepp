@@ -10,7 +10,7 @@ metadata:
 ## 前提条件
 
 1. 确保在项目根目录（包含 `src/plugins/DicePP/` 的目录）
-2. 确保依赖已安装：`uv pip install -e ".[dev]"`
+2. 确保依赖已安装：`uv sync --group dev`
 
 ## 使用方法
 
@@ -18,29 +18,29 @@ metadata:
 
 ```bash
 # 创建会话
-.venv/bin/dicepp-shell start test
+uv run dicepp-shell start test
 
 # 发送命令（带确定性骰子结果）
-.venv/bin/dicepp-shell send test --user player1 --msg ".r 1d20 攻击" --dice 20
+uv run dicepp-shell send test --user player1 --msg ".r 1d20 攻击" --dice 20
 
 # 清理
-.venv/bin/dicepp-shell rm test
+uv run dicepp-shell rm test
 ```
 
 ### 多步骤场景测试
 
 ```bash
 # 1. 创建专门用于此场景的会话
-.venv/bin/dicepp-shell start <scenario_name> --group <group_id>
+uv run dicepp-shell start <scenario_name> --group <group_id>
 
 # 2. 按顺序执行测试步骤
-.venv/bin/dicepp-shell send <scenario_name> --user <user> --msg "<cmd>" [--dice <seq>]
+uv run dicepp-shell send <scenario_name> --user <user> --msg "<cmd>" [--dice <seq>]
 
 # 3. 查看结果，必要时使用 --json 获取结构化输出
-.venv/bin/dicepp-shell send <scenario_name> --user <user> --msg "<cmd>" --json
+uv run dicepp-shell send <scenario_name> --user <user> --msg "<cmd>" --json
 
 # 4. 完成后清理
-.venv/bin/dicepp-shell rm <scenario_name>
+uv run dicepp-shell rm <scenario_name>
 ```
 
 ### 常用命令速查
@@ -70,26 +70,36 @@ metadata:
 ### 测试战斗流程
 
 ```bash
-.venv/bin/dicepp-shell start combat
-.venv/bin/dicepp-shell send combat --user DM --msg ".init"
-.venv/bin/dicepp-shell send combat --user 战士 --msg ".ri" --dice 18
-.venv/bin/dicepp-shell send combat --user 法师 --msg ".ri" --dice 12
-.venv/bin/dicepp-shell send combat --user DM --msg ".init next"
-.venv/bin/dicepp-shell rm combat
+uv run dicepp-shell start combat
+uv run dicepp-shell send combat --user DM --msg ".init"
+uv run dicepp-shell send combat --user 战士 --msg ".ri" --dice 18
+uv run dicepp-shell send combat --user 法师 --msg ".ri" --dice 12
+uv run dicepp-shell send combat --user DM --msg ".init next"
+uv run dicepp-shell rm combat
 ```
 
 ### 测试角色卡功能
 
 ```bash
-.venv/bin/dicepp-shell start char
-.venv/bin/dicepp-shell send char --user player1 --msg ".角色卡记录
+uv run dicepp-shell start char
+uv run dicepp-shell send char --user player1 --msg ".角色卡记录
 $姓名$ 测试角色
 $等级$ 5
 $生命值$ 50/50
 $生命骰$ 5/5 D10
 $属性$ 16/14/13/10/12/8"
-.venv/bin/dicepp-shell send char --user player1 --msg ".状态"
-.venv/bin/dicepp-shell rm char
+uv run dicepp-shell send char --user player1 --msg ".状态"
+uv run dicepp-shell rm char
+```
+
+如需直接调用虚拟环境中的可执行文件：
+
+```powershell
+# Windows
+.venv\Scripts\dicepp-shell.exe start test
+
+# Unix/macOS/Linux
+.venv/bin/dicepp-shell start test
 ```
 
 ## 最佳实践
