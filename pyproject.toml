@@ -45,6 +45,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
     "pytest-timeout>=2.0",
+    "pytest-xdist>=3.5",
     "pyinstaller>=6.0",
     "bump-my-version>=0.28",
 ]
@@ -75,7 +76,7 @@ pythonpath = ["src"]
 python_files = ["unit_test.py", "test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test*"]
-addopts = "--tb=short -m \"not real_llm\" --timeout=30"
+addopts = "--tb=short -m \"not real_llm\" --timeout=30 --strict-markers --strict-config"
 markers = [
     "unit: Unit tests for individual modules (no external I/O, all dependencies mocked)",
     "e2e: End-to-end tests exercising the full bot lifecycle (may start real services)",
