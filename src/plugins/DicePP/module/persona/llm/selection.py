@@ -23,7 +23,7 @@ class SelectionPolicy:
 
 
 SelectionPolicy.CHAT = SelectionPolicy(
-    category="llm", required_capabilities=("text",),
+    category="llm", required_capabilities=("text", "tool_calls"),
     prefer_quality=True, prefer_cost=False,
 )
 SelectionPolicy.SCORING = SelectionPolicy(

@@ -1,16 +1,14 @@
 """
-Phase 7c: 配额与豁免逻辑单元测试（使用 QuotaHook）
+Phase 7c: 配额与豁免逻辑单元测试（router increment_usage）
 """
 import pytest
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from unittest.mock import MagicMock
 
-from plugins.DicePP.module.persona.llm.router import LLMRouter, QuotaExceeded
-from plugins.DicePP.module.persona.llm.hooks import QuotaHook
-from plugins.DicePP.module.persona.llm.loop import AgentLoop
+from plugins.DicePP.module.persona.llm.router import LLMRouter
 from plugins.DicePP.module.persona.data.models import UserLLMConfig
 from conftest import make_mock_providers
 
@@ -36,6 +34,15 @@ class MockDataStore:
 
     async def get_user_llm_config(self, user_id: str):
         return self._user_configs.get(user_id)
+
+    async def insert_agent_run(self, **kwargs):
+        return "run_id"
+
+    async def update_run(self, run_id: str, **kwargs):
+        pass
+
+    async def insert_agent_event(self, **kwargs):
+        pass
 
     def add_whitelist_user(self, user_id: str):
         self._whitelist_users.add(user_id)
@@ -64,85 +71,6 @@ def mock_config():
     return MockConfig()
 
 
-class TestQuotaCheck:
-    @pytest.mark.asyncio
-    async def test_quota_disabled_allows_all(self, mock_store):
-        hook = QuotaHook(data_store=mock_store, quota_check_enabled=False, daily_limit=0)
-        from plugins.DicePP.module.persona.llm.hook_protocol import LoopContext
-        ctx = LoopContext(user_id="u1", group_id="g1")
-        result = await hook.pre_llm([], ctx)
-        assert result.abort is False
-
-    @pytest.mark.asyncio
-    async def test_quota_exceeded_blocks(self, mock_store, mock_config):
-        hook = QuotaHook(data_store=mock_store, quota_check_enabled=True, daily_limit=2, config=mock_config)
-        from plugins.DicePP.module.persona.llm.hook_protocol import LoopContext
-        today = datetime.now().strftime("%Y-%m-%d")
-        mock_store._usage[("u1", today)] = 2
-        ctx = LoopContext(user_id="u1", group_id="g1")
-        result = await hook.pre_llm([], ctx)
-        assert result.abort is True
-
-    @pytest.mark.asyncio
-    async def test_within_quota_allows(self, mock_store, mock_config):
-        hook = QuotaHook(data_store=mock_store, quota_check_enabled=True, daily_limit=5, config=mock_config)
-        from plugins.DicePP.module.persona.llm.hook_protocol import LoopContext
-        today = datetime.now().strftime("%Y-%m-%d")
-        mock_store._usage[("u1", today)] = 3
-        ctx = LoopContext(user_id="u1", group_id="g1")
-        result = await hook.pre_llm([], ctx)
-        assert result.abort is False
-
-    @pytest.mark.asyncio
-    async def test_quota_exceeded_raises_in_router(self, mock_store, mock_config):
-        router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
-        router.data_store = mock_store
-        router.config = mock_config
-        router.quota_check_enabled = True
-        router.daily_limit = 1
-        today = datetime.now().strftime("%Y-%m-%d")
-        mock_store._usage[("u1", today)] = 1
-
-        with pytest.raises(QuotaExceeded):
-            await router.run_via_loop(
-                messages=[{"role": "user", "content": "hi"}],
-                user_id="u1", group_id="g1",
-                hooks=[QuotaHook(data_store=mock_store, quota_check_enabled=True, daily_limit=1)],
-            )
-
-
-class TestExemptionLogic:
-    @pytest.mark.asyncio
-    async def test_user_custom_key_no_longer_exempt(self, mock_store, mock_config):
-        mock_store.set_user_config("u1", UserLLMConfig(user_id="u1", primary_api_key="sk-custom"))
-        hook = QuotaHook(data_store=mock_store, config=mock_config)
-        assert await hook._is_exempt("u1", "g1") is False  # v1 不再提供 user key 豁免
-
-    @pytest.mark.asyncio
-    async def test_user_whitelist_exempt(self, mock_store, mock_config):
-        mock_store.add_whitelist_user("u1")
-        hook = QuotaHook(data_store=mock_store, config=mock_config)
-        assert await hook._is_exempt("u1", "g1") is True
-
-    @pytest.mark.asyncio
-    async def test_group_whitelist_exempt(self, mock_store, mock_config):
-        mock_store.add_whitelist_group("g1")
-        hook = QuotaHook(data_store=mock_store, config=mock_config)
-        assert await hook._is_exempt("u1", "g1") is True
-
-    @pytest.mark.asyncio
-    async def test_whitelist_disabled_no_exempt(self, mock_store, mock_config):
-        mock_config.whitelist_enabled = False
-        mock_store.add_whitelist_user("u1")
-        hook = QuotaHook(data_store=mock_store, config=mock_config)
-        assert await hook._is_exempt("u1", "g1") is False
-
-    @pytest.mark.asyncio
-    async def test_no_data_store_conservative(self):
-        hook = QuotaHook(data_store=None)
-        assert await hook._is_exempt("u1", "g1") is False
-
-
 class TestIncrementUsage:
     @pytest.mark.asyncio
     async def test_increment_usage(self, mock_store, mock_config):
@@ -160,16 +88,225 @@ class TestIncrementUsage:
         await router.increment_usage("u1")
 
 
-class TestErrorClassification:
-    def test_classify_timeout(self):
-        assert AgentLoop._ce(asyncio.TimeoutError()) == "network_error"
+class TestQuotaWhitelistExemption:
+    """白名单用户/群豁免配额限制"""
 
-    def test_classify_rate_limit(self):
-        assert AgentLoop._ce(Exception("rate limit hit")) == "rate_limited"
-        assert AgentLoop._ce(Exception("429 too many requests")) == "rate_limited"
+    @pytest.mark.asyncio
+    async def test_is_quota_exempt_user(self):
+        """白名单用户 → _is_quota_exempt 返回 True"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        router = MagicMock()
+        config = MockConfig()
+        config.whitelist_enabled = True
+        router.config = config
 
-    def test_classify_connection(self):
-        assert AgentLoop._ce(Exception("connection refused")) == "network_error"
+        store = MockDataStore()
+        store.add_whitelist_user("u1")
+        router.data_store = store
 
-    def test_classify_unknown(self):
-        assert AgentLoop._ce(Exception("something else")) == "unknown"
+        runtime = AgentRuntime(router=router, store=MagicMock())
+        assert await runtime._is_quota_exempt("u1", "") is True
+
+    @pytest.mark.asyncio
+    async def test_is_quota_exempt_group(self):
+        """白名单群 → _is_quota_exempt 返回 True（群聊中群优先）"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        router = MagicMock()
+        config = MockConfig()
+        config.whitelist_enabled = True
+        router.config = config
+
+        store = MockDataStore()
+        store.add_whitelist_group("g1")
+        router.data_store = store
+
+        runtime = AgentRuntime(router=router, store=MagicMock())
+        assert await runtime._is_quota_exempt("u1", "g1") is True
+
+    @pytest.mark.asyncio
+    async def test_is_quota_exempt_whitelist_disabled(self):
+        """whitelist_enabled=False → _is_quota_exempt 返回 False"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        router = MagicMock()
+        config = MockConfig()
+        config.whitelist_enabled = False
+        router.config = config
+
+        store = MockDataStore()
+        store.add_whitelist_user("u1")
+        router.data_store = store
+
+        runtime = AgentRuntime(router=router, store=MagicMock())
+        assert await runtime._is_quota_exempt("u1", "") is False
+
+    @pytest.mark.asyncio
+    async def test_is_quota_exempt_non_whitelisted(self):
+        """非白名单用户/群 → _is_quota_exempt 返回 False"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        router = MagicMock()
+        config = MockConfig()
+        config.whitelist_enabled = True
+        router.config = config
+
+        store = MockDataStore()
+        router.data_store = store
+
+        runtime = AgentRuntime(router=router, store=MagicMock())
+        assert await runtime._is_quota_exempt("u1", "g1") is False
+
+    @pytest.mark.asyncio
+    async def test_run_chat_skips_quota_for_whitelisted_user(self):
+        """白名单用户达到 daily_limit 也不抛 QuotaExceeded"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        from plugins.DicePP.module.persona.agent.loop import AgentLoop, AgentRunResult
+
+        mock_result = AgentRunResult(
+            run_id="r", turn_id="t", status="completed",
+            final_reason="direct_content", final_text="ok",
+            delivery_performed=False,
+        )
+
+        with patch("plugins.DicePP.module.persona.agent.runtime.AgentLoop.run",
+                   AsyncMock(return_value=mock_result)):
+            router = MagicMock()
+            router.quota_check_enabled = True
+            router.daily_limit = 5
+            config = MockConfig()
+            config.whitelist_enabled = True
+            config.timezone = "Asia/Shanghai"
+            router.config = config
+
+            store = MockDataStore()
+            store.add_whitelist_user("u1")
+            # 用量已达上限
+            store._usage[("u1", datetime.now().strftime("%Y-%m-%d"))] = 5
+            router.data_store = store
+
+            runtime = AgentRuntime(router=router, store=store)
+            # 不应抛 QuotaExceeded
+            result = await runtime.run_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                user_id="u1", group_id="",
+                tool_registry=MagicMock(),
+            )
+            assert result.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_run_chat_enforces_quota_for_non_whitelisted(self):
+        """非白名单用户达到 daily_limit → QuotaExceeded"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
+
+        router = MagicMock()
+        router.quota_check_enabled = True
+        router.daily_limit = 5
+        config = MockConfig()
+        config.whitelist_enabled = True
+        config.timezone = "Asia/Shanghai"
+        router.config = config
+
+        store = MockDataStore()
+        store._usage[("u1", datetime.now().strftime("%Y-%m-%d"))] = 5
+        router.data_store = store
+
+        runtime = AgentRuntime(router=router, store=store)
+        with pytest.raises(QuotaExceeded):
+            await runtime.run_chat(
+                messages=[{"role": "user", "content": "hi"}],
+                user_id="u1", group_id="",
+                tool_registry=MagicMock(),
+            )
+
+
+class TestBillUsageFlag:
+    """bill_usage=False 时 UsageSink 不注册 → 不扣用量"""
+
+    @pytest.mark.asyncio
+    async def test_bill_usage_false_skips_increment(self):
+        """bill_usage=False → UsageSink 不注册 → 即使事件触发也不扣用量"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        from plugins.DicePP.module.persona.agent.llm_gateway import LLMGateway, LLMGatewayResult
+        from plugins.DicePP.module.persona.agent.events import ModelResponseReceivedPayload
+
+        router = MagicMock()
+        router.increment_usage = AsyncMock()
+        router.config = None
+
+        mock_result = LLMGatewayResult(
+            content="ok", tool_calls=[],
+            usage={"input": 1, "output": 1},
+            provider="t", model="m",
+        )
+
+        async def mock_complete(self, request, state, timeout=None):
+            await self._event_bus.emit(
+                "ModelResponseReceived",
+                ModelResponseReceivedPayload(
+                    round_index=0, content_ignored=False,
+                    content_preview="ok", tool_calls=[],
+                    usage={"input": 1, "output": 1},
+                    provider="t", model="m",
+                ),
+                state,
+            )
+            return mock_result
+
+        tool_registry = MagicMock()
+        tool_registry.get_openai_schemas = MagicMock(return_value=[])
+        store = MockDataStore()
+        with patch.object(LLMGateway, "complete", mock_complete):
+            runtime = AgentRuntime(router=router, store=store)
+            result = await runtime.run(
+                messages=[{"role": "user", "content": "hi"}],
+                user_id="u1", group_id="",
+                tool_registry=tool_registry,
+                bill_usage=False,
+            )
+
+        assert result.status == "completed"
+        router.increment_usage.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_bill_usage_true_calls_increment(self):
+        """bill_usage=True → UsageSink 注册 → 首次 ModelResponseReceived 扣用量"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        from plugins.DicePP.module.persona.agent.llm_gateway import LLMGateway, LLMGatewayResult
+        from plugins.DicePP.module.persona.agent.events import ModelResponseReceivedPayload
+
+        router = MagicMock()
+        router.increment_usage = AsyncMock()
+        router.config = None
+
+        mock_result = LLMGatewayResult(
+            content="ok", tool_calls=[],
+            usage={"input": 1, "output": 1},
+            provider="t", model="m",
+        )
+
+        async def mock_complete(self, request, state, timeout=None):
+            await self._event_bus.emit(
+                "ModelResponseReceived",
+                ModelResponseReceivedPayload(
+                    round_index=0, content_ignored=False,
+                    content_preview="ok", tool_calls=[],
+                    usage={"input": 1, "output": 1},
+                    provider="t", model="m",
+                ),
+                state,
+            )
+            return mock_result
+
+        tool_registry = MagicMock()
+        tool_registry.get_openai_schemas = MagicMock(return_value=[])
+        store = MockDataStore()
+        with patch.object(LLMGateway, "complete", mock_complete):
+            runtime = AgentRuntime(router=router, store=store)
+            result = await runtime.run(
+                messages=[{"role": "user", "content": "hi"}],
+                user_id="u1", group_id="",
+                tool_registry=tool_registry,
+                bill_usage=True,
+            )
+
+        assert result.status == "completed"
+        router.increment_usage.assert_called_once()

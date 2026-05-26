@@ -1,8 +1,82 @@
 """Life 域收集型工具 — 无副作用，仅收集 LLM 结构化输出"""
-from typing import List
+from __future__ import annotations
+
+from typing import Any, Dict, Optional
+
 from nonebot.log import logger
+from pydantic import BaseModel, Field
+
 from .registry import ToolDef
 
+
+# ── Pydantic Args Schemas (for new ToolSpec/EffectKind) ──────
+
+
+class RecordEventArgs(BaseModel):
+    """record_event 参数"""
+    description: str = Field(..., description="事件描述，自然叙事，不强制字数上限但保持简洁")
+    context_summary: str = Field(
+        ..., min_length=1,
+        description="事件摘要，30-60字，仅包含关键事实（谁、在哪、做了什么、结果），用于聊天上下文注入",
+    )
+    duration_minutes: int = Field(
+        ..., ge=0, le=2880,
+        description="事件持续时间（分钟），0 表示瞬时事件，最多 48 小时",
+    )
+    energy_delta: int = Field(
+        default=0, ge=-20, le=20,
+        description="事件对体力的影响（可选，范围-20~+20）",
+    )
+    mood_delta: int = Field(
+        default=0, ge=-20, le=20,
+        description="事件对心情的影响（可选，范围-20~+20）",
+    )
+    health_delta: int = Field(
+        default=0, ge=-20, le=20,
+        description="事件对健康的影响（可选，范围-20~+20）",
+    )
+
+
+class RecordReactionArgs(BaseModel):
+    """record_reaction 参数"""
+    reaction: str = Field(..., description="30-80 字的内心反应，仅用于日记和上下文")
+    share_desire: float = Field(
+        ..., ge=0.0, le=1.0,
+        description="角色主动想把这件事说出去的程度，0~1",
+    )
+    follow_up_action: Optional[str] = Field(
+        default=None,
+        description="根据当前情况，角色决定做并且已经开始做的事。如果有，填写具体描述，否则填 null",
+    )
+    pending_plan: Optional[str] = Field(
+        default=None,
+        description="角色产生的短期想法或计划。null=保持备忘，空字符串=清空备忘",
+    )
+
+
+class RecordDiaryEntryArgs(BaseModel):
+    """record_diary_entry 参数"""
+    diary: str = Field(..., description="日记内容，100-300字，第一人称")
+
+
+class RecordShareMessageArgs(BaseModel):
+    """record_share_message 参数"""
+    message: str = Field(
+        ...,
+        description="20-60字的第一人称口语消息，禁止出现角色名和第三人称描写",
+    )
+
+
+class RecordScoreArgs(BaseModel):
+    """record_score 参数 — 统一替代旧 score_relationship / record_evaluation"""
+    intimacy: float = Field(default=0.0, ge=-5.0, le=5.0, description="亲密度变化，范围 -5.0 到 +5.0")
+    passion: float = Field(default=0.0, ge=-5.0, le=5.0, description="激情变化，范围 -5.0 到 +5.0")
+    trust: float = Field(default=0.0, ge=-5.0, le=5.0, description="信任变化，范围 -5.0 到 +5.0")
+    secureness: float = Field(default=0.0, ge=-5.0, le=5.0, description="安全感变化，范围 -5.0 到 +5.0")
+    facts: Dict[str, Any] = Field(default_factory=dict, description="提取或更新的用户事实，key-value 形式")
+
+
+# ── Old-format ToolDef definitions (backward compat) ─────────
 
 RECORD_EVENT_TOOL = ToolDef(
     name="record_event",
@@ -115,6 +189,12 @@ RECORD_SHARE_MESSAGE_TOOL = ToolDef(
     },
 )
 
+RECORD_SCORE_TOOL = ToolDef(
+    name="record_score",
+    description="记录评分结果：好感度变化和用户事实提取。统一替代旧的 score_relationship 和 record_evaluation 工具",
+    parameters=RecordScoreArgs.model_json_schema(),
+)
+
 
 async def life_collecting_executor(args: dict, ctx) -> str:
     """life 域通用收集型 executor — 将 LLM 输出参数写入 ctx.collected_args"""
@@ -125,15 +205,3 @@ async def life_collecting_executor(args: dict, ctx) -> str:
             "life_collecting_executor: ctx 或 collected_args 为 None，数据丢弃"
         )
     return '{"status": "ok"}'
-
-
-def make_collecting_executor(results: List[dict]):
-    """返回一个收集型 executor，每次调用时将 args 存入 results 列表（闭包模式）。
-
-    供 scoring.py 等非 life 路径使用——通过闭包捕获 results 列表，
-    不依赖 ToolContext.collected_args。
-    """
-    async def executor(args: dict, ctx) -> str:
-        results.append(args)
-        return '{"status": "ok"}'
-    return executor

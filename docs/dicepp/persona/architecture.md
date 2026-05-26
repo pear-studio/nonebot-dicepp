@@ -346,16 +346,16 @@ Agent 已按功能归属分散到对应域，本节仅作跨域索引：
 **执行模型**：
 
 - EventGenerationAgent 不再自行创建 `ToolRegistry` 和 `AgentLoop` 实例，改为接收全局 `ToolRegistry`（通过构造函数注入）
-- life 域工具（`record_event` / `record_reaction` / `record_diary_entry` / `record_share_message`）的 `ToolDef` 定义位于 `tools/collecting.py`，在 `factory.py` 的组装阶段注册到 `ToolDomain.LIFE`
-- 所有生成任务统一经由 `LLMRouter.run_via_loop()` 执行，由 Router 内部负责 provider 选择、`AgentLoop` 创建与销毁、Hook 管线附着，不再由 Agent 自行拼装
-- 工具执行结果通过 `ToolContext.collected_args` 收集。`tools/collecting.py` 中 `life_collecting_executor` 将每次工具调用的入参写入 `ctx.collected_args`，替代旧的闭包模式 `make_collecting_executor`。旧模式仍保留于 `make_collecting_executor()`，供 `scoring.py` 等非 life 路径继续使用
+- life 域工具（`record_event` / `record_reaction` / `record_diary_entry` / `record_share_message`）的 `ToolDef` 定义位于 `tools/collecting.py`，在 `factory.py` 的组装阶段注册
+- 所有生成任务统一经由 `AgentRuntime.run()` 执行，由 Runtime 内部负责 provider 选择、LLM Gateway 调用、工具执行与 sink 管线，不再由 Agent 自行拼装
+- 工具执行结果通过 `build_collecting_registry` 收集闭包捕获。`tools/collecting.py` 中 `life_collecting_executor` 通过 `ToolContext.collected_args` 工作；非 life 路径（scoring、action_evaluator）使用相同的 collecting registry 模式
 
 ---
 
 ### 3.8 工具层（`tools/`）
 
 - **`registry.py`**: `ToolDef` / `ToolRegistry` / `ToolDomain` 定义。按域注册工具，支持按域获取定义列表和生成闭包 executor
-- **`collecting.py`**: life 域收集型工具的 `ToolDef` 常量（`RECORD_EVENT_TOOL` / `RECORD_REACTION_TOOL` / `RECORD_DIARY_ENTRY_TOOL` / `RECORD_SHARE_MESSAGE_TOOL`）及通用收集 executor `life_collecting_executor`；保留 `make_collecting_executor()` 兼容旧路径（供 `scoring.py` 使用）
+- **`collecting.py`**: life 域收集型工具的 `ToolDef` 常量（`RECORD_EVENT_TOOL` / `RECORD_REACTION_TOOL` / `RECORD_DIARY_ENTRY_TOOL` / `RECORD_SHARE_MESSAGE_TOOL`）及通用收集 executor `life_collecting_executor`
 - **`search_persona` / `search_knowledge` / `roll_dice`**: 三个已实现的 chat 域工具
 
 ---

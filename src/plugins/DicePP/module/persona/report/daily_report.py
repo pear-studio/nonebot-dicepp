@@ -356,6 +356,7 @@ class DailyReportGenerator:
                     self._character.name,
                     getattr(self._character, "description", "") or "",
                     summary,
+                    store=self._store,
                 )
                 if opening:
                     return opening

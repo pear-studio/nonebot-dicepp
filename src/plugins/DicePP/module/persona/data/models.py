@@ -138,6 +138,10 @@ class UnifiedMessage(BaseModel):
     content: str
     display_name: str = ""
     created_at: Optional[datetime] = None
+    agent_run_id: str = ""  # Phase M1: 所属 Agent run ID，用于聚合同 run segments
+    turn_id: str = ""
+    segment_index: int = -1
+    segment_phase: str = ""
 
 
 class WhitelistEntry(BaseModel):

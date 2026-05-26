@@ -1,300 +1,528 @@
-"""AgentLoop — 统一的 Agent 循环抽象（一等公民，供 chat/life/scoring 复用）"""
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any
-import asyncio
+"""AgentLoop — 状态机驱动的 Agent 循环
+
+职责：
+- 维护 messages、round、tool round、correction count
+- 调 LLMGateway.complete()
+- 处理 tool_calls
+- 调 ToolExecutor.execute_many()
+- 根据 tool/action 结果决定继续、纠正、结束或失败
+- 产生 agent-level events
+
+不直接依赖：
+- DB
+- NoneBot port
+- trace store
+- usage store
+- router stats
+"""
+from __future__ import annotations
+
 import json
 import re
-import time
 import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 from nonebot.log import logger
 
-from ..llm.hook_protocol import LoopContext, ToolResult
-from ..llm.providers.protocol import LLMProvider
-from ..llm.providers.protocol import NonRetryableError
-from ..llm.errors import classify
+from .actions import EffectKind, SendMessageAction, GenerateImageAction
+from .event_bus import AgentEventBus
+from .events import (
+    AgentRunFinishedPayload,
+    AgentWarningPayload,
+    CorrectionInjectedPayload,
+    ModelRequestPreparedPayload,
+    ModelResponseReceivedPayload as ModelRespPayload,
+)
+from .llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
+from .request import AgentRunLimits, ToolUseMode
+from .sinks import DeliverySink, ImageGenerationSink
+from .state import AgentRunState
+from .tool_executor import ToolExecutor, ToolRegistry
+from ..llm.selection import SelectionPolicy
 
-_THINK_RE = r'<think>.*?</think>'
-_L1_MSG = {"role": "user", "content": "[系统指令] 你必须调用工具来完成任务。不要直接输出文本——只能通过调用工具来输出结果。"}
+_THINK_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL)
 
-_FINISH_TASK_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "finish_task",
-        "description": (
-            "当你完成所有必要工作后调用此工具来结束任务。"
-            "调用后对话立即终止，不需要再生成任何后续回复或调用其它工具。"
-            "只在所有实际工具已调用完毕后才使用此工具。"
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "简短总结你完成了什么",
-                },
-            },
-            "required": ["summary"],
-        },
-    },
+_L1_CORRECTION_MSG = {
+    "role": "user",
+    "content": "[系统指令] 你必须调用工具来完成任务。不要直接输出文本——只能通过调用工具来输出结果。",
 }
+
+_CORRECTION_INTERIM_REASON = "final_required_after_interim"
+_CORRECTION_INTERIM_MSG = (
+    "[系统指令] 你已经发送了中间回复（phase=interim），但还没有给出最终回复。"
+    "请继续完成任务；如果可以答复，请调用 send_reply_segment 并设置 phase=final。"
+)
 
 
 @dataclass
-class LoopResult:
-    final_output: Optional[str]
-    metadata: dict = field(default_factory=dict)
-    aborted: bool = False
-    abort_reason: str = ""
+class AgentRunResult:
+    """AgentLoop.run() 的返回值 — 替代旧 LoopResult"""
+
+    run_id: str
+    turn_id: str
+    status: str
+    final_reason: str
+    final_text: str
+    delivery_performed: bool
+    tokens_input: int = 0
+    tokens_output: int = 0
+    tool_rounds: int = 0
+    warning_count: int = 0
+    sink_failure_count: int = 0
+    error: str = ""
+    provider: str = ""
+    model: str = ""
 
 
 class AgentLoop:
-    """统一的 Agent 循环 — LLM 调用 → 工具分派 → 继续/终止"""
-
-    MAX_TOOLS_PER_ROUND = 10
+    """Agent 状态机 — LLM 调用 → 工具分派 → 继续/终止"""
 
     def __init__(
-        self, provider: LLMProvider, tool_registry: Any = None,
-        hooks: Optional[List] = None,
-        max_tool_rounds: int = 5, max_round_callbacks: int = 3,
-    ):
-        self.provider = provider
-        self.tool_registry = tool_registry
-        self.hooks: List = hooks or []
-        self.max_tool_rounds = max_tool_rounds
-        self.max_round_callbacks = max_round_callbacks
+        self,
+        llm_gateway: LLMGateway,
+        tool_executor: ToolExecutor,
+        event_bus: AgentEventBus,
+        delivery_sink: Optional[DeliverySink] = None,
+        image_sink: Optional[ImageGenerationSink] = None,
+        limits: Optional[AgentRunLimits] = None,
+    ) -> None:
+        self._llm = llm_gateway
+        self._executor = tool_executor
+        self._event_bus = event_bus
+        self._delivery = delivery_sink
+        self._image = image_sink
+        self._limits = limits or AgentRunLimits()
 
     async def run(
-        self, messages: List[dict], tools: Optional[List[dict]] = None,
+        self,
+        messages: List[dict],
+        state: AgentRunState,
+        tools: Optional[List[dict]] = None,
+        tool_use_mode: ToolUseMode = ToolUseMode.AUTO,
+        required_tools: Optional[List[str]] = None,
         temperature: Optional[float] = None,
-        timeout: int = 60, user_id: str = "", group_id: str = "",
-        tool_domains: Optional[List[str]] = None, tool_ctx: Any = None,
-    ) -> LoopResult:
+        timeout: Optional[int] = None,
+        selection: Optional[SelectionPolicy] = None,
+    ) -> AgentRunResult:
+        """执行一次 Agent run。
 
-        session_id = f"{user_id or ''}:{group_id or ''}:{uuid.uuid4().hex[:16]}"
-        ctx = LoopContext(
-            user_id=user_id, group_id=group_id, session_id=session_id,
-            max_tool_rounds=self.max_tool_rounds,
-            max_round_callbacks=self.max_round_callbacks,
-            provider=self.provider, mode="chat",
-        )
+        Args:
+            messages: 初始消息列表
+            state: 运行时状态（会被修改）
+            tools: OpenAI 格式的工具定义列表
+            tool_use_mode: 工具使用策略
+            required_tools: REQUIRED_ONE_OF 模式下的必需工具名列表
+            temperature: 模型温度
+            timeout: 超时秒数
 
-        current = list(messages)
-        all_tools = list(tools) + [_FINISH_TASK_TOOL] if tools is not None else None
-        records: List[dict] = []
-        trn = 0  # tool_round_num
-        cb = 0   # callback_count
-        tin = 0  # total tokens in
-        tout = 0 # total tokens out
-        tnames: List[str] = []
-        cached = 0
+        Returns:
+            AgentRunResult
+        """
+        state.messages = list(messages)
+        round_index = 0
+        total_tokens_in = 0
+        total_tokens_out = 0
+        provider = ""
         model = ""
-        tr = 0   # total_rounds
-        max_tr = self.max_tool_rounds + self.max_round_callbacks
-        t0 = time.monotonic()
 
-        while tr < max_tr:
-            ctx.tool_round_num = trn
-            ctx.callback_count = cb
-            ctx.messages = current
+        while round_index < self._limits.max_tool_rounds:
+            # ── 构造 LLM 请求 ──
+            req = LLMRequest(
+                messages=state.messages,
+                tools=tools,
+                tool_use_mode=tool_use_mode,
+                required_tools=required_tools,
+                temperature=temperature,
+                selection=selection or SelectionPolicy.CHAT,
+            )
 
-            # ── pre_llm ──
-            for h in self.hooks:
-                if not hasattr(h, 'pre_llm'):
-                    continue
-                r = await h.pre_llm(current, ctx)
-                if r and r.abort:
-                    return LoopResult(final_output=None, aborted=True, abort_reason=r.abort_reason,
-                        metadata=self._md(tin, tout, trn, tnames, cached, records, model, cb,
-                                          int((time.monotonic() - t0) * 1000),
-                                          "quota_exceeded", r.abort_reason,
-                                          uid=user_id, gid=group_id, msgs=messages, temp=temperature))
-                if r and r.messages is not None:
-                    current = r.messages
+            await self._event_bus.emit(
+                "ModelRequestPrepared",
+                ModelRequestPreparedPayload(
+                    round_index=round_index,
+                    tool_use_mode=tool_use_mode.value,
+                    required_tools=required_tools or [],
+                    message_count=req.message_count,
+                    tool_count=req.tool_count,
+                ),
+                state,
+            )
 
-            # ── generate ──
+            # ── 调用 LLM ──
             try:
-                resp = await self.provider.generate(
-                    messages=current, tools=all_tools,
-                    temperature=temperature, timeout=timeout)
-            except NonRetryableError:
-                raise
+                result = await self._llm.complete(
+                    request=req,
+                    state=state,
+                    timeout=timeout,
+                )
             except Exception as e:
-                logger.error(f"AgentLoop LLM error: {self._ce(e)} {e}", exc_info=True)
-                raise
+                logger.error(f"AgentLoop LLM 调用失败: {e}")
+                return await self._finish(state, "failed", "llm_error", total_tokens_in, total_tokens_out, is_error=True)
 
-            tr += 1
-            tin += resp.usage.input
-            tout += resp.usage.output
-            cached = resp.usage.cached
-            if resp.model:
-                model = resp.model
+            total_tokens_in += result.usage.get("input", 0)
+            total_tokens_out += result.usage.get("output", 0)
+            provider = result.provider
+            model = result.model
 
-            # ── think ──
-            raw = resp.content or ""
-            think = self._extract_think(raw)
-            resp.content = self._filter_think_tags(raw)
-            resp._think_raw = think  # type: ignore[attr-defined]
+            # ── 处理响应 ──
+            content = result.content or ""
+            tool_calls = result.tool_calls
 
-            # 截断
-            tcs = resp.tool_calls
-            if len(tcs) > self.MAX_TOOLS_PER_ROUND:
-                logger.warning(f"工具超限 {len(tcs)} > {self.MAX_TOOLS_PER_ROUND}")
-                tcs = tcs[:self.MAX_TOOLS_PER_ROUND]
+            required_tool_output = (
+                bool(tools)
+                and tool_use_mode in {ToolUseMode.REQUIRED, ToolUseMode.REQUIRED_ONE_OF}
+            )
 
-            # ── L1 ──
-            if (trn < self.max_tool_rounds and not tcs
-                    and all_tools
-                    and cb < self.max_round_callbacks):
-                current.append(dict(_L1_MSG))
-                cb += 1
-                records.append({"round": trn, "think": think, "tool_calls": [],
-                                "tool_results": [], "callback": dict(_L1_MSG)})
+            # ── L1 纠正：要求工具输出时，不能直接输出文本或空响应 ──
+            if (round_index < self._limits.max_corrections
+                    and not tool_calls
+                    and tools
+                    and (not content.strip() or required_tool_output)):
+                state.messages.append(dict(_L1_CORRECTION_MSG))
+                state.correction_count += 1
+                round_index += 1
+                await self._event_bus.emit(
+                    "CorrectionInjected",
+                    CorrectionInjectedPayload(
+                        reason="tool_required",
+                        round_index=round_index,
+                        message=_L1_CORRECTION_MSG["content"],
+                    ),
+                    state,
+                )
                 continue
 
-            # ── post_llm ──
-            injected = None
-            for h in self.hooks:
-                if not hasattr(h, 'post_llm'):
+            if required_tool_output and not tool_calls:
+                state.warning_count += 1
+                await self._event_bus.emit(
+                    "AgentWarning",
+                    AgentWarningPayload(
+                        code="required_tool_missing",
+                        message="模型在强制工具输出模式下未调用工具",
+                        round_index=round_index,
+                    ),
+                    state,
+                )
+                return await self._finish(state, "max_corrections",
+                                          "required_tool_missing",
+                                          total_tokens_in, total_tokens_out,
+                                          provider, model)
+
+            # ── 无工具 + 有内容 → 直接返回 ──
+            if not tool_calls and content.strip():
+                final_text = self._remove_think_tags(content)
+                state.final_text = final_text
+                state.delivery_performed = True
+                state.final_reason = "direct_content"
+                return await self._finish(state, "completed", "direct_content",
+                                          total_tokens_in, total_tokens_out, provider, model)
+
+            # ── 无工具 + 无内容（不应发生，兜底返回） ──
+            if not tool_calls and not content.strip():
+                return await self._finish(state, "completed", "empty_response",
+                                          total_tokens_in, total_tokens_out, provider, model)
+
+            # ── REQUIRED_ONE_OF 校验：本轮 tool_calls 必须命中 required_tools ──
+            if (tool_use_mode == ToolUseMode.REQUIRED_ONE_OF
+                    and required_tools
+                    and not any(tc["name"] in required_tools for tc in tool_calls)):
+                if state.correction_count < self._limits.max_corrections:
+                    missing_list = ", ".join(required_tools)
+                    correction_msg = {
+                        "role": "user",
+                        "content": (
+                            f"[系统指令] 你必须调用以下工具之一: {missing_list}。"
+                            f"必须通过工具调用完成任务，不要直接输出文本。"
+                        ),
+                    }
+                    state.messages.append(dict(correction_msg))
+                    state.correction_count += 1
+                    round_index += 1
+                    await self._event_bus.emit(
+                        "CorrectionInjected",
+                        CorrectionInjectedPayload(
+                            reason="required_tool_mismatch",
+                            round_index=round_index,
+                            message=correction_msg["content"],
+                        ),
+                        state,
+                    )
                     continue
-                try:
-                    hr = await h.post_llm(current, resp, ctx)
-                except Exception as e:
-                    logger.warning(f"post_llm hook error ({type(h).__name__}): {e}", exc_info=True)
+                else:
+                    state.warning_count += 1
+                    await self._event_bus.emit(
+                        "AgentWarning",
+                        AgentWarningPayload(
+                            code="required_tool_mismatch",
+                            message="模型连续调用非必需工具，correction 已耗尽",
+                            round_index=round_index,
+                        ),
+                        state,
+                    )
+                    return await self._finish(state, "max_corrections",
+                                              "required_tool_mismatch",
+                                              total_tokens_in, total_tokens_out,
+                                              provider, model)
+
+            # ── structured_collect：只执行 required_tools 中的工具，防止同轮混入非目标工具数据 ──
+            if state.mode == "structured_collect" and required_tools:
+                tool_calls = [tc for tc in tool_calls if tc["name"] in required_tools]
+                if not tool_calls:
                     continue
-                if hr is not None and getattr(h, 'injects_message', False):
-                    injected = hr
 
-            if (injected and trn < self.max_tool_rounds
-                    and cb < self.max_round_callbacks):
-                current.append(injected)
-                cb += 1
-                records.append({"round": trn, "think": think,
-                    "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tcs],
-                    "tool_results": [], "callback": injected})
-                continue
-
-            # ── 无工具 → 返回 ──
-            if not tcs:
-                records.append({"round": trn, "think": think, "tool_calls": [],
-                                "tool_results": [], "callback": None})
-                return LoopResult(
-                    final_output=resp.content or "",
-                    metadata=self._md(tin, tout, trn, tnames, cached, records, model, cb,
-                                      int((time.monotonic() - t0) * 1000), "ok",
-                                      content=resp.content or "",
-                                      uid=user_id, gid=group_id, msgs=messages, temp=temperature))
-
-            # ── finish_task 过滤 ──
-            other_tcs = [tc for tc in tcs if tc.name != "finish_task"]
-            finish_tcs = [tc for tc in tcs if tc.name == "finish_task"]
-            if finish_tcs and other_tcs:
+            # ── 有限工具轮次：截断 ──
+            if len(tool_calls) > self._limits.max_tools_per_round:
                 logger.warning(
-                    f"finish_task 与其他工具共存（总计 {len(tcs)} 个），"
-                    f"忽略 finish_task 并执行其余 {len(other_tcs)} 个工具")
-                tcs = other_tcs
-            elif finish_tcs and not other_tcs:
-                # ── finish_task 终止 ──
-                finish_tc = finish_tcs[0]
-                try:
-                    finish_args = json.loads(finish_tc.arguments or "{}")
-                except json.JSONDecodeError:
-                    finish_args = {}
-                finish_summary = finish_args.get("summary", "")
-                records.append({"round": trn, "think": think,
-                                "tool_calls": [{"id": finish_tc.id, "name": "finish_task",
-                                                "arguments": finish_tc.arguments}],
-                                "tool_results": [], "callback": None,
-                                "finish_summary": finish_summary})
-                current.append({
-                    "role": "assistant", "content": resp.content or "",
-                    "tool_calls": [{"id": finish_tc.id, "type": "function",
-                                     "function": {"name": "finish_task",
-                                                  "arguments": finish_tc.arguments}}],
-                })
-                tnames.append("finish_task")
-                return LoopResult(
-                    final_output=resp.content or finish_summary,
-                    metadata=self._md(tin, tout, trn, tnames, cached, records, model, cb,
-                                      int((time.monotonic() - t0) * 1000), "finished",
-                                      content=resp.content or finish_summary,
-                                      uid=user_id, gid=group_id, msgs=messages, temp=temperature))
+                    f"工具超限 {len(tool_calls)} > {self._limits.max_tools_per_round}"
+                )
+                tool_calls = tool_calls[:self._limits.max_tools_per_round]
 
-            # ── 工具分派 ──
-            tc_dicts = [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in tcs]
-            for tc in tcs:
-                if tc.name not in tnames:
-                    tnames.append(tc.name)
-
-            current.append({
-                "role": "assistant", "content": resp.content or "",
-                "tool_calls": [{"id": tc.id, "type": "function",
-                    "function": {"name": tc.name, "arguments": tc.arguments}} for tc in tcs],
+            # ── 工具执行 ──
+            state.messages.append({
+                "role": "assistant",
+                "content": content or "",
+                "tool_calls": [
+                    {"id": tc["id"], "type": "function",
+                     "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                    for tc in tool_calls
+                ],
             })
-            executor = self._executor(tool_domains, tool_ctx)
-            try:
-                tresults = await executor([tc.to_dict() for tc in tcs])
-            except Exception as e:
-                logger.warning(f"工具执行异常: tool={tnames}, error={e}", exc_info=True)
-                tresults = [{"tool_call_id": tc.id, "content": f"工具执行失败: {e}"} for tc in tcs]
-            for tr_item in tresults:
-                current.append({"role": "tool", "tool_call_id": tr_item["tool_call_id"],
-                                "content": tr_item["content"]})
-            tr_dicts = [{"tool_call_id": r["tool_call_id"], "content": r["content"]} for r in tresults]
 
-            if self.tool_registry:
-                for h in self.hooks:
-                    if not hasattr(h, 'post_tool'):
-                        continue
+            tool_results = await self._executor.execute_many(tool_calls, state)
+
+            state.tool_rounds += 1
+            round_index += 1
+
+            # ── 按调用顺序处理 EXTERNAL_ACTION 结果 ──
+            delivery_performed_this_round = False
+            has_pending_observation = False
+            interim_found = False
+            skip_rest = False
+            ordered_results: List[dict] = []
+
+            for idx, (tc, tr) in enumerate(zip(tool_calls, tool_results)):
+                tc_name = tc["name"]
+                result_content = tr["content"]
+                action_id = tr.get("_action_id")
+
+                if skip_rest:
+                    tr["content"] = "跳过：前面的工具已产生最终输出"
+                    ordered_results.append(tr)
+                    continue
+
+                # send_reply_segment → DeliverySink
+                if tc_name == "send_reply_segment":
+                    # 从 result_content 解析 phase（executor 返回的 JSON）
                     try:
-                        await h.post_tool(
-                            [ToolResult(tool_call_id=r["tool_call_id"], content=r["content"]) for r in tresults], ctx)
-                    except Exception as e:
-                        logger.warning(f"post_tool hook error ({type(h).__name__}): {e}", exc_info=True)
+                        action_data = json.loads(result_content)
+                    except (json.JSONDecodeError, TypeError):
+                        action_data = {}
 
-            trn += 1
-            records.append({"round": trn - 1, "think": think, "tool_calls": tc_dicts,
-                            "tool_results": tr_dicts, "callback": None})
+                    phase = action_data.get("phase", "final")
+                    seg_content = action_data.get("content", result_content)
+
+                    if phase == "final" and has_pending_observation:
+                        tr["content"] = "跳过：前面有待回填 observation，等待下一轮"
+                        skip_rest = True
+                        ordered_results.append(tr)
+                        continue
+
+                    if not action_id or not self._delivery:
+                        ordered_results.append(tr)
+                        continue
+
+                    send_action = SendMessageAction(
+                        content=seg_content,
+                        phase=phase,
+                        delay_before=action_data.get("delay_before", 1.0),
+                        segment_index=idx,
+                        action_id=action_id,
+                    )
+
+                    delivery_ok = await self._delivery.handle_send(
+                        send_action,
+                        state.user_id,
+                        state.group_id,
+                        state.run_id,
+                        state.turn_id,
+                    )
+
+                    if delivery_ok:
+                        delivery_performed_this_round = True
+                        state.delivery_performed = True
+                    else:
+                        state.sink_failures.append(f"send_reply_segment:{send_action.action_id}")
+
+                    if phase == "interim":
+                        interim_found = True
+                        state.interim_segment_count += 1
+                    elif phase == "final":
+                        state.final_text = seg_content
+                        state.final_reason = "terminal_final_segment"
+
+                    # send_reply_segment 不回填模型
+                    tr["content"] = "已发送"
+
+                    if phase == "final":
+                        skip_rest = True
+
+                # generate_image → ImageGenerationSink
+                elif tc_name == "generate_image" and action_id and self._image:
+                    try:
+                        action_data = json.loads(result_content)
+                    except (json.JSONDecodeError, TypeError):
+                        action_data = {}
+
+                    gen_action = GenerateImageAction(
+                        prompt=action_data.get("prompt", result_content),
+                        action_id=action_id,
+                    )
+
+                    observation = await self._image.handle_generate(gen_action)
+                    tr["content"] = observation
+                    has_pending_observation = True
+
+                ordered_results.append(tr)
+
+            # ── 回填 tool messages ──
+            for tr in ordered_results:
+                state.messages.append({
+                    "role": "tool",
+                    "tool_call_id": tr["tool_call_id"],
+                    "content": tr["content"],
+                })
+
+            # ── 判断下一步 ──
+            if state.final_reason == "terminal_final_segment":
+                return await self._finish(state, "completed", "terminal_final_segment",
+                                          total_tokens_in, total_tokens_out, provider, model)
+
+            if interim_found and not has_pending_observation:
+                # 只有 interim 没有 observation 和 final：注入 correction
+                if state.correction_count < self._limits.max_corrections:
+                    state.messages.append({
+                        "role": "user",
+                        "content": _CORRECTION_INTERIM_MSG,
+                    })
+                    state.correction_count += 1
+                    await self._event_bus.emit(
+                        "CorrectionInjected",
+                        CorrectionInjectedPayload(
+                            reason=_CORRECTION_INTERIM_REASON,
+                            round_index=round_index,
+                            message=_CORRECTION_INTERIM_MSG,
+                        ),
+                        state,
+                    )
+                    continue
+                else:
+                    # correction 耗尽
+                    state.warning_count += 1
+                    await self._event_bus.emit(
+                        "AgentWarning",
+                        AgentWarningPayload(
+                            code="interim_limit_exceeded",
+                            message="interim 后 correction 已耗尽",
+                            round_index=round_index,
+                        ),
+                        state,
+                    )
+                    return await self._finish(state, "max_corrections",
+                                              "interim_corrections_exhausted",
+                                              total_tokens_in, total_tokens_out,
+                                              provider, model)
+
+            # 有 pending observation → 继续循环
+            if has_pending_observation:
+                continue
+
+            # ── structured_collect：本轮命中 required STATE_WRITE → 完成 ──
+            if (state.mode == "structured_collect"
+                    and required_tools
+                    and any(tc["name"] in required_tools for tc in tool_calls)):
+                state.final_reason = "structured_collect_completed"
+                return await self._finish(state, "completed", "structured_collect_completed",
+                                          total_tokens_in, total_tokens_out, provider, model)
+
+            # ── 达到最大轮次 ──
+            if round_index >= self._limits.max_tool_rounds:
+                return await self._finish(state, "max_rounds", "max_tool_rounds",
+                                          total_tokens_in, total_tokens_out, provider, model)
+
+            # 一般继续
             continue
 
-        return LoopResult(final_output="",
-            metadata=self._md(tin, tout, trn, tnames, cached, records, model, cb,
-                              int((time.monotonic() - t0) * 1000), "max_rounds",
-                              uid=user_id, gid=group_id, msgs=messages, temp=temperature))
+        # ── 循环结束（max_tool_rounds 耗尽） ──
+        return await self._finish(state, "max_rounds", "max_tool_rounds",
+                                  total_tokens_in, total_tokens_out, provider, model)
 
-    def _executor(self, domains: Optional[List[str]], tool_ctx: Any):
-        if not self.tool_registry:
-            async def _noop(tcs):
-                return [{"tool_call_id": tc["id"], "content": "工具执行不可用"} for tc in tcs]
-            return _noop
-        if domains:
-            return self.tool_registry.make_executor_for(*domains, ctx=tool_ctx)
-        return self.tool_registry.make_executor_for(
-            *getattr(self.tool_registry, '_domains', {}).keys(), ctx=tool_ctx)
+    # ── 终止路径 ────────────────────────────────────────────────
+
+    async def _finish(
+        self,
+        state: AgentRunState,
+        status: str,
+        reason: str,
+        tokens_in: int,
+        tokens_out: int,
+        provider: str = "",
+        model: str = "",
+        is_error: bool = False,
+    ) -> AgentRunResult:
+        """统一终止路径：emit terminal event + build result。所有 return 必须走此方法。"""
+        event_type = "AgentRunFailed" if is_error else "AgentRunFinished"
+        event_status = status
+        await self._event_bus.emit(
+            event_type,
+            AgentRunFinishedPayload(
+                status=event_status,
+                reason=reason,
+                delivery_performed=state.delivery_performed,
+                final_text=state.final_text,
+                tokens_input=tokens_in,
+                tokens_output=tokens_out,
+                provider=provider,
+                model=model,
+            ),
+            state,
+        )
+        return self._build_result(state, status, reason, tokens_in, tokens_out, provider, model)
+
+    # ── 工具方法 ────────────────────────────────────────────────
 
     @staticmethod
-    def _extract_think(content: Optional[str]) -> Optional[str]:
-        if not content:
-            return None
-        blocks = re.findall(_THINK_RE, content, flags=re.DOTALL)
+    def _extract_think(content: str) -> Optional[str]:
+        blocks = _THINK_RE.findall(content)
         return "".join(blocks) if blocks else None
 
     @staticmethod
-    def _filter_think_tags(content: str) -> str:
-        return re.sub(_THINK_RE, '', content, flags=re.DOTALL).strip()
+    def _remove_think_tags(content: str) -> str:
+        return _THINK_RE.sub("", content).strip()
 
     @staticmethod
-    def _ce(e: Exception) -> str:
-        return classify(e).value
-
-    @staticmethod
-    def _md(tin=0, tout=0, trn=0, tnames=None, cached=0, records=None, model="",
-            cb=0, lat=0, status="ok", error="", content="", uid="", gid="", msgs=None, temp=None):
-        return {
-            "model": model, "tokens_input": tin, "tokens_output": tout,
-            "tool_rounds": trn, "tool_names": tnames or [], "cached_tokens": cached,
-            "round_records": records or [], "callback_count": cb,
-            "latency_ms": lat, "status": status, "error": error,
-            "content": content, "user_id": uid, "group_id": gid,
-            "messages": msgs or [], "temperature": temp,
-        }
+    def _build_result(
+        state: AgentRunState,
+        status: str,
+        reason: str,
+        tokens_in: int,
+        tokens_out: int,
+        provider: str = "",
+        model: str = "",
+    ) -> AgentRunResult:
+        return AgentRunResult(
+            run_id=state.run_id,
+            turn_id=state.turn_id,
+            status=status,
+            final_reason=reason,
+            final_text=state.final_text,
+            delivery_performed=state.delivery_performed,
+            tokens_input=tokens_in,
+            tokens_output=tokens_out,
+            tool_rounds=state.tool_rounds,
+            warning_count=state.warning_count,
+            sink_failure_count=len(state.sink_failures),
+            error=state.error,
+            provider=provider,
+            model=model,
+        )

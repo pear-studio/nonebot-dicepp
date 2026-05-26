@@ -12,9 +12,8 @@ import json
 from nonebot.log import logger
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy
-from ..tools.registry import ToolRegistry, ToolDomain
+from ..tools.registry import ToolRegistry
 from ..tools.collecting import RECORD_EVENT_TOOL, RECORD_REACTION_TOOL, RECORD_DIARY_ENTRY_TOOL, RECORD_SHARE_MESSAGE_TOOL
-from ..tools.context import ToolContext
 from ..wall_clock import format_timestamp, format_relative_time, persona_wall_now
 from typing import TYPE_CHECKING
 
@@ -23,6 +22,7 @@ _DEFAULT_BG_TIMEOUT = 90
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
+    from ..data.store import PersonaDataStore
 
 @dataclass
 class EventGenerationResult:
@@ -123,12 +123,13 @@ class EventGenerationAgent:
     def __init__(
         self,
         llm_router: LLMRouter,
-        tool_registry: ToolRegistry,
+        _tool_registry: ToolRegistry,  # unused, kept for caller compatibility — M4 清理时移除
         config: Optional["PersonaConfig"] = None,
+        store: Optional["PersonaDataStore"] = None,
     ):
         self.llm_router = llm_router
-        self.tool_registry = tool_registry
         self.config = config
+        self._store = store
         self._bg_timeout = (
             getattr(config, "background_llm_timeout_seconds", _DEFAULT_BG_TIMEOUT)
             if config
@@ -171,13 +172,24 @@ class EventGenerationAgent:
     async def _run_life_collect_loop(
         self, messages: list, tools: list, temperature: float, selection: SelectionPolicy,
     ) -> list:
-        collected: list = []
-        tool_ctx = ToolContext(collected_args=collected)
-        await self.llm_router.run_via_loop(
-            messages=messages, tools=tools, temperature=temperature,
-            timeout=self._bg_timeout, tool_registry=self.tool_registry,
-            tool_domains=[ToolDomain.LIFE], tool_ctx=tool_ctx,
-            selection=selection, max_tool_rounds=self._max_tool_rounds,
+        from ..agent.tool_bridge import run_structured_collect
+
+        tool_name = ""
+        if tools:
+            first = tools[0]
+            if isinstance(first, dict):
+                func = first.get("function", first)
+                tool_name = func.get("name", "")
+
+        collected, _result = await run_structured_collect(
+            router=self.llm_router,
+            store=self._store,
+            messages=messages,
+            temperature=temperature,
+            timeout=self._bg_timeout,
+            selection=selection,
+            required_tools=[tool_name] if tool_name else None,
+            max_tool_rounds=self._max_tool_rounds,
         )
         return collected
 
@@ -755,6 +767,7 @@ class EventGenerationAgent:
         character_name: str,
         character_description: str,
         summary: str,
+        store: Optional["PersonaDataStore"] = None,
     ) -> Optional[str]:
         """生成日报开场白 — 辅助 tier，无工具调用，直接取文本回复。
 
@@ -778,17 +791,28 @@ class EventGenerationAgent:
         user_prompt = "请用第一人称写2-3句日报开场白："
 
         try:
-            result = await llm_router.run_via_loop(
+            from ..agent.runtime import AgentRuntime
+            from ..agent.request import AgentRunLimits
+            from ..agent.tool_executor import ToolRegistry
+            runtime = AgentRuntime(
+                router=llm_router,
+                store=store,
+                limits=AgentRunLimits(max_tool_rounds=1),
+            )
+
+            result = await runtime.run(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                selection=SelectionPolicy.SUMMARIZE,
+                user_id="",
+                group_id="",
+                tool_registry=ToolRegistry(),
                 temperature=0.85,
-                tools=None,
-                max_tool_rounds=0,
+                timeout=None,
+                selection=SelectionPolicy.SUMMARIZE,
             )
-            text = (result.final_output or "").strip().strip('"').strip("'")
+            text = (result.final_text or "").strip().strip('"').strip("'")
             if not text:
                 return None
             return text[:200]

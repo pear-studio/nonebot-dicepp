@@ -286,7 +286,7 @@ def _build_tooling(
     tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
     tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
 
-    event_agent = EventGenerationAgent(router, tool_registry, config=config)
+    event_agent = EventGenerationAgent(router, tool_registry, config=config, store=store)
 
     life_config = CharacterLifeConfig.from_persona(config)
     character_life = CharacterLife(
@@ -374,7 +374,8 @@ def _make_resolve_query_db(bot: Bot):
 def _build_chat(deps: ChatDeps) -> ChatSession:
     """组装 ChatSession"""
     scoring_agent = ScoringAgent(deps.router, timezone=deps.config.timezone,
-                                 max_tool_rounds=deps.config.background_llm_max_tool_rounds)
+                                 max_tool_rounds=deps.config.background_llm_max_tool_rounds,
+                                 store=deps.store)
     from .chat.context import SegmentGuide
 
     segment_guide = None
@@ -414,7 +415,6 @@ def _build_chat(deps: ChatDeps) -> ChatSession:
         response_handler=response_handler,
         context_builder=context_builder,
         decay_calculator=deps.decay_calculator,
-        segment_dispatcher=deps.segment_dispatcher,
         query_store=deps.query_store,
         resolve_db=deps.resolve_db,
         sleep_gate=deps.sleep_gate,

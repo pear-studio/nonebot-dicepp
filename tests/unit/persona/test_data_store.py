@@ -30,6 +30,23 @@ class TestMessageCRUD:
         assert msgs[1].content == "hi"
 
     @pytest.mark.asyncio
+    async def test_message_stream_segment_metadata_roundtrip(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream(
+            "u1", "", "assistant", MessageType.CHAT, "part1",
+            agent_run_id="run_1", turn_id="turn_1",
+            segment_index=0, segment_phase="interim",
+        )
+
+        msgs = await store.get_recent_messages("u1", limit=10)
+        assert len(msgs) == 1
+        assert msgs[0].agent_run_id == "run_1"
+        assert msgs[0].turn_id == "turn_1"
+        assert msgs[0].segment_index == 0
+        assert msgs[0].segment_phase == "interim"
+
+    @pytest.mark.asyncio
     async def test_get_recent_messages_order_and_limit(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType

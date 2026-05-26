@@ -5,7 +5,13 @@ from .collecting import (
     RECORD_REACTION_TOOL,
     RECORD_DIARY_ENTRY_TOOL,
     RECORD_SHARE_MESSAGE_TOOL,
+    RECORD_SCORE_TOOL,
     life_collecting_executor,
+    RecordEventArgs,
+    RecordReactionArgs,
+    RecordDiaryEntryArgs,
+    RecordShareMessageArgs,
+    RecordScoreArgs,
 )
 
 __all__ = [
@@ -16,5 +22,11 @@ __all__ = [
     "RECORD_REACTION_TOOL",
     "RECORD_DIARY_ENTRY_TOOL",
     "RECORD_SHARE_MESSAGE_TOOL",
+    "RECORD_SCORE_TOOL",
     "life_collecting_executor",
+    "RecordEventArgs",
+    "RecordReactionArgs",
+    "RecordDiaryEntryArgs",
+    "RecordShareMessageArgs",
+    "RecordScoreArgs",
 ]

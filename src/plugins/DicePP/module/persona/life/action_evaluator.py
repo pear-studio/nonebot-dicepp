@@ -11,35 +11,10 @@ from nonebot.log import logger
 
 from ..data.store import PersonaDataStore
 from ..llm.selection import SelectionPolicy
-from ..tools.collecting import make_collecting_executor
-from ..tools.registry import ToolRegistry, ToolDef
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
     from ..llm.router import LLMRouter
-
-RECORD_EVALUATION_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "record_evaluation",
-        "description": "记录行动可行性评估结果",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "result": {
-                    "type": "string",
-                    "enum": ["approved", "rejected", "deferred"],
-                    "description": "评估结论：approved=可行立即执行, rejected=不可行丢弃, deferred=可行但有进行中活动需等待",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "评估理由，30-80字，说明为何通过/拒绝/推迟",
-                },
-            },
-            "required": ["result", "reason"],
-        },
-    },
-}
 
 # 常见中文地点词匹配
 _LOCATION_RE = re.compile(
@@ -128,6 +103,7 @@ class ActionEvaluator:
         self,
         action_idea: str,
         ongoing_descriptions: Optional[List[str]] = None,
+        user_id: str = "",
     ) -> Tuple[str, str]:
         """评估行动可行性，返回 (result, reason)。"""
         try:
@@ -147,36 +123,29 @@ class ActionEvaluator:
                 ongoing_descriptions=ongoing_descriptions or [],
             )
 
-            return await self._call_llm(user_prompt)
+            return await self._call_llm(user_prompt, user_id=user_id)
 
         except Exception:
             logger.exception("[ActionEvaluator] 评估失败")
             return ("rejected", "评估异常，默认拒绝")
 
-    async def _call_llm(self, user_prompt: str) -> Tuple[str, str]:
-        collected_args: list = []
-        tool_registry = ToolRegistry()
-        tool_registry.register(
-            "life",
-            ToolDef(name="record_evaluation", description="", parameters=RECORD_EVALUATION_TOOL["function"]["parameters"]),
-            make_collecting_executor(collected_args),
-        )
-
+    async def _call_llm(self, user_prompt: str, user_id: str = "") -> Tuple[str, str]:
         from ..llm.router import ServiceUnavailableError
-        hooks = self._router.make_default_hooks()
+        from ..agent.tool_bridge import run_structured_collect
+
         try:
-            result = await self._router.run_via_loop(
+            collected_args, _result = await run_structured_collect(
+                router=self._router,
+                store=self._store,
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
-                tools=[RECORD_EVALUATION_TOOL],
+                user_id=user_id,
+                required_tools=["record_evaluation"],
                 temperature=0.3,
                 timeout=self._timeout,
                 selection=SelectionPolicy.SCORING,
-                tool_registry=tool_registry,
-                tool_domains=["life"],
-                hooks=hooks,
                 max_tool_rounds=1,
             )
         except ServiceUnavailableError:
