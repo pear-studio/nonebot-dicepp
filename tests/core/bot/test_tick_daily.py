@@ -9,34 +9,31 @@ class _FakeBotCommand(BotCommandBase):
     pass
 
 
-@pytest.mark.asyncio
-async def test_tick_daily_awaits_async_command_tick_daily():
-    """
-    DiceBot.tick_daily 必须正确 await 返回协程的 command.tick_daily，
-    同时兼容同步实现。此测试覆盖 CODE111 根因。
-    """
+def _make_mock_bot():
+    """构造 tick_daily 所需的最小 mock Bot，集中管理 mock 表面积。"""
     bot = MagicMock()
-
-    # DB mocks: 返回空列表，使统计循环快速通过
     bot.db.user_stat.list_all = AsyncMock(return_value=[])
     bot.db.user_stat.upsert_many = AsyncMock()
     bot.db.group_stat.list_all = AsyncMock(return_value=[])
     bot.db.group_stat.upsert_many = AsyncMock()
-
-    # 其他依赖 mocks
     bot.scheduler = MagicMock()
     bot.clear_expired_data = AsyncMock(return_value=[])
     bot.loc_helper.format_loc_text = MagicMock(return_value="")
     bot.send_msg_to_master = AsyncMock()
     bot.handle_exception = MagicMock(return_value=("", ""))
     bot.data_path = "/tmp/test_bot_data"
+    return bot
 
-    # 构造同步 command
+
+@pytest.mark.asyncio
+async def test_tick_daily_awaits_async_command_tick_daily():
+    """sync 和 async command.tick_daily 都被正确调用，结果累加到 bot_commands。"""
+    bot = _make_mock_bot()
+
     sync_cmd = MagicMock()
     sync_cmd.readable_name = "SyncCmd"
     sync_cmd.tick_daily.return_value = [_FakeBotCommand()]
 
-    # 构造异步 command
     async_cmd = MagicMock()
     async_cmd.readable_name = "AsyncCmd"
     async_cmd.tick_daily = AsyncMock(return_value=[_FakeBotCommand(), _FakeBotCommand()])
@@ -46,33 +43,16 @@ async def test_tick_daily_awaits_async_command_tick_daily():
     bot_commands = []
     await Bot.tick_daily(bot, bot_commands)
 
-    # 验证同步 command 被调用且结果已累加
     sync_cmd.tick_daily.assert_called_once()
-    # 验证异步 command 被调用且协程被 await（AsyncMock 会自动处理）
     async_cmd.tick_daily.assert_called_once()
-
-    # 验证 bot_commands 正确累加：1 (sync) + 2 (async) = 3
     assert len(bot_commands) == 3
     assert all(isinstance(cmd, BotCommandBase) for cmd in bot_commands)
 
 
 @pytest.mark.asyncio
 async def test_tick_daily_skips_command_on_exception():
-    """
-    单个 command 的 tick_daily 抛出异常时不应中断整体流程。
-    """
-    bot = MagicMock()
-
-    bot.db.user_stat.list_all = AsyncMock(return_value=[])
-    bot.db.user_stat.upsert_many = AsyncMock()
-    bot.db.group_stat.list_all = AsyncMock(return_value=[])
-    bot.db.group_stat.upsert_many = AsyncMock()
-    bot.scheduler = MagicMock()
-    bot.clear_expired_data = AsyncMock(return_value=[])
-    bot.loc_helper.format_loc_text = MagicMock(return_value="")
-    bot.send_msg_to_master = AsyncMock()
-    bot.handle_exception = MagicMock(return_value=("err", ""))
-    bot.data_path = "/tmp/test_bot_data"
+    """单个 command 抛异常时不应中断整体流程，后续 command 仍被执行。"""
+    bot = _make_mock_bot()
 
     bad_cmd = MagicMock()
     bad_cmd.readable_name = "BadCmd"
@@ -87,7 +67,6 @@ async def test_tick_daily_skips_command_on_exception():
     bot_commands = []
     await Bot.tick_daily(bot, bot_commands)
 
-    # 异常 command 的结果被跳过，但后续 command 仍被执行
     assert len(bot_commands) == 1
     bad_cmd.tick_daily.assert_called_once()
     good_cmd.tick_daily.assert_called_once()

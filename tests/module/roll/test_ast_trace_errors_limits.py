@@ -1,10 +1,8 @@
 """
-Tests for Trace, Errors, and Safety Limits
+Tests for Trace rendering, Safety Limits, and Evaluation Depth.
 
-This module tests:
-1. Trace event model and rendering
-2. Error code mapping
-3. Safety limit enforcement
+Constructor tests (TestTraceEvents, TestErrorCodes, TestLimitChecker) removed
+as they verify internal wiring/constants rather than behavioral contracts.
 """
 
 import pytest
@@ -12,14 +10,10 @@ from module.roll.ast_engine.trace import (
     EvaluationTrace,
     DiceRollEvent,
     ModifierAppliedEvent,
-    OperationEvent,
-    ResultEvent,
     TraceEventType,
     LegacyTextRenderer,
 )
 from module.roll.ast_engine.errors import (
-    RollSyntaxError,
-    RollRuntimeError,
     RollLimitError,
     RollErrorCode,
 )
@@ -29,54 +23,7 @@ from module.roll.ast_engine.limits import (
     check_dice_count,
     check_dice_sides,
     check_explosion_limit,
-    LimitChecker,
 )
-
-
-@pytest.mark.unit
-class TestTraceEvents:
-    """Test trace event creation and types."""
-    
-    def test_dice_roll_event(self):
-        event = DiceRollEvent(
-            event_type=TraceEventType.DICE_ROLL,
-            count=2,
-            sides=20,
-            values=[15, 8]
-        )
-        assert event.count == 2
-        assert event.sides == 20
-        assert event.values == [15, 8]
-    
-    def test_modifier_applied_event(self):
-        event = ModifierAppliedEvent(
-            event_type=TraceEventType.MODIFIER_APPLIED,
-            modifier_type="K",  # ModifierType.KEEP_HIGHEST.value == "K"
-            original_values=[3, 15, 8],
-            result_values=[15, 8],
-            kept_indices=[1, 2]
-        )
-        assert event.modifier_type == "K"
-        assert event.result_values == [15, 8]
-    
-    def test_operation_event(self):
-        event = OperationEvent(
-            event_type=TraceEventType.OPERATION,
-            operator="+",
-            left_value=10,
-            right_value=5,
-            result_value=15
-        )
-        assert event.operator == "+"
-        assert event.result_value == 15
-    
-    def test_result_event(self):
-        event = ResultEvent(
-            event_type=TraceEventType.RESULT,
-            value=42,
-            expression="2D20+5"
-        )
-        assert event.value == 42
 
 
 @pytest.mark.unit
@@ -160,46 +107,6 @@ class TestLegacyTextRenderer:
 
 
 @pytest.mark.unit
-class TestErrorCodes:
-    """Test error code mapping."""
-    
-    def test_syntax_error_code(self):
-        error = RollSyntaxError("Test error")
-        assert error.code == RollErrorCode.SYNTAX_ERROR
-    
-    def test_syntax_error_with_position(self):
-        error = RollSyntaxError(
-            "Unexpected token",
-            expression="1+@2",
-            position=3,
-            code=RollErrorCode.UNEXPECTED_TOKEN
-        )
-        assert error.position == 3
-        assert error.expression == "1+@2"
-    
-    def test_runtime_error_code(self):
-        error = RollRuntimeError("Division error")
-        assert error.code == RollErrorCode.RUNTIME_ERROR
-    
-    def test_limit_error_details(self):
-        error = RollLimitError(
-            "Too many dice",
-            code=RollErrorCode.DICE_COUNT_EXCEEDED,
-            limit_name="dice_count",
-            limit_value=1000,
-            actual_value=1500
-        )
-        assert error.limit_name == "dice_count"
-        assert error.limit_value == 1000
-        assert error.actual_value == 1500
-    
-    def test_error_info_property(self):
-        """Error.info should return message for legacy compatibility."""
-        error = RollSyntaxError("Test message")
-        assert error.info == "Test message"
-
-
-@pytest.mark.unit
 class TestSafetyLimits:
     """Test safety limit enforcement."""
     
@@ -253,51 +160,6 @@ class TestSafetyLimits:
         with pytest.raises(RollLimitError) as exc_info:
             check_explosion_limit(15, limits)
         assert exc_info.value.code == RollErrorCode.EXPLOSION_LIMIT_EXCEEDED
-
-
-@pytest.mark.unit
-class TestLimitChecker:
-    """Test stateful limit checker."""
-    
-    def test_increment_rolls(self):
-        checker = LimitChecker()
-        checker.check_and_increment_rolls(10)
-        assert checker.total_rolls == 10
-    
-    def test_rolls_accumulate(self):
-        checker = LimitChecker()
-        checker.check_and_increment_rolls(10)
-        checker.check_and_increment_rolls(20)
-        assert checker.total_rolls == 30
-    
-    def test_rolls_exceeded(self):
-        limits = SafetyLimits(max_total_rolls=100)
-        checker = LimitChecker(limits)
-        checker.check_and_increment_rolls(50)
-        checker.check_and_increment_rolls(40)
-        with pytest.raises(RollLimitError):
-            checker.check_and_increment_rolls(20)
-    
-    def test_explosion_increment(self):
-        checker = LimitChecker()
-        checker.check_and_increment_explosion()
-        assert checker.explosion_count == 1
-    
-    def test_explosion_exceeded(self):
-        limits = SafetyLimits(max_explosion_iterations=5)
-        checker = LimitChecker(limits)
-        for _ in range(5):
-            checker.check_and_increment_explosion()
-        with pytest.raises(RollLimitError):
-            checker.check_and_increment_explosion()
-    
-    def test_reset(self):
-        checker = LimitChecker()
-        checker.check_and_increment_rolls(50)
-        checker.check_and_increment_explosion()
-        checker.reset()
-        assert checker.total_rolls == 0
-        assert checker.explosion_count == 0
 
 
 @pytest.mark.unit

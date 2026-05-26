@@ -86,6 +86,7 @@ markers = [
     "compatibility: Compatibility corpus tests for product-level behavior contracts",
     "karma: Tests for karma system",
     "log: Tests for logging system",
+    "legacy: Tests for legacy code paths pending migration or removal",
 ]
 
 # ── coverage 配置（替代 .coveragerc）─────────────────────────────────────────

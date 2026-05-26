@@ -9,6 +9,7 @@ from module.roll.roll_config import DICE_CONSTANT_MAX
 
 
 @pytest.mark.unit
+@pytest.mark.legacy
 class TestRollModifiers:
     def test_modifier_registration(self):
         assert "(R|X|XO)(<|>|=|<=|>=|==)?[1-9][0-9]*" in ROLL_MODIFIERS_DICT
@@ -77,6 +78,7 @@ class TestRollModifiers:
 
 
 @pytest.mark.unit
+@pytest.mark.legacy
 class TestRollModifierModify:
     def create_dice_result(self, val_list: list, dice_type: int = 20) -> RollResult:
         result = RollResult()

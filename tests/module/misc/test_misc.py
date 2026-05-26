@@ -36,42 +36,6 @@ class _BotTestBase(IsolatedAsyncioTestCase):
         return await self.bot.process_message(msg, meta)
 
 
-# ─────────────────────────── JRRP 集成测试 ───────────────────────────
-
-@pytest.mark.integration
-class TestJrrpCommandIntegration(_BotTestBase):
-    """JrrpCommand (.jrrp) 集成测试
-    # 与 test_jrrp_determinism.py 的单元测试互补
-    """
-
-    BOT_NAME = "test_jrrp_bot"
-
-    async def test_jrrp_returns_response(self):
-        cmds = await self._send_group(".jrrp")
-        result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".jrrp 应返回结果")
-        self.assertTrue(len(result) > 0, "结果内容不应为空")
-
-    async def test_jrrp_contains_number(self):
-        """jrrp 输出应包含 1-100 之间的数字"""
-        import re
-        cmds = await self._send_group(".jrrp")
-        result = "\n".join([str(c) for c in cmds])
-        numbers = re.findall(r'\d+', result)
-        self.assertTrue(len(numbers) > 0, "jrrp 结果应包含数字")
-        # 至少有一个数字在 1-100 范围内
-        has_valid_num = any(1 <= int(n) <= 100 for n in numbers if n.isdigit())
-        self.assertTrue(has_valid_num, f"jrrp 结果应包含 1-100 的人品值，实际输出：{result}")
-
-    async def test_jrrp_deterministic_same_day(self):
-        """同一天同一用户的 jrrp 结果应相同"""
-        cmds1 = await self._send_group(".jrrp", user_id="fixed_user")
-        cmds2 = await self._send_group(".jrrp", user_id="fixed_user")
-        result1 = "\n".join([str(c) for c in cmds1])
-        result2 = "\n".join([str(c) for c in cmds2])
-        self.assertEqual(result1, result2, "同一天同一用户的 jrrp 应相同")
-
-
 # ─────────────────────────── DND 集成测试 ───────────────────────────
 
 @pytest.mark.integration

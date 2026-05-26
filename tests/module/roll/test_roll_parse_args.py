@@ -22,6 +22,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 import pytest
+from module.roll.expression import sift_roll_exp_and_reason
 from module.roll.roll_parse_args import _parse_roll_args, RollParseArgs, MULTI_ROLL_LIMIT
 
 
@@ -349,3 +350,29 @@ def test_hash_times_with_na_mode():
     assert r.times == 3
     assert r.special_mode == "na"
     assert r.exp_str == "D10+5"
+
+
+# ---------------------------------------------------------------------------
+# 11. tail_text 切分（继承自 test_roll_parse_baseline）
+# ---------------------------------------------------------------------------
+class TestRollTailTextSplit:
+    """验证 sift_roll_exp_and_reason 分割掷骰表达式与原因"""
+
+    def test_no_reason(self):
+        exp, reason = sift_roll_exp_and_reason("d20+4")
+        assert exp.upper() == "D20+4"
+        assert reason == ""
+
+    def test_with_reason_space(self):
+        exp, reason = sift_roll_exp_and_reason("d20+4 攻击地精")
+        assert "D20" in exp.upper()
+        assert "攻击地精" in reason
+
+    def test_reason_only(self):
+        exp, reason = sift_roll_exp_and_reason("攻击地精")
+        assert "攻击地精" in reason
+
+    def test_empty_input(self):
+        exp, reason = sift_roll_exp_and_reason("")
+        assert exp == ""
+        assert reason == ""

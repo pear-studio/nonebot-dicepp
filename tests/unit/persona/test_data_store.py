@@ -7,8 +7,14 @@ Phase 7c: PersonaDataStore CRUD 单元测试 — 核心 CRUD
 import pytest
 from datetime import datetime, timedelta
 
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
+
 from plugins.DicePP.module.persona.data.models import (
     UserProfile,
+    LLMTraceRecord,
+    UserLLMConfig,
+    ScoreEvent,
+    ScoreDeltas,
 )
 
 
@@ -551,5 +557,290 @@ class TestGetDailyChatStats:
         assert len(stats["top_users"]) == 1
         assert stats["top_users"][0]["user_id"] == "u1"
         assert stats["top_users"][0]["cnt"] == 2
+
+
+# ── 以下为从 test_data_store_daily_event.py 合并 ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_add_and_get_daily_event_with_new_fields(tmp_path):
+    db_path = tmp_path / "test.db"
+    import aiosqlite
+    db = await aiosqlite.connect(str(db_path))
+    store = PersonaDataStore(db)
+    await store.ensure_tables()
+
+    await store.add_daily_event(
+        date="2024-01-01",
+        event_type="scheduled",
+        description="测试中",
+        reaction="不错",
+        share_desire=0.75,
+        duration_minutes=30,
+        energy_delta=3,
+        mood_delta=-2,
+        health_delta=1,
+        context_summary="在酒馆喝酒",
+    )
+    # 不传 context_summary
+    await store.add_daily_event(
+        date="2024-01-01",
+        event_type="system",
+        description="另一件事",
+    )
+
+    events = await store.get_daily_events("2024-01-01")
+    assert len(events) == 2
+    ev = events[0]
+    assert ev.share_desire == 0.75
+    assert ev.duration_minutes == 30
+    assert ev.description == "测试中"
+    assert ev.reaction == "不错"
+    assert ev.event_type == "scheduled"
+    assert ev.energy_delta == 3
+    assert ev.mood_delta == -2
+    assert ev.health_delta == 1
+    assert ev.context_summary == "在酒馆喝酒"
+    # 不传时回读为空字符串
+    ev2 = events[1]
+    assert ev2.context_summary == ""
+
+    await db.close()
+
+
+# ── 以下为从 test_data_store_llm.py 合并 ─────────────────────────────────────
+
+
+class TestLLMTraceCRUD:
+    """测试 LLM Trace CRUD"""
+
+    @pytest.mark.asyncio
+    async def test_add_and_get_llm_traces(self, temp_db):
+        store = temp_db
+        trace = LLMTraceRecord(
+            session_id="s1",
+            user_id="u1",
+            group_id="g1",
+            model="gpt-4o",
+            tier="primary",
+            messages="[]",
+            response="hello",
+            latency_ms=100,
+            tokens_in=10,
+            tokens_out=5,
+            status="ok",
+        )
+        await store.add_llm_trace(trace)
+
+        traces = await store.get_llm_traces("u1", limit=5)
+        assert len(traces) == 1
+        assert traces[0].response == "hello"
+        assert traces[0].latency_ms == 100
+
+    @pytest.mark.asyncio
+    async def test_prune_llm_traces(self, temp_db):
+        store = temp_db
+        old_trace = LLMTraceRecord(
+            session_id="s1",
+            user_id="u1",
+            group_id="g1",
+            model="gpt-4o",
+            tier="primary",
+            messages="[]",
+            response="old",
+            status="ok",
+            created_at=datetime.now() - timedelta(days=10),
+        )
+        await store.add_llm_trace(old_trace)
+        deleted = await store.prune_llm_traces(max_age_days=5)
+        assert deleted == 1
+        assert len(await store.get_llm_traces("u1", limit=5)) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_today_token_usage(self, temp_db):
+        store = temp_db
+        t1 = LLMTraceRecord(
+            session_id="s1",
+            user_id="u1",
+            model="m",
+            tier="primary",
+            messages="[]",
+            response="r",
+            tokens_in=10,
+            tokens_out=5,
+            status="ok",
+            created_at=datetime.now(),
+        )
+        t2 = LLMTraceRecord(
+            session_id="s2",
+            user_id="u2",
+            model="m",
+            tier="primary",
+            messages="[]",
+            response="r",
+            tokens_in=3,
+            tokens_out=1,
+            status="ok",
+            created_at=datetime.now(),
+        )
+        await store.add_llm_trace(t1)
+        await store.add_llm_trace(t2)
+
+        tin, tout = await store.get_today_token_usage()
+        assert tin == 13
+        assert tout == 6
+
+    @pytest.mark.asyncio
+    async def test_get_error_summary_since(self, temp_db):
+        store = temp_db
+        t1 = LLMTraceRecord(
+            session_id="s1",
+            user_id="u1",
+            model="m",
+            tier="primary",
+            messages="[]",
+            response="r",
+            tokens_in=1,
+            tokens_out=1,
+            status="timeout",
+            created_at=datetime.now(),
+        )
+        t2 = LLMTraceRecord(
+            session_id="s2",
+            user_id="u1",
+            model="m",
+            tier="primary",
+            messages="[]",
+            response="r",
+            tokens_in=1,
+            tokens_out=1,
+            status="rate_limit",
+            created_at=datetime.now(),
+        )
+        await store.add_llm_trace(t1)
+        await store.add_llm_trace(t2)
+
+        since = (datetime.now() - timedelta(hours=24)).isoformat()
+        errors = await store.get_error_summary_since(since)
+        assert len(errors) == 2
+        counts = {status: cnt for status, cnt in errors}
+        assert counts["timeout"] == 1
+        assert counts["rate_limit"] == 1
+
+
+class TestUserLLMConfigCRUD:
+    """测试用户 LLM 配置 CRUD（不依赖加密密钥时返回 False/None）"""
+
+    @pytest.mark.asyncio
+    async def test_save_and_get_user_llm_config_without_key(self, temp_db):
+        store = temp_db
+        config = UserLLMConfig(
+            user_id="u1",
+            primary_api_key="sk-test",
+            primary_model="gpt-4o",
+        )
+        # 无 DICE_PERSONA_SECRET 时加密失败，save 返回 False
+        success = await store.save_user_llm_config(config)
+        assert success is False
+
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_user_llm_config(self, temp_db):
+        store = temp_db
+        assert await store.get_user_llm_config("u_unknown") is None
+
+    @pytest.mark.asyncio
+    async def test_clear_user_llm_config(self, temp_db):
+        store = temp_db
+        # 即使配置不存在也返回 True
+        assert await store.clear_user_llm_config("u1") is True
+
+
+# ── 以下为从 test_data_store_relationship.py 合并 ────────────────────────────
+
+
+class TestRelationshipCRUD:
+    """测试关系状态 CRUD"""
+
+    @pytest.mark.asyncio
+    async def test_init_and_get_relationship(self, temp_db):
+        store = temp_db
+        rel = await store.init_relationship("u1", initial_score=40.0)
+        assert rel.user_id == "u1"
+        assert rel.intimacy == 40.0
+        assert rel.passion == 40.0
+
+    @pytest.mark.asyncio
+    async def test_update_relationship(self, temp_db):
+        store = temp_db
+        rel = await store.init_relationship("u1", initial_score=30.0)
+        rel.intimacy = 50.0
+        rel.passion = 45.0
+        await store.update_relationship(rel)
+
+        rel2 = await store.get_relationship("u1")
+        assert rel2.intimacy == 50.0
+        assert rel2.passion == 45.0
+
+    @pytest.mark.asyncio
+    async def test_list_all_relationships_raw(self, temp_db):
+        store = temp_db
+        await store.init_relationship("u1", 30.0)
+        await store.init_relationship("u2", 40.0)
+
+        rels = await store.list_all_relationships_raw()
+        assert len(rels) == 2
+        user_ids = {r.user_id for r in rels}
+        assert user_ids == {"u1", "u2"}
+
+    @pytest.mark.asyncio
+    async def test_list_active_relationships(self, temp_db):
+        store = temp_db
+        await store.init_relationship("u1", 30.0)
+        rels = await store.list_active_relationships(min_score=0, active_within_days=30)
+        assert len(rels) >= 1
+
+
+class TestScoreEventCRUD:
+    """测试评分事件 CRUD"""
+
+    @pytest.mark.asyncio
+    async def test_add_and_get_recent_score_events(self, temp_db):
+        store = temp_db
+        event = ScoreEvent(
+            user_id="u1",
+            group_id="g1",
+            deltas=ScoreDeltas(intimacy=2.0, passion=1.0, trust=0.0, secureness=0.0),
+            composite_before=30.0,
+            composite_after=33.0,
+            reason="test",
+            conversation_digest="u: hello; a: hi",
+        )
+        await store.add_score_event(event)
+
+        events = await store.get_recent_score_events("u1", limit=5)
+        assert len(events) == 1
+        assert events[0].reason == "test"
+        assert events[0].deltas.intimacy == 2.0
+        assert events[0].conversation_digest == "u: hello; a: hi"
+
+
+class TestUserProfileCRUD:
+    """测试用户档案 CRUD"""
+
+    @pytest.mark.asyncio
+    async def test_save_and_get_user_profile(self, temp_db):
+        store = temp_db
+        profile = UserProfile(user_id="u1", facts={"name": "Xiao Ming", "pet": "cat"})
+        await store.save_user_profile(profile)
+
+        fetched = await store.get_user_profile("u1")
+        assert fetched is not None
+        assert fetched.facts["name"] == "Xiao Ming"
+        assert fetched.facts["pet"] == "cat"
+
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_profile(self, temp_db):
+        store = temp_db
+        assert await store.get_user_profile("u_unknown") is None
 
 

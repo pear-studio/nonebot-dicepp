@@ -27,6 +27,16 @@ async def temp_db():
     os.unlink(db_path)
 
 
+def _populate_latency(router, provider_name, values):
+    """通过内部窗口填充延迟数据以测试百分位计算。
+    LLMRouter 不暴露公开的 record_latency API；网关层在 LLM 调用完成时
+    直接写入 _latency_window。此 helper 将数据准备集中管理。"""
+    from collections import deque
+    if provider_name not in router._latency_window:
+        router._latency_window[provider_name] = deque(maxlen=100)
+    router._latency_window[provider_name].extend(values)
+
+
 def test_latency_percentiles_empty():
     router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
     p = router.get_latency_percentiles("fake")
@@ -37,12 +47,8 @@ def test_latency_percentiles_empty():
 
 def test_latency_percentiles_per_tier():
     router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
-    for v in [100, 200, 300, 400, 500]:
-        router._latency_window["fake"].append(v)
-    from collections import deque as _deque
-    router._latency_window["fake2"] = _deque(maxlen=100)
-    for v in [50, 60, 70]:
-        router._latency_window["fake2"].append(v)
+    _populate_latency(router, "fake", [100, 200, 300, 400, 500])
+    _populate_latency(router, "fake2", [50, 60, 70])
     pp = router.get_latency_percentiles("fake")
     ap = router.get_latency_percentiles("fake2")
     assert pp["p50"] == 300.0

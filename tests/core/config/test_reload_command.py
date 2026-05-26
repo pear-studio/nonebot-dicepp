@@ -131,10 +131,8 @@ async def test_process_msg_success_applies_persona_to_loc():
 async def test_process_msg_success_uses_ok_loc_key():
     bot, _ = _make_bot()
     cmd = ReloadConfigCommand(bot)
-    await cmd.process_msg(".reload", _meta("master1"), None)
-    bot.loc_helper.format_loc_text.assert_called()
-    called_key = bot.loc_helper.format_loc_text.call_args[0][0]
-    assert called_key == "reload_ok"
+    results = await cmd.process_msg(".reload", _meta("master1"), None)
+    assert "[reload_ok]" in results[0].msg
 
 
 # ── process_msg: failure / rollback ──────────────────────────────────────────
@@ -161,9 +159,8 @@ async def test_process_msg_validation_error_uses_fail_loc_key():
     err = ConfigValidationError("bad config")
     bot, _ = _make_bot(reload_raises=err)
     cmd = ReloadConfigCommand(bot)
-    await cmd.process_msg(".reload", _meta("master1"), None)
-    called_key = bot.loc_helper.format_loc_text.call_args[0][0]
-    assert called_key == "reload_fail"
+    results = await cmd.process_msg(".reload", _meta("master1"), None)
+    assert "[reload_fail]" in results[0].msg
 
 
 @pytest.mark.asyncio
@@ -172,8 +169,7 @@ async def test_process_msg_generic_exception_handled():
     cmd = ReloadConfigCommand(bot)
     results = await cmd.process_msg(".reload", _meta("master1"), None)
     assert len(results) == 1
-    called_key = bot.loc_helper.format_loc_text.call_args[0][0]
-    assert called_key == "reload_fail"
+    assert "[reload_fail]" in results[0].msg
 
 
 @pytest.mark.asyncio
