@@ -230,7 +230,7 @@ class TestNoCrossRequestLeak:
 # ---------------------------------------------------------------------------
 
 class TestAstOnlyRouting:
-    """Verify the sampling path uses only AST engine, never legacy."""
+    """Verify the sampling path uses only AST engine."""
 
     def test_build_sampling_plan_uses_ast_parse(self):
         """build_sampling_plan must call parse_expression (AST), not legacy parser."""
@@ -251,15 +251,15 @@ class TestAstOnlyRouting:
             sample_from_plan(plan)
             mock_eval.assert_called_once()
 
-    def test_no_legacy_import_triggered(self):
-        """Importing and using the sampling path must not import the legacy module."""
+    def test_no_removed_legacy_module_import_triggered(self):
+        """Importing and using the sampling path must not recreate the removed legacy module."""
         import sys
-        # Ensure legacy_adapter is not imported as a side effect of build/sample
+        # Ensure the removed legacy adapter is not imported as a side effect of build/sample.
         legacy_key = "module.roll.ast_engine.legacy_adapter"
         was_loaded = legacy_key in sys.modules
         build_sampling_plan("3D6")
         is_loaded_now = legacy_key in sys.modules
         if not was_loaded:
             assert not is_loaded_now, (
-                "legacy_adapter was imported as a side-effect of build_sampling_plan()"
+                "removed legacy_adapter was imported as a side-effect of build_sampling_plan()"
             )

@@ -1,29 +1,30 @@
-# 掷骰引擎（AST/Legacy）
+# 掷骰引擎（AST）
 
-本文档描述当前掷骰引擎结构、安全限制与回退机制。
+本文档描述当前掷骰引擎结构与安全限制。Legacy 正则引擎已删除，生产路径统一使用 AST 引擎。
 
 ## 模块边界
 
 AST 引擎代码位于：
 
 - `module/roll/ast_engine/adapter.py`
+- `module/roll/ast_engine/parser.py`
+- `module/roll/ast_engine/evaluator.py`
 - `module/roll/ast_engine/limits.py`
 - `module/roll/ast_engine/errors.py`
-- `module/roll/ast_engine/legacy_adapter.py`
 
-## 默认引擎与切换
+## 公共入口
 
-`adapter.py` 提供：
+上层业务应优先使用：
 
-- `enable_ast_engine()`
-- `disable_ast_engine()`
-- `is_ast_engine_enabled()`
+- `exec_roll_exp_unified()`：执行表达式并返回完整 `RollResult`
+- `preprocess_roll_exp()`：表达式预处理
+- `is_roll_exp()`：表达式合法性判断
+- `sift_roll_exp_and_reason()`：从命令片段中分离表达式与原因
 
-注意：
+底层 AST 调试或测试可使用：
 
-- `disable_ast_engine()` 仅切换默认引擎类型到 legacy。
-- legacy 实际调用还受 `legacy_adapter.py` 中 `_LEGACY_ENABLED` 显式开关保护（默认 `False`）。
-- 若未手动启用 `_LEGACY_ENABLED = True`，legacy 路径会抛错并拒绝执行。
+- `exec_roll_exp_ast()`：返回 AST 原生 `RollExpressionResult`
+- `build_sampling_plan()` / `sample_from_plan()`：`.rexp` 期望计算的重复采样路径
 
 ## 安全限制（当前默认）
 
@@ -41,15 +42,7 @@ AST 引擎代码位于：
 ## 错误处理
 
 错误类型由 `errors.py` 统一定义，按语法、运行时、限制超限分类。
-建议文档与上层调用只依赖“错误类别 + code”，避免绑定具体文案。
-
-## 运维建议
-
-- 生产环境保持 AST 默认，不建议开启 legacy 显式开关。
-- 临时排障如需 legacy：
-  1. 手动将 `_LEGACY_ENABLED = True`
-  2. 切换默认引擎到 legacy
-  3. 排障结束后恢复为 `False`
+`exec_roll_exp_unified()` 会将 AST 引擎错误包装为 `RollDiceError`，以保持上层命令处理的用户可见错误契约。
 
 ## 相关文档
 

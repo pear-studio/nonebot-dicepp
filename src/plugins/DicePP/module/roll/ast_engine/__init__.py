@@ -11,7 +11,7 @@ Key components:
 - errors: Unified error model
 
 Design goals:
-- 100% compatibility with legacy engine behavior
+- Preserve the public RollResult contract while using only the AST engine
 - Explicit operator precedence and associativity
 - Structured trace output for rendering
 - Unified error handling
@@ -25,17 +25,15 @@ from .preprocessor import preprocess
 from .adapter import (
     exec_roll_exp_ast,
     exec_roll_exp_unified,
+    build_roll_result,
+    preprocess_roll_exp,
+    is_roll_exp,
+    sift_roll_exp_and_reason,
     sample_roll_exp_ast,
     build_sampling_plan,
     sample_from_plan,
     SamplingPlan,
     RollExpressionResult,
-    EngineType,
-    set_default_engine,
-    get_default_engine,
-    enable_ast_engine,
-    disable_ast_engine,
-    is_ast_engine_enabled,
 )
 
 __all__ = [
@@ -53,15 +51,13 @@ __all__ = [
     # Adapter (main API)
     "exec_roll_exp_ast",
     "exec_roll_exp_unified",
+    "build_roll_result",
+    "preprocess_roll_exp",
+    "is_roll_exp",
+    "sift_roll_exp_and_reason",
     "sample_roll_exp_ast",
     "build_sampling_plan",
     "sample_from_plan",
     "SamplingPlan",
     "RollExpressionResult",
-    "EngineType",
-    "set_default_engine",
-    "get_default_engine",
-    "enable_ast_engine",
-    "disable_ast_engine",
-    "is_ast_engine_enabled",
 ]

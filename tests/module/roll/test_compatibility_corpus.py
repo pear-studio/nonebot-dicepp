@@ -7,20 +7,18 @@ behavior. It tests that all supported expression types parse and execute correct
 For arithmetic expressions (no randomness), exact values are verified.
 For dice expressions, we verify successful parsing and execution.
 
-Each corpus is tested against BOTH the legacy engine and the AST engine to
-ensure full behavioural compatibility during migration.
+The legacy engine has been removed, so the corpus now guards the AST engine's
+public behavior directly.
 """
 
 import pytest
 from typing import List, Optional
 from dataclasses import dataclass
 
-import module.roll.ast_engine.legacy_adapter as legacy_adapter_module
-from module.roll.expression import exec_roll_exp, exec_roll_exp_legacy
+from module.roll.ast_engine.adapter import exec_roll_exp_unified as exec_roll_exp
 from module.roll.roll_utils import RollDiceError
 from module.roll.ast_engine import exec_roll_exp_ast
-from module.roll.ast_engine.errors import RollEngineError, RollSyntaxError, RollLimitError, RollRuntimeError
-from module.roll.karma_runtime import set_runtime, reset_runtime
+from module.roll.ast_engine.errors import RollEngineError
 
 pytestmark = pytest.mark.compatibility
 
@@ -31,61 +29,6 @@ class CorpusEntry:
     expression: str
     expected_value: Optional[int] = None  # Only used for deterministic (arithmetic) tests
     description: str = ""
-
-
-class _SequenceRuntime:
-    """
-    Deterministic runtime backed by a fixed cyclic sequence.
-
-    Note: legacy and AST may consume RNG in different counts for some expressions,
-    so this runtime is primarily used to stabilize each single-engine execution.
-    """
-
-    def __init__(self, seq: List[int]):
-        self._seq = list(seq)
-        self._idx = 0
-
-    def roll(self, dice_type: int) -> int:
-        if not self._seq:
-            return 1
-        raw = self._seq[self._idx % len(self._seq)]
-        self._idx += 1
-        # Normalize into valid dice range.
-        return ((int(raw) - 1) % max(1, dice_type)) + 1
-
-
-def _run_legacy(expression: str, runtime: _SequenceRuntime):
-    """Run expression through legacy engine (explicitly enables legacy switch for test purposes)."""
-    # Temporarily enable legacy switch to allow calling exec_roll_exp_legacy in tests.
-    # This is the only acceptable use of the legacy switch in test code.
-    original = legacy_adapter_module._LEGACY_ENABLED
-    legacy_adapter_module._LEGACY_ENABLED = True
-    token = set_runtime(runtime)
-    try:
-        result = exec_roll_exp_legacy(expression)
-        return ("ok", result.get_val(), None)
-    except RollDiceError:
-        return ("err", None, "runtime")
-    finally:
-        reset_runtime(token)
-        legacy_adapter_module._LEGACY_ENABLED = original
-
-
-def _run_ast(expression: str, runtime: _SequenceRuntime):
-    token = set_runtime(runtime)
-    try:
-        result = exec_roll_exp_ast(expression)
-        return ("ok", result.get_val(), None)
-    except RollSyntaxError:
-        return ("err", None, "syntax")
-    except RollLimitError:
-        return ("err", None, "limit")
-    except RollRuntimeError:
-        return ("err", None, "runtime")
-    except RollEngineError:
-        return ("err", None, "runtime")
-    finally:
-        reset_runtime(token)
 
 
 # =============================================================================
@@ -261,9 +204,8 @@ class TestLocalizationCorpus:
 
 
 # =============================================================================
-# AST ENGINE COMPATIBILITY TESTS
-# The same corpus tested directly against the AST engine to validate
-# that the new implementation matches legacy behaviour.
+# AST ENGINE CORPUS TESTS
+# The same corpus tested directly against the raw AST engine API.
 # =============================================================================
 
 @pytest.mark.unit
@@ -309,38 +251,6 @@ class TestASTErrorCorpus:
     def test_ast_error_raised(self, entry: CorpusEntry):
         with pytest.raises(RollEngineError):
             exec_roll_exp_ast(entry.expression)
-
-
-@pytest.mark.unit
-class TestLegacyAstCompatibilityBaseline:
-    """
-    Baseline compatibility checks between legacy and AST engines.
-
-    - Arithmetic corpus: exact value parity (deterministic and non-random).
-    - Other corpora: success/error parity and error-type parity.
-      (Exact dice value parity is intentionally not required here because
-       legacy and AST may consume RNG in different orders/counts.)
-    """
-
-    @pytest.mark.parametrize("entry", ARITHMETIC_CORPUS, ids=lambda e: e.description)
-    def test_arithmetic_exact_parity(self, entry: CorpusEntry):
-        legacy_state, legacy_value, legacy_err = _run_legacy(entry.expression, _SequenceRuntime([7, 3, 11, 19]))
-        ast_state, ast_value, ast_err = _run_ast(entry.expression, _SequenceRuntime([7, 3, 11, 19]))
-        assert legacy_state == ast_state
-        assert legacy_err == ast_err
-        assert legacy_value == ast_value
-
-    @pytest.mark.parametrize(
-        "entry",
-        DICE_CORPUS + MODIFIER_CORPUS + LOCALIZATION_CORPUS + ERROR_CORPUS,
-        ids=lambda e: e.description,
-    )
-    def test_non_arithmetic_outcome_parity(self, entry: CorpusEntry):
-        legacy_state, _legacy_value, legacy_err = _run_legacy(entry.expression, _SequenceRuntime([2, 5, 9, 13, 17]))
-        ast_state, _ast_value, ast_err = _run_ast(entry.expression, _SequenceRuntime([2, 5, 9, 13, 17]))
-        assert legacy_state == ast_state, f"Outcome mismatch for expression: {entry.expression}"
-        # Legacy engine only exposes RollDiceError as a single error class.
-        # We keep parity at outcome level and avoid over-constraining subclass mapping.
 
 
 @pytest.mark.unit

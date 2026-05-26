@@ -16,7 +16,7 @@ from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_par
 from utils.string import match_substring
 from utils.logger import dice_log
 from utils.cq_code import get_cq_image
-from module.roll import preprocess_roll_exp, is_roll_exp, exec_roll_exp
+from module.roll.ast_engine.adapter import preprocess_roll_exp, is_roll_exp, exec_roll_exp_unified
 
 
 LOC_DRAW_RESULT = "draw_result"
@@ -85,7 +85,7 @@ class DeckItem:
         def handle_roll(match):
             roll_exp = preprocess_roll_exp(match.group(1))
             if is_roll_exp(roll_exp):
-                roll_res = exec_roll_exp(roll_exp)
+                roll_res = exec_roll_exp_unified(roll_exp)
                 return roll_res.get_complete_result()
             else:
                 if ignore:
@@ -104,7 +104,7 @@ class DeckItem:
                 draw_times_str = draw_exp
             except ValueError:
                 if is_roll_exp(draw_exp):
-                    roll_res = exec_roll_exp(draw_exp)
+                    roll_res = exec_roll_exp_unified(draw_exp)
                     draw_times = roll_res.get_val()
                     draw_times_str = roll_res.get_complete_result()
                 else:
@@ -289,7 +289,7 @@ class DeckCommand(UserCommandBase):
                 feedback += self.format_loc(LOC_DRAW_ERR_TIME, times=times)
                 return [BotSendMsgCommand(self.bot.account, feedback, [port])]
             else:
-                roll_res = exec_roll_exp(times)
+                roll_res = exec_roll_exp_unified(times)
                 times = roll_res.get_val()
                 if times <= 0 or times > DRAW_LIMIT:
                     feedback += self.format_loc(LOC_DRAW_ERR_TIME, times=times)

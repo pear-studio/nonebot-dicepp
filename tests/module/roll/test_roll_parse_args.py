@@ -22,7 +22,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 import pytest
-from module.roll.expression import sift_roll_exp_and_reason
+from module.roll.ast_engine.adapter import sift_roll_exp_and_reason
 from module.roll.roll_parse_args import _parse_roll_args, RollParseArgs, MULTI_ROLL_LIMIT
 
 

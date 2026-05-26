@@ -22,7 +22,8 @@ DND5E 角色服务层
 from typing import Dict, List, Literal, Optional, Tuple
 from collections import defaultdict
 
-from module.roll import exec_roll_exp, RollDiceError, RollResult
+from module.roll import RollDiceError, RollResult
+from module.roll.ast_engine.adapter import exec_roll_exp_unified
 
 from core.data.models import (
     HPInfo, AbilityInfo, DNDCharacter,
@@ -99,7 +100,7 @@ class HPService:
         roll_result_val = 0
         for i in range(num):
             try:
-                roll_result = exec_roll_exp(roll_exp)
+                roll_result = exec_roll_exp_unified(roll_exp)
             except RollDiceError as e:
                 return f"未知掷骰错误:{e.info}"
             if num > 1:
@@ -291,7 +292,7 @@ class AbilityService:
             assert ext_str[0] in ["+", "-"], f"调整值无效: 必须以[优势/劣势]+/-开头\n{check_name}:{ext_str}"
             # 校验表达式合法性
             try:
-                res = exec_roll_exp("D20" + ext_str)
+                res = exec_roll_exp_unified("D20" + ext_str)
                 res.get_complete_result()
             except RollDiceError as e:
                 raise AssertionError(f"无效的调整值: {check_name}:{ext_str} {e.info}")
@@ -412,7 +413,7 @@ class AbilityService:
 
         roll_exp = f"{roll_exp}{prof_bonus_str}{ability_modifier_str}{ext_str}{mod_str}"
         try:
-            roll_result = exec_roll_exp(roll_exp)
+            roll_result = exec_roll_exp_unified(roll_exp)
             result_str = roll_result.get_complete_result()
             result_val = roll_result.get_val()
         except RollDiceError as e:

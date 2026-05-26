@@ -1,58 +1,26 @@
 """
-Engine Adapter for Roll Expression Evaluation
+AST Engine Adapter for Roll Expression Evaluation
 
-This module provides a stable interface for roll expression evaluation,
-abstracting over the underlying engine (AST or legacy).
-
-The adapter:
-- Exposes a consistent API for command handlers
-- Supports runtime engine selection via feature flag
-- Enables gradual migration from legacy to AST engine
+This module exposes the stable roll-expression API used by command handlers.
+The legacy regex engine has been removed; all execution goes through the AST
+parser/evaluator.
 """
 
-from typing import Optional, Union, Callable, Any
+import logging
+from typing import Optional, Union, Callable, Any, Tuple
 from dataclasses import dataclass, field
-from enum import Enum
 
 from .parser import parse_expression
 from .evaluator import evaluate, EvalResult
-from .errors import RollSyntaxError, RollRuntimeError, RollLimitError
+from .errors import RollSyntaxError, RollRuntimeError, RollLimitError, RollEngineError
 from .limits import check_expression_length, SafetyLimits, DEFAULT_LIMITS
 from .trace import LegacyTextRenderer
 from .preprocessor import preprocess
 from .ast_nodes import canonical_str
+from ..result import RollResult
+from ..roll_utils import RollDiceError
 
-
-class EngineType(Enum):
-    """Available roll expression engines."""
-    LEGACY = "legacy"
-    AST = "ast"
-
-
-# Default engine: always AST.
-# This constant is not meant to be changed at runtime.
-# To use legacy engine, enable the explicit code switch in legacy_adapter._LEGACY_ENABLED.
-_default_engine: EngineType = EngineType.AST
-
-
-def set_default_engine(engine: EngineType) -> None:
-    """Set the default engine for expression evaluation.
-
-    .. deprecated::
-        The default engine is now permanently AST.
-        This function is kept for backward compatibility only (e.g., tests that
-        call disable_ast_engine() to test legacy path explicitly).
-        Setting to LEGACY requires the explicit legacy switch in legacy_adapter
-        to also be enabled, otherwise calls will raise RuntimeError at the
-        legacy guard.
-    """
-    global _default_engine
-    _default_engine = engine
-
-
-def get_default_engine() -> EngineType:
-    """Get the current default engine (always AST in production)."""
-    return _default_engine
+AVAILABLE_CHARACTER = "1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ.+-*/><=#()优劣势抗性易伤"
 
 
 @dataclass
@@ -60,10 +28,8 @@ class RollExpressionResult:
     """
     Result of evaluating a roll expression.
     
-    This is a unified result type that works with both engines.
-    _eval_result holds the raw EvalResult from the AST evaluator (None for
-    legacy path) so that the wrapping layer in expression.py can extract
-    dice_results to populate the full RollResult field set.
+    _eval_result holds the raw EvalResult from the AST evaluator so that
+    build_roll_result() can populate the full RollResult field set.
     """
     value: Union[int, float]
     expression: str
@@ -148,31 +114,142 @@ def _build_info_text(result: EvalResult) -> str:
     return str(result.value)
 
 
+def build_roll_result(ast_result: RollExpressionResult) -> RollResult:
+    """
+    Convert an AST RollExpressionResult into the public RollResult shape.
+
+    Command handlers and plugin modules rely on RollResult fields such as
+    val_list, dice_num, d20_num, success/fail, and average_list.  The AST
+    evaluator preserves those details in EvalResult.dice_results; this function
+    is the single place that maps them to the public result object.
+    """
+    result = RollResult()
+    result.info = ast_result.info
+    result.exp = ast_result.exp
+    result.float_state = isinstance(ast_result.value, float)
+
+    eval_result = ast_result._eval_result
+    if eval_result is None or not eval_result.dice_results:
+        result.val_list = [ast_result.value]
+        return result
+
+    dice_results = eval_result.dice_results
+
+    if not result.float_state and len(dice_results) == 1:
+        kept_values_candidate = [r.value for r in dice_results[0].rolls if r.kept]
+        kept_sum = sum(kept_values_candidate)
+        is_pure = isinstance(ast_result.value, int) and kept_sum == ast_result.value
+    else:
+        kept_values_candidate = []
+        is_pure = False
+
+    if is_pure:
+        result.val_list = kept_values_candidate if kept_values_candidate else [ast_result.value]
+    elif not result.float_state and len(dice_results) > 1:
+        multi_kept = []
+        for dr in dice_results:
+            multi_kept.extend(r.value for r in dr.rolls if r.kept)
+        result.val_list = multi_kept if multi_kept else [ast_result.value]
+    else:
+        result.val_list = [ast_result.value]
+
+    for dr in dice_results:
+        kept_rolls = [r for r in dr.rolls if r.kept]
+        kept_count = len(kept_rolls)
+        sides = dr.sides
+
+        result.dice_num += kept_count
+
+        if sides == 20:
+            result.d20_num += kept_count
+            for r in kept_rolls:
+                if r.value == 20:
+                    result.success += 1
+                elif r.value == 1:
+                    result.fail += 1
+            result.average_list += [
+                round((r.value - 1) * 100 / (sides - 1)) for r in kept_rolls
+            ]
+        elif sides == 100:
+            result.d100_num += kept_count
+            for r in kept_rolls:
+                if r.value == 1:
+                    result.success += 1
+                elif r.value == 100:
+                    result.fail += 1
+            result.average_list += [
+                round((r.value - 1) * 100 / (sides - 1)) for r in kept_rolls
+            ]
+
+    result.type = dice_results[0].sides if is_pure else None
+    return result
+
+
 def exec_roll_exp_unified(
     expression: str,
-    engine: Optional[EngineType] = None,
     dice_roller: Optional[Callable[[int], int]] = None,
-) -> RollExpressionResult:
+) -> RollResult:
     """
-    Execute a roll expression using the specified or default engine.
+    Execute a roll expression through the AST engine and return RollResult.
     
-    This is the main entry point for roll expression evaluation.
-    
-    Args:
-        expression: The roll expression string
-        engine: Engine to use (defaults to current default)
-        dice_roller: Optional custom dice roller function
-        
-    Returns:
-        RollExpressionResult with value and display info
+    This is the public production entry point.  AST engine semantic errors and
+    unexpected internal errors are wrapped as RollDiceError so existing command
+    handlers can keep one user-facing error type.
     """
-    engine = engine or _default_engine
-    
-    if engine == EngineType.AST:
-        return exec_roll_exp_ast(expression, dice_roller=dice_roller)
-    else:
-        # Fall back to legacy engine
-        return _exec_legacy(expression)
+    try:
+        ast_result = exec_roll_exp_ast(expression, dice_roller=dice_roller)
+        return build_roll_result(ast_result)
+    except RollEngineError as e:
+        logging.getLogger(__name__).error(
+            "roll_engine=ast expression=%r error=%s: %s",
+            expression,
+            type(e).__name__,
+            e.info,
+        )
+        raise RollDiceError(e.info) from e
+    except Exception as e:
+        logging.getLogger(__name__).error(
+            "roll_engine=ast expression=%r unexpected_error=%s: %s",
+            expression,
+            type(e).__name__,
+            e,
+        )
+        raise RollDiceError(f"掷骰引擎内部错误: {type(e).__name__}: {e}") from e
+
+
+def preprocess_roll_exp(input_str: str) -> str:
+    """Preprocess a roll expression using the AST preprocessor."""
+    return preprocess(input_str)
+
+
+def is_roll_exp(input_str: str) -> bool:
+    """Return True if input is a valid AST roll expression."""
+    try:
+        processed = preprocess_roll_exp(input_str)
+        check_expression_length(processed, DEFAULT_LIMITS)
+        parse_expression(processed)
+    except RollEngineError:
+        return False
+    return True
+
+
+def sift_roll_exp_and_reason(input_str: str) -> Tuple[str, str]:
+    """
+    Split a raw command tail into roll expression and reason text.
+
+    This preserves the historic lightweight tokenizer behavior: whitespace ends
+    the expression, and unsupported characters start the reason section.
+    """
+    input_str = input_str.strip()
+    length = len(input_str)
+    exp_right = len(input_str)
+    if " " in input_str:
+        exp_right = input_str.find(" ")
+    for index in range(exp_right):
+        if input_str[index].upper() not in AVAILABLE_CHARACTER:
+            exp_right = index
+            break
+    return input_str[0:exp_right].strip().upper(), input_str[exp_right:length].strip()
 
 
 @dataclass
@@ -283,45 +360,3 @@ def sample_roll_exp_ast(expression: str) -> int:
     """
     plan = build_sampling_plan(expression)
     return plan.sample()
-
-
-def _exec_legacy(expression: str) -> RollExpressionResult:
-    """Execute using legacy engine via the isolated legacy_adapter boundary.
-
-    All legacy imports are funnelled through legacy_adapter so that the legacy
-    seam can be deleted in one place without touching this file.
-    """
-    from .legacy_adapter import call_legacy_engine, RollDiceError
-
-    try:
-        result = call_legacy_engine(expression)
-        return RollExpressionResult(
-            value=result.get_val(),
-            expression=expression,
-            info=result.get_info(),
-            exp=result.get_exp(),
-        )
-    except RollDiceError as e:
-        # Re-raise as AST engine error for consistency
-        raise RollRuntimeError(e.info, expression=expression)
-
-
-# =============================================================================
-# Feature Flag Support
-# =============================================================================
-# Single source of truth: _default_engine already tracks which engine is active.
-# enable_ast_engine / disable_ast_engine are thin wrappers kept for ergonomics.
-
-def enable_ast_engine() -> None:
-    """Enable AST engine as default."""
-    set_default_engine(EngineType.AST)
-
-
-def disable_ast_engine() -> None:
-    """Disable AST engine, fall back to legacy."""
-    set_default_engine(EngineType.LEGACY)
-
-
-def is_ast_engine_enabled() -> bool:
-    """Check if AST engine is currently enabled."""
-    return _default_engine == EngineType.AST
