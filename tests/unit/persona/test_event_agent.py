@@ -73,7 +73,8 @@ class TestGenerateDiary:
         result = await agent.generate_diary(
             events=[{"description": "事件", "reaction": "反应"}],
             character_name="角色", character_description="描述")
-        assert result is not None and len(result) > 0
+        assert isinstance(result, str)
+        assert result.strip()
 
     @pytest.mark.asyncio
     async def test_generate_diary_no_collected(self, agent, mock_router):

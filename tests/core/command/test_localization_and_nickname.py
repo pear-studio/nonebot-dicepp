@@ -19,12 +19,12 @@ class TestLocalization:
 @pytest.mark.integration
 class TestNickname:
     async def test_set_group_nickname(self, h):
-        await h.send_group(".nn 梨子", group_id="group1")
+        await h.send_group(".nn 梨子", group_id="group1", checker=lambda s: "已将您的昵称设为梨子" in s)
         await h.send_group(".rd", group_id="group1", checker=lambda s: "梨子" in s)
         await h.send_group(".rd", group_id="group2", checker=lambda s: "梨子" not in s)
 
     async def test_set_default_nickname(self, h):
-        await h.send_private(".nn 西瓜")
+        await h.send_private(".nn 西瓜", checker=lambda s: "已将您的昵称设为西瓜" in s)
         await h.send_private(".rd", checker=lambda s: "西瓜" in s)
         await h.send_group(".rd", group_id="group3", checker=lambda s: "西瓜" in s)
         await h.send_group(".rd", group_id="group1", checker=lambda s: "西瓜" not in s and "梨子" in s)

@@ -148,7 +148,7 @@ class TestOpenAIProvider:
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             resp = await provider.generate(messages=[{"role": "user", "content": "hi"}])
             assert resp.content == "finally"
-            assert mock_sleep.await_count == 2  # 2 retries with sleep
+            assert [call.args[0] for call in mock_sleep.await_args_list] == [2, 4]
 
     @pytest.mark.asyncio
     async def test_retry_exhausted_raises(self, provider):
@@ -160,7 +160,7 @@ class TestOpenAIProvider:
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             with pytest.raises(Exception):
                 await provider.generate(messages=[{"role": "user", "content": "hi"}])
-            assert mock_sleep.await_count == 3  # 3 retries with exponential backoff
+            assert [call.args[0] for call in mock_sleep.await_args_list] == [2, 4, 8]
 
     @pytest.mark.asyncio
     async def test_auth_error_raises_non_retryable(self, provider):
@@ -195,7 +195,7 @@ class TestOpenAIProvider:
         with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             resp = await provider.generate(messages=[{"role": "user", "content": "hi"}])
             assert resp.content == "ok after timeout"
-            assert mock_sleep.await_count == 1  # 1 retry with sleep
+            assert [call.args[0] for call in mock_sleep.await_args_list] == [2]
 
     @pytest.mark.asyncio
     async def test_retryable_errors_property(self, provider):

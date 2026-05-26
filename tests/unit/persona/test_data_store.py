@@ -834,7 +834,6 @@ class TestUserProfileCRUD:
         await store.save_user_profile(profile)
 
         fetched = await store.get_user_profile("u1")
-        assert fetched is not None
         assert fetched.facts["name"] == "Xiao Ming"
         assert fetched.facts["pet"] == "cat"
 

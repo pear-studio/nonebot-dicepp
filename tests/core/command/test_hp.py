@@ -124,4 +124,4 @@ class TestHPInitiativeIntegration:
         await h.send_group(".hp a=0", checker=lambda s: "哥布林a: HP=0" in s and "昏迷" not in s)
 
     async def test_cleanup(self, h):
-        await h.send_group(".init clr")
+        await h.send_group(".init clr", checker=lambda s: "已清除先攻列表" in s)

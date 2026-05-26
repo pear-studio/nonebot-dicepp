@@ -111,8 +111,7 @@ def test_snapshot_compat(cmd_name: str, case: Dict):
     验证命令解析器的输出与快照文件中的 expected 完全一致。
     若不一致，说明迁移后行为发生了变化，需要人工审批并更新快照。
     """
-    factory = SNAPSHOT_PARSER_FACTORIES.get(cmd_name)
-    assert factory is not None, f"未找到命令 '{cmd_name}' 的解析器注册，请在 SNAPSHOT_PARSER_FACTORIES 中注册"
+    factory = SNAPSHOT_PARSER_FACTORIES[cmd_name]
 
     parser: CommandTextParser = factory()
     input_str = case["input"]

@@ -29,10 +29,7 @@ class TestRepository:
         await repo.save(karma)
 
         result = await repo.get("user1", "group1")
-        assert result is not None
-        assert result.user_id == "user1"
-        assert result.group_id == "group1"
-        assert result.value == 50
+        assert result == karma
 
     @pytest.mark.asyncio
     async def test_get_not_exists(self, repo):

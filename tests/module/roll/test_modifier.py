@@ -48,7 +48,7 @@ class TestRollModifiers:
 
     def test_float_modifier(self):
         modifier = REModFloat("")
-        assert modifier is not None
+        assert isinstance(modifier, RollExpModifier)
 
     def test_minimum_modifier(self):
         modifier = REModMinimum("M5")

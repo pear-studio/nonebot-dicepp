@@ -97,7 +97,6 @@ class TestCharacterLifeBasics:
         )
         life.character.extensions.daily_events_count = 2
         result = await life.tick()
-        assert life._slot_minutes_today is not None
         # wake_up + 2 system + good_night = 4
         assert len(life._slot_minutes_today) == 4
 
@@ -111,7 +110,7 @@ class TestCharacterLifeBasics:
         life._slot_minutes_today = [(10 * 60, "system")]  # 10:00
         life._last_event_date = "2024-01-01"
         result = await life.tick()
-        assert result is not None
+        assert len(result) == 1
         assert result[0]["description"] == "窗外下起了小雨"
         assert result[0]["reaction"] == "喜欢听雨声"
         assert 0 in life._fired_slot_indices
@@ -155,7 +154,7 @@ class TestCharacterLifeBasics:
         life._fired_slot_indices = set()
         life._last_event_date = "2024-01-01"
         result = await life.tick()
-        assert result is not None
+        assert len(result) == 1
         assert result[0]["duration_minutes"] == 60
         assert len(life._ongoing_activities) == 1
         assert life._ongoing_activities[0].duration_minutes == 60
@@ -196,7 +195,8 @@ class TestCharacterLifeBasics:
         life._last_event_date = "2024-01-01"
 
         result = await life.tick()
-        assert result is not None
+        assert len(result) == 1
+        assert result[0]["description"] == "我正在房间里休息。"
 
         # 验证 _clamp_delta 后状态不变（0 → 0, None → 0）
         updated_state = mock_data_store.update_character_state.call_args[0][0]
@@ -549,7 +549,7 @@ class TestCharacterLifePhase1:
         life._last_event_date = "2024-01-01"
 
         result = await life.tick()
-        assert result is not None
+        assert len(result) == 1
         assert result[0].get("slot_type") == "wake_up"
         mock_data_store.add_daily_event.assert_called_once()
 
@@ -567,7 +567,7 @@ class TestCharacterLifePhase1:
         life._last_event_date = "2024-01-01"
 
         result = await life.tick()
-        assert result is not None
+        assert len(result) == 1
         assert result[0].get("slot_type") == "good_night"
 
     @pytest.mark.asyncio
@@ -629,7 +629,7 @@ class TestCharacterLifePhase1:
         await life._handle_day_transition("2024-01-01")
 
         # 验证 update_character_state 被调用，且状态已恢复
-        assert mock_data_store.update_character_state.called
+        mock_data_store.update_character_state.assert_awaited_once()
         updated_state = mock_data_store.update_character_state.call_args[0][0]
         assert updated_state.energy == 30  # 10 + 20
         assert updated_state.mood == 20    # 10 + 10
@@ -655,7 +655,7 @@ class TestCharacterLifePhase1:
         await life._handle_day_transition("2024-01-01")
 
         # 不调用 update_character_state
-        assert not mock_data_store.update_character_state.called
+        mock_data_store.update_character_state.assert_not_awaited()
 
     # ── 边界测试补充（R14-1） ─────────────────────
 
@@ -768,9 +768,8 @@ class TestCharacterLifePhase2:
         life._last_event_date = "2024-01-01"
 
         result = await life.tick()
-        assert result is not None
         assert len(result) == 1
-        assert mock_event_agent.generate_event_result.call_count == 1
+        assert len(mock_event_agent.generate_event_result.await_args_list) == 1
 
     @pytest.mark.asyncio
     async def test_chain_depth_three_with_tendency(self, life, mock_event_agent, monkeypatch):
@@ -792,9 +791,8 @@ class TestCharacterLifePhase2:
         ))
 
         result = await life.tick()
-        assert result is not None
         assert len(result) == 3
-        assert mock_event_agent.generate_event_result.call_count == 3
+        assert len(mock_event_agent.generate_event_result.await_args_list) == 3
 
     @pytest.mark.asyncio
     async def test_chain_delta_clamped(self, life, mock_data_store, mock_event_agent, monkeypatch):
@@ -817,7 +815,7 @@ class TestCharacterLifePhase2:
         await life.tick()
 
         # 验证 update_character_state 被调用，且状态被正确钳制
-        assert mock_data_store.update_character_state.called
+        mock_data_store.update_character_state.assert_awaited()
         updated_state = mock_data_store.update_character_state.call_args[0][0]
         assert updated_state.energy == 30   # 50 - 20 (clamp)
         assert updated_state.mood == 70     # 50 + 20 (clamp)
@@ -846,9 +844,8 @@ class TestCharacterLifePhase2:
         ))
 
         result = await life.tick()
-        assert result is not None
         assert len(result) == 2  # 保底触发了一个额外事件
-        assert mock_event_agent.generate_event_result.call_count == 2
+        assert len(mock_event_agent.generate_event_result.await_args_list) == 2
 
     @pytest.mark.asyncio
     async def test_chain_fallback_disabled_after_chain_triggered(self, life, mock_event_agent, monkeypatch):
@@ -871,7 +868,6 @@ class TestCharacterLifePhase2:
         ))
 
         result = await life.tick()
-        assert result is not None
         assert len(result) == 1  # 保底不触发
 
     @pytest.mark.asyncio
@@ -896,7 +892,7 @@ class TestCharacterLifePhase2:
         await life.tick()
 
         # 保底触发时 generate_event_result 被调用两次
-        assert mock_event_agent.generate_event_result.call_count == 2
+        assert len(mock_event_agent.generate_event_result.await_args_list) == 2
 
     # ── 2.5 意向生命周期 ──────────────────────────
 
@@ -1081,6 +1077,5 @@ class TestCharacterLifePhase2:
 
         result = await life.tick()
         # tick 应继续执行并生成事件，而不是抛出异常
-        assert result is not None
         assert len(result) == 1
         assert result[0]["description"] == "测试事件"

@@ -73,6 +73,7 @@ class _RollCmdBotBase(IsolatedAsyncioTestCase):
             cmds = await self.bot.process_message(msg, meta)
 
         result = "\n".join([str(cmd) for cmd in cmds])
+        assert cmds, f"{msg!r} should return a command response"
         return cmds, result
 
 
@@ -91,7 +92,6 @@ class TestRollPool(_RollCmdBotBase):
         with mock.patch.object(random, 'randint', side_effect=[4, 5, 6]):
             cmds, result = await self._send_group(".w 3")
 
-        assert len(cmds) > 0, "Should have response"
         # Default ROLL_WIN is 8; 4,5,6 are all below it → 0 wins
         assert_contains_number(result, 0)
         assert_contains_number(result, 3)
@@ -102,7 +102,6 @@ class TestRollPool(_RollCmdBotBase):
         with mock.patch.object(random, 'randint', side_effect=[3, 4, 5, 6, 2]):
             cmds, result = await self._send_group(".w 5d4")
 
-        assert len(cmds) > 0, "Should have response"
         # With threshold d4, wins are values >= 4 → 4,5,6 → 3 successes
         assert_contains_number(result, 3)
 
@@ -110,8 +109,6 @@ class TestRollPool(_RollCmdBotBase):
         """.help w returns non-empty text about pool."""
         cmds, result = await self._send_group(".help w")
 
-        assert len(cmds) > 0, "Should have response"
-        assert len(result) > 10  # Non-empty help text
         assert any(word in result for word in ['pool', 'WOD', '骰池', '.pool'])
 
 
@@ -123,7 +120,6 @@ class TestRollChoose(_RollCmdBotBase):
         """.c 苹果 香蕉 橙子, result is in the set."""
         cmds, result = await self._send_group(".c 苹果 香蕉 橙子")
         
-        assert len(cmds) > 0, "Should have response"
         # Result should be one of the options
         assert any(opt in result for opt in ["苹果", "香蕉", "橙子"])
 
@@ -131,7 +127,6 @@ class TestRollChoose(_RollCmdBotBase):
         """Choose with reason includes reason text."""
         cmds, result = await self._send_group(".c 苹果 香蕉 今天吃什么")
 
-        assert len(cmds) > 0, "Should have response"
         # The command randomly selects one of the three options (苹果, 香蕉, 今天吃什么)
         # Just verify we got a valid result containing one of the options
         assert any(opt in result for opt in ["苹果", "香蕉", "今天吃什么"])
@@ -147,8 +142,6 @@ class TestRollChoose(_RollCmdBotBase):
         """.help c returns non-empty text about choose."""
         cmds, result = await self._send_group(".help c")
 
-        assert len(cmds) > 0, "Should have response"
-        assert len(result) > 10
         assert any(word in result for word in ['choose', '选择', '.choose'])
 
 
@@ -164,7 +157,6 @@ class TestDiceSet(_RollCmdBotBase):
         # Set as admin user (permission=1)
         cmds, result = await self._send_group(".dset d20", permission=1)
 
-        assert len(cmds) > 0, "Should have response"
         # Should confirm setting
         assert any(word in result for word in ["设置", "成功", "默认"]), f"应返回设置成功提示: {result}"
 
@@ -176,8 +168,6 @@ class TestDiceSet(_RollCmdBotBase):
         """.help dset returns non-empty text about dset."""
         cmds, result = await self._send_group(".help dset")
 
-        assert len(cmds) > 0, "Should have response"
-        assert len(result) > 10
         assert any(word in result for word in ['dset', '骰设', '.dset'])
 
 
@@ -193,7 +183,6 @@ class TestKarmaDice(_RollCmdBotBase):
         # Turn on (as admin, permission=1)
         cmds, result = await self._send_group(".karmadice on", permission=1)
 
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["开启", "on", "启用", "karma"]), f"应返回开启确认: {result}"
 
         # Turn off
@@ -208,7 +197,6 @@ class TestKarmaDice(_RollCmdBotBase):
         # Check status
         cmds, result = await self._send_group(".karmadice status")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["开启", "已启用", "on", "enabled"]), f"应返回启用状态: {result}"
 
     async def test_karmadice__permission_check(self):
@@ -227,13 +215,11 @@ class TestKarmaDice(_RollCmdBotBase):
         result = "\n".join([str(cmd) for cmd in cmds])
 
         # Should be denied
-        assert len(cmds) > 0, "expected at least one command response"
+        assert cmds, "expected at least one command response"
         assert any(word in result for word in ["权限", "拒绝", "denied", "permission"])
 
     async def test_karmadice__help_not_empty(self):
         """.help karmadice returns non-empty text about karmadice."""
         cmds, result = await self._send_group(".help karmadice")
 
-        assert len(cmds) > 0, "Should have response"
-        assert len(result) > 10
         assert any(word in result for word in ['karmadice', '业力', '.karmadice'])

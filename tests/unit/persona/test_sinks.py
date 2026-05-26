@@ -54,11 +54,11 @@ class TestDeliverySink:
         result = await sink.handle_send(action, "u1", "g1", "r1", "t1")
 
         assert result is True
-        port.send.assert_called_once_with(
+        port.send.assert_awaited_once_with(
             user_id="u1", group_id="g1", content="hello",
             skip_history_record=True,
         )
-        store.add_message_stream.assert_called_once()
+        store.add_message_stream.assert_awaited_once()
         call_kwargs = store.add_message_stream.call_args[1]
         assert call_kwargs["content"] == "hello"
         assert call_kwargs["agent_run_id"] == "r1"
@@ -75,7 +75,7 @@ class TestDeliverySink:
         action = SendMessageAction(content="private reply")
         await sink.handle_send(action, "u1", "", "r1", "t1")
 
-        store.add_message_stream.assert_called_once()
+        store.add_message_stream.assert_awaited_once()
         # 私聊: user_id 保持原值（非 "assistant"）
         call_kwargs = store.add_message_stream.call_args[1]
         assert call_kwargs["user_id"] == "u1"
@@ -106,9 +106,12 @@ class TestDeliverySink:
         result = await sink.handle_send(action, "u1", "g1", "r1", "t1")
 
         assert result is False
-        port.send.assert_called_once()
+        port.send.assert_awaited_once_with(
+            user_id="u1", group_id="g1", content="fail",
+            skip_history_record=True,
+        )
         # 发送失败时，不写 persona_messages
-        assert not store.add_message_stream.called
+        store.add_message_stream.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_handle_send_exception_in_store(self):
@@ -182,7 +185,10 @@ class TestImageGenerationSink:
 
         assert "失败" in result
         assert "rate limit" in result
-        assert mock_router.handle_model_error.called
+        mock_router.handle_model_error.assert_called_once()
+        provider_arg, error_arg = mock_router.handle_model_error.call_args.args
+        assert provider_arg is provider
+        assert "rate limit" in str(error_arg)
 
 
 class TestUsageSink:
@@ -202,7 +208,7 @@ class TestUsageSink:
 
         await sink.on_event(event, state)
 
-        mock_router.increment_usage.assert_called_once_with("u1")
+        mock_router.increment_usage.assert_awaited_once_with("u1")
 
     @pytest.mark.asyncio
     async def test_second_event_skipped(self, mock_router):
@@ -213,7 +219,7 @@ class TestUsageSink:
         await sink.on_event(event, state)
         await sink.on_event(event, state)
 
-        mock_router.increment_usage.assert_called_once()  # 只调用一次
+        mock_router.increment_usage.assert_awaited_once_with("u1")  # 只调用一次
 
     @pytest.mark.asyncio
     async def test_wrong_event_type_ignored(self, mock_router):
@@ -223,7 +229,7 @@ class TestUsageSink:
         await sink.on_event(_make_event("ToolCallRequested"), state)
         await sink.on_event(_make_event("AgentRunStarted"), state)
 
-        assert not mock_router.increment_usage.called
+        mock_router.increment_usage.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_usage_failure_best_effort(self, mock_router):
@@ -250,7 +256,7 @@ class TestRunSummarySink:
         state = _make_state()
 
         await sink.on_event(_make_event("AgentRunStarted"), state)
-        assert not mock_event_store.update_run.called
+        mock_event_store.update_run.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_run_finished_updates_status(self, mock_event_store):
@@ -267,7 +273,7 @@ class TestRunSummarySink:
         })
         await sink.on_event(event, state)
 
-        mock_event_store.update_run.assert_called_once()
+        mock_event_store.update_run.assert_awaited_once()
         args = mock_event_store.update_run.call_args[0]
         assert args[0] == "r1"
         assert "status" in mock_event_store.update_run.call_args[1]

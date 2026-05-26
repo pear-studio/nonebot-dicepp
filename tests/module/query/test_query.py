@@ -22,7 +22,7 @@ class TestCreateEmptySqliteDatabase:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test_query.db")
             result = asyncio.run(store.create_empty_database(db_path))
-            assert result, "应成功创建数据库"
+            assert result is True, "应成功创建数据库"
             assert os.path.exists(db_path), "数据库文件应存在"
 
     def test_created_db_has_data_table(self):
@@ -64,7 +64,7 @@ class TestCreateEmptySqliteDatabase:
         try:
             db_path = os.path.join(tmpdir, "test_idem.db")
             result1 = asyncio.run(store.create_empty_database(db_path))
-            assert result1, "第一次创建应成功"
+            assert result1 is True, "第一次创建应成功"
             # 第二次调用在 data 表已存在时应抛出异常
             with pytest.raises(Exception):
                 asyncio.run(store.create_empty_database(db_path))
@@ -102,8 +102,7 @@ class TestRegexpNormalize:
     def test_normalize_basic_string(self):
         from core.data.query_store import regexp_normalize
         result = regexp_normalize("火球术")
-        assert isinstance(result, str)
-        assert len(result) > 0
+        assert result == "火球术"
 
     def test_normalize_empty_string(self):
         from core.data.query_store import regexp_normalize
@@ -143,17 +142,16 @@ class TestQueryCommandIntegration(IsolatedAsyncioTestCase):
     async def test_query_no_database_returns_response(self):
         """没有数据库时 .查询 应返回错误提示而非崩溃"""
         cmds = await self._send_group(".查询 火球术")
-        # 即使没有数据库，也应该有回复（错误提示）
-        self.assertTrue(len(cmds) > 0, ".查询 应返回提示信息")
+        self.assertEqual(len(cmds), 1, ".查询 应返回一条提示信息")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(result) > 0, "响应内容不应为空")
+        self.assertIn("未加载的数据库", result)
 
     async def test_query_short_form_no_database(self):
         """.q 短指令同上"""
         cmds = await self._send_group(".q 火球术")
-        self.assertTrue(len(cmds) > 0, ".q 应返回提示信息")
+        self.assertEqual(len(cmds), 1, ".q 应返回一条提示信息")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(result) > 0, "响应内容不应为空")
+        self.assertIn("未加载的数据库", result)
 
 
 @pytest.mark.integration

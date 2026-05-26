@@ -226,7 +226,11 @@ class TestSuggestActionRelationshipGate:
 
         await asyncio.sleep(0.3)
         assert len(call_order) == 2
-        assert character_life._inject_spontaneous_event_impl.call_count == 2
+        injected_actions = [
+            call.args[0]
+            for call in character_life._inject_spontaneous_event_impl.await_args_list
+        ]
+        assert injected_actions == ["task1", "task2"]
 
 
 class TestInjectSpontaneousEvent:

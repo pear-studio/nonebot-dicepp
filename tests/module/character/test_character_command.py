@@ -68,7 +68,8 @@ class _CharBotBase(IsolatedAsyncioTestCase):
         )
 
     async def _send_group(self, msg: str, user_id: str = None, nickname: str = None,
-                          group_id: str = None, dice_values: List[int] = None) -> Tuple[List[BotCommandBase], str]:
+                          group_id: str = None, dice_values: List[int] = None,
+                          require_response: bool = True) -> Tuple[List[BotCommandBase], str]:
         """Send a group message with optional dice mocking."""
         meta = self._make_meta(msg, user_id, nickname, group_id)
         
@@ -84,6 +85,8 @@ class _CharBotBase(IsolatedAsyncioTestCase):
             cmds = await self.bot.process_message(msg, meta)
         
         result = "\n".join([str(cmd) for cmd in cmds])
+        if require_response:
+            assert cmds, f"{msg!r} should return a command response"
         return cmds, result
 
     def _create_char_cmd(self, name: str = "测试角色", level: int = 5,
@@ -115,12 +118,11 @@ class TestCharacterCard(_CharBotBase):
         cmd = self._create_char_cmd(name="勇者", level=5, abilities={"str": 18, "dex": 14, "con": 16, "int": 10, "wis": 12, "cha": 8})
         cmds, result = await self._send_group(cmd)
 
-        assert len(cmds) > 0, "Should have response"
         assert "设置" in result or "成功" in result, f"角色卡创建应返回成功提示: {result}"
 
         # Verify in DB
         char = await self.bot.db.characters_dnd.get(self.group_id, self.user_id)
-        assert char is not None
+        assert char.name == "勇者"
         assert char.ability_info.level == 5
         assert char.ability_info.ability[0] == 18  # str is first in ABILITY_LIST
 
@@ -133,7 +135,6 @@ class TestCharacterCard(_CharBotBase):
         # Check status
         cmds, result = await self._send_group(".状态")
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 5)  # Level
         assert_contains_number(result, 45)  # HP
 
@@ -168,7 +169,6 @@ class TestCharacterCard(_CharBotBase):
         """.状态 without character returns missing hint."""
         cmds, result = await self._send_group(".状态")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["找不到", "不存在", "miss", "没有"])
 
 
@@ -185,7 +185,6 @@ class TestCharacterChecks(_CharBotBase):
         # Roll check with mock value 10
         cmds, result = await self._send_group(".力量检定", dice_values=[10])
         
-        assert len(cmds) > 0, "Should have response"
         # Result should be 10 + 4 = 14
         assert_contains_number(result, 14)
 
@@ -201,7 +200,6 @@ class TestCharacterChecks(_CharBotBase):
         # Roll athletics check: d20(10) + str_mod(4) + prof(3) = 17
         cmds, result = await self._send_group(".运动检定", dice_values=[10])
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 17)
 
     async def test_check__skill_without_proficiency(self):
@@ -213,7 +211,6 @@ class TestCharacterChecks(_CharBotBase):
         # Roll stealth check: d20(10) + dex_mod(2) = 12
         cmds, result = await self._send_group(".隐匿检定", dice_values=[10])
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 12)
 
     async def test_check__with_temp_modifier(self):
@@ -223,7 +220,6 @@ class TestCharacterChecks(_CharBotBase):
         
         cmds, result = await self._send_group(".力量检定+3", dice_values=[10])
         
-        assert len(cmds) > 0, "Should have response"
         # 10 + 4 (STR mod) + 3 = 17
         assert_contains_number(result, 17)
 
@@ -234,7 +230,6 @@ class TestCharacterChecks(_CharBotBase):
         
         cmds, result = await self._send_group(".2#力量检定", dice_values=[8, 12])
         
-        assert len(cmds) > 0, "Should have response"
         # Results: 8+4=12 and 12+4=16
         assert_contains_number(result, 12)
         assert_contains_number(result, 16)
@@ -243,7 +238,6 @@ class TestCharacterChecks(_CharBotBase):
         """Check without character returns missing hint."""
         cmds, result = await self._send_group(".力量检定")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["找不到", "不存在", "角色卡"])
 
     async def test_check__invalid_ability_name(self):
@@ -251,11 +245,11 @@ class TestCharacterChecks(_CharBotBase):
         cmd = self._create_char_cmd()
         await self._send_group(cmd)
 
-        cmds, result = await self._send_group(".不存在属性检定")
+        cmds, result = await self._send_group(".不存在属性检定", require_response=False)
 
         # Invalid ability name may not be processed by any command
         # Either empty response or error message is acceptable
-        if len(cmds) > 0:
+        if cmds:
             assert any(word in result for word in ["找不到", "不存在", "未知", "无效", "错误"])
 
 
@@ -274,7 +268,6 @@ class TestCharacterSaving(_CharBotBase):
         # CON save: d20(10) + con_mod(3) + prof(3) = 16
         cmds, result = await self._send_group(".体质豁免", dice_values=[10])
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 16)
 
     async def test_saving__without_proficiency(self):
@@ -285,7 +278,6 @@ class TestCharacterSaving(_CharBotBase):
         # CHA save: d20(10) + cha_mod(-1) = 9
         cmds, result = await self._send_group(".魅力豁免", dice_values=[10])
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 9)
 
 
@@ -300,7 +292,6 @@ class TestCharacterHP(_CharBotBase):
         
         cmds, result = await self._send_group(".hp")
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 45)
 
     async def test_hp__take_damage(self):
@@ -310,7 +301,6 @@ class TestCharacterHP(_CharBotBase):
         
         cmds, result = await self._send_group(".hp -10")
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 35)
 
     async def test_hp__heal(self):
@@ -325,7 +315,6 @@ class TestCharacterHP(_CharBotBase):
         # Then heal
         cmds, result = await self._send_group(".hp +10")
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 30)
 
     async def test_hp__heal_capped_at_max(self):
@@ -339,7 +328,6 @@ class TestCharacterHP(_CharBotBase):
         # Over-heal
         cmds, result = await self._send_group(".hp +20")
         
-        assert len(cmds) > 0, "Should have response"
         # Should be capped at max 45
         assert_contains_number(result, 45)
 
@@ -347,7 +335,6 @@ class TestCharacterHP(_CharBotBase):
         """.hp without character returns missing hint."""
         cmds, result = await self._send_group(".hp")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["找不到", "不存在", "角色卡"])
 
 
@@ -367,7 +354,6 @@ class TestCharacterLongRest(_CharBotBase):
         # Long rest
         cmds, result = await self._send_group(".长休")
         
-        assert len(cmds) > 0, "Should have response"
         # Verify HP restored
         char = await self.bot.db.characters_dnd.get(self.group_id, self.user_id)
         assert char.hp_info.hp_cur == 45
@@ -379,12 +365,10 @@ class TestCharacterLongRest(_CharBotBase):
         
         cmds, result = await self._send_group(".长休")
         
-        assert len(cmds) > 0, "Should have response"
         assert "生命骰" in result
 
     async def test_long_rest__without_char_returns_miss(self):
         """.长休 without character returns missing hint."""
         cmds, result = await self._send_group(".长休")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["找不到", "不存在", "角色卡"])

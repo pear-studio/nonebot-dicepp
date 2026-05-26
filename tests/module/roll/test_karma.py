@@ -204,7 +204,10 @@ class TestKarmaCommand(IsolatedAsyncioTestCase):
         await self._send_msg(".karmadice on")
         cmds = await self._send_msg(".karmadice status")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(result) > 0)
+        self.assertTrue(
+            any(word in result for word in ["业力", "模式", "引擎"]),
+            f"状态输出应包含业力骰子配置，实际输出：{result}",
+        )
 
     async def test_reset_history(self):
         await self._send_msg(".karmadice on")

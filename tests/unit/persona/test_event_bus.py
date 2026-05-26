@@ -1,4 +1,6 @@
 """AgentEventBus + EventStore 测试 — emit、sink 分发、失败隔离"""
+import json
+
 import pytest
 from unittest.mock import Mock, AsyncMock, MagicMock
 
@@ -48,11 +50,13 @@ class TestEventStore:
         event = AgentEvent(run_id="r1", seq=0, event_type="test", payload={})
         await es.write_event(event)
 
-        store.insert_agent_event.assert_called_once()
+        store.insert_agent_event.assert_awaited_once()
         args = store.insert_agent_event.call_args[1]
         assert args["run_id"] == "r1"
         assert args["seq"] == 0
         assert args["event_type"] == "test"
+        assert json.loads(args["payload_json"]) == {}
+        assert args["created_at"] == ""
 
     @pytest.mark.asyncio
     async def test_get_events_delegates(self):
@@ -87,7 +91,19 @@ class TestAgentEventBus:
         assert event.run_id == "r1"
         assert event.seq == 1
         assert event.created_at != ""
-        assert mock_event_store.insert_agent_event.called
+        mock_event_store.insert_agent_event.assert_awaited_once()
+        args = mock_event_store.insert_agent_event.call_args.kwargs
+        assert args["run_id"] == event.run_id
+        assert args["seq"] == event.seq
+        assert args["event_type"] == "AgentRunStarted"
+        assert json.loads(args["payload_json"]) == {
+            "run_id": "r1",
+            "turn_id": "t1",
+            "user_id": "u1",
+            "group_id": "g1",
+            "mode": "chat",
+        }
+        assert args["created_at"] == event.created_at
 
     @pytest.mark.asyncio
     async def test_seq_increments(self, mock_event_store):
@@ -113,11 +129,10 @@ class TestAgentEventBus:
         state = _make_state()
 
         payload = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
-        await bus.emit("AgentRunStarted", payload, state)
+        event = await bus.emit("AgentRunStarted", payload, state)
 
-        assert sink.on_event.called
-        call_args = sink.on_event.call_args[0]
-        assert call_args[0].event_type == "AgentRunStarted"
+        sink.on_event.assert_awaited_once_with(event, state)
+        assert event.event_type == "AgentRunStarted"
 
     @pytest.mark.asyncio
     async def test_sink_failure_does_not_block(self, mock_event_store):
@@ -130,9 +145,10 @@ class TestAgentEventBus:
         state = _make_state()
 
         payload = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
-        await bus.emit("AgentRunStarted", payload, state)
+        event = await bus.emit("AgentRunStarted", payload, state)
 
-        assert sink2.on_event.called  # 第二个 sink 仍被调用
+        failing_sink.on_event.assert_awaited_once_with(event, state)
+        sink2.on_event.assert_awaited_once_with(event, state)
         assert len(state.sink_failures) == 1  # 失败被记录
         assert "sink crash" in state.sink_failures[0]
 

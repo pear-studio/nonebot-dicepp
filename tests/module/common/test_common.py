@@ -85,22 +85,20 @@ class TestNicknameCommandIntegration(_BotTestBase):
     async def test_set_nickname_returns_response(self):
         cmds = await self._send_group(".nn 测试昵称")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, "设置昵称应返回回复")
         self.assertIn("测试昵称", result, "回复应包含设置的昵称")
 
     async def test_illegal_nickname_returns_error(self):
         cmds = await self._send_group(".nn .bot")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, "非法昵称应返回错误")
-        # 应包含"非法"相关提示
-        self.assertTrue(len(result) > 0, "应有错误提示")
+        self.assertIn("非法昵称", result, "非法昵称应返回错误")
 
     async def test_reset_nickname_returns_response(self):
         # 先设置昵称
         await self._send_group(".nn 临时昵称")
         # 再重置（空参数）
         cmds = await self._send_group(".nn")
-        self.assertTrue(len(cmds) > 0, "重置昵称应有回复")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertIn("已将您的昵称从临时昵称", result, "重置昵称应返回原昵称")
 
 
 @pytest.mark.integration
@@ -112,8 +110,6 @@ class TestHelpCommandIntegration(_BotTestBase):
     async def test_help_returns_response(self):
         cmds = await self._send_group(".help")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".help 应返回帮助内容")
-        self.assertTrue(len(result) > 0, "帮助内容不应为空")
         # 帮助信息应包含核心命令关键词
         self.assertTrue(
             any(word in result.lower() for word in ['.r', '.nn', '.help', '.welcome']),
@@ -123,7 +119,6 @@ class TestHelpCommandIntegration(_BotTestBase):
     async def test_help_with_keyword_roll(self):
         cmds = await self._send_group(".help roll")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".help roll 应有回复")
         self.assertTrue(
             any(word in result.lower() for word in ['roll', '掷骰', '.r']),
             f".help roll 应包含掷骰相关关键词，实际输出：{result}"
@@ -132,7 +127,6 @@ class TestHelpCommandIntegration(_BotTestBase):
     async def test_help_with_keyword_nn(self):
         cmds = await self._send_group(".help nn")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".help nn 应有回复")
         # 返回的帮助文本应包含 nn 相关内容
         self.assertIn("nn", result.lower(), ".help nn 应返回 nn 的帮助文本")
 
@@ -146,8 +140,6 @@ class TestWelcomeCommandIntegration(_BotTestBase):
     async def test_welcome_show_returns_response(self):
         cmds = await self._send_group(".welcome show")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".welcome show 应返回回复")
-        self.assertTrue(len(result) > 0, "回复内容不应为空")
         # 欢迎信息应包含 welcome/欢迎 相关关键词
         self.assertTrue(
             any(word in result.lower() for word in ['welcome', '欢迎']),
@@ -157,7 +149,6 @@ class TestWelcomeCommandIntegration(_BotTestBase):
     async def test_welcome_set_returns_response(self):
         cmds = await self._send_group(".welcome 欢迎新朋友！")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".welcome 设置应有回复")
         # 设置欢迎语后应回显确认或包含新内容
         self.assertTrue(
             any(word in result for word in ['欢迎新朋友', '设置', '成功']),

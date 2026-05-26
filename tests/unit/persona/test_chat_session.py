@@ -123,7 +123,7 @@ async def test_dedup_within_5_seconds_returns_none(mock_agent_runtime):
     session = _make_session()
 
     first = await session.chat("u1", "", "你好")
-    assert first is not None
+    assert first == "reply"
 
     # 立刻发送相同消息：应被去重
     again = await session.chat("u1", "", "你好")
@@ -140,8 +140,8 @@ async def test_dedup_different_message_not_skipped():
     a = await session.chat("u1", "", "你好")
     b = await session.chat("u1", "", "再见")
 
-    assert a is not None
-    assert b is not None
+    assert a == "reply"
+    assert b == "reply"
 
 
 @pytest.mark.asyncio
@@ -149,7 +149,7 @@ async def test_first_private_message_goes_through_coordinator(mock_agent_runtime
     """私聊首次对话走标准 LLM 路径"""
     session = _make_session()
     result = await session.chat("u1", "", "你好")
-    assert result is not None
+    assert result == "reply"
     assert len(mock_agent_runtime) == 1
 
 
@@ -158,7 +158,7 @@ async def test_first_group_message_goes_through_coordinator(mock_agent_runtime):
     """群聊首次对话走标准 LLM 路径"""
     session = _make_session()
     result = await session.chat("u1", "g1", "大家好")
-    assert result is not None
+    assert result == "reply"
     assert len(mock_agent_runtime) == 1
 
 

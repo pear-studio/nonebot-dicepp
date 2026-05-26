@@ -132,8 +132,9 @@ class TestDispatch:
         assert ctx.segment_state.segment_count == 1
         # queue should have the segment
         queue = dispatcher._queues.get("group:g1")
-        assert queue is not None
-        assert not queue.empty()
+        item = queue.get_nowait()
+        assert item.content == "hi"
+        assert item.delay_before == 2.0
         await dispatcher.shutdown()
 
     @pytest.mark.asyncio
@@ -141,8 +142,8 @@ class TestDispatch:
         result = parse(await send_reply_segment_executor({"content": "now", "delay_before": 0}, ctx))
         assert result["status"] == "success"
         queue = dispatcher._queues.get("group:g1")
-        assert queue is not None
         item = queue.get_nowait()
+        assert item.content == "now"
         assert item.delay_before == 0
         await dispatcher.shutdown()
 

@@ -115,8 +115,8 @@ async def test_single_call_charges_once():
 
     result = await session.chat("u1", "", "你好")
 
-    assert result is not None
-    assert session.router.increment_usage.await_count == 1
+    assert result == "reply"
+    session.router.increment_usage.assert_awaited_once_with("u1")
 
 
 @pytest.mark.asyncio
@@ -125,21 +125,21 @@ async def test_buffered_merge_charges_per_call():
     coordinator = LLMCallCoordinator()
     session = _make_session(coordinator)
 
-    call_count = 0
+    llm_calls = []
     first_started = asyncio.Event()
     third_buffered = asyncio.Event()
 
     async def slow_chat_call(user_id, group_id, messages):
-        nonlocal call_count
-        call_count += 1
+        llm_calls.append((user_id, group_id, messages))
+        call_index = len(llm_calls)
         # 模拟 AgentRuntime 内部计费行为
         await session.router.increment_usage(user_id)
-        if call_count == 1:
+        if call_index == 1:
             first_started.set()
             await asyncio.sleep(0.05)
-        elif call_count == 2:
+        elif call_index == 2:
             await asyncio.sleep(0.05)
-        return f"reply_{call_count}"
+        return f"reply_{call_index}"
 
     session._coordinator_chat_call_fn = slow_chat_call
 
@@ -158,10 +158,14 @@ async def test_buffered_merge_charges_per_call():
 
     await asyncio.gather(first(), second(), third())
 
-    # call_count 至少 2（首轮 + 至少 1 次 buffered 合并）
-    assert call_count >= 2
+    # 至少 2 次 LLM 调用（首轮 + 至少 1 次 buffered 合并）
+    assert len(llm_calls) >= 2
     # 中间轮通过 on_result 各扣 1 次 + 最终轮 success 1 次：N 次 LLM 调用 → N 次扣费
-    assert session.router.increment_usage.await_count == call_count
+    charged_user_ids = [
+        call.args[0]
+        for call in session.router.increment_usage.await_args_list
+    ]
+    assert charged_user_ids == ["u1"] * len(llm_calls)
 
 
 @pytest.mark.asyncio
@@ -178,6 +182,5 @@ async def test_all_failures_does_not_charge():
     result = await session.chat("u1", "", "msg")
 
     # 兜底文案
-    assert result is not None
     assert "暂时不可用" in result
-    assert session.router.increment_usage.await_count == 0
+    session.router.increment_usage.assert_not_awaited()

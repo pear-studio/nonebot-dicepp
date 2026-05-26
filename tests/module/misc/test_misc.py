@@ -47,8 +47,6 @@ class TestDndCommandIntegration(_BotTestBase):
     async def test_dnd_returns_response(self):
         cmds = await self._send_group(".dnd")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".dnd 应返回结果")
-        self.assertTrue(len(result) > 0, "结果内容不应为空")
         self.assertTrue(
             any(word in result for word in ['DND', 'dnd', '龙与地下城']),
             f".dnd 结果应包含 DND 相关关键词，实际输出：{result}"
@@ -64,9 +62,12 @@ class TestDndCommandIntegration(_BotTestBase):
         self.assertTrue(len(numbers) >= 6, f".dnd 应生成 6 项属性，实际输出：{result}")
 
     async def test_dnd_multiple_times(self):
+        import re
+
         cmds = await self._send_group(".dnd 3")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".dnd 3 应返回 3 次生成结果")
+        numbers = re.findall(r'\d+', result)
+        self.assertGreaterEqual(len(numbers), 18, f".dnd 3 应返回 3 次生成结果，实际输出：{result}")
 
     async def test_dnd_with_reason(self):
         cmds = await self._send_group(".dnd 1 为了勇者")
@@ -85,8 +86,6 @@ class TestCocMiscCommandIntegration(_BotTestBase):
     async def test_coc_returns_response(self):
         cmds = await self._send_group(".coc")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".coc 应返回结果")
-        self.assertTrue(len(result) > 0, "结果内容不应为空")
         self.assertTrue(
             any(word in result for word in ['COC', 'coc', '克苏鲁']),
             f".coc 结果应包含 COC 相关关键词，实际输出：{result}"

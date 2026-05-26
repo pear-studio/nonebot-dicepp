@@ -140,9 +140,7 @@ async def test_create_persona_success_registers_tools(monkeypatch):
 
     app = await create_persona(bot)
 
-    assert app is not None
-    assert app.chat is not None
-    assert app.chat.tool_registry is not None
+    assert app.get_character().name == "小骰"
 
     definitions = app.chat.tool_registry.get_definitions_for(ToolDomain.CHAT)
     names = {d["function"]["name"] for d in definitions}
@@ -153,11 +151,6 @@ async def test_create_persona_success_registers_tools(monkeypatch):
     assert "suggest_action" in names, f"缺失 suggest_action，实际注册: {names}"
 
     # R6: 跨组件引用一致性
-    assert app.chat is not None
-    assert app.life is not None
-    assert app.store is not None
-    assert app.port is not None
-    assert app.segment_dispatcher is not None
     assert app.chat._response_handler.port is app.port
-    assert app.life.scheduler is not None
-    assert app.life.character_life is not None
+    assert app.life.scheduler.character.name == "小骰"
+    assert app.life.character_life.character.name == "小骰"

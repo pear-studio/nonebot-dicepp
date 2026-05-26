@@ -6,6 +6,8 @@ from core.data.models import (
     DNDCharacter,
     HPInfo,
     AbilityInfo,
+    CHECK_ITEM_NUM,
+    EXT_ITEM_NUM,
 )
 
 
@@ -69,6 +71,6 @@ class TestAbilityInfoModel:
     def test_default_arrays(self):
         ability = AbilityInfo()
         assert all(v == 0 for v in ability.ability)
-        assert len(ability.check_prof) > 0
-        assert len(ability.check_ext) > 0
+        assert ability.check_prof == [0] * CHECK_ITEM_NUM
+        assert ability.check_ext == [""] * EXT_ITEM_NUM
 

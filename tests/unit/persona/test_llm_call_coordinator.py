@@ -28,7 +28,7 @@ class TestLLMCallCoordinatorBasics:
         result = await coordinator.submit("user:1", "msg", call_fn)
         assert result.status == "success"
         assert result.value == "hello"
-        assert call_fn.call_count == 1
+        call_fn.assert_awaited_once_with(["msg"])
 
     @pytest.mark.asyncio
     async def test_second_submit_while_executing_queues_and_merges(self, coordinator):
@@ -73,15 +73,14 @@ class TestLLMCallCoordinatorBasics:
         execution_started = asyncio.Event()
         second_done = asyncio.Event()
         second_result = None
-        call_count = 0
+        attempts = []
 
         async def slow_call_fn(messages):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            attempts.append(messages)
+            if len(attempts) == 1:
                 execution_started.set()
                 await barrier.wait()
-            return f"result_{call_count}"
+            return f"result_{len(attempts)}"
 
         async def second_submit():
             nonlocal second_result
@@ -106,7 +105,8 @@ class TestLLMCallCoordinatorBasics:
 
         barrier.set()
         result = await first_task
-        assert call_count == 2
+        assert len(attempts) == 2
+        assert attempts == [["msg1"], ["msg2"]]
         assert result.status == "success"
         assert result.value == "result_2"
 
@@ -159,18 +159,17 @@ class TestLLMCallCoordinatorBasics:
             nonlocal on_exhausted_called
             on_exhausted_called = True
 
-        call_count = 0
+        attempts = []
 
         async def failing_call_fn(messages):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            attempts.append(messages)
+            if len(attempts) == 1:
                 started1.set()
                 await barrier1.wait()
-            elif call_count == 2:
+            elif len(attempts) == 2:
                 started2.set()
                 await barrier2.wait()
-            elif call_count == 3:
+            elif len(attempts) == 3:
                 started3.set()
                 await barrier3.wait()
             raise Exception("fail")
@@ -206,7 +205,7 @@ class TestLLMCallCoordinatorBasics:
         result = await first_task
         assert result.status == "failed"
         assert result.value is None
-        assert call_count == 3
+        assert attempts == [["msg1"], ["msg2"], ["msg3"]]
         assert on_exhausted_called is True
 
     @pytest.mark.asyncio
@@ -215,16 +214,15 @@ class TestLLMCallCoordinatorBasics:
         started2 = asyncio.Event()
         barrier1 = asyncio.Event()
         barrier2 = asyncio.Event()
-        call_count = 0
+        attempts = []
 
         async def inner_call_fn(messages):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            attempts.append(messages)
+            if len(attempts) == 1:
                 started1.set()
                 await barrier1.wait()
                 raise Exception("fail")
-            if call_count == 2:
+            if len(attempts) == 2:
                 started2.set()
                 await barrier2.wait()
                 raise Exception("fail")
@@ -254,7 +252,7 @@ class TestLLMCallCoordinatorBasics:
 
         barrier2.set()
         result = await first_task
-        assert call_count == 3
+        assert attempts == [["msg1"], ["msg2"], ["msg3"]]
         assert result.status == "success"
         assert result.value == "success"
 
@@ -362,14 +360,13 @@ class TestLLMCallCoordinatorExhaustion:
         async def bad_on_exhausted(last_exception=None):
             raise RuntimeError("boom")
 
-        call_count = 0
+        attempts = []
 
         async def inner_failing_call_fn(messages):
-            nonlocal call_count
-            call_count += 1
+            attempts.append(messages)
             # 直接设置内部状态以精确控制 _run_loop 的重试路径，
             # 而非测试并发 buffered 行为本身。
-            if call_count <= 2:
+            if len(attempts) <= 2:
                 coordinator._has_buffered["user:1"] = True
             raise Exception("fail")
 
@@ -380,23 +377,22 @@ class TestLLMCallCoordinatorExhaustion:
         )
         assert result.status == "failed"
         assert result.value is None
-        assert call_count == 3
+        assert attempts == [["msg"], [], []]
 
     @pytest.mark.asyncio
     async def test_max_iterations_prevents_infinite_loop(self, coordinator):
         """MAX_ITERATIONS=5 防止用户刷屏导致无限循环"""
         started_events = [asyncio.Event() for _ in range(5)]
         barriers = [asyncio.Event() for _ in range(4)]
-        call_count = 0
+        attempts = []
 
         async def call_fn(messages):
-            nonlocal call_count
-            call_count += 1
-            idx = call_count - 1
+            attempts.append(messages)
+            idx = len(attempts) - 1
             started_events[idx].set()
             if idx < 4:
                 await barriers[idx].wait()
-            return f"result_{call_count}"
+            return f"result_{len(attempts)}"
 
         first_task = asyncio.create_task(
             coordinator.submit(
@@ -419,7 +415,7 @@ class TestLLMCallCoordinatorExhaustion:
                 await started_events[i + 1].wait()
 
         result = await first_task
-        assert call_count == 5
+        assert len(attempts) == 5
         assert result.status == "success"
         assert result.value == "result_5"
 
@@ -432,18 +428,17 @@ class TestLLMCallCoordinatorExhaustion:
         barrier1 = asyncio.Event()
         barrier2 = asyncio.Event()
         barrier3 = asyncio.Event()
-        call_count = 0
+        attempts = []
 
         async def inner_failing_call_fn(messages):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            attempts.append(messages)
+            if len(attempts) == 1:
                 started1.set()
                 await barrier1.wait()
-            elif call_count == 2:
+            elif len(attempts) == 2:
                 started2.set()
                 await barrier2.wait()
-            elif call_count == 3:
+            elif len(attempts) == 3:
                 started3.set()
                 await barrier3.wait()
             raise Exception("fail")
@@ -496,7 +491,7 @@ class TestLLMCallCoordinatorExhaustion:
         result = await first_task
         assert result.status == "failed"
         assert result.value is None
-        assert call_count == 3
+        assert attempts == [["msg1"], ["msg2"], ["msg3"]]
         assert on_exhausted_called is True
         # buffered 在最后一次失败后被 pop（此时 has_buffered=True 但 failures >= max_failures，不继续）
         assert coordinator._has_buffered.get("user:1") is None
@@ -506,13 +501,12 @@ class TestLLMCallCoordinatorExhaustion:
         """had_success=True 时即使最终失败也不触发 on_exhausted"""
         started1 = asyncio.Event()
         barrier1 = asyncio.Event()
-        call_count = 0
+        attempts = []
         on_exhausted_called = False
 
         async def call_fn(messages):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            attempts.append(messages)
+            if len(attempts) == 1:
                 started1.set()
                 await barrier1.wait()
                 return "first_success"
@@ -538,7 +532,7 @@ class TestLLMCallCoordinatorExhaustion:
 
         barrier1.set()
         result = await first_task
-        assert call_count == 2
+        assert attempts == [["msg1"], ["msg2"]]
         assert result.status == "failed"
         assert result.value is None
         assert on_exhausted_called is False  # 因为 had_success=True
@@ -625,15 +619,14 @@ class TestLLMCallCoordinatorExhaustion:
         coordinator = LLMCallCoordinator()
         barrier = asyncio.Event()
         started = asyncio.Event()
-        call_count = 0
+        attempts = []
 
         async def share_fn(messages):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
+            attempts.append(messages)
+            if len(attempts) == 1:
                 started.set()
                 await barrier.wait()
-            return f"share_{call_count}"
+            return f"share_{len(attempts)}"
 
         share_task = asyncio.create_task(
             coordinator.submit(
@@ -654,7 +647,7 @@ class TestLLMCallCoordinatorExhaustion:
         share_result = await share_task
         assert share_result.status == "success"
         # share_fn 被调用 2 次：第 1 次正常执行，第 2 次处理缓冲消息
-        assert call_count == 2
+        assert attempts == [[], ["chat_msg"]]
         assert share_result.value == "share_2"
         # 缓冲消息已被消费，状态已清理
         assert coordinator._has_buffered.get("user:1") is None
@@ -690,7 +683,7 @@ class TestLLMCallCoordinatorExhaustion:
         coordinator._has_buffered.pop(key, None)
 
         # 验证缓冲消息残留
-        assert coordinator._pending_messages.get(key) is not None
+        assert coordinator._pending_messages.get(key) == ["msg_A"]
 
         # 新 chat submit：应追加 msg_B，而非覆盖 msg_A
         async def chat_fn(messages):
@@ -707,14 +700,13 @@ class TestLLMCallCoordinatorExhaustion:
     @pytest.mark.asyncio
     async def test_iteration_exhaustion_does_not_call_on_exhausted_when_had_success(self, coordinator):
         """超过 MAX_ITERATIONS 且 had_success=True 时不应调用 on_exhausted"""
-        call_count = 0
+        attempts = []
         on_exhausted_called = False
 
         async def call_fn(messages):
-            nonlocal call_count
-            call_count += 1
+            attempts.append(messages)
             coordinator._has_buffered["user:1"] = True
-            return f"result_{call_count}"
+            return f"result_{len(attempts)}"
 
         async def on_exhausted(last_exception=None):
             nonlocal on_exhausted_called
@@ -724,7 +716,7 @@ class TestLLMCallCoordinatorExhaustion:
         result = await coordinator.submit(
             "user:1", "msg", call_fn, continue_on_buffered=True, on_exhausted=on_exhausted
         )
-        assert call_count == 5
+        assert len(attempts) == 5
         assert on_exhausted_called is False
         # 超过 max_iterations 后仍返回最后一次 call_fn 的结果（last_result_sent=False）
         assert result.status == "success"
@@ -734,13 +726,12 @@ class TestLLMCallCoordinatorExhaustion:
     async def test_on_result_exception_treated_as_sent_to_avoid_duplicate(self, coordinator):
         """on_result 抛异常时应将 last_result_sent 置 True，
         避免 max_iterations 强制退出时重复投递（保守策略）。"""
-        call_count = 0
+        attempts = []
 
         async def call_fn(messages):
-            nonlocal call_count
-            call_count += 1
+            attempts.append(messages)
             coordinator._has_buffered["user:dup"] = True
-            return f"result_{call_count}"
+            return f"result_{len(attempts)}"
 
         async def on_result(value):
             raise RuntimeError(f"投递失败 for {value}")
@@ -758,6 +749,6 @@ class TestLLMCallCoordinatorExhaustion:
         )
         # on_result 始终抛异常，但保守策略下视为已发送，因此最终强制退出时返回 None
         # （SubmitResult: result is None → status="failed", value=None，避免重复投递）
-        assert call_count == 5
+        assert len(attempts) == 5
         assert result.status == "failed"
         assert result.value is None

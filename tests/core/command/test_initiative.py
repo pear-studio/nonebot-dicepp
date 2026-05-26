@@ -8,7 +8,7 @@ class TestInitiativeBasic:
         await h.send_group(".init", checker=lambda s: "没有找到先攻列表" in s)
 
     async def test_single_ri(self, h):
-        await h.send_group(".nn 伊丽莎白")
+        await h.send_group(".nn 伊丽莎白", checker=lambda s: "已将您的昵称设为伊丽莎白" in s)
         await h.send_group(".ri", checker=lambda s: "伊丽莎白的先攻值是 1D20=" in s)
 
     async def test_ri_with_fixed_value(self, h):
@@ -32,7 +32,7 @@ class TestInitiativeBasic:
         await h.send_group(".init", group_id="group2", checker=lambda s: "没有找到先攻列表" in s)
 
     async def test_nickname_change_affects_init_list(self, h):
-        await h.send_group(".nn 雷电将军")
+        await h.send_group(".nn 雷电将军", checker=lambda s: "已将您的昵称设为雷电将军" in s)
         await h.send_group(".init", checker=lambda s: "伊丽莎白" not in s and "雷电将军" in s and "大地精" in s)
 
     async def test_clear_init_list(self, h):
@@ -106,4 +106,4 @@ class TestInitiativeErrors:
 
     async def test_cleanup(self, h):
         await h.send_group(".init clr", checker=lambda s: "已清除先攻列表" in s)
-        await h.send_group(".nn")
+        await h.send_group(".nn", checker=lambda s: "已将您的昵称从" in s or "您尚未设置过昵称" in s)

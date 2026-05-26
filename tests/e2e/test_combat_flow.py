@@ -75,8 +75,7 @@ class TestCombatFlow:
         cmds, result = await send_as_user(
             bot, ".log on", user_id=dm_id, nickname=dm_nick, group_id=group_id
         )
-        # 日志可能未启用，只要返回了响应即可
-        assert len(cmds) > 0, "日志命令应返回响应"
+        assert "日志" in result or "log" in result.lower(), f"日志命令应返回日志相关响应: {result}"
 
         # 查看先攻列表（初始应为空）
         cmds, result = await send_as_user(
@@ -88,7 +87,7 @@ class TestCombatFlow:
         cmds, result = await send_as_user(
             bot, ".br", user_id=dm_id, nickname=dm_nick, group_id=group_id
         )
-        assert len(cmds) > 0, "应成功创建战斗轮"
+        assert "先攻" in result or "回合" in result or "轮" in result, f"应返回战斗轮相关响应: {result}"
 
         # 添加怪物 (使用 .ri 命令)
         cmds, result = await send_as_user(
@@ -160,7 +159,7 @@ class TestCombatFlow:
         cmds, result = await send_as_user(
             bot, ".log off", user_id=dm_id, nickname=dm_nick, group_id=group_id
         )
-        assert len(cmds) > 0, "日志命令应返回响应"
+        assert "日志" in result or "log" in result.lower(), f"日志命令应返回日志相关响应: {result}"
 
     async def test_combat_flow__initiative_with_character_stats(self, e2e_bot: Bot):
         """任务 7.2: 先攻与角色卡属性联动"""
@@ -282,7 +281,7 @@ class TestCombatFlow:
 
         # 开启战斗轮（应在添加先攻前调用，.br 会清理旧战斗状态）
         cmds, result = await send_as_user(bot, ".br", user_id="dm5", nickname="DM", group_id=group_id)
-        assert len(cmds) > 0, "应成功创建战斗轮"
+        assert "先攻" in result or "回合" in result or "轮" in result, f"应返回战斗轮相关响应: {result}"
 
         await send_as_user(bot, ".ri 15 兽人1", user_id="dm5", nickname="DM", group_id=group_id, dice_values=[15])
         await send_as_user(bot, ".ri 14 兽人2", user_id="dm5", nickname="DM", group_id=group_id, dice_values=[14])

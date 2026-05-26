@@ -80,7 +80,7 @@ class TestASTErrorSemantics:
         with pytest.raises(RollEngineError) as exc_info:
             exec_roll_exp_ast("1001D20")
         assert isinstance(exc_info.value.info, str)
-        assert len(exc_info.value.info) > 0
+        assert exc_info.value.info.strip()
 
 
 # ===========================================================================
@@ -112,7 +112,7 @@ class TestDefaultPathErrorSemantics:
         with pytest.raises(RollDiceError) as exc_info:
             exec_roll_exp("1001D20")
         assert isinstance(exc_info.value.info, str)
-        assert len(exc_info.value.info) > 0
+        assert exc_info.value.info.strip()
 
 
 # ===========================================================================

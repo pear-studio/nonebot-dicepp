@@ -46,7 +46,7 @@ class TestAESEncryption:
         original = "sk-test-api-key-12345"
         encrypted = PersonaDataStore.encrypt_api_key(original)
 
-        assert encrypted is not None
+        assert isinstance(encrypted, str)
         assert encrypted != original
 
         decrypted = PersonaDataStore.decrypt_api_key(encrypted)
@@ -189,7 +189,6 @@ class TestUserConfigCRUD:
 
             # 读取配置
             retrieved = await store.get_user_llm_config("U123")
-            assert retrieved is not None
             assert retrieved.user_id == "U123"
             assert retrieved.primary_api_key == "sk-test123"
             assert retrieved.primary_base_url == "https://api.test.com/v1"
@@ -299,7 +298,8 @@ class TestRollDiceTool:
         assert "掷骰" in result
         # 用正则提取最终数值并做范围断言
         match = re.search(r"=\s*(\d+)$", result)
-        assert match is not None, f"无法从结果中解析数值: {result}"
+        if match is None:
+            raise AssertionError(f"无法从结果中解析数值: {result}")
         val = int(match.group(1))
         assert 1 <= val <= 20, f"数值 {val} 不在 1-20 范围内: {result}"
 

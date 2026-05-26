@@ -189,7 +189,10 @@ class TestAgentLoopSegmentedFinal:
         assert result.final_reason == "terminal_final_segment"
         assert result.delivery_performed is True
         assert result.final_text == "final reply"
-        mock_delivery.handle_send.assert_called_once()
+        mock_delivery.handle_send.assert_awaited_once()
+        send_action = mock_delivery.handle_send.await_args.args[0]
+        assert send_action.content == "final reply"
+        assert send_action.phase == "final"
 
 
 class TestAgentLoopInterimRequiresFinal:
@@ -238,8 +241,14 @@ class TestAgentLoopInterimRequiresFinal:
         assert result.final_reason == "terminal_final_segment"
         assert result.final_text == "final answer"
         assert result.delivery_performed is True
-        # DeliverySink 被调用了 2 次（interim + final）
-        assert mock_delivery.handle_send.await_count == 2
+        sent_actions = [
+            call.args[0]
+            for call in mock_delivery.handle_send.await_args_list
+        ]
+        assert [(action.content, action.phase) for action in sent_actions] == [
+            ("typing...", "interim"),
+            ("final answer", "final"),
+        ]
 
     @pytest.mark.asyncio
     async def test_interim_corrections_exhausted(self, loop, mock_llm, mock_executor, mock_delivery, mock_event_bus):
@@ -345,7 +354,7 @@ class TestAgentLoopGenerateImage:
         # image 后面的 final segment 应被跳过
         assert result.status == "completed"
         mock_image.handle_generate.assert_called_once()
-        mock_delivery.handle_send.assert_not_called()
+        mock_delivery.handle_send.assert_not_awaited()
 
 
 class TestAgentLoopCorrections:
@@ -400,7 +409,10 @@ class TestAgentLoopCorrections:
         assert result.final_reason == "terminal_final_segment"
         assert result.final_text == "工具回复"
         assert state.correction_count == 1
-        mock_delivery.handle_send.assert_called_once()
+        mock_delivery.handle_send.assert_awaited_once()
+        send_action = mock_delivery.handle_send.await_args.args[0]
+        assert send_action.content == "工具回复"
+        assert send_action.phase == "final"
 
     @pytest.mark.asyncio
     async def test_empty_response_handled(self, loop, mock_llm, mock_executor, mock_event_bus):

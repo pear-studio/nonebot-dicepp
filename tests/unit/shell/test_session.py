@@ -32,7 +32,6 @@ class TestSessionManagement:
             assert session_exists("test_create")
 
             meta = load_session("test_create")
-            assert meta is not None
             assert meta["name"] == "test_create"
             assert meta["group_id"] == "g1"
         finally:
@@ -46,7 +45,8 @@ class TestSessionManagement:
             assert session_dir.exists()
             # Should not raise or corrupt data
             meta = load_session("test_idempotent")
-            assert meta is not None
+            assert meta["name"] == "test_idempotent"
+            assert meta["group_id"] == "test_group"
         finally:
             _cleanup("test_idempotent")
 
@@ -55,11 +55,10 @@ class TestSessionManagement:
         try:
             create_session("test_last_used")
             meta_before = load_session("test_last_used")
-            assert meta_before is not None
             last_used_before = meta_before["last_used"]
 
             meta_after = load_session("test_last_used")
-            assert meta_after is not None
+            assert meta_after["name"] == "test_last_used"
             assert meta_after["last_used"] >= last_used_before
         finally:
             _cleanup("test_last_used")

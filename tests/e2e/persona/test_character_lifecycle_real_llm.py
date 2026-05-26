@@ -305,7 +305,7 @@ class TestCharacterLifecycleRealLLM:
 
         # 4. 日记不为空且长度合理
         diary = results["diary"]
-        assert diary is not None, "日记未生成"
+        assert isinstance(diary, str), "日记未生成"
         assert 50 <= len(diary) <= 400, f"日记长度异常: {len(diary)} 字"
 
         # 5. 日记提及至少一个当天事件关键词（角色名或常见活动）

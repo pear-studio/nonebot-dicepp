@@ -131,8 +131,8 @@ def test_account_config_deep_merge_does_not_erase_siblings(dd):
 def test_persona_fallback_when_missing(dd):
     _write(dd.global_cfg, {"persona": "nonexistent"})
     cfg = dd.loader().load()
-    # Falls back silently to default; no exception
-    assert cfg is not None
+    assert cfg.persona == "nonexistent"
+    assert cfg.chat_interval == 20
 
 
 def test_env_var_overrides_account_config(dd):
@@ -192,7 +192,8 @@ def test_account_config_auto_created_from_template(dd):
 
 def test_no_template_no_account_still_loads(dd):
     cfg = dd.loader("orphan").load()
-    assert cfg is not None  # graceful, not an exception
+    assert cfg.mode.default == "DND5E2024"
+    assert cfg.chat_interval == 20
 
 
 # ── malformed JSON ────────────────────────────────────────────────────────────
@@ -201,14 +202,16 @@ def test_no_template_no_account_still_loads(dd):
 def test_malformed_global_config_ignored(dd):
     dd.global_cfg.write_text("{ this is not json }", encoding="utf-8")
     cfg = dd.loader().load()
-    assert cfg is not None  # fallback to defaults
+    assert cfg.mode.default == "DND5E2024"
+    assert cfg.chat_interval == 20
 
 
 def test_malformed_account_config_ignored(dd):
     _write(dd.account_cfg("bot1"), {})  # write empty first to create file
     dd.account_cfg("bot1").write_text("BAD JSON", encoding="utf-8")
     cfg = dd.loader("bot1").load()
-    assert cfg is not None
+    assert cfg.mode.default == "DND5E2024"
+    assert cfg.chat_interval == 20
 
 
 # ── 9.2: Pydantic validation errors ──────────────────────────────────────────
@@ -282,4 +285,4 @@ def test_config_property_lazy_loads(dd):
     assert loader._config is None
     cfg = loader.config  # triggers lazy load
     assert cfg.nickname == "lazy"
-    assert loader._config is not None
+    assert loader._config is cfg

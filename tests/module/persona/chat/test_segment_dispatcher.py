@@ -19,7 +19,7 @@ from plugins.DicePP.module.persona.chat.segment_dispatcher import (
 async def _wait_sends(mock_port, count: int, timeout: float = 3.0) -> None:
     """轮询等待 send 完成指定次数，避免固定 sleep 在 CI 下 flaky。"""
     deadline = asyncio.get_event_loop().time() + timeout
-    while mock_port.send.await_count < count:
+    while len(mock_port.send.await_args_list) < count:
         if asyncio.get_event_loop().time() > deadline:
             break
         await asyncio.sleep(0.01)
@@ -59,7 +59,8 @@ class TestLazyCreation:
         dispatcher.notify("group:1", SegmentItem("a", 0, "u1", "g1"))
         dispatcher.notify("group:1", SegmentItem("b", 0, "u1", "g1"))
         await _wait_sends(mock_port, 2)
-        assert mock_port.send.await_count == 2
+        calls = mock_port.send.await_args_list
+        assert [call.args[2] for call in calls] == ["a", "b"]
 
 
 class TestIdleTimeout:
@@ -141,7 +142,7 @@ class TestShutdown:
         await asyncio.sleep(0.1)
         with patch("plugins.DicePP.module.persona.chat.segment_dispatcher.logger") as mock_logger:
             await dispatcher.shutdown()
-        assert not mock_logger.warning.called
+        mock_logger.warning.assert_not_called()
 
 
 class TestMaxPerRun:
@@ -170,7 +171,8 @@ class TestSendFailure:
         dispatcher.notify("group:1", SegmentItem("fail", 0, "u1", "g1"))
         dispatcher.notify("group:1", SegmentItem("ok", 0, "u1", "g1"))
         await _wait_sends(mock_port, 2)
-        assert mock_port.send.await_count == 2
+        calls = mock_port.send.await_args_list
+        assert [call.args[2] for call in calls] == ["fail", "ok"]
 
 
 class TestWorkerExitRace:

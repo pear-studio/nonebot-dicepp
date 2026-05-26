@@ -180,7 +180,6 @@ class TestModifierRendering:
         renderer = LegacyTextRenderer()
         event = self._make_event("K", original=[15, 8, 3], result=[15])
         rendered = renderer.render_modifier(event)
-        assert rendered  # non-empty
         assert "MAX" in rendered
         assert "15" in rendered
 
@@ -188,7 +187,6 @@ class TestModifierRendering:
         renderer = LegacyTextRenderer()
         event = self._make_event("KL", original=[15, 8, 3], result=[3])
         rendered = renderer.render_modifier(event)
-        assert rendered
         assert "MIN" in rendered
         assert "3" in rendered
 
@@ -197,7 +195,6 @@ class TestModifierRendering:
         # Die with value 2 was rerolled to 10
         event = self._make_event("R", original=[2], result=[10])
         rendered = renderer.render_modifier(event)
-        assert rendered
         assert "10" in rendered
 
     def test_render_explode_nonempty(self):
@@ -210,7 +207,6 @@ class TestModifierRendering:
             extra={"exploded_chains": [[6, 4]]},
         )
         rendered = renderer.render_modifier(event)
-        assert rendered
         assert "6" in rendered
         assert "4" in rendered
 
@@ -224,7 +220,6 @@ class TestModifierRendering:
             extra={"exploded_chains": [[6, 3]]},
         )
         rendered = renderer.render_modifier(event)
-        assert rendered
         assert "6" in rendered
         assert "3" in rendered
 
@@ -233,14 +228,12 @@ class TestModifierRendering:
         # Die 1 raised to minimum 3
         event = self._make_event("M", original=[1], result=[3])
         rendered = renderer.render_modifier(event)
-        assert rendered
         assert "3" in rendered
 
     def test_render_portent_nonempty(self):
         renderer = LegacyTextRenderer()
         event = self._make_event("P", original=[7], result=[10])
         rendered = renderer.render_modifier(event)
-        assert rendered
         assert "=10" in rendered
 
     def test_render_count_success_nonempty(self):
@@ -257,7 +250,6 @@ class TestModifierRendering:
             },
         )
         rendered = renderer.render_modifier(event)
-        assert rendered  # non-empty
         assert "成功" in rendered
         assert "7" in rendered
 

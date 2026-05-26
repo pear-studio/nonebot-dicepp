@@ -90,7 +90,6 @@ class TestBuildAndGenerateShareMessage:
             environment="private",
         )
 
-        assert msg is not None
         assert msg["user_id"] == "u1"
         assert msg["content"] == "默认消息"
         assert msg["type"] == "scheduled_event"

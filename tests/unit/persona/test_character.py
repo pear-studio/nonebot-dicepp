@@ -280,7 +280,6 @@ extensions:
             loader = CharacterLoader(tmpdir)
             char = loader.load("test_char")
             
-            assert char is not None
             assert char.name == "测试角色"
             assert char.extensions.initial_relationship == 40
 
@@ -298,8 +297,7 @@ extensions:
         char = loader.load("default")
 
         if os.path.exists("content/characters/default/character.yaml"):
-            assert char is not None
-            assert char.name is not None
+            assert char.name
         else:
             pytest.skip("默认角色卡不存在")
 
@@ -356,7 +354,7 @@ extensions:
             loader = CharacterLoader(tmpdir)
             char = loader.load("full_fields")
 
-            assert char is not None
+            assert char.name == "全字段角色"
             ext = char.extensions
             assert ext.initial_relationship == 60
             assert ext.warmth_labels == ["冷淡", "普通", "友好", "亲密", "挚友"]

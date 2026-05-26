@@ -71,9 +71,8 @@ class TestDailyReportGenerator:
 
         await gen.generate_and_send("今天是美好的一天。")
 
-        assert mock_bot.proxy.process_bot_command.await_count == 3
-
         calls = mock_bot.proxy.process_bot_command.await_args_list
+        assert len(calls) == 3
         seg1_cmd = calls[0].args[0]
         seg2_cmd = calls[1].args[0]
         seg3_cmd = calls[2].args[0]
@@ -279,9 +278,10 @@ class TestDailyReportGenerator:
         # 即使 store 为 None（Persona 数据源全部不可用），日报仍发送 3 段
         await gen.generate_and_send("diary")
 
-        assert mock_bot.proxy.process_bot_command.await_count == 3
+        calls = mock_bot.proxy.process_bot_command.await_args_list
+        assert len(calls) == 3
         # 段 2 应有核心统计数据（即使 Persona 数据不可用）
-        seg2 = mock_bot.proxy.process_bot_command.await_args_list[1].args[0].msg
+        seg2 = calls[1].args[0].msg
         assert "昨日消息: 3" in seg2
 
 
@@ -312,7 +312,9 @@ class TestTickDailyIntegration:
         diary = await mock_app.tick_daily()
         await gen.generate_and_send(diary) if cmd.config.daily_report_enabled else None
 
-        assert _mock_bot.proxy.process_bot_command.await_count == 3
+        calls = _mock_bot.proxy.process_bot_command.await_args_list
+        assert len(calls) == 3
+        assert "diary content" in calls[0].args[0].msg
 
     @pytest.mark.asyncio
     async def test_daily_report_disabled_skips_generate(self):

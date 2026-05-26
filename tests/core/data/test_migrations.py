@@ -43,10 +43,10 @@ async def test_runner_applies_v1_and_noop_on_second_run():
             assert second.target_version == 2
             assert second.applied_versions == []
 
-            cursor = await db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='karma'")
-            assert await cursor.fetchone() is not None
-            cursor = await log_db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='logs'")
-            assert await cursor.fetchone() is not None
+            cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='karma'")
+            assert await cursor.fetchone() == ("karma",)
+            cursor = await log_db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='logs'")
+            assert await cursor.fetchone() == ("logs",)
         finally:
             await db.close()
             await log_db.close()
@@ -97,9 +97,9 @@ async def test_bot_database_connect_runs_full_baseline_schema():
     try:
         assert await db.schema_version() == 2
         assert await db.target_schema_version() == 2
-        # Smoke check: repositories and log tables are available after migration.
-        assert db.karma is not None
-        assert db.log is not None
+        # Smoke check: repositories and log tables are queryable after migration.
+        assert await db.karma.list_all() == []
+        assert await db.log.get_records("__missing_session__") == []
     finally:
         await db.close()
 

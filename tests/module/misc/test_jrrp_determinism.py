@@ -12,6 +12,16 @@ from tests.e2e.conftest import e2e_bot, send_as_user
 from core.bot import Bot
 
 
+def _extract_jrrp_value(result: str) -> int:
+    matches = re.findall(r'\d+', result)
+    assert matches, f"应能提取人品值: {result}"
+    for match in matches:
+        value = int(match)
+        if 1 <= value <= 100:
+            return value
+    raise AssertionError(f"应能找到有效的人品值: {matches}")
+
+
 @pytest.fixture
 def mock_jrrp_date():
     """Mock JRRP 日期为固定值"""
@@ -50,15 +60,8 @@ class TestJrrpDeterminism:
         cmds1, result1 = await send_as_user(bot, ".jrrp", user_id="user_a", nickname=nickname, group_id=group_id)
         cmds2, result2 = await send_as_user(bot, ".jrrp", user_id="user_b", nickname=nickname, group_id=group_id)
 
-        # 提取人品值
-        matches1 = re.findall(r'\d+', result1)
-        matches2 = re.findall(r'\d+', result2)
-
-        assert matches1 and matches2, "应能提取人品值"
-        # 找到 1-100 范围内的值
-        jrrp1 = next((int(m) for m in matches1 if 1 <= int(m) <= 100), None)
-        jrrp2 = next((int(m) for m in matches2 if 1 <= int(m) <= 100), None)
-        assert jrrp1 is not None and jrrp2 is not None, f"应能找到有效的人品值: {matches1}, {matches2}"
+        jrrp1 = _extract_jrrp_value(result1)
+        jrrp2 = _extract_jrrp_value(result2)
         # 注意：不同用户可能偶然得到相同值，这是概率性的
         # 这里我们只验证都拿到了有效值
 
@@ -107,7 +110,6 @@ class TestJrrpDeterminism:
         with patch("module.misc.jrrp_command.random.randint", return_value=1):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_min", nickname="测试用户", group_id="group_jrrp")
 
-        assert len(cmds) > 0, "应返回命令"
         # 验证实际格式: 结果应同时包含人品值 "1" 和评级 "大凶"
         assert "1" in result, "结果应包含人品值 1"
         assert "大凶" in result, "最小值应显示'大凶'评级"
@@ -120,7 +122,6 @@ class TestJrrpDeterminism:
         with patch("module.misc.jrrp_command.random.randint", return_value=100):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_max", nickname="测试用户", group_id="group_jrrp")
 
-        assert len(cmds) > 0, "应返回命令"
         # 验证实际格式: 结果应同时包含人品值 "100" 和评级 "大吉"
         assert "100" in result, "结果应包含人品值 100"
         assert "大吉" in result, "最大值应显示'大吉'评级"
@@ -135,7 +136,6 @@ class TestJrrpDeterminism:
             mock_rand.side_effect = [80, 40]  # 昨日, 今日
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_lower", nickname="测试用户", group_id="group_jrrp")
 
-        assert len(cmds) > 0, "应返回命令"
         assert "40" in result, "结果应包含今日人品值 40"
         # 应包含下降相关信息
         assert any(kw in result for kw in ["下降", "降低", "lower", "%"]), "应显示下降信息"
@@ -148,7 +148,6 @@ class TestJrrpDeterminism:
             mock_rand.side_effect = [30, 70]  # 昨日, 今日
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_higher", nickname="测试用户", group_id="group_jrrp")
 
-        assert len(cmds) > 0, "应返回命令"
         # 应包含上升相关信息 (LOC_JRRP_HIGHER 模板包含 "上升了" 和 "%")
         assert any(kw in result for kw in ["上升", "提高", "higher", "%"]), f"应显示上升信息, result={result}"
 
@@ -159,7 +158,6 @@ class TestJrrpDeterminism:
             mock_rand.side_effect = [50, 50]  # 昨日, 今日
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_same", nickname="测试用户", group_id="group_jrrp")
 
-        assert len(cmds) > 0, "应返回命令"
         # 应包含相同相关信息
         assert any(kw in result for kw in ["相同", "一样", "same", "持平"]), "应显示相同信息"
 
@@ -188,8 +186,6 @@ class TestJrrpDeterminism:
                 cmds3, result3 = await send_as_user(
                     e2e_bot, ".jrrp", user_id="test_user_456", nickname="测试用户3", group_id="group_jrrp"
                 )
-                # 验证 random.randint 被调用（说明 seed 设置有效）
-                assert mock_rand.called, "random.randint 应被调用"
                 # 验证结果包含 mock 的值 42
                 assert "42" in result3, f"结果应包含 mock 的人品值 42, 实际: {result3}"
 
@@ -204,13 +200,5 @@ class TestJrrpDeterminism:
                 group_id="group_jrrp"
             )
 
-            assert len(cmds) > 0, f"第 {i} 次应返回命令"
-
-            # 提取人品值 (JRRP 值通常是 1-100 的数字)
-            matches = re.findall(r'\d+', result)
-            assert matches, f"应能提取人品值: {result}"
-
-            # 找到 1-100 范围内的值
-            jrrp_value = next((int(m) for m in matches if 1 <= int(m) <= 100), None)
-            assert jrrp_value is not None, f"应能找到有效的人品值: {matches}"
+            jrrp_value = _extract_jrrp_value(result)
             assert 1 <= jrrp_value <= 100, f"人品值应在 1-100 范围内: {jrrp_value}"

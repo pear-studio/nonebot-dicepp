@@ -81,15 +81,15 @@ class _CountedGateway:
 
     def __init__(self, first_tool_calls: Optional[List[dict]] = None,
                  done_content: str = "完成"):
-        self.call_count = 0
+        self.response_index = 0
         self._first_tool_calls = first_tool_calls
         self._done_content = done_content
 
     async def complete(
         self, request: LLMRequest, state: AgentRunState, timeout: Optional[int] = None,
     ) -> LLMGatewayResult:
-        self.call_count += 1
-        if self.call_count == 1 and self._first_tool_calls:
+        self.response_index += 1
+        if self.response_index == 1 and self._first_tool_calls:
             return LLMGatewayResult(
                 content="",
                 tool_calls=self._first_tool_calls,
@@ -316,11 +316,11 @@ class TestMissingToolCorrection:
         # 第二次: 调用工具 → 成功
         class _TwoPhaseGateway:
             def __init__(self):
-                self.call_count = 0
+                self.response_index = 0
 
             async def complete(self, request, state, timeout=None):
-                self.call_count += 1
-                if self.call_count == 1:
+                self.response_index += 1
+                if self.response_index == 1:
                     return LLMGatewayResult(
                         content="好的", tool_calls=None,
                         usage={"input": 10, "output": 5},

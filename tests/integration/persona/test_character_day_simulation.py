@@ -179,7 +179,7 @@ class TestCharacterDaySimulation:
         # ── 08:15 起床事件 ──
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
         result = await life.tick()
-        assert result is not None
+        assert len(result) == 1
         assert result[0].get("slot_type") == "wake_up"
 
         # 验证状态未变（边界事件无 delta）
@@ -195,7 +195,6 @@ class TestCharacterDaySimulation:
 
         result = await life.tick()
 
-        assert result is not None
         assert len(result) == 3  # 咖啡→散步→看书
 
         # 验证状态更新（50 + 5 - 10 - 5 = 40 energy, 50 + 10 + 5 + 8 = 73 mood）
@@ -215,7 +214,7 @@ class TestCharacterDaySimulation:
         fake_now = datetime(2024, 1, 1, 21, 50, 0)
         life._slot_minutes_today = [(10 * 60, "system"), (21 * 60 + 50, "good_night")]
         result = await life.tick()
-        assert result is not None
+        assert len(result) == 1
         assert result[0].get("slot_type") == "good_night"
 
         # 验证睡觉事件已保存
@@ -237,7 +236,6 @@ class TestCharacterDaySimulation:
         )
         diary = await diary_generator.generate_diary()
 
-        assert diary is not None
         assert "今天喝了咖啡" in diary
 
         # 事件保留供历史查询，不再当日清理
@@ -262,7 +260,8 @@ class TestCharacterDaySimulation:
         )
 
         result = await life.tick()
-        assert result is not None
+        assert len(result) == 1
+        assert result[0]["description"] == "吃早餐"
 
         # 状态不应触发兜底恢复（因为有 good_night 事件）
         state = await life.data_store.get_character_state()

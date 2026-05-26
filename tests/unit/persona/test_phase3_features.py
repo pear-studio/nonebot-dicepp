@@ -134,7 +134,7 @@ class TestSearchMemory:
             query="Test",
             search_type="all"
         )
-        assert result and len(result) > 0
+        assert len(result) >= 1
 
 
 class TestWarmthLevelRefuse:

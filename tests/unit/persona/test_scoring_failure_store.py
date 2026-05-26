@@ -30,7 +30,7 @@ async def test_record_scoring_failure_defaults():
         assert f.messages_count == 10
         assert f.error == "timeout"
         assert f.raw_response == ""
-        assert f.created_at is not None
+        assert isinstance(f.created_at, datetime)
 
 
 @pytest.mark.asyncio

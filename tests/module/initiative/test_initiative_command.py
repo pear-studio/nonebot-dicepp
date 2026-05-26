@@ -57,7 +57,8 @@ class _InitBotBase(IsolatedAsyncioTestCase):
         )
 
     async def _send_group(self, msg: str, user_id: str = None, nickname: str = None,
-                          group_id: str = None, dice_values: List[int] = None) -> Tuple[List[BotCommandBase], str]:
+                          group_id: str = None, dice_values: List[int] = None,
+                          require_response: bool = True) -> Tuple[List[BotCommandBase], str]:
         """Send a group message with optional dice mocking."""
         meta = self._make_meta(msg, user_id, nickname, group_id)
         
@@ -73,6 +74,8 @@ class _InitBotBase(IsolatedAsyncioTestCase):
             cmds = await self.bot.process_message(msg, meta)
         
         result = "\n".join([str(cmd) for cmd in cmds])
+        if require_response:
+            assert cmds, f"{msg!r} should return a command response"
         return cmds, result
 
     async def _send_private(self, msg: str, user_id: str = None, nickname: str = None,
@@ -107,7 +110,6 @@ class TestInitiativeRi(_InitBotBase):
         """Mock dice returns 15, verify reply contains 15 and entry is in list."""
         cmds, result = await self._send_group(".ri", dice_values=[15])
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 15)
         
         # Verify entry is in list
@@ -118,14 +120,12 @@ class TestInitiativeRi(_InitBotBase):
         """Mock dice returns 12, modifier +3, verify result is 15."""
         cmds, result = await self._send_group(".ri +3", dice_values=[12])
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 15)  # 12 + 3 = 15
 
     async def test_ri__for_npc(self):
         """DM rolls for '哥布林' (Goblin), verify list entry has empty owner."""
         cmds, result = await self._send_group(".ri 哥布林", dice_values=[10])
         
-        assert len(cmds) > 0, "Should have response"
         assert_contains_number(result, 10)
         assert "哥布林" in result
 
@@ -147,10 +147,10 @@ class TestInitiativeRi(_InitBotBase):
     async def test_ri__invalid_expression_returns_error(self):
         """Invalid expression, verify error hint and no crash."""
         # Use an expression that looks like roll but is invalid
-        cmds, result = await self._send_group(".ri 1dxx")
+        cmds, result = await self._send_group(".ri 1dxx", require_response=False)
 
         # Command may return empty if expression is parsed as name, or error if parsed as expression
-        if len(cmds) > 0:
+        if cmds:
             # Should contain error indication
             assert any(word in result for word in ["无效", "错误", "非法", "Error", "error", "[Roll]"])
 
@@ -161,7 +161,6 @@ class TestInitiativeRi(_InitBotBase):
         # In private chat, initiative requires a group context and must return a
         # rejection response. A silent empty response is not acceptable because it
         # would allow the test to pass even when the feature is not implemented.
-        assert len(cmds) > 0, "Private chat .ri should return a rejection response, not silently ignore"
         assert any(word in result for word in ["群", "group", "无法", "不能"]), (
             f"Expected rejection message (e.g. 群/无法/不能) in response, got: {result!r}"
         )
@@ -186,7 +185,6 @@ class TestInitiativeList(_InitBotBase):
         """Empty list .init should return hint."""
         cmds, result = await self._send_group(".init")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["没有", "不存在", "empty", "None", "没有找到"])
 
     async def test_init__shows_sorted_order(self):
@@ -209,7 +207,6 @@ class TestInitiativeList(_InitBotBase):
         # Clear list
         cmds, result = await self._send_group(".init clr")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["清除", "清空", "clr", "clear"]), f"应返回清除确认: {result}"
         
         # Verify list is empty
@@ -224,7 +221,6 @@ class TestInitiativeList(_InitBotBase):
         # Delete entry
         cmds, result = await self._send_group(".init del 勇者")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["删除", "移除"]), f"应返回删除确认: {result}"
 
     async def test_init_del__not_found_returns_error(self):
@@ -235,7 +231,6 @@ class TestInitiativeList(_InitBotBase):
         # Try to delete non-existent entry
         cmds, result = await self._send_group(".init del 幽灵")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["没有", "不存在", "找不到", "not found"])
 
     async def test_init_del__case_insensitive_exact_match(self):
@@ -254,7 +249,6 @@ class TestInitiativeList(_InitBotBase):
 
         # Delete with all-lowercase (simulating preprocess_msg behaviour)
         cmds2, result2 = await self._send_group(".init del alex")
-        assert len(cmds2) > 0, "Should have response"
         assert any(word in result2 for word in ["删除", "移除"]), f"应返回删除确认: {result2}"
 
         # Verify entry is gone
@@ -270,7 +264,6 @@ class TestInitiativeList(_InitBotBase):
 
         # Fuzzy partial match with different case
         cmds, result = await self._send_group(".init del al")
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["删除", "移除"]), f"应返回删除确认: {result}"
 
         # Verify entry is gone
@@ -289,7 +282,6 @@ class TestInitiativeList(_InitBotBase):
         # Swap order
         cmds2, result2 = await self._send_group(".init swap 勇者 法师")
         
-        assert len(cmds2) > 0, "Should have response"
         assert any(word in result2 for word in ["互换", "交换", "swap", "已"])
 
 
@@ -301,7 +293,6 @@ class TestInitiativeBattleRound(_InitBotBase):
         """.br on empty list returns error."""
         cmds, result = await self._send_group(".br")
         
-        assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["空", "没有", "不存在", "先攻", "empty"])
 
     async def test_br__advance_turn_and_round(self):
@@ -312,7 +303,7 @@ class TestInitiativeBattleRound(_InitBotBase):
         
         # Create battle round
         cmds, result = await self._send_group(".br")
-        assert len(cmds) > 0, "Should have response"
+        assert any(word in result for word in ["轮", "回合", "开始", "先攻", "round"])
         
         # Advance turn (multiple times to go to next round)
         for _ in range(3):
@@ -320,7 +311,7 @@ class TestInitiativeBattleRound(_InitBotBase):
         
         # Verify round number increased (check for round indicator)
         # The result should contain turn/round information
-        assert len(cmds) > 0, "Should have response after advancing"
+        assert any(word in result for word in ["轮", "回合", "行动", "turn", "round"]), result
 
 
 @pytest.mark.integration

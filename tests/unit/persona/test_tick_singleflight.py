@@ -36,7 +36,7 @@ async def test_tick_single_flight_does_not_stack_tasks():
     cmd.tick()
     await asyncio.wait_for(started.wait(), timeout=1.0)
     first = cmd._async_tick_task
-    assert first is not None
+    assert first.done() is False
 
     cmd.tick()
     assert cmd._async_tick_task is first
@@ -66,7 +66,7 @@ async def test_tick_daily_single_flight():
     cmd.tick_daily()
     await asyncio.sleep(0.05)
     t1 = cmd._async_tick_daily_task
-    assert t1 is not None and not t1.done()
+    assert t1.done() is False
 
     cmd.tick_daily()
     assert cmd._async_tick_daily_task is t1

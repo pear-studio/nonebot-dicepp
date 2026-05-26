@@ -80,7 +80,7 @@ def _make_cmd(bot=None, enabled=True):
 
 def _get_sent_content(cmd) -> str:
     """从 mock 的 _send 调用中提取发送的消息内容"""
-    if not cmd._send.called:
+    if cmd._send.call_args is None:
         return ""
     args = cmd._send.call_args[0]
     return args[2] if len(args) > 2 else ""

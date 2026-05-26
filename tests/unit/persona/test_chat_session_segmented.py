@@ -138,7 +138,6 @@ class TestFlagLifecycle:
     @pytest.mark.asyncio
     async def test_chat_via_coordinator_returns_empty_str_for_delivery_performed(self, session):
         result = await session._chat_via_coordinator("u1", "", "hi", "user:u1")
-        assert result is not None
         assert result == ""
         assert session._delivery_performed is True
 
@@ -163,14 +162,12 @@ class TestReturnSemantics:
     async def test_chat_returns_empty_str_for_delivery_performed(self, session):
         # AgentRuntime mock returns delivery_performed=True → 空字符串
         result = await session.chat("u1", "", "hello")
-        assert result is not None
         assert result == ""
 
     @pytest.mark.asyncio
     async def test_chat_returns_empty_str_for_segmented_mode(self, session):
         """分段模式下 chat 返回空字符串"""
         result = await session.chat("u1", "", "hello")
-        assert result is not None
         assert result == ""
 
 

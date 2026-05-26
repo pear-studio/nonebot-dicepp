@@ -37,7 +37,6 @@ class TestLogRepository:
         await log_repo.save_session(session)
 
         result = await log_repo.get_session("session1")
-        assert result is not None
         assert result.id == "session1"
         assert result.group_id == "group1"
         assert result.name == "Test Session"

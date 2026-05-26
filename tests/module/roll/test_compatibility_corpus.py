@@ -164,7 +164,6 @@ class TestDiceCorpus:
     def test_dice_executes(self, entry: CorpusEntry):
         """Validate dice expressions parse and execute without error."""
         result = exec_roll_exp(entry.expression)
-        assert result is not None
         assert isinstance(result.get_val(), (int, float))
 
 
@@ -176,7 +175,6 @@ class TestModifierCorpus:
     def test_modifier_executes(self, entry: CorpusEntry):
         """Validate modifier expressions parse and execute without error."""
         result = exec_roll_exp(entry.expression)
-        assert result is not None
         assert isinstance(result.get_val(), (int, float))
 
 
@@ -199,7 +197,6 @@ class TestLocalizationCorpus:
     def test_localization_executes(self, entry: CorpusEntry):
         """Validate localization expressions parse and execute."""
         result = exec_roll_exp(entry.expression)
-        assert result is not None
         assert isinstance(result.get_val(), (int, float))
 
 
@@ -228,7 +225,6 @@ class TestASTDiceCorpus:
     @pytest.mark.parametrize("entry", DICE_CORPUS, ids=lambda e: e.description)
     def test_ast_dice_executes(self, entry: CorpusEntry):
         result = exec_roll_exp_ast(entry.expression)
-        assert result is not None
         assert isinstance(result.get_val(), (int, float))
 
 
@@ -239,7 +235,6 @@ class TestASTModifierCorpus:
     @pytest.mark.parametrize("entry", MODIFIER_CORPUS, ids=lambda e: e.description)
     def test_ast_modifier_executes(self, entry: CorpusEntry):
         result = exec_roll_exp_ast(entry.expression)
-        assert result is not None
         assert isinstance(result.get_val(), (int, float))
 
 

@@ -69,7 +69,6 @@ async def test_chat_with_user_returns_empty_str_when_delivery_performed():
 
     result = await app.chat_with_user("u1", "g1", "hello", "nick")
 
-    assert result is not None
     assert result == ""
     app.chat.chat.assert_awaited_once_with("u1", "g1", "hello", "nick")
 

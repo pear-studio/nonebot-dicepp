@@ -56,7 +56,7 @@ class TestForceFinal:
 def _make_loc_helper():
     """创建最小化的 LocalizationManager mock"""
     loc = MagicMock()
-    loc.format_loc_text = MagicMock(side_effect=lambda key, **kwargs: kwargs.get("content", ""))
+    loc.format_loc_text = MagicMock(side_effect=lambda key, **kwargs: kwargs.get("content", kwargs.get("result", "")))
     return loc
 
 
@@ -86,13 +86,12 @@ class TestDeckDraw:
 
     def test_draw_single_returns_content(self):
         result = self.deck.draw(1, [self.deck], self.loc)
-        assert len(result) >= 0  # 有输出
+        assert "卡牌" in result
 
     def test_draw_multiple_times(self):
         # loc mock 返回 content，多次抽取不应抛异常
         result = self.deck.draw(3, [self.deck], self.loc)
-        # draw 3 times should call format_loc_text multiple times
-        assert self.loc.format_loc_text.call_count >= 3
+        assert result.count("卡牌") == 3
 
     def test_draw_no_redraw_exhausts_deck(self):
         """不放回抽取：在同一次 draw(times=2) 调用中第二次应触发空牌库提示"""
