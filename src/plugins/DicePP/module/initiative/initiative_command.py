@@ -8,7 +8,7 @@ from core.communication import MessageMetaData, PrivateMessagePort, GroupMessage
 from module.roll import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, RollDiceError, is_roll_exp, sift_roll_exp_and_reason
 
 from core.data.models import InitList, InitEntity, InitiativeError, HPInfo
-from utils.string import match_substring
+
 
 LOC_INIT_ROLL = "initiative_roll"
 LOC_INIT_INFO = "initiative_info"
@@ -296,7 +296,7 @@ class InitiativeCommand(UserCommandBase):
         # 先找到先攻数据是否存在
         init_data: InitList
         init_data = await self.bot.db.initiative.get(meta.group_id)
-        if init_data is None:
+        if init_data is None or len(init_data.entities) == 0:
             feedback = self.format_loc(LOC_INIT_INFO_NOT_EXIST)
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
@@ -482,25 +482,41 @@ class InitiativeCommand(UserCommandBase):
     def get_description(self) -> str:
         return ".ri 投掷先攻 .init 操作先攻列表"
     
-    def find_valid_entities(self,name_list: List[str],global_list: List[str]) -> Tuple[List[str],str]:
-        # O(N*M)暴力搜索寻找匹配对象
+    def find_valid_entities(self, name_list: List[str], global_list: List[str]) -> Tuple[List[str], str]:
+        """大小写无关匹配先攻条目名（精确 + 模糊）。
+
+        修复 .init del 「哥布林A 删不掉」的 bug：preprocess_msg 把用户消息
+        统一转小写，但 entity.name 可能因为不同来源（PC 群昵称、`.init
+        import` 导入、`.ri` 复数自动后缀外的手动命名）保留了大小写，导致
+        直接 `e_name == name` 永远 False。统一在 lower() 空间比较即可。
+        """
         result_list: List[str] = []
         feedback: str = ""
+        # lower_to_origs: 同 lower-key 的所有原始大小写（一般 1 个，理论上可能多个）
+        lower_to_origs: Dict[str, List[str]] = {}
+        for orig in global_list:
+            lower_to_origs.setdefault(orig.lower(), []).append(orig)
+
         for name in name_list:
-            match_num = sum([e_name == name for e_name in global_list])  
-            if match_num == 1:  # 正好有一个同名条目
-                result_list.append(name)
-            elif match_num == 0:  # 没有同名条目, 进入模糊搜索
-                possible_res: List[str] = match_substring(name, global_list)
-                if len(possible_res) == 0:  # 还是没有结果, 提示用户
+            name_lower = name.lower()
+            if name_lower in lower_to_origs:
+                origs = lower_to_origs[name_lower]
+                if len(origs) == 1:
+                    result_list.append(origs[0])
+                else:
+                    # 极端情况：同 lower 不同大小写共存（如 "Alex" 和 "alex"），按设计不应出现
+                    feedback += self.format_loc(LOC_INIT_ERROR,
+                        error_info=f"列表中存在大小写不同的同名条目 {origs}, 联系开发者") + "\n"
+            else:
+                # 模糊匹配：大小写无关 substring
+                possible_res: List[str] = [orig for orig in global_list if name_lower in orig.lower()]
+                if len(possible_res) == 0:
                     feedback += self.format_loc(LOC_INIT_ENTITY_NOT_FOUND, name=name) + "\n"
-                elif len(possible_res) > 1:  # 多个可能的结果, 提示用户
+                elif len(possible_res) > 1:
                     feedback += self.format_loc(LOC_INIT_ENTITY_VAGUE, name=name, name_list=possible_res) + "\n"
-                elif len(possible_res) == 1:
+                else:
                     result_list.append(possible_res[0])
-            else: #if match_num > 1:  # 多于一个同名条目, 按设计是不可能出现的, 需要排查原因
-                feedback += self.format_loc(LOC_INIT_ERROR, error_info=f"列表中存在同名条目{name}, 联系开发者") + "\n"
-        return (result_list,feedback)
+        return (result_list, feedback)
 
     async def add_initiative_entities(self, result_dict: Dict[str, Tuple[int, str]], owner_id: str, group_id: str) -> str:
         """

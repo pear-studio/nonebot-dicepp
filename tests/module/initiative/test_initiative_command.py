@@ -238,6 +238,45 @@ class TestInitiativeList(_InitBotBase):
         assert len(cmds) > 0, "Should have response"
         assert any(word in result for word in ["没有", "不存在", "找不到", "not found"])
 
+    async def test_init_del__case_insensitive_exact_match(self):
+        """Delete entry whose PC nickname has uppercase (e.g. "Alex") via lowercase input.
+
+        preprocess_msg lowercases user input, so ".init del Alex" becomes
+        ".init del alex", but the entity name stored from get_nickname() retains
+        the original case.  Exact match must work despite case mismatch.
+        """
+        # PC with mixed-case nickname "Alex" rolls
+        await self._send_group(".ri", user_id="user1", nickname="Alex", dice_values=[15])
+
+        # Verify entry exists with original case in list
+        cmds1, result1 = await self._send_group(".init")
+        assert "Alex" in result1, f"Expected Alex in list, got: {result1}"
+
+        # Delete with all-lowercase (simulating preprocess_msg behaviour)
+        cmds2, result2 = await self._send_group(".init del alex")
+        assert len(cmds2) > 0, "Should have response"
+        assert any(word in result2 for word in ["删除", "移除"]), f"应返回删除确认: {result2}"
+
+        # Verify entry is gone
+        cmds3, result3 = await self._send_group(".init")
+        assert "Alex" not in result3, f"Alex should be deleted, got: {result3}"
+
+    async def test_init_del__case_insensitive_fuzzy_match(self):
+        """Fuzzy match works case-insensitively.
+
+        Partial lowercase input "al" should match "Alex" via substring in lower() space.
+        """
+        await self._send_group(".ri", user_id="user1", nickname="Alex", dice_values=[15])
+
+        # Fuzzy partial match with different case
+        cmds, result = await self._send_group(".init del al")
+        assert len(cmds) > 0, "Should have response"
+        assert any(word in result for word in ["删除", "移除"]), f"应返回删除确认: {result}"
+
+        # Verify entry is gone
+        cmds2, result2 = await self._send_group(".init")
+        assert "Alex" not in result2, f"Alex should be deleted, got: {result2}"
+
     async def test_init__swap_changes_order(self):
         """swap changes the order of names in list."""
         # Add two entries
