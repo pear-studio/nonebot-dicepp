@@ -37,14 +37,16 @@ class UtilsCOCCommand(UserCommandBase):
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         should_proc: bool = msg_str.startswith(".coc")
         should_pass: bool = False
-        msg_str = msg_str[4:].strip()
-        args = msg_str.split(" ", 1)
-        reason = args[1].strip()[:MAX_COC_RESULT_LEN] if len(args) > 1 else ""
+        arg_str = msg_str[4:].strip()
+        first_arg, _, remaining = arg_str.partition(" ")
         try:
-            times = int(args[0])
+            times = int(first_arg)
             assert 1 <= times <= MAX_COC_TIMES
         except (ValueError, AssertionError):
             times = 1
+            reason = arg_str[:MAX_COC_RESULT_LEN]
+        else:
+            reason = remaining.strip()[:MAX_COC_RESULT_LEN]
         return should_proc, should_pass, (times, reason)
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:

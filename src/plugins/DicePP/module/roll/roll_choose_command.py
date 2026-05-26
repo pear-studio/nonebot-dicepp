@@ -18,6 +18,13 @@ LOC_ROLL_CHOOSE_FAILED = "roll_choose_failed"
 
 ROLL_OPTIONS_LIMIT = 100  # 可选择的项目上线
 
+
+def _looks_like_choose_command(msg_str: str) -> bool:
+    if not msg_str.startswith(".c"):
+        return False
+    suffix = msg_str[2:]
+    return not suffix or suffix[0].isspace() or not (suffix[0].isascii() and suffix[0].isalpha())
+
 @custom_user_command(readable_name="随机选择指令",
                      priority=0,
                      group_only=False,
@@ -40,6 +47,8 @@ class RollChooseCommand(UserCommandBase):
                                          ".c指令失败时返回")
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
+        if not _looks_like_choose_command(msg_str):
+            return False, False, None
         parse = _CHOOSE_PARSER.parse(msg_str)
         if parse.has_errors:
             return False, False, None

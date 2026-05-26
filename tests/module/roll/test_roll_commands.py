@@ -136,6 +136,13 @@ class TestRollChoose(_RollCmdBotBase):
         # Just verify we got a valid result containing one of the options
         assert any(opt in result for opt in ["苹果", "香蕉", "今天吃什么"])
 
+    async def test_choose__compact_count_still_supported(self):
+        """.c2 苹果 香蕉 橙子 keeps the compact count syntax."""
+        cmds, result = await self._send_group(".c2 苹果 香蕉 橙子")
+
+        assert "随机选择2个对象" in result
+        assert any(opt in result for opt in ["苹果", "香蕉", "橙子"])
+
     async def test_choose__help_not_empty(self):
         """.help c returns non-empty text about choose."""
         cmds, result = await self._send_group(".help c")

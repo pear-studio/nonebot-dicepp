@@ -103,12 +103,15 @@ class TestCocMiscCommandIntegration(_BotTestBase):
     async def test_coc_multiple_times(self):
         cmds = await self._send_group(".coc 2")
         result = "\n".join([str(c) for c in cmds])
-        self.assertTrue(len(cmds) > 0, ".coc 2 应返回两次生成结果")
+        self.assertIn("COC人物作成", result)
+        self.assertEqual(result.count("合计"), 2, f".coc 2 应返回两次 COC 作成结果，实际输出：{result}")
+        self.assertNotIn("选到了", result, ".coc 不应被 .c 随机选择指令处理")
 
     async def test_coc_with_reason(self):
         """原因参数应出现在返回消息中（注意次数需可被解析为整数）"""
         cmds = await self._send_group(".coc 侦探角色扮演")
         result = "\n".join([str(c) for c in cmds])
         # 原因应在输出中（当 args[0] 不是有效整数时，reason 含整个参数）
-        # 或者直接断言有输出、不崩溃即可
-        self.assertTrue(len(cmds) > 0, ".coc 含原因时应有输出")
+        self.assertIn("COC人物作成", result)
+        self.assertIn("侦探角色扮演", result)
+        self.assertNotIn("选到了", result, ".coc 不应被 .c 随机选择指令处理")
