@@ -75,12 +75,14 @@ class AgentRuntime:
 
         # 配额预检
         if self._router.quota_check_enabled and self._router.data_store:
-            from ..wall_clock import persona_wall_now
-            tz = self._router.config.timezone if self._router.config else "Asia/Shanghai"
-            today = persona_wall_now(tz).strftime("%Y-%m-%d")
-            count = await self._router.data_store.get_daily_usage(user_id, today)
-            if count >= self._router.daily_limit:
-                raise QuotaExceeded(f"今日额度已用完 ({count}/{self._router.daily_limit})")
+            exempt = await self._is_quota_exempt(user_id, group_id)
+            if not exempt:
+                from ..wall_clock import persona_wall_now
+                tz = self._router.config.timezone if self._router.config else "Asia/Shanghai"
+                today = persona_wall_now(tz).strftime("%Y-%m-%d")
+                count = await self._router.data_store.get_daily_usage(user_id, today)
+                if count >= self._router.daily_limit:
+                    raise QuotaExceeded(f"今日额度已用完 ({count}/{self._router.daily_limit})")
 
         # 初始化 state
         state = AgentRunState(
@@ -156,6 +158,18 @@ class AgentRuntime:
 
         return result
 
+    async def _is_quota_exempt(self, user_id: str, group_id: str) -> bool:
+        """检查用户/群是否在白名单中，豁免配额限制。"""
+        if not self._router.config or not self._router.data_store:
+            return False
+        if not getattr(self._router.config, "whitelist_enabled", False):
+            return False
+        if group_id and await self._router.data_store.is_group_whitelisted(group_id):
+            return True
+        if await self._router.data_store.is_user_whitelisted(user_id):
+            return True
+        return False
+
     async def run(
         self,
         messages: List[dict],
@@ -170,6 +184,7 @@ class AgentRuntime:
         selection: SelectionPolicy = SelectionPolicy.SCORING,
         temperature: Optional[float] = None,
         timeout: Optional[int] = None,
+        bill_usage: bool = False,
     ) -> AgentRunResult:
         """执行一次 Agent run（通用路径，供 scoring/life 等非 chat 场景使用）。
 
@@ -177,6 +192,7 @@ class AgentRuntime:
         - 默认使用 REQUIRED_ONE_OF 和 SCORING 策略
         - 不设置 DeliverySink / ImageGenerationSink
         - 不执行配额预检（配额由调用方控制）
+        - bill_usage=False 时不挂载 UsageSink，背景任务不计入用量
         """
         run_id = new_run_id()
         turn_id = new_turn_id()
@@ -193,11 +209,11 @@ class AgentRuntime:
         # 事件存储
         event_store = EventStore(self._store)
 
-        # 事件总线 + sinks
-        usage_sink = UsageSink(self._router)
+        # 事件总线 + sinks（通用路径默认不扣用量）
         summary_sink = RunSummarySink(event_store)
-
-        sinks = [usage_sink, summary_sink]
+        sinks = [summary_sink]
+        if bill_usage:
+            sinks.insert(0, UsageSink(self._router))
         bus = AgentEventBus(event_store=event_store, sinks=sinks)
 
         # LLMGateway

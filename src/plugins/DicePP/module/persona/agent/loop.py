@@ -247,6 +247,48 @@ class AgentLoop:
                 return self._build_result(state, "completed", "empty_response",
                                           total_tokens_in, total_tokens_out, provider, model)
 
+            # ── REQUIRED_ONE_OF 校验：本轮 tool_calls 必须命中 required_tools ──
+            if (tool_use_mode == ToolUseMode.REQUIRED_ONE_OF
+                    and required_tools
+                    and not any(tc["name"] in required_tools for tc in tool_calls)):
+                if state.correction_count < self._limits.max_corrections:
+                    missing_list = ", ".join(required_tools)
+                    correction_msg = {
+                        "role": "user",
+                        "content": (
+                            f"[系统指令] 你必须调用以下工具之一: {missing_list}。"
+                            f"必须通过工具调用完成任务，不要直接输出文本。"
+                        ),
+                    }
+                    state.messages.append(dict(correction_msg))
+                    state.correction_count += 1
+                    round_index += 1
+                    await self._event_bus.emit(
+                        "CorrectionInjected",
+                        CorrectionInjectedPayload(
+                            reason="required_tool_mismatch",
+                            round_index=round_index,
+                            message=correction_msg["content"],
+                        ),
+                        state,
+                    )
+                    continue
+                else:
+                    state.warning_count += 1
+                    await self._event_bus.emit(
+                        "AgentWarning",
+                        AgentWarningPayload(
+                            code="required_tool_mismatch",
+                            message="模型连续调用非必需工具，correction 已耗尽",
+                            round_index=round_index,
+                        ),
+                        state,
+                    )
+                    return self._build_result(state, "max_corrections",
+                                              "required_tool_mismatch",
+                                              total_tokens_in, total_tokens_out,
+                                              provider, model)
+
             # ── 有限工具轮次：截断 ──
             if len(tool_calls) > self._limits.max_tools_per_round:
                 logger.warning(
@@ -424,6 +466,28 @@ class AgentLoop:
             # 有 pending observation → 继续循环
             if has_pending_observation:
                 continue
+
+            # ── structured_collect：本轮命中 required STATE_WRITE → 完成 ──
+            if (state.mode == "structured_collect"
+                    and required_tools
+                    and any(tc["name"] in required_tools for tc in tool_calls)):
+                state.final_reason = "structured_collect_completed"
+                await self._event_bus.emit(
+                    "AgentRunFinished",
+                    AgentRunFinishedPayload(
+                        status="completed",
+                        reason="structured_collect_completed",
+                        delivery_performed=False,
+                        final_text="",
+                        tokens_input=total_tokens_in,
+                        tokens_output=total_tokens_out,
+                        provider=provider,
+                        model=model,
+                    ),
+                    state,
+                )
+                return self._build_result(state, "completed", "structured_collect_completed",
+                                          total_tokens_in, total_tokens_out, provider, model)
 
             # ── 达到最大轮次 ──
             if round_index >= self._limits.max_tool_rounds:

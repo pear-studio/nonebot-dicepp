@@ -439,3 +439,113 @@ class TestAgentLoopError:
         assert result.status == "failed"
         assert result.final_reason == "llm_error"
         assert result.delivery_performed is False
+
+
+class TestRequiredOneOfValidation:
+    """REQUIRED_ONE_OF 下调用非 required 工具 → 纠正"""
+
+    @pytest.mark.asyncio
+    async def test_wrong_tool_injects_correction_and_skips_execution(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """REQUIRED_ONE_OF + required_tools=["correct"] → 调 "wrong" → correction + 不执行"""
+        loop._limits = AgentRunLimits(max_tool_rounds=10, max_corrections=2)
+        mock_llm.complete.side_effect = [
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("wrong_tool", '{}')],
+            ),
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("wrong_tool", '{}')],
+            ),
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("wrong_tool", '{}')],
+            ),
+        ]
+        state = _make_state()
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "test"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "correct_tool"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["correct_tool"],
+        )
+
+        assert result.final_reason == "required_tool_mismatch"
+        mock_executor.execute_many.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_correct_tool_passes_validation(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """REQUIRED_ONE_OF + required_tools=["send"] → 调 "send" → 正常执行"""
+        mock_llm.complete.return_value = _make_gateway_result(
+            content="",
+            tool_calls=[_make_tool_call("send_reply_segment", json.dumps({
+                "content": "ok", "phase": "final", "delay_before": 0.0,
+            }))],
+        )
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", json.dumps({
+                "content": "ok", "phase": "final", "delay_before": 0.0,
+            }), _action_id="act_1"),
+        ]
+        state = _make_state()
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "hi"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "send_reply_segment"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["send_reply_segment"],
+        )
+
+        assert result.status == "completed"
+        mock_executor.execute_many.assert_called_once()
+
+
+class TestStructuredCollectCompletion:
+    """structured_collect 模式 → 工具命中 required → 直接完成"""
+
+    @pytest.mark.asyncio
+    async def test_hit_required_tool_completes(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """structured_collect + required_tools=["record_score"] → 命中 → completed"""
+        mock_llm.complete.return_value = _make_gateway_result(
+            content="",
+            tool_calls=[_make_tool_call("record_score", '{"deltas":{},"facts":{}}')],
+        )
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", "ok"),
+        ]
+        state = _make_state(mode="structured_collect")
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "score"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "record_score"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["record_score"],
+        )
+
+        assert result.status == "completed"
+        assert result.final_reason == "structured_collect_completed"
+        assert result.delivery_performed is False
+
+    @pytest.mark.asyncio
+    async def test_non_collect_mode_still_uses_max_rounds(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """非 structured_collect 模式：工具执行后继续 → max_rounds"""
+        loop._limits = AgentRunLimits(max_tool_rounds=1, max_corrections=0)
+        mock_llm.complete.return_value = _make_gateway_result(
+            content="",
+            tool_calls=[_make_tool_call("search", '{"query":"x"}')],
+        )
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", "result"),
+        ]
+        state = _make_state()
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "test"}],
+            state=state,
+        )
+
+        assert result.status == "max_rounds"

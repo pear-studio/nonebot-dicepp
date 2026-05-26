@@ -362,7 +362,7 @@ class TestMissingToolCorrection:
         assert len(collected) == 1
         assert collected[0]["description"] == "最终生成的事件"
         # 循环正常终止
-        assert result.final_reason in ("max_tool_rounds", "completed"), (
+        assert result.final_reason in ("max_tool_rounds", "completed", "structured_collect_completed"), (
             f"unexpected: {result.status}/{result.final_reason}"
         )
 
