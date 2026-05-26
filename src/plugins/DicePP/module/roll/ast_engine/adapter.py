@@ -7,7 +7,6 @@ parser/evaluator.
 """
 
 import logging
-import re
 from typing import Optional, Union, Callable, Any, Tuple
 from dataclasses import dataclass, field
 
@@ -216,9 +215,6 @@ def exec_roll_exp_unified(
             e,
         )
         raise RollDiceError(f"掷骰引擎内部错误: {type(e).__name__}: {e}") from e
-
-
-exec_roll_exp = exec_roll_exp_unified
 
 
 def preprocess_roll_exp(input_str: str) -> str:

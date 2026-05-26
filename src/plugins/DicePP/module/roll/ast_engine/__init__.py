@@ -23,7 +23,6 @@ from .evaluator import evaluate
 from .errors import RollSyntaxError, RollRuntimeError, RollLimitError
 from .preprocessor import preprocess
 from .adapter import (
-    exec_roll_exp,
     exec_roll_exp_ast,
     exec_roll_exp_unified,
     build_roll_result,
@@ -50,7 +49,6 @@ __all__ = [
     "RollRuntimeError",
     "RollLimitError",
     # Adapter (main API)
-    "exec_roll_exp",
     "exec_roll_exp_ast",
     "exec_roll_exp_unified",
     "build_roll_result",

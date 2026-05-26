@@ -93,7 +93,7 @@ class TestInitiativeErrors:
         await h.send_group(".ri 100000000000#地精", checker=lambda s: "不是一个有效的数字" in s)
 
     async def test_ri_too_many_dice(self, h):
-        await h.send_group(".ri1000000D20 地精", checker=lambda s: "骰子数量不能大于100" in s)
+        await h.send_group(".ri1000000D20 地精", checker=lambda s: "骰子数量过多" in s)
 
     async def test_init_list_size_limit(self, h):
         from core.data.models import INIT_LIST_SIZE

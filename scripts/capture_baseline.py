@@ -30,21 +30,28 @@ def load_module_directly(name, filepath):
 roll_path = os.path.join(dicepp_path, 'module', 'roll')
 utils_path = os.path.join(dicepp_path, 'utils')
 
-# Load utils.string first (needed by expression)
+# Load utils.string first (needed by ast_engine.preprocessor)
 load_module_directly('utils', os.path.join(utils_path, '__init__.py'))
 load_module_directly('utils.string', os.path.join(utils_path, 'string.py'))
 
-# Load roll submodules
+# Load roll submodules that ast_engine depends on
 load_module_directly('module.roll.karma_runtime', os.path.join(roll_path, 'karma_runtime.py'))
 load_module_directly('module.roll.roll_config', os.path.join(roll_path, 'roll_config.py'))
 load_module_directly('module.roll.result', os.path.join(roll_path, 'result.py'))
 load_module_directly('module.roll.roll_utils', os.path.join(roll_path, 'roll_utils.py'))
-load_module_directly('module.roll.formula', os.path.join(roll_path, 'formula.py'))
-load_module_directly('module.roll.modifier', os.path.join(roll_path, 'modifier.py'))
-load_module_directly('module.roll.connector', os.path.join(roll_path, 'connector.py'))
-load_module_directly('module.roll.expression', os.path.join(roll_path, 'expression.py'))
 
-from module.roll.expression import exec_roll_exp
+# Load ast_engine submodules in dependency order
+ast_path = os.path.join(roll_path, 'ast_engine')
+load_module_directly('module.roll.ast_engine.errors', os.path.join(ast_path, 'errors.py'))
+load_module_directly('module.roll.ast_engine.ast_nodes', os.path.join(ast_path, 'ast_nodes.py'))
+load_module_directly('module.roll.ast_engine.trace', os.path.join(ast_path, 'trace.py'))
+load_module_directly('module.roll.ast_engine.limits', os.path.join(ast_path, 'limits.py'))
+load_module_directly('module.roll.ast_engine.preprocessor', os.path.join(ast_path, 'preprocessor.py'))
+load_module_directly('module.roll.ast_engine.parser', os.path.join(ast_path, 'parser.py'))
+load_module_directly('module.roll.ast_engine.evaluator', os.path.join(ast_path, 'evaluator.py'))
+load_module_directly('module.roll.ast_engine.adapter', os.path.join(ast_path, 'adapter.py'))
+
+from module.roll.ast_engine.adapter import exec_roll_exp_unified
 from module.roll.roll_utils import RollDiceError
 from module.roll.karma_runtime import set_runtime, reset_runtime
 
@@ -101,7 +108,7 @@ def main():
             
             for expr in expressions:
                 try:
-                    result = exec_roll_exp(expr)
+                    result = exec_roll_exp_unified(expr)
                     results[category][expr] = {
                         "value": result.get_val(),
                         "info": result.get_info(),

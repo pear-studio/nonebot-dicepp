@@ -79,7 +79,7 @@ def check_dice_count(count: int, limits: Optional[SafetyLimits] = None) -> None:
     limits = limits or DEFAULT_LIMITS
     if count > limits.max_dice_count:
         raise RollLimitError(
-            f"骰子数量不能大于{limits.max_dice_count}",
+            f"骰子数量过多: {count} (上限 {limits.max_dice_count})",
             code=RollErrorCode.DICE_COUNT_EXCEEDED,
             limit_name="dice_count",
             limit_value=limits.max_dice_count,
@@ -97,7 +97,7 @@ def check_dice_sides(sides: int, limits: Optional[SafetyLimits] = None) -> None:
     limits = limits or DEFAULT_LIMITS
     if sides > limits.max_dice_sides:
         raise RollLimitError(
-            f"骰子面数不能大于{limits.max_dice_sides}",
+            f"骰子面数过大: {sides} (上限 {limits.max_dice_sides})",
             code=RollErrorCode.DICE_SIDES_EXCEEDED,
             limit_name="dice_sides",
             limit_value=limits.max_dice_sides,

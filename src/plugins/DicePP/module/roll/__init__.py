@@ -1,12 +1,5 @@
 from .result import RollResult
 from .roll_utils import RollDiceError
-from .ast_engine.adapter import (
-    exec_roll_exp,
-    exec_roll_exp_unified,
-    is_roll_exp,
-    preprocess_roll_exp,
-    sift_roll_exp_and_reason,
-)
 
 from .roll_dice_command import RollDiceCommand
 from .roll_pool_command import RollPoolCommand
