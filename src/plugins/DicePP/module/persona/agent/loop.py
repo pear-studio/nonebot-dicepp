@@ -472,7 +472,7 @@ class AgentLoop:
     ) -> AgentRunResult:
         """统一终止路径：emit terminal event + build result。所有 return 必须走此方法。"""
         event_type = "AgentRunFailed" if is_error else "AgentRunFinished"
-        event_status = "failed" if is_error else "completed"
+        event_status = status
         await self._event_bus.emit(
             event_type,
             AgentRunFinishedPayload(
