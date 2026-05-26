@@ -234,19 +234,23 @@ _COLLECTING_TOOL_META: List[tuple] = [
 
 def build_collecting_registry(
     executor_fn: Callable[[Dict[str, Any]], Awaitable[str]],
+    tool_names: list[str] | None = None,
 ) -> ToolRegistry:
     """构建结构化采集工具的新 ToolRegistry，所有工具标记为 STATE_WRITE。
 
     Args:
         executor_fn: 统一的收集型 executor，签名 async (args: dict) -> str。
                      由调用方提供（如包装 DB 写入或闭包收集）。
+        tool_names: 限定注册的工具名列表；None 表示注册全部。
 
     Returns:
-        新 ToolRegistry，包含 6 个 STATE_WRITE 工具。
+        新 ToolRegistry，包含指定的 STATE_WRITE 工具。
     """
     reg = ToolRegistry()
 
     for name, desc, args_schema in _COLLECTING_TOOL_META:
+        if tool_names is not None and name not in tool_names:
+            continue
         async def _exec(**kwargs: Any) -> str:
             return await executor_fn(kwargs)
 
@@ -290,7 +294,7 @@ async def run_structured_collect(
         store=store,
         limits=AgentRunLimits(max_tool_rounds=max_tool_rounds),
     )
-    tool_registry = build_collecting_registry(_collect)
+    tool_registry = build_collecting_registry(_collect, tool_names=required_tools)
 
     result = await runtime.run(
         messages=messages,
