@@ -1,22 +1,6 @@
 # 子代理提示词
 
-主 agent 应尽量使用 subagent 批量处理，但最终仲裁和自动改动由主 agent 负责。
-
-## 样本交叉校准
-
-```text
-你是测试质量审计子代理。请只审计我给你的测试样本，不要修改文件。
-
-目标：判断这些测试是否保护行为契约，而不是是否覆盖代码。
-
-请按 test-quality-governor 的评分标准输出：
-1. 文件级简短摘要
-2. 需要动作的 action items
-3. 评分分歧或不确定点
-
-不要逐个列出所有 keep 测试。只列需要 rename/merge/rewrite/delete/move-layer/mark-layer/quarantine-flaky/add-contract-test 的测试组。
-输出使用 JSONL，字段遵循 report-schema.zh.md。
-```
+主 agent 负责最终仲裁和自动改动，subagent 负责批量审计和诊断。
 
 ## 批量审计
 
@@ -28,14 +12,30 @@
 步骤：
 1. 阅读相关测试文件和必要的生产代码上下文。
 2. 判断测试意图、测试层级、断言强度、重复风险、mock 风险和维护成本。
-3. 对每个文件输出一条 file summary。
-4. 只对需要动作的测试组输出 action item。
+3. 对每个文件给出简短摘要和整体质量判断。
+4. 只对需要动作的测试组输出 action item（keep 的不要列）。
 
 规则：
 - 不要因为测试数量多就建议删除。
-- 不要默认逐个输出 keep 测试。
-- 不确定是否历史回归时，action 不要用 delete，改用 rewrite 或 low confidence。
-- 输出 JSONL，不要写额外说明。
+- 不确定是否历史回归时，action 不要用 delete，改用 rewrite 或标低置信度。
+- 按评分标准给每个测试组打分，给出建议动作、风险等级和置信度。
+```
+
+## 样本交叉校准
+
+项目较大或风格陌生时，先抽样让两个 subagent 独立审计同一小批样本，比较分歧并校准标准。
+
+```text
+你是测试质量审计子代理。请只审计我给你的测试样本，不要修改文件。
+
+目标：判断这些测试是否保护行为契约。
+
+按评分标准输出：
+1. 文件级简短摘要
+2. 需要动作的 action items
+3. 评分分歧或不确定点
+
+不要逐个列出 keep 测试。
 ```
 
 ## 删除候选复核
@@ -49,21 +49,13 @@
 - 与其他测试重复或只测实现细节
 - 删除后有更强测试覆盖同一行为
 
-输出：
-- confirmed-delete
-- downgrade-to-rewrite
-- downgrade-to-merge
-- keep
-
-只输出 JSONL。
+对每个候选输出：confirmed-delete / downgrade-to-rewrite / downgrade-to-merge / keep，并说明理由。
 ```
 
 ## 重写方案生成
 
 ```text
-你是测试重写方案子代理。请针对这些 rewrite candidates 设计更高质量的测试方案。
-
-不要直接改文件，除非主 agent 明确要求。
+你是测试重写方案子代理。请针对这些 rewrite candidates 设计更高质量的测试方案。不要直接改文件。
 
 优先把测试改成：
 - 行为断言
