@@ -16,6 +16,15 @@ from plugins.DicePP.module.persona.chat.segment_dispatcher import (
 )
 
 
+async def _wait_sends(mock_port, count: int, timeout: float = 3.0) -> None:
+    """轮询等待 send 完成指定次数，避免固定 sleep 在 CI 下 flaky。"""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while mock_port.send.await_count < count:
+        if asyncio.get_event_loop().time() > deadline:
+            break
+        await asyncio.sleep(0.01)
+
+
 @pytest.fixture
 def mock_port():
     return AsyncMock()
@@ -49,7 +58,7 @@ class TestLazyCreation:
     async def test_second_segment_reuses_worker(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("a", 0, "u1", "g1"))
         dispatcher.notify("group:1", SegmentItem("b", 0, "u1", "g1"))
-        await asyncio.sleep(0.05)
+        await _wait_sends(mock_port, 2)
         assert mock_port.send.await_count == 2
 
 
@@ -141,13 +150,13 @@ class TestMaxPerRun:
         # max_per_run = 3; worker 达到上限后退出，需新的 notify() 触发重建
         for i in range(3):
             dispatcher.notify("group:1", SegmentItem(str(i), 0, "u1", "g1"))
-        await asyncio.sleep(0.1)
+        await _wait_sends(mock_port, 3)
         calls = mock_port.send.await_args_list
         assert len(calls) == 3
 
         for i in range(3, 5):
             dispatcher.notify("group:1", SegmentItem(str(i), 0, "u1", "g1"))
-        await asyncio.sleep(0.1)
+        await _wait_sends(mock_port, 5)
         calls = mock_port.send.await_args_list
         assert len(calls) == 5
         contents = [c[0][2] for c in calls]
@@ -160,7 +169,7 @@ class TestSendFailure:
         mock_port.send.side_effect = [Exception("boom"), None]
         dispatcher.notify("group:1", SegmentItem("fail", 0, "u1", "g1"))
         dispatcher.notify("group:1", SegmentItem("ok", 0, "u1", "g1"))
-        await asyncio.sleep(0.1)
+        await _wait_sends(mock_port, 2)
         assert mock_port.send.await_count == 2
 
 
@@ -174,7 +183,7 @@ class TestWorkerExitRace:
         """worker 因 max_per_run=3 退出后，queue 中剩余 2 条应由新 worker 接管。"""
         for i in range(5):
             dispatcher.notify("group:1", SegmentItem(str(i), 0, "u1", "g1"))
-        await asyncio.sleep(0.15)
+        await _wait_sends(mock_port, 5)
         calls = mock_port.send.await_args_list
         contents = [c[0][2] for c in calls]
         assert contents == ["0", "1", "2", "3", "4"], f"Got: {contents}"
