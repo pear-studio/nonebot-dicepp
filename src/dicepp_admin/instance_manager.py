@@ -16,10 +16,12 @@ admin 后台自身重启后，原本由它 spawn 的 DicePP 子进程可能仍�
 import json
 import logging
 import os
+import secrets
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -60,7 +62,13 @@ class ProcessRef:
         return False
 
 
+# 全局子进程引用表。FastAPI 同步 def 端点跑在线程池里，多客户端
+# 并发访问（启动/停止/查询同一实例）会读写这个 dict，必须用 Lock
+# 串行化所有读写路径以避免 KeyError 和状态不一致。
+# 锁仅保护字典本身（put/pop/lookup），不包含真正的 subprocess 调用 ——
+# 那些 IO 操作放在 finally 里执行以减少 hold lock 时间。
 _processes: Dict[str, ProcessRef] = {}
+_processes_lock = threading.RLock()
 
 
 # ─── 持久化 ──────────────────────────────────────────────────────────────
@@ -154,8 +162,9 @@ def create_instance(name: str, qq_id: Optional[str] = None,
     (inst_dir / "logs").mkdir(exist_ok=True)
     (inst_dir / "config").mkdir(exist_ok=True)
 
-    # 自动生成 13 位 access_token（跟 β README 约定一致）
-    token = str(int(time.time() * 1000))[-13:]
+    # 自动生成 access_token：32 hex chars，CSPRNG 不可预测
+    # （旧实现用 time.time()*1000 后 13 位，可凭时间戳推算 — pear #45 Q2）
+    token = secrets.token_hex(16)
 
     inst = {
         "name": name.strip(),
@@ -208,42 +217,60 @@ def update_instance(instance_id: str, patch: Dict) -> Dict:
 
 
 def delete_instance(instance_id: str, remove_data: bool = False) -> None:
+    """删除实例。按 pear #45 S2：先操作磁盘成功，再写 instances.json，保证原子性。
+
+    旧实现是 pop+save 之后才 rmtree —— 若 rmtree 失败，instances.json
+    已经把实例移除，但数据目录残留磁盘，下次创建同名实例会撞已有目录。
+    """
     stop_instance(instance_id)
+
     data = _load_instances()
-    inst = data.pop(instance_id, None)
-    _save_instances(data)
-    # 清掉 LLOneBot 里对应的反向 WS 配置
-    if inst and inst.get("qq_id") and llonebot_manager.is_acquired():
+    inst = data.get(instance_id)
+    if not inst:
+        return
+
+    # 1. 先清 LLOneBot config（独立资源，失败仅 warning，不阻塞主流程）
+    if inst.get("qq_id") and llonebot_manager.is_acquired():
         try:
             llonebot_manager.clear_config(inst["qq_id"])
         except OSError as e:
-            # 配置文件已被外部删除等情况；不影响实例删除主流程
             logger.warning(
                 "delete_instance(%s): clear llonebot config for qq %s failed: %s",
                 instance_id, inst.get("qq_id"), e,
             )
-    if remove_data and inst and inst.get("data_dir"):
+
+    # 2. 如需清磁盘数据，先做 rmtree（用 ignore_errors=True，部分失败也能继续）。
+    #    rmtree 完整失败时记录详细日志，但仍继续 pop —— 因为部分文件可能已删，
+    #    保留 instances.json 条目会让用户看到死实例，反而更糟
+    if remove_data and inst.get("data_dir"):
         try:
             shutil.rmtree(inst["data_dir"], ignore_errors=True)
         except OSError as e:
-            # ignore_errors=True 已尽量降低失败概率；若仍失败提示用户手动清
             logger.warning(
-                "delete_instance(%s): rmtree(%s) failed: %s",
+                "delete_instance(%s): rmtree(%s) failed, manual cleanup needed: %s",
                 instance_id, inst["data_dir"], e,
             )
+
+    # 3. 最后从 instances.json 移除（在磁盘清理已完成或已尝试之后）
+    data.pop(instance_id, None)
+    _save_instances(data)
 
 
 # ─── 进程控制 ────────────────────────────────────────────────────────────
 
 def is_running(instance_id: str) -> bool:
-    ref = _processes.get(instance_id)
-    if ref is not None:
+    # pear #45 S1：FastAPI 同步 def 端点在线程池里跑，并发读写 _processes
+    # 必须串行化。锁内只做字典读取 + is_alive 检查（不做 IO）
+    with _processes_lock:
+        ref = _processes.get(instance_id)
+        if ref is None:
+            return False
         if ref.is_alive():
             return True
-        # 进程已退出，清掉缓存和持久化字段
+        # 进程已退出，清掉缓存
         _processes.pop(instance_id, None)
-        _patch_inst_field(instance_id, pid=None)
-        return False
+    # 持久化 pid=None 走自己的 IO，无需 hold 锁
+    _patch_inst_field(instance_id, pid=None)
     return False
 
 
@@ -275,7 +302,8 @@ def scan_existing_processes() -> int:
             alive = False
 
         if alive:
-            _processes[inst_id] = ProcessRef(pid=pid)
+            with _processes_lock:
+                _processes[inst_id] = ProcessRef(pid=pid)
             recovered += 1
         else:
             inst.pop("pid", None)
@@ -360,7 +388,9 @@ def start_instance(instance_id: str) -> Dict:
         stderr=subprocess.STDOUT,
         creationflags=creationflags,
     )
-    _processes[instance_id] = ProcessRef(pid=proc.pid, popen=proc)
+    # pear #45 S1: 用锁保护 _processes 写入
+    with _processes_lock:
+        _processes[instance_id] = ProcessRef(pid=proc.pid, popen=proc)
     # 持久化 pid：admin 重启后能识别并恢复状态
     _patch_inst_field(instance_id, pid=proc.pid)
 
@@ -368,7 +398,11 @@ def start_instance(instance_id: str) -> Dict:
 
 
 def stop_instance(instance_id: str) -> None:
-    ref = _processes.pop(instance_id, None)
+    # pear #45 S1: 用锁原子地 pop 引用；后续 kill IO 操作在锁外执行
+    # 以避免长时间 hold 锁阻塞其他端点
+    with _processes_lock:
+        ref = _processes.pop(instance_id, None)
+
     if ref is None:
         _patch_inst_field(instance_id, pid=None)
         return
@@ -415,7 +449,10 @@ def stop_instance(instance_id: str) -> None:
 
 
 def stop_all() -> None:
-    for inst_id in list(_processes.keys()):
+    # pear #45 S1: 锁内取 ID 快照，避免迭代中被其他线程修改
+    with _processes_lock:
+        ids = list(_processes.keys())
+    for inst_id in ids:
         stop_instance(inst_id)
 
 

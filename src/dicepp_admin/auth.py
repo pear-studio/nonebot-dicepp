@@ -110,15 +110,25 @@ def revoke_session(token: str) -> None:
 
 
 def get_session(token: str) -> Optional[Dict]:
+    """获取 session；顺便清理所有过期条目防止 sessions.json 长期膨胀。
+
+    pear #45 Q1：旧实现只删被查到的那一条过期 token，长期运行 admin
+    （不重新登录的情况下）过期 session 会越积越多。现在每次 get 都
+    跑一遍 _prune_expired，跟 create_session 行为对齐。
+    """
     sessions = _load_sessions()
     s = sessions.get(token)
-    if not s:
-        return None
-    if s.get("expires_at", 0) < int(time.time()):
-        sessions.pop(token, None)
-        _save_sessions(sessions)
-        return None
-    return s
+    if s and s.get("expires_at", 0) >= int(time.time()):
+        # 命中且未过期 — 在不阻塞当前请求的前提下，惰性清理同文件里的其他过期项
+        pruned = _prune_expired(sessions)
+        if len(pruned) != len(sessions):
+            _save_sessions(pruned)
+        return s
+    # 未命中或已过期 — 走清理路径
+    pruned = _prune_expired(sessions)
+    if len(pruned) != len(sessions):
+        _save_sessions(pruned)
+    return None
 
 
 # ─── FastAPI 依赖 ────────────────────────────────────────────────────────

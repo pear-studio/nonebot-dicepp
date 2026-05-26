@@ -93,7 +93,7 @@ def auth_setup(body: _SetupBody, response: Response) -> Dict:
     token = auth.create_session(username)
     response.set_cookie(
         key=auth.get_cookie_name(), value=token,
-        httponly=True, samesite="lax", max_age=7 * 24 * 3600,
+        httponly=True, samesite="strict", max_age=7 * 24 * 3600,
     )
     audit.log(username, "auth.setup")
     return {"ok": True, "username": username}
@@ -110,7 +110,7 @@ def auth_login(body: _LoginBody, request: Request, response: Response) -> Dict:
     token = auth.create_session(username)
     response.set_cookie(
         key=auth.get_cookie_name(), value=token,
-        httponly=True, samesite="lax", max_age=7 * 24 * 3600,
+        httponly=True, samesite="strict", max_age=7 * 24 * 3600,
     )
     audit.log(username, "auth.login", ip=_client_ip(request))
     return {"ok": True, "username": username}
@@ -192,13 +192,14 @@ def instances_patch(instance_id: str, body: _InstancePatchBody, request: Request
 
 
 @app.delete("/api/instances/{instance_id}")
-def instances_delete(instance_id: str, remove_data: bool = Query(False),
-                     request: Request = None,  # type: ignore[assignment]
+def instances_delete(request: Request, instance_id: str,
+                     remove_data: bool = Query(False),
                      session: Dict = Depends(auth.require_auth)) -> Dict:
+    # pear #45 S3: Request 前移,去掉反模式的 = None 默认
     instance_manager.delete_instance(instance_id, remove_data=remove_data)
     audit.log(session["username"], "instance.delete", target=instance_id,
               detail=f"remove_data={remove_data}",
-              ip=_client_ip(request) if request else None)
+              ip=_client_ip(request))
     return {"ok": True}
 
 
