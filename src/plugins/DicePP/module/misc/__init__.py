@@ -9,4 +9,4 @@ try:
 except:
     a = 1+1 # 不加载了
 
-from .test_command import NewTestCommand
+from .json_invite_command import JsonInviteCommand

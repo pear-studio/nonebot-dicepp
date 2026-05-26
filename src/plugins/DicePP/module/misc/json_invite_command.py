@@ -11,7 +11,7 @@ LOC_JSON_INVITE_UNABLE = "json_invite_unable"
 @custom_user_command(readable_name="新功能测试指令",
                      priority=0,
                      flag=DPP_COMMAND_FLAG_FUN)
-class NewTestCommand(UserCommandBase):
+class JsonInviteCommand(UserCommandBase):
     """处理JSON格式群邀请链接的命令"""
 
     def __init__(self, bot: Bot):
