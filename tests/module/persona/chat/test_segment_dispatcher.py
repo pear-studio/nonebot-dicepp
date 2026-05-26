@@ -23,6 +23,16 @@ async def _wait_sends(mock_port, count: int, timeout: float = 3.0) -> None:
         if asyncio.get_event_loop().time() > deadline:
             break
         await asyncio.sleep(0.01)
+    assert len(mock_port.send.await_args_list) >= count
+
+
+async def _wait_worker_removed(dispatcher, target_key: str, timeout: float = 3.0) -> None:
+    deadline = asyncio.get_event_loop().time() + timeout
+    while target_key in dispatcher._workers:
+        if asyncio.get_event_loop().time() > deadline:
+            break
+        await asyncio.sleep(0.01)
+    assert target_key not in dispatcher._workers
 
 
 @pytest.fixture
@@ -51,7 +61,7 @@ class TestLazyCreation:
     @pytest.mark.asyncio
     async def test_first_segment_creates_worker(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("hello", 0, "u1", "g1"))
-        await asyncio.sleep(0.05)
+        await _wait_sends(mock_port, 1)
         mock_port.send.assert_awaited_once_with("u1", "g1", "hello", skip_history_record=True)
 
     @pytest.mark.asyncio
@@ -65,13 +75,18 @@ class TestLazyCreation:
 
 class TestIdleTimeout:
     @pytest.mark.asyncio
-    async def test_worker_exits_after_idle(self, dispatcher):
+    async def test_worker_exits_after_idle(self, mock_port):
+        dispatcher = SegmentDispatcher(
+            message_port=mock_port,
+            idle_seconds=0.05,
+            max_per_run=3,
+        )
         dispatcher.notify("group:1", SegmentItem("hi", 0, "u1", "g1"))
-        await asyncio.sleep(0.05)
+        await _wait_sends(mock_port, 1)
         # Worker should still exist briefly after send
         assert "group:1" in dispatcher._workers
         # After idle timeout it should be gone
-        await asyncio.sleep(1.2)
+        await _wait_worker_removed(dispatcher, "group:1")
         assert "group:1" not in dispatcher._workers
         assert "group:1" not in dispatcher._queues
 
@@ -80,25 +95,25 @@ class TestDelayBefore:
     @pytest.mark.asyncio
     async def test_zero_delay_sends_immediately(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("now", 0, "u1", "g1"))
-        await asyncio.sleep(0.05)
+        await _wait_sends(mock_port, 1)
         mock_port.send.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_positive_delay_waits(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("later", 0.3, "u1", "g1"))
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         # Not sent yet
         mock_port.send.assert_not_awaited()
-        await asyncio.sleep(0.35)
+        await _wait_sends(mock_port, 1)
         mock_port.send.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_new_segment_wakes_sleeping_worker(self, dispatcher, mock_port):
         dispatcher.notify("group:1", SegmentItem("a", 0.5, "u1", "g1"))
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.01)
         # Enqueue second segment while first is sleeping
         dispatcher.notify("group:1", SegmentItem("b", 0, "u1", "g1"))
-        await asyncio.sleep(0.6)
+        await _wait_sends(mock_port, 2)
         # Both should be sent; order preserved
         calls = mock_port.send.await_args_list
         assert len(calls) == 2
@@ -139,7 +154,7 @@ class TestShutdown:
     async def test_shutdown_no_warning_when_empty(self, dispatcher):
         from unittest.mock import patch
         dispatcher.notify("group:1", SegmentItem("a", 0, "u1", "g1"))
-        await asyncio.sleep(0.1)
+        await _wait_sends(dispatcher._port, 1)
         with patch("plugins.DicePP.module.persona.chat.segment_dispatcher.logger") as mock_logger:
             await dispatcher.shutdown()
         mock_logger.warning.assert_not_called()
@@ -192,9 +207,15 @@ class TestWorkerExitRace:
 
     @pytest.mark.asyncio
     async def test_teardown_race_segment_not_lost(
-        self, dispatcher, mock_port
+        self, mock_port
     ):
         """模拟 notify 在 worker finally 清理期间注入 segment 的竞态时序。"""
+        dispatcher = SegmentDispatcher(
+            message_port=mock_port,
+            idle_seconds=0.05,
+            max_per_run=3,
+        )
+
         # 用 dict 子类在 workers.pop 后注入 segment，复现竞态窗口
         class _TrackingDict(dict):
             def pop(self, key, *args, **kwargs):
@@ -207,10 +228,7 @@ class TestWorkerExitRace:
         dispatcher._workers = _TrackingDict(dispatcher._workers)
 
         dispatcher.notify("group:1", SegmentItem("first", 0, "u1", "g1"))
-        await asyncio.sleep(1.3)  # 等 worker 超时退出
-
-        # 等注入的 segment 被新 worker 处理完
-        await asyncio.sleep(0.15)
+        await _wait_sends(mock_port, 2)
         calls = mock_port.send.await_args_list
         contents = [c[0][2] for c in calls]
         assert "injected" in contents, f"Segment lost! Got: {contents}"

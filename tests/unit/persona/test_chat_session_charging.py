@@ -127,7 +127,7 @@ async def test_buffered_merge_charges_per_call():
 
     llm_calls = []
     first_started = asyncio.Event()
-    third_buffered = asyncio.Event()
+    release_first = asyncio.Event()
 
     async def slow_chat_call(user_id, group_id, messages):
         llm_calls.append((user_id, group_id, messages))
@@ -136,27 +136,26 @@ async def test_buffered_merge_charges_per_call():
         await session.router.increment_usage(user_id)
         if call_index == 1:
             first_started.set()
-            await asyncio.sleep(0.05)
-        elif call_index == 2:
-            await asyncio.sleep(0.05)
+            await release_first.wait()
         return f"reply_{call_index}"
 
     session._coordinator_chat_call_fn = slow_chat_call
 
-    async def first():
-        return await session.chat("u1", "", "msg1")
+    first_task = asyncio.create_task(session.chat("u1", "", "msg1"))
+    await asyncio.wait_for(first_started.wait(), timeout=1.0)
 
-    async def second():
+    async def buffered(message):
         await first_started.wait()
-        return await session.chat("u1", "", "msg2")
+        return await session.chat("u1", "", message)
 
-    async def third():
-        await first_started.wait()
-        await asyncio.sleep(0.01)
-        third_buffered.set()
-        return await session.chat("u1", "", "msg3")
+    buffered_results = await asyncio.gather(
+        buffered("msg2"),
+        buffered("msg3"),
+    )
+    assert buffered_results == [None, None]
 
-    await asyncio.gather(first(), second(), third())
+    release_first.set()
+    await first_task
 
     # 至少 2 次 LLM 调用（首轮 + 至少 1 次 buffered 合并）
     assert len(llm_calls) >= 2

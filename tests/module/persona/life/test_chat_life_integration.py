@@ -35,6 +35,15 @@ def _dt(hour, minute=0):
     return datetime(2026, 5, 15, hour, minute, 0)
 
 
+async def _wait_until(predicate, timeout=1.0):
+    deadline = asyncio.get_event_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_event_loop().time() > deadline:
+            break
+        await asyncio.sleep(0.01)
+    assert predicate()
+
+
 class TestSleepGate:
     """is_awake() 各场景测试"""
 
@@ -170,8 +179,12 @@ class TestSuggestActionRelationshipGate:
         ctx = MagicMock(user_id="u1")
         result = await executor({"action_idea": "出去散步"}, ctx)
         assert result == "action noted"
-        # fire-and-forget: executor returns immediately, evaluate runs in background
-        await asyncio.sleep(0.1)
+        await _wait_until(lambda: len(action_evaluator.evaluate.await_args_list) == 1)
+        action_evaluator.evaluate.assert_awaited_once_with(
+            "出去散步",
+            [],
+            user_id="u1",
+        )
 
     @pytest.mark.asyncio
     async def test_missing_relationship_skips(self):
@@ -203,9 +216,14 @@ class TestSuggestActionRelationshipGate:
         store.get_relationship = AsyncMock(return_value=rel)
 
         call_order = []
+        first_entered = asyncio.Event()
+        release_first = asyncio.Event()
+
         async def slow_evaluate(*args, **kw):
-            call_order.append("eval")
-            await asyncio.sleep(0.05)
+            call_order.append(args[0])
+            if args[0] == "task1":
+                first_entered.set()
+                await release_first.wait()
             return ("approved", "ok")
 
         action_evaluator = MagicMock()
@@ -222,10 +240,16 @@ class TestSuggestActionRelationshipGate:
         ctx = MagicMock(user_id="u1")
 
         await executor({"action_idea": "task1"}, ctx)
+        await asyncio.wait_for(first_entered.wait(), timeout=1.0)
         await executor({"action_idea": "task2"}, ctx)
 
-        await asyncio.sleep(0.3)
-        assert len(call_order) == 2
+        await asyncio.sleep(0)
+        assert call_order == ["task1"]
+        release_first.set()
+        await _wait_until(
+            lambda: len(character_life._inject_spontaneous_event_impl.await_args_list) == 2
+        )
+        assert call_order == ["task1", "task2"]
         injected_actions = [
             call.args[0]
             for call in character_life._inject_spontaneous_event_impl.await_args_list

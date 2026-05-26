@@ -94,39 +94,43 @@ async def test_auth_failure_does_not_reconnect_loop():
 async def test_integration_user_message_to_bot_message_and_error():
     received_from_bot = []
     ready = asyncio.Event()
+    done = asyncio.Event()
 
     async def handler(ws):
-        auth = json.loads(await ws.recv())
-        assert auth["type"] == "auth"
-        await ws.send(json.dumps({"v": 1, "type": "auth_result", "status": "ok"}))
-        ready.set()
+        try:
+            auth = json.loads(await ws.recv())
+            assert auth["type"] == "auth"
+            await ws.send(json.dumps({"v": 1, "type": "auth_result", "status": "ok"}))
+            ready.set()
 
-        await ws.send(
-            json.dumps(
-                {
-                    "v": 1,
-                    "type": "user_message",
-                    "user_id": "u-1",
-                    "content": ".r d20",
-                    "ack_id": "ack-1",
-                }
+            await ws.send(
+                json.dumps(
+                    {
+                        "v": 1,
+                        "type": "user_message",
+                        "user_id": "u-1",
+                        "content": ".r d20",
+                        "ack_id": "ack-1",
+                    }
+                )
             )
-        )
-        received_from_bot.append(json.loads(await ws.recv()))
+            received_from_bot.append(json.loads(await ws.recv()))
 
-        await ws.send(
-            json.dumps(
-                {
-                    "v": 1,
-                    "type": "user_message",
-                    "user_id": "u-1",
-                    "content": ".err",
-                    "ack_id": "ack-2",
-                }
+            await ws.send(
+                json.dumps(
+                    {
+                        "v": 1,
+                        "type": "user_message",
+                        "user_id": "u-1",
+                        "content": ".err",
+                        "ack_id": "ack-2",
+                    }
+                )
             )
-        )
-        received_from_bot.append(json.loads(await ws.recv()))
-        await ws.close()
+            received_from_bot.append(json.loads(await ws.recv()))
+            await ws.close()
+        finally:
+            done.set()
 
     async with websockets.serve(handler, "127.0.0.1", 0) as server:
         port = server.sockets[0].getsockname()[1]
@@ -135,7 +139,7 @@ async def test_integration_user_message_to_bot_message_and_error():
         bot = _MiniBot(proxy=proxy)
         await adapter.start(bot)
         await asyncio.wait_for(ready.wait(), timeout=2)
-        await asyncio.sleep(0.3)
+        await asyncio.wait_for(done.wait(), timeout=2)
         await adapter.close()
 
     assert received_from_bot[0]["type"] == "bot_message"
@@ -149,16 +153,20 @@ async def test_integration_user_message_to_bot_message_and_error():
 async def test_unknown_type_and_oversized_frame_produce_error():
     received_from_bot = []
     ready = asyncio.Event()
+    done = asyncio.Event()
 
     async def handler(ws):
-        await ws.recv()
-        await ws.send(json.dumps({"v": 1, "type": "auth_result", "status": "ok"}))
-        ready.set()
-        await ws.send(json.dumps({"v": 1, "type": "mystery", "user_id": "u-1", "ack_id": "ack-x"}))
-        received_from_bot.append(json.loads(await ws.recv()))
-        await ws.send("x" * ((64 * 1024) + 16))
-        received_from_bot.append(json.loads(await ws.recv()))
-        await ws.close()
+        try:
+            await ws.recv()
+            await ws.send(json.dumps({"v": 1, "type": "auth_result", "status": "ok"}))
+            ready.set()
+            await ws.send(json.dumps({"v": 1, "type": "mystery", "user_id": "u-1", "ack_id": "ack-x"}))
+            received_from_bot.append(json.loads(await ws.recv()))
+            await ws.send("x" * ((64 * 1024) + 16))
+            received_from_bot.append(json.loads(await ws.recv()))
+            await ws.close()
+        finally:
+            done.set()
 
     async with websockets.serve(handler, "127.0.0.1", 0) as server:
         port = server.sockets[0].getsockname()[1]
@@ -166,7 +174,7 @@ async def test_unknown_type_and_oversized_frame_produce_error():
         bot = _MiniBot(proxy=None)  # type: ignore[arg-type]
         await adapter.start(bot)
         await asyncio.wait_for(ready.wait(), timeout=2)
-        await asyncio.sleep(0.3)
+        await asyncio.wait_for(done.wait(), timeout=2)
         await adapter.close()
 
     assert received_from_bot[0]["type"] == "error"

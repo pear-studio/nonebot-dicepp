@@ -8,7 +8,7 @@ Tests for .rexp sampling optimization:
 
 Tasks covered: 2.5, 2.6, 3.1, 3.2, 3.3, 3.4
 """
-import asyncio
+import random
 from typing import List
 
 import pytest
@@ -85,6 +85,10 @@ class TestStatisticalEquivalence:
     We run each approach once (not 10 rounds in unit tests to keep CI fast).
     The tolerance of 1 unit is documented in design.md Task 2.6.
     """
+
+    @pytest.fixture(autouse=True)
+    def _seed_random(self, request):
+        random.seed(request.node.nodeid)
 
     @pytest.mark.parametrize("expression", ["3D6", "10D10", "2D20"])
     def test_percentile_deviation_within_one_unit(self, expression: str):
@@ -181,12 +185,11 @@ class TestErrorContract:
         with pytest.raises(RollLimitError):
             build_sampling_plan(huge_expr)
 
-    def test_syntax_error_in_get_roll_exp_result_propagates(self):
+    @pytest.mark.asyncio
+    async def test_syntax_error_in_get_roll_exp_result_propagates(self):
         """Syntax errors must propagate out of get_roll_exp_result, not be swallowed."""
         with pytest.raises((RollSyntaxError, Exception)):
-            asyncio.get_event_loop().run_until_complete(
-                get_roll_exp_result("@@@invalid@@@")
-            )
+            await get_roll_exp_result("@@@invalid@@@")
 
 
 # ---------------------------------------------------------------------------

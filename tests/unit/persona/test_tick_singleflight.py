@@ -22,10 +22,11 @@ async def test_tick_single_flight_does_not_stack_tasks():
     cmd.app.life = MagicMock()
 
     started = asyncio.Event()
+    release = asyncio.Event()
 
     async def slow_tick():
         started.set()
-        await asyncio.sleep(0.2)
+        await release.wait()
         return []
 
     cmd.app.tick = slow_tick
@@ -41,6 +42,7 @@ async def test_tick_single_flight_does_not_stack_tasks():
     cmd.tick()
     assert cmd._async_tick_task is first
 
+    release.set()
     await asyncio.wait_for(first, timeout=2.0)
     assert first.done()
 
@@ -57,14 +59,16 @@ async def test_tick_daily_single_flight():
     cmd.app.life = MagicMock()
 
     gate = asyncio.Event()
+    started = asyncio.Event()
 
     async def slow_daily():
+        started.set()
         await gate.wait()
 
     cmd.app.tick_daily = slow_daily
 
     cmd.tick_daily()
-    await asyncio.sleep(0.05)
+    await asyncio.wait_for(started.wait(), timeout=1.0)
     t1 = cmd._async_tick_daily_task
     assert t1.done() is False
 
