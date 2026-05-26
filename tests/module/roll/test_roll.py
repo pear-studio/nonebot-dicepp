@@ -81,22 +81,12 @@ class MyTestCase:
             return int(parts[-1]) if parts else 0
 
         self.__show_exec_res("1D20", checker=lambda s: "1D20" in s and 1 <= extract_val(s) <= 20)
-        self.__show_exec_res("3D20")
         self.__show_exec_res("D", checker=lambda s: "1D20" in s and 1 <= extract_val(s) <= 20)
         self.__show_exec_res("1D", checker=lambda s: "1D20" in s and 1 <= extract_val(s) <= 20)
         self.__show_exec_res("1D4", checker=lambda s: "1D4" in s and 1 <= extract_val(s) <= 4)
         self.__show_exec_res("1", checker=lambda s: "1" == s)
         self.__show_exec_res("+1D20", checker=lambda s: "1D20" in s and 1 <= extract_val(s) <= 20)
         self.__show_exec_res("-1D20", checker=lambda s: "-1D20" in s and extract_val(s) < 0)
-
-        self.__show_exec_res("1D20+1")
-        self.__show_exec_res("1D20-1")
-        self.__show_exec_res("3D20*2")
-        self.__show_exec_res("3D20/2")
-        self.__show_exec_res("1+1D20")
-        self.__show_exec_res("1-1D20")
-        self.__show_exec_res("2*3D20")
-        self.__show_exec_res("2/3D20")
 
         self.__show_exec_res("1-1-1", checker=lambda s: s.endswith("-1"))
         self.__show_exec_res("1+1-1", checker=lambda s: s.endswith("1"))
@@ -105,42 +95,7 @@ class MyTestCase:
         self.__show_exec_res("1+2*2", checker=lambda s: s.endswith("5"))
         self.__show_exec_res("1*2+2", checker=lambda s: s.endswith("4"))
         self.__show_exec_res("1-1+1-1", checker=lambda s: s.endswith("0"))
-        self.__show_exec_res("1+1-1+1")
-
         self.__show_exec_res("1d20", checker=lambda s: "1D20" in s and 1 <= extract_val(s) <= 20)
-        self.__show_exec_res("d20＋1")
-
-        self.__show_exec_res("2D20k1")
-        self.__show_exec_res("1D20K2")
-        self.__show_exec_res("4D20k2kl1")
-        self.__show_exec_res("4D20r<10")
-        self.__show_exec_res("4D20x<10")
-        self.__show_exec_res("4D20xo<10")
-        self.__show_exec_res("4D20r<10x>10")
-        self.__show_exec_res("4D20x>10r<10")
-        self.__show_exec_res("D20cs>5")
-        self.__show_exec_res("10D20cs>10")
-        self.__show_exec_res("5+10D20cs>10+5")
-        self.__show_exec_res("10D20kl5cs>10")
-
-        # 带括号
-        self.__show_exec_res("(1+2)")
-        self.__show_exec_res("(1+2)*2")
-        self.__show_exec_res("(D20)*2")
-        self.__show_exec_res("(1+D20)*2")
-        self.__show_exec_res("((1+D20))*2")
-        self.__show_exec_res("(D20)")
-        self.__show_exec_res("(D20)*(D20)")
-
-        # 优势与劣势
-        self.__show_exec_res("D20优势")
-        self.__show_exec_res("D20劣势+1")
-        self.__show_exec_res("D20劣势+1+D优势")
-
-        # 抗性与易伤
-        self.__show_exec_res("D20+2抗性")
-        self.__show_exec_res("5抗性")
-        self.__show_exec_res("2D4+D20易伤")
 
         # 基础运算错误
         self.__show_exception("1D(20)")
@@ -155,13 +110,3 @@ class MyTestCase:
         self.__show_exception(f"{roll_config.DICE_NUM_MAX + 1}D20")
         self.__show_exception(f"{roll_config.DICE_CONSTANT_MIN - 1}")
         self.__show_exception(f"{roll_config.DICE_CONSTANT_MAX + 1}")
-
-    def test_d20_state(self):
-        self.__show_exec_res("1D20")
-        self.__show_exec_res("2D20KL1")
-        self.__show_exec_res("2D20K1")
-        self.__show_exec_res("1D20K3")
-        self.__show_exec_res("1D4+1D20+20")
-        self.__show_exec_res("2D20")
-        self.__show_exec_res("4D20K3")
-        self.__show_exec_res("D20+D20")

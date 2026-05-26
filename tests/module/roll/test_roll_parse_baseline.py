@@ -44,18 +44,17 @@ class TestRollErrorHandling:
 
     def test_invalid_expression_raises(self):
         from module.roll.roll_utils import RollDiceError
-        from module.roll.ast_engine.errors import RollEngineError
-        with pytest.raises((RollDiceError, RollEngineError, Exception)):
+        with pytest.raises(RollDiceError):
             exec_roll_exp("???")
 
     def test_empty_expression(self):
         # 空表达式不应静默通过
-        from module.roll.ast_engine.errors import RollEngineError
         from module.roll.roll_utils import RollDiceError
-        with pytest.raises((RollDiceError, RollEngineError, Exception)):
+        with pytest.raises(RollDiceError):
             exec_roll_exp("")
 
     def test_valid_simple_expression(self):
+        # 1d6 产生随机结果，范围检查是能做出的最精确断言
         result = exec_roll_exp("1d6")
         assert result is not None
         assert 1 <= result.get_val() <= 6

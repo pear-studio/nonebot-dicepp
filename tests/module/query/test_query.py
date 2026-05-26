@@ -144,12 +144,16 @@ class TestQueryCommandIntegration(IsolatedAsyncioTestCase):
         """没有数据库时 .查询 应返回错误提示而非崩溃"""
         cmds = await self._send_group(".查询 火球术")
         # 即使没有数据库，也应该有回复（错误提示）
-        self.assertTrue(len(cmds) >= 0, ".查询 不应崩溃")
+        self.assertTrue(len(cmds) > 0, ".查询 应返回提示信息")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertTrue(len(result) > 0, "响应内容不应为空")
 
     async def test_query_short_form_no_database(self):
         """.q 短指令同上"""
         cmds = await self._send_group(".q 火球术")
-        self.assertTrue(len(cmds) >= 0, ".q 不应崩溃")
+        self.assertTrue(len(cmds) > 0, ".q 应返回提示信息")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertTrue(len(result) > 0, "响应内容不应为空")
 
 
 @pytest.mark.integration
@@ -182,9 +186,12 @@ class TestHomebrewCommandIntegration(IsolatedAsyncioTestCase):
     async def test_homebrew_status_returns_response(self):
         """查询私设状态不应崩溃"""
         cmds = await self._send_group(".hb status")
-        self.assertTrue(len(cmds) >= 0, ".hb status 不应崩溃")
+        # 无 homebrew 数据时命令可能不匹配任何处理器返回空列表
+        # 验证 process_message 至少返回 list 而非抛异常
+        self.assertIsInstance(cmds, list, ".hb status 不应抛异常")
 
     async def test_homebrew_query_no_data_returns_response(self):
         """没有私设数据时查询应返回提示而非崩溃"""
         cmds = await self._send_group(".私设 测试条目")
-        self.assertTrue(len(cmds) >= 0, ".私设 不应崩溃")
+        # 无私设数据时命令可能不匹配处理器返回空列表
+        self.assertIsInstance(cmds, list, ".私设 不应抛异常")

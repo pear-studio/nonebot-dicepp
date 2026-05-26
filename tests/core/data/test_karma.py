@@ -5,18 +5,27 @@ from core.data.models.karma import UserKarma
 
 @pytest.mark.unit
 class TestUserKarma:
-    def test_init(self):
-        karma = UserKarma(user_id="user123", group_id="group456")
-        assert karma.user_id == "user123"
-        assert karma.group_id == "group456"
-        assert karma.value == 0
+    @pytest.mark.parametrize(
+        ("user_id", "group_id", "value", "expected_value"),
+        [
+            ("user123", "group456", None, 0),
+            ("user456", "group123", None, 0),
+            ("user789", "group012", 100, 100),
+            ("alice", "g1", -5, -5),
+        ],
+    )
+    def test_construction(self, user_id: str, group_id: str, value: object, expected_value: int):
+        kwargs = {"user_id": user_id, "group_id": group_id}
+        if value is not None:
+            kwargs["value"] = value
+        karma = UserKarma(**kwargs)
+
+        assert karma.user_id == user_id
+        assert karma.group_id == group_id
+        assert karma.value == expected_value
         assert isinstance(karma.last_update, datetime)
 
-    def test_init_with_value(self):
-        karma = UserKarma(user_id="user123", group_id="group456", value=100)
-        assert karma.value == 100
-
-    def test_serialization(self):
+    def test_serialization_roundtrip(self):
         karma = UserKarma(user_id="user123", group_id="group456", value=50)
         serialized = karma.model_dump_json()
 
@@ -24,10 +33,4 @@ class TestUserKarma:
         assert karma.user_id == karma2.user_id
         assert karma.group_id == karma2.group_id
         assert karma.value == karma2.value
-
-    def test_default_last_update(self):
-        before = datetime.now()
-        karma = UserKarma(user_id="user123", group_id="group456")
-        after = datetime.now()
-        assert karma.last_update >= before
-        assert karma.last_update <= after
+        assert karma.last_update == karma2.last_update

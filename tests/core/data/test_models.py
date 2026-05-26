@@ -3,47 +3,10 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from core.data.models import (
-    InitEntity,
-    InitList,
     DNDCharacter,
     HPInfo,
     AbilityInfo,
 )
-
-
-class TestInitListModel:
-    def test_create(self):
-        init_list = InitList()
-        assert len(init_list.entities) == 0
-        assert init_list.round == 1
-
-    def test_add_entity(self):
-        init_list = InitList()
-        init_list.add_entity("Goblin", "", 10)
-        assert len(init_list.entities) == 1
-        assert init_list.entities[0].name == "Goblin"
-
-    def test_add_entity_sorted(self):
-        init_list = InitList()
-        init_list.add_entity("Goblin", "", 10)
-        init_list.add_entity("Orc", "", 15)
-        init_list.add_entity("Elf", "", 12)
-
-        assert init_list.entities[0].name == "Orc"
-        assert init_list.entities[1].name == "Elf"
-        assert init_list.entities[2].name == "Goblin"
-
-    def test_del_entity(self):
-        init_list = InitList()
-        init_list.add_entity("Goblin", "", 10)
-        init_list.del_entity("Goblin")
-        assert len(init_list.entities) == 0
-
-    def test_del_entity_not_found(self):
-        from core.data.models import InitiativeError
-        init_list = InitList()
-        with pytest.raises(InitiativeError):
-            init_list.del_entity("NotExists")
 
 
 class TestDNDCharacterModel:

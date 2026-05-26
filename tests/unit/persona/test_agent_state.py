@@ -1,106 +1,65 @@
-"""AgentRunState 测试 — 构造、字段变更、特殊值"""
-import pytest
+"""AgentRunState 测试 — 初始状态快照与序列化结构完整性"""
+import dataclasses
 
 from plugins.DicePP.module.persona.agent.state import AgentRunState
 
 
-class TestAgentRunStateConstruction:
-    """AgentRunState 基础构造"""
+class TestAgentRunStateInitialSnapshot:
+    """构造 + 初始状态快照 — 通过 dataclasses.asdict 验证完整结构"""
 
-    def test_minimal_construction(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="segmented_chat")
-        assert state.run_id == "r1"
-        assert state.turn_id == "t1"
-        assert state.user_id == "u1"
-        assert state.group_id == "g1"
-        assert state.mode == "segmented_chat"
+    def test_defaults_in_asdict(self):
+        """asdict 快照应包含所有字段及其默认值"""
+        state = AgentRunState(
+            run_id="r1",
+            turn_id="t1",
+            user_id="u1",
+            group_id="g1",
+            mode="segmented_chat",
+        )
+        assert dataclasses.asdict(state) == {
+            "run_id": "r1",
+            "turn_id": "t1",
+            "user_id": "u1",
+            "group_id": "g1",
+            "mode": "segmented_chat",
+            "status": "running",
+            "messages": [],
+            "tool_rounds": 0,
+            "correction_count": 0,
+            "warning_count": 0,
+            "interim_segment_count": 0,
+            "sink_failures": [],
+            "final_text": "",
+            "delivery_performed": False,
+            "final_reason": "",
+            "error": "",
+        }
 
-    def test_default_values(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
-        assert state.status == "running"
-        assert state.messages == []
-        assert state.tool_rounds == 0
-        assert state.correction_count == 0
-        assert state.interim_segment_count == 0
-        assert state.sink_failures == []
-        assert state.final_text == ""
-        assert state.delivery_performed is False
-        assert state.final_reason == ""
-        assert state.error == ""
 
-    def test_empty_group_id(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="chat")
-        assert state.group_id == ""
+class TestAgentRunStateRoundtrip:
+    """序列化/反序列化往返 — 验证结构完整性而非逐个字段读写"""
 
-    def test_empty_user_id(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="", group_id="g1", mode="proactive")
-        assert state.user_id == ""
-
-
-class TestAgentRunStateMutation:
-    """AgentRunState 字段变更"""
-
-    def test_status_transition(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="chat")
-        state.status = "completed"
-        assert state.status == "completed"
-        state.status = "failed"
-        assert state.status == "failed"
-
-    def test_tool_rounds_increment(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="chat")
-        state.tool_rounds += 1
-        assert state.tool_rounds == 1
-        state.tool_rounds += 1
-        assert state.tool_rounds == 2
-
-    def test_correction_count_increment(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="chat")
-        state.correction_count = 3
-        assert state.correction_count == 3
-
-    def test_interim_segment_count(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="segmented_chat")
-        state.interim_segment_count = 2
-        assert state.interim_segment_count == 2
-
-    def test_sink_failures_append(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="chat")
+    def test_asdict_reconstruct(self):
+        """经 asdict 序列化再通过 ** 重构的实例应与原实例相等"""
+        state = AgentRunState(
+            run_id="r2",
+            turn_id="t2",
+            user_id="u2",
+            group_id="g2",
+            mode="structured_collect",
+        )
+        # 在默认值基础上施加变更，覆盖所有可选字段
+        state.tool_rounds = 3
+        state.correction_count = 1
+        state.warning_count = 2
+        state.interim_segment_count = 1
         state.sink_failures.append("delivery_failed")
-        assert len(state.sink_failures) == 1
-        assert state.sink_failures[0] == "delivery_failed"
-        state.sink_failures.append("image_gen_failed")
-        assert len(state.sink_failures) == 2
-
-    def test_final_text_set(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="chat")
-        state.final_text = "final reply text"
-        assert state.final_text == "final reply text"
-
-    def test_delivery_performed_flag(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="chat")
+        state.final_text = "hello"
         state.delivery_performed = True
-        assert state.delivery_performed is True
+        state.final_reason = "completed"
+        state.error = ""
 
-    def test_final_reason_and_error(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="chat")
-        state.final_reason = "max_tool_rounds"
-        state.error = "LLM returned empty content"
-        assert state.final_reason == "max_tool_rounds"
-        assert state.error == "LLM returned empty content"
+        d = dataclasses.asdict(state)
+        restored = AgentRunState(**d)
 
-
-class TestAgentRunStateModes:
-    """不同 mode 值"""
-
-    def test_segmented_chat_mode(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="segmented_chat")
-        assert state.mode == "segmented_chat"
-
-    def test_structured_collect_mode(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="structured_collect")
-        assert state.mode == "structured_collect"
-
-    def test_proactive_mode(self):
-        state = AgentRunState(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="proactive")
-        assert state.mode == "proactive"
+        assert restored == state

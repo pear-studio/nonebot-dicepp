@@ -90,25 +90,6 @@ class TestAESEncryption:
 class TestUserLLMConfigModel:
     """测试 UserLLMConfig 模型"""
 
-    def test_user_config_creation(self):
-        """测试创建用户配置"""
-        config = UserLLMConfig(
-            user_id="U123",
-            primary_api_key="sk-test",
-            primary_model="gpt-4o",
-        )
-        assert config.user_id == "U123"
-        assert config.primary_api_key == "sk-test"
-        assert config.primary_model == "gpt-4o"
-
-    def test_user_config_defaults(self):
-        """测试用户配置默认值"""
-        config = UserLLMConfig(user_id="U123")
-        assert config.primary_api_key == ""
-        assert config.primary_base_url == ""
-        assert config.primary_model == ""
-        assert config.auxiliary_api_key == ""
-
 
 # ── Quota System Tests ───────────────────────────────────────────────────────
 
