@@ -40,7 +40,9 @@ class _BotTestBase(IsolatedAsyncioTestCase):
 
 @pytest.mark.integration
 class TestJrrpCommandIntegration(_BotTestBase):
-    """JrrpCommand (.jrrp) 集成测试"""
+    """JrrpCommand (.jrrp) 集成测试
+    # 与 test_jrrp_determinism.py 的单元测试互补
+    """
 
     BOT_NAME = "test_jrrp_bot"
 
@@ -83,6 +85,10 @@ class TestDndCommandIntegration(_BotTestBase):
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(cmds) > 0, ".dnd 应返回结果")
         self.assertTrue(len(result) > 0, "结果内容不应为空")
+        self.assertTrue(
+            any(word in result for word in ['DND', 'dnd', '龙与地下城']),
+            f".dnd 结果应包含 DND 相关关键词，实际输出：{result}"
+        )
 
     async def test_dnd_contains_stats(self):
         """dnd 属性生成结果应包含 6 项属性"""
@@ -117,6 +123,10 @@ class TestCocMiscCommandIntegration(_BotTestBase):
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(cmds) > 0, ".coc 应返回结果")
         self.assertTrue(len(result) > 0, "结果内容不应为空")
+        self.assertTrue(
+            any(word in result for word in ['COC', 'coc', '克苏鲁']),
+            f".coc 结果应包含 COC 相关关键词，实际输出：{result}"
+        )
 
     async def test_coc_contains_stats(self):
         """coc 属性生成结果应包含多项属性数值"""

@@ -107,11 +107,12 @@ class TestRollPool(_RollCmdBotBase):
         assert_contains_number(result, 3)
 
     async def test_pool__help_not_empty(self):
-        """.help w returns non-empty text."""
+        """.help w returns non-empty text about pool."""
         cmds, result = await self._send_group(".help w")
-        
+
         assert len(cmds) > 0, "Should have response"
         assert len(result) > 10  # Non-empty help text
+        assert any(word in result for word in ['pool', 'WOD', '骰池', '.pool'])
 
 
 @pytest.mark.integration
@@ -136,11 +137,12 @@ class TestRollChoose(_RollCmdBotBase):
         assert any(opt in result for opt in ["苹果", "香蕉", "今天吃什么"])
 
     async def test_choose__help_not_empty(self):
-        """.help c returns non-empty text."""
+        """.help c returns non-empty text about choose."""
         cmds, result = await self._send_group(".help c")
-        
+
         assert len(cmds) > 0, "Should have response"
         assert len(result) > 10
+        assert any(word in result for word in ['choose', '选择', '.choose'])
 
 
 @pytest.mark.integration
@@ -164,11 +166,12 @@ class TestDiceSet(_RollCmdBotBase):
         assert_contains_number(result2, 15)
 
     async def test_dset__help_not_empty(self):
-        """.help dset returns non-empty text."""
+        """.help dset returns non-empty text about dset."""
         cmds, result = await self._send_group(".help dset")
-        
+
         assert len(cmds) > 0, "Should have response"
         assert len(result) > 10
+        assert any(word in result for word in ['dset', '骰设', '.dset'])
 
 
 @pytest.mark.integration
@@ -212,17 +215,18 @@ class TestKarmaDice(_RollCmdBotBase):
         )
         # Set permission level to 0 (regular user)
         meta.permission = 0
-        
+
         cmds = await self.bot.process_message(".karmadice on", meta)
         result = "\n".join([str(cmd) for cmd in cmds])
-        
-        # Should be denied or no response
-        if len(cmds) > 0:
-            assert any(word in result for word in ["权限", "拒绝", "denied", "permission"])
+
+        # Should be denied
+        assert len(cmds) > 0, "expected at least one command response"
+        assert any(word in result for word in ["权限", "拒绝", "denied", "permission"])
 
     async def test_karmadice__help_not_empty(self):
-        """.help karmadice returns non-empty text."""
+        """.help karmadice returns non-empty text about karmadice."""
         cmds, result = await self._send_group(".help karmadice")
-        
+
         assert len(cmds) > 0, "Should have response"
         assert len(result) > 10
+        assert any(word in result for word in ['karmadice', '业力', '.karmadice'])

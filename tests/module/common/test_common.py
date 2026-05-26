@@ -114,11 +114,20 @@ class TestHelpCommandIntegration(_BotTestBase):
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(cmds) > 0, ".help 应返回帮助内容")
         self.assertTrue(len(result) > 0, "帮助内容不应为空")
+        # 帮助信息应包含核心命令关键词
+        self.assertTrue(
+            any(word in result.lower() for word in ['.r', '.nn', '.help', '.welcome']),
+            f".help 应包含常用命令关键词，实际输出：{result}"
+        )
 
     async def test_help_with_keyword_roll(self):
         cmds = await self._send_group(".help roll")
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(cmds) > 0, ".help roll 应有回复")
+        self.assertTrue(
+            any(word in result.lower() for word in ['roll', '掷骰', '.r']),
+            f".help roll 应包含掷骰相关关键词，实际输出：{result}"
+        )
 
     async def test_help_with_keyword_nn(self):
         cmds = await self._send_group(".help nn")
@@ -139,8 +148,18 @@ class TestWelcomeCommandIntegration(_BotTestBase):
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(cmds) > 0, ".welcome show 应返回回复")
         self.assertTrue(len(result) > 0, "回复内容不应为空")
+        # 欢迎信息应包含 welcome/欢迎 相关关键词
+        self.assertTrue(
+            any(word in result.lower() for word in ['welcome', '欢迎']),
+            f".welcome show 应包含欢迎相关关键词，实际输出：{result}"
+        )
 
     async def test_welcome_set_returns_response(self):
         cmds = await self._send_group(".welcome 欢迎新朋友！")
         result = "\n".join([str(c) for c in cmds])
         self.assertTrue(len(cmds) > 0, ".welcome 设置应有回复")
+        # 设置欢迎语后应回显确认或包含新内容
+        self.assertTrue(
+            any(word in result for word in ['欢迎新朋友', '设置', '成功']),
+            f".welcome 设置后应包含确认或新内容，实际输出：{result}"
+        )

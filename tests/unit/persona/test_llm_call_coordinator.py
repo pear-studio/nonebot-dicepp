@@ -1,5 +1,8 @@
 """
 单元测试: LLMCallCoordinator
+
+涵盖基础行为、并发控制、失败重试、耗尽/取消/边界场景。
+合并自: test_llm_call_coordinator.py + test_llm_call_coordinator_exhaustion.py
 """
 import pytest
 import asyncio
@@ -11,12 +14,13 @@ from plugins.DicePP.module.persona.llm.coordinator import (
 )
 
 
+@pytest.fixture
+def coordinator():
+    return LLMCallCoordinator()
+
+
 class TestLLMCallCoordinatorBasics:
     """测试基础行为"""
-
-    @pytest.fixture
-    def coordinator(self):
-        return LLMCallCoordinator()
 
     @pytest.mark.asyncio
     async def test_single_successful_submit_returns_result(self, coordinator):
@@ -348,3 +352,412 @@ class TestLLMCallCoordinatorBasics:
 
         barrier.set()
         await first_task
+
+
+class TestLLMCallCoordinatorExhaustion:
+    """耗尽/取消/边界测试"""
+
+    @pytest.mark.asyncio
+    async def test_on_exhausted_exception_does_not_crash(self, coordinator):
+        async def bad_on_exhausted(last_exception=None):
+            raise RuntimeError("boom")
+
+        call_count = 0
+
+        async def inner_failing_call_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            # 直接设置内部状态以精确控制 _run_loop 的重试路径，
+            # 而非测试并发 buffered 行为本身。
+            if call_count <= 2:
+                coordinator._has_buffered["user:1"] = True
+            raise Exception("fail")
+
+        call_fn = AsyncMock(side_effect=inner_failing_call_fn)
+        # 不应抛出异常
+        result = await coordinator.submit(
+            "user:1", "msg", call_fn, on_exhausted=bad_on_exhausted
+        )
+        assert result.status == "failed"
+        assert result.value is None
+        assert call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_max_iterations_prevents_infinite_loop(self, coordinator):
+        """MAX_ITERATIONS=5 防止用户刷屏导致无限循环"""
+        started_events = [asyncio.Event() for _ in range(5)]
+        barriers = [asyncio.Event() for _ in range(4)]
+        call_count = 0
+
+        async def call_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            idx = call_count - 1
+            started_events[idx].set()
+            if idx < 4:
+                await barriers[idx].wait()
+            return f"result_{call_count}"
+
+        first_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", "msg", call_fn, continue_on_buffered=True
+            )
+        )
+        await started_events[0].wait()
+
+        # 每次 call_fn 开始后，提交新的 submit 来设置 buffered
+        for i in range(4):
+            next_task = asyncio.create_task(
+                coordinator.submit(
+                    "user:1", f"msg_{i}", AsyncMock(return_value="ignored")
+                )
+            )
+            await next_task
+            assert coordinator._has_buffered.get("user:1") is True
+            barriers[i].set()
+            if i < 3:
+                await started_events[i + 1].wait()
+
+        result = await first_task
+        assert call_count == 5
+        assert result.status == "success"
+        assert result.value == "result_5"
+
+    @pytest.mark.asyncio
+    async def test_pending_submit_during_last_attempt_dropped(self, coordinator):
+        """最后一次尝试期间到达的 pending submit，标记 buffered 但不会被处理"""
+        started1 = asyncio.Event()
+        started2 = asyncio.Event()
+        started3 = asyncio.Event()
+        barrier1 = asyncio.Event()
+        barrier2 = asyncio.Event()
+        barrier3 = asyncio.Event()
+        call_count = 0
+
+        async def inner_failing_call_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                started1.set()
+                await barrier1.wait()
+            elif call_count == 2:
+                started2.set()
+                await barrier2.wait()
+            elif call_count == 3:
+                started3.set()
+                await barrier3.wait()
+            raise Exception("fail")
+
+        on_exhausted_called = False
+
+        async def on_exhausted_fn(last_exception=None):
+            nonlocal on_exhausted_called
+            on_exhausted_called = True
+
+        first_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", "msg1", inner_failing_call_fn, on_exhausted=on_exhausted_fn
+            )
+        )
+        await started1.wait()
+
+        second_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", "msg2", AsyncMock(return_value="ignored")
+            )
+        )
+        await second_task
+
+        barrier1.set()
+        await started2.wait()
+
+        third_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", "msg3", AsyncMock(return_value="ignored")
+            )
+        )
+        await third_task
+
+        barrier2.set()
+        await started3.wait()
+
+        # 第三次 call_fn 已经开始，此时再提交第四个 submit
+        # 它会被 buffered，但由于 failures 即将达到 max_failures，不会被处理
+        fourth_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", "msg4", AsyncMock(return_value="ignored")
+            )
+        )
+        fourth_result = await fourth_task
+        assert fourth_result.status == "buffered"
+        assert coordinator._has_buffered.get("user:1") is True
+
+        barrier3.set()
+        result = await first_task
+        assert result.status == "failed"
+        assert result.value is None
+        assert call_count == 3
+        assert on_exhausted_called is True
+        # buffered 在最后一次失败后被 pop（此时 has_buffered=True 但 failures >= max_failures，不继续）
+        assert coordinator._has_buffered.get("user:1") is None
+
+    @pytest.mark.asyncio
+    async def test_on_exhausted_only_when_never_succeeded(self, coordinator):
+        """had_success=True 时即使最终失败也不触发 on_exhausted"""
+        started1 = asyncio.Event()
+        barrier1 = asyncio.Event()
+        call_count = 0
+        on_exhausted_called = False
+
+        async def call_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                started1.set()
+                await barrier1.wait()
+                return "first_success"
+            raise Exception("fail")
+
+        async def on_exhausted_fn():
+            nonlocal on_exhausted_called
+            on_exhausted_called = True
+
+        first_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", "msg1", call_fn, continue_on_buffered=True, on_exhausted=on_exhausted_fn
+            )
+        )
+        await started1.wait()
+
+        second_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", "msg2", AsyncMock(return_value="ignored")
+            )
+        )
+        await second_task
+
+        barrier1.set()
+        result = await first_task
+        assert call_count == 2
+        assert result.status == "failed"
+        assert result.value is None
+        assert on_exhausted_called is False  # 因为 had_success=True
+
+    @pytest.mark.asyncio
+    async def test_different_targets_run_concurrently(self, coordinator):
+        """不同 target_key 之间应并行执行"""
+        order = []
+        barrier1 = asyncio.Event()
+        barrier2 = asyncio.Event()
+        started1 = asyncio.Event()
+        started2 = asyncio.Event()
+
+        async def slow1(messages):
+            order.append("start_1")
+            started1.set()
+            await barrier1.wait()
+            order.append("end_1")
+            return "r1"
+
+        async def slow2(messages):
+            order.append("start_2")
+            started2.set()
+            await barrier2.wait()
+            order.append("end_2")
+            return "r2"
+
+        t1 = asyncio.create_task(coordinator.submit("user:1", "msg1", slow1))
+        t2 = asyncio.create_task(coordinator.submit("user:2", "msg2", slow2))
+        await started1.wait()
+        await started2.wait()
+
+        assert "start_1" in order
+        assert "start_2" in order
+        # 两者都开始执行了，说明不同 target 之间是并行的
+
+        barrier1.set()
+        barrier2.set()
+        r1 = await t1
+        r2 = await t2
+        assert r1.status == "success"
+        assert r1.value == "r1"
+        assert r2.status == "success"
+        assert r2.value == "r2"
+
+    @pytest.mark.asyncio
+    async def test_chat_blocks_share_on_same_target(self):
+        """同一 target 上 share 执行中时，chat submit 应被 queued（buffered）"""
+        coordinator = LLMCallCoordinator()
+        barrier = asyncio.Event()
+        execution_started = asyncio.Event()
+
+        async def slow_share_fn(messages):
+            execution_started.set()
+            await barrier.wait()
+            return "share_msg"
+
+        # 先启动 share
+        share_task = asyncio.create_task(
+            coordinator.submit("user:1", None, slow_share_fn)
+        )
+        await execution_started.wait()
+
+        # 同一 target 启动 chat
+        chat_task = asyncio.create_task(
+            coordinator.submit("user:1", "msg", AsyncMock(return_value="chat_reply"))
+        )
+        chat_result = await chat_task
+        assert chat_result.status == "buffered"
+        assert coordinator._has_buffered.get("user:1") is True
+
+        barrier.set()
+        share_result = await share_task
+        assert share_result.status == "success"
+        assert share_result.value == "share_msg"
+
+    @pytest.mark.asyncio
+    async def test_share_continue_on_buffered_detected(self):
+        """share 路径 (continue_on_buffered=False) 执行期间有缓冲消息时应继续迭代
+
+        share 完成后检测到 has_buffered，应继续处理缓冲消息而非直接退出。
+        max_iterations=5 兜底防止 share 被无限延长。
+        """
+        coordinator = LLMCallCoordinator()
+        barrier = asyncio.Event()
+        started = asyncio.Event()
+        call_count = 0
+
+        async def share_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                started.set()
+                await barrier.wait()
+            return f"share_{call_count}"
+
+        share_task = asyncio.create_task(
+            coordinator.submit(
+                "user:1", None, share_fn, continue_on_buffered=False
+            )
+        )
+        await started.wait()
+
+        # share 执行期间缓冲 chat 消息
+        chat_task = asyncio.create_task(
+            coordinator.submit("user:1", "chat_msg", AsyncMock(return_value="reply"))
+        )
+        chat_result = await chat_task
+        assert chat_result.status == "buffered"
+        assert coordinator._has_buffered.get("user:1") is True
+
+        barrier.set()
+        share_result = await share_task
+        assert share_result.status == "success"
+        # share_fn 被调用 2 次：第 1 次正常执行，第 2 次处理缓冲消息
+        assert call_count == 2
+        assert share_result.value == "share_2"
+        # 缓冲消息已被消费，状态已清理
+        assert coordinator._has_buffered.get("user:1") is None
+
+    @pytest.mark.asyncio
+    async def test_pending_messages_preserved_across_submits(self):
+        """share 退出后缓冲消息保留，下一次 chat submit 追加而非覆盖
+
+        share (continue_on_buffered=False) 不处理缓冲消息时，消息留在
+        _pending_messages。下一次 chat submit 获取执行权时应追加新消息，
+        而非覆盖旧消息。
+        """
+        # 此测试验证 B1 修复（append 代替 overwrite）的独立价值。
+        # 使用默认 continue_on_buffered=True + 手动设置 _executing
+        # 来模拟 share 不检查 buffered 的旧行为，排除 B2 修复的干扰。
+        coordinator = LLMCallCoordinator()
+        seen_messages = []
+
+        # 模拟 share 执行中：直接设置 _executing
+        key = "user:1"
+        coordinator._executing[key] = True
+
+        # chat 提交 → buffered
+        chat_a = await coordinator.submit(
+            key, "msg_A", AsyncMock(return_value="rA")
+        )
+        assert chat_a.status == "buffered"
+        assert coordinator._pending_messages.get(key) == ["msg_A"]
+
+        # 模拟 share 退出：清除 _executing 和 _has_buffered，
+        # 但保留 _pending_messages（finally 块逻辑）
+        coordinator._executing.pop(key, None)
+        coordinator._has_buffered.pop(key, None)
+
+        # 验证缓冲消息残留
+        assert coordinator._pending_messages.get(key) is not None
+
+        # 新 chat submit：应追加 msg_B，而非覆盖 msg_A
+        async def chat_fn(messages):
+            seen_messages.extend(messages)
+            return "reply"
+
+        chat_b = await coordinator.submit(key, "msg_B", chat_fn)
+        assert chat_b.status == "success"
+        assert chat_b.value == "reply"
+        assert "msg_A" in seen_messages
+        assert "msg_B" in seen_messages
+        assert len(seen_messages) == 2
+
+    @pytest.mark.asyncio
+    async def test_iteration_exhaustion_does_not_call_on_exhausted_when_had_success(self, coordinator):
+        """超过 MAX_ITERATIONS 且 had_success=True 时不应调用 on_exhausted"""
+        call_count = 0
+        on_exhausted_called = False
+
+        async def call_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            coordinator._has_buffered["user:1"] = True
+            return f"result_{call_count}"
+
+        async def on_exhausted(last_exception=None):
+            nonlocal on_exhausted_called
+            on_exhausted_called = True
+            return "exhausted_fallback"
+
+        result = await coordinator.submit(
+            "user:1", "msg", call_fn, continue_on_buffered=True, on_exhausted=on_exhausted
+        )
+        assert call_count == 5
+        assert on_exhausted_called is False
+        # 超过 max_iterations 后仍返回最后一次 call_fn 的结果（last_result_sent=False）
+        assert result.status == "success"
+        assert result.value == "result_5"
+
+    @pytest.mark.asyncio
+    async def test_on_result_exception_treated_as_sent_to_avoid_duplicate(self, coordinator):
+        """on_result 抛异常时应将 last_result_sent 置 True，
+        避免 max_iterations 强制退出时重复投递（保守策略）。"""
+        call_count = 0
+
+        async def call_fn(messages):
+            nonlocal call_count
+            call_count += 1
+            coordinator._has_buffered["user:dup"] = True
+            return f"result_{call_count}"
+
+        async def on_result(value):
+            raise RuntimeError(f"投递失败 for {value}")
+
+        async def on_exhausted(last_exception=None):
+            return None
+
+        result = await coordinator.submit(
+            "user:dup",
+            "msg",
+            call_fn,
+            continue_on_buffered=True,
+            on_exhausted=on_exhausted,
+            on_result=on_result,
+        )
+        # on_result 始终抛异常，但保守策略下视为已发送，因此最终强制退出时返回 None
+        # （SubmitResult: result is None → status="failed", value=None，避免重复投递）
+        assert call_count == 5
+        assert result.status == "failed"
+        assert result.value is None

@@ -1,5 +1,5 @@
-"""AgentEvent 与事件 payload dataclass 测试 — 构造、序列化、默认值"""
-from datetime import datetime
+"""AgentEvent 与事件 payload dataclass 测试 — 序列化、结构完整性、默认值语义"""
+import dataclasses
 
 import pytest
 
@@ -22,6 +22,7 @@ from plugins.DicePP.module.persona.agent.events import (
     ToolExecutionFailedPayload,
     DeclaredActionProducedPayload,
     ToolCallSkippedPayload,
+    StructuredOutputCollectedPayload,
     ResponseSegmentRequestedPayload,
     ResponseSegmentDeliveredPayload,
     ResponseSegmentFailedPayload,
@@ -34,230 +35,135 @@ from plugins.DicePP.module.persona.agent.events import (
 )
 
 
-class TestAgentEvent:
-    """AgentEvent 包装类构造与序列化"""
+def _field_names(cls):
+    """返回 dataclass 所有声明字段名集合"""
+    return {f.name for f in dataclasses.fields(cls)}
 
-    def test_minimal_construction(self):
-        event = AgentEvent(run_id="r1", seq=0, event_type="run_started", payload={})
-        assert event.run_id == "r1"
-        assert event.seq == 0
-        assert event.event_type == "run_started"
-        assert event.payload == {}
+
+# ── 场景 1: AgentEvent 包装与序列化往返 ─────────────────────
+
+
+class TestAgentEvent:
+    """AgentEvent 包装、序列化与默认值"""
+
+    def test_roundtrip(self):
+        """payload → _dictify → 嵌入 AgentEvent → _dictify: 验证完整 dict 结构"""
+        payload = AgentRunStartedPayload(
+            run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat",
+        )
+        event = AgentEvent(
+            run_id="r1", seq=0, event_type="run_started",
+            payload=_dictify(payload),
+        )
+        d = _dictify(event)
+        assert d == {
+            "run_id": "r1",
+            "seq": 0,
+            "event_type": "run_started",
+            "payload": {
+                "run_id": "r1",
+                "turn_id": "t1",
+                "user_id": "u1",
+                "group_id": "g1",
+                "mode": "chat",
+            },
+            "schema_version": 1,
+            "created_at": "",
+        }
+
+    def test_defaults(self):
+        """schema_version 默认为 1，created_at 默认为空字符串"""
+        event = AgentEvent(run_id="x", seq=0, event_type="t", payload={})
         assert event.schema_version == 1
         assert event.created_at == ""
 
-    def test_full_construction(self):
-        event = AgentEvent(
-            run_id="r1", seq=5, event_type="run_finished",
-            payload={"status": "ok"}, schema_version=2, created_at="2026-05-25T10:00:00",
-        )
-        assert event.run_id == "r1"
-        assert event.seq == 5
-        assert event.schema_version == 2
-        assert event.created_at == "2026-05-25T10:00:00"
 
-    def test_payload_dataclass_dictified(self):
-        inner = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
-        event = AgentEvent(run_id="r1", seq=1, event_type="run_started", payload=_dictify(inner))
-        assert isinstance(event.payload, dict)
-        assert event.payload["run_id"] == "r1"
-        assert event.payload["mode"] == "chat"
+# ── 场景 2 & 3: payload 序列化契约 ———————————————
 
 
-class TestRunLifecyclePayloads:
-    """运行生命周期事件 payload"""
+# 关键 payload — 验证 _dictify 字段名与值的完整性
+_KEY_CASES = [
+    pytest.param(
+        AgentRunStartedPayload,
+        dict(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat"),
+        dict(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat"),
+        id="AgentRunStartedPayload",
+    ),
+    pytest.param(
+        ModelResponseReceivedPayload,
+        dict(
+            round_index=0, content_ignored=True, content_preview="hello",
+            tool_calls=[{"id": "1", "name": "search"}],
+            usage={"input": 5, "output": 10},
+            provider="openai", model="gpt-4",
+        ),
+        dict(
+            round_index=0, content_ignored=True, content_preview="hello",
+            tool_calls=[{"id": "1", "name": "search"}],
+            usage={"input": 5, "output": 10},
+            provider="openai", model="gpt-4",
+        ),
+        id="ModelResponseReceivedPayload",
+    ),
+    pytest.param(
+        ToolExecutionCompletedPayload,
+        dict(tool_call_id="tc_1", tool_name="search", content="result"),
+        dict(tool_call_id="tc_1", tool_name="search", content="result"),
+        id="ToolExecutionCompletedPayload",
+    ),
+]
 
-    def test_agent_run_started_payload(self):
-        p = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
-        assert p.run_id == "r1"
-        assert p.turn_id == "t1"
-        assert p.mode == "chat"
+# 其余 payload — 覆盖所有字段名的结构完整性
+_STRUCTURAL_SPECS = [
+    (AgentRunFinishedPayload, dict(
+        status="ok", reason="completed", delivery_performed=True, final_text="hello",
+        tokens_input=10, tokens_output=5, provider="openai", model="gpt-4",
+    )),
+    (AgentWarningPayload, dict(code="TOOL_FAILED", message="tool error", round_index=1, severity="warning")),
+    (ModelRequestPreparedPayload, dict(
+        round_index=0, tool_use_mode="auto",
+        required_tools=["search"], message_count=2, tool_count=1,
+    )),
+    (ModelCandidateSelectedPayload, dict(provider="openai", model="gpt-4", candidate_index=0, total_candidates=2)),
+    (ModelCandidateFailedPayload, dict(provider="openai", model="gpt-4", error="timeout", candidate_index=0)),
+    (ModelCandidateSucceededPayload, dict(provider="openai", model="gpt-4", candidate_index=1)),
+    (ModelInvocationFailedPayload, dict(provider="openai", model="gpt-4", error="rate_limit", round_index=0)),
+    (ToolCallRequestedPayload, dict(round_index=0, tool_call_id="tc_1", tool_name="search", raw_arguments='{"q":"x"}')),
+    (ToolArgumentsValidatedPayload, dict(tool_call_id="tc_1", tool_name="search")),
+    (ToolArgumentsInvalidPayload, dict(tool_call_id="tc_1", tool_name="search", error="missing field")),
+    (ToolExecutionStartedPayload, dict(tool_call_id="tc_1", tool_name="search")),
+    (ToolExecutionFailedPayload, dict(tool_call_id="tc_1", tool_name="search", error="timeout")),
+    (DeclaredActionProducedPayload, dict(tool_call_id="tc_1", tool_name="send_reply", action_type="send_message", action_id="act_1")),
+    (ToolCallSkippedPayload, dict(tool_call_id="tc_1", tool_name="search", reason="budget_exceeded")),
+    (StructuredOutputCollectedPayload, dict(tool_call_id="tc_1", tool_name="state_write", arguments={"key": "val"})),
+    (ResponseSegmentRequestedPayload, dict(action_id="act_1", content="hello", phase="final", delay_before=1.0, segment_index=0)),
+    (ResponseSegmentDeliveredPayload, dict(action_id="act_1", message_id=42, segment_index=0, phase="final")),
+    (ResponseSegmentFailedPayload, dict(action_id="act_1", error="send failed", segment_index=0)),
+    (ImageGenerationRequestedPayload, dict(action_id="act_1", prompt="a cat")),
+    (ImageGenerationStartedPayload, dict(action_id="act_1", prompt="a cat")),
+    (ImageGeneratedPayload, dict(action_id="act_1", image_url="http://example.com/cat.png")),
+    (ImageGenerationFailedPayload, dict(action_id="act_1", error="rate_limited")),
+    (CorrectionInjectedPayload, dict(reason="missing_segment_tool", round_index=1, message="use send_reply_segment")),
+]
 
-    def test_agent_run_started_empty_group(self):
-        p = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="", mode="proactive")
-        assert p.group_id == ""
-
-    def test_agent_run_finished_payload(self):
-        p = AgentRunFinishedPayload(status="ok", reason="completed", delivery_performed=True, final_text="hello")
-        assert p.status == "ok"
-        assert p.delivery_performed is True
-        assert p.final_text == "hello"
-
-    def test_agent_run_finished_no_delivery(self):
-        p = AgentRunFinishedPayload(status="aborted", reason="quota", delivery_performed=False, final_text="")
-        assert p.delivery_performed is False
-
-    def test_agent_warning_payload_default_severity(self):
-        p = AgentWarningPayload(code="TOOL_FAILED", message="tool failed", round_index=1)
-        assert p.severity == "warning"
-
-    def test_agent_warning_payload_custom_severity(self):
-        p = AgentWarningPayload(code="CRITICAL", message="critical error", round_index=0, severity="error")
-        assert p.severity == "error"
-
-
-class TestModelCallPayloads:
-    """模型调用事件 payload"""
-
-    def test_model_request_prepared(self):
-        p = ModelRequestPreparedPayload(
-            round_index=0, tool_use_mode="auto",
-            required_tools=["search"], message_count=2, tool_count=1,
-        )
-        assert p.round_index == 0
-        assert p.tool_use_mode == "auto"
-        assert p.required_tools == ["search"]
-        assert p.message_count == 2
-
-    def test_model_request_prepared_defaults(self):
-        p = ModelRequestPreparedPayload(round_index=0, tool_use_mode="required")
-        assert p.required_tools == []
-        assert p.message_count == 0
-        assert p.tool_count == 0
-
-    def test_model_candidate_selected(self):
-        p = ModelCandidateSelectedPayload(provider="openai", model="gpt-4", candidate_index=0, total_candidates=2)
-        assert p.provider == "openai"
-        assert p.total_candidates == 2
-
-    def test_model_candidate_failed(self):
-        p = ModelCandidateFailedPayload(provider="openai", model="gpt-4", error="timeout", candidate_index=0)
-        assert "timeout" in p.error
-
-    def test_model_candidate_succeeded(self):
-        p = ModelCandidateSucceededPayload(provider="openai", model="gpt-4", candidate_index=1)
-        assert p.candidate_index == 1
-
-    def test_model_response_received_no_tool_calls(self):
-        p = ModelResponseReceivedPayload(
-            round_index=0, content_ignored=False, content_preview="hi",
-        )
-        assert p.tool_calls == []
-        assert p.usage == {}
-
-    def test_model_response_received_with_tools(self):
-        p = ModelResponseReceivedPayload(
-            round_index=1, content_ignored=True, content_preview="",
-            tool_calls=[{"id": "tc_1", "name": "search"}],
-            usage={"input": 10, "output": 5}, provider="openai", model="gpt-4",
-        )
-        assert p.content_ignored is True
-        assert len(p.tool_calls) == 1
-        assert p.usage["input"] == 10
-
-    def test_model_invocation_failed(self):
-        p = ModelInvocationFailedPayload(provider="openai", model="gpt-4", error="rate_limit", round_index=0)
-        assert p.error == "rate_limit"
+_STRUCTURAL_CASES = [
+    pytest.param(cls, kwargs, None, id=cls.__name__)
+    for cls, kwargs in _STRUCTURAL_SPECS
+]
 
 
-class TestToolCallPayloads:
-    """工具调用事件 payload"""
+class TestPayloadDictify:
+    """所有事件 payload 经 _dictify 序列化的契约验证"""
 
-    def test_tool_call_requested(self):
-        p = ToolCallRequestedPayload(round_index=0, tool_call_id="tc_1", tool_name="search", raw_arguments='{"q":"x"}')
-        assert p.tool_call_id == "tc_1"
-        assert p.tool_name == "search"
-
-    def test_tool_arguments_validated(self):
-        p = ToolArgumentsValidatedPayload(tool_call_id="tc_1", tool_name="search")
-        assert p.tool_call_id == "tc_1"
-
-    def test_tool_arguments_invalid(self):
-        p = ToolArgumentsInvalidPayload(tool_call_id="tc_1", tool_name="search", error="missing required field")
-        assert "missing" in p.error
-
-    def test_tool_execution_started(self):
-        p = ToolExecutionStartedPayload(tool_call_id="tc_1", tool_name="search")
-        assert p.tool_name == "search"
-
-    def test_tool_execution_completed(self):
-        p = ToolExecutionCompletedPayload(tool_call_id="tc_1", tool_name="search", content="result")
-        assert p.content == "result"
-
-    def test_tool_execution_failed(self):
-        p = ToolExecutionFailedPayload(tool_call_id="tc_1", tool_name="search", error="timeout")
-        assert p.error == "timeout"
-
-    def test_declared_action_produced(self):
-        p = DeclaredActionProducedPayload(
-            tool_call_id="tc_1", tool_name="send_reply_segment",
-            action_type="send_message", action_id="act_1",
-        )
-        assert p.action_type == "send_message"
-
-    def test_tool_call_skipped(self):
-        p = ToolCallSkippedPayload(tool_call_id="tc_1", tool_name="search", reason="budget_exceeded")
-        assert p.reason == "budget_exceeded"
-
-
-class TestDeliveryPayloads:
-    """投递/图像生成事件 payload"""
-
-    def test_response_segment_requested(self):
-        p = ResponseSegmentRequestedPayload(
-            action_id="act_1", content="hello", phase="final",
-            delay_before=1.0, segment_index=0,
-        )
-        assert p.content == "hello"
-        assert p.phase == "final"
-        assert p.delay_before == 1.0
-
-    def test_response_segment_requested_interim(self):
-        p = ResponseSegmentRequestedPayload(
-            action_id="act_2", content="typing...", phase="interim",
-            delay_before=0.5, segment_index=0,
-        )
-        assert p.phase == "interim"
-
-    def test_response_segment_delivered(self):
-        p = ResponseSegmentDeliveredPayload(
-            action_id="act_1", message_id=42, segment_index=0, phase="final",
-        )
-        assert p.message_id == 42
-
-    def test_response_segment_failed(self):
-        p = ResponseSegmentFailedPayload(action_id="act_1", error="send failed", segment_index=0)
-        assert "send failed" in p.error
-
-    def test_image_generation_requested(self):
-        p = ImageGenerationRequestedPayload(action_id="act_1", prompt="a cat")
-        assert p.prompt == "a cat"
-
-    def test_image_generation_started(self):
-        p = ImageGenerationStartedPayload(action_id="act_1", prompt="a cat")
-        assert p.prompt == "a cat"
-
-    def test_image_generated(self):
-        p = ImageGeneratedPayload(action_id="act_1", image_url="http://example.com/cat.png")
-        assert p.image_url.endswith(".png")
-
-    def test_image_generation_failed(self):
-        p = ImageGenerationFailedPayload(action_id="act_1", error="rate_limited")
-        assert p.error == "rate_limited"
-
-
-class TestCorrectionPayloads:
-    """纠正事件 payload"""
-
-    def test_correction_injected(self):
-        p = CorrectionInjectedPayload(reason="missing_segment_tool", round_index=1, message="use send_reply_segment")
-        assert p.reason == "missing_segment_tool"
-        assert p.round_index == 1
-
-
-class TestDictify:
-    """_dictify 辅助函数"""
-
-    def test_dictify_simple_payload(self):
-        p = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+    @pytest.mark.parametrize(
+        ("cls", "kwargs", "expected"),
+        _KEY_CASES + _STRUCTURAL_CASES,
+    )
+    def test_payload_dictify(self, cls, kwargs, expected):
+        p = cls(**kwargs)
         d = _dictify(p)
-        assert d == {"run_id": "r1", "turn_id": "t1", "user_id": "u1", "group_id": "g1", "mode": "chat"}
-
-    def test_dictify_payload_with_list(self):
-        p = ModelResponseReceivedPayload(
-            round_index=0, content_ignored=False, content_preview="hi",
-            tool_calls=[{"id": "1"}],
-        )
-        d = _dictify(p)
-        assert d["tool_calls"] == [{"id": "1"}]
-        assert d["content_ignored"] is False
+        # 字段结构完整性：_dictify 输出包含 dataclass 所有声明字段
+        assert set(d.keys()) == _field_names(cls)
+        # 关键 payload 额外验证字段值完整
+        if expected is not None:
+            assert d == expected

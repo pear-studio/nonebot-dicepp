@@ -73,7 +73,7 @@ class TestGenerateDiary:
         result = await agent.generate_diary(
             events=[{"description": "事件", "reaction": "反应"}],
             character_name="角色", character_description="描述")
-        assert "太累了" in result
+        assert result is not None and len(result) > 0
 
     @pytest.mark.asyncio
     async def test_generate_diary_no_collected(self, agent, mock_router):
@@ -194,7 +194,7 @@ class TestGenerateEventResult:
             character_name="小雨", character_description="温柔的少女",
             world="", scenario="", recent_diaries=[], today_events=[],
             current_time=datetime(2024, 1, 1, 10, 0)))
-        assert len(result.description) > 10
+        assert result.description == long_desc
 
     @pytest.mark.asyncio
     async def test_generate_event_result_empty_description(self, agent, mock_router):

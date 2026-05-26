@@ -77,18 +77,6 @@ async def test_generate_share_message_truncate_long(agent, mock_router, base_con
 
 
 @pytest.mark.asyncio
-async def test_generate_share_message_llm_error_returns_none(agent, mock_router, base_context, monkeypatch):
-    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
-
-    async def failing_run(self, messages, user_id, group_id, tool_registry, **kwargs):
-        raise Exception("LLM 错误")
-
-    monkeypatch.setattr(AgentRuntime, "run", failing_run)
-    result = await agent.generate_share_message(base_context)
-    assert result is None
-
-
-@pytest.mark.asyncio
 async def test_generate_share_message_empty_message(agent, mock_router, base_context):
     mock_router._pending_tool_args = {"message": ""}
 
@@ -98,8 +86,20 @@ async def test_generate_share_message_empty_message(agent, mock_router, base_con
 
 
 @pytest.mark.asyncio
-async def test_generate_share_message_no_collected(agent, mock_router, base_context):
-    # _pending_tool_args 保持 None → 模拟 LLM 未调用工具
+@pytest.mark.parametrize(
+    "scenario,setup",
+    [
+        ("llm_error", lambda agent, mock_router, monkeypatch: monkeypatch.setattr(
+            "plugins.DicePP.module.persona.agent.runtime.AgentRuntime.run",
+            lambda self, messages, user_id, group_id, tool_registry, **kwargs: (_ for _ in ()).throw(Exception("LLM 错误")),
+        )),
+        ("no_collected", lambda agent, mock_router, monkeypatch: None),
+    ],
+)
+async def test_generate_share_message_returns_none(
+    agent, mock_router, base_context, monkeypatch, scenario, setup,
+):
+    setup(agent, mock_router, monkeypatch)
     result = await agent.generate_share_message(base_context)
     assert result is None
 

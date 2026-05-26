@@ -11,18 +11,15 @@ from utils.time import (
 class TestStrToDatetime:
     def test_standard_format(self):
         result = str_to_datetime("2024/01/15 10:30:45")
-        assert isinstance(result, datetime.datetime)
-        assert result.year == 2024
-        assert result.month == 1
-        assert result.day == 15
+        assert result == datetime.datetime(2024, 1, 15, 10, 30, 45, tzinfo=china_tz)
 
     def test_dash_format(self):
         result = str_to_datetime("2024-01-15 10:30:45")
-        assert isinstance(result, datetime.datetime)
+        assert result == datetime.datetime(2024, 1, 15, 10, 30, 45, tzinfo=china_tz)
 
     def test_underscore_format(self):
         result = str_to_datetime("2024_01_15 10:30:45")
-        assert isinstance(result, datetime.datetime)
+        assert result == datetime.datetime(2024, 1, 15, 10, 30, 45, tzinfo=china_tz)
 
     def test_invalid_format(self):
         with pytest.raises(ValueError):
@@ -39,7 +36,7 @@ class TestDatetimeToStr:
     def test_with_timezone(self):
         dt = datetime.datetime(2024, 1, 15, 10, 30, 45, tzinfo=china_tz)
         result = datetime_to_str(dt)
-        assert "2024" in result
+        assert result == "2024/01/15 10:30:45"
 
 
 @pytest.mark.unit
@@ -47,6 +44,7 @@ class TestDatetimeToInt:
     def test_conversion(self):
         dt = datetime.datetime(2024, 1, 15, 10, 30, 45, tzinfo=china_tz)
         result = datetime_to_int(dt)
+        # 精确值依赖 time.mktime 的本地时区行为，无法固定预期值
         assert isinstance(result, int)
         assert result > 0
 
@@ -56,14 +54,14 @@ class TestIntToDatetime:
     def test_conversion(self):
         timestamp = 1705299045
         result = int_to_datetime(timestamp)
-        assert isinstance(result, datetime.datetime)
-        assert result.year == 2024
+        assert result == datetime.datetime(2024, 1, 15, 14, 10, 45, tzinfo=china_tz)
 
 
 @pytest.mark.unit
 class TestGetCurrentDate:
     def test_get_current_date_raw(self):
         result = get_current_date_raw()
+        # 精确值依赖当前运行时间，无法固定预期值
         assert isinstance(result, datetime.datetime)
 
     def test_timezone(self):
@@ -84,7 +82,7 @@ class TestDatetimeToStrWeek:
     def test_conversion(self):
         dt = datetime.datetime(2024, 1, 15, 10, 30, 45, tzinfo=china_tz)
         result = datetime_to_str_week(dt)
-        assert "2024" in result
+        assert result == "2024_03"
 
 
 @pytest.mark.unit
