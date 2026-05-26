@@ -70,10 +70,6 @@ class AgentRuntime:
         timeout: Optional[int] = None,
     ) -> AgentRunResult:
         """执行一次 Agent run（chat 路径）。"""
-        run_id = new_run_id()
-        turn_id = new_turn_id()
-
-        # 配额预检
         if self._router.quota_check_enabled and self._router.data_store:
             exempt = await self._is_quota_exempt(user_id, group_id)
             if not exempt:
@@ -84,79 +80,15 @@ class AgentRuntime:
                 if count >= self._router.daily_limit:
                     raise QuotaExceeded(f"今日额度已用完 ({count}/{self._router.daily_limit})")
 
-        # 初始化 state
-        state = AgentRunState(
-            run_id=run_id,
-            turn_id=turn_id,
-            user_id=user_id,
-            group_id=group_id,
-            mode="segmented_chat",
-        )
-
-        # 事件存储
-        event_store = EventStore(self._store)
-
-        # 事件总线 + sinks
-        usage_sink = UsageSink(self._router)
-        summary_sink = RunSummarySink(event_store)
-
-        sinks = [usage_sink, summary_sink]
-        bus = AgentEventBus(event_store=event_store, sinks=sinks)
-
-        # action sinks
-        delivery_sink = DeliverySink(port=self._port, store=self._store) if self._port else None
-        image_sink = ImageGenerationSink(router=self._router)
-
-        # LLMGateway
-        gateway = LLMGateway(router=self._router, event_bus=bus)
-
-        # ToolExecutor
-        executor = ToolExecutor(registry=tool_registry, event_bus=bus)
-
-        # Loop
-        loop = AgentLoop(
-            llm_gateway=gateway,
-            tool_executor=executor,
-            event_bus=bus,
-            delivery_sink=delivery_sink,
-            image_sink=image_sink,
-            limits=self._limits,
-        )
-
-        # 写 persona_agent_runs
-        await event_store.write_run(
-            run_id=run_id, turn_id=turn_id,
-            user_id=user_id, group_id=group_id,
-            mode="segmented_chat",
-        )
-
-        # 事件：RunStarted
-        await bus.emit(
-            "AgentRunStarted",
-            AgentRunStartedPayload(
-                run_id=run_id, turn_id=turn_id,
-                user_id=user_id, group_id=group_id,
-                mode="segmented_chat",
-            ),
-            state,
-        )
-
-        # 工具定义
-        tool_defs = tools or tool_registry.get_openai_schemas()
-
-        # 执行 loop
-        result = await loop.run(
-            messages=messages,
-            state=state,
-            tools=tool_defs,
-            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+        return await self._run_internal(
+            messages=messages, user_id=user_id, group_id=group_id,
+            tool_registry=tool_registry, mode="segmented_chat",
+            tools=tools, tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
             required_tools=["send_reply_segment"],
-            temperature=temperature,
-            timeout=timeout,
             selection=SelectionPolicy.CHAT,
+            temperature=temperature, timeout=timeout,
+            bill_usage=True, with_action_sinks=True,
         )
-
-        return result
 
     async def _is_quota_exempt(self, user_id: str, group_id: str) -> bool:
         """检查用户/群是否在白名单中，豁免配额限制。"""
@@ -194,76 +126,85 @@ class AgentRuntime:
         - 不执行配额预检（配额由调用方控制）
         - bill_usage=False 时不挂载 UsageSink，背景任务不计入用量
         """
+        return await self._run_internal(
+            messages=messages, user_id=user_id, group_id=group_id,
+            tool_registry=tool_registry, mode=mode,
+            tools=tools, tool_use_mode=tool_use_mode,
+            required_tools=required_tools, selection=selection,
+            temperature=temperature, timeout=timeout,
+            bill_usage=bill_usage, with_action_sinks=False,
+        )
+
+    async def _run_internal(
+        self,
+        messages: List[dict],
+        user_id: str,
+        group_id: str,
+        tool_registry: ToolRegistry,
+        *,
+        mode: str,
+        tools: Optional[List[dict]],
+        tool_use_mode: ToolUseMode,
+        required_tools: Optional[List[str]],
+        selection: SelectionPolicy,
+        temperature: Optional[float],
+        timeout: Optional[int],
+        bill_usage: bool,
+        with_action_sinks: bool,
+    ) -> AgentRunResult:
+        """公共装配逻辑：创建 state/event_store/bus/gateway/executor/loop，执行并返回。"""
         run_id = new_run_id()
         turn_id = new_turn_id()
 
-        # 初始化 state
         state = AgentRunState(
-            run_id=run_id,
-            turn_id=turn_id,
-            user_id=user_id,
-            group_id=group_id,
-            mode=mode,
+            run_id=run_id, turn_id=turn_id,
+            user_id=user_id, group_id=group_id, mode=mode,
         )
 
-        # 事件存储
         event_store = EventStore(self._store)
 
-        # 事件总线 + sinks（通用路径默认不扣用量）
         summary_sink = RunSummarySink(event_store)
-        sinks = [summary_sink]
+        sinks: List = [summary_sink]
         if bill_usage:
             sinks.insert(0, UsageSink(self._router))
         bus = AgentEventBus(event_store=event_store, sinks=sinks)
 
-        # LLMGateway
         gateway = LLMGateway(router=self._router, event_bus=bus)
-
-        # ToolExecutor
         executor = ToolExecutor(registry=tool_registry, event_bus=bus)
 
-        # Loop（通用路径不需要 DeliverySink / ImageGenerationSink）
+        delivery_sink = None
+        image_sink = None
+        if with_action_sinks:
+            delivery_sink = DeliverySink(port=self._port, store=self._store) if self._port else None
+            image_sink = ImageGenerationSink(router=self._router)
+
         loop = AgentLoop(
-            llm_gateway=gateway,
-            tool_executor=executor,
-            event_bus=bus,
+            llm_gateway=gateway, tool_executor=executor, event_bus=bus,
+            delivery_sink=delivery_sink, image_sink=image_sink,
             limits=self._limits,
         )
 
-        # 写 persona_agent_runs
         await event_store.write_run(
             run_id=run_id, turn_id=turn_id,
-            user_id=user_id, group_id=group_id,
-            mode=mode,
+            user_id=user_id, group_id=group_id, mode=mode,
         )
 
-        # 事件：RunStarted
         await bus.emit(
             "AgentRunStarted",
             AgentRunStartedPayload(
                 run_id=run_id, turn_id=turn_id,
-                user_id=user_id, group_id=group_id,
-                mode=mode,
+                user_id=user_id, group_id=group_id, mode=mode,
             ),
             state,
         )
 
-        # 工具定义
         tool_defs = tools or tool_registry.get_openai_schemas()
 
-        # 执行 loop
-        result = await loop.run(
-            messages=messages,
-            state=state,
-            tools=tool_defs,
-            tool_use_mode=tool_use_mode,
-            required_tools=required_tools,
-            temperature=temperature,
-            timeout=timeout,
-            selection=selection,
+        return await loop.run(
+            messages=messages, state=state, tools=tool_defs,
+            tool_use_mode=tool_use_mode, required_tools=required_tools,
+            temperature=temperature, timeout=timeout, selection=selection,
         )
-
-        return result
 
     @staticmethod
     def build_tool_registry(

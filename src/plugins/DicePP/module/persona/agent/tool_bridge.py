@@ -6,6 +6,7 @@ M3 清理时，各工具应直接创建 ToolSpec 并注册到 agent.ToolRegistry
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Type
 
 from pydantic import BaseModel, Field
@@ -79,7 +80,7 @@ class ScoreRelationshipArgs(BaseModel):
 
 
 class RecordEvaluationArgs(BaseModel):
-    """record_evaluation 参数 — ActionEvaluator 当前使用"""
+    """记录行动可行性评估结果"""
     result: Literal["approved", "rejected", "deferred"] = Field(..., description="评估结果")
     reason: str = Field(default="", description="评估理由")
 
@@ -221,14 +222,22 @@ def build_registry(
 # ── 结构化采集工具专用注册 ──────────────────────────────────────
 
 
-_COLLECTING_TOOL_META: List[tuple] = [
-    ("record_event", "记录生成的生活事件及其对角色状态的影响", RecordEventArgs),
-    ("record_reaction", "记录角色对事件的内心反应、分享欲望、行动倾向和意向更新", RecordReactionArgs),
-    ("record_diary_entry", "记录日记内容", RecordDiaryEntryArgs),
-    ("record_share_message", "调用此工具输出你要发给对方的分享消息。20-60字的第一人称口语消息", RecordShareMessageArgs),
-    ("record_score", "记录评分结果：好感度变化和用户事实提取", RecordScoreArgs),
-    ("record_evaluation", "记录行动可行性评估结果", RecordEvaluationArgs),
+_COLLECTING_MODELS: List[Type[BaseModel]] = [
+    RecordEventArgs,
+    RecordReactionArgs,
+    RecordDiaryEntryArgs,
+    RecordShareMessageArgs,
+    RecordScoreArgs,
+    RecordEvaluationArgs,
 ]
+
+
+def _model_to_tool_name(model: Type[BaseModel]) -> str:
+    """从 Pydantic model 类名推导工具名（PascalCase → snake_case，去 Args 后缀）。"""
+    name = model.__name__
+    if name.endswith("Args"):
+        name = name[:-4]
+    return re.sub(r'(?<=[a-z])([A-Z])', r'_\1', name).lower()
 
 
 def build_collecting_registry(
@@ -247,7 +256,8 @@ def build_collecting_registry(
     """
     reg = ToolRegistry()
 
-    for name, desc, args_schema in _COLLECTING_TOOL_META:
+    for model in _COLLECTING_MODELS:
+        name = _model_to_tool_name(model)
         if tool_names is not None and name not in tool_names:
             continue
         async def _exec(**kwargs: Any) -> str:
@@ -255,8 +265,8 @@ def build_collecting_registry(
 
         spec = ToolSpec(
             name=name,
-            description=desc,
-            args_schema=args_schema,
+            description=model.__doc__ or "",
+            args_schema=model,
             effect=EffectKind.STATE_WRITE,
             executor=_exec,
         )
