@@ -72,24 +72,39 @@ _DB_TABLE = [
 
 
 def _derive_db_build(str_val: int, siz_val: int) -> Tuple[str, int]:
+    """COC7 伤害加值 + 体格。表内查；525+ 时按规则每 80 +1d6/+1。"""
     total = str_val + siz_val
     for upper, db, build in _DB_TABLE:
         if total <= upper:
             return db, build
-    # 525+：每多 80 点加 1d6 / +1
-    extra = (total - 444) // 80
-    db = f"+{4 + extra}d6"
-    build = 5 + extra
+    # 525+：表外延伸。524 对应 +5d6/+6，525 起进入 +6d6/+7 这一档，
+    # 每多 80 再加 1d6/+1。
+    # extra=0 → 525~604 → +6d6/+7
+    # extra=1 → 605~684 → +7d6/+8
+    extra = (total - 525) // 80
+    db = f"+{6 + extra}d6"
+    build = 7 + extra
     return db, build
 
 
 def _derive_mov(str_val: int, dex_val: int, siz_val: int) -> int:
-    """成人 MOV，简化版（不考虑年龄修正，.coc 没有年龄输入）"""
+    """成人 MOV，简化版（不考虑年龄修正，.coc 没有年龄输入）。
+
+    COC7 规则书 (核心 33 页)：
+      - 若 STR 与 DEX **均 < SIZ**           → MOV 7
+      - 若 STR 与 DEX **均 ≥ SIZ**           → MOV 9
+        （正好等于的边界 case 也算，只要 ≥；其中至少一个严格 > 才不退化）
+      - 其余（STR/DEX 一高一低于 SIZ）        → MOV 8
+
+    旧实现错误地要求两者都严格 `>`，把例如 STR=DEX=SIZ 这种平衡角色
+    意外降到 MOV=8。修复后例：STR=70 DEX=65 SIZ=65 返回 9。
+    """
     if str_val < siz_val and dex_val < siz_val:
         return 7
-    if str_val > siz_val and dex_val > siz_val:
+    if (str_val >= siz_val and dex_val >= siz_val
+            and (str_val > siz_val or dex_val > siz_val)):
         return 9
-    # STR/DEX 任一 >= SIZ
+    # 其他：STR/DEX 一边高一边低 → MOV 8
     return 8
 
 
