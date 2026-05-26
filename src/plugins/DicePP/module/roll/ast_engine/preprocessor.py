@@ -9,7 +9,6 @@ This handles two categories of transformations:
 
 The preprocessor is engine-agnostic in principle, but lives inside ast_engine
 so that every call through the AST engine automatically benefits from it.
-The legacy engine retains its own preprocess_roll_exp() for backward compat.
 """
 
 import re

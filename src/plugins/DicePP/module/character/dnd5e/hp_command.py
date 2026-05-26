@@ -12,7 +12,8 @@ from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 
 from utils.string import match_substring
-from module.roll import exec_roll_exp, RollDiceError, RollResult
+from module.roll import RollDiceError, RollResult
+from module.roll.ast_engine.adapter import exec_roll_exp_unified
 from core.data.models import DNDCharacter, NPCHealth, HPInfo
 from module.character.dnd5e.services import HPService
 
@@ -162,7 +163,7 @@ class HPCommand(UserCommandBase):
             hp_temp_mod_result: Optional[RollResult] = None
             if temp_match:
                 try:
-                    hp_temp_mod_result = exec_roll_exp(temp_match.group(1))
+                    hp_temp_mod_result = exec_roll_exp_unified(temp_match.group(1))
                 except RollDiceError as e:
                     feedback = self.format_loc(LOC_HP_MOD_ERR, error=e.info)
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]
@@ -179,10 +180,10 @@ class HPCommand(UserCommandBase):
                 arg_list = arg_str.split("/", 1)
                 try:
                     if len(arg_list) == 2:
-                        hp_cur_mod_result = exec_roll_exp(arg_list[0])
-                        hp_max_mod_result = exec_roll_exp(arg_list[1])
+                        hp_cur_mod_result = exec_roll_exp_unified(arg_list[0])
+                        hp_max_mod_result = exec_roll_exp_unified(arg_list[1])
                     else:
-                        hp_cur_mod_result = exec_roll_exp(arg_str)
+                        hp_cur_mod_result = exec_roll_exp_unified(arg_str)
                 except RollDiceError as e:
                     feedback = self.format_loc(LOC_HP_MOD_ERR, error=e.info)
                     return [BotSendMsgCommand(self.bot.account, feedback, [port])]

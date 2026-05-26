@@ -157,7 +157,7 @@ class TestRollResultEdgeCases:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# _build_roll_result() 字段填充口径测试
+# build_roll_result() 字段填充口径测试
 # 覆盖 Fix 1（float_state）、Fix 2（is_pure 判定）、Fix 3（统计口径文档化）
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -167,12 +167,11 @@ class TestBuildRollResult:
 
     def _run(self, expr: str, roller=None):
         """用固定 dice roller 执行表达式，返回 RollResult。"""
-        from module.roll.expression import exec_roll_exp
         from module.roll.ast_engine.adapter import exec_roll_exp_ast
-        from module.roll.expression import _build_roll_result
+        from module.roll.ast_engine.adapter import build_roll_result
 
         ast_result = exec_roll_exp_ast(expr, dice_roller=roller)
-        return _build_roll_result(ast_result)
+        return build_roll_result(ast_result)
 
     # ── Fix 1: float_state ────────────────────────────────────────────────────
 
@@ -321,17 +320,17 @@ class TestBuildRollResult:
         """
         import logging
         from unittest.mock import patch
-        from module.roll.expression import exec_roll_exp
+        from module.roll.ast_engine.adapter import exec_roll_exp_unified
         from module.roll.roll_utils import RollDiceError
 
         with patch(
-            "module.roll.expression._build_roll_result",
+            "module.roll.ast_engine.adapter.build_roll_result",
             side_effect=RuntimeError("simulated internal bug"),
         ):
             with caplog.at_level(logging.ERROR):
                 # 新行为：非预期错误应抛出 RollDiceError，不 fallback
                 with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
-                    exec_roll_exp("1D20")
+                    exec_roll_exp_unified("1D20")
 
         # 应留有 ERROR 日志，包含 roll_engine=ast
         assert any("roll_engine=ast" in r.message for r in caplog.records), (

@@ -5,7 +5,12 @@ from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from module.roll import RollResult, RollExpression, preprocess_roll_exp, parse_roll_exp, RollDiceError, is_roll_exp, sift_roll_exp_and_reason
+from module.roll import RollResult, RollDiceError
+from module.roll.ast_engine.adapter import (
+    exec_roll_exp_unified,
+    is_roll_exp,
+    sift_roll_exp_and_reason,
+)
 
 from core.data.models import InitList, InitEntity, InitiativeError, HPInfo
 
@@ -211,6 +216,8 @@ class InitiativeCommand(UserCommandBase):
                 # name = await self.bot.get_nickname(meta.user_id, meta.group_id)
                 name = "self"
                 owner_id = meta.user_id
+            if not exp_str:
+                exp_str = "D20"
 
             # 处理复数先攻
             name_dict: Dict[str, RollResult] = {}
@@ -243,12 +250,6 @@ class InitiativeCommand(UserCommandBase):
                     final_exp_str = final_exp_str + n[split_index:]
                     n = n[:split_index]
 
-                # 得到先攻结果
-                try:
-                    roll_exp: RollExpression = parse_roll_exp(preprocess_roll_exp(final_exp_str))
-                except RollDiceError as e:  # 无效的掷骰表达式
-                    return [BotSendMsgCommand(self.bot.account, e.info, [port])]
-
                 if not n:
                     continue
                 if "#" in n:  # 对于 .ri 3#地精 这种情况
@@ -260,10 +261,16 @@ class InitiativeCommand(UserCommandBase):
                         return [BotSendMsgCommand(self.bot.account, f"{num}不是一个有效的数字 (1~10)", [port])]
                     for i in range(num):
                         # 获取先攻结果
-                        name_dict[n + chr(ord("a") + i)] = roll_exp.get_result()
+                        try:
+                            name_dict[n + chr(ord("a") + i)] = exec_roll_exp_unified(final_exp_str)
+                        except RollDiceError as e:
+                            return [BotSendMsgCommand(self.bot.account, e.info, [port])]
                 else:
                     # 获取先攻结果
-                    name_dict[n] = roll_exp.get_result()
+                    try:
+                        name_dict[n] = exec_roll_exp_unified(final_exp_str)
+                    except RollDiceError as e:
+                        return [BotSendMsgCommand(self.bot.account, e.info, [port])]
 
             result_dict: Dict[str, Tuple[int, str]] = dict()
             for name, res in name_dict.items():

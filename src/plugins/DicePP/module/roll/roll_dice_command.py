@@ -20,7 +20,8 @@ _ROLL_PARSER = CommandTextParser(
 from module.roll.roll_const import MULTI_ROLL_LIMIT
 from module.roll.roll_parse_args import RollParseArgs, _parse_roll_args
 
-from module.roll import RollResult, preprocess_roll_exp, RollDiceError
+from module.roll import RollResult, RollDiceError
+from module.roll.ast_engine.adapter import exec_roll_exp_unified, preprocess_roll_exp
 from module.roll.ast_engine import build_sampling_plan, sample_from_plan
 from module.roll.ast_engine.errors import RollEngineError
 from module.roll.default_dice import (
@@ -177,13 +178,8 @@ class RollDiceCommand(UserCommandBase):
                     dice_log(f"[KarmaDice] 加载群配置失败: {exc}")
 
             def _exec_ast_once() -> RollResult:
-                """通过 exec_roll_exp() 执行当前 exp_str（含完整异常兜底）。
-
-                exec_roll_exp() 已统一处理 RollEngineError 和非预期内部异常，
-                全部包装为 RollDiceError 抛出，避免命令层异常外泄。
-                """
-                from module.roll.expression import exec_roll_exp as _exec_roll_exp
-                return _exec_roll_exp(exp_str)
+                """通过 AST 统一入口执行当前 exp_str（含完整异常兜底）。"""
+                return exec_roll_exp_unified(exp_str)
 
             if karma_manager:
                 user_token = meta.user_id or "_anon_"

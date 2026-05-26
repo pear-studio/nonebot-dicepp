@@ -5,7 +5,8 @@
 负责异常转换和结果格式化。
 """
 from nonebot.log import logger
-from module.roll import exec_roll_exp, RollDiceError
+from module.roll import RollDiceError
+from module.roll.ast_engine.adapter import exec_roll_exp_unified
 from .context import ToolContext
 from .registry import ToolDef
 
@@ -28,7 +29,7 @@ class RollAdapter:
             return {"success": False, "error": "表达式无效或过长（最大100字符）"}
 
         try:
-            result = exec_roll_exp(expression)
+            result = exec_roll_exp_unified(expression)
             return {
                 "success": True,
                 "value": result.get_val(),
