@@ -53,7 +53,7 @@ class TestDeliverySink:
         action = SendMessageAction(content="hello", phase="final", segment_index=0)
         result = await sink.handle_send(action, "u1", "g1", "r1", "t1")
 
-        assert result == ""
+        assert result is True
         port.send.assert_called_once_with(
             user_id="u1", group_id="g1", content="hello",
             skip_history_record=True,
@@ -105,7 +105,7 @@ class TestDeliverySink:
         action = SendMessageAction(content="fail")
         result = await sink.handle_send(action, "u1", "g1", "r1", "t1")
 
-        assert result == ""
+        assert result is False
         port.send.assert_called_once()
         # 发送失败时，不写 persona_messages
         assert not store.add_message_stream.called
@@ -120,7 +120,7 @@ class TestDeliverySink:
         action = SendMessageAction(content="db fail")
         # 异常不应传播
         result = await sink.handle_send(action, "u1", "g1", "r1", "t1")
-        assert result == ""
+        assert result is True
 
 
 class TestImageGenerationSink:

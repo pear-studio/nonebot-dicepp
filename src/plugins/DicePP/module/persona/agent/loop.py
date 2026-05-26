@@ -123,6 +123,8 @@ class AgentLoop:
         round_index = 0
         total_tokens_in = 0
         total_tokens_out = 0
+        provider = ""
+        model = ""
 
         while round_index < self._limits.max_tool_rounds:
             # ── 构造 LLM 请求 ──
@@ -156,19 +158,7 @@ class AgentLoop:
                 )
             except Exception as e:
                 logger.error(f"AgentLoop LLM 调用失败: {e}")
-                await self._event_bus.emit(
-                    "AgentRunFailed",
-                    AgentRunFinishedPayload(
-                        status="failed",
-                        reason="llm_error",
-                        delivery_performed=False,
-                        final_text="",
-                        tokens_input=total_tokens_in,
-                        tokens_output=total_tokens_out,
-                    ),
-                    state,
-                )
-                return self._build_result(state, "failed", "llm_error", total_tokens_in, total_tokens_out)
+                return await self._finish(state, "failed", "llm_error", total_tokens_in, total_tokens_out, is_error=True)
 
             total_tokens_in += result.usage.get("input", 0)
             total_tokens_out += result.usage.get("output", 0)
@@ -214,7 +204,7 @@ class AgentLoop:
                     ),
                     state,
                 )
-                return self._build_result(state, "max_corrections",
+                return await self._finish(state, "max_corrections",
                                           "required_tool_missing",
                                           total_tokens_in, total_tokens_out,
                                           provider, model)
@@ -225,26 +215,12 @@ class AgentLoop:
                 state.final_text = final_text
                 state.delivery_performed = True
                 state.final_reason = "direct_content"
-                await self._event_bus.emit(
-                    "AgentRunFinished",
-                    AgentRunFinishedPayload(
-                        status="completed",
-                        reason="direct_content",
-                        delivery_performed=True,
-                        final_text=final_text,
-                        tokens_input=total_tokens_in,
-                        tokens_output=total_tokens_out,
-                        provider=provider,
-                        model=model,
-                    ),
-                    state,
-                )
-                return self._build_result(state, "completed", "direct_content",
+                return await self._finish(state, "completed", "direct_content",
                                           total_tokens_in, total_tokens_out, provider, model)
 
             # ── 无工具 + 无内容（不应发生，兜底返回） ──
             if not tool_calls and not content.strip():
-                return self._build_result(state, "completed", "empty_response",
+                return await self._finish(state, "completed", "empty_response",
                                           total_tokens_in, total_tokens_out, provider, model)
 
             # ── REQUIRED_ONE_OF 校验：本轮 tool_calls 必须命中 required_tools ──
@@ -284,10 +260,16 @@ class AgentLoop:
                         ),
                         state,
                     )
-                    return self._build_result(state, "max_corrections",
+                    return await self._finish(state, "max_corrections",
                                               "required_tool_mismatch",
                                               total_tokens_in, total_tokens_out,
                                               provider, model)
+
+            # ── structured_collect：只执行 required_tools 中的工具，防止同轮混入非目标工具数据 ──
+            if state.mode == "structured_collect" and required_tools:
+                tool_calls = [tc for tc in tool_calls if tc["name"] in required_tools]
+                if not tool_calls:
+                    continue
 
             # ── 有限工具轮次：截断 ──
             if len(tool_calls) > self._limits.max_tools_per_round:
@@ -358,7 +340,7 @@ class AgentLoop:
                         action_id=action_id,
                     )
 
-                    await self._delivery.handle_send(
+                    delivery_ok = await self._delivery.handle_send(
                         send_action,
                         state.user_id,
                         state.group_id,
@@ -366,8 +348,11 @@ class AgentLoop:
                         state.turn_id,
                     )
 
-                    delivery_performed_this_round = True
-                    state.delivery_performed = True
+                    if delivery_ok:
+                        delivery_performed_this_round = True
+                        state.delivery_performed = True
+                    else:
+                        state.sink_failures.append(f"send_reply_segment:{send_action.action_id}")
 
                     if phase == "interim":
                         interim_found = True
@@ -410,22 +395,7 @@ class AgentLoop:
 
             # ── 判断下一步 ──
             if state.final_reason == "terminal_final_segment":
-                # final segment 已发送，正常结束
-                await self._event_bus.emit(
-                    "AgentRunFinished",
-                    AgentRunFinishedPayload(
-                        status="completed",
-                        reason="terminal_final_segment",
-                        delivery_performed=True,
-                        final_text=state.final_text,
-                        tokens_input=total_tokens_in,
-                        tokens_output=total_tokens_out,
-                        provider=provider,
-                        model=model,
-                    ),
-                    state,
-                )
-                return self._build_result(state, "completed", "terminal_final_segment",
+                return await self._finish(state, "completed", "terminal_final_segment",
                                           total_tokens_in, total_tokens_out, provider, model)
 
             if interim_found and not has_pending_observation:
@@ -458,7 +428,7 @@ class AgentLoop:
                         ),
                         state,
                     )
-                    return self._build_result(state, "max_corrections",
+                    return await self._finish(state, "max_corrections",
                                               "interim_corrections_exhausted",
                                               total_tokens_in, total_tokens_out,
                                               provider, model)
@@ -472,34 +442,52 @@ class AgentLoop:
                     and required_tools
                     and any(tc["name"] in required_tools for tc in tool_calls)):
                 state.final_reason = "structured_collect_completed"
-                await self._event_bus.emit(
-                    "AgentRunFinished",
-                    AgentRunFinishedPayload(
-                        status="completed",
-                        reason="structured_collect_completed",
-                        delivery_performed=False,
-                        final_text="",
-                        tokens_input=total_tokens_in,
-                        tokens_output=total_tokens_out,
-                        provider=provider,
-                        model=model,
-                    ),
-                    state,
-                )
-                return self._build_result(state, "completed", "structured_collect_completed",
+                return await self._finish(state, "completed", "structured_collect_completed",
                                           total_tokens_in, total_tokens_out, provider, model)
 
             # ── 达到最大轮次 ──
             if round_index >= self._limits.max_tool_rounds:
-                return self._build_result(state, "max_rounds", "max_tool_rounds",
+                return await self._finish(state, "max_rounds", "max_tool_rounds",
                                           total_tokens_in, total_tokens_out, provider, model)
 
             # 一般继续
             continue
 
         # ── 循环结束（max_tool_rounds 耗尽） ──
-        return self._build_result(state, "max_rounds", "max_tool_rounds",
+        return await self._finish(state, "max_rounds", "max_tool_rounds",
                                   total_tokens_in, total_tokens_out, provider, model)
+
+    # ── 终止路径 ────────────────────────────────────────────────
+
+    async def _finish(
+        self,
+        state: AgentRunState,
+        status: str,
+        reason: str,
+        tokens_in: int,
+        tokens_out: int,
+        provider: str = "",
+        model: str = "",
+        is_error: bool = False,
+    ) -> AgentRunResult:
+        """统一终止路径：emit terminal event + build result。所有 return 必须走此方法。"""
+        event_type = "AgentRunFailed" if is_error else "AgentRunFinished"
+        event_status = "failed" if is_error else "completed"
+        await self._event_bus.emit(
+            event_type,
+            AgentRunFinishedPayload(
+                status=event_status,
+                reason=reason,
+                delivery_performed=state.delivery_performed,
+                final_text=state.final_text,
+                tokens_input=tokens_in,
+                tokens_output=tokens_out,
+                provider=provider,
+                model=model,
+            ),
+            state,
+        )
+        return self._build_result(state, status, reason, tokens_in, tokens_out, provider, model)
 
     # ── 工具方法 ────────────────────────────────────────────────
 

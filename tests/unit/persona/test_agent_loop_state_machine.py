@@ -66,7 +66,7 @@ def mock_event_bus():
 @pytest.fixture
 def mock_delivery():
     sink = Mock(spec=DeliverySink)
-    sink.handle_send = AsyncMock(return_value="")
+    sink.handle_send = AsyncMock(return_value=True)
     return sink
 
 

@@ -38,11 +38,11 @@ class DeliverySink:
 
     async def handle_send(self, action: SendMessageAction,
                           user_id: str, group_id: str,
-                          run_id: str, turn_id: str) -> str:
+                          run_id: str, turn_id: str) -> bool:
         """发送消息，写 persona_messages。
 
         Returns:
-            observation 文本（始终为空字符串，send_reply_segment 不回填模型）
+            True 表示投递成功，False 表示投递失败。
         """
         # 发送消息 (MessagePort.send 负责 NoneBot 投递)
         success = await self.port.send(
@@ -69,10 +69,10 @@ class DeliverySink:
                 )
             except Exception as e:
                 logger.warning(f"DeliverySink 写 persona_messages 失败: {e}")
+            return True
         else:
             logger.warning(f"DeliverySink 发送失败: run={run_id}, phase={action.phase}")
-
-        return ""
+            return False
 
 
 # ── ImageGenerationSink ─────────────────────────────────────────
@@ -172,6 +172,7 @@ class RunSummarySink:
                 "finished_at": event.created_at,
                 "warning_count": self._warning_count,
                 "sink_failure_count": len(state.sink_failures),
+                "tool_rounds": state.tool_rounds,
             }
 
             final_reason = payload.get("reason", "")

@@ -797,7 +797,7 @@ class EventGenerationAgent:
             runtime = AgentRuntime(
                 router=llm_router,
                 store=store,
-                limits=AgentRunLimits(max_tool_rounds=0),
+                limits=AgentRunLimits(max_tool_rounds=1),
             )
 
             result = await runtime.run(

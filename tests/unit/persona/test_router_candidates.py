@@ -11,7 +11,7 @@ def _make_model_config(name, category="llm", capabilities=None,
     mc = MagicMock()
     mc.name = name
     mc.category = category
-    mc.capabilities = capabilities or ["text"]
+    mc.capabilities = capabilities or ["text", "tool_calls"]
     mc.quality = quality
     mc.cost = cost
     mc.circuit_breaker = circuit_breaker
