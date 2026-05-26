@@ -18,9 +18,11 @@ from .character import (
 )
 from .extended import (
     UserNickname,
+    UserPoint,
     GroupConfig,
     GroupActivate,
     GroupWelcome,
+    GroupTeam,
     ChatRecord,
     BotControl,
     UserStat,
@@ -29,6 +31,7 @@ from .extended import (
     NPCHealth,
     UserVariable,
     UserFavor,
+    UserMacro,
 )
 from .hub_config import HubConfig
 
@@ -47,6 +50,7 @@ __all__ = [
     "DNDCharacter",
     # 扩展模型
     "UserNickname",
+    "UserPoint",
     "GroupConfig",
     "GroupActivate",
     "GroupWelcome",
@@ -57,6 +61,10 @@ __all__ = [
     "MetaStat",
     "NPCHealth",
     "HubConfig",
+    "UserVariable",
+    "UserFavor",
+    "UserMacro",
+    "GroupTeam",
     # 角色常量
     "CHAR_INFO_KEY_HP",
     "CHAR_INFO_KEY_HP_DICE",

@@ -1,5 +1,5 @@
 from core.command.const import *
-from core.command.bot_cmd import BotCommandBase, BotSendMsgCommand, BotLeaveGroupCommand, BotDelayCommand, BotSendForwardMsgCommand, BotSendFileCommand
+from core.command.bot_cmd import BotCommandBase, BotSendMsgCommand, BotLeaveGroupCommand, BotDelayCommand, BotSendForwardMsgCommand, BotSendFileCommand, BotSetGroupCardCommand
 from core.command.user_cmd import CommandError, UserCommandBase, custom_user_command, CommandRegistry, use_registry, DEFAULT_REGISTRY
 from core.command.parse_result import (
     CommandParseResult, MentionInfo, MessageSegment, ParseIssue

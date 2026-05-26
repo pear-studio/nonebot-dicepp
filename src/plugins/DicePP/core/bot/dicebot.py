@@ -560,6 +560,14 @@ class Bot:
 
         msg = preprocess_msg(msg)  # 转换中文符号, 转换小写等等
 
+        # 展开用户定义的宏（.define）：在命令分发前把消息文本里能匹配的宏替换掉。
+        # apply_user_macros 内部对没定义宏的用户会快速返回原文，对错误也会兜底返回原文。
+        try:
+            from module.common.macro_command import apply_user_macros
+            msg = await apply_user_macros(self, meta.user_id, msg)
+        except Exception:
+            dice_log(f"[Macro] [Expand] 宏展开失败，回退原始消息: {get_exception_info()}")
+
         bot_commands: List[BotCommandBase] = []
 
         # 统计信息 —— 从 SQLite 读取，失败则创建默认值
@@ -778,6 +786,15 @@ class Bot:
                     
                     if feedback:
                         bot_commands += [BotSendMsgCommand(self.account, choice(feedback.split("|")), [GroupMessagePort(data.group_id)])]
+
+                # 队伍模式：若该群启用了 team 且新成员不在 team 中，自动改群名片为 ob
+                try:
+                    from module.common.team_command import auto_rename_ob_for_new_member
+                    bot_commands += await auto_rename_ob_for_new_member(
+                        self, data.group_id, data.user_id
+                    )
+                except Exception:
+                    dice_log(f"[Team] [Notice] 自动改名 ob 失败: {get_exception_info()}")
 
         if self.proxy:
             for command in bot_commands:

@@ -333,6 +333,14 @@ class ModeConfig(BaseModel):
     default: str = "DND5E2024"
 
 
+class PointConfig(BaseModel):
+    """用户点数系统配置（.point 指令）"""
+    init: int = Field(default=100, ge=0, description="新用户初始拥有的点数")
+    add: int = Field(default=100, ge=0, description="每天给活跃用户增加的点数")
+    max: int = Field(default=500, ge=0, description="用户能持有的点数上限")
+    limit_daily: int = Field(default=300, ge=0, description="每天使用点数的上限")
+
+
 class BotConfig(BaseModel):
     """Top-level configuration model for a single Bot instance."""
 
@@ -374,3 +382,4 @@ class BotConfig(BaseModel):
     query: QueryConfig = Field(default_factory=QueryConfig)
     log: LogConfig = Field(default_factory=LogConfig)
     mode: ModeConfig = Field(default_factory=ModeConfig)
+    point: PointConfig = Field(default_factory=PointConfig)

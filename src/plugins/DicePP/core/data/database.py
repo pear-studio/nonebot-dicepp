@@ -13,9 +13,11 @@ from .models import (
     InitList,
     DNDCharacter,
     UserNickname,
+    UserPoint,
     GroupConfig,
     GroupActivate,
     GroupWelcome,
+    GroupTeam,
     ChatRecord,
     BotControl,
     UserStat,
@@ -24,6 +26,7 @@ from .models import (
     NPCHealth,
     UserVariable,
     UserFavor,
+    UserMacro,
 )
 
 
@@ -53,6 +56,9 @@ class BotDatabase:
         self._npc_health: Optional[Repository[NPCHealth]] = None
         self._variable: Optional[Repository[UserVariable]] = None
         self._favor: Optional[Repository[UserFavor]] = None
+        self._macro: Optional[Repository[UserMacro]] = None
+        self._point: Optional[Repository[UserPoint]] = None
+        self._group_team: Optional[Repository[GroupTeam]] = None
         self.query: QueryStore = QueryStore()
         self._migration_runner: Optional[MigrationRunner] = None
 
@@ -152,6 +158,24 @@ class BotDatabase:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._favor
 
+    @property
+    def macro(self) -> Repository[UserMacro]:
+        if self._macro is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._macro
+
+    @property
+    def point(self) -> Repository[UserPoint]:
+        if self._point is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._point
+
+    @property
+    def group_team(self) -> Repository[GroupTeam]:
+        if self._group_team is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._group_team
+
     async def connect(self) -> None:
         # allow idempotent connect() (some packaged runs may receive events early)
         if self._db is not None and self._log_db is not None:
@@ -200,6 +224,9 @@ class BotDatabase:
         self._npc_health = None
         self._variable = None
         self._favor = None
+        self._macro = None
+        self._point = None
+        self._group_team = None
         self._migration_runner = None
 
         # 关闭 query 数据库连接
@@ -315,4 +342,16 @@ class BotDatabase:
 
         self._favor = Repository[UserFavor](
             self._db, UserFavor, "favor", ["user_id", "group_id"]
+        )
+
+        self._macro = Repository[UserMacro](
+            self._db, UserMacro, "macros", ["user_id", "key"]
+        )
+
+        self._point = Repository[UserPoint](
+            self._db, UserPoint, "point", ["user_id"]
+        )
+
+        self._group_team = Repository[GroupTeam](
+            self._db, GroupTeam, "group_team", ["group_id"]
         )
