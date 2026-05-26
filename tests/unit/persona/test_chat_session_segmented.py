@@ -174,49 +174,4 @@ class TestReturnSemantics:
         assert result == ""
 
 
-class TestSegmentCorrectionHook:
-    """SegmentCorrectionHook 逻辑（替代 _on_segment_round_complete）"""
 
-    @pytest.mark.asyncio
-    async def test_returns_none_when_tool_called(self):
-        from plugins.DicePP.module.persona.llm.hooks import SegmentCorrectionHook
-        from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
-        from unittest.mock import Mock
-
-        hook = SegmentCorrectionHook()
-        resp = LLMResponse(
-            content="",
-            tool_calls=[ToolCall(id="tc1", name="send_reply_segment", arguments="{}")],
-            usage=TokenUsage(),
-        )
-        ctx = Mock()
-        ctx.tool_round_num = 0
-        result = await hook.post_llm([], resp, ctx)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_returns_injection_when_content_without_tools(self):
-        from plugins.DicePP.module.persona.llm.hooks import SegmentCorrectionHook
-        from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage
-        from unittest.mock import Mock
-
-        hook = SegmentCorrectionHook()
-        resp = LLMResponse(content="hello", tool_calls=[], usage=TokenUsage())
-        ctx = Mock()
-        ctx.tool_round_num = 0
-        result = await hook.post_llm([], resp, ctx)
-        assert result is not None
-        assert "send_reply_segment" in result["content"]
-
-    @pytest.mark.asyncio
-    async def test_returns_none_for_empty_content(self):
-        from plugins.DicePP.module.persona.llm.hooks import SegmentCorrectionHook
-        from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage
-        from unittest.mock import Mock
-
-        hook = SegmentCorrectionHook()
-        resp = LLMResponse(content="", tool_calls=[], usage=TokenUsage())
-        ctx = Mock()
-        ctx.tool_round_num = 0
-        result = await hook.post_llm([], resp, ctx)
-        assert result is None

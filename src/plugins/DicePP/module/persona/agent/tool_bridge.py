@@ -262,6 +262,50 @@ def build_collecting_registry(
     return reg
 
 
+async def run_structured_collect(
+    router,
+    store,
+    messages: list,
+    *,
+    user_id: str = "",
+    group_id: str = "",
+    required_tools: list | None = None,
+    temperature: float = 0.7,
+    timeout: int | None = None,
+    selection=None,
+    max_tool_rounds: int = 1,
+) -> tuple[list, Any]:
+    """运行 structured_collect 模式，返回 (collected_args, runtime_result)。"""
+    from .runtime import AgentRuntime
+    from .request import AgentRunLimits
+
+    collected: list = []
+
+    async def _collect(args: dict) -> str:
+        collected.append(args)
+        return "ok"
+
+    runtime = AgentRuntime(
+        router=router,
+        store=store,
+        limits=AgentRunLimits(max_tool_rounds=max_tool_rounds),
+    )
+    tool_registry = build_collecting_registry(_collect)
+
+    result = await runtime.run(
+        messages=messages,
+        user_id=user_id,
+        group_id=group_id,
+        tool_registry=tool_registry,
+        required_tools=required_tools,
+        temperature=temperature,
+        timeout=timeout,
+        selection=selection,
+        mode="structured_collect",
+    )
+    return collected, result
+
+
 def _dynamic_model(name: str, parameters: dict) -> Type[BaseModel]:
     """从 JSON schema 参数构建 Pydantic model（fallback）。"""
     from typing import Optional as Opt

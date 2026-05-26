@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 from module.persona.llm.router import LLMRouter
-from module.persona.llm.loop import AgentLoop
 from module.persona.chat.context import ContextBuilder
 from module.persona.character.models import Character
 from module.persona.data.store import PersonaDataStore
@@ -26,13 +25,6 @@ async def temp_db():
         await store.ensure_tables()
         yield store
     os.unlink(db_path)
-
-
-def test_classify_error():
-    assert AgentLoop._ce(asyncio.TimeoutError()) == "network_error"
-    assert AgentLoop._ce(Exception("rate limit hit")) == "rate_limited"
-    assert AgentLoop._ce(Exception("rate_limit_error occurred")) == "rate_limited"
-    assert AgentLoop._ce(Exception("something else")) == "unknown"
 
 
 def test_latency_percentiles_empty():
@@ -142,22 +134,6 @@ async def test_trace_round_messages_round_trip(temp_db):
     assert stored_rr[0]["tool_results"][0]["content"] == "找到 3 条记忆"
     assert stored_rr[1]["round"] == 1
     assert stored_rr[1]["think"] == "<think>准备回复</think>"
-
-
-@pytest.mark.asyncio
-async def test_trace_hook_disabled_does_not_write():
-    """TraceHook trace_enabled=False 时 flush 不写数据库"""
-    from unittest.mock import AsyncMock, Mock
-    from module.persona.llm.hooks import TraceHook
-
-    store = Mock()
-    store.add_llm_trace = AsyncMock()
-    hook = TraceHook(data_store=store, trace_enabled=False)
-
-    await hook.flush("s1", {"round_records": [{"round": 0}]})
-    await asyncio.sleep(0.05)
-
-    assert not store.add_llm_trace.called
 
 
 @pytest.mark.asyncio

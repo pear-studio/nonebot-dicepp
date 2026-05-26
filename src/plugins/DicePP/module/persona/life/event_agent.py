@@ -12,9 +12,8 @@ import json
 from nonebot.log import logger
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy
-from ..tools.registry import ToolRegistry, ToolDomain
+from ..tools.registry import ToolRegistry
 from ..tools.collecting import RECORD_EVENT_TOOL, RECORD_REACTION_TOOL, RECORD_DIARY_ENTRY_TOOL, RECORD_SHARE_MESSAGE_TOOL
-from ..tools.context import ToolContext
 from ..wall_clock import format_timestamp, format_relative_time, persona_wall_now
 from typing import TYPE_CHECKING
 
@@ -124,12 +123,11 @@ class EventGenerationAgent:
     def __init__(
         self,
         llm_router: LLMRouter,
-        tool_registry: ToolRegistry,
+        _tool_registry: ToolRegistry,  # unused, kept for caller compatibility — M4 清理时移除
         config: Optional["PersonaConfig"] = None,
         store: Optional["PersonaDataStore"] = None,
     ):
         self.llm_router = llm_router
-        self.tool_registry = tool_registry
         self.config = config
         self._store = store
         self._bg_timeout = (
@@ -174,56 +172,25 @@ class EventGenerationAgent:
     async def _run_life_collect_loop(
         self, messages: list, tools: list, temperature: float, selection: SelectionPolicy,
     ) -> list:
-        collected: list = []
+        from ..agent.tool_bridge import run_structured_collect
 
-        # ── 新路径: AgentRuntime（store 存在时） ──
-        if self._store is not None:
-            from ..agent.runtime import AgentRuntime
-            from ..agent.request import AgentRunLimits
-            from ..agent.tool_bridge import build_collecting_registry
+        tool_name = ""
+        if tools:
+            first = tools[0]
+            if isinstance(first, dict):
+                func = first.get("function", first)
+                tool_name = func.get("name", "")
 
-            runtime = AgentRuntime(
-                router=self.llm_router,
-                store=self._store,
-                limits=AgentRunLimits(max_tool_rounds=self._max_tool_rounds),
-            )
-
-            async def _collect(args: dict) -> str:
-                collected.append(args)
-                return "ok"
-
-            tool_registry = build_collecting_registry(_collect)
-
-            # 从旧格式 tools 中提取工具名
-            tool_name = ""
-            if tools:
-                first = tools[0]
-                if isinstance(first, dict):
-                    func = first.get("function", first)
-                    tool_name = func.get("name", "")
-
-            await runtime.run(
-                messages=messages,
-                user_id="",
-                group_id="",
-                tool_registry=tool_registry,
-                required_tools=[tool_name] if tool_name else None,
-                temperature=temperature,
-                timeout=self._bg_timeout,
-                selection=selection,
-                mode="structured_collect",
-            )
-
-        # ── 旧路径: run_via_loop（store 为 None 时使用） ──
-        else:
-            tool_ctx = ToolContext(collected_args=collected)
-            await self.llm_router.run_via_loop(
-                messages=messages, tools=tools, temperature=temperature,
-                timeout=self._bg_timeout, tool_registry=self.tool_registry,
-                tool_domains=[ToolDomain.LIFE], tool_ctx=tool_ctx,
-                selection=selection, max_tool_rounds=self._max_tool_rounds,
-            )
-
+        collected, _result = await run_structured_collect(
+            router=self.llm_router,
+            store=self._store,
+            messages=messages,
+            temperature=temperature,
+            timeout=self._bg_timeout,
+            selection=selection,
+            required_tools=[tool_name] if tool_name else None,
+            max_tool_rounds=self._max_tool_rounds,
+        )
         return collected
 
     async def generate_event_result(self, context: EventContext) -> EventGenerationResult:
@@ -824,43 +791,28 @@ class EventGenerationAgent:
         user_prompt = "请用第一人称写2-3句日报开场白："
 
         try:
-            if store is not None:
-                from ..agent.runtime import AgentRuntime
-                from ..agent.request import AgentRunLimits
-                from ..agent.tool_executor import ToolRegistry
-                from ..llm.selection import SelectionPolicy
+            from ..agent.runtime import AgentRuntime
+            from ..agent.request import AgentRunLimits
+            from ..agent.tool_executor import ToolRegistry
+            runtime = AgentRuntime(
+                router=llm_router,
+                store=store,
+                limits=AgentRunLimits(max_tool_rounds=0),
+            )
 
-                runtime = AgentRuntime(
-                    router=llm_router,
-                    store=store,
-                    limits=AgentRunLimits(max_tool_rounds=0),
-                )
-
-                result = await runtime.run(
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    user_id="",
-                    group_id="",
-                    tool_registry=ToolRegistry(),
-                    temperature=0.85,
-                    timeout=None,
-                    selection=SelectionPolicy.SUMMARIZE,
-                )
-                text = (result.final_text or "").strip().strip('"').strip("'")
-            else:
-                result = await llm_router.run_via_loop(
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    selection=SelectionPolicy.SUMMARIZE,
-                    temperature=0.85,
-                    tools=None,
-                    max_tool_rounds=0,
-                )
-                text = (result.final_output or "").strip().strip('"').strip("'")
+            result = await runtime.run(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                user_id="",
+                group_id="",
+                tool_registry=ToolRegistry(),
+                temperature=0.85,
+                timeout=None,
+                selection=SelectionPolicy.SUMMARIZE,
+            )
+            text = (result.final_text or "").strip().strip('"').strip("'")
             if not text:
                 return None
             return text[:200]

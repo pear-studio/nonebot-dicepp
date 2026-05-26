@@ -4,8 +4,6 @@ import tempfile
 import os
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.llm.loop import LoopResult
-
 
 def make_mock_provider():
     """创建单个 mock LLM provider，generate 为 AsyncMock。"""
@@ -49,28 +47,35 @@ def _make_tool_registry():
     return registry
 
 
-def attach_mock_run_via_loop(router, final_output_attr=None):
-    """为 mock router 添加 run_via_loop AsyncMock，支持 collecting executor。
+def make_mock_runtime(monkeypatch):
+    """为 AgentRuntime.run 挂载 mock，通过 router 属性动态控制行为。
 
-    router._pending_tool_args 为 JSON 字符串时，mock 会通过 tool_registry
-    执行收集，将解析后的参数存入 collected_args 列表。
+    测试设置 router._pending_tool_args (dict) 来模拟工具收集路径；
+    设置 router._pending_final_output (str) 来控制回退路径的 final_text。
 
-    当 final_output_attr 非空时，从 router 读取该属性作为 LoopResult.final_output；
-    否则 final_output 为 "ok"。
+    供 test_scoring.py / test_event_agent.py / test_generate_share_message.py 使用。
     """
+    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+    from plugins.DicePP.module.persona.agent.loop import AgentRunResult
 
-    async def _mock(messages=None, tools=None, temperature=None,
-                    timeout=None, selection=None, max_tool_rounds=None,
-                    tool_registry=None, tool_domains=None, hooks=None, **kwargs):
-        if router._pending_tool_args is not None and tool_registry and tool_domains and tools:
-            tool_name = tools[0]["function"]["name"]
-            executor = tool_registry.make_executor_for(*tool_domains, ctx=None)
-            await executor([{"id": "tc_1", "name": tool_name,
-                             "arguments": router._pending_tool_args}])
-        final_output = getattr(router, final_output_attr) if final_output_attr else "ok"
-        return LoopResult(final_output=final_output, metadata={"status": "ok"})
+    async def fake_run(self, messages, user_id, group_id, tool_registry, **kwargs):
+        router = self._router
+        pending_args = getattr(router, '_pending_tool_args', None)
+        if pending_args is not None and tool_registry is not None:
+            specs = tool_registry.list_tools()
+            if specs:
+                await specs[0].executor(**pending_args)
+        final_output = getattr(router, '_pending_final_output', 'ok')
+        return AgentRunResult(
+            run_id="test",
+            turn_id="test",
+            status="completed",
+            final_reason="direct_content",
+            final_text=final_output,
+            delivery_performed=True,
+        )
 
-    router.run_via_loop = AsyncMock(side_effect=_mock)
+    monkeypatch.setattr(AgentRuntime, "run", fake_run)
 
 
 @pytest.fixture

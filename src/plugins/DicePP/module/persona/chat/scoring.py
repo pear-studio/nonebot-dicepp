@@ -11,8 +11,6 @@ from ..data.models import ScoreDeltas, UserProfile, RelationshipState
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy
-from ..tools.collecting import make_collecting_executor
-from ..tools.registry import ToolRegistry, ToolDef
 from ..utils.json_helpers import safe_json_loads
 from ..wall_clock import persona_wall_now, format_timestamp, format_relative_time
 
@@ -44,67 +42,9 @@ class ScoringAgent:
         user_id: str = "",
         group_id: str = "",
     ) -> ScoringAnalysisResult:
-        collected_args: list = []
+        from ..agent.tool_bridge import run_structured_collect
 
-        # ── 新路径: AgentRuntime（store 存在时） ──
-        if self._store is not None:
-            tool_name = "record_score"
-            from ..agent.runtime import AgentRuntime
-            from ..agent.request import AgentRunLimits
-            from ..agent.tool_bridge import build_collecting_registry
-
-            runtime = AgentRuntime(
-                router=self.llm_router,
-                store=self._store,
-                limits=AgentRunLimits(max_tool_rounds=self.max_tool_rounds),
-            )
-
-            async def _collect(args: dict) -> str:
-                collected_args.append(args)
-                return "ok"
-
-            tool_registry = build_collecting_registry(_collect)
-
-        # ── 旧路径: run_via_loop（向后兼容，store 为 None 时使用） ──
-        else:
-            tool_name = "score_relationship"
-            tools = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool_name,
-                        "description": "输出好感度变化分析和用户事实提取结果",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "deltas": {
-                                    "type": "object",
-                                    "properties": {
-                                        "intimacy": {"type": "number", "description": "亲密度变化，范围 -5.0 到 +5.0"},
-                                        "passion": {"type": "number", "description": "激情变化"},
-                                        "trust": {"type": "number", "description": "信任变化"},
-                                        "secureness": {"type": "number", "description": "安全感变化"},
-                                    },
-                                    "required": ["intimacy", "passion", "trust", "secureness"],
-                                },
-                                "facts": {
-                                    "type": "object",
-                                    "description": "提取或更新的用户事实，key-value 形式",
-                                },
-                            },
-                            "required": ["deltas", "facts"],
-                        },
-                    },
-                }
-            ]
-
-            old_tool_registry = ToolRegistry()
-            old_tool_registry.register(
-                "scoring",
-                ToolDef(name=tool_name, description="评分工具",
-                        parameters=tools[0]["function"]["parameters"]),
-                make_collecting_executor(collected_args),
-            )
+        tool_name = "record_score"
 
         prompt = self._build_analysis_prompt(
             messages,
@@ -114,33 +54,19 @@ class ScoringAgent:
         )
 
         try:
-            if self._store is not None:
-                runtime_result = await runtime.run(
-                    messages=[{"role": "user", "content": prompt}],
-                    user_id=user_id,
-                    group_id=group_id,
-                    tool_registry=tool_registry,
-                    required_tools=["record_score"],
-                    temperature=0.7,
-                    timeout=60,
-                    mode="structured_collect",
-                    selection=SelectionPolicy.SCORING,
-                )
-                content = runtime_result.final_text or ""
-            else:
-                hooks = self.llm_router.make_default_hooks()
-                result = await self.llm_router.run_via_loop(
-                    messages=[{"role": "user", "content": prompt}],
-                    tools=tools,
-                    temperature=0.7,
-                    timeout=60,
-                    selection=SelectionPolicy.SCORING,
-                    tool_registry=old_tool_registry,
-                    tool_domains=["scoring"],
-                    hooks=hooks,
-                    max_tool_rounds=self.max_tool_rounds,
-                )
-                content = result.final_output or ""
+            collected_args, runtime_result = await run_structured_collect(
+                router=self.llm_router,
+                store=self._store,
+                messages=[{"role": "user", "content": prompt}],
+                user_id=user_id,
+                group_id=group_id,
+                required_tools=["record_score"],
+                temperature=0.7,
+                timeout=60,
+                selection=SelectionPolicy.SCORING,
+                max_tool_rounds=self.max_tool_rounds,
+            )
+            content = runtime_result.final_text or ""
 
         except ServiceUnavailableError as e:
             logger.error(f"评分: 无可用 LLM provider: {e}")

@@ -1,7 +1,7 @@
 """Life 域收集型工具 — 无副作用，仅收集 LLM 结构化输出"""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from nonebot.log import logger
 from pydantic import BaseModel, Field
@@ -205,15 +205,3 @@ async def life_collecting_executor(args: dict, ctx) -> str:
             "life_collecting_executor: ctx 或 collected_args 为 None，数据丢弃"
         )
     return '{"status": "ok"}'
-
-
-def make_collecting_executor(results: List[dict]):
-    """返回一个收集型 executor，每次调用时将 args 存入 results 列表（闭包模式）。
-
-    供 scoring.py 等非 life 路径使用——通过闭包捕获 results 列表，
-    不依赖 ToolContext.collected_args。
-    """
-    async def executor(args: dict, ctx) -> str:
-        results.append(args)
-        return '{"status": "ok"}'
-    return executor

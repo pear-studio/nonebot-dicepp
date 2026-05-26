@@ -307,7 +307,7 @@ class ChatSession:
             on_result=_on_result,
         )
         if result.status == "success":
-            # 最终轮计费由 BillingHook 处理（每次 AgentLoop.run() 首次 post_llm 扣费）。
+            # 计费由 UsageSink 在 AgentRuntime 内 best effort 处理。
             return result.value
         return fallback_response if fallback_response is not None else None
 

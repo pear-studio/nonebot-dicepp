@@ -7,21 +7,16 @@ from __future__ import annotations
 
 import asyncio
 import random
-import time
 from collections import deque
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from nonebot.log import logger
 
 from .providers import _PROVIDER_CLASSES
-from .providers.protocol import LLMProvider, ImageGenProvider, ErrorClass
-from .errors import ErrorKind, classify_from_provider
+from .providers.protocol import ImageGenProvider
+from .errors import classify_from_provider
 from .circuit_breaker import CircuitBreakerRegistry
 from .selection import SelectionPolicy
-from ..agent.old_loop import OldAgentLoop as AgentLoop, LoopResult
-
-if TYPE_CHECKING:
-    from ..tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from ...core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
@@ -81,7 +76,6 @@ class LLMRouter:
         # 后台探针任务
         self._probe_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
-        self._flush_tasks: set = set()
 
         logger.info(
             f"LLMRouter 初始化完成: {len(self._llm_models)} LLM 模型, "
@@ -248,147 +242,6 @@ class LLMRouter:
         """返回 key 对应的 provider 实例。"""
         return self._model_providers[key]
 
-    # ── AgentLoop 执行 ────────────────────────────────────────
-
-    async def run_via_loop(
-        self, messages: List[Dict],
-        selection: Optional[SelectionPolicy] = None,
-        timeout: Optional[int] = None,
-        temperature: Optional[float] = None,
-        user_id: Optional[str] = None,
-        group_id: Optional[str] = None,
-        tools: Optional[List[Dict]] = None,
-        max_tool_rounds: int = 5,
-        max_round_callbacks: int = 3,
-        tool_registry: Optional["ToolRegistry"] = None,
-        tool_domains: Optional[List[str]] = None,
-        tool_ctx: Any = None,
-        hooks: Optional[List] = None,
-        trace_hook: Any = None,
-    ) -> LoopResult:
-        """通过 AgentLoop 执行带工具的 LLM 调用，含候选回退。"""
-        actual_timeout = timeout if timeout is not None else self.timeout
-        policy = selection or SelectionPolicy.CHAT
-
-        candidates = self.build_candidates(policy)
-        if not candidates:
-            raise ServiceUnavailableError(
-                f"没有可用的模型匹配 policy: category={policy.category}, "
-                f"capabilities={policy.required_capabilities}"
-            )
-
-        last_messages = list(messages)
-        candidate_count = len(candidates)
-
-        for idx, key in enumerate(candidates):
-            provider = self._model_providers[key]
-            provider_name = key[0]
-            model_name = key[1]
-            sem = self.acquire_semaphore(key)
-
-            async with sem:
-                self.stats[provider_name]["requests"] += 1
-
-                loop = AgentLoop(
-                    provider=provider,
-                    tool_registry=tool_registry,
-                    hooks=hooks or [],
-                    max_tool_rounds=max_tool_rounds,
-                    max_round_callbacks=max_round_callbacks,
-                )
-                try:
-                    result = await loop.run(
-                        messages=last_messages,
-                        tools=tools,
-                        temperature=temperature,
-                        timeout=actual_timeout,
-                        user_id=user_id or "",
-                        group_id=group_id or "",
-                        tool_domains=tool_domains,
-                        tool_ctx=tool_ctx,
-                    )
-                except asyncio.TimeoutError:
-                    self.stats[provider_name]["errors"] += 1
-                    cb = self.circuit_breakers.get(provider_name, model_name)
-                    if cb:
-                        cb.record_failure()
-                    raise ServiceUnavailableError(
-                        f"模型 {provider_name}/{model_name} 超时，不重试其他候选"
-                    )
-                except Exception as e:
-                    self.stats[provider_name]["errors"] += 1
-                    cb = self.circuit_breakers.get(provider_name, model_name)
-                    kind = classify_from_provider(e, provider)
-                    if cb:
-                        if kind.is_retryable:
-                            cb.record_failure()
-                        else:
-                            cb.mark_dead(f"{kind.value}: {e}")
-                    if kind.recovery == "switch" and idx < len(candidates) - 1:
-                        logger.warning(
-                            f"模型 {provider_name}/{model_name} 失败 [{kind.value}]: {e}，"
-                            f"回退到下一个候选（{idx + 2}/{candidate_count}）"
-                        )
-                        continue
-                    raise ServiceUnavailableError(
-                        f"模型 {provider_name}/{model_name} 失败 [{kind.value}]: {e}"
-                    ) from e
-
-                # success
-                cb = self.circuit_breakers.get(provider_name, model_name)
-                if cb:
-                    cb.record_success()
-
-                md = result.metadata
-                if md.get("status") in ("ok", "finished"):
-                    logger.info(
-                        f"model={md.get('model', model_name)} "
-                        f"provider={provider_name} "
-                        f"latency={md.get('latency_ms', 0) / 1000:.1f}s "
-                        f"tools_rounds={md.get('tool_rounds', 0)} "
-                        f"tools={md.get('tool_names', [])} "
-                        f"cached={md.get('cached_tokens', 0)} "
-                        f"candidates={idx + 1}/{candidate_count} "
-                        f"status={md.get('status')}"
-                    )
-                result.metadata["provider_name"] = provider_name
-                result.metadata["model_name"] = model_name
-                result.metadata["selection_policy"] = str(policy)
-                result.metadata["candidate_count"] = candidate_count
-
-                if result.aborted and result.abort_reason:
-                    raise QuotaExceeded(result.abort_reason)
-
-                latency_ms = result.metadata.get("latency_ms", 0)
-                self._latency_window[provider_name].append(latency_ms)
-
-                if result.metadata.get("status") not in ("ok", "max_rounds", "finished"):
-                    self.stats[provider_name]["errors"] += 1
-
-            self._flush_trace(hooks, trace_hook, user_id, group_id, result.metadata)
-            return result
-
-        raise ServiceUnavailableError("所有候选模型均已不可用")
-
-    def _flush_trace(self, hooks, trace_hook, user_id, group_id, metadata):
-        from .hooks import TraceHook as _TraceHook
-        _trace_hook = trace_hook or next(
-            (h for h in (hooks or []) if isinstance(h, _TraceHook)), None)
-        if _trace_hook:
-            try:
-                task = asyncio.create_task(
-                    _trace_hook.flush(
-                        f"{user_id or ''}:{group_id or ''}:loop", metadata)
-                )
-                task.add_done_callback(
-                    lambda t: not t.cancelled() and (e := t.exception()) and logger.error(
-                        f"Trace flush 失败: {e}")
-                )
-                task.add_done_callback(self._flush_tasks.discard)
-                self._flush_tasks.add(task)
-            except RuntimeError as e:
-                logger.warning(f"无法创建 trace flush 任务: {e}", exc_info=True)
-
     async def increment_usage(self, user_id: str) -> None:
         """增加用量计数"""
         if not self.data_store:
@@ -398,25 +251,6 @@ class LLMRouter:
             self.config.timezone if self.config else "Asia/Shanghai"
         ).strftime("%Y-%m-%d")
         await self.data_store.increment_daily_usage(user_id, today)
-
-    def make_default_hooks(
-        self, include_billing: bool = False, include_segment: bool = False,
-    ) -> list:
-        """统一的 Hook 工厂方法，消除调用方重复构造逻辑"""
-        from .hooks import QuotaHook, TraceHook, BillingHook, SegmentCorrectionHook
-        hooks = [
-            QuotaHook(data_store=self.data_store,
-                      quota_check_enabled=self.quota_check_enabled,
-                      daily_limit=self.daily_limit, config=self.config),
-            TraceHook(data_store=self.data_store,
-                      trace_enabled=self.trace_enabled,
-                      trace_max_age_days=self.trace_max_age_days),
-        ]
-        if include_billing:
-            hooks.append(BillingHook(router=self))
-        if include_segment:
-            hooks.append(SegmentCorrectionHook())
-        return hooks
 
     def get_stats(self) -> Dict[str, Any]:
         return {k: v.copy() for k, v in self.stats.items()}
@@ -464,8 +298,6 @@ class LLMRouter:
             except asyncio.CancelledError:
                 pass
             self._probe_task = None
-        if self._flush_tasks:
-            await asyncio.gather(*self._flush_tasks, return_exceptions=True)
         logger.info("LLMRouter 后台探针已停止")
 
     async def _probe_loop(self) -> None:
