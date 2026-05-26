@@ -166,6 +166,8 @@ src/plugins/DicePP/module/misc/log_command.py
 # Trae/Agent 配置（符号链接，实际内容在 docs/agent/）
 .trae/
 .claude/
+.agents/
+.codex/
 
 # Cursor IDE 配置
 .cursor/
