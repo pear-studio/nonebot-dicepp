@@ -385,10 +385,14 @@ class Bot:
                     f"{''.join(tb_str)}"
                 )
 
-        await self.db.close()
+        await self.scheduler.shutdown()
 
         if self.tick_task:
             self.tick_task.cancel()
+            await asyncio.gather(self.tick_task, return_exceptions=True)
+            self.tick_task = None
+
+        await self.db.close()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
         # config is read-only at runtime; hot-reload is triggered via .reload command
 

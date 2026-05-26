@@ -312,7 +312,7 @@ def _resolve_module_order(existing: dict[str, list[BacklogItem]], items: list[Ba
 def cmd_add(args):
     path = _resolve_path(args.file)
     item = BacklogItem(
-        id=_gen_id(args.module, args.title, args.symptom or ""),
+        id=args.id or _gen_id(args.module, args.title, args.symptom or ""),
         module=args.module,
         title=args.title,
         priority=args.priority,
@@ -588,6 +588,7 @@ def main():
     p_add.add_argument("--effort", "-e", required=True, choices=["S", "M", "L", "XL"])
     p_add.add_argument("--symptom", required=True, help="问题表现（必填，可含换行）")
     p_add.add_argument("--plan", required=True, help="工作计划（必填，可含换行）")
+    p_add.add_argument("--id", help="手动指定 ID（默认自动生成）")
     p_add.set_defaults(func=cmd_add)
 
     p_batch = sub.add_parser("batch-add", help="批量新增 backlog")

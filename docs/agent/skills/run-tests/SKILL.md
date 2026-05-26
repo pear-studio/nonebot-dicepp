@@ -15,7 +15,7 @@ Run tests for the DicePP project to validate implementation correctness.
 
 - Python 3.10+ installed
 - uv installed (推荐) 或 pip
-- Dependencies installed: `uv pip install ".[dev]"`
+- Dependencies installed: `uv sync --group dev`
 
 **Steps**
 
@@ -27,7 +27,7 @@ Run tests for the DicePP project to validate implementation correctness.
    ```
 
    If pytest is not installed:
-   - Recommendation: "Run: uv pip install '.[dev]'"
+   - Recommendation: "Run: uv sync --group dev"
 
 2. **Run All Tests**
 
@@ -53,6 +53,9 @@ Run tests for the DicePP project to validate implementation correctness.
 
    To test a specific module:
    ```powershell
+   # Fast regression tests
+   uv run pytest -m "not (slow or integration or e2e or real_llm)" --tb=short
+
    # Roll module tests
    uv run pytest tests/module/roll/ -v
 
@@ -67,7 +70,7 @@ Run tests for the DicePP project to validate implementation correctness.
 
    Execute pytest with coverage:
    ```powershell
-   uv run pytest --cov=src/plugins/DicePP --cov-report=term-missing
+   uv run pytest -m "not real_llm" --cov --cov-report=term-missing
    ```
 
    **Coverage Results**:
@@ -110,11 +113,14 @@ Run tests for the DicePP project to validate implementation correctness.
 # Run all tests
 uv run pytest -v --tb=short
 
+# Run fast CI-equivalent tests
+uv run pytest -m "not (slow or integration or e2e or real_llm)" --tb=short
+
 # Run only roll module tests
 uv run pytest tests/module/roll/ -v
 
 # Run with coverage
-uv run pytest --cov=src/plugins/DicePP --cov-report=term-missing
+uv run pytest -m "not real_llm" --cov --cov-report=term-missing
 
 # Run specific test file
 uv run pytest tests/module/roll/test_karma.py -v

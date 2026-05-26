@@ -45,6 +45,7 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=4.1",
     "pytest-timeout>=2.0",
+    "pytest-xdist>=3.5",
     "pyinstaller>=6.0",
     "bump-my-version>=0.28",
 ]
@@ -75,19 +76,21 @@ pythonpath = ["src"]
 python_files = ["unit_test.py", "test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test*"]
-addopts = "--tb=short -m \"not real_llm\" --timeout=30"
+addopts = "--tb=short -m \"not real_llm\" --timeout=30 --strict-markers --strict-config"
 markers = [
     "unit: Unit tests for individual modules (no external I/O, all dependencies mocked)",
     "e2e: End-to-end tests exercising the full bot lifecycle (may start real services)",
     "real_llm: Tests that call real LLM APIs (cost money, require API key)",
     "integration: Integration tests for command flow",
     "slow: Tests that take a long time to run",
+    "compatibility: Compatibility corpus tests for product-level behavior contracts",
     "karma: Tests for karma system",
     "log: Tests for logging system",
 ]
 
 # ── coverage 配置（替代 .coveragerc）─────────────────────────────────────────
 [tool.coverage.run]
+branch = true
 source = ["src/plugins/DicePP"]
 omit = [
     "*/tests/*",
@@ -98,6 +101,7 @@ omit = [
 
 [tool.coverage.report]
 show_missing = true
+fail_under = 60
 
 # ── 版本号自动递增 ────────────────────────────────────────────────────────────
 # 使用: uv run bump-my-version bump patch/minor/major

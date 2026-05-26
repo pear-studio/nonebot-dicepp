@@ -3,7 +3,7 @@
 # 安装 uv：curl -LsSf https://astral.sh/uv/install.sh | sh（Linux/Mac）
 #           或 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"（Windows）
 
-.PHONY: install install-dev test test-cov run clean help
+.PHONY: install install-dev test test-fast test-slow test-integration test-e2e test-real-llm test-compat test-collect test-cov run clean help
 .PHONY: deploy start stop restart logs update status
 .PHONY: setup-llbot llbot-start llbot-stop llbot-restart llbot-logs
 .PHONY: start-all stop-all
@@ -20,8 +20,29 @@ install-dev:  ## 安装开发依赖（含 pytest、pytest-cov、pyinstaller）
 test:  ## 运行测试
 	uv run pytest
 
+test-fast:  ## 运行快速回归测试
+	uv run pytest -m "not (slow or integration or e2e or real_llm)" --tb=short
+
+test-slow:  ## 运行慢速测试
+	uv run pytest -m "slow and not integration and not e2e and not real_llm" --tb=short
+
+test-integration:  ## 运行集成测试
+	uv run pytest -m "integration and not e2e and not real_llm" --tb=short
+
+test-e2e:  ## 运行端到端测试
+	uv run pytest -m "e2e and not real_llm" --tb=short
+
+test-real-llm:  ## 运行真实 LLM 测试（需要本地 secret，可能产生费用）
+	uv run pytest -m "real_llm" --tb=short -s
+
+test-compat:  ## 运行兼容性语料测试
+	uv run pytest -m compatibility -v --tb=long -x
+
+test-collect:  ## 仅收集测试，验证导入、marker 与 fixture
+	uv run pytest --collect-only -q
+
 test-cov:  ## 运行测试（带覆盖率报告）
-	uv run pytest --cov=src/plugins/DicePP --cov-report=term-missing --cov-report=html
+	uv run pytest -m "not real_llm" --cov --cov-report=term-missing --cov-report=html
 
 # ── 本地运行 ──────────────────────────────────────────────────────────────────
 run:  ## 本地运行 Bot (Windows)
@@ -132,7 +153,7 @@ help:  ## 显示帮助信息
 	@echo "DicePP 命令集"
 	@echo ""
 	@echo "开发命令 (Windows/本地):"
-	@grep -E '^(install|install-dev|test|test-cov|run|clean):.*?##' $(MAKEFILE_LIST) | \
+	@grep -E '^(install|install-dev|test|test-fast|test-slow|test-integration|test-e2e|test-real-llm|test-compat|test-collect|test-cov|run|clean):.*?##' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 	@echo ""
 	@echo "版本管理:"

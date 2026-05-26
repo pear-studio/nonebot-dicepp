@@ -160,8 +160,7 @@ content/**
 !content/characters/default/skin.yaml
 src/plugins/DicePP/module/misc/log_command.py
 
-# uv lock 文件（可选是否追踪，这里选择不追踪）
-uv.lock
+# uv lock 文件用于 CI frozen sync，需要追踪
 
 # Trae/Agent 配置（符号链接，实际内容在 docs/agent/）
 .trae/

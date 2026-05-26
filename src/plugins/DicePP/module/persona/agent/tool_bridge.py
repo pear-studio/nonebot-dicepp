@@ -6,10 +6,9 @@ M3 清理时，各工具应直接创建 ToolSpec 并注册到 agent.ToolRegistry
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Type
 
 from pydantic import BaseModel, Field
-from typing import Literal
 
 from ..tools.collecting import (
     RecordDiaryEntryArgs,

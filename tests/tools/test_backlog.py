@@ -13,6 +13,7 @@ def run(*args, cwd=None, input_text="") -> tuple[int, str, str]:
         [sys.executable, str(BACKLOG_PY), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=cwd,
         input=input_text,
     )
@@ -41,7 +42,7 @@ class TestAdd:
         )
         assert rc == 0
         assert out.startswith("B-")
-        text = backlog.read_text()
+        text = backlog.read_text(encoding="utf-8")
         assert "Dice balance check" in text
         assert "roll" in text
 
@@ -63,9 +64,8 @@ class TestAdd:
         assert "校验失败" in err
 
     def test_add_duplicate_id_rejected(self, tmp_dir):
-        # 同秒内同 module/title/symptom 会生成相同 ID, 应被拒绝
         backlog = tmp_dir / "backlog.md"
-        args = [
+        base_args = [
             "--file", str(backlog),
             "add",
             "--module", "roll",
@@ -76,8 +76,8 @@ class TestAdd:
             "--symptom", "d0 边界未覆盖",
             "--plan", "增补单测",
         ]
-        run(*args)
-        rc, out, err = run(*args)
+        run(*base_args, "--id", "B-250101-aaa000")
+        rc, out, err = run(*base_args, "--id", "B-250101-aaa000")
         assert rc != 0
         assert "已存在" in err
 
@@ -115,7 +115,7 @@ class TestBatchAdd:
         assert len(lines) == 2
         assert lines[0].startswith("B-")
         assert lines[1].startswith("B-")
-        text = backlog.read_text()
+        text = backlog.read_text(encoding="utf-8")
         assert "Batch A" in text
         assert "Batch B" in text
 
@@ -238,7 +238,7 @@ class TestSortValidate:
 
         rc, _, _ = run("--file", str(backlog), "sort")
         assert rc == 0
-        text = backlog.read_text()
+        text = backlog.read_text(encoding="utf-8")
         assert text.index("amod") < text.index("zmod")
 
     def test_validate_pass(self, tmp_dir):

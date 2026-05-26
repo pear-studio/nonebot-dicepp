@@ -2,12 +2,12 @@
 
 ## 启动
 ```bash
-.venv/bin/dicepp-shell start <session> [--group <id>]
+uv run dicepp-shell start <session> [--group <id>]
 ```
 
 ## 发送消息
 ```bash
-.venv/bin/dicepp-shell send <session> --user <id> --msg "<cmd>" [options]
+uv run dicepp-shell send <session> --user <id> --msg "<cmd>" [options]
 ```
 
 ### 常用选项
@@ -18,8 +18,18 @@
 
 ## 管理
 ```bash
-.venv/bin/dicepp-shell list          # 列出现有会话
-.venv/bin/dicepp-shell rm <session>  # 删除会话
+uv run dicepp-shell list          # 列出现有会话
+uv run dicepp-shell rm <session>  # 删除会话
+```
+
+直接调用虚拟环境可执行文件时：
+
+```powershell
+# Windows
+.venv\Scripts\dicepp-shell.exe start <session>
+
+# Unix/macOS/Linux
+.venv/bin/dicepp-shell start <session>
 ```
 
 ## 典型命令
