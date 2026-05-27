@@ -125,7 +125,10 @@ class PersonaCommand(UserCommandBase):
 
     @staticmethod
     def _is_persona_trigger(meta: MessageMetaData, msg: str) -> bool:
-        """判断消息是否为 persona 触发（@bot 或 .ai/。ai 前缀）"""
+        """判断消息是否为 persona 触发（@bot 或 .ai/。ai 前缀，或私聊）"""
+        # 私聊自动触发
+        if not meta.group_id:
+            return True
         return meta.to_me or msg.strip().startswith(".ai") or msg.strip().startswith("。ai")
 
     @staticmethod

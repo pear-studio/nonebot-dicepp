@@ -186,6 +186,36 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
         ok, _, _ = await cmd.can_process_msg(".ai hello", meta)
         assert ok is True
 
+    async def test_private_chat_triggers_without_to_me(self):
+        """私聊消息 to_me=False 时仍应触发（NoneBot 私聊默认 to_me=False）"""
+        bot = _make_mock_bot()
+        cmd = _make_cmd(bot)
+        store = AsyncMock()
+        store.get_setting = AsyncMock(return_value=None)
+        cmd.data_store = store
+
+        # 模拟 NoneBot 真实行为：私聊 to_me=False
+        meta = MessageMetaData("你好啊", "你好啊", MessageSender("user", "测试用户"), "", False)
+        ok, _, _ = await cmd.can_process_msg("你好啊", meta)
+        assert ok is True, "私聊消息即使 to_me=False 也应触发"
+
+    async def test_is_persona_trigger_private_vs_group(self):
+        """_is_persona_trigger: 私聊自动触发，群聊需 @bot 或 .ai 前缀"""
+        # 私聊：to_me=False，无 .ai 前缀 → 应触发
+        private_meta = MessageMetaData("hello", "hello", MessageSender("u", "n"), "", False)
+        assert PersonaCommand._is_persona_trigger(private_meta, "hello") is True
+
+        # 群聊：to_me=False，无 .ai 前缀 → 不触发
+        group_meta = MessageMetaData("hello", "hello", MessageSender("u", "n"), "g123", False)
+        assert PersonaCommand._is_persona_trigger(group_meta, "hello") is False
+
+        # 群聊：to_me=True → 触发
+        group_meta_to_me = MessageMetaData("hello", "hello", MessageSender("u", "n"), "g123", True)
+        assert PersonaCommand._is_persona_trigger(group_meta_to_me, "hello") is True
+
+        # 群聊：.ai 前缀 → 触发
+        assert PersonaCommand._is_persona_trigger(group_meta, ".ai status") is True
+
 
 @pytest.mark.unit
 class TestAdminCommands(IsolatedAsyncioTestCase):
