@@ -12,6 +12,7 @@ from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
 from plugins.DicePP.module.persona.data.models import (
     UserProfile,
+    RelationshipState,
     LLMTraceRecord,
     UserLLMConfig,
     ScoreEvent,
@@ -842,5 +843,109 @@ class TestUserProfileCRUD:
     async def test_get_nonexistent_profile(self, temp_db):
         store = temp_db
         assert await store.get_user_profile("u_unknown") is None
+
+
+# ── 以下为从 test_phase3_features.py 合并 ───────────────────────────────────
+
+
+class TestMuteFunctionality:
+    """测试 mute/unmute 功能"""
+
+    @pytest.mark.asyncio
+    async def test_initial_state_not_muted(self, temp_db):
+        """初始状态应该未静音"""
+        store = temp_db
+        assert await store.is_user_muted("test_user") is False
+
+    @pytest.mark.asyncio
+    async def test_mute_user(self, temp_db):
+        """静音用户"""
+        store = temp_db
+        user_id = "test_user"
+
+        await store.mute_user(user_id, reason="user_request")
+        assert await store.is_user_muted(user_id) is True
+
+    @pytest.mark.asyncio
+    async def test_unmute_user(self, temp_db):
+        """取消静音"""
+        store = temp_db
+        user_id = "test_user"
+
+        await store.mute_user(user_id)
+        assert await store.is_user_muted(user_id) is True
+
+        await store.unmute_user(user_id)
+        assert await store.is_user_muted(user_id) is False
+
+    @pytest.mark.asyncio
+    async def test_repeat_mute_idempotent(self, temp_db):
+        """重复静音应该保持静音状态"""
+        store = temp_db
+        user_id = "test_user"
+
+        await store.mute_user(user_id)
+        await store.mute_user(user_id)
+        assert await store.is_user_muted(user_id) is True
+
+
+class TestSearchMemoryPhase3:
+    """测试 search_memory 功能（从 test_phase3_features 合并）"""
+
+    @pytest.mark.asyncio
+    async def test_search_user_profile(self, temp_db):
+        """搜索用户档案"""
+        store = temp_db
+        user_id = "test_user"
+
+        profile = UserProfile(
+            user_id=user_id,
+            facts={"name": "Xiao Ming", "pet": "cat", "hobby": "games"},
+            updated_at=wall_now()
+        )
+        await store.save_user_profile(profile)
+
+        result = await store.search_memory(
+            user_id=user_id,
+            group_id="",
+            query="cat",
+            search_type="profile"
+        )
+        assert "cat" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_search_not_found(self, temp_db):
+        """搜索不存在的"""
+        store = temp_db
+        user_id = "test_user"
+
+        result = await store.search_memory(
+            user_id=user_id,
+            group_id="",
+            query="nonexistent_word_xyz",
+            search_type="profile"
+        )
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_search_all_includes_profile(self, temp_db):
+        """all 类型应该搜索用户档案"""
+        store = temp_db
+        user_id = "test_user"
+
+        profile = UserProfile(
+            user_id=user_id,
+            facts={"name": "Test User"},
+            updated_at=wall_now()
+        )
+        await store.save_user_profile(profile)
+
+        result = await store.search_memory(
+            user_id=user_id,
+            group_id="",
+            query="Test",
+            search_type="all"
+        )
+        assert len(result) >= 1
 
 

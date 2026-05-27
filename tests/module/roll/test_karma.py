@@ -109,6 +109,8 @@ class TestKarmaState:
 @pytest.mark.slow
 class TestKarmaEngines:
     def test_standard_is_uniform(self):
+        import random
+        random.seed(42)
         from module.roll.karma_manager import KarmaDiceManager
         from core.bot import Bot
 
@@ -120,6 +122,8 @@ class TestKarmaEngines:
         assert avg < 60
 
     def test_grim_mode_skews_low(self):
+        import random
+        random.seed(42)
         from module.roll.karma_manager import KarmaDiceManager, KarmaConfig
         from core.bot import Bot
 
@@ -133,6 +137,8 @@ class TestKarmaEngines:
         assert avg < 55
 
     def test_stable_mode_lower_variance(self):
+        import random
+        random.seed(42)
         from module.roll.karma_manager import KarmaDiceManager, KarmaConfig
         from core.bot import Bot
         import statistics

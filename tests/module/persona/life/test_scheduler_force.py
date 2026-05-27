@@ -27,26 +27,45 @@ def mock_data_store():
     return store
 
 
-@pytest.mark.asyncio
-async def test_share_event_to_targets_bypass_min_interval_for_force(scheduler_cfg, mock_data_store, mock_coordinator):
+def make_scheduler(cfg, data_store, coordinator, targets, agent_result="hello"):
+    """Create a ProactiveScheduler pre-configured for share_event_to_targets tests.
+
+    Args:
+        cfg: ProactiveConfig instance.
+        data_store: Mock data store.
+        coordinator: Mock LLM coordinator.
+        targets: List of ShareTarget objects for target_selector.
+        agent_result: Return value for mock agent's generate_share_message.
+
+    Returns:
+        Configured ProactiveScheduler with mock agent attached.
+    """
     target_selector = MagicMock()
-    target_selector.select_share_targets = AsyncMock(return_value=[
-        ShareTarget(user_id="u1", policy="force"),
-    ])
+    target_selector.select_share_targets = AsyncMock(return_value=targets)
 
     scheduler = ProactiveScheduler(
-        config=scheduler_cfg,
-        data_store=mock_data_store,
+        config=cfg,
+        data_store=data_store,
         character=MagicMock(),
         target_selector=target_selector,
-        coordinator=mock_coordinator,
+        coordinator=coordinator,
+    )
+
+    mock_agent = MagicMock()
+    mock_agent.generate_share_message = AsyncMock(return_value=agent_result)
+    scheduler.event_agent = mock_agent
+
+    return scheduler
+
+
+@pytest.mark.asyncio
+async def test_share_event_to_targets_bypass_min_interval_for_force(scheduler_cfg, mock_data_store, mock_coordinator):
+    scheduler = make_scheduler(
+        scheduler_cfg, mock_data_store, mock_coordinator,
+        targets=[ShareTarget(user_id="u1", policy="force")],
     )
     # 模拟刚刚发送过
     scheduler._last_proactive_time["user:u1"] = wall_now()
-
-    mock_agent = MagicMock()
-    mock_agent.generate_share_message = AsyncMock(return_value="hello")
-    scheduler.event_agent = mock_agent
 
     msgs = await scheduler.share_event_to_targets("hello", "", 10)
     assert len(msgs) == 1
@@ -57,25 +76,13 @@ async def test_share_event_to_targets_bypass_min_interval_for_force(scheduler_cf
 
 @pytest.mark.asyncio
 async def test_share_event_to_targets_respects_min_interval_for_normal(scheduler_cfg, mock_data_store, mock_coordinator):
-    target_selector = MagicMock()
-    target_selector.select_share_targets = AsyncMock(return_value=[
-        ShareTarget(user_id="u1", policy="normal"),
-    ])
-
-    scheduler = ProactiveScheduler(
-        config=scheduler_cfg,
-        data_store=mock_data_store,
-        character=MagicMock(),
-        target_selector=target_selector,
-        coordinator=mock_coordinator,
+    scheduler = make_scheduler(
+        scheduler_cfg, mock_data_store, mock_coordinator,
+        targets=[ShareTarget(user_id="u1", policy="normal")],
     )
     now = wall_now()
     scheduler._now = lambda: now
     scheduler._last_proactive_time["user:u1"] = now
-
-    mock_agent = MagicMock()
-    mock_agent.generate_share_message = AsyncMock(return_value="hello")
-    scheduler.event_agent = mock_agent
 
     msgs = await scheduler.share_event_to_targets("hello", "", 10)
     assert len(msgs) == 0
@@ -83,27 +90,17 @@ async def test_share_event_to_targets_respects_min_interval_for_normal(scheduler
 
 @pytest.mark.asyncio
 async def test_share_event_to_targets_mixed_force_and_normal(scheduler_cfg, mock_data_store, mock_coordinator):
-    target_selector = MagicMock()
-    target_selector.select_share_targets = AsyncMock(return_value=[
-        ShareTarget(user_id="u_force", policy="force"),
-        ShareTarget(user_id="u_normal", policy="normal"),
-    ])
-
-    scheduler = ProactiveScheduler(
-        config=scheduler_cfg,
-        data_store=mock_data_store,
-        character=MagicMock(),
-        target_selector=target_selector,
-        coordinator=mock_coordinator,
+    scheduler = make_scheduler(
+        scheduler_cfg, mock_data_store, mock_coordinator,
+        targets=[
+            ShareTarget(user_id="u_force", policy="force"),
+            ShareTarget(user_id="u_normal", policy="normal"),
+        ],
     )
     now = wall_now()
     scheduler._now = lambda: now
     scheduler._last_proactive_time["user:u_force"] = now
     scheduler._last_proactive_time["user:u_normal"] = now
-
-    mock_agent = MagicMock()
-    mock_agent.generate_share_message = AsyncMock(return_value="hello")
-    scheduler.event_agent = mock_agent
 
     msgs = await scheduler.share_event_to_targets("hello", "", 10)
     assert len(msgs) == 1
@@ -112,23 +109,11 @@ async def test_share_event_to_targets_mixed_force_and_normal(scheduler_cfg, mock
 
 @pytest.mark.asyncio
 async def test_share_event_to_targets_updates_last_proactive_time(scheduler_cfg, mock_data_store, mock_coordinator):
-    target_selector = MagicMock()
-    target_selector.select_share_targets = AsyncMock(return_value=[
-        ShareTarget(user_id="u1", policy="force"),
-    ])
-
-    scheduler = ProactiveScheduler(
-        config=scheduler_cfg,
-        data_store=mock_data_store,
-        character=MagicMock(),
-        target_selector=target_selector,
-        coordinator=mock_coordinator,
+    scheduler = make_scheduler(
+        scheduler_cfg, mock_data_store, mock_coordinator,
+        targets=[ShareTarget(user_id="u1", policy="force")],
     )
     scheduler._last_proactive_time.pop("user:u1", None)
-
-    mock_agent = MagicMock()
-    mock_agent.generate_share_message = AsyncMock(return_value="hello")
-    scheduler.event_agent = mock_agent
 
     await scheduler.share_event_to_targets("hello", "", 10)
     assert "user:u1" in scheduler._last_proactive_time
@@ -136,23 +121,11 @@ async def test_share_event_to_targets_updates_last_proactive_time(scheduler_cfg,
 
 @pytest.mark.asyncio
 async def test_share_event_to_targets_disabled_when_proactive_off(scheduler_cfg, mock_data_store, mock_coordinator):
-    target_selector = MagicMock()
-    target_selector.select_share_targets = AsyncMock(return_value=[
-        ShareTarget(user_id="u1", policy="force"),
-    ])
-
-    scheduler = ProactiveScheduler(
-        config=scheduler_cfg,
-        data_store=mock_data_store,
-        character=MagicMock(),
-        target_selector=target_selector,
-        coordinator=mock_coordinator,
+    scheduler = make_scheduler(
+        scheduler_cfg, mock_data_store, mock_coordinator,
+        targets=[ShareTarget(user_id="u1", policy="force")],
     )
     scheduler.config.enabled = False
-
-    mock_agent = MagicMock()
-    mock_agent.generate_share_message = AsyncMock(return_value="hello")
-    scheduler.event_agent = mock_agent
 
     msgs = await scheduler.share_event_to_targets("hello", "", 10)
     assert msgs == []
@@ -160,28 +133,15 @@ async def test_share_event_to_targets_disabled_when_proactive_off(scheduler_cfg,
 
 @pytest.mark.asyncio
 async def test_group_target_skips_mute_check(scheduler_cfg, mock_data_store, mock_coordinator):
-    target_selector = MagicMock()
-    target_selector.select_share_targets = AsyncMock(return_value=[
-        ShareTarget(user_id="", group_id="g1", is_group=True, policy="force"),
-    ])
     # 若代码错误地调用 is_user_muted("")， side_effect 会抛出或返回异常值
     mock_data_store.is_user_muted = AsyncMock(side_effect=lambda uid: (_ for _ in ()).throw(AssertionError("不应检查群的 mute 状态")))
 
-    scheduler = ProactiveScheduler(
-        config=scheduler_cfg,
-        data_store=mock_data_store,
-        character=MagicMock(),
-        target_selector=target_selector,
-        coordinator=mock_coordinator,
+    scheduler = make_scheduler(
+        scheduler_cfg, mock_data_store, mock_coordinator,
+        targets=[ShareTarget(user_id="", group_id="g1", is_group=True, policy="force")],
     )
-
-    mock_agent = MagicMock()
-    mock_agent.generate_share_message = AsyncMock(return_value="hello")
-    scheduler.event_agent = mock_agent
 
     msgs = await scheduler.share_event_to_targets("hello", "", 10)
     assert len(msgs) == 1
     assert msgs[0]["group_id"] == "g1"
     assert "group:g1" in scheduler._last_proactive_time
-
-

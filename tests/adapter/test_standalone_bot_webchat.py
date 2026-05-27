@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-pytestmark = pytest.mark.e2e
+pytestmark = pytest.mark.integration
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PLUGIN_ROOT = PROJECT_ROOT / "src" / "plugins" / "DicePP"

@@ -105,7 +105,25 @@ async def test_generate_share_message_returns_none(
 
 
 @pytest.mark.asyncio
-async def test_generate_share_message_few_shot_default(agent, mock_router, base_context, monkeypatch):
+@pytest.mark.parametrize(
+    "examples,expect_present,expect_absent",
+    [
+        # 默认示例：注入 event_description 关键词，替换 {{character_name}} 占位符
+        (None, ["示例:", "鸽子"], ["{{character_name}}"]),
+        # 空列表：不注入 few-shot
+        ([], [], ["示例:"]),
+        # 自定义示例：注入自定义内容
+        (["场景：下雨了\n消息：\"下雨了，记得带伞\"\n→ 好示例"], ["下雨了"], []),
+    ],
+    ids=["default", "empty_list", "custom"],
+)
+async def test_generate_share_message_few_shot_injection(
+    agent, mock_router, base_context, monkeypatch,
+    examples, expect_present, expect_absent,
+):
+    """few-shot 注入策略：默认/空列表/自定义三种场景"""
+    if examples is not None:
+        base_context.share_message_examples = examples
     from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
     mock_run = AsyncMock()
     monkeypatch.setattr(AgentRuntime, "run", mock_run)
@@ -113,35 +131,10 @@ async def test_generate_share_message_few_shot_default(agent, mock_router, base_
     await agent.generate_share_message(base_context)
     call_kwargs = mock_run.call_args.kwargs
     system_prompt = call_kwargs["messages"][0]["content"]
-    assert "示例:" in system_prompt
-    assert "鸽子" in system_prompt
-    assert "{{character_name}}" not in system_prompt
-
-
-@pytest.mark.asyncio
-async def test_generate_share_message_few_shot_empty_list(agent, mock_router, base_context, monkeypatch):
-    base_context.share_message_examples = []
-    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
-    mock_run = AsyncMock()
-    monkeypatch.setattr(AgentRuntime, "run", mock_run)
-
-    await agent.generate_share_message(base_context)
-    call_kwargs = mock_run.call_args.kwargs
-    system_prompt = call_kwargs["messages"][0]["content"]
-    assert "示例:" not in system_prompt
-
-
-@pytest.mark.asyncio
-async def test_generate_share_message_few_shot_custom(agent, mock_router, base_context, monkeypatch):
-    base_context.share_message_examples = ["场景：下雨了\n消息：\"下雨了，记得带伞\"\n→ 好示例"]
-    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
-    mock_run = AsyncMock()
-    monkeypatch.setattr(AgentRuntime, "run", mock_run)
-
-    await agent.generate_share_message(base_context)
-    call_kwargs = mock_run.call_args.kwargs
-    system_prompt = call_kwargs["messages"][0]["content"]
-    assert "下雨了" in system_prompt
+    for keyword in expect_present:
+        assert keyword in system_prompt, f"expected '{keyword}' in prompt"
+    for keyword in expect_absent:
+        assert keyword not in system_prompt, f"unexpected '{keyword}' in prompt"
 
 
 @pytest.mark.asyncio

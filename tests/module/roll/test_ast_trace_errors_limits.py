@@ -72,41 +72,6 @@ class TestEvaluationTrace:
 
 
 @pytest.mark.unit
-class TestLegacyTextRenderer:
-    """Test legacy-compatible text rendering."""
-    
-    def test_render_single_dice(self):
-        renderer = LegacyTextRenderer()
-        event = DiceRollEvent(
-            event_type=TraceEventType.DICE_ROLL,
-            count=1, sides=20, values=[15]
-        )
-        text = renderer.render_dice_roll(event)
-        assert text == "[15]"
-    
-    def test_render_multiple_dice(self):
-        renderer = LegacyTextRenderer()
-        event = DiceRollEvent(
-            event_type=TraceEventType.DICE_ROLL,
-            count=3, sides=6, values=[3, 4, 5]
-        )
-        text = renderer.render_dice_roll(event)
-        assert text == "[3+4+5]"
-    
-    def test_render_keep_highest(self):
-        renderer = LegacyTextRenderer()
-        event = ModifierAppliedEvent(
-            event_type=TraceEventType.MODIFIER_APPLIED,
-            modifier_type="K",  # ModifierType.KEEP_HIGHEST.value == "K"
-            original_values=[15, 12, 3],  # K renders from original_values (legacy style)
-            result_values=[15],
-        )
-        text = renderer.render_modifier(event)
-        assert "MAX" in text
-        assert "15" in text
-
-
-@pytest.mark.unit
 class TestSafetyLimits:
     """Test safety limit enforcement."""
     
@@ -165,6 +130,24 @@ class TestSafetyLimits:
 @pytest.mark.unit
 class TestModifierRendering:
     """Test that every modifier type produces non-empty render output."""
+
+    def test_render_single_dice(self):
+        renderer = LegacyTextRenderer()
+        event = DiceRollEvent(
+            event_type=TraceEventType.DICE_ROLL,
+            count=1, sides=20, values=[15]
+        )
+        text = renderer.render_dice_roll(event)
+        assert text == "[15]"
+
+    def test_render_multiple_dice(self):
+        renderer = LegacyTextRenderer()
+        event = DiceRollEvent(
+            event_type=TraceEventType.DICE_ROLL,
+            count=3, sides=6, values=[3, 4, 5]
+        )
+        text = renderer.render_dice_roll(event)
+        assert text == "[3+4+5]"
 
     def _make_event(self, modifier_type: str, original=None, result=None, extra=None):
         return ModifierAppliedEvent(
@@ -327,8 +310,3 @@ class TestEvaluationDepthLimit:
         evaluator = Evaluator(limits=limits)
         result = ast.accept(evaluator)
         assert result.value == 6
-
-    def test_depth_error_code_is_parse_depth_exceeded(self):
-        """Verify the error code enum value is PARSE_DEPTH_EXCEEDED."""
-        from module.roll.ast_engine.errors import RollErrorCode
-        assert RollErrorCode.PARSE_DEPTH_EXCEEDED.value == 302

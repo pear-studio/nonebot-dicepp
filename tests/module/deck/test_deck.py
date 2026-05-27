@@ -130,26 +130,33 @@ class TestDeckDraw:
         deck.draw(2, [deck], loc)
 
     def test_weighted_draw_respects_weight(self):
-        """高权重卡牌应被更频繁抽到"""
+        """固定 random.randint 返回值，验证权重抽卡逻辑"""
         import random
+        from unittest.mock import patch
+
+        def _loc_passthrough(key, **kwargs):
+            """透传 content/result 关键字参数"""
+            return kwargs.get("content", kwargs.get("result", ""))
+
+        # weight_sum=100, randint(1,100)→1 选中第一项(低权重卡)
         deck = Deck("权重牌库", "/tmp")
         deck.add_item(DeckItem("低权重卡", weight=1))
         deck.add_item(DeckItem("高权重卡", weight=99))
         loc = _make_loc_helper()
-        # 固定随机种子，确保可重复
-        random.seed(42)
-        counts = {"低权重卡": 0, "高权重卡": 0}
-        for _ in range(100):
-            # 重置牌库（不放回的话每次都要重新创建）
-            d = Deck("权重牌库", "/tmp")
-            d.add_item(DeckItem("低权重卡", weight=1))
-            d.add_item(DeckItem("高权重卡", weight=99))
-            loc2 = _make_loc_helper()
-            loc2.format_loc_text.side_effect = lambda key, content="", **kwargs: content
-            d.draw(1, [d], loc2)
-            calls = [str(c) for c in loc2.format_loc_text.call_args_list]
-            if any("高权重卡" in c for c in calls):
-                counts["高权重卡"] += 1
-            else:
-                counts["低权重卡"] += 1
-        assert counts["高权重卡"] > counts["低权重卡"], "高权重卡牌应比低权重卡牌更频繁抽到"
+        loc.format_loc_text.side_effect = _loc_passthrough
+
+        with patch.object(random, 'randint', return_value=1):
+            result_low = deck.draw(1, [deck], loc)
+
+        # 重新创建牌库，randint(1,100)→50 选中第二项(高权重卡)
+        deck2 = Deck("权重牌库", "/tmp")
+        deck2.add_item(DeckItem("低权重卡", weight=1))
+        deck2.add_item(DeckItem("高权重卡", weight=99))
+        loc2 = _make_loc_helper()
+        loc2.format_loc_text.side_effect = _loc_passthrough
+
+        with patch.object(random, 'randint', return_value=50):
+            result_high = deck2.draw(1, [deck2], loc2)
+
+        assert "低权重卡" in result_low, f"randint=1 应选中低权重卡: {result_low}"
+        assert "高权重卡" in result_high, f"randint=50 应选中高权重卡: {result_high}"

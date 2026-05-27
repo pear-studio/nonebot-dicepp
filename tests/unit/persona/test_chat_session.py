@@ -4,8 +4,10 @@
 
 1. 5 秒去重：相同消息 5 秒内重复返回 None
 2. 厌倦拒绝：relationship_refuse_enabled 且 warmth_level=0，按概率返回 refuse_messages
+3. 分段回复集成：_chat_with_tools flag 生命周期、coordinator 协作、返回值语义
 """
 
+import asyncio
 import random
 from datetime import datetime, timedelta
 from plugins.DicePP.utils.time import wall_now
@@ -15,10 +17,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from plugins.DicePP.module.persona.chat.session import ChatSession, ChatConfig
 from plugins.DicePP.module.persona.data.models import DailyEvent, RelationshipState
+from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.llm.coordinator import LLMCallCoordinator
+from plugins.DicePP.module.persona.character.models import Character
+from plugins.DicePP.module.persona.chat.context import ContextBuilder
 
 
-@pytest.fixture(autouse=True)
+# ── fixtures: 非分段路径 ───────────────────────────────────────────────────
+
+
+@pytest.fixture()
 def mock_agent_runtime():
     """Mock AgentRuntime.run_chat — 避免依赖真实 LLM 调用"""
     from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
@@ -46,6 +54,7 @@ def _make_session(
     refuse_enabled: bool = False,
     relationship: RelationshipState = None,
     refuse_messages=None,
+    coordinator: LLMCallCoordinator = None,
 ) -> ChatSession:
     """构造最小可运行 ChatSession（mock 全部依赖）"""
     store = AsyncMock()
@@ -109,13 +118,135 @@ def _make_session(
         store=store,
         router=router,
         tool_registry=MagicMock(),
-        coordinator=LLMCallCoordinator(),
+        coordinator=coordinator if coordinator is not None else LLMCallCoordinator(),
         character=character,
         config=config,
         scoring_trigger=scoring_trigger,
         response_handler=response_handler,
         context_builder=context_builder,
     )
+
+
+# ── fixtures: 分段回复路径 ─────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def mock_agent_runtime_segmented():
+    """Mock AgentRuntime.run_chat — 模拟分段路径（delivery_performed=True）"""
+    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+    from plugins.DicePP.module.persona.agent.loop import AgentRunResult
+
+    original = AgentRuntime.run_chat
+    result = AgentRunResult(
+        run_id="test", turn_id="test", status="completed",
+        final_reason="terminal_final_segment", final_text="hello",
+        delivery_performed=True,
+        tool_rounds=2,
+    )
+
+    async def fake_run_chat(self, messages, user_id, group_id, **kwargs):
+        return result
+
+    AgentRuntime.run_chat = fake_run_chat
+    yield result
+    AgentRuntime.run_chat = original
+
+
+@pytest.fixture
+def seg_mock_store():
+    store = MagicMock(spec=PersonaDataStore)
+    store.get_group_messages = AsyncMock(return_value=[])
+    store.get_recent_messages = AsyncMock(return_value=[])
+    store.add_message_stream = AsyncMock(return_value=1)
+    store.get_relationship = AsyncMock(return_value=None)
+    store.get_user_profile = AsyncMock(return_value=None)
+    store.get_user_llm_config = AsyncMock(return_value=None)
+    store.get_daily_usage = AsyncMock(return_value=0)
+    store.is_user_whitelisted = AsyncMock(return_value=False)
+    store.is_group_whitelisted = AsyncMock(return_value=False)
+    return store
+
+
+@pytest.fixture
+def seg_mock_port():
+    return AsyncMock()
+
+
+@pytest.fixture
+def tool_registry():
+    from plugins.DicePP.module.persona.tools.registry import ToolRegistry
+    return ToolRegistry()
+
+
+@pytest.fixture
+def coordinator():
+    return LLMCallCoordinator(max_failures=3, max_iterations=5)
+
+
+@pytest.fixture
+def seg_character():
+    return Character(name="Test")
+
+
+@pytest.fixture
+def context_builder(seg_character):
+    return ContextBuilder(seg_character)
+
+
+@pytest.fixture
+def seg_config():
+    return ChatConfig(
+        tools_max_rounds=5,
+        segment_target_chars=30,
+        segment_max_chars=80,
+        segment_soft_limit=100,
+        segment_hard_limit=120,
+        segment_count_max=10,
+        segment_max_delay=10.0,
+        segment_round_callbacks_max=3,
+    )
+
+
+@pytest.fixture
+def mock_router():
+    router = MagicMock()
+    router.increment_usage = AsyncMock()
+    router.data_store = None
+    router.quota_check_enabled = False
+    router.daily_limit = 20
+    router.trace_enabled = False
+    router.trace_max_age_days = 7
+    router.config = None
+    return router
+
+
+@pytest.fixture
+def seg_session(seg_mock_store, mock_router, tool_registry, coordinator, seg_character, seg_config, context_builder, seg_mock_port, mock_agent_runtime_segmented):
+    scoring_trigger = MagicMock()
+    scoring_trigger.effective_relationship = MagicMock(side_effect=lambda rel: rel)
+    scoring_trigger.on_interaction = AsyncMock()
+    scoring_trigger.update_character = MagicMock()
+
+    response_handler = MagicMock()
+    response_handler.port = seg_mock_port
+    response_handler.persist = AsyncMock(return_value=1)
+    response_handler.send = AsyncMock(return_value=True)
+    response_handler.persist_and_send = AsyncMock(return_value=1)
+
+    return ChatSession(
+        store=seg_mock_store,
+        router=mock_router,
+        tool_registry=tool_registry,
+        coordinator=coordinator,
+        character=seg_character,
+        config=seg_config,
+        scoring_trigger=scoring_trigger,
+        response_handler=response_handler,
+        context_builder=context_builder,
+    )
+
+
+# ── 去重 / 拒绝测试 ───────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -134,7 +265,7 @@ async def test_dedup_within_5_seconds_returns_none(mock_agent_runtime):
 
 
 @pytest.mark.asyncio
-async def test_dedup_different_message_not_skipped():
+async def test_dedup_different_message_not_skipped(mock_agent_runtime):
     """5 秒内不同消息正常处理"""
     session = _make_session()
 
@@ -191,7 +322,7 @@ async def test_refuse_triggers_at_warmth_zero(monkeypatch, mock_agent_runtime):
 
 
 @pytest.mark.asyncio
-async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch):
+async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch, mock_agent_runtime):
     """warmth_level>0 时不进入拒绝分支"""
     # 高分 → warmth_level>0
     rel = RelationshipState(
@@ -213,6 +344,9 @@ async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch):
     result = await session.chat("u1", "", "你好")
 
     assert result != "...（已读不回）"
+
+
+# ── _apply_token_window 测试 ───────────────────────────────────────────────
 
 
 class TestApplyTokenWindow:
@@ -326,6 +460,9 @@ class TestApplyTokenWindow:
         assert truncated is True
 
 
+# ── ScoringTrigger decay 测试 ──────────────────────────────────────────────
+
+
 class TestDecayInScoringTrigger:
     """ScoringTrigger.on_interaction 中的惰性 decay 路径测试"""
 
@@ -373,6 +510,9 @@ class TestDecayInScoringTrigger:
         # 验证写入的 score_event 包含 decay 原因
         event = store.add_score_event.call_args[0][0]
         assert "time_decay" in event.reason
+
+
+# ── _build_diary_context 测试 ──────────────────────────────────────────────
 
 
 class TestBuildDiaryContext:
@@ -447,3 +587,153 @@ class TestBuildDiaryContext:
         result = await session._build_diary_context()
         assert "昨天" in result
         assert "公园" in result
+
+
+# ── 分段回复集成测试（原 test_chat_session_segmented.py）────────────────────
+
+
+class TestFlagLifecycle:
+    @pytest.mark.asyncio
+    async def test_delivery_performed_flag_set_by_chat_with_tools(self, seg_session):
+        result = await seg_session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
+        assert result == "hello"
+        assert seg_session._delivery_performed is True
+
+    @pytest.mark.asyncio
+    async def test_chat_via_coordinator_returns_empty_str_for_delivery_performed(self, seg_session):
+        result = await seg_session._chat_via_coordinator("u1", "", "hi", "user:u1")
+        assert result == ""
+        assert seg_session._delivery_performed is True
+
+    @pytest.mark.asyncio
+    async def test_exception_does_not_produce_sentinel(self, seg_session):
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        original = AgentRuntime.run_chat
+
+        async def failing_run_chat(self, messages, user_id, group_id, **kwargs):
+            raise RuntimeError("boom")
+
+        AgentRuntime.run_chat = failing_run_chat
+        try:
+            with pytest.raises(RuntimeError):
+                await seg_session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
+        finally:
+            AgentRuntime.run_chat = original
+
+
+class TestReturnSemantics:
+    @pytest.mark.asyncio
+    async def test_chat_returns_empty_str_for_delivery_performed(self, seg_session):
+        # AgentRuntime mock returns delivery_performed=True → 空字符串
+        result = await seg_session.chat("u1", "", "hello")
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_chat_returns_empty_str_for_segmented_mode(self, seg_session):
+        """分段模式下 chat 返回空字符串"""
+        result = await seg_session.chat("u1", "", "hello")
+        assert result == ""
+
+
+# ── 计费路径测试 ───────────────────────────────────────────────────────────
+
+
+class TestChargingPath:
+    """确保"一次 LLM 调用 = 一次 increment_usage"不变量"""
+
+    @pytest.fixture(autouse=True)
+    def mock_agent_runtime(self):
+        """Mock AgentRuntime.run_chat — 模拟 UsageSink 计费行为"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        from plugins.DicePP.module.persona.agent.loop import AgentRunResult
+
+        original = AgentRuntime.run_chat
+        result = AgentRunResult(
+            run_id="test", turn_id="test", status="completed",
+            final_reason="direct_content", final_text="reply",
+            delivery_performed=False,
+        )
+
+        async def fake_run_chat(self, messages, user_id, group_id, **kwargs):
+            # 模拟 UsageSink 在 AgentLoop 首次 LLM 调用后的计费
+            await self._router.increment_usage(user_id)
+            return result
+
+        AgentRuntime.run_chat = fake_run_chat
+        yield
+        AgentRuntime.run_chat = original
+
+    @pytest.mark.asyncio
+    async def test_single_call_charges_once(self):
+        """单次成功调用 → 1 次扣费"""
+        coordinator = LLMCallCoordinator()
+        session = _make_session(coordinator=coordinator)
+
+        result = await session.chat("u1", "", "你好")
+
+        assert result == "reply"
+        session.router.increment_usage.assert_awaited_once_with("u1")
+
+    @pytest.mark.asyncio
+    async def test_buffered_merge_charges_per_call(self):
+        """N 次 LLM 调用（中间轮 + 最终轮）→ N 次扣费（中间轮 on_result + 最终轮 success 各扣 1 次）"""
+        coordinator = LLMCallCoordinator()
+        session = _make_session(coordinator=coordinator)
+
+        llm_calls = []
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def slow_chat_call(user_id, group_id, messages):
+            llm_calls.append((user_id, group_id, messages))
+            call_index = len(llm_calls)
+            # 模拟 AgentRuntime 内部计费行为
+            await session.router.increment_usage(user_id)
+            if call_index == 1:
+                first_started.set()
+                await release_first.wait()
+            return f"reply_{call_index}"
+
+        session._coordinator_chat_call_fn = slow_chat_call
+
+        first_task = asyncio.create_task(session.chat("u1", "", "msg1"))
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
+
+        async def buffered(message):
+            await first_started.wait()
+            return await session.chat("u1", "", message)
+
+        buffered_results = await asyncio.gather(
+            buffered("msg2"),
+            buffered("msg3"),
+        )
+        assert buffered_results == [None, None]
+
+        release_first.set()
+        await first_task
+
+        # 至少 2 次 LLM 调用（首轮 + 至少 1 次 buffered 合并）
+        assert len(llm_calls) >= 2
+        # 中间轮通过 on_result 各扣 1 次 + 最终轮 success 1 次：N 次 LLM 调用 → N 次扣费
+        charged_user_ids = [
+            call.args[0]
+            for call in session.router.increment_usage.await_args_list
+        ]
+        assert charged_user_ids == ["u1"] * len(llm_calls)
+
+    @pytest.mark.asyncio
+    async def test_all_failures_does_not_charge(self):
+        """全部失败走 on_exhausted → 0 次扣费"""
+        coordinator = LLMCallCoordinator(max_failures=1, max_iterations=5)
+        session = _make_session(coordinator=coordinator)
+
+        async def always_fail(user_id, group_id, messages):
+            raise RuntimeError("LLM down")
+
+        session._coordinator_chat_call_fn = always_fail
+
+        result = await session.chat("u1", "", "msg")
+
+        # 兜底文案
+        assert "暂时不可用" in result
+        session.router.increment_usage.assert_not_awaited()

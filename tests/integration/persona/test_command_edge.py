@@ -86,7 +86,7 @@ def _get_sent_content(cmd) -> str:
     return args[2] if len(args) > 2 else ""
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestEdgeAndExceptionPaths(IsolatedAsyncioTestCase):
     """异常/边界路径（3个）"""
 
@@ -130,7 +130,7 @@ class TestEdgeAndExceptionPaths(IsolatedAsyncioTestCase):
         assert "你好，我是" in _get_sent_content(self.cmd)
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestGroupChatRecorder(IsolatedAsyncioTestCase):
     """_group_chat_recorder 写库路径与边界"""
 
@@ -171,7 +171,7 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
         )
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
     """R4 回归: 分段路径下 chat_with_user 返回空字符串（delivery 已由 runtime 完成），
     群活跃度仍需更新, 但 _send 不应被再次调用 (消息已通过 dispatcher 实时发出)

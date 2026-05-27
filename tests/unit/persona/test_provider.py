@@ -56,22 +56,28 @@ class TestOpenAIProvider:
         assert resp.usage.cached == 0
         assert resp.model == "gpt-4o-2024-08-06"
 
-    @pytest.mark.asyncio
-    async def test_tool_call_response(self, provider):
+    def _setup_tool_call_response(self, provider):
+        """构造含单个 tool_call 的 mock 响应并挂载到 provider。"""
         tc = Mock()
         tc.id = "call_abc"
         tc.function = Mock()
         tc.function.name = "search_persona"
         tc.function.arguments = '{"query":"猫"}'
-
         mock_client = Mock()
         mock_client.chat.completions.create = AsyncMock(
             return_value=self._mock_openai_response(content="", tool_calls=[tc]))
         provider._client = mock_client
+        return mock_client
+
+    @pytest.mark.parametrize("tool_choice", ["auto", "required"])
+    @pytest.mark.asyncio
+    async def test_tool_call_response(self, provider, tool_choice):
+        mock_client = self._setup_tool_call_response(provider)
 
         resp = await provider.generate(
             messages=[{"role": "user", "content": "搜索猫"}],
             tools=[{"type": "function", "function": {"name": "search_persona"}}],
+            tool_choice=tool_choice,
         )
 
         assert resp.finish_reason == "tool_calls"
@@ -80,28 +86,7 @@ class TestOpenAIProvider:
         assert resp.tool_calls[0].name == "search_persona"
         assert resp.tool_calls[0].arguments == '{"query":"猫"}'
         assert resp.tool_calls[0].to_dict() == {"id": "call_abc", "name": "search_persona", "arguments": '{"query":"猫"}'}
-        assert mock_client.chat.completions.create.call_args.kwargs["tool_choice"] == "auto"
-
-    @pytest.mark.asyncio
-    async def test_tool_choice_required(self, provider):
-        tc = Mock()
-        tc.id = "call_abc"
-        tc.function = Mock()
-        tc.function.name = "search_persona"
-        tc.function.arguments = '{"query":"猫"}'
-
-        mock_client = Mock()
-        mock_client.chat.completions.create = AsyncMock(
-            return_value=self._mock_openai_response(content="", tool_calls=[tc]))
-        provider._client = mock_client
-
-        await provider.generate(
-            messages=[{"role": "user", "content": "搜索猫"}],
-            tools=[{"type": "function", "function": {"name": "search_persona"}}],
-            tool_choice="required",
-        )
-
-        assert mock_client.chat.completions.create.call_args.kwargs["tool_choice"] == "required"
+        assert mock_client.chat.completions.create.call_args.kwargs["tool_choice"] == tool_choice
 
     @pytest.mark.asyncio
     async def test_cached_tokens_extraction(self, provider):

@@ -117,19 +117,22 @@ class TestRollChoose(_RollCmdBotBase):
     """Tests for .c (choose) command."""
 
     async def test_choose__result_in_options(self):
-        """.c 苹果 香蕉 橙子, result is in the set."""
-        cmds, result = await self._send_group(".c 苹果 香蕉 橙子")
-        
-        # Result should be one of the options
-        assert any(opt in result for opt in ["苹果", "香蕉", "橙子"])
+        """.c 苹果 香蕉 橙子, result is the first option when shuffle is fixed."""
+        import random
+        with mock.patch.object(random, 'shuffle', side_effect=lambda x: None):
+            cmds, result = await self._send_group(".c 苹果 香蕉 橙子")
+
+        # With shuffle as no-op, first arg "苹果" is always chosen
+        assert "苹果" in result
 
     async def test_choose__with_reason(self):
-        """Choose with reason includes reason text."""
-        cmds, result = await self._send_group(".c 苹果 香蕉 今天吃什么")
+        """Choose with reason: first option is chosen when shuffle is fixed."""
+        import random
+        with mock.patch.object(random, 'shuffle', side_effect=lambda x: None):
+            cmds, result = await self._send_group(".c 苹果 香蕉 今天吃什么")
 
-        # The command randomly selects one of the three options (苹果, 香蕉, 今天吃什么)
-        # Just verify we got a valid result containing one of the options
-        assert any(opt in result for opt in ["苹果", "香蕉", "今天吃什么"])
+        # With shuffle as no-op, first arg "苹果" is always chosen
+        assert "苹果" in result
 
     async def test_choose__compact_count_still_supported(self):
         """.c2 苹果 香蕉 橙子 keeps the compact count syntax."""

@@ -85,12 +85,6 @@ class TestAESEncryption:
         assert encrypted1 != encrypted2
 
 
-# ── UserLLMConfig Model Tests ────────────────────────────────────────────────
-
-class TestUserLLMConfigModel:
-    """测试 UserLLMConfig 模型"""
-
-
 # ── Quota System Tests ───────────────────────────────────────────────────────
 
 class TestQuotaSystem:
@@ -287,34 +281,41 @@ class TestRollDiceTool:
 
     @pytest.mark.asyncio
     async def test_roll_dice_simple(self):
-        """测试简单掷骰"""
+        """测试简单掷骰 — 固定 SequenceRuntime 断言精确输出"""
         from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
         from plugins.DicePP.module.persona.tools.context import ToolContext
+        from tests.helpers.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 
         ctx = ToolContext(user_id="u1", group_id="")
-        result = await roll_dice_executor({"expression": "1d20"}, ctx)
+        runtime = SequenceRuntime([5])  # d20 → ((5-1)%20)+1 = 5
+        token = set_runtime(runtime)
+        try:
+            result = await roll_dice_executor({"expression": "1d20"}, ctx)
+        finally:
+            reset_runtime(token)
 
-        import re
         assert "掷骰" in result
-        # 用正则提取最终数值并做范围断言
-        match = re.search(r"=\s*(\d+)$", result)
-        if match is None:
-            raise AssertionError(f"无法从结果中解析数值: {result}")
-        val = int(match.group(1))
-        assert 1 <= val <= 20, f"数值 {val} 不在 1-20 范围内: {result}"
+        assert "[5]" in result, f"应包含 [5]，实际: {result}"
+        assert "= 5" in result, f"应包含最终值 5，实际: {result}"
 
     @pytest.mark.asyncio
     async def test_roll_dice_with_modifier(self):
-        """测试带修饰符的掷骰"""
+        """测试带修饰符的掷骰 — 固定 SequenceRuntime 断言精确输出"""
         from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
         from plugins.DicePP.module.persona.tools.context import ToolContext
+        from tests.helpers.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 
         ctx = ToolContext(user_id="u1", group_id="")
-        result = await roll_dice_executor({"expression": "2d6+3"}, ctx)
+        runtime = SequenceRuntime([4, 6])  # 2d6 → [4, 6], +3 → 13
+        token = set_runtime(runtime)
+        try:
+            result = await roll_dice_executor({"expression": "2d6+3"}, ctx)
+        finally:
+            reset_runtime(token)
 
         assert "掷骰" in result
-        # 结果应该包含计算后的值（5-15）
-        assert "=" in result
+        assert "[4+6]" in result, f"应包含 [4+6]，实际: {result}"
+        assert "= 13" in result, f"应包含最终值 13，实际: {result}"
 
     @pytest.mark.asyncio
     async def test_roll_dice_invalid_expression(self):

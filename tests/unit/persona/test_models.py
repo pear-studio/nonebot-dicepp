@@ -12,6 +12,7 @@ from plugins.DicePP.module.persona.data.models import (
     RelationshipState,
     UserProfile,
 )
+from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
@@ -199,6 +200,42 @@ class TestPersonaConfig:
             PersonaConfig(segment_count_max=0)
         with pytest.raises(ValidationError):
             PersonaConfig(segment_max_delay=0)
+
+
+class TestWarmthLevelRefuse:
+    """测试冷淡拒绝机制"""
+
+    def test_warmth_level_cold(self):
+        """好感度 5 分应该在冷淡区间（0）"""
+        rel = RelationshipState(
+            user_id="test",
+            intimacy=5.0,
+            passion=5.0,
+            trust=5.0,
+            secureness=5.0,
+        )
+
+        ext = PersonaExtensions(initial_relationship=40)
+        char = Character(name="Test", extensions=ext)
+
+        warmth_level, label = rel.get_warmth_level(char.get_warmth_labels())
+        assert warmth_level == 0, f"Expected 0 (cold), got {warmth_level}"
+
+    def test_warmth_level_distant(self):
+        """好感度 30 分应该在疏远区间（1）"""
+        rel = RelationshipState(
+            user_id="test",
+            intimacy=30.0,
+            passion=30.0,
+            trust=30.0,
+            secureness=30.0,
+        )
+
+        ext = PersonaExtensions(initial_relationship=40)
+        char = Character(name="Test", extensions=ext)
+
+        warmth_level, label = rel.get_warmth_level(char.get_warmth_labels())
+        assert warmth_level == 1, f"Expected 1 (distant), got {warmth_level}"
 
 
 if __name__ == "__main__":

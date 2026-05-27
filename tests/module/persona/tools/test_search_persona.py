@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 def _make_ctx(**kwargs):

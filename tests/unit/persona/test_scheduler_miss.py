@@ -182,35 +182,44 @@ class TestProactiveSchedulerMissProbability:
         return evt
 
     @pytest.mark.asyncio
-    async def test_miss_probability_distant_stage(self, scheduler, mock_data_store, monkeypatch):
-        """疏远阶段(score=30)概率 50%"""
-        import random
-        random.seed(42)
-
+    async def test_miss_distant_stage_random_below_threshold_triggers(self, scheduler, mock_data_store, monkeypatch):
+        """疏远阶段(score=30)概率 50%，random<0.5 → 触发"""
         fake_now = datetime(2024, 1, 4, 10, 0, 0)
         monkeypatch.setattr(
             "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: fake_now,
         )
+        monkeypatch.setattr("plugins.DicePP.module.persona.life.proactive_scheduler.random.random", lambda: 0.3)
         rel = self._make_rel(30.0, fake_now)
         mock_data_store.list_active_relationships.return_value = [rel]
         mock_data_store.get_daily_events.return_value = [self._make_event()]
 
-        # 让消息生成成功
         mock_agent = AsyncMock()
         mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
         scheduler.event_agent = mock_agent
 
-        triggered = 0
-        trials = 100
-        for _ in range(trials):
-            result = await scheduler._check_missed_users()
-            if result:
-                triggered += 1
-            # 重置开关，否则下次循环开关已打开
-            rel.last_miss_sent_at = None
-        # 50% 概率，100 次试验中应落在 35-65 之间（3-sigma 约 ±15）
-        assert 35 <= triggered <= 65
+        result = await scheduler._check_missed_users()
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_miss_distant_stage_random_above_threshold_skips(self, scheduler, mock_data_store, monkeypatch):
+        """疏远阶段(score=30)概率 50%，random>=0.5 → 跳过"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: fake_now,
+        )
+        monkeypatch.setattr("plugins.DicePP.module.persona.life.proactive_scheduler.random.random", lambda: 0.7)
+        rel = self._make_rel(30.0, fake_now)
+        mock_data_store.list_active_relationships.return_value = [rel]
+        mock_data_store.get_daily_events.return_value = [self._make_event()]
+
+        mock_agent = AsyncMock()
+        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+        scheduler.event_agent = mock_agent
+
+        result = await scheduler._check_missed_users()
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_miss_probability_intimate_always(self, scheduler, mock_data_store, monkeypatch):

@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 
 from module.fastapi.api import bind_runtime, dpp_api
 
+pytestmark = pytest.mark.unit
+
 
 class _FakeHubManager:
     def __init__(self, registered: bool = False):

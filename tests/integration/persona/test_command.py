@@ -187,7 +187,7 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
         assert ok is True
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestAdminCommands(IsolatedAsyncioTestCase):
     """admin 子命令（10个）"""
 
@@ -346,7 +346,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         assert "已恢复" in _get_sent_content(self.cmd)
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestUserCommands(IsolatedAsyncioTestCase):
     """用户命令（7个）"""
 

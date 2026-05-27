@@ -165,6 +165,8 @@ class TestDiceCorpus:
         """Validate dice expressions parse and execute without error."""
         result = exec_roll_exp(entry.expression)
         assert isinstance(result.get_val(), (int, float))
+        assert result.get_val() >= -1000, f"Dice result {result.get_val()} unexpectedly low for '{entry.expression}'"
+        assert result.get_val() <= 100000, f"Dice result {result.get_val()} unexpectedly high for '{entry.expression}'"
 
 
 @pytest.mark.unit
@@ -176,6 +178,8 @@ class TestModifierCorpus:
         """Validate modifier expressions parse and execute without error."""
         result = exec_roll_exp(entry.expression)
         assert isinstance(result.get_val(), (int, float))
+        assert result.get_val() >= 0, f"Modifier result {result.get_val()} should be >= 0 for '{entry.expression}'"
+        assert result.get_val() <= 100000, f"Modifier result {result.get_val()} should be <= 100000 for '{entry.expression}'"
 
 
 @pytest.mark.unit
@@ -198,6 +202,7 @@ class TestLocalizationCorpus:
         """Validate localization expressions parse and execute."""
         result = exec_roll_exp(entry.expression)
         assert isinstance(result.get_val(), (int, float))
+        assert result.get_val() >= 0, f"Localization result {result.get_val()} should be >= 0 for '{entry.expression}'"
 
 
 # =============================================================================
@@ -226,6 +231,8 @@ class TestASTDiceCorpus:
     def test_ast_dice_executes(self, entry: CorpusEntry):
         result = exec_roll_exp_ast(entry.expression)
         assert isinstance(result.get_val(), (int, float))
+        assert result.get_val() >= -1000, f"[AST] Dice result {result.get_val()} unexpectedly low for '{entry.expression}'"
+        assert result.get_val() <= 100000, f"[AST] Dice result {result.get_val()} unexpectedly high for '{entry.expression}'"
 
 
 @pytest.mark.unit
@@ -236,6 +243,8 @@ class TestASTModifierCorpus:
     def test_ast_modifier_executes(self, entry: CorpusEntry):
         result = exec_roll_exp_ast(entry.expression)
         assert isinstance(result.get_val(), (int, float))
+        assert result.get_val() >= 0, f"[AST] Modifier result {result.get_val()} should be >= 0 for '{entry.expression}'"
+        assert result.get_val() <= 100000, f"[AST] Modifier result {result.get_val()} should be <= 100000 for '{entry.expression}'"
 
 
 @pytest.mark.unit
