@@ -170,7 +170,7 @@ class TestCharacterDaySimulation:
         # ── 07:00 起床前，无事件 ──
         fake_now = datetime(2024, 1, 1, 7, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         result = await life.tick()
@@ -225,7 +225,7 @@ class TestCharacterDaySimulation:
         fake_now = datetime(2024, 1, 1, 23, 30, 0)
         monkeypatch.setattr(life.data_store, "_wall_now", lambda: fake_now)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.diary.persona_wall_now",
+            "plugins.DicePP.module.persona.life.diary.wall_now",
             lambda tz: fake_now,
         )
         diary_generator = DiaryGenerator(
@@ -272,7 +272,7 @@ class TestCharacterDaySimulation:
         """跨天且无睡觉事件时触发兜底恢复"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
 

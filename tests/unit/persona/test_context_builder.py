@@ -4,13 +4,14 @@
 
 import pytest
 from datetime import datetime, timedelta
+from plugins.DicePP.utils.time import wall_now
 
 from plugins.DicePP.module.persona.character.models import Character, CharacterBook, LoreEntry
 from plugins.DicePP.module.persona.data.models import UserProfile
 from plugins.DicePP.module.persona.chat.context import ContextBuilder
 
 # 今天日期，用于构造同日时间戳（format_timestamp 同日返回 HH:MM）
-_TODAY = datetime.now().replace(hour=14, minute=0, second=0, microsecond=0)
+_TODAY = wall_now().replace(hour=14, minute=0, second=0, microsecond=0)
 
 
 def _dt(minute: int = 0) -> datetime:
@@ -413,7 +414,7 @@ class TestFormatPrivateHistory:
 
     def test_timestamp_prefix(self, monkeypatch):
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.chat.context.persona_wall_now",
+            "plugins.DicePP.module.persona.chat.context.wall_now",
             lambda tz: _TODAY,
         )
         builder = ContextBuilder(self._make_character())
@@ -695,7 +696,7 @@ class TestFormatHistory:
 
     def test_is_group_false_dispatches_private(self, monkeypatch):
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.chat.context.persona_wall_now",
+            "plugins.DicePP.module.persona.chat.context.wall_now",
             lambda tz: _TODAY,
         )
         builder = ContextBuilder(self._make_character())

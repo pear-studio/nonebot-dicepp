@@ -122,7 +122,7 @@ class TestGenerateDiary:
 
         fake_now = datetime(2026, 5, 23, 14, 30, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.event_agent.persona_wall_now",
+            "plugins.DicePP.module.persona.life.event_agent.wall_now",
             lambda tz: fake_now,
         )
 

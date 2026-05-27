@@ -324,13 +324,13 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
     async def test_admin_diary_today_and_yesterday(self):
         self.store.get_diary = AsyncMock(return_value=None)
         self.store.get_daily_events = AsyncMock(return_value=[])
-        with patch("plugins.DicePP.module.persona.wall_clock.persona_wall_now") as mock_wall:
+        with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
             mock_wall.return_value = datetime(2026, 4, 15, 12, 0, 0)
             meta = _make_private_meta(".ai admin today", user_id=self.user_id)
             await self.cmd.process_msg(".ai admin today", meta, "admin")
             assert "今天" in _get_sent_content(self.cmd)
 
-        with patch("plugins.DicePP.module.persona.wall_clock.persona_wall_now") as mock_wall:
+        with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
             mock_wall.return_value = datetime(2026, 4, 15, 12, 0, 0)
             meta2 = _make_private_meta(".ai admin yesterday", user_id=self.user_id)
             await self.cmd.process_msg(".ai admin yesterday", meta2, "admin")

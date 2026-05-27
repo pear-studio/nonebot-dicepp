@@ -6,6 +6,7 @@ Phase 7c: PersonaDataStore CRUD 单元测试 — 核心 CRUD
 
 import pytest
 from datetime import datetime, timedelta
+from plugins.DicePP.utils.time import wall_now
 
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
@@ -349,8 +350,8 @@ class TestDiaryAndDailyEventsCRUD:
     @pytest.mark.asyncio
     async def test_prune_diaries(self, temp_db):
         store = temp_db
-        old_date = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
-        recent_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        old_date = (wall_now() - timedelta(days=10)).strftime("%Y-%m-%d")
+        recent_date = (wall_now() - timedelta(days=1)).strftime("%Y-%m-%d")
         await store.save_diary(old_date, "old")
         await store.save_diary(recent_date, "recent")
 
@@ -649,7 +650,7 @@ class TestLLMTraceCRUD:
             messages="[]",
             response="old",
             status="ok",
-            created_at=datetime.now() - timedelta(days=10),
+            created_at=wall_now() - timedelta(days=10),
         )
         await store.add_llm_trace(old_trace)
         deleted = await store.prune_llm_traces(max_age_days=5)
@@ -669,7 +670,7 @@ class TestLLMTraceCRUD:
             tokens_in=10,
             tokens_out=5,
             status="ok",
-            created_at=datetime.now(),
+            created_at=wall_now(),
         )
         t2 = LLMTraceRecord(
             session_id="s2",
@@ -681,7 +682,7 @@ class TestLLMTraceCRUD:
             tokens_in=3,
             tokens_out=1,
             status="ok",
-            created_at=datetime.now(),
+            created_at=wall_now(),
         )
         await store.add_llm_trace(t1)
         await store.add_llm_trace(t2)
@@ -703,7 +704,7 @@ class TestLLMTraceCRUD:
             tokens_in=1,
             tokens_out=1,
             status="timeout",
-            created_at=datetime.now(),
+            created_at=wall_now(),
         )
         t2 = LLMTraceRecord(
             session_id="s2",
@@ -715,12 +716,12 @@ class TestLLMTraceCRUD:
             tokens_in=1,
             tokens_out=1,
             status="rate_limit",
-            created_at=datetime.now(),
+            created_at=wall_now(),
         )
         await store.add_llm_trace(t1)
         await store.add_llm_trace(t2)
 
-        since = (datetime.now() - timedelta(hours=24)).isoformat()
+        since = (wall_now() - timedelta(hours=24)).isoformat()
         errors = await store.get_error_summary_since(since)
         assert len(errors) == 2
         counts = {status: cnt for status, cnt in errors}

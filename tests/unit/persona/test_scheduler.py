@@ -78,7 +78,7 @@ class TestProactiveSchedulerBasics:
     async def test_inactive_hours_blocks_messages(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 2, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: fake_now,
         )
         result = await scheduler.tick()
@@ -88,21 +88,21 @@ class TestProactiveSchedulerBasics:
     async def test_character_active_hours(self, scheduler, monkeypatch):
         # 07:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: datetime(2024, 1, 1, 7, 0, 0),
         )
         assert scheduler._is_character_active() is False
 
         # 10:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: datetime(2024, 1, 1, 10, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 23:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: datetime(2024, 1, 1, 23, 0, 0),
         )
         assert scheduler._is_character_active() is False
@@ -115,21 +115,21 @@ class TestProactiveSchedulerBasics:
 
         # 23:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: datetime(2024, 1, 1, 23, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 02:00 活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: datetime(2024, 1, 1, 2, 0, 0),
         )
         assert scheduler._is_character_active() is True
 
         # 10:00 不活跃
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: datetime(2024, 1, 1, 10, 0, 0),
         )
         assert scheduler._is_character_active() is False
@@ -138,7 +138,7 @@ class TestProactiveSchedulerBasics:
     async def test_can_send_to_key_respects_interval(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: fake_now,
         )
         assert scheduler._can_send_to_key("user:u1") is True
@@ -151,7 +151,7 @@ class TestProactiveSchedulerBasics:
     async def test_reset_daily_state(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: fake_now,
         )
         scheduler._last_event_date = "2024-01-01"
@@ -194,7 +194,7 @@ class TestProactiveSchedulerPersistence:
     async def test_load_and_save_state(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: fake_now,
         )
         raw = json.dumps({
@@ -229,7 +229,7 @@ class TestProactiveSchedulerPersistence:
     async def test_load_old_date_updates_date(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.persona_wall_now",
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: fake_now,
         )
         raw = json.dumps({

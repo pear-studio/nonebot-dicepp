@@ -31,8 +31,8 @@ class TestLogRepository:
             group_id="group1",
             name="Test Session",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session)
 
@@ -54,8 +54,8 @@ class TestLogRepository:
             group_id="group1",
             name="Original",
             recording=False,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session1)
 
@@ -64,8 +64,8 @@ class TestLogRepository:
             group_id="group1",
             name="Updated",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session2)
 
@@ -80,14 +80,14 @@ class TestLogRepository:
             group_id="group1",
             name="Test",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session)
 
         record = LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user1",
             nickname="User One",
             content="Hello world",
@@ -103,14 +103,14 @@ class TestLogRepository:
             group_id="group1",
             name="Test",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session)
 
         await log_repo.add_record(LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user1",
             nickname="User One",
             content="Hello",
@@ -118,7 +118,7 @@ class TestLogRepository:
         ))
         await log_repo.add_record(LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user2",
             nickname="User Two",
             content="Hi there",
@@ -135,14 +135,14 @@ class TestLogRepository:
             group_id="group1",
             name="Test",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session)
 
         await log_repo.add_record(LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user1",
             nickname="User One",
             content="Hello",
@@ -165,14 +165,14 @@ class TestLogRepository:
             group_id="group1",
             name="Test",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session)
 
         await log_repo.add_record(LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user1",
             nickname="User One",
             content="Hello",
@@ -190,14 +190,14 @@ class TestLogRepository:
             group_id="group1",
             name="Test",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session)
 
         record = LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user1",
             nickname="User One",
             content="Test message",
@@ -213,23 +213,23 @@ class TestLogRepository:
             group_id="group1",
             name="Test Group 1",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         session2 = LogSession(
             id="session2",
             group_id="group2",
             name="Test Group 2",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session1)
         await log_repo.save_session(session2)
 
         await log_repo.add_record(LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user1",
             nickname="User One",
             content="Hello from group1",
@@ -237,7 +237,7 @@ class TestLogRepository:
         ))
         await log_repo.add_record(LogRecord(
             log_id="session2",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user2",
             nickname="User Two",
             content="Hello from group2",
@@ -255,14 +255,14 @@ class TestLogRepository:
             group_id="group1",
             name="Test",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session)
 
         await log_repo.add_record(LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user1",
             nickname="User One",
             content="Message from user1",
@@ -270,7 +270,7 @@ class TestLogRepository:
         ))
         await log_repo.add_record(LogRecord(
             log_id="session1",
-            time=datetime.now(),
+            time=datetime(2026, 5, 27, 12, 0, 0),
             user_id="user2",
             nickname="User Two",
             content="Message from user2",
@@ -289,13 +289,13 @@ class TestLogRepository:
             group_id="group1",
             name="Test",
             recording=True,
-            created_at=datetime.now(),
-            updated_at=datetime.now(),
+            created_at=datetime(2026, 5, 27, 12, 0, 0),
+            updated_at=datetime(2026, 5, 27, 12, 0, 0),
         )
         await log_repo.save_session(session)
 
         old_time = datetime(2020, 1, 1)
-        new_time = datetime.now()
+        new_time = datetime(2026, 5, 27, 12, 0, 0)
 
         await log_repo.insert(LogRecord(
             log_id="session1",

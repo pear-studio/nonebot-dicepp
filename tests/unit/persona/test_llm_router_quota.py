@@ -4,6 +4,7 @@ Phase 7c: 配额与豁免逻辑单元测试（router increment_usage）
 import pytest
 import asyncio
 from datetime import datetime
+from plugins.DicePP.utils.time import wall_now
 from unittest.mock import AsyncMock, patch
 
 from unittest.mock import MagicMock
@@ -77,7 +78,7 @@ class TestIncrementUsage:
         router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
         router.data_store = mock_store
         router.config = mock_config
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = wall_now().strftime("%Y-%m-%d")
         await router.increment_usage("u1")
         assert await mock_store.get_daily_usage("u1", today) == 1
 
@@ -179,7 +180,7 @@ class TestQuotaWhitelistExemption:
             store = MockDataStore()
             store.add_whitelist_user("u1")
             # 用量已达上限
-            store._usage[("u1", datetime.now().strftime("%Y-%m-%d"))] = 5
+            store._usage[("u1", wall_now().strftime("%Y-%m-%d"))] = 5
             router.data_store = store
 
             runtime = AgentRuntime(router=router, store=store)
@@ -206,7 +207,7 @@ class TestQuotaWhitelistExemption:
         router.config = config
 
         store = MockDataStore()
-        store._usage[("u1", datetime.now().strftime("%Y-%m-%d"))] = 5
+        store._usage[("u1", wall_now().strftime("%Y-%m-%d"))] = 5
         router.data_store = store
 
         runtime = AgentRuntime(router=router, store=store)

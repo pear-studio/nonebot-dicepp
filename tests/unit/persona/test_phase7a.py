@@ -4,6 +4,7 @@ import asyncio
 import tempfile
 import os
 from datetime import datetime, timedelta
+from plugins.DicePP.utils.time import wall_now
 from unittest.mock import MagicMock
 
 from module.persona.llm.router import LLMRouter
@@ -84,7 +85,7 @@ async def test_trace_lifecycle(temp_db):
         tokens_in=10,
         tokens_out=5,
         status="ok",
-        created_at=datetime.now() - timedelta(days=2),
+        created_at=wall_now() - timedelta(days=2),
     )
     await store.add_llm_trace(trace)
     traces = await store.get_llm_traces("u1", limit=5)
@@ -155,7 +156,7 @@ async def test_today_token_usage_and_errors(temp_db):
         tokens_in=10,
         tokens_out=5,
         status="ok",
-        created_at=datetime.now(),
+        created_at=wall_now(),
     )
     t2 = LLMTraceRecord(
         session_id="s2",
@@ -167,7 +168,7 @@ async def test_today_token_usage_and_errors(temp_db):
         tokens_in=3,
         tokens_out=1,
         status="timeout",
-        created_at=datetime.now(),
+        created_at=wall_now(),
     )
     await store.add_llm_trace(t1)
     await store.add_llm_trace(t2)
@@ -176,15 +177,15 @@ async def test_today_token_usage_and_errors(temp_db):
     assert tin == 13
     assert tout == 6
 
-    since = (datetime.now() - timedelta(hours=24)).isoformat()
+    since = (wall_now() - timedelta(hours=24)).isoformat()
     errors = await store.get_error_summary_since(since)
     assert len(errors) == 1
     assert errors[0] == ("timeout", 1)
 
-    old_since = (datetime.now() - timedelta(days=2)).isoformat()
+    old_since = (wall_now() - timedelta(days=2)).isoformat()
     errors_old = await store.get_error_summary_since(old_since)
     assert len(errors_old) == 1
 
-    future_since = (datetime.now() + timedelta(hours=1)).isoformat()
+    future_since = (wall_now() + timedelta(hours=1)).isoformat()
     errors_future = await store.get_error_summary_since(future_since)
     assert len(errors_future) == 0

@@ -6,6 +6,7 @@ Phase 7c: DecayCalculator 边界条件单元测试
 
 import pytest
 from datetime import datetime, timedelta
+from plugins.DicePP.utils.time import wall_now
 
 from plugins.DicePP.module.persona.data.models import RelationshipState
 from plugins.DicePP.module.persona.game.decay import DecayCalculator, DecayConfig
@@ -20,8 +21,8 @@ class TestDecayCalculatorEdgeCases:
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
-            last_interaction_at=datetime.now() - timedelta(days=1),
-            last_miss_sent_at=datetime.now() - timedelta(days=1),
+            last_interaction_at=wall_now() - timedelta(days=1),
+            last_miss_sent_at=wall_now() - timedelta(days=1),
         )
         deltas, reason = calc.calculate_decay(rel)
         assert deltas.intimacy == 0.0
@@ -42,7 +43,7 @@ class TestDecayCalculatorEdgeCases:
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
-            last_interaction_at=datetime.now() - timedelta(days=1),
+            last_interaction_at=wall_now() - timedelta(days=1),
             last_miss_sent_at=None,
         )
         deltas, reason = calc.calculate_decay(rel)
@@ -52,7 +53,7 @@ class TestDecayCalculatorEdgeCases:
     def test_within_grace_period_no_decay(self):
         config = DecayConfig(enabled=True, grace_period_hours=8)
         calc = DecayCalculator(config)
-        now = datetime.now()
+        now = wall_now()
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
@@ -79,8 +80,8 @@ class TestDecayCalculatorEdgeCases:
             trust=25.0,
             secureness=25.0,
             peak_stage=1,
-            last_interaction_at=datetime.now() - timedelta(hours=1),
-            last_miss_sent_at=datetime.now() - timedelta(hours=1),
+            last_interaction_at=wall_now() - timedelta(hours=1),
+            last_miss_sent_at=wall_now() - timedelta(hours=1),
         )
         # floor = 20, current = 25, allowed_decay = 5
         deltas, reason = calc.calculate_decay(rel)
@@ -103,8 +104,8 @@ class TestDecayCalculatorEdgeCases:
             trust=20.0,
             secureness=20.0,
             peak_stage=1,
-            last_interaction_at=datetime.now() - timedelta(hours=10),
-            last_miss_sent_at=datetime.now() - timedelta(hours=10),
+            last_interaction_at=wall_now() - timedelta(hours=10),
+            last_miss_sent_at=wall_now() - timedelta(hours=10),
         )
         deltas, reason = calc.calculate_decay(rel)
         assert deltas.intimacy == 0.0
@@ -126,8 +127,8 @@ class TestDecayCalculatorEdgeCases:
             trust=82.0,
             secureness=82.0,
             peak_stage=4,
-            last_interaction_at=datetime.now() - timedelta(hours=1),
-            last_miss_sent_at=datetime.now() - timedelta(hours=1),
+            last_interaction_at=wall_now() - timedelta(hours=1),
+            last_miss_sent_at=wall_now() - timedelta(hours=1),
         )
         deltas, reason = calc.calculate_decay(rel)
         assert deltas.intimacy == -2.0
@@ -149,8 +150,8 @@ class TestDecayCalculatorEdgeCases:
             trust=80.0,
             secureness=80.0,
             peak_stage=4,
-            last_interaction_at=datetime.now() - timedelta(hours=1),
-            last_miss_sent_at=datetime.now() - timedelta(hours=1),
+            last_interaction_at=wall_now() - timedelta(hours=1),
+            last_miss_sent_at=wall_now() - timedelta(hours=1),
         )
         deltas, reason = calc.calculate_decay(rel)
         assert deltas.intimacy == 0.0
@@ -165,7 +166,7 @@ class TestDecayCalculatorEdgeCases:
             daily_cap=100.0,
         )
         calc = DecayCalculator(config)
-        now = datetime.now()
+        now = wall_now()
         rel = RelationshipState(
             user_id="u1",
             intimacy=58.0,
@@ -196,8 +197,8 @@ class TestDecayCalculatorEdgeCases:
             trust=80.0,
             secureness=80.0,
             peak_stage=0,
-            last_interaction_at=datetime.now() - timedelta(hours=1),
-            last_miss_sent_at=datetime.now() - timedelta(hours=1),
+            last_interaction_at=wall_now() - timedelta(hours=1),
+            last_miss_sent_at=wall_now() - timedelta(hours=1),
         )
         deltas, _ = calc.calculate_decay(rel)
         assert deltas.intimacy == -3.0
@@ -208,8 +209,8 @@ class TestDecayCalculatorEdgeCases:
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
-            last_interaction_at=datetime.now() - timedelta(hours=2),
-            last_miss_sent_at=datetime.now() - timedelta(hours=2),
+            last_interaction_at=wall_now() - timedelta(hours=2),
+            last_miss_sent_at=wall_now() - timedelta(hours=2),
         )
         assert calc.should_apply_decay(rel) is True
 
@@ -220,7 +221,7 @@ class TestDecayCalculatorEdgeCases:
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
-            last_interaction_at=datetime.now() - timedelta(days=1),
+            last_interaction_at=wall_now() - timedelta(days=1),
             last_miss_sent_at=None,
         )
         assert calc.should_apply_decay(rel) is False
@@ -228,7 +229,7 @@ class TestDecayCalculatorEdgeCases:
     def test_should_apply_decay_false_within_grace(self):
         config = DecayConfig(enabled=True, grace_period_hours=8)
         calc = DecayCalculator(config)
-        now = datetime.now()
+        now = wall_now()
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
@@ -243,8 +244,8 @@ class TestDecayCalculatorEdgeCases:
         rel = RelationshipState(
             user_id="u1",
             intimacy=50.0,
-            last_interaction_at=datetime.now() - timedelta(days=1),
-            last_miss_sent_at=datetime.now() - timedelta(days=1),
+            last_interaction_at=wall_now() - timedelta(days=1),
+            last_miss_sent_at=wall_now() - timedelta(days=1),
         )
         assert calc.should_apply_decay(rel) is False
 
@@ -269,8 +270,8 @@ class TestDecayCalculatorEdgeCases:
             trust=50.0,
             secureness=50.0,
             peak_stage=0,
-            last_interaction_at=datetime.now() - timedelta(hours=5),
-            last_miss_sent_at=datetime.now() - timedelta(hours=5),
+            last_interaction_at=wall_now() - timedelta(hours=5),
+            last_miss_sent_at=wall_now() - timedelta(hours=5),
         )
         before = rel.composite_score
         eff = calc.effective_relationship(rel)
@@ -481,8 +482,8 @@ def test_effective_relationship_leaves_original_unchanged():
         passion=50.0,
         trust=50.0,
         secureness=50.0,
-        last_interaction_at=datetime.now() - timedelta(hours=5),
-        last_miss_sent_at=datetime.now() - timedelta(hours=5),
+        last_interaction_at=wall_now() - timedelta(hours=5),
+        last_miss_sent_at=wall_now() - timedelta(hours=5),
         peak_stage=0,
     )
     before = rel.composite_score

@@ -13,6 +13,7 @@ import tempfile
 import os
 
 from datetime import datetime
+from plugins.DicePP.utils.time import wall_now
 
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.data.models import UserProfile, RelationshipState
@@ -88,7 +89,7 @@ class TestSearchMemory:
         profile = UserProfile(
             user_id=user_id,
             facts={"name": "Xiao Ming", "pet": "cat", "hobby": "games"},
-            updated_at=datetime.now()
+            updated_at=wall_now()
         )
         await store.save_user_profile(profile)
 
@@ -124,7 +125,7 @@ class TestSearchMemory:
         profile = UserProfile(
             user_id=user_id,
             facts={"name": "Test User"},
-            updated_at=datetime.now()
+            updated_at=wall_now()
         )
         await store.save_user_profile(profile)
 

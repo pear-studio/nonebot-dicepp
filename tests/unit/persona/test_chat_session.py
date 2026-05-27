@@ -8,6 +8,7 @@
 
 import random
 from datetime import datetime, timedelta
+from plugins.DicePP.utils.time import wall_now
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -83,7 +84,7 @@ def _make_session(
         relationship_refuse_prob_base=0.3,
         relationship_refuse_prob_max=0.9,
         scoring_interval=999,
-        timezone="",  # 解耦时区，与测试构造的 datetime.now() 对齐
+        timezone="Asia/Shanghai",  # 与 wall_now() 默认时区一致
     )
 
     context_builder = MagicMock()
@@ -244,7 +245,7 @@ class TestApplyTokenWindow:
         session.config.group_max_messages = 100
         session.config.group_max_age_minutes = 1000
 
-        now = datetime.now()
+        now = wall_now()
         history = [
             self._make_gc("短消息1", now),
             self._make_gc("短消息2", now),
@@ -263,7 +264,7 @@ class TestApplyTokenWindow:
         session.config.group_max_messages = 100
         session.config.group_max_age_minutes = 1000
 
-        now = datetime.now()
+        now = wall_now()
         long_msg = "这是一个非常长的消息内容用于测试截断"
         history = [self._make_gc(long_msg, now)]
         result, truncated = session._apply_token_window(history)
@@ -278,7 +279,7 @@ class TestApplyTokenWindow:
         session.config.group_max_messages = 100
         session.config.group_max_age_minutes = 10
 
-        now = datetime.now()
+        now = wall_now()
         # 列表按时间升序排列（老在前），reversed 后从新到旧遍历
         history = [
             self._make_gc("老消息", now - timedelta(minutes=20)),
@@ -296,7 +297,7 @@ class TestApplyTokenWindow:
         session.config.group_max_messages = 100
         session.config.group_max_age_minutes = 1000
 
-        now = datetime.now()
+        now = wall_now()
         history = [
             self._make_gc("用户消息", now, role="user", display_name="小明"),
             self._make_gc("机器人回复", now, role="assistant", display_name=""),
@@ -314,7 +315,7 @@ class TestApplyTokenWindow:
         session.config.group_max_messages = 100
         session.config.group_max_age_minutes = 1000
 
-        now = datetime.now()
+        now = wall_now()
         history = [
             self._make_gc("消息1", now),
             self._make_gc("消息2", now),

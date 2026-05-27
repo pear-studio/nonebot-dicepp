@@ -5,6 +5,7 @@
 """
 
 from datetime import datetime
+from plugins.DicePP.utils.time import wall_now
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock
@@ -235,7 +236,7 @@ class TestFormatRecentHistory:
     @staticmethod
     def _mock_scheduler():
         s = MagicMock()
-        s._now.return_value = datetime.now()
+        s._now.return_value = wall_now()
         return s
 
     def test_empty_messages(self):
@@ -295,7 +296,7 @@ class TestFormatRecentHistory:
         assert "消息0" not in result
 
     def test_with_timestamps(self):
-        now = datetime.now()
+        now = wall_now()
         msg = MagicMock()
         msg.role = "user"
         msg.content = "你好"

@@ -15,7 +15,7 @@ from plugins.DicePP.module.persona.report.daily_report import (
     DailyReportGenerator, _DATA_UNAVAILABLE, _DIARY_UNAVAILABLE,
 )
 from plugins.DicePP.module.persona.gateway.port import MessagePort
-from plugins.DicePP.module.persona.wall_clock import persona_wall_now
+from plugins.DicePP.utils.time import wall_now
 from plugins.DicePP.core.message_types import MessageType
 
 
@@ -373,7 +373,7 @@ class MockConfig:
 
 
 def _yesterday() -> str:
-    return (persona_wall_now("Asia/Shanghai") - timedelta(days=1)).strftime("%Y-%m-%d")
+    return (wall_now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 class TestCollectChatOverview:
@@ -419,7 +419,7 @@ class TestCollectChatOverview:
 
         y = _yesterday()
         # 两天前的日期，确保在 yesterday 之前
-        two_days_ago = (persona_wall_now("Asia/Shanghai") - timedelta(days=2)).strftime("%Y-%m-%d")
+        two_days_ago = (wall_now() - timedelta(days=2)).strftime("%Y-%m-%d")
 
         # u1 在两天前聊过 → 不算新增
         await temp_db.add_message_stream("u1", "g1", "user", MessageType.CHAT, "old")

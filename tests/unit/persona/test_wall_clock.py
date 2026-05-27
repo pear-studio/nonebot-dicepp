@@ -1,14 +1,14 @@
 """format_timestamp 单元测试"""
 from datetime import datetime
 
-from plugins.DicePP.module.persona.wall_clock import format_timestamp
+from plugins.DicePP.utils.time import format_timestamp
 
 
 class TestFormatTimestamp:
     """覆盖 format_timestamp 的 4 条分支路径"""
 
     def test_none_returns_empty(self):
-        assert format_timestamp(None, datetime.now()) == ""
+        assert format_timestamp(None, datetime(2026, 5, 27, 12, 0, 0)) == ""
 
     def test_str_iso_today(self):
         now = datetime(2026, 5, 11, 14, 30)

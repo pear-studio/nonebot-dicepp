@@ -1,5 +1,6 @@
 import pytest
 from datetime import datetime
+from plugins.DicePP.utils.time import wall_now
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
@@ -41,7 +42,7 @@ async def test_share_event_to_targets_bypass_min_interval_for_force(scheduler_cf
         coordinator=mock_coordinator,
     )
     # 模拟刚刚发送过
-    scheduler._last_proactive_time["user:u1"] = datetime.now()
+    scheduler._last_proactive_time["user:u1"] = wall_now()
 
     mock_agent = MagicMock()
     mock_agent.generate_share_message = AsyncMock(return_value="hello")
@@ -68,7 +69,7 @@ async def test_share_event_to_targets_respects_min_interval_for_normal(scheduler
         target_selector=target_selector,
         coordinator=mock_coordinator,
     )
-    now = datetime.now()
+    now = wall_now()
     scheduler._now = lambda: now
     scheduler._last_proactive_time["user:u1"] = now
 
@@ -95,7 +96,7 @@ async def test_share_event_to_targets_mixed_force_and_normal(scheduler_cfg, mock
         target_selector=target_selector,
         coordinator=mock_coordinator,
     )
-    now = datetime.now()
+    now = wall_now()
     scheduler._now = lambda: now
     scheduler._last_proactive_time["user:u_force"] = now
     scheduler._last_proactive_time["user:u_normal"] = now

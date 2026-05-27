@@ -33,6 +33,7 @@ import os
 import sys
 import tempfile
 from datetime import datetime
+from plugins.DicePP.utils.time import wall_now
 from typing import Optional
 
 import aiosqlite
@@ -78,11 +79,11 @@ _fake_now: Optional[datetime] = None
 def _patched_wall_now(timezone_name: str = "") -> datetime:
     if _fake_now is not None:
         return _fake_now
-    return datetime.now()
+    return wall_now()
 
 
 def _set_fake_time(hour: int, minute: int) -> None:
-    """设置全局假时间，并同步到所有已导入模块中的 persona_wall_now 引用。"""
+    """设置全局假时间，并同步到所有已导入模块中的 wall_now 引用。"""
     global _fake_now
     _fake_now = datetime(2024, 1, 1, hour, minute, 0)
 
@@ -92,11 +93,11 @@ def _set_fake_time(hour: int, minute: int) -> None:
     import DicePP.module.persona.data.store as ds
     import DicePP.module.persona.llm.router as lr
     import DicePP.module.persona.chat.context as cb
-    import DicePP.module.persona.wall_clock as wc
+    import DicePP.utils.time as wc
 
     for mod in (life_cl, life_diary, ds, lr, cb, wc):
-        if hasattr(mod, "persona_wall_now"):
-            mod.persona_wall_now = _patched_wall_now
+        if hasattr(mod, "wall_now"):
+            mod.wall_now = _patched_wall_now
 
 
 # ── 加载 API 配置 ──

@@ -92,7 +92,7 @@ class TestCharacterLifeBasics:
     async def test_tick_generates_slots_on_first_run(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life.character.extensions.daily_events_count = 2
@@ -104,7 +104,7 @@ class TestCharacterLifeBasics:
     async def test_tick_triggers_event_when_time_matches(self, life, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]  # 10:00
@@ -120,7 +120,7 @@ class TestCharacterLifeBasics:
     async def test_tick_no_double_trigger_same_slot(self, life, mock_event_agent, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -134,7 +134,7 @@ class TestCharacterLifeBasics:
     async def test_tick_time_not_match_skips(self, life, mock_event_agent, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(12 * 60, "system")]  # 12:00, diff=120min > 15
@@ -147,7 +147,7 @@ class TestCharacterLifeBasics:
     async def test_ongoing_activities_persisted(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -167,7 +167,7 @@ class TestCharacterLifeBasics:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
 
@@ -259,7 +259,7 @@ class TestCharacterLifePersistence:
     async def test_load_state_same_day(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         raw = '{"date": "2024-01-01", "slot_minutes": [480, 720, 960], "fired": [0], "jittered_start": 420, "jittered_end": 1260}'
@@ -273,7 +273,7 @@ class TestCharacterLifePersistence:
     async def test_load_state_old_day_regenerates(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         raw = '{"date": "2024-01-01", "slot_minutes": [480], "fired": [0]}'
@@ -285,7 +285,7 @@ class TestCharacterLifePersistence:
     async def test_save_state(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(480, "system"), (720, "system")]
@@ -348,7 +348,7 @@ class TestCharacterLifeDiary:
     async def test_generate_diary_success(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 23, 30, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.diary.persona_wall_now",
+            "plugins.DicePP.module.persona.life.diary.wall_now",
             lambda tz: fake_now,
         )
         result = await diary_generator.generate_diary()
@@ -360,7 +360,7 @@ class TestCharacterLifeDiary:
     async def test_generate_diary_includes_yesterday_context(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 23, 30, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.diary.persona_wall_now",
+            "plugins.DicePP.module.persona.life.diary.wall_now",
             lambda tz: fake_now,
         )
         await diary_generator.generate_diary()
@@ -375,7 +375,7 @@ class TestCharacterLifeDiary:
         """
         fake_now = datetime(2024, 1, 2, 0, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.diary.persona_wall_now",
+            "plugins.DicePP.module.persona.life.diary.wall_now",
             lambda tz: fake_now,
         )
         result = await diary_generator.generate_diary()
@@ -409,7 +409,7 @@ class TestCharacterLifeStatus:
     def test_get_event_status(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(480, "system"), (720, "system")]
@@ -474,7 +474,7 @@ class TestCharacterLifePhase1:
         """同一天多次计算波动边界结果一致"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         start1, end1, rng1 = life._compute_daily_boundaries()
@@ -488,13 +488,13 @@ class TestCharacterLifePhase1:
         fake_now2 = datetime(2024, 1, 2, 10, 0, 0)
 
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now1,
         )
         start1, end1, rng1 = life._compute_daily_boundaries()
 
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now2,
         )
         start2, end2, rng2 = life._compute_daily_boundaries()
@@ -506,7 +506,7 @@ class TestCharacterLifePhase1:
         """波动边界在合理范围内"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         start, end, rng = life._compute_daily_boundaries()
@@ -521,7 +521,7 @@ class TestCharacterLifePhase1:
         """当前时间未到起床时间时跳过所有槽位"""
         fake_now = datetime(2024, 1, 1, 7, 0, 0)  # 7:00，假设起床时间约 8:00
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         # 强制设置波动边界为 8:15
@@ -540,7 +540,7 @@ class TestCharacterLifePhase1:
         """起床边界槽位在窗口内触发"""
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._today_jittered_start = 8 * 60 + 15
@@ -558,7 +558,7 @@ class TestCharacterLifePhase1:
         """睡觉边界槽位在窗口内触发"""
         fake_now = datetime(2024, 1, 1, 21, 50, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._today_jittered_start = 8 * 60 + 15
@@ -575,7 +575,7 @@ class TestCharacterLifePhase1:
         """边界槽位当天不重复触发（通过 _fired_slot_indices）"""
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._today_jittered_start = 8 * 60 + 15
@@ -593,7 +593,7 @@ class TestCharacterLifePhase1:
         """日常槽位生成在约束区间内，与边界保持间隔"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         # 波动边界 8:00-22:00，日常槽位在 constrained_start/end 内
@@ -616,7 +616,7 @@ class TestCharacterLifePhase1:
 
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         # 昨天没有任何事件
@@ -640,7 +640,7 @@ class TestCharacterLifePhase1:
         """跨天且昨晚有 good_night 事件时不触发兜底"""
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         # DB 返回昨晚有 good_night 事件
@@ -746,7 +746,7 @@ class TestCharacterLifePhase2:
         """槽位生成时波动边界正确同步到 boundary_receiver"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._regenerate_slots_for_today()
@@ -761,7 +761,7 @@ class TestCharacterLifePhase2:
         """follow_up_action 为空时只生成一个事件"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -778,7 +778,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -801,7 +801,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -830,7 +830,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life.config.chain_force_extend_once_prob = 1.0
@@ -854,7 +854,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life.config.chain_force_extend_once_prob = 1.0
@@ -877,7 +877,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life.config.chain_force_extend_once_prob = 1.0
@@ -903,7 +903,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -931,7 +931,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -958,7 +958,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -983,7 +983,7 @@ class TestCharacterLifePhase2:
         """跨天时意向自动清空"""
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -1012,7 +1012,7 @@ class TestCharacterLifePhase2:
 
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         life._slot_minutes_today = [(10 * 60, "system")]
@@ -1042,7 +1042,7 @@ class TestCharacterLifePhase2:
         """min_event_interval 过大时仅生成边界槽位（wake_up / good_night）"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         # 波动边界约 8:00-22:00，设置 min_interval 为 800 分钟（远超区间长度）
@@ -1060,7 +1060,7 @@ class TestCharacterLifePhase2:
         """跨天恢复数据库异常时不阻断 tick 继续生成事件（R2 容错路径）"""
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.persona_wall_now",
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         # 模拟跨天：last_event_date 是昨天
