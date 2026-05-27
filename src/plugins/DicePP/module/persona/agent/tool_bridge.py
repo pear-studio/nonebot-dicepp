@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Type
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from ..tools.collecting import (
     RecordDiaryEntryArgs,
@@ -342,7 +342,7 @@ def _dynamic_model(name: str, parameters: dict) -> Type[BaseModel]:
             else:
                 fields[key] = (Opt[py_type], None)
 
-    return BaseModel.create(name + "_Args", **fields)
+    return create_model(name + "_Args", **fields)
 
 
 def _json_type(typ: str) -> type:
