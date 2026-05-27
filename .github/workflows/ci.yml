@@ -22,6 +22,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Lint — forbid datetime.now() in tests
+        run: |
+          if grep -rn 'datetime\.now()' tests/ --include="*.py" | grep -v '# allow: datetime.now'; then
+            echo "ERROR: datetime.now() found in tests. Use wall_now() or a fixed datetime instead."
+            echo "If this usage is legitimate, add a '# allow: datetime.now' comment on the same line."
+            exit 1
+          fi
+          echo "OK: no datetime.now() in tests"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
