@@ -7,7 +7,7 @@ from typing import Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 from nonebot.log import logger
 from ..data.models import RelationshipState, ScoreDeltas, STAGE_FLOORS
-from ..wall_clock import persona_wall_now
+from utils.time import wall_now
 
 
 if TYPE_CHECKING:
@@ -58,7 +58,7 @@ class DecayCalculator:
         self._timezone_name = timezone_name
 
     def _resolve_now(self, now: Optional[datetime]) -> datetime:
-        return now if now is not None else persona_wall_now(self._timezone_name)
+        return now if now is not None else wall_now(self._timezone_name)
 
     def calculate_decay(
         self,

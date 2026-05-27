@@ -28,7 +28,7 @@ from ..character.models import Character
 from ..chat.context import ContextBuilder
 from ..chat.chat_config import ChatConfig
 from ..game.decay import DecayCalculator
-from ..wall_clock import persona_wall_now, PERSONA_EPOCH, format_timestamp, format_relative_time
+from utils.time import wall_now, DEFAULT_EPOCH, format_timestamp, format_relative_time
 from ..tools.registry import ToolRegistry, ToolDomain
 from ..tools.context import ToolContext
 from ..life.protocols import SleepGate
@@ -399,7 +399,7 @@ class ChatSession:
 
         original_count = len(history)
 
-        now = persona_wall_now(self.config.timezone)
+        now = wall_now(self.config.timezone)
         max_age = timedelta(minutes=self.config.group_max_age_minutes)
         budget = self.config.group_context_budget_tokens
         max_msgs = self.config.group_max_messages
@@ -473,7 +473,7 @@ class ChatSession:
 
     async def _build_diary_context(self) -> str:
         """构建日记/事件上下文：优先今日事件，fallback 昨日日记"""
-        wall = persona_wall_now(self.config.timezone)
+        wall = wall_now(self.config.timezone)
         today = wall.strftime("%Y-%m-%d")
         yesterday = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
         max_diary_len = self.config.max_diary_context_chars
@@ -486,7 +486,7 @@ class ChatSession:
                 or (e.description and e.description.strip())
             ]
             # 按时间升序排列（旧→新），使日记以自然时序呈现
-            valid_events.sort(key=lambda e: e.created_at or PERSONA_EPOCH, reverse=False)
+            valid_events.sort(key=lambda e: e.created_at or DEFAULT_EPOCH, reverse=False)
 
             if valid_events:
                 # 优先用 context_summary，空则回退到 description

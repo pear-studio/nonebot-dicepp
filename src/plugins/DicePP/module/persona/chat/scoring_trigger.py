@@ -21,7 +21,7 @@ from ..data.models import (
 from ..character.models import Character
 from ..chat.scoring import ScoringAgent
 from ..game.decay import DecayCalculator
-from ..wall_clock import persona_wall_now
+from utils.time import wall_now
 from .chat_config import ChatConfig
 
 
@@ -87,7 +87,7 @@ class ScoringTrigger:
         if not rel:
             rel = await self._store.init_relationship(user_id, initial)
 
-        now = persona_wall_now(self._config.timezone)
+        now = wall_now(self._config.timezone)
 
         # ── 2. 应用时间衰减 ────────────────────────────────
         decay_event: Optional[ScoreEvent] = None
@@ -212,7 +212,7 @@ class ScoringTrigger:
         # ── 应用评分结果 ──────────────────────────────────
         deltas = result.deltas
         new_facts = result.facts
-        now = persona_wall_now(self._config.timezone)
+        now = wall_now(self._config.timezone)
 
         if rel:
             composite_before = rel.composite_score

@@ -246,8 +246,8 @@ class LLMRouter:
         """增加用量计数"""
         if not self.data_store:
             return
-        from ..wall_clock import persona_wall_now
-        today = persona_wall_now(
+        from utils.time import wall_now
+        today = wall_now(
             self.config.timezone if self.config else "Asia/Shanghai"
         ).strftime("%Y-%m-%d")
         await self.data_store.increment_daily_usage(user_id, today)

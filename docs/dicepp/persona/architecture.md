@@ -214,7 +214,7 @@ Command.tick_daily() 每天调用
 | 记忆类型 | 来源 | 注入位置 |
 |----------|------|----------|
 | 角色设定 | `Character` | system 消息 |
-| 当前时间 | `persona_wall_now()` | system 消息 |
+| 当前时间 | `wall_now()` | system 消息 |
 | 关系标签 | `RelationshipState.get_warmth_level()` | system 消息 |
 | 用户档案 | `persona_user_profiles` | system 消息 |
 | 世界书 | `Character.search_lore_entries()` | system 消息（before_char / after_char）|
@@ -401,7 +401,7 @@ Agent 已按功能归属分散到对应域，本节仅作跨域索引：
 
 Persona 模块采用 **naive local datetime** 策略：
 
-- 所有业务时间统一通过 `wall_clock.persona_wall_now(timezone)` 获取
+- 所有业务时间统一通过 `utils.time.wall_now(timezone)` 获取
 - 返回值为**不带 `tzinfo` 的本地时间**，与 SQLite `fromisoformat` 存储行为保持一致
 - 禁止在业务代码中直接使用 `datetime.now()` 或 `datetime.min`，以防止 naive/aware 混用导致的 `TypeError`
 - 排序或兜底场景使用安全的 naive 基准时间（如 `datetime(2000, 1, 1)`）代替 `datetime.min`

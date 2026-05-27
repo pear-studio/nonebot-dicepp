@@ -13,7 +13,7 @@ from core.bot import Bot
 from .factory import PersonaApp
 from .data.store import PersonaDataStore
 from .report.daily_report import DailyReportGenerator
-from .wall_clock import persona_wall_now
+from utils.time import wall_now
 from .game.decay import STAGE_FLOORS
 
 
@@ -330,9 +330,9 @@ class AdminDispatcher:
         return "\n".join(lines)
 
     async def _admin_diary(self, user_id: str, group_id: str, args: List[str]) -> str:
-        from .wall_clock import persona_wall_now
+        from utils.time import wall_now
         subcmd = args[0]
-        wall = persona_wall_now(self.config.timezone)
+        wall = wall_now(self.config.timezone)
         if subcmd == "yesterday":
             date = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
             date_label = "昨天"
@@ -499,8 +499,8 @@ class AdminDispatcher:
             return "权限不足"
         if not self.data_store:
             return "模块未初始化"
-        from .wall_clock import persona_wall_now
-        since = (persona_wall_now(self.config.timezone) - timedelta(hours=24)).isoformat()
+        from utils.time import wall_now
+        since = (wall_now(self.config.timezone) - timedelta(hours=24)).isoformat()
         rows = await self.data_store.get_error_summary_since(since)
         if not rows:
             return "最近 24h 没有错误记录"

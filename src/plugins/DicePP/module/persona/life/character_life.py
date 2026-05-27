@@ -19,7 +19,7 @@ from ..character.models import Character
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
 from ..data.models import CharacterState
-from ..wall_clock import persona_wall_now
+from utils.time import wall_now
 from .protocols import BoundaryReceiver
 
 if TYPE_CHECKING:
@@ -89,7 +89,7 @@ class CharacterLifeConfig:
         )
 
     def now(self) -> datetime:
-        return persona_wall_now(self.timezone)
+        return wall_now(self.timezone)
 
 
 class CharacterLife:

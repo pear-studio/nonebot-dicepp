@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from ..wall_clock import persona_wall_now
+from utils.time import wall_now
 from ..utils.privacy import mask_sensitive_string
 
 from .models import (
@@ -66,7 +66,7 @@ class PersonaDataStore:
 
     def _wall_now(self) -> datetime:
         """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
-        return persona_wall_now(self._timezone)
+        return wall_now(self._timezone)
 
     @staticmethod
     def _is_private_chat(group_id: Optional[str]) -> bool:

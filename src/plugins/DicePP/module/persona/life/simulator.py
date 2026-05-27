@@ -13,7 +13,7 @@ from ..data.store import PersonaDataStore
 from ..data.models import RelationshipState, ScoreEvent, MessageType
 from ..character.models import Character
 from ..game.decay import DecayCalculator
-from ..wall_clock import persona_wall_now
+from utils.time import wall_now
 from .proactive_scheduler import ProactiveScheduler
 from .protocols import EventSharePort
 from .diary import DiaryGenerator
@@ -177,7 +177,7 @@ class LifeSimulator:
         if not self.decay_calculator or not self.character:
             return 0
         n = 0
-        now = persona_wall_now(self.config.timezone)
+        now = wall_now(self.config.timezone)
         try:
             for rel in await self.store.list_all_relationships_raw():
                 if not self.decay_calculator.should_apply_decay(rel, now):

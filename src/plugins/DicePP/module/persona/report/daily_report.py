@@ -12,7 +12,7 @@ from core.bot import Bot
 from core.statistics import UserStatInfo, GroupStatInfo
 from ..data.models import MessageType, CharacterState
 from ..gateway.port import MessagePort
-from ..wall_clock import persona_wall_now
+from utils.time import wall_now
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +259,7 @@ class DailyReportGenerator:
         try:
             if not self._store:
                 return [_DATA_UNAVAILABLE]
-            yesterday = (persona_wall_now(self._config.timezone) - timedelta(days=1)).strftime("%Y-%m-%d")
+            yesterday = (wall_now(self._config.timezone) - timedelta(days=1)).strftime("%Y-%m-%d")
             db = self._store.db
             cursor = await db.execute(
                 """
@@ -314,7 +314,7 @@ class DailyReportGenerator:
         try:
             if not self._store:
                 return [_DATA_UNAVAILABLE]
-            yesterday = (persona_wall_now(self._config.timezone) - timedelta(days=1)).strftime("%Y-%m-%d")
+            yesterday = (wall_now(self._config.timezone) - timedelta(days=1)).strftime("%Y-%m-%d")
             stats = await self._store.get_daily_chat_stats(yesterday)
 
             lines = []

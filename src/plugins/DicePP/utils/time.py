@@ -1,11 +1,16 @@
 import time
 import datetime
 
+from typing import Optional, Union
+from nonebot.log import logger
+
 china_tz = datetime.timezone(datetime.timedelta(hours=8), "北京时间")
 DATE_STR_FORMAT = "%Y/%m/%d %H:%M:%S"
 DATE_STR_FORMAT_DAY = "%Y_%m_%d"
 DATE_STR_FORMAT_WEEK = "%Y_%W"
 DATE_STR_FORMAT_MONTH = "%Y_%m"
+
+DEFAULT_EPOCH = datetime.datetime(2000, 1, 1)
 
 # 兼容历史数据中使用下划线或短横线分隔的时间格式
 _DATE_STR_COMPAT_FORMATS = [
@@ -15,6 +20,91 @@ _DATE_STR_COMPAT_FORMATS = [
     "%Y-%m-%d_%H_%M_%S",
     "%Y_%m_%d_%H_%M_%S",
 ]
+
+
+def wall_now(timezone_name: str = "Asia/Shanghai") -> datetime.datetime:
+    """
+    返回配置时区下的当前本地时间，不带 tzinfo（与 SQLite / fromisoformat 存取一致）。
+
+    若时区非法或 ZoneInfo 不可用，记录 warning 并回退到进程本地 `datetime.now()`。
+    """
+    if not timezone_name or not timezone_name.strip():
+        return datetime.datetime.now()
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.datetime.now(ZoneInfo(timezone_name.strip())).replace(tzinfo=None)
+    except Exception as e:
+        logger.warning(
+            "wall_now: 无效时区 %r，回退 naive now: %s",
+            timezone_name,
+            e,
+        )
+        return datetime.datetime.now()
+
+
+def format_relative_time(
+    ts: Optional[Union[datetime.datetime, str]],
+    now: datetime.datetime,
+) -> str:
+    """返回相对时间描述，用于让 LLM 感知事件与当前时刻的时间距离。
+
+    - ts: datetime / ISO str / None
+    - now: 参考时间
+    - 返回值: "刚刚" / "X分钟前" / "X小时前" / "X小时Y分钟前" / "X天前"
+    - ts 为 None / 无效 / 未来时间 返回空字符串
+    """
+    if ts is None:
+        return ""
+    if isinstance(ts, str):
+        try:
+            ts = datetime.datetime.fromisoformat(ts)
+        except ValueError:
+            return ""
+    if not isinstance(ts, datetime.datetime):
+        return ""
+
+    diff = now - ts
+    seconds = diff.total_seconds()
+
+    if seconds < 0:
+        return ""
+    if seconds < 60:
+        return "刚刚"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}分钟前"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    if seconds < 86400:
+        if minutes == 0:
+            return f"{hours}小时前"
+        return f"{hours}小时{minutes}分钟前"
+    days = int(seconds // 86400)
+    return f"{days}天前"
+
+
+def format_timestamp(
+    ts: Optional[Union[datetime.datetime, str]],
+    now: datetime.datetime,
+    fmt_today: str = "%H:%M",
+    fmt_other: str = "%m-%d %H:%M",
+) -> str:
+    """格式化时间戳为可读字符串。
+
+    - ts: datetime / ISO str / None
+    - now: 参考时间（用于判断是否同日）
+    - 返回值: 当日返回 HH:MM，隔日返回 MM-DD HH:MM，ts 为 None 返回空字符串
+    """
+    if ts is None:
+        return ""
+    if isinstance(ts, str):
+        try:
+            ts = datetime.datetime.fromisoformat(ts)
+        except ValueError:
+            return ""
+    if not isinstance(ts, datetime.datetime):
+        return ""
+    return ts.strftime(fmt_today) if ts.date() == now.date() else ts.strftime(fmt_other)
 
 
 def str_to_datetime(input_str: str) -> datetime:
@@ -51,9 +141,9 @@ def int_to_datetime(timestamp: int) -> datetime:
     return datetime.datetime.fromtimestamp(timestamp, tz=china_tz)
 
 
-def get_current_date_raw() -> datetime:
+def get_current_date_raw() -> datetime.datetime:
     """
-    返回datetime格式的当前北京时间
+    返回datetime格式的当前北京时间（带 tzinfo）
     """
     return datetime.datetime.now(china_tz)
 

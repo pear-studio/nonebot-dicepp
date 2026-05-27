@@ -539,8 +539,8 @@ class PersonaCommand(UserCommandBase):
             try:
                 earliest_time = await self.data_store.get_earliest_message_time(user_id, group_id)
                 if earliest_time:
-                    from .wall_clock import persona_wall_now
-                    now = persona_wall_now(self.config.timezone)
+                    from utils.time import wall_now
+                    now = wall_now(self.config.timezone)
                     days_known = max(1, (now - earliest_time).days)
                     lines.append(f"  认识: {days_known} 天")
                 else:

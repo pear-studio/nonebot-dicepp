@@ -10,7 +10,7 @@ from datetime import timedelta
 from ..data.store import PersonaDataStore
 from ..character.models import Character
 from ..life.event_agent import EventGenerationAgent
-from ..wall_clock import persona_wall_now
+from utils.time import wall_now
 
 
 @dataclass
@@ -54,7 +54,7 @@ class DiaryGenerator:
             日记内容，如果失败则返回 None
         """
         try:
-            now = persona_wall_now(self.config.timezone)
+            now = wall_now(self.config.timezone)
 
             diary_hour, diary_minute = map(int, self.config.diary_time.split(":"))
             diary_minutes = diary_hour * 60 + diary_minute

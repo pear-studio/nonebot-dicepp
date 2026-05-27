@@ -12,7 +12,7 @@ from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy
 from ..utils.json_helpers import safe_json_loads
-from ..wall_clock import persona_wall_now, format_timestamp, format_relative_time
+from utils.time import wall_now, format_timestamp, format_relative_time
 
 
 class ScoringAnalysisResult(BaseModel):
@@ -122,7 +122,7 @@ class ScoringAgent:
         tool_name: str = "score_relationship",
     ) -> str:
         dialogue_lines = []
-        now = persona_wall_now(self.timezone)
+        now = wall_now(self.timezone)
         for msg in messages:
             role = "用户" if msg["role"] == "user" else "AI"
             rel = format_relative_time(msg.get("created_at"), now)

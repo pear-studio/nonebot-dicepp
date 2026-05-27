@@ -14,7 +14,7 @@ from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy
 from ..tools.registry import ToolRegistry
 from ..tools.collecting import RECORD_EVENT_TOOL, RECORD_REACTION_TOOL, RECORD_DIARY_ENTRY_TOOL, RECORD_SHARE_MESSAGE_TOOL
-from ..wall_clock import format_timestamp, format_relative_time, persona_wall_now
+from utils.time import format_timestamp, format_relative_time, wall_now
 from typing import TYPE_CHECKING
 
 # keep in sync with PersonaConfig.background_llm_timeout_seconds default
@@ -388,7 +388,7 @@ class EventGenerationAgent:
         today_context = ""
         if today_events:
             events_lines = []
-            now = datetime.now()
+            now = wall_now(getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai")
             for e in today_events:
                 created_at = e.get("created_at")
                 if created_at:
@@ -523,7 +523,7 @@ class EventGenerationAgent:
 
         # 构建事件上下文（带时间戳）
         events_lines = []
-        now = datetime.now()
+        now = wall_now(getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai")
         for e in events:
             created_at = e.get("created_at")
             if created_at:
@@ -542,7 +542,7 @@ class EventGenerationAgent:
             yesterday_context = f"\n\n昨天的日记:\n{yesterday_diary[:200]}..."
 
         tz = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
-        now = persona_wall_now(tz)
+        now = wall_now(tz)
         date_str = now.strftime("%Y年%m月%d日")
 
         user_prompt = f"""当前日期: {date_str}
@@ -667,7 +667,7 @@ class EventGenerationAgent:
                 if context.today_events[idx].get("description") == context.event_description:
                     skip_idx = idx
                     break
-            now = datetime.now()
+            now = wall_now(getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai")
             ev_lines = []
             for idx, e in enumerate(context.today_events):
                 if idx == skip_idx:

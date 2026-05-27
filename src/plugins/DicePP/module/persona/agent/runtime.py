@@ -73,9 +73,9 @@ class AgentRuntime:
         if self._router.quota_check_enabled and self._router.data_store:
             exempt = await self._is_quota_exempt(user_id, group_id)
             if not exempt:
-                from ..wall_clock import persona_wall_now
+                from utils.time import wall_now
                 tz = self._router.config.timezone if self._router.config else "Asia/Shanghai"
-                today = persona_wall_now(tz).strftime("%Y-%m-%d")
+                today = wall_now(tz).strftime("%Y-%m-%d")
                 count = await self._router.data_store.get_daily_usage(user_id, today)
                 if count >= self._router.daily_limit:
                     raise QuotaExceeded(f"今日额度已用完 ({count}/{self._router.daily_limit})")

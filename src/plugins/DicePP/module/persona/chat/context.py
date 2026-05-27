@@ -11,7 +11,7 @@ from utils.string import estimate_tokens
 
 from ..character.models import Character
 from ..data.models import UserProfile
-from ..wall_clock import persona_wall_now, format_timestamp, format_relative_time
+from utils.time import wall_now, format_timestamp, format_relative_time
 
 DEFAULT_DELAY_BEFORE = 1.0
 
@@ -165,7 +165,7 @@ class ContextBuilder:
             parts.append(f"【世界书】\n{bullets}")
 
         # 添加当前时间（使用中文星期）
-        now = persona_wall_now(self.timezone)
+        now = wall_now(self.timezone)
         weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
         weekday = weekdays[now.weekday()]
         time_str = now.strftime(f"%Y年%m月%d日 %H:%M {weekday}")
@@ -227,7 +227,7 @@ class ContextBuilder:
         """
         if not history:
             return []
-        now = persona_wall_now(self.timezone)
+        now = wall_now(self.timezone)
         result: List[Dict[str, str]] = []
         buffer: List[Dict] = []
 
@@ -274,7 +274,7 @@ class ContextBuilder:
         """
         if not history:
             return []
-        now = persona_wall_now(self.timezone)
+        now = wall_now(self.timezone)
         result = []
         buffer = []
 
