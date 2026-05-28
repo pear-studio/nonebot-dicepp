@@ -25,17 +25,14 @@ from plugins.DicePP.module.persona.life.event_agent import (
 
 @pytest.fixture
 async def temp_db():
-    import tempfile
-    import os
     import aiosqlite
 
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db_path = f.name
-    async with aiosqlite.connect(db_path) as db:
-        store = PersonaDataStore(db)
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
         await store.ensure_tables()
         yield store
-    os.unlink(db_path)
 
 
 @pytest.fixture

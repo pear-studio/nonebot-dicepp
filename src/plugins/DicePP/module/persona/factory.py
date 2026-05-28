@@ -3,10 +3,12 @@
 负责从 Bot 组装所有依赖，创建 ChatSession / LifeSimulator / MessagePort。
 """
 import asyncio
+import os
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from nonebot.log import logger
 from core.bot import Bot
+from core.config.basic import Paths
 
 from .character.loader import CharacterLoader
 from .character.models import Character
@@ -66,6 +68,7 @@ class PersonaApp:
     port: MessagePort
     segment_dispatcher: Optional[SegmentDispatcher] = None
     all_providers_disabled: bool = False
+    current_character_name: str = ""
 
     # ── 角色卡 ────────────────────────────────────────────────
 
@@ -73,6 +76,11 @@ class PersonaApp:
         """统一传播新的角色卡到所有子系统。"""
         self.chat.update_character(character)
         self.life.update_character(character)
+
+    async def switch_character_db(self, new_character_name: str) -> None:
+        """切换到新角色的 persona_db"""
+        await self.store.switch_persona_db(new_character_name)
+        self.current_character_name = new_character_name
 
     def get_character(self) -> Optional[Character]:
         return self.chat.character
@@ -199,24 +207,47 @@ def _load_character(config) -> Character:
 
 
 async def _build_store(bot: Bot, config) -> PersonaDataStore:
-    """初始化数据存储"""
-    raw_db = getattr(getattr(bot, "db", None), "_db", None)
-    if raw_db is None:
+    """初始化数据存储（双连接：persona_db + core_db）"""
+    core_db = getattr(getattr(bot, "db", None), "_db", None)
+    if core_db is None:
         raise PersonaStorageError("数据库未初始化（bot.db 或 bot.db._db 为 None）")
 
+    # 拼接 persona_db 路径: data/bots/{bot_id}/personas_data_{character_name}.db
+    bot_dir = Paths.bot_data_dir(bot.account)
+    persona_db_path = str(bot_dir / f"personas_data_{config.character_name}.db")
+    os.makedirs(str(bot_dir), exist_ok=True)
+
     store = PersonaDataStore(
-        raw_db,
+        persona_db_path,
+        core_db,
         group_activity_decay_per_day=config.group_activity_decay_per_day,
         group_activity_floor_whitelist=config.group_activity_floor_whitelist,
         timezone=config.timezone,
         message_stream_max_per_group=config.message_stream_max_per_group,
     )
     try:
-        await store.ensure_tables()
+        await store.open()
     except Exception as e:
         raise PersonaStorageError(f"数据库表初始化失败: {e}") from e
-    logger.info("数据存储已初始化")
+    logger.info(f"数据存储已初始化: persona_db={persona_db_path}")
+
+    # 迁移旧 persona_settings 中的 'code' 到 persona_global_settings
+    await _migrate_code_setting(store)
+
     return store
+
+
+async def _migrate_code_setting(store: PersonaDataStore) -> None:
+    """首次启动时将旧 persona_settings 中的 'code' 迁移到 persona_global_settings"""
+    existing = await store.get_global_setting("code")
+    if existing is not None:
+        await store.delete_setting("code")  # 清理 persona_db 侧残留
+        return
+    old_code = await store.get_setting("code")
+    if old_code is not None:
+        await store.set_global_setting("code", old_code)
+        await store.delete_setting("code")
+        logger.info("已将口令 'code' 从 persona_settings 迁移到 persona_global_settings")
 
 
 def _build_router(config, store: PersonaDataStore) -> LLMRouter:
@@ -560,4 +591,5 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         chat=chat, life=life, store=infra.store, port=infra.port,
         segment_dispatcher=infra.segment_dispatcher,
         all_providers_disabled=all_disabled,
+        current_character_name=config.character_name,
     )

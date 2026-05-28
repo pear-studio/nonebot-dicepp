@@ -566,48 +566,51 @@ class TestGetDailyChatStats:
 
 @pytest.mark.asyncio
 async def test_add_and_get_daily_event_with_new_fields(tmp_path):
-    db_path = tmp_path / "test.db"
     import aiosqlite
-    db = await aiosqlite.connect(str(db_path))
-    store = PersonaDataStore(db)
-    await store.ensure_tables()
+    persona_db = await aiosqlite.connect(":memory:")
+    core_db = await aiosqlite.connect(":memory:")
+    try:
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
+        await store.ensure_tables()
 
-    await store.add_daily_event(
-        date="2024-01-01",
-        event_type="scheduled",
-        description="测试中",
-        reaction="不错",
-        share_desire=0.75,
-        duration_minutes=30,
-        energy_delta=3,
-        mood_delta=-2,
-        health_delta=1,
-        context_summary="在酒馆喝酒",
-    )
-    # 不传 context_summary
-    await store.add_daily_event(
-        date="2024-01-01",
-        event_type="system",
-        description="另一件事",
-    )
+        await store.add_daily_event(
+            date="2024-01-01",
+            event_type="scheduled",
+            description="测试中",
+            reaction="不错",
+            share_desire=0.75,
+            duration_minutes=30,
+            energy_delta=3,
+            mood_delta=-2,
+            health_delta=1,
+            context_summary="在酒馆喝酒",
+        )
+        # 不传 context_summary
+        await store.add_daily_event(
+            date="2024-01-01",
+            event_type="system",
+            description="另一件事",
+        )
 
-    events = await store.get_daily_events("2024-01-01")
-    assert len(events) == 2
-    ev = events[0]
-    assert ev.share_desire == 0.75
-    assert ev.duration_minutes == 30
-    assert ev.description == "测试中"
-    assert ev.reaction == "不错"
-    assert ev.event_type == "scheduled"
-    assert ev.energy_delta == 3
-    assert ev.mood_delta == -2
-    assert ev.health_delta == 1
-    assert ev.context_summary == "在酒馆喝酒"
-    # 不传时回读为空字符串
-    ev2 = events[1]
-    assert ev2.context_summary == ""
-
-    await db.close()
+        events = await store.get_daily_events("2024-01-01")
+        assert len(events) == 2
+        ev = events[0]
+        assert ev.share_desire == 0.75
+        assert ev.duration_minutes == 30
+        assert ev.description == "测试中"
+        assert ev.reaction == "不错"
+        assert ev.event_type == "scheduled"
+        assert ev.energy_delta == 3
+        assert ev.mood_delta == -2
+        assert ev.health_delta == 1
+        assert ev.context_summary == "在酒馆喝酒"
+        # 不传时回读为空字符串
+        ev2 = events[1]
+        assert ev2.context_summary == ""
+    finally:
+        await persona_db.close()
+        await core_db.close()
 
 
 # ── 以下为从 test_data_store_llm.py 合并 ─────────────────────────────────────
@@ -947,5 +950,162 @@ class TestSearchMemoryPhase3:
             search_type="all"
         )
         assert len(result) >= 1
+
+
+# ── switch_persona_db / _migrate_code_setting 测试 ────────────────────────────
+
+
+class TestSwitchPersonaDb:
+    """switch_persona_db 测试"""
+
+    @pytest.mark.asyncio
+    async def test_switch_persona_db_basic(self, tmp_path):
+        """切换后新库能正常读写，旧库已关闭"""
+        import aiosqlite
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+
+        db_dir = str(tmp_path)
+        old_path = f"{db_dir}/personas_data_old.db"
+        new_path = f"{db_dir}/personas_data_new.db"
+
+        async with aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(old_path, core_db)
+            await store.open()
+            # 在旧库写入数据
+            await store.set_setting("test_key", "test_value")
+            old_val = await store.get_setting("test_key")
+            assert old_val == "test_value"
+
+            # 切换到新库
+            await store.switch_persona_db("new")
+
+            # 新库应该能正常工作
+            assert store._persona_db_path == new_path
+            await store.set_setting("new_key", "new_value")
+            new_val = await store.get_setting("new_key")
+            assert new_val == "new_value"
+
+            # 旧库的 test_key 在新库中不应存在
+            old_val_in_new = await store.get_setting("test_key")
+            assert old_val_in_new is None
+
+            await store.close()
+
+    @pytest.mark.asyncio
+    async def test_switch_persona_db_open_failure_rollback(self, tmp_path):
+        """模拟 open 失败时应回滚到旧状态"""
+        import aiosqlite
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+
+        db_dir = str(tmp_path)
+        old_path = f"{db_dir}/personas_data_old.db"
+
+        async with aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(old_path, core_db)
+            await store.open()
+            await store.set_setting("key", "value")
+
+            # 创建一个目录来模拟文件冲突（目录不能作为数据库打开）
+            import os
+            os.makedirs(f"{db_dir}/personas_data_conflict.db", exist_ok=True)
+
+            with pytest.raises(Exception):
+                await store.switch_persona_db("conflict")
+
+            # store 应回滚到旧状态
+            assert store._persona_db_path == old_path
+            assert store._persona_db is not None
+            # 旧库仍能正常读写
+            val = await store.get_setting("key")
+            assert val == "value"
+            await store.close()
+
+    @pytest.mark.asyncio
+    async def test_switch_persona_db_memory_raises(self):
+        """:memory: 路径应抛出 ValueError"""
+        import aiosqlite
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+
+        async with aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db)
+            store._persona_db = await aiosqlite.connect(":memory:")
+            with pytest.raises(ValueError, match=":memory:"):
+                await store.switch_persona_db("new")
+
+
+class TestMigrateCodeSetting:
+    """_migrate_code_setting 测试"""
+
+    @pytest.mark.asyncio
+    async def test_migrate_code_setting_first_run(self):
+        """首次迁移正确写入 global_settings"""
+        import aiosqlite
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from plugins.DicePP.module.persona.factory import _migrate_code_setting
+
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db)
+            store._persona_db = persona_db
+            await store.ensure_tables()
+
+            # 在旧表中设置 code
+            await store.set_setting("code", "secret123")
+
+            # 执行迁移
+            await _migrate_code_setting(store)
+
+            # 验证迁移到 global_settings
+            global_code = await store.get_global_setting("code")
+            assert global_code == "secret123"
+
+            # 验证旧记录已删除
+            old_code = await store.get_setting("code")
+            assert old_code is None
+
+    @pytest.mark.asyncio
+    async def test_migrate_code_setting_idempotent(self):
+        """已存在 global_settings 时不覆盖"""
+        import aiosqlite
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from plugins.DicePP.module.persona.factory import _migrate_code_setting
+
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db)
+            store._persona_db = persona_db
+            await store.ensure_tables()
+
+            # 先设置 global_settings
+            await store.set_global_setting("code", "existing_code")
+            # 旧表也有 code
+            await store.set_setting("code", "old_code")
+
+            # 执行迁移
+            await _migrate_code_setting(store)
+
+            # global_settings 应保持原值
+            global_code = await store.get_global_setting("code")
+            assert global_code == "existing_code"
+
+    @pytest.mark.asyncio
+    async def test_migrate_code_setting_no_old_code(self):
+        """旧表无 code 时无操作"""
+        import aiosqlite
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from plugins.DicePP.module.persona.factory import _migrate_code_setting
+
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db)
+            store._persona_db = persona_db
+            await store.ensure_tables()
+
+            # 执行迁移（旧表无 code）
+            await _migrate_code_setting(store)
+
+            # global_settings 应为空
+            global_code = await store.get_global_setting("code")
+            assert global_code is None
 
 

@@ -21,7 +21,7 @@ def _make_app() -> PersonaApp:
     life = MagicMock()
     life.character = chat.character
 
-    store = MagicMock()
+    store = AsyncMock()
     port = MagicMock()
 
     return PersonaApp(chat=chat, life=life, store=store, port=port)

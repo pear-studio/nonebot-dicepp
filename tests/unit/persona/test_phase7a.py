@@ -17,15 +17,14 @@ from conftest import make_mock_providers
 
 @pytest.fixture
 async def temp_db():
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db_path = f.name
     import aiosqlite
 
-    async with aiosqlite.connect(db_path) as db:
-        store = PersonaDataStore(db)
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
         await store.ensure_tables()
         yield store
-    os.unlink(db_path)
 
 
 def _populate_latency(router, provider_name, values):

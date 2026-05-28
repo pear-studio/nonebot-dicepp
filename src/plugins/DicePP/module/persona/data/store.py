@@ -27,7 +27,8 @@ from .models import (
     ScoringFailure, UnifiedMessage, MessageType, DEFAULT_WARMTH_LABELS,
 )
 from .migrations import (
-    ALL_MIGRATIONS, RENAME_LEGACY_TABLE,
+    PERSONA_DB_MIGRATIONS, CORE_DB_MIGRATIONS,
+    RENAME_LEGACY_TABLE,
     DROP_LEGACY_USER_INDEX, DROP_LEGACY_GROUP_INDEX,
     ALTER_MESSAGE_STREAM_COLUMNS,
 )
@@ -49,20 +50,47 @@ class PersonaDataStore:
 
     def __init__(
         self,
-        db_connection: aiosqlite.Connection,
+        persona_db_path: str,
+        core_db: aiosqlite.Connection,
         *,
         group_activity_decay_per_day: float = 10.0,
         group_activity_floor_whitelist: float = 50.0,
         timezone: str = "Asia/Shanghai",
         message_stream_max_per_group: int = 1000,
     ):
-        self.db = db_connection
+        self._persona_db_path = persona_db_path
+        self._core_db = core_db
+        self._persona_db: Optional[aiosqlite.Connection] = None
         self._group_activity_decay_per_day = group_activity_decay_per_day
         self._group_activity_floor_whitelist = group_activity_floor_whitelist
         self._timezone = timezone
         self._message_stream_max_per_group = message_stream_max_per_group
         self._msg_stream_write_count = 0
         self._last_prune_at: Optional[datetime] = None
+
+    @property
+    def db(self) -> aiosqlite.Connection:
+        """返回 persona_db 连接（保持外部 self.db.xxx 引用不变）"""
+        if self._persona_db is None:
+            raise RuntimeError("PersonaDataStore 未打开，先调用 await store.open()")
+        return self._persona_db
+
+    async def _init_connection(self, conn: aiosqlite.Connection) -> None:
+        """设置连接 PRAGMA"""
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA foreign_keys=ON")
+
+    async def open(self) -> None:
+        """连接 persona_db，设置 PRAGMA，创建表"""
+        self._persona_db = await aiosqlite.connect(self._persona_db_path)
+        await self._init_connection(self._persona_db)
+        await self.ensure_tables()
+
+    async def close(self) -> None:
+        """关闭 persona_db 连接。core_db 由 Bot 生命周期管理，不在此关闭。"""
+        if self._persona_db is not None:
+            await self._persona_db.close()
+            self._persona_db = None
 
     def _wall_now(self) -> datetime:
         """与 `PersonaConfig.timezone` 一致的墙钟（naive 本地时间）。"""
@@ -79,24 +107,53 @@ class PersonaDataStore:
 
     async def ensure_tables(self) -> None:
         """确保所有表已创建，并对旧表名做透明迁移。"""
-        # 如果旧表 persona_unified_messages 存在，先重命名到 message_stream
+        persona_db = self.db
+        core_db = self._core_db
+        # 如果旧表 persona_unified_messages 存在，先重命名到 message_stream（persona_db 侧）
         try:
-            await self.db.execute(RENAME_LEGACY_TABLE)
-            await self.db.execute(DROP_LEGACY_USER_INDEX)
-            await self.db.execute(DROP_LEGACY_GROUP_INDEX)
-            await self.db.commit()
+            await persona_db.execute(RENAME_LEGACY_TABLE)
+            await persona_db.execute(DROP_LEGACY_USER_INDEX)
+            await persona_db.execute(DROP_LEGACY_GROUP_INDEX)
+            await persona_db.commit()
         except Exception:
             pass  # 旧表不存在或已迁移，无需处理
-        for migration in ALL_MIGRATIONS:
-            await self.db.execute(migration)
+        # persona_db 侧：14 张角色表 + 索引
+        for migration in PERSONA_DB_MIGRATIONS:
+            await persona_db.execute(migration)
+        # core_db 侧：4 张 bot 级表
+        for migration in CORE_DB_MIGRATIONS:
+            await core_db.execute(migration)
+        await core_db.commit()
         # Phase M1: message_stream 扩展列（幂等 ALTER TABLE）
         for alter_sql in ALTER_MESSAGE_STREAM_COLUMNS:
             try:
-                await self.db.execute(alter_sql)
+                await persona_db.execute(alter_sql)
             except sqlite3.OperationalError as e:
                 if "duplicate column" not in str(e):
                     raise
-        await self.db.commit()
+        await persona_db.commit()
+
+    async def switch_persona_db(self, new_character_name: str) -> None:
+        """关闭当前 persona_db，打开新角色的 persona_db（先开后关策略）"""
+        if self._persona_db_path == ":memory:":
+            raise ValueError("switch_persona_db 不适用于 :memory: 数据库")
+        dir_path = os.path.dirname(self._persona_db_path)
+        new_path = os.path.join(dir_path, f"personas_data_{new_character_name}.db")
+        new_conn = await aiosqlite.connect(new_path)
+        await self._init_connection(new_conn)
+        old_db = self._persona_db
+        old_path = self._persona_db_path
+        self._persona_db = new_conn
+        self._persona_db_path = new_path
+        try:
+            await self.ensure_tables()
+        except Exception:
+            self._persona_db = old_db
+            self._persona_db_path = old_path
+            await new_conn.close()
+            raise
+        if old_db is not None:
+            await old_db.close()
 
     # ========== 消息流表 (message_stream) ==========
 
@@ -618,11 +675,11 @@ class PersonaDataStore:
                 ))
             return events
 
-    # ========== 白名单相关 ==========
+    # ========== 白名单相关（core_db 侧） ==========
 
     async def is_user_whitelisted(self, user_id: str) -> bool:
         """检查用户是否在白名单"""
-        async with self.db.execute(
+        async with self._core_db.execute(
             "SELECT 1 FROM persona_whitelist WHERE id = ? AND type = 'user'",
             (user_id,)
         ) as cursor:
@@ -630,17 +687,17 @@ class PersonaDataStore:
 
     async def is_group_whitelisted(self, group_id: str) -> bool:
         """检查群是否在白名单"""
-        async with self.db.execute(
+        async with self._core_db.execute(
             "SELECT 1 FROM persona_whitelist WHERE id = ? AND type = 'group'",
             (group_id,)
         ) as cursor:
             return await cursor.fetchone() is not None
 
-    # --- 用户主动消息静音 (Phase 3) ---
+    # --- 用户主动消息静音 (core_db 侧) ---
 
     async def is_user_muted(self, user_id: str) -> bool:
         """检查用户是否关闭了主动消息"""
-        async with self.db.execute(
+        async with self._core_db.execute(
             "SELECT 1 FROM persona_user_mute WHERE user_id = ?",
             (user_id,)
         ) as cursor:
@@ -648,56 +705,56 @@ class PersonaDataStore:
 
     async def mute_user(self, user_id: str, reason: str = "") -> None:
         """关闭用户的主动消息"""
-        await self.db.execute(
+        await self._core_db.execute(
             """
             INSERT OR REPLACE INTO persona_user_mute (user_id, muted_at, reason)
             VALUES (?, ?, ?)
             """,
             (user_id, self._wall_now().isoformat(), reason)
         )
-        await self.db.commit()
+        await self._core_db.commit()
 
     async def unmute_user(self, user_id: str) -> None:
         """开启用户的主动消息"""
-        await self.db.execute(
+        await self._core_db.execute(
             "DELETE FROM persona_user_mute WHERE user_id = ?",
             (user_id,)
         )
-        await self.db.commit()
+        await self._core_db.commit()
 
     async def add_user_to_whitelist(self, user_id: str) -> None:
         """添加用户到白名单"""
-        await self.db.execute(
+        await self._core_db.execute(
             """
             INSERT OR IGNORE INTO persona_whitelist (id, type, joined_at)
             VALUES (?, 'user', ?)
             """,
             (user_id, self._wall_now().isoformat())
         )
-        await self.db.commit()
+        await self._core_db.commit()
 
     async def add_group_to_whitelist(self, group_id: str) -> None:
         """添加群到白名单"""
-        await self.db.execute(
+        await self._core_db.execute(
             """
             INSERT OR IGNORE INTO persona_whitelist (id, type, joined_at)
             VALUES (?, 'group', ?)
             """,
             (group_id, self._wall_now().isoformat())
         )
-        await self.db.commit()
+        await self._core_db.commit()
 
     async def remove_from_whitelist(self, entry_id: str, entry_type: str) -> None:
         """从白名单移除"""
-        await self.db.execute(
+        await self._core_db.execute(
             "DELETE FROM persona_whitelist WHERE id = ? AND type = ?",
             (entry_id, entry_type)
         )
-        await self.db.commit()
+        await self._core_db.commit()
 
     async def list_whitelist(self) -> List[WhitelistEntry]:
         """列出所有白名单条目"""
-        async with self.db.execute(
+        async with self._core_db.execute(
             "SELECT id, type, joined_at FROM persona_whitelist ORDER BY type, joined_at"
         ) as cursor:
             rows = await cursor.fetchall()
@@ -712,13 +769,13 @@ class PersonaDataStore:
 
     async def clear_whitelist(self) -> None:
         """清空白名单"""
-        await self.db.execute("DELETE FROM persona_whitelist")
-        await self.db.commit()
+        await self._core_db.execute("DELETE FROM persona_whitelist")
+        await self._core_db.commit()
 
-    # ========== 设置相关（口令等） ==========
+    # ========== 设置相关（角色级，persona_db 侧） ==========
 
     async def get_setting(self, key: str) -> Optional[str]:
-        """获取设置值"""
+        """获取角色级设置值"""
         async with self.db.execute(
             "SELECT value FROM persona_settings WHERE key = ?",
             (key,)
@@ -727,7 +784,7 @@ class PersonaDataStore:
             return row[0] if row else None
 
     async def set_setting(self, key: str, value: str) -> None:
-        """设置值"""
+        """设置角色级设置值"""
         await self.db.execute(
             """
             INSERT INTO persona_settings (key, value)
@@ -739,12 +796,43 @@ class PersonaDataStore:
         await self.db.commit()
 
     async def delete_setting(self, key: str) -> None:
-        """删除设置"""
+        """删除角色级设置"""
         await self.db.execute(
             "DELETE FROM persona_settings WHERE key = ?",
             (key,)
         )
         await self.db.commit()
+
+    # ========== 全局设置相关（bot 级，core_db 侧） ==========
+
+    async def get_global_setting(self, key: str) -> Optional[str]:
+        """获取 bot 级全局设置值（如口令 'code'）"""
+        async with self._core_db.execute(
+            "SELECT value FROM persona_global_settings WHERE key = ?",
+            (key,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def set_global_setting(self, key: str, value: str) -> None:
+        """设置 bot 级全局设置值"""
+        await self._core_db.execute(
+            """
+            INSERT INTO persona_global_settings (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value)
+        )
+        await self._core_db.commit()
+
+    async def delete_global_setting(self, key: str) -> None:
+        """删除 bot 级全局设置"""
+        await self._core_db.execute(
+            "DELETE FROM persona_global_settings WHERE key = ?",
+            (key,)
+        )
+        await self._core_db.commit()
 
     # ========== 用量相关 ==========
 
@@ -1593,7 +1681,7 @@ class PersonaDataStore:
                 results.append(f"[{date}] {content}")
             return results
 
-    # ========== Phase 4: 用户 LLM 配置 ==========
+    # ========== Phase 4: 用户 LLM 配置（core_db 侧） ==========
 
     @staticmethod
     def _get_encryption_key() -> Optional[bytes]:
@@ -1642,10 +1730,10 @@ class PersonaDataStore:
 
     async def get_user_llm_config(self, user_id: str) -> Optional[UserLLMConfig]:
         """获取用户 LLM 配置（自动解密 API Key）"""
-        async with self.db.execute(
+        async with self._core_db.execute(
             """
             SELECT user_id, primary_api_key_encrypted, primary_base_url, primary_model,
-                   auxiliary_api_key_encrypted, auxiliary_base_url, auxiliary_model, updated_at  -- 数据库字段保持加密存储
+                   auxiliary_api_key_encrypted, auxiliary_base_url, auxiliary_model, updated_at
             FROM persona_user_llm_config
             WHERE user_id = ?
             """,
@@ -1690,7 +1778,7 @@ class PersonaDataStore:
         if auxiliary_encrypted is None and config.auxiliary_api_key:
             return False
 
-        await self.db.execute(
+        await self._core_db.execute(
             """
             INSERT INTO persona_user_llm_config
             (user_id, primary_api_key_encrypted, primary_base_url, primary_model,
@@ -1716,7 +1804,7 @@ class PersonaDataStore:
                 self._wall_now().isoformat(),
             )
         )
-        await self.db.commit()
+        await self._core_db.commit()
         return True
 
     async def clear_user_llm_config(self, user_id: str) -> bool:
@@ -1725,11 +1813,11 @@ class PersonaDataStore:
         Returns:
             是否成功清除（配置不存在也返回 True）
         """
-        await self.db.execute(
+        await self._core_db.execute(
             "DELETE FROM persona_user_llm_config WHERE user_id = ?",
             (user_id,)
         )
-        await self.db.commit()
+        await self._core_db.commit()
         return True
 
     # ========== Agent Runtime (Phase M1) ==========

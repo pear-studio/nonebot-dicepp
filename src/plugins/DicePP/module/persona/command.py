@@ -217,7 +217,7 @@ class PersonaCommand(UserCommandBase):
             return False
 
         # 检查是否设置了口令
-        code = await self.data_store.get_setting("code")
+        code = await self.data_store.get_global_setting("code")
         if not code:
             # 未设置口令，白名单不激活，允许所有人
             return True
@@ -445,7 +445,7 @@ class PersonaCommand(UserCommandBase):
             return "AI 功能暂未开放，请联系管理员"
 
         # 检查是否设置了口令
-        code = await self.data_store.get_setting("code")
+        code = await self.data_store.get_global_setting("code")
         if not code:
             return "AI 功能暂未开放，请联系管理员"
 
@@ -593,7 +593,7 @@ class PersonaCommand(UserCommandBase):
         # 检查白名单状态
         whitelist_status = ""
         if config.whitelist_enabled and self.data_store:
-            code = await self.data_store.get_setting("code")
+            code = await self.data_store.get_global_setting("code")
             if code:
                 whitelisted = await self._check_whitelist(user_id, group_id, is_private)
                 whitelist_status = f"\n白名单: {'已通过' if whitelisted else '未加入（发送 .ai join <口令> 加入）'}"
@@ -674,9 +674,11 @@ class PersonaCommand(UserCommandBase):
         return ".pa 命令已废弃，请使用 .ai admin 子命令"
 
     async def shutdown(self) -> None:
-        """Bot 关闭时清理分段调度器"""
+        """Bot 关闭时清理资源"""
         if self.app and self.app.segment_dispatcher:
             await self.app.segment_dispatcher.shutdown()
+        if self.app and self.app.store:
+            await self.app.store.close()
 
     def get_description(self) -> str:
         """获取命令描述"""

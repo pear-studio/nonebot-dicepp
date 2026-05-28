@@ -161,7 +161,7 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
         bot.config.persona_ai.whitelist_enabled = True
         cmd = _make_cmd(bot)
         store = AsyncMock()
-        store.get_setting = AsyncMock(return_value="secret")
+        store.get_global_setting = AsyncMock(return_value="secret")
         store.is_user_whitelisted = AsyncMock(return_value=True)
         cmd.data_store = store
 
@@ -179,7 +179,7 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
         cmd = _make_cmd(bot)
         # whitelist_enabled=True but no code set
         store = AsyncMock()
-        store.get_setting = AsyncMock(return_value=None)
+        store.get_global_setting = AsyncMock(return_value=None)
         cmd.data_store = store
 
         meta = _make_private_meta(".ai hello")
@@ -240,6 +240,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         self.cmd.app.get_character.return_value = self.cmd.app.chat.character
         self.cmd.app.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.app.get_initial_relationship.return_value = 30.0
+        self.cmd.app.current_character_name = "test_char"
 
         self.cmd.app.life = MagicMock()
         self.cmd.app.life.scheduler = MagicMock()
@@ -273,7 +274,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         assert "管理员命令" in _get_sent_content(self.cmd)
 
     async def test_admin_code(self):
-        self.store.get_setting = AsyncMock(return_value=None)
+        self.store.get_global_setting = AsyncMock(return_value=None)
         meta = _make_private_meta(".ai admin code newcode", user_id=self.user_id)
         await self.cmd.process_msg(".ai admin code newcode", meta, "admin")
         assert "已更新" in _get_sent_content(self.cmd)
@@ -439,7 +440,7 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         assert "已开启主动消息" in _get_sent_content(self.cmd)
 
     async def test_join(self):
-        self.store.get_setting = AsyncMock(return_value="secret")
+        self.store.get_global_setting = AsyncMock(return_value="secret")
         self.store.is_user_whitelisted = AsyncMock(return_value=False)
         meta = _make_private_meta(".ai join secret")
         await self.cmd.process_msg(".ai join secret", meta, "join")

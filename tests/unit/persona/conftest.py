@@ -1,7 +1,5 @@
 """共享测试工具 — mock provider / router 工厂函数、temp_db fixture"""
 import pytest
-import tempfile
-import os
 from unittest.mock import MagicMock, AsyncMock
 
 
@@ -80,13 +78,13 @@ def make_mock_runtime(monkeypatch):
 
 @pytest.fixture
 async def temp_db():
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db_path = f.name
     import aiosqlite
     from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
-    async with aiosqlite.connect(db_path) as db:
-        store = PersonaDataStore(db)
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        await persona_db.execute("PRAGMA foreign_keys=ON")
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
         await store.ensure_tables()
         yield store
-    os.unlink(db_path)

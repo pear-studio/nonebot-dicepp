@@ -76,8 +76,9 @@ def _make_bot() -> MagicMock:
     cfg.decay_rate_per_hour = 0.5
     cfg.decay_daily_cap = 5.0
     bot.config.persona_ai = cfg
+    bot.account = "test_bot"
     bot.db = MagicMock()
-    bot.db._db = MagicMock()  # 满足 PersonaDataStore 的 db_connection 参数位置
+    bot.db._db = MagicMock()  # 满足 PersonaDataStore 的 core_db 参数
     return bot
 
 
@@ -114,13 +115,21 @@ async def test_create_persona_success_registers_tools(monkeypatch):
     )
 
     class FakeStore:
-        def __init__(self, db_connection, **kwargs):
-            self.db = db_connection
+        def __init__(self, persona_db_path, core_db, **kwargs):
+            self._persona_db_path = persona_db_path
+            self._core_db = core_db
+            self._persona_db = None
+
+        async def open(self):
+            pass
 
         async def ensure_tables(self):
             pass
 
         async def get_setting(self, key):
+            return None
+
+        async def get_global_setting(self, key):
             return None
 
     monkeypatch.setattr(

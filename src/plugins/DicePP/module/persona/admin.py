@@ -98,16 +98,16 @@ class AdminDispatcher:
 
     async def _admin_code(self, user_id: str, group_id: str, args: List[str]) -> str:
         if len(args) < 2:
-            current_code = await self.data_store.get_setting("code")
+            current_code = await self.data_store.get_global_setting("code")
             if current_code:
                 return f"当前已设置口令（{len(current_code)}位字符）"
             else:
                 return "当前未设置口令，白名单功能未激活"
         if args[1] == "clear":
-            await self.data_store.delete_setting("code")
+            await self.data_store.delete_global_setting("code")
             return "口令已清除，白名单功能已停用"
         new_code = args[1]
-        await self.data_store.set_setting("code", new_code)
+        await self.data_store.set_global_setting("code", new_code)
         return "已更新，白名单功能已激活"
 
     async def _admin_whitelist(self, user_id: str, group_id: str, args: List[str]) -> str:
@@ -286,6 +286,10 @@ class AdminDispatcher:
             )
             if not new_character:
                 return f"无法加载角色卡: {self.config.character_name}"
+            # 检测角色名是否变化，如果变化则切换 persona_db
+            if self.app.current_character_name != self.config.character_name:
+                await self.app.switch_character_db(self.config.character_name)
+                logger.info(f"persona_db 已切换: {self.config.character_name}")
             await self.app.update_character(new_character)
             return f"角色卡已重载: {new_character.name}"
         except Exception as e:

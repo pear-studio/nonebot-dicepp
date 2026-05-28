@@ -14,8 +14,10 @@ from plugins.DicePP.module.persona.data.models import ScoringFailure
 @pytest.mark.asyncio
 async def test_record_scoring_failure_defaults():
     """record_scoring_failure 默认值写入"""
-    async with aiosqlite.connect(":memory:") as db:
-        store = PersonaDataStore(db)
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
         await store.ensure_tables()
 
         await store.record_scoring_failure(
@@ -36,8 +38,10 @@ async def test_record_scoring_failure_defaults():
 @pytest.mark.asyncio
 async def test_record_scoring_failure_explicit_fields():
     """record_scoring_failure 显式字段写入"""
-    async with aiosqlite.connect(":memory:") as db:
-        store = PersonaDataStore(db)
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
         await store.ensure_tables()
 
         now = datetime(2026, 5, 8, 12, 0, 0)
@@ -63,8 +67,10 @@ async def test_record_scoring_failure_explicit_fields():
 @pytest.mark.asyncio
 async def test_get_recent_scoring_failures_filter_and_order():
     """get_recent_scoring_failures 按 user_id/group_id 过滤、按 created_at DESC 排序"""
-    async with aiosqlite.connect(":memory:") as db:
-        store = PersonaDataStore(db)
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
         await store.ensure_tables()
 
         base = datetime(2026, 5, 8, 12, 0, 0)
@@ -99,8 +105,10 @@ async def test_get_recent_scoring_failures_filter_and_order():
 @pytest.mark.asyncio
 async def test_prune_scoring_failures_by_days():
     """prune_scoring_failures 按天数正确清理（覆盖 R2 同天边界）"""
-    async with aiosqlite.connect(":memory:") as db:
-        store = PersonaDataStore(db)
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
         await store.ensure_tables()
 
         now = datetime(2026, 5, 8, 15, 0, 0)

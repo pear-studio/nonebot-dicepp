@@ -134,7 +134,6 @@ async def _run_full_day_lifecycle() -> dict:
     base_url = _API_CFG.get("primary_base_url", "https://api.minimaxi.com/v1")
     model = _API_CFG.get("primary_model", "MiniMax-M2.7")
 
-    db_path = tempfile.mktemp(suffix=".db")
     results: dict = {
         "events": [],
         "diary": None,
@@ -143,8 +142,10 @@ async def _run_full_day_lifecycle() -> dict:
         "boundaries": (None, None),
     }
 
-    async with aiosqlite.connect(db_path) as db:
-        store = PersonaDataStore(db)
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
         await store.ensure_tables()
         await store.update_character_state(
             CharacterState(energy=50, mood=50, health=50)

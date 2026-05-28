@@ -95,9 +95,10 @@ class TestQuotaSystem:
         """测试每日用量追踪"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             user_id = "U123"
@@ -119,9 +120,10 @@ class TestQuotaSystem:
         """测试不同日期的用量分开计算"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             user_id = "U123"
@@ -144,9 +146,10 @@ class TestQuotaSystem:
         """测试不同用户的用量分开计算"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             date = "2024-01-15"
@@ -172,9 +175,10 @@ class TestUserConfigCRUD:
         """测试保存和读取用户配置"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             # 保存配置
@@ -193,9 +197,10 @@ class TestUserConfigCRUD:
         """测试读取不存在的配置"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             config = await store.get_user_llm_config("NONEXISTENT")
@@ -206,9 +211,10 @@ class TestUserConfigCRUD:
         """测试清除用户配置"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             # 先保存配置
@@ -227,9 +233,10 @@ class TestUserConfigCRUD:
         """测试更新用户配置"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             # 初始配置
@@ -260,9 +267,10 @@ class TestUserConfigCRUD:
 
         monkeypatch.delenv("DICE_PERSONA_SECRET", raising=False)
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             config = UserLLMConfig(
@@ -361,9 +369,10 @@ class TestQuotaExemptions:
         """测试白名单用户豁免配额"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             # 添加用户到白名单
@@ -379,9 +388,10 @@ class TestQuotaExemptions:
         """测试白名单群豁免配额"""
         import aiosqlite
 
-        db_path = tmp_path / "test.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            store = PersonaDataStore(db, timezone="Asia/Shanghai")
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
             await store.ensure_tables()
 
             # 添加群到白名单
