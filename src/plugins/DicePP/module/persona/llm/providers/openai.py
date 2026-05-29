@@ -36,12 +36,10 @@ class OpenAIProvider:
         api_key: str,
         base_url: str,
         model: str,
-        extra_params: Optional[Dict[str, Any]] = None,
     ):
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
-        self.extra_params = extra_params or {}
         self._client = None
 
     def _get_client(self):
@@ -63,6 +61,7 @@ class OpenAIProvider:
         temperature: Optional[float] = None,
         timeout: int = 60,
         tool_choice: Optional[str] = None,
+        thinking: bool = False,
     ) -> LLMResponse:
         """执行单次 LLM 调用，含指数退避重试。"""
         client = self._get_client()
@@ -70,7 +69,7 @@ class OpenAIProvider:
 
         for attempt in range(4):
             try:
-                return await self._call(client, messages, tools, temperature, timeout, tool_choice)
+                return await self._call(client, messages, tools, temperature, timeout, tool_choice, thinking)
             except NonRetryableError:
                 raise
             except asyncio.TimeoutError as e:
@@ -108,19 +107,34 @@ class OpenAIProvider:
         temperature: Optional[float],
         timeout: int,
         tool_choice: Optional[str],
+        thinking: bool = False,
     ) -> LLMResponse:
         start_time = time.monotonic()
 
-        create_kwargs: Dict[str, Any] = dict(self.extra_params)
-        create_kwargs.update({
+        create_kwargs: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-        })
+        }
         if tools:
             create_kwargs["tools"] = tools
             create_kwargs["tool_choice"] = tool_choice or "auto"
         if temperature is not None:
             create_kwargs["temperature"] = temperature
+
+        # 构建 extra_body
+        extra_body: Dict[str, Any] = {}
+
+        # 仅在 thinking=True 时注入，不支持 thinking 的 API 不会收到意外参数
+        if thinking:
+            extra_body["thinking"] = {"type": "enabled"}
+
+        # TODO: 当引入 MiniMaxProvider 子类时，将以下 MiniMax 特殊逻辑迁移
+        # MiniMax reasoning_split 强制启用，确保 thinking 内容不混入 content
+        if "minimax" in (self.base_url or "").lower():
+            extra_body.setdefault("reasoning_split", True)
+
+        if extra_body:
+            create_kwargs["extra_body"] = extra_body
 
         response = await asyncio.wait_for(
             client.chat.completions.create(**create_kwargs),
@@ -131,7 +145,24 @@ class OpenAIProvider:
         message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason or "stop"
 
+        # 提取 reasoning_content（使用 getattr + 类型检查，兼容 Mock 和真实 API response）
+        raw_reasoning = getattr(message, "reasoning_content", None)
+        reasoning = raw_reasoning if isinstance(raw_reasoning, str) else None
+
+        # MiniMax reasoning_details 兼容（reasoning_split=True 时）
+        if not reasoning:
+            raw_details = getattr(message, "reasoning_details", None)
+            if isinstance(raw_details, list):
+                reasoning = "\n".join(
+                    d["text"] for d in raw_details if isinstance(d, dict) and d.get("text")
+                ) or None
+
+        # content 直接使用（三家 API 在 reasoning_split=True 下均为干净文本）
         content = message.content or ""
+
+        # 检查：如果 tool_calls 出现在 reasoning_content 里，记录警告
+        if message.tool_calls and isinstance(reasoning, str) and "tool_calls" in reasoning:
+            logger.warning("检测到 tool_calls 出现在 reasoning_content 中，可能是 MiMo thinking + tool_calls 不稳定")
 
         # 标准化 tool_calls
         raw_tool_calls = message.tool_calls or []
@@ -154,7 +185,7 @@ class OpenAIProvider:
         logger.debug(
             f"OpenAI 调用完成: model={model} finish={finish_reason} "
             f"tokens_in={usage.input} tokens_out={usage.output} "
-            f"cached={usage.cached} latency={latency:.1f}s"
+            f"cache_read={usage.cache_read} latency={latency:.1f}s"
         )
 
         return LLMResponse(
@@ -163,6 +194,8 @@ class OpenAIProvider:
             usage=usage,
             finish_reason=finish_reason,
             model=model,
+            reasoning_content=reasoning,
+            latency_ms=latency * 1000,
         )
 
     def _extract_usage(self, response) -> TokenUsage:
@@ -170,20 +203,45 @@ class OpenAIProvider:
             return TokenUsage()
 
         input_tokens = response.usage.prompt_tokens or 0
+
+        # reasoning_tokens
+        reasoning_tokens = 0
+        if hasattr(response.usage, "completion_tokens_details"):
+            details = response.usage.completion_tokens_details
+            if details and hasattr(details, "reasoning_tokens"):
+                reasoning_tokens = details.reasoning_tokens or 0
+
+        # 缓存字段（兼容三家 API，优先级：OpenAI > Anthropic > DeepSeek）
+        # elif 链: 三家 API 互斥，同一 response 只会命中一种格式
+        cache_read = 0
+        cache_creation = 0
+        if hasattr(response.usage, "prompt_tokens_details"):
+            pt = response.usage.prompt_tokens_details
+            if pt and hasattr(pt, "cached_tokens"):
+                cache_read = pt.cached_tokens or 0
+        elif hasattr(response.usage, "cache_read_input_tokens"):
+            cache_read = response.usage.cache_read_input_tokens or 0
+            if hasattr(response.usage, "cache_creation_input_tokens"):
+                cache_creation = response.usage.cache_creation_input_tokens or 0
+        elif hasattr(response.usage, "prompt_cache_hit_tokens"):
+            cache_read = response.usage.prompt_cache_hit_tokens or 0
+
+        # output 与 reasoning 互斥处理
+        # DeepSeek/MiMo 的 completion_tokens 包含 reasoning_tokens，需减去
+        # OpenAI 的 completion_tokens 不含 reasoning_tokens，直接使用
+        # 风险：OpenAI o1/o3 的 completion_tokens 不含 reasoning_tokens，当前全局减法会错误扣减。
+        # 后续应按 provider 分支处理（见 backlog B-260529-f99d2c）。
         output_tokens = response.usage.completion_tokens or 0
+        if reasoning_tokens > 0 and output_tokens >= reasoning_tokens:
+            output_tokens -= reasoning_tokens
 
-        # OpenAI 格式 (GPT-4o+)
-        cached = 0
-        if hasattr(response.usage, 'prompt_tokens_details'):
-            details = response.usage.prompt_tokens_details
-            if details and hasattr(details, 'cached_tokens'):
-                cached = details.cached_tokens
-
-        # Anthropic 格式（样板代码，供未来 AnthropicProvider 参考）
-        if cached == 0 and hasattr(response.usage, 'cache_read_input_tokens'):
-            cached = response.usage.cache_read_input_tokens
-
-        return TokenUsage(input=input_tokens, output=output_tokens, cached=cached)
+        return TokenUsage(
+            input=input_tokens,
+            output=output_tokens,
+            cache_read=cache_read,
+            cache_creation=cache_creation,
+            reasoning=reasoning_tokens,
+        )
 
     async def probe(self) -> bool:
         """Health check: 发送 max_tokens=1 的 completion 请求。"""

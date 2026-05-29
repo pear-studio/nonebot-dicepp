@@ -107,16 +107,13 @@ class LLMRouter:
                     )
                     continue
 
-                extra_params: Dict[str, Any] = {}
                 provider_kwargs: Dict[str, Any] = dict(
                     api_key=pconfig.api_key,
                     base_url=pconfig.base_url,
-                    model=mconfig.name,
+                    model=mconfig.api_model or mconfig.name,
                 )
                 if mconfig.category == "gen" and mconfig.max_prompt_chars is not None:
                     provider_kwargs["max_prompt_chars"] = mconfig.max_prompt_chars
-                if mconfig.category == "llm":
-                    provider_kwargs["extra_params"] = extra_params
                 provider = provider_cls(**provider_kwargs)
                 provider._router_key = key
                 self._model_providers[key] = provider
@@ -241,6 +238,10 @@ class LLMRouter:
     def get_model_provider(self, key: tuple) -> object:
         """返回 key 对应的 provider 实例。"""
         return self._model_providers[key]
+
+    def get_model_config(self, key: tuple) -> Optional["ModelConfig"]:
+        """返回 key 对应的 ModelConfig。"""
+        return self._model_configs.get(key)
 
     async def increment_usage(self, user_id: str) -> None:
         """增加用量计数"""

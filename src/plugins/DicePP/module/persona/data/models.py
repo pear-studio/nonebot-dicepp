@@ -231,9 +231,10 @@ class GroupActivity(BaseModel):
 class LLMTraceRecord(BaseModel):
     """LLM 调用 Trace 记录"""
     id: Optional[int] = None
-    session_id: str
+    session_id: str  # 当前等同于 run_id（历史遗留字段，语义相同）
     user_id: str = ""
     group_id: str = ""
+    run_id: str = ""
     model: str
     tier: str
     messages: str  # JSON
@@ -250,4 +251,8 @@ class LLMTraceRecord(BaseModel):
     temperature: Optional[float] = None
     status: str
     error: str = ""
+    reasoning_content: Optional[str] = None
+    cache_read: int = 0
+    cache_creation: int = 0
+    reasoning_tokens: int = 0
     created_at: Optional[datetime] = None

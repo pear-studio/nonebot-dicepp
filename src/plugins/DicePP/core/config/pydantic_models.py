@@ -20,10 +20,12 @@ class CircuitBreakerConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     name: str
+    api_model: Optional[str] = Field(default=None, description="实际 API 模型名，默认使用 name")
     category: Literal["llm", "gen"]
     capabilities: List[str]
     quality: float = Field(default=0.5, ge=0.0, le=1.0)
     cost: float = Field(default=0.5, ge=0.0, le=1.0)
+    thinking: bool = False
     circuit_breaker: Optional[CircuitBreakerConfig] = None
     max_prompt_chars: Optional[int] = Field(default=None, ge=1)
 

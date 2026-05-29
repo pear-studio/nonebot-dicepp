@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -40,8 +39,6 @@ from .sinks import DeliverySink, ImageGenerationSink
 from .state import AgentRunState
 from .tool_executor import ToolExecutor, ToolRegistry
 from ..llm.selection import SelectionPolicy
-
-_THINK_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL)
 
 _L1_CORRECTION_MSG = {
     "role": "user",
@@ -155,6 +152,7 @@ class AgentLoop:
                     request=req,
                     state=state,
                     timeout=timeout,
+                    run_id=state.run_id,
                 )
             except Exception as e:
                 logger.error(f"AgentLoop LLM 调用失败: {e}")
@@ -211,7 +209,7 @@ class AgentLoop:
 
             # ── 无工具 + 有内容 → 直接返回 ──
             if not tool_calls and content.strip():
-                final_text = self._remove_think_tags(content)
+                final_text = content
                 state.final_text = final_text
                 state.delivery_performed = True
                 state.final_reason = "direct_content"
@@ -279,7 +277,7 @@ class AgentLoop:
                 tool_calls = tool_calls[:self._limits.max_tools_per_round]
 
             # ── 工具执行 ──
-            state.messages.append({
+            assistant_msg = {
                 "role": "assistant",
                 "content": content or "",
                 "tool_calls": [
@@ -287,7 +285,10 @@ class AgentLoop:
                      "function": {"name": tc["name"], "arguments": tc["arguments"]}}
                     for tc in tool_calls
                 ],
-            })
+            }
+            if result.reasoning_content is not None:
+                assistant_msg["reasoning_content"] = result.reasoning_content
+            state.messages.append(assistant_msg)
 
             tool_results = await self._executor.execute_many(tool_calls, state)
 
@@ -490,15 +491,6 @@ class AgentLoop:
         return self._build_result(state, status, reason, tokens_in, tokens_out, provider, model)
 
     # ── 工具方法 ────────────────────────────────────────────────
-
-    @staticmethod
-    def _extract_think(content: str) -> Optional[str]:
-        blocks = _THINK_RE.findall(content)
-        return "".join(blocks) if blocks else None
-
-    @staticmethod
-    def _remove_think_tags(content: str) -> str:
-        return _THINK_RE.sub("", content).strip()
 
     @staticmethod
     def _build_result(

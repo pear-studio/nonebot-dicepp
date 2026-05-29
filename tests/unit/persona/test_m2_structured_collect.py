@@ -86,7 +86,7 @@ class _CountedGateway:
         self._done_content = done_content
 
     async def complete(
-        self, request: LLMRequest, state: AgentRunState, timeout: Optional[int] = None,
+        self, request: LLMRequest, state: AgentRunState, timeout: Optional[int] = None, run_id: str = "",
     ) -> LLMGatewayResult:
         self.response_index += 1
         if self.response_index == 1 and self._first_tool_calls:
@@ -318,7 +318,7 @@ class TestMissingToolCorrection:
             def __init__(self):
                 self.response_index = 0
 
-            async def complete(self, request, state, timeout=None):
+            async def complete(self, request, state, timeout=None, run_id=""):
                 self.response_index += 1
                 if self.response_index == 1:
                     return LLMGatewayResult(

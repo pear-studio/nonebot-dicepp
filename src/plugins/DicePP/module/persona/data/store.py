@@ -31,6 +31,7 @@ from .migrations import (
     RENAME_LEGACY_TABLE,
     DROP_LEGACY_USER_INDEX, DROP_LEGACY_GROUP_INDEX,
     ALTER_MESSAGE_STREAM_COLUMNS,
+    ALTER_LLM_TRACES_COLUMNS,
 )
 
 
@@ -126,6 +127,13 @@ class PersonaDataStore:
         await core_db.commit()
         # Phase M1: message_stream 扩展列（幂等 ALTER TABLE）
         for alter_sql in ALTER_MESSAGE_STREAM_COLUMNS:
+            try:
+                await persona_db.execute(alter_sql)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    raise
+        # Phase 1: persona_llm_traces 扩展列（幂等 ALTER TABLE）
+        for alter_sql in ALTER_LLM_TRACES_COLUMNS:
             try:
                 await persona_db.execute(alter_sql)
             except sqlite3.OperationalError as e:
@@ -533,17 +541,20 @@ class PersonaDataStore:
         await self.db.execute(
             """
             INSERT INTO persona_llm_traces (
-                session_id, user_id, group_id, model, tier,
+                session_id, user_id, group_id, run_id, model, tier,
                 messages, response, tool_calls, round_messages,
                 selected_provider, selected_model, selection_policy, candidate_count,
                 latency_ms,
-                tokens_in, tokens_out, temperature, status, error, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tokens_in, tokens_out, temperature, status, error,
+                reasoning_content, cache_read, cache_creation, reasoning_tokens,
+                created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trace.session_id,
                 trace.user_id,
                 trace.group_id,
+                trace.run_id,
                 trace.model,
                 trace.tier,
                 trace.messages,
@@ -560,6 +571,10 @@ class PersonaDataStore:
                 trace.temperature,
                 trace.status,
                 trace.error,
+                trace.reasoning_content or "",
+                trace.cache_read,
+                trace.cache_creation,
+                trace.reasoning_tokens,
                 created_at_str,
             ),
         )
@@ -572,11 +587,13 @@ class PersonaDataStore:
     ) -> List[LLMTraceRecord]:
         async with self.db.execute(
             """
-            SELECT id, session_id, user_id, group_id, model, tier,
+            SELECT id, session_id, user_id, group_id, run_id, model, tier,
                    messages, response, tool_calls, round_messages,
                    selected_provider, selected_model, selection_policy, candidate_count,
                    latency_ms,
-                   tokens_in, tokens_out, temperature, status, error, created_at
+                   tokens_in, tokens_out, temperature, status, error,
+                   reasoning_content, cache_read, cache_creation, reasoning_tokens,
+                   created_at
             FROM persona_llm_traces
             WHERE user_id = ?
             ORDER BY created_at DESC
@@ -592,23 +609,28 @@ class PersonaDataStore:
                     session_id=row[1],
                     user_id=row[2],
                     group_id=row[3],
-                    model=row[4],
-                    tier=row[5],
-                    messages=row[6],
-                    response=row[7],
-                    tool_calls=row[8] or "",
-                    round_messages=row[9] or "",
-                    selected_provider=row[10] or "",
-                    selected_model=row[11] or "",
-                    selection_policy=row[12] or "",
-                    candidate_count=row[13] or 0,
-                    latency_ms=row[14],
-                    tokens_in=row[15] or 0,
-                    tokens_out=row[16] or 0,
-                    temperature=row[17],
-                    status=row[18],
-                    error=row[19] or "",
-                    created_at=datetime.fromisoformat(row[20]) if row[20] else None,
+                    run_id=row[4] or "",
+                    model=row[5],
+                    tier=row[6],
+                    messages=row[7],
+                    response=row[8],
+                    tool_calls=row[9] or "",
+                    round_messages=row[10] or "",
+                    selected_provider=row[11] or "",
+                    selected_model=row[12] or "",
+                    selection_policy=row[13] or "",
+                    candidate_count=row[14] or 0,
+                    latency_ms=row[15],
+                    tokens_in=row[16] or 0,
+                    tokens_out=row[17] or 0,
+                    temperature=row[18],
+                    status=row[19],
+                    error=row[20] or "",
+                    reasoning_content=row[21] or "",
+                    cache_read=row[22] or 0,
+                    cache_creation=row[23] or 0,
+                    reasoning_tokens=row[24] or 0,
+                    created_at=datetime.fromisoformat(row[25]) if row[25] else None,
                 ))
             return traces
 

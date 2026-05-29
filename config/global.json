@@ -84,7 +84,8 @@
         "api_key": "",
         "base_url": "https://api.minimaxi.com/v1",
         "models": [
-          {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.3, "cost": 0.3}
+          {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.3, "cost": 0.3},
+          {"name": "MiniMax-M2.7-t", "api_model": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.4, "cost": 0.4, "thinking": true}
         ]
       },
       "deepseek": {
@@ -92,7 +93,8 @@
         "base_url": "https://api.deepseek.com",
         "models": [
           {"name": "deepseek-v4-flash", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.5, "cost": 0.5},
-          {"name": "deepseek-v4-pro", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.6, "cost": 0.6}
+          {"name": "deepseek-v4-pro", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.6, "cost": 0.6},
+          {"name": "deepseek-v4-pro-t", "api_model": "deepseek-v4-pro", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.7, "thinking": true}
         ]
       },
       "minimax_image": {

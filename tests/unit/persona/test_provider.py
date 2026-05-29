@@ -53,7 +53,7 @@ class TestOpenAIProvider:
         assert resp.finish_reason == "stop"
         assert resp.usage.input == 10
         assert resp.usage.output == 5
-        assert resp.usage.cached == 0
+        assert resp.usage.cache_read == 0
         assert resp.model == "gpt-4o-2024-08-06"
 
     def _setup_tool_call_response(self, provider):
@@ -96,7 +96,7 @@ class TestOpenAIProvider:
         provider._client = mock_client
 
         resp = await provider.generate(messages=[{"role": "user", "content": "hi"}])
-        assert resp.usage.cached == 50
+        assert resp.usage.cache_read == 50
 
     @pytest.mark.asyncio
     async def test_tool_truncation(self, provider):
@@ -187,4 +187,85 @@ class TestOpenAIProvider:
         assert "rate_limit" in provider.retryable_errors
         assert "timeout" in provider.retryable_errors
         assert "connection" in provider.retryable_errors
+
+    @pytest.mark.asyncio
+    async def test_reasoning_content_extraction(self, provider):
+        """reasoning_content 从 message.reasoning_content 正确提取"""
+        resp = self._mock_openai_response(content="answer")
+        resp.choices[0].message.reasoning_content = "让我想想..."
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(return_value=resp)
+        provider._client = mock_client
+
+        result = await provider.generate(messages=[{"role": "user", "content": "hi"}])
+        assert result.reasoning_content == "让我想想..."
+
+    @pytest.mark.asyncio
+    async def test_reasoning_content_none_when_absent(self, provider):
+        """message 无 reasoning_content 时返回 None"""
+        resp = self._mock_openai_response(content="answer")
+        # Mock 对象自动创建属性，需显式删除
+        del resp.choices[0].message.reasoning_content
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(return_value=resp)
+        provider._client = mock_client
+
+        result = await provider.generate(messages=[{"role": "user", "content": "hi"}])
+        assert result.reasoning_content is None
+
+    @pytest.mark.asyncio
+    async def test_reasoning_details_fallback(self, provider):
+        """MiniMax reasoning_details 回退路径：无 reasoning_content 时从 reasoning_details 拼接"""
+        resp = self._mock_openai_response(content="answer")
+        del resp.choices[0].message.reasoning_content
+        resp.choices[0].message.reasoning_details = [{"text": "step one"}, {"text": "step two"}]
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(return_value=resp)
+        provider._client = mock_client
+
+        result = await provider.generate(messages=[{"role": "user", "content": "hi"}])
+        assert result.reasoning_content == "step one\nstep two"
+
+    @pytest.mark.asyncio
+    async def test_output_tokens_equals_reasoning_tokens(self, provider):
+        """completion_tokens == reasoning_tokens 时 output 应为 0（纯推理无文本输出）"""
+        resp = self._mock_openai_response(content="", completion_tokens=100)
+        # 添加 reasoning_tokens 到 completion_tokens_details
+        details = Mock()
+        details.reasoning_tokens = 100
+        resp.usage.completion_tokens_details = details
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(return_value=resp)
+        provider._client = mock_client
+
+        result = await provider.generate(messages=[{"role": "user", "content": "hi"}])
+        assert result.usage.output == 0
+        assert result.usage.reasoning == 100
+
+    @pytest.mark.asyncio
+    async def test_output_tokens_greater_than_reasoning(self, provider):
+        """completion_tokens > reasoning_tokens 时 output = completion - reasoning"""
+        resp = self._mock_openai_response(content="answer", completion_tokens=150)
+        details = Mock()
+        details.reasoning_tokens = 100
+        resp.usage.completion_tokens_details = details
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(return_value=resp)
+        provider._client = mock_client
+
+        result = await provider.generate(messages=[{"role": "user", "content": "hi"}])
+        assert result.usage.output == 50
+        assert result.usage.reasoning == 100
+
+    @pytest.mark.asyncio
+    async def test_latency_ms_populated(self, provider):
+        """latency_ms 应在返回值中填充"""
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=self._mock_openai_response(content="ok"))
+        provider._client = mock_client
+
+        result = await provider.generate(messages=[{"role": "user", "content": "hi"}])
+        assert result.latency_ms is not None
+        assert result.latency_ms >= 0
 

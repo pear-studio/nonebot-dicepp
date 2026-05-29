@@ -66,8 +66,10 @@ class TestLLMGateway:
         router.timeout = 30
         router.quota_check_enabled = False
         router.data_store = None
+        router.trace_enabled = False
         router.config = None
         router.daily_limit = 20
+        router.get_model_config = Mock(return_value=None)
 
         # semaphore mock that supports async context manager
         sem = AsyncMock()
@@ -222,3 +224,63 @@ class TestLLMGateway:
 
         await gateway.increment_usage("u1")
         mock_router.increment_usage.assert_called_once_with("u1")
+
+    @pytest.mark.asyncio
+    async def test_trace_written_when_enabled(self, mock_router, mock_event_store):
+        """trace_enabled=True 时应调用 add_llm_trace 写入 trace"""
+        mock_data_store = Mock()
+        mock_data_store.add_llm_trace = AsyncMock()
+        mock_router.data_store = mock_data_store
+        mock_router.trace_enabled = True
+
+        provider = Mock()
+        resp = _make_llm_resp(content="hello")
+        resp.reasoning_content = "thinking..."
+        resp.latency_ms = 123.4
+        resp.usage.cache_read = 42
+        resp.usage.cache_creation = 7
+        resp.usage.reasoning = 30
+        provider.generate = AsyncMock(return_value=resp)
+        mock_router.build_candidates.return_value = [("p1", "m1")]
+        mock_router._model_providers = {("p1", "m1"): provider}
+        mock_router.acquire_semaphore.return_value = Mock()
+        mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
+
+        bus = AgentEventBus(event_store=mock_event_store)
+        gateway = LLMGateway(router=mock_router, event_bus=bus)
+        state = _make_state()
+        req = _make_request()
+
+        result = await gateway.complete(req, state, run_id="run-123")
+
+        # add_llm_trace 应被调用
+        mock_data_store.add_llm_trace.assert_called_once()
+        trace = mock_data_store.add_llm_trace.call_args[0][0]
+        assert trace.run_id == "run-123"
+        assert trace.session_id == "run-123"  # R1: session_id 使用 run_id
+        assert trace.reasoning_content == "thinking..."
+        assert trace.latency_ms == 123
+        assert trace.status == "success"
+        assert trace.tokens_in == 10
+        assert trace.tokens_out == 5
+        assert trace.cache_read == 42
+        assert trace.cache_creation == 7
+        assert trace.reasoning_tokens == 30
+
+    @pytest.mark.asyncio
+    async def test_result_contains_reasoning_content(self, gateway, mock_router):
+        """LLMGatewayResult 应包含 reasoning_content"""
+        provider = Mock()
+        resp = _make_llm_resp(content="answer")
+        resp.reasoning_content = "let me think..."
+        provider.generate = AsyncMock(return_value=resp)
+        mock_router.build_candidates.return_value = [("p1", "m1")]
+        mock_router._model_providers = {("p1", "m1"): provider}
+        mock_router.acquire_semaphore.return_value = Mock()
+        mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
+
+        state = _make_state()
+        req = _make_request()
+        result = await gateway.complete(req, state)
+
+        assert result.reasoning_content == "let me think..."

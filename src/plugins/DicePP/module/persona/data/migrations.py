@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS persona_llm_traces (
     session_id TEXT NOT NULL,
     user_id TEXT DEFAULT '',
     group_id TEXT DEFAULT '',
+    run_id TEXT DEFAULT '',
     model TEXT NOT NULL,
     tier TEXT NOT NULL,
     messages TEXT NOT NULL,
@@ -238,6 +239,10 @@ CREATE TABLE IF NOT EXISTS persona_llm_traces (
     temperature REAL,
     status TEXT NOT NULL,
     error TEXT DEFAULT '',
+    reasoning_content TEXT DEFAULT '',
+    cache_read INTEGER DEFAULT 0,
+    cache_creation INTEGER DEFAULT 0,
+    reasoning_tokens INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -372,4 +377,33 @@ ALTER_MESSAGE_STREAM_COLUMNS = [
     ALTER_MESSAGE_STREAM_ADD_TURN_ID,
     ALTER_MESSAGE_STREAM_ADD_SEGMENT_INDEX,
     ALTER_MESSAGE_STREAM_ADD_SEGMENT_PHASE,
+]
+
+# persona_llm_traces 扩展列（Phase 1: reasoning_content 通用化）
+ALTER_LLM_TRACES_ADD_RUN_ID = """
+ALTER TABLE persona_llm_traces ADD COLUMN run_id TEXT DEFAULT '';
+"""
+
+ALTER_LLM_TRACES_ADD_REASONING_CONTENT = """
+ALTER TABLE persona_llm_traces ADD COLUMN reasoning_content TEXT DEFAULT '';
+"""
+
+ALTER_LLM_TRACES_ADD_CACHE_READ = """
+ALTER TABLE persona_llm_traces ADD COLUMN cache_read INTEGER DEFAULT 0;
+"""
+
+ALTER_LLM_TRACES_ADD_CACHE_CREATION = """
+ALTER TABLE persona_llm_traces ADD COLUMN cache_creation INTEGER DEFAULT 0;
+"""
+
+ALTER_LLM_TRACES_ADD_REASONING_TOKENS = """
+ALTER TABLE persona_llm_traces ADD COLUMN reasoning_tokens INTEGER DEFAULT 0;
+"""
+
+ALTER_LLM_TRACES_COLUMNS = [
+    ALTER_LLM_TRACES_ADD_RUN_ID,
+    ALTER_LLM_TRACES_ADD_REASONING_CONTENT,
+    ALTER_LLM_TRACES_ADD_CACHE_READ,
+    ALTER_LLM_TRACES_ADD_CACHE_CREATION,
+    ALTER_LLM_TRACES_ADD_REASONING_TOKENS,
 ]

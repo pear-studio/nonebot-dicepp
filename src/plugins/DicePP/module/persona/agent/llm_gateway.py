@@ -13,6 +13,7 @@ from nonebot.log import logger
 
 from ..llm.providers.protocol import LLMResponse
 from ..llm.router import LLMRouter, QuotaExceeded, ServiceUnavailableError
+from ..data.models import LLMTraceRecord
 from ..llm.selection import SelectionPolicy
 from ..llm.errors import classify_from_provider
 
@@ -56,6 +57,7 @@ class LLMGatewayResult:
     usage: dict
     provider: str
     model: str
+    reasoning_content: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -75,6 +77,7 @@ class LLMGateway:
         request: LLMRequest,
         state: AgentRunState,
         timeout: Optional[int] = None,
+        run_id: str = "",
     ) -> LLMGatewayResult:
         """核心调用入口。
 
@@ -82,6 +85,7 @@ class LLMGateway:
             request: LLMRequest 包含 messages, tools, tool_use_mode 等
             state: 当前 run state（用于写入事件）
             timeout: 可覆盖超时
+            run_id: 关联 agent_runs 表
 
         Returns:
             LLMGatewayResult
@@ -109,6 +113,10 @@ class LLMGateway:
             model_name = key[1]
             sem = self._router.acquire_semaphore(key)
 
+            # 从 model_configs 读取 thinking 配置
+            mconfig = self._router.get_model_config(key)
+            thinking = mconfig.thinking if mconfig else False
+
             # 事件：候选选择
             await self._event_bus.emit(
                 "ModelCandidateSelected",
@@ -131,6 +139,7 @@ class LLMGateway:
                         temperature=request.temperature,
                         timeout=timeout or self._router.timeout,
                         tool_choice=_tool_choice_for(request),
+                        thinking=thinking,
                     )
                 except Exception as e:
                     self._router.stats[provider_name]["errors"] += 1
@@ -183,6 +192,14 @@ class LLMGateway:
                 content = resp.content or ""
                 tool_calls = _normalize_tool_calls(resp)
 
+                usage_dict = {
+                    "input": resp.usage.input,
+                    "output": resp.usage.output,
+                    "cache_read": resp.usage.cache_read,
+                    "cache_creation": resp.usage.cache_creation,
+                    "reasoning": resp.usage.reasoning,
+                }
+
                 await self._event_bus.emit(
                     "ModelResponseReceived",
                     ModelResponseReceivedPayload(
@@ -191,27 +208,55 @@ class LLMGateway:
                         content_preview=content[:200],
                         tool_calls=[{"id": tc["id"], "name": tc["name"]}
                                     for tc in tool_calls],
-                        usage={
-                            "input": resp.usage.input,
-                            "output": resp.usage.output,
-                            "cached": resp.usage.cached,
-                        },
+                        usage=usage_dict,
                         provider=provider_name,
                         model=model_name,
                     ),
                     state,
                 )
 
+                # 写入 trace
+                if self._router.data_store and self._router.trace_enabled:
+                    trace = LLMTraceRecord(
+                        session_id=run_id,
+                        user_id=state.user_id,
+                        group_id=state.group_id,
+                        run_id=run_id,
+                        model=model_name,
+                        tier=request.selection.category,
+                        messages=json.dumps(request.messages, ensure_ascii=False),
+                        response=resp.content or "",
+                        tool_calls=json.dumps(
+                            [{"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
+                             for tc in tool_calls],
+                            ensure_ascii=False,
+                        ),
+                        selected_provider=provider_name,
+                        selected_model=model_name,
+                        selection_policy=str(request.selection),
+                        candidate_count=total_candidates,
+                        latency_ms=int(resp.latency_ms) if resp.latency_ms is not None else None,
+                        tokens_in=resp.usage.input,
+                        tokens_out=resp.usage.output,
+                        temperature=request.temperature,
+                        status="success",
+                        reasoning_content=resp.reasoning_content,
+                        cache_read=resp.usage.cache_read,
+                        cache_creation=resp.usage.cache_creation,
+                        reasoning_tokens=resp.usage.reasoning,
+                    )
+                    try:
+                        await self._router.data_store.add_llm_trace(trace)
+                    except Exception as e:
+                        logger.warning(f"写入 LLM trace 失败: {e}")
+
                 return LLMGatewayResult(
                     content=content,
                     tool_calls=tool_calls,
-                    usage={
-                        "input": resp.usage.input,
-                        "output": resp.usage.output,
-                        "cached": resp.usage.cached,
-                    },
+                    usage=usage_dict,
                     provider=provider_name,
                     model=model_name,
+                    reasoning_content=resp.reasoning_content,
                 )
 
         raise ServiceUnavailableError(
