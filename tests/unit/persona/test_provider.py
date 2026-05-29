@@ -269,3 +269,35 @@ class TestOpenAIProvider:
         assert result.latency_ms is not None
         assert result.latency_ms >= 0
 
+    @pytest.mark.asyncio
+    async def test_temperature_injected_when_thinking_false(self, provider):
+        """thinking=False 时 temperature 正常注入"""
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=self._mock_openai_response(content="ok"))
+        provider._client = mock_client
+
+        await provider.generate(
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.7,
+            thinking=False,
+        )
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["temperature"] == 0.7
+
+    @pytest.mark.asyncio
+    async def test_temperature_skipped_when_thinking_true(self, provider):
+        """thinking=True 时跳过 temperature（MiMo/DeepSeek 兼容）"""
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=self._mock_openai_response(content="ok"))
+        provider._client = mock_client
+
+        await provider.generate(
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.7,
+            thinking=True,
+        )
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert "temperature" not in kwargs
+
