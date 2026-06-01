@@ -22,20 +22,24 @@
 - 问题表现: .ai admin trace 不显示 cache_read/cache_creation/reasoning_tokens
 - 工作计划: 在 full_mode 下增加 token 维度摘要行
 
-### [B-260529-ea64d0] 启动时汇报 persona 相关信息
-- 创建: 2026-05-29
+### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
+- 创建: 2026-06-01
 - 优先级: P2
 - 类型: feature
-- 改动量: S
+- 改动量: M
 - 问题表现:
-  - 启动时 persona 模块只输出零散的 logger.info，没有结构化汇总
-  - 管理员无法快速确认：加载了哪个角色卡、有哪些 LLM 模型可用、probe 结果如何
-  - 排查配置问题需要翻阅多行日志，效率低
+  当前 .ai key config 命令返回"升级中，暂不可用"，用户无法配置自己的 API Key。
+  - command.py:436 硬编码了占位回复
+  - errors.py:163 已提示用户使用 .ai key config 配置 API Key 可解除限制，但功能未实现
+  - data/models.py 已有 primary_api_key / auxiliary_api_key 字段，但缺少命令入口和路由集成
+  - 所有对话只能使用全局 provider 配置，用户无法配置自有 key 来解除限流或使用自己的额度
 - 工作计划:
-  - 在 create_persona() 初始化完成后，输出一段结构化汇总日志
-  - 包含：角色卡名称+描述、已配置的 provider/model 列表、probe 成功/失败状态
-  - 影响面：module/persona/agent/factory.py
-  - 可选：在 NoneBot 启动事件中发送一条管理员消息
+  实现 .ai key config 命令，允许用户配置自己的 API Key：
+  - 实现 command.py 中的 key config 子命令（设置/查看/删除）
+  - 加密存储用户 API Key 到数据库（复用 data/models.py 已有字段）
+  - LLM 路由中优先使用用户自有 key（若已配置），回退到全局 provider
+  - 影响面：command.py、data/store.py、llm/router.py
+  - 风险点：用户 key 的安全存储与传输，key 校验机制
 
 ### [B-260601-fb1b04] LLM 模型/provider 增加手动开关
 - 创建: 2026-06-01
@@ -53,14 +57,6 @@
   - 影响面：pydantic_models.py、router.py、selection.py
   - 风险点：运行时切换需考虑正在进行的会话如何处理
 
-### [B-260515-dd50eb] 用户自带 API Key 功能（.ai key config）
-- 创建: 2026-05-28
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现: `SelectionPolicy.CHAT`、`.SCORING` 等类属性在 `frozen=True` 的 dataclass 定义之后通过赋值添加。功能正常但静态类型检查器（mypy/pyright）无法识别这些属性，影响 IDE 补全和类型推导。
-- 工作计划: 改用 `__init_subclass__` 或将预定义策略改为模块级常量而非类属性。或改用 `frozen=False` 并在 `__post_init__` 中手动实现不可变性。影响面: module/persona/llm/selection.py。
-
 ### [B-260529-f99d2c] reasoning_tokens 按 provider 分支处理
 - 创建: 2026-05-29
 - 优先级: P2
@@ -74,6 +70,16 @@
     - 按 provider 类型（base_url 或 provider 元数据）选择不同的 token 计算分支
     - 影响面: module/persona/llm/providers/openai.py _extract_usage
     - 风险点: 当前三家 API（DeepSeek/MiMo/MiniMax）行为一致，暂无生产风险；引入 OpenAI o-series 时需优先处理
+
+### [B-260601-c0516a] SelectionPolicy frozen dataclass 类型检查修复
+- 创建: 2026-06-01
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现: SelectionPolicy.CHAT、.SCORING 等类属性在 frozen=True 的 dataclass 定义之后通过赋值添加。功能正常但静态类型检查器（mypy/pyright）无法识别这些属性，影响 IDE 补全和类型推导。
+- 工作计划:
+  改用 __init_subclass__ 或将预定义策略改为模块级常量而非类属性。或改用 frozen=False 并在 __post_init__ 中手动实现不可变性。
+  - 影响面：module/persona/llm/selection.py
 
 ### [B-260529-ed2000] SQL 行映射使用位置索引 — store.py 统一重构
 - 创建: 2026-05-29

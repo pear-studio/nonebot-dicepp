@@ -19,6 +19,7 @@ from .chat.context import ContextBuilder
 from .chat.response_handler import ResponseHandler
 from .chat.scoring_trigger import ScoringTrigger
 from .data.store import PersonaDataStore
+from .data.models import MessageType
 from .data.protocols import MessageStore, RelationshipStore, ProfileStore, EventStore
 from .exceptions import (
     PersonaCharacterLoadError,
@@ -274,7 +275,6 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
     pipeline.add(TruncateStage(max_chars=2000))
     async def _on_delivery_failed(user_id: str, group_id: str, content: str, error: str = "") -> None:
         try:
-            from .data.models import MessageType
             await store.add_message_stream(
                 user_id=user_id, group_id=group_id, role="assistant",
                 type=MessageType.SYSTEM_NOTICE, content=f"[发送失败] {content}",
@@ -515,6 +515,76 @@ async def _build_life(
     )
 
 
+async def _startup_summary(
+    character: Character,
+    providers: Dict[str, object],
+    probe_results: Dict[tuple, bool],
+    infra: _Infra,
+    bot: Bot,
+) -> None:
+    """输出启动汇总：结构化日志 + master 消息（仅可用模型）"""
+    llm_entries: List[tuple] = []
+    gen_entries: List[tuple] = []
+    for pname, pconfig in providers.items():
+        for mconfig in pconfig.models:
+            key = (pname, mconfig.name)
+            ok = probe_results.get(key, False)
+            if mconfig.category == "llm":
+                llm_entries.append((pname, mconfig, ok))
+            elif mconfig.category == "gen":
+                gen_entries.append((pname, mconfig, ok))
+
+    desc = character.description or ""
+    if len(desc) > 60:
+        desc = desc[:60] + "..."
+
+    lines: List[str] = []
+    lines.append("══════ Persona AI 启动报告 ══════")
+    lines.append(f"角色卡: {character.name}" + (f" — {desc}" if desc else ""))
+
+    if llm_entries:
+        lines.append(f"LLM 模型 ({len(llm_entries)}):")
+        for pname, mconfig, ok in llm_entries:
+            status = "✅" if ok else "❌"
+            thinking_note = " (thinking: on)" if getattr(mconfig, "thinking", False) else ""
+            fail_note = "" if ok else " (probe 失败)"
+            lines.append(f"  {status} {pname}/{mconfig.name}{thinking_note}{fail_note}")
+
+    if gen_entries:
+        lines.append(f"图像生成模型 ({len(gen_entries)}):")
+        for pname, mconfig, ok in gen_entries:
+            status = "✅" if ok else "❌"
+            fail_note = "" if ok else " (probe 失败)"
+            lines.append(f"  {status} {pname}/{mconfig.name}{fail_note}")
+
+    lines.append("════════════════════════════════════")
+
+    for line in lines:
+        logger.info(line)
+
+    master_ids: List[str] = bot.config.master
+    if not master_ids:
+        return
+
+    available_llm = [f"{p}/{m.name}" for p, m, ok in llm_entries if ok]
+    available_gen = [f"{p}/{m.name}" for p, m, ok in gen_entries if ok]
+
+    msg_lines = ["Persona AI 启动完成"]
+    msg_lines.append(f"角色卡: {character.name}" + (f" — {desc}" if desc else ""))
+    if available_llm:
+        msg_lines.append(f"可用 LLM: {', '.join(available_llm)}")
+    if available_gen:
+        msg_lines.append(f"可用图像生成: {', '.join(available_gen)}")
+
+    try:
+        await infra.port.send(
+            master_ids[0], "", "\n".join(msg_lines),
+            message_type=MessageType.SYSTEM_LOG,
+        )
+    except Exception:
+        logger.exception("发送启动报告到 master 失败")
+
+
 async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     """从 Bot 组装 Persona 模块所有组件
 
@@ -581,8 +651,9 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         event_agent=event_agent,
     )
 
+    probe_results: Dict[tuple, bool] = {}
     try:
-        await infra.router.probe_all_models()
+        probe_results = await infra.router.probe_all_models()
     except Exception as e:
         logger.error(f"启动探针异常: {e}")
     all_disabled = infra.router.all_providers_disabled()
@@ -590,6 +661,8 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         logger.warning("所有模型 probe 失败！Persona AI 功能将不可用")
 
     infra.router.start_probe_task()
+
+    await _startup_summary(character, config.providers, probe_results, infra, bot)
 
     logger.info("Persona 模块初始化完成")
     return PersonaApp(
