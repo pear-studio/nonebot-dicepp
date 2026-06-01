@@ -788,6 +788,37 @@ class PersonaDataStore:
                 return row[0], row[1]
             return None, None
 
+    async def get_daily_token_usage(self, date: str) -> list[dict]:
+        """返回指定日期各模型的 LLM 调用统计（次数 + token 消耗）
+
+        返回 [{"provider": str, "model": str, "requests": int,
+               "tokens_in": int, ...}, ...]
+        """
+        async with self.db.execute(
+            "SELECT selected_provider, selected_model, COUNT(*),"
+            " COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),"
+            " COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_creation),0),"
+            " COALESCE(SUM(reasoning_tokens),0)"
+            " FROM persona_llm_traces WHERE date(created_at) = ?"
+            " GROUP BY selected_provider, selected_model"
+            " ORDER BY SUM(tokens_in) + SUM(tokens_out) DESC",
+            (date,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            {
+                "provider": row[0] or "",
+                "model": row[1] or "",
+                "requests": row[2],
+                "tokens_in": row[3],
+                "tokens_out": row[4],
+                "cache_read": row[5],
+                "cache_creation": row[6],
+                "reasoning_tokens": row[7],
+            }
+            for row in rows
+        ]
+
     async def get_error_summary_since(self, since_iso: str) -> list[tuple[str, int]]:
         """返回自 since_iso 以来的错误统计 [(status, count), ...]"""
         async with self.db.execute(

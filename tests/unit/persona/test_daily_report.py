@@ -199,13 +199,13 @@ class TestDailyReportGenerator:
     # ── _collect_llm_usage ──────────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_llm_usage_no_router_returns_unavailable(self):
-        """router 为 None 时 LLM 用量返回 _DATA_UNAVAILABLE"""
+    async def test_llm_usage_no_store_returns_unavailable(self):
+        """store 为 None 时 LLM 调用返回 _DATA_UNAVAILABLE"""
         bot = _make_mock_bot()
         port, _mock_bot = _make_mock_port()
-        gen = DailyReportGenerator(bot=bot, port=port, router=None)
+        gen = DailyReportGenerator(bot=bot, port=port, store=None)
 
-        result = await gen._collect_llm_usage()
+        result = await gen._collect_llm_usage(use_cur_day=False)
         assert result == [_DATA_UNAVAILABLE]
 
     # ── _collect_character_state ────────────────────────────────

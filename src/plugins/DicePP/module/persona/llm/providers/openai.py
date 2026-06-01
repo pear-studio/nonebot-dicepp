@@ -231,7 +231,6 @@ class OpenAIProvider:
         # DeepSeek/MiMo 的 completion_tokens 包含 reasoning_tokens，需减去
         # OpenAI 的 completion_tokens 不含 reasoning_tokens，直接使用
         # 风险：OpenAI o1/o3 的 completion_tokens 不含 reasoning_tokens，当前全局减法会错误扣减。
-        # 后续应按 provider 分支处理（见 backlog B-260529-f99d2c）。
         output_tokens = response.usage.completion_tokens or 0
         if reasoning_tokens > 0 and output_tokens >= reasoning_tokens:
             output_tokens -= reasoning_tokens

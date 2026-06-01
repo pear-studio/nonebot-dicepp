@@ -146,9 +146,9 @@ class DailyReportGenerator:
 
         lines: List[str] = []
 
-        # LLM 用量
-        lines.append("LLM 各模型调用量:")
-        for item in await self._collect_llm_usage():
+        # LLM 调用
+        lines.append("LLM 调用:")
+        for item in await self._collect_llm_usage(use_cur_day):
             lines.append(f"  {item}")
 
         # 好感度变化 Top 3
@@ -238,18 +238,45 @@ class DailyReportGenerator:
                 return name
         return group_id
 
-    async def _collect_llm_usage(self) -> Any:
-        """收集 LLM 各模型用量"""
+    async def _collect_llm_usage(self, use_cur_day: bool) -> Any:
+        """收集昨日/今日各模型 LLM 调用统计（次数 + token 消耗）"""
         try:
-            if not self._router:
+            if not self._store:
                 return [_DATA_UNAVAILABLE]
-            stats = self._router.get_stats()
+            tz = self._config.timezone if self._config else "Asia/Shanghai"
+            if use_cur_day:
+                date = wall_now(tz).strftime("%Y-%m-%d")
+            else:
+                date = (wall_now(tz) - timedelta(days=1)).strftime("%Y-%m-%d")
+            rows = await self._store.get_daily_token_usage(date)
+            if not rows:
+                return [_DATA_UNAVAILABLE]
+
+            def _fmt(v: int) -> str:
+                if v >= 1_000_000:
+                    return f"{v / 1_000_000:.1f}M"
+                if v >= 1_000:
+                    return f"{v / 1_000:.1f}K"
+                return str(v)
+
             lines = []
-            for pname in sorted(stats.keys()):
-                s = stats[pname]
-                lines.append(f"{pname}: {s['requests']} 次 / {s['errors']} 错误")
-            if not lines:
-                return [_DATA_UNAVAILABLE]
+            for r in rows:
+                label = f"{r['provider']}/{r['model']}" if r["provider"] else r["model"]
+                token_parts = []
+                for key, name in [
+                    ("tokens_in", "输入"),
+                    ("tokens_out", "输出"),
+                    ("cache_read", "缓存读"),
+                    ("cache_creation", "缓存写"),
+                    ("reasoning_tokens", "推理"),
+                ]:
+                    v = r.get(key, 0)
+                    if v:
+                        token_parts.append(f"{name} {_fmt(v)}")
+                line = f"{label}: {r['requests']} 次"
+                if token_parts:
+                    line += f"\n    {' / '.join(token_parts)}"
+                lines.append(line)
             return lines
         except Exception:
             return [_DATA_UNAVAILABLE]

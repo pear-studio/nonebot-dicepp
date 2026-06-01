@@ -14,14 +14,6 @@
 
 ## persona
 
-### [B-260529-a1b2c3] admin.py trace 展示新增 token 维度
-- 创建: 2026-05-29
-- 优先级: P2
-- 类型: feature
-- 改动量: S
-- 问题表现: .ai admin trace 不显示 cache_read/cache_creation/reasoning_tokens
-- 工作计划: 在 full_mode 下增加 token 维度摘要行
-
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01
 - 优先级: P2
@@ -56,20 +48,6 @@
   - 可选：增加 NoneBot 命令 /persona model toggle 支持运行时切换（需持久化到配置）
   - 影响面：pydantic_models.py、router.py、selection.py
   - 风险点：运行时切换需考虑正在进行的会话如何处理
-
-### [B-260529-f99d2c] reasoning_tokens 按 provider 分支处理
-- 创建: 2026-05-29
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现:
-    - openai.py _extract_usage 中 reasoning_tokens 减法逻辑对所有 provider 无差别执行
-    - DeepSeek/MiMo 的 completion_tokens 包含 reasoning_tokens，需减去
-    - OpenAI o1/o3 的 completion_tokens 不含 reasoning_tokens，直接使用，当前全局减法会错误扣减
-- 工作计划:
-    - 按 provider 类型（base_url 或 provider 元数据）选择不同的 token 计算分支
-    - 影响面: module/persona/llm/providers/openai.py _extract_usage
-    - 风险点: 当前三家 API（DeepSeek/MiMo/MiniMax）行为一致，暂无生产风险；引入 OpenAI o-series 时需优先处理
 
 ### [B-260529-ed2000] SQL 行映射使用位置索引 — store.py 统一重构
 - 创建: 2026-05-29
