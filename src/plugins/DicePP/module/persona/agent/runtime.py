@@ -32,7 +32,7 @@ from .sinks import DeliverySink, ImageGenerationSink, UsageSink, RunSummarySink
 from .state import AgentRunState
 from .tool_executor import ToolExecutor, ToolRegistry
 from .tool_bridge import build_registry
-from ..llm.selection import SelectionPolicy
+from ..llm.selection import SelectionPolicy, CHAT, CHAT_WITH_IMAGE, SCORING
 
 
 def new_run_id() -> str:
@@ -82,7 +82,7 @@ class AgentRuntime:
                     raise QuotaExceeded(f"今日额度已用完 ({count}/{self._router.daily_limit})")
 
         has_images = bool(image_data_urls)
-        selection = SelectionPolicy.CHAT_WITH_IMAGE if has_images else SelectionPolicy.CHAT
+        selection = CHAT_WITH_IMAGE if has_images else CHAT
 
         return await self._run_internal(
             messages=messages, user_id=user_id, group_id=group_id,
@@ -118,7 +118,7 @@ class AgentRuntime:
         tools: Optional[List[dict]] = None,
         tool_use_mode: ToolUseMode = ToolUseMode.REQUIRED_ONE_OF,
         required_tools: Optional[List[str]] = None,
-        selection: SelectionPolicy = SelectionPolicy.SCORING,
+        selection: SelectionPolicy = SCORING,
         temperature: Optional[float] = None,
         timeout: Optional[int] = None,
         bill_usage: bool = False,

@@ -22,27 +22,27 @@ class SelectionPolicy:
             raise ValueError("prefer_quality 和 prefer_cost 必须至少一个为 True")
 
 
-SelectionPolicy.CHAT = SelectionPolicy(
+CHAT = SelectionPolicy(
     category="llm", required_capabilities=("text", "tool_calls"),
     prefer_quality=True, prefer_cost=False,
 )
-SelectionPolicy.SCORING = SelectionPolicy(
+SCORING = SelectionPolicy(
     category="llm", required_capabilities=("text", "tool_calls"),
     prefer_quality=False, prefer_cost=True,
 )
-SelectionPolicy.EVENT_GEN = SelectionPolicy(
+EVENT_GEN = SelectionPolicy(
     category="llm", required_capabilities=("text", "tool_calls"),
     prefer_quality=False, prefer_cost=True,
 )
-SelectionPolicy.DIARY = SelectionPolicy(
+DIARY = SelectionPolicy(
     category="llm", required_capabilities=("text", "tool_calls"),
     prefer_quality=False, prefer_cost=True,
 )
-SelectionPolicy.SUMMARIZE = SelectionPolicy(
+SUMMARIZE = SelectionPolicy(
     category="llm", required_capabilities=("text", "tool_calls"),
     prefer_quality=False, prefer_cost=True,
 )
-SelectionPolicy.CHAT_WITH_IMAGE = SelectionPolicy(
+CHAT_WITH_IMAGE = SelectionPolicy(
     category="llm", required_capabilities=("text", "tool_calls", "vision"),
     prefer_quality=True, prefer_cost=False,
 )

@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple, TYPE_CHECKING
 from nonebot.log import logger
 
 from ..data.store import PersonaDataStore
-from ..llm.selection import SelectionPolicy
+from ..llm.selection import SelectionPolicy, SCORING
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
@@ -145,7 +145,7 @@ class ActionEvaluator:
                 required_tools=["record_evaluation"],
                 temperature=0.3,
                 timeout=self._timeout,
-                selection=SelectionPolicy.SCORING,
+                selection=SCORING,
                 max_tool_rounds=1,
             )
         except ServiceUnavailableError:

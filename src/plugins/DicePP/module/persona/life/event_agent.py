@@ -11,7 +11,7 @@ from datetime import datetime
 import json
 from nonebot.log import logger
 from ..llm.router import LLMRouter, ServiceUnavailableError
-from ..llm.selection import SelectionPolicy
+from ..llm.selection import SelectionPolicy, EVENT_GEN, DIARY, SUMMARIZE
 from ..tools.registry import ToolRegistry
 from ..tools.collecting import RECORD_EVENT_TOOL, RECORD_REACTION_TOOL, RECORD_DIARY_ENTRY_TOOL, RECORD_SHARE_MESSAGE_TOOL
 from utils.time import format_timestamp, format_relative_time, wall_now
@@ -281,7 +281,7 @@ class EventGenerationAgent:
                 ],
                 tools=tools,
                 temperature=0.9,
-                selection=SelectionPolicy.EVENT_GEN,
+                selection=EVENT_GEN,
             )
 
             if not collected:
@@ -416,7 +416,7 @@ class EventGenerationAgent:
                 ],
                 tools=tools,
                 temperature=0.9,
-                selection=SelectionPolicy.EVENT_GEN,
+                selection=EVENT_GEN,
             )
 
             if not collected:
@@ -567,7 +567,7 @@ class EventGenerationAgent:
                 ],
                 tools=tools,
                 temperature=0.85,
-                selection=SelectionPolicy.DIARY,
+                selection=DIARY,
             )
 
             if not collected:
@@ -727,7 +727,7 @@ class EventGenerationAgent:
                     ],
                     tools=tools,
                     temperature=0.85,
-                    selection=SelectionPolicy.SUMMARIZE,
+                    selection=SUMMARIZE,
                 )
             except ServiceUnavailableError as e:
                 logger.error(f"分享消息: 无可用 provider: {e}", exc_info=True)
@@ -810,7 +810,7 @@ class EventGenerationAgent:
                 tool_registry=ToolRegistry(),
                 temperature=0.85,
                 timeout=None,
-                selection=SelectionPolicy.SUMMARIZE,
+                selection=SUMMARIZE,
             )
             text = (result.final_text or "").strip().strip('"').strip("'")
             if not text:

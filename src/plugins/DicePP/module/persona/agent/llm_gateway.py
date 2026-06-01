@@ -14,7 +14,7 @@ from nonebot.log import logger
 from ..llm.providers.protocol import LLMResponse
 from ..llm.router import LLMRouter, QuotaExceeded, ServiceUnavailableError
 from ..data.models import LLMTraceRecord
-from ..llm.selection import SelectionPolicy
+from ..llm.selection import SelectionPolicy, CHAT
 from ..llm.errors import classify_from_provider
 
 from .event_bus import AgentEventBus
@@ -37,7 +37,7 @@ class LLMRequest:
     tool_use_mode: ToolUseMode = ToolUseMode.AUTO
     required_tools: Optional[List[str]] = None
     temperature: Optional[float] = None
-    selection: SelectionPolicy = SelectionPolicy.CHAT
+    selection: SelectionPolicy = CHAT
 
     @property
     def tool_count(self) -> int:

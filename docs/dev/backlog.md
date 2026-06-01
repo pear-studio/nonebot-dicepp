@@ -71,16 +71,6 @@
     - 影响面: module/persona/llm/providers/openai.py _extract_usage
     - 风险点: 当前三家 API（DeepSeek/MiMo/MiniMax）行为一致，暂无生产风险；引入 OpenAI o-series 时需优先处理
 
-### [B-260601-c0516a] SelectionPolicy frozen dataclass 类型检查修复
-- 创建: 2026-06-01
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现: SelectionPolicy.CHAT、.SCORING 等类属性在 frozen=True 的 dataclass 定义之后通过赋值添加。功能正常但静态类型检查器（mypy/pyright）无法识别这些属性，影响 IDE 补全和类型推导。
-- 工作计划:
-  改用 __init_subclass__ 或将预定义策略改为模块级常量而非类属性。或改用 frozen=False 并在 __post_init__ 中手动实现不可变性。
-  - 影响面：module/persona/llm/selection.py
-
 ### [B-260529-ed2000] SQL 行映射使用位置索引 — store.py 统一重构
 - 创建: 2026-05-29
 - 优先级: P2

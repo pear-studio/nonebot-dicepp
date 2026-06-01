@@ -38,7 +38,7 @@ from .request import AgentRunLimits, ToolUseMode
 from .sinks import DeliverySink, ImageGenerationSink
 from .state import AgentRunState
 from .tool_executor import ToolExecutor, ToolRegistry
-from ..llm.selection import SelectionPolicy
+from ..llm.selection import SelectionPolicy, CHAT, CHAT_WITH_IMAGE
 
 _L1_CORRECTION_MSG = {
     "role": "user",
@@ -145,7 +145,7 @@ class AgentLoop:
                 state.messages = _embed_images_in_messages(
                     state.messages, state.pending_images,
                 )
-                effective_selection = SelectionPolicy.CHAT_WITH_IMAGE
+                effective_selection = CHAT_WITH_IMAGE
                 state.pending_images = None
             else:
                 effective_selection = selection
@@ -157,7 +157,7 @@ class AgentLoop:
                 tool_use_mode=tool_use_mode,
                 required_tools=required_tools,
                 temperature=temperature,
-                selection=effective_selection or SelectionPolicy.CHAT,
+                selection=effective_selection or CHAT,
             )
 
             await self._event_bus.emit(

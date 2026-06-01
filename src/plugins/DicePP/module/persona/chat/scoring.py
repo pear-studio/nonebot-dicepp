@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
-from ..llm.selection import SelectionPolicy
+from ..llm.selection import SelectionPolicy, SCORING
 from ..utils.json_helpers import safe_json_loads
 from utils.time import wall_now, format_timestamp, format_relative_time
 
@@ -63,7 +63,7 @@ class ScoringAgent:
                 required_tools=["record_score"],
                 temperature=0.7,
                 timeout=60,
-                selection=SelectionPolicy.SCORING,
+                selection=SCORING,
                 max_tool_rounds=self.max_tool_rounds,
             )
             content = runtime_result.final_text or ""
