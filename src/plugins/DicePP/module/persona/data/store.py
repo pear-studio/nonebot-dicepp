@@ -3,7 +3,10 @@ Persona 数据存储层
 
 统一的数据访问接口
 """
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..image_cache import ImageCacheProtocol
 from datetime import datetime, timedelta
 import json
 from nonebot.log import logger
@@ -68,6 +71,7 @@ class PersonaDataStore:
         self._message_stream_max_per_group = message_stream_max_per_group
         self._msg_stream_write_count = 0
         self._last_prune_at: Optional[datetime] = None
+        self.image_cache: Optional["ImageCacheProtocol"] = None  # 由 command.py 注入 ImageCache 实例
 
     @property
     def db(self) -> aiosqlite.Connection:
@@ -167,7 +171,15 @@ class PersonaDataStore:
 
     @staticmethod
     def _row_to_message(row: tuple) -> UnifiedMessage:
-        """将数据库行反序列化为 UnifiedMessage。"""
+        """将数据库行反序列化为 UnifiedMessage。
+
+        列序与 SELECT 语句对应：
+          0:id 1:user_id 2:group_id 3:role 4:type 5:content 6:display_name
+          7:created_at 8:agent_run_id 9:turn_id 10:segment_index
+          11:segment_phase 12:image_meta
+        """
+        image_meta_raw = row[12] if len(row) > 12 else None
+        image_meta = json.loads(image_meta_raw) if image_meta_raw else None
         return UnifiedMessage(
             id=row[0],
             user_id=row[1],
@@ -181,6 +193,7 @@ class PersonaDataStore:
             turn_id=row[9] if len(row) > 9 else "",
             segment_index=row[10] if len(row) > 10 else -1,
             segment_phase=row[11] if len(row) > 11 else "",
+            image_meta=image_meta,
         )
 
     async def add_message_stream(
@@ -196,6 +209,7 @@ class PersonaDataStore:
         turn_id: str = "",
         segment_index: int = -1,
         segment_phase: str = "",
+        image_meta: Optional[List[dict]] = None,
     ) -> int:
         """写入一条消息流记录，返回 last_insert_rowid。写入后按限频触发保留裁剪。
 
@@ -204,17 +218,21 @@ class PersonaDataStore:
             turn_id: 所属 turn ID
             segment_index: 分段序号 (>=0)
             segment_phase: 分段阶段 ("interim" / "final")
+
+        新增参数 (Phase 3):
+            image_meta: 图片元信息列表（JSON 序列化存储）
         """
         now_iso = self._wall_now().isoformat()
+        image_meta_json = json.dumps(image_meta, ensure_ascii=False) if image_meta else None
         cursor = await self.db.execute(
             """
             INSERT INTO message_stream
             (user_id, group_id, role, type, content, display_name, created_at,
-             agent_run_id, turn_id, segment_index, segment_phase)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             agent_run_id, turn_id, segment_index, segment_phase, image_meta)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (user_id, group_id, role, type.value, content, display_name, now_iso,
-             agent_run_id, turn_id, segment_index, segment_phase),
+             agent_run_id, turn_id, segment_index, segment_phase, image_meta_json),
         )
         await self.db.commit()
         rowid = cursor.lastrowid
@@ -231,7 +249,7 @@ class PersonaDataStore:
         async with self.db.execute(
             f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase
+                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE user_id = ? AND group_id = ?
               AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
@@ -242,6 +260,70 @@ class PersonaDataStore:
         ) as cursor:
             rows = await cursor.fetchall()
             return [self._row_to_message(r) for r in reversed(list(rows))]
+
+    async def get_recent_images(
+        self,
+        user_id: str,
+        group_id: str,
+        count: int = 5,
+    ) -> List[dict]:
+        """获取最近的图片元信息（flatten 所有消息的 image_meta）。
+
+        返回最近 count 张图片的元信息列表，按时间正序（index 0 = 最近一张）。
+        image_index=1 对应 list[0]，与 [图片 #1] 标记一致。
+        每个 entry 包含额外的 _message_id 字段，供 update_image_meta 使用。
+        """
+        async with self.db.execute(
+            f"""
+            SELECT id, image_meta FROM message_stream
+            WHERE user_id = ? AND group_id = ?
+              AND image_meta IS NOT NULL AND image_meta != ''
+              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, group_id, count * 3),  # 多取几条以覆盖多图消息
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        # flatten: 从最近到最旧收集图片，直到够数
+        all_images: List[dict] = []
+        for row in rows:
+            msg_id, raw_meta = row[0], row[1]
+            if not raw_meta:
+                continue
+            try:
+                meta_list = json.loads(raw_meta)
+                if isinstance(meta_list, list):
+                    # 同一消息内的图片保持原始顺序
+                    for entry in meta_list:
+                        entry["_message_id"] = msg_id
+                        all_images.append(entry)
+                        if len(all_images) >= count:
+                            break
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if len(all_images) >= count:
+                break
+
+        # 反转使 index 0 = 最近一张
+        all_images.reverse()
+        return all_images
+
+    async def update_image_meta(
+        self,
+        user_id: str,
+        group_id: str,
+        message_id: int,
+        image_meta: List[dict],
+    ) -> None:
+        """更新指定消息的 image_meta（用于回填 cache_hash）。"""
+        image_meta_json = json.dumps(image_meta, ensure_ascii=False)
+        await self.db.execute(
+            "UPDATE message_stream SET image_meta = ? WHERE id = ? AND user_id = ? AND group_id = ?",
+            (image_meta_json, message_id, user_id, group_id),
+        )
+        await self.db.commit()
 
     async def get_earliest_message_time(self, user_id: str, group_id: str = "") -> Optional[datetime]:
         """获取用户最早消息时间（ORDER BY created_at ASC LIMIT 1）
@@ -280,7 +362,7 @@ class PersonaDataStore:
         if limit is None:
             sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase
+                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at DESC
@@ -289,7 +371,7 @@ class PersonaDataStore:
         else:
             sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase
+                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at DESC
@@ -349,7 +431,7 @@ class PersonaDataStore:
         where_clause = " AND ".join(conditions)
         sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase
+                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE {where_clause}
             ORDER BY created_at DESC
@@ -437,15 +519,17 @@ class PersonaDataStore:
             ],
         }
 
-    async def _prune_message_stream_private(self, user_id: str) -> None:
-        """私聊按 user_id 维度保留最近 N 条"""
+    async def _prune_message_stream_private(self, user_id: str) -> set:
+        """私聊按 user_id 维度保留最近 N 条。返回需清理的 cache_hash 集合。"""
         async with self.db.execute(
             f"SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
             (user_id,),
         ) as cursor:
             row = await cursor.fetchone()
             if row and row[0] <= self._message_stream_max_per_group:
-                return
+                return set()
+        # 收集被裁剪消息的图片缓存 hash
+        cache_hashes = await self._collect_pruned_image_cache_hashes(user_id, "")
         await self.db.execute(
             f"""
             DELETE FROM message_stream
@@ -461,16 +545,19 @@ class PersonaDataStore:
             (user_id, user_id, self._message_stream_max_per_group),
         )
         await self.db.commit()
+        return cache_hashes
 
-    async def _prune_message_stream_group(self, group_id: str) -> None:
-        """群聊按 group_id 维度保留最近 N 条"""
+    async def _prune_message_stream_group(self, group_id: str) -> set:
+        """群聊按 group_id 维度保留最近 N 条。返回需清理的 cache_hash 集合。"""
         async with self.db.execute(
             f"SELECT COUNT(*) FROM message_stream WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
             (group_id,),
         ) as cursor:
             row = await cursor.fetchone()
             if row and row[0] <= self._message_stream_max_per_group:
-                return
+                return set()
+        # 收集被裁剪消息的图片缓存 hash
+        cache_hashes = await self._collect_pruned_image_cache_hashes("", group_id)
         await self.db.execute(
             f"""
             DELETE FROM message_stream
@@ -486,6 +573,48 @@ class PersonaDataStore:
             (group_id, group_id, self._message_stream_max_per_group),
         )
         await self.db.commit()
+        return cache_hashes
+
+    async def _collect_pruned_image_cache_hashes(self, user_id: str, group_id: str) -> set:
+        """收集即将被裁剪的消息中的图片 cache_hash 集合。"""
+        if not self.image_cache:
+            return set()
+        # 查询将被裁剪的消息（不在保留集中的消息）
+        if group_id:
+            where = "group_id = ? AND group_id != ''"
+            params = (group_id, group_id, self._message_stream_max_per_group)
+        else:
+            where = "user_id = ? AND group_id = ''"
+            params = (user_id, user_id, self._message_stream_max_per_group)
+        hashes: set = set()
+        try:
+            async with self.db.execute(
+                f"""
+                SELECT image_meta FROM message_stream
+                WHERE {where} AND image_meta IS NOT NULL AND image_meta != ''
+                  AND id NOT IN (
+                    SELECT id FROM message_stream WHERE {where}
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                  )
+                """,
+                params,
+            ) as cursor:
+                rows = await cursor.fetchall()
+            for row in rows:
+                if not row[0]:
+                    continue
+                try:
+                    meta_list = json.loads(row[0])
+                    if isinstance(meta_list, list):
+                        for entry in meta_list:
+                            ch = entry.get("cache_hash")
+                            if ch:
+                                hashes.add(ch)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        except Exception as e:
+            dice_log(f"[Persona] 图片缓存裁剪扫描异常: {e}")
+        return hashes
 
     def _tick_and_check_prune(self, now: datetime) -> bool:
         """递增计数器并判断是否应触发裁剪：每 N 次写入或每 M 秒"""
@@ -508,9 +637,13 @@ class PersonaDataStore:
         self._msg_stream_write_count = 0
         self._last_prune_at = now
         if group_id:
-            await self._prune_message_stream_group(group_id)
+            cache_hashes = await self._prune_message_stream_group(group_id)
         else:
-            await self._prune_message_stream_private(user_id)
+            cache_hashes = await self._prune_message_stream_private(user_id)
+        # 清理被裁剪消息的图片缓存文件
+        if cache_hashes and self.image_cache:
+            for ch in cache_hashes:
+                self.image_cache.delete_cache(ch)
         await self._prune_system_log()
 
     async def _prune_system_log(self) -> None:

@@ -64,6 +64,7 @@ class InboundMessageHook(Protocol):
         type: str,
         content: str,
         display_name: str,
+        raw_msg: str = "",
     ) -> None: ...
 
 
@@ -655,6 +656,7 @@ class Bot:
                                 type=msg_type_val,
                                 content=msg_cur,
                                 display_name=display_name,
+                                raw_msg=meta.raw_msg,
                             )
                         except Exception as e:
                             dice_log(f"[InboundHook] 记录失败: {e}")
@@ -705,6 +707,7 @@ class Bot:
                             type=msg_type_default,
                             content=msg_cur,
                             display_name=display_name,
+                            raw_msg=meta.raw_msg,
                         )
                     except Exception as e:
                         dice_log(f"[InboundHook] 记录失败: {e}")

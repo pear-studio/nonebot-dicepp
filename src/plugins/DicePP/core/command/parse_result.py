@@ -49,8 +49,8 @@ class MessageSegment:
         return cls(seg_type="at", data={"user_id": user_id, "display_name": display_name})
 
     @classmethod
-    def image(cls, url: str) -> "MessageSegment":
-        return cls(seg_type="image", data={"url": url})
+    def image(cls, url: str, file: str = "", sub_type: str = "") -> "MessageSegment":
+        return cls(seg_type="image", data={"url": url, "file": file, "sub_type": sub_type})
 
     @classmethod
     def cq(cls, cq_type: str, params: Dict[str, str]) -> "MessageSegment":

@@ -28,6 +28,47 @@ from .admin import AdminDispatcher
 from .report.daily_report import DailyReportGenerator
 from .gateway.port import MessagePort
 from .gateway.pipeline import MessagePipeline, TruncateStage
+from .image_cache import ImageCache
+from core.command.cq_extractor import extract_segments
+
+
+async def resolve_images(
+    raw_msg: str, image_cache: ImageCache, *, force_download: bool = False,
+) -> Tuple[Optional[List[dict]], Optional[List[str]]]:
+    """从 raw_msg 提取图片元信息，按需下载缓存，返回 (image_meta, data_urls)。
+
+    force_download=True 时始终下载；否则仅在已有缓存时读取。
+    返回 (None, None) 表示无图片或提取失败。
+    """
+    if not raw_msg:
+        return None, None
+    segments = extract_segments(raw_msg)
+    image_segs = [s for s in segments if s.seg_type == "image"]
+    if not image_segs:
+        return None, None
+    image_meta = [
+        {
+            "url": s.data.get("url", ""),
+            "file": s.data.get("file", ""),
+            "sub_type": s.data.get("sub_type", ""),
+            "size": 0,
+            "cache_hash": None,
+        }
+        for s in image_segs[:PersonaCommand.MAX_IMAGES_PER_MESSAGE]
+    ]
+    if force_download:
+        await image_cache.download_and_cache(image_meta)
+    urls = [
+        image_cache.read_cache(e["cache_hash"])
+        for e in image_meta
+        if e.get("cache_hash")
+    ]
+    cached_count = sum(1 for e in image_meta if e.get("cache_hash"))
+    dice_log(
+        f"[Persona] resolve_images: total={len(image_meta)}"
+        f" cached={cached_count} download={'forced' if force_download else 'lazy'}"
+    )
+    return image_meta, urls or None
 
 
 @custom_user_command("PersonaAI", priority=DPP_COMMAND_PRIORITY_DEFAULT, flag=DPP_COMMAND_FLAG_FUN)
@@ -36,6 +77,8 @@ class PersonaCommand(UserCommandBase):
 
     message_type: MessageType = MessageType.CHAT
     _format_relationship_base = staticmethod(AdminDispatcher._format_relationship_base)
+
+    MAX_IMAGES_PER_MESSAGE = 5
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
@@ -51,6 +94,8 @@ class PersonaCommand(UserCommandBase):
         self._admin_handlers: Dict[str, Callable] = {}
         # 日报生成器（生命周期独立于 PersonaApp）
         self.report_generator: Optional[DailyReportGenerator] = None
+        # 图片缓存
+        self.image_cache: ImageCache = ImageCache()
 
     def _require_app(self) -> Optional[str]:
         """检查 app 和 data_store 是否已初始化，返回错误信息或 None"""
@@ -100,6 +145,8 @@ class PersonaCommand(UserCommandBase):
                 return []
             if self.app:
                 self.data_store = self.app.store
+                # 注入 ImageCache 到 data_store（供裁剪时清理图片缓存）
+                self.data_store.image_cache = self.image_cache
                 # 注入 app 引用到日报生成器
                 if self.report_generator:
                     self.report_generator.set_app(self.app)
@@ -176,6 +223,7 @@ class PersonaCommand(UserCommandBase):
         type: str,
         content: str,
         display_name: str,
+        raw_msg: str = "",
     ) -> None:
         """入站消息记录器回调（每条用户消息记录一次）"""
         if not self.data_store:
@@ -184,6 +232,13 @@ class PersonaCommand(UserCommandBase):
             msg_type = MessageType.from_str(type)
             if type not in (MessageType.CHAT.value, MessageType.COMMAND.value, MessageType.SYSTEM_NOTICE.value, MessageType.SYSTEM_LOG.value):
                 dice_log(f"[Persona] 未知 message_type='{type}'，fallback 到 CHAT")
+
+            # 检测图片（私聊立即下载缓存）
+            is_private = not group_id
+            image_meta, _ = await resolve_images(
+                raw_msg, self.image_cache, force_download=is_private,
+            )
+
             await self.data_store.add_message_stream(
                 user_id=user_id,
                 group_id=group_id,
@@ -191,6 +246,7 @@ class PersonaCommand(UserCommandBase):
                 type=msg_type,
                 content=content,
                 display_name=display_name,
+                image_meta=image_meta,
             )
         except Exception as e:
             dice_log(f"[Persona] 入站记录器写入失败: {e}")
@@ -284,8 +340,10 @@ class PersonaCommand(UserCommandBase):
                 return False, False, None
 
         # 不调用 LLM 的工具类命令：无需白名单
-        if cmd in ("ping", "clear", "status", "profile", "mute", "unmute") or cmd == "":
+        if cmd in ("ping", "clear", "status", "profile", "mute", "unmute"):
             return True, False, None
+        if cmd == "":
+            return False, False, None
 
         # 聊天触发（@bot）：无需 .ai 前缀，也无需白名单以外的命令
         if meta.to_me and not msg.startswith(".ai"):
@@ -384,11 +442,22 @@ class PersonaCommand(UserCommandBase):
         elif is_at_trigger:
             if self.app and self.enabled:
                 try:
+                    # 检测当前消息中的图片（始终下载）
+                    _, image_data_urls = await resolve_images(
+                        meta.raw_msg, self.image_cache, force_download=True,
+                    )
+                    if image_data_urls:
+                        dice_log(
+                            f"[Persona] CHAT_WITH_IMAGE trigger: source=current_message"
+                            f" image_count={len(image_data_urls)} user={user_id}"
+                        )
+
                     response = await self.app.chat_with_user(
                         user_id=user_id,
                         group_id=group_id,
                         message=content,
                         nickname=nickname,
+                        image_data_urls=image_data_urls,
                     )
                 except QuotaExceeded as e:
                     dice_log(f"[Persona] 配额超限: user={user_id}, group={group_id}")

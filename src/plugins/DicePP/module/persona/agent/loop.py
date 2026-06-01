@@ -51,6 +51,18 @@ _CORRECTION_INTERIM_MSG = (
     "请继续完成任务；如果可以答复，请调用 send_reply_segment 并设置 phase=final。"
 )
 
+# 工具排序常量：vision 工具 > 其他 > send_reply_segment
+_VISION_TOOLS = frozenset({"look_at_past_image", "generate_image"})
+
+
+def _tool_sort_key(tc: dict) -> int:
+    name = tc["name"]
+    if name in _VISION_TOOLS:
+        return 0
+    if name == "send_reply_segment":
+        return 2
+    return 1
+
 
 @dataclass
 class AgentRunResult:
@@ -124,6 +136,20 @@ class AgentLoop:
         model = ""
 
         while round_index < self._limits.max_tool_rounds:
+            # ── Phase 3: 检测 pending_images（observation 方案）──
+            if state.pending_images:
+                logger.info(
+                    f"[AgentLoop] pending_images detected: count={len(state.pending_images)}"
+                    f" source=model_requested_history"
+                )
+                state.messages = _embed_images_in_messages(
+                    state.messages, state.pending_images,
+                )
+                effective_selection = SelectionPolicy.CHAT_WITH_IMAGE
+                state.pending_images = None
+            else:
+                effective_selection = selection
+
             # ── 构造 LLM 请求 ──
             req = LLMRequest(
                 messages=state.messages,
@@ -131,7 +157,7 @@ class AgentLoop:
                 tool_use_mode=tool_use_mode,
                 required_tools=required_tools,
                 temperature=temperature,
-                selection=selection or SelectionPolicy.CHAT,
+                selection=effective_selection or SelectionPolicy.CHAT,
             )
 
             await self._event_bus.emit(
@@ -290,6 +316,9 @@ class AgentLoop:
                 assistant_msg["reasoning_content"] = result.reasoning_content
             state.messages.append(assistant_msg)
 
+            # ── 工具排序：vision 工具 > 其他 > send_reply_segment ──
+            tool_calls = sorted(tool_calls, key=_tool_sort_key)
+
             tool_results = await self._executor.execute_many(tool_calls, state)
 
             state.tool_rounds += 1
@@ -384,6 +413,27 @@ class AgentLoop:
                     tr["content"] = observation
                     has_pending_observation = True
 
+                # look_at_past_image → observation 方案
+                elif tc_name == "look_at_past_image" and action_id:
+                    try:
+                        obs_data = json.loads(result_content)
+                    except (json.JSONDecodeError, TypeError):
+                        obs_data = {}
+
+                    if "data_url" in obs_data:
+                        # executor 返回了图片 data_url → 暂存到 pending_images
+                        img_index = obs_data.get("image_index", 0)
+                        if state.pending_images is None:
+                            state.pending_images = {}
+                        state.pending_images[img_index] = obs_data["data_url"]
+                        has_pending_observation = True
+                        tr["content"] = json.dumps({"status": "已获取图片，将在下一轮查看"}, ensure_ascii=False)
+                    elif "error" in obs_data:
+                        # executor 返回错误 → 保持原样回填给 LLM
+                        pass
+                    else:
+                        tr["content"] = result_content
+
                 ordered_results.append(tr)
 
             # ── 回填 tool messages ──
@@ -434,8 +484,8 @@ class AgentLoop:
                                               total_tokens_in, total_tokens_out,
                                               provider, model)
 
-            # 有 pending observation → 继续循环
-            if has_pending_observation:
+            # 有 pending observation 或 pending images → 继续循环
+            if has_pending_observation or state.pending_images:
                 continue
 
             # ── structured_collect：本轮命中 required STATE_WRITE → 完成 ──
@@ -518,3 +568,37 @@ class AgentLoop:
             provider=provider,
             model=model,
         )
+
+
+def _embed_images_in_messages(
+    messages: List[dict], image_data_urls: Dict[int, str],
+) -> List[dict]:
+    """将含 [图片 #n] 标记的消息替换为多模态 content parts。
+
+    [表情 #n] 标记保留为纯文本（不嵌入图片）。
+    仅对匹配的消息做结构性变化（content: str → List[dict]），其余保持不变。
+    注意：必须在 truncate_by_turns 之后调用（estimate_tokens 期望 content 为 str）。
+    """
+    result = []
+    for msg in messages:
+        content = msg.get("content", "")
+        if not isinstance(content, str) or "[图片 #" not in content:
+            result.append(msg)
+            continue
+        # 解析文本和标记，按 Dict key 匹配而非按列表位置
+        parts: list = []
+        remaining = content
+        for idx, img_url in sorted(image_data_urls.items()):
+            marker = f"[图片 #{idx}]"
+            if marker in remaining:
+                before, _, remaining = remaining.partition(marker)
+                if before.strip():
+                    parts.append({"type": "text", "text": before})
+                parts.append({"type": "image_url", "image_url": {"url": img_url}})
+        if remaining.strip():
+            parts.append({"type": "text", "text": remaining})
+        if parts:
+            result.append({**msg, "content": parts})
+        else:
+            result.append(msg)
+    return result

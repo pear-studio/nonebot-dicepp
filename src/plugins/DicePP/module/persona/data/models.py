@@ -142,6 +142,7 @@ class UnifiedMessage(BaseModel):
     turn_id: str = ""
     segment_index: int = -1
     segment_phase: str = ""
+    image_meta: Optional[List[dict]] = None  # Phase 3: 图片元信息
 
 
 class WhitelistEntry(BaseModel):

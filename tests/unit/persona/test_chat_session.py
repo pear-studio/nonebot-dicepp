@@ -684,7 +684,7 @@ class TestChargingPath:
         first_started = asyncio.Event()
         release_first = asyncio.Event()
 
-        async def slow_chat_call(user_id, group_id, messages):
+        async def slow_chat_call(user_id, group_id, messages, **kwargs):
             llm_calls.append((user_id, group_id, messages))
             call_index = len(llm_calls)
             # 模拟 AgentRuntime 内部计费行为
@@ -727,7 +727,7 @@ class TestChargingPath:
         coordinator = LLMCallCoordinator(max_failures=1, max_iterations=5)
         session = _make_session(coordinator=coordinator)
 
-        async def always_fail(user_id, group_id, messages):
+        async def always_fail(user_id, group_id, messages, **kwargs):
             raise RuntimeError("LLM down")
 
         session._coordinator_chat_call_fn = always_fail

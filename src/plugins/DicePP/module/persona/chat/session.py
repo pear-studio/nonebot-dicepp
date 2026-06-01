@@ -91,6 +91,7 @@ class ChatSession:
         group_id: str,
         message: str,
         nickname: str = "",
+        image_data_urls: Optional[List[str]] = None,
     ) -> Optional[str]:
         """处理单条用户消息，返回回复文本（None 表示不回复）"""
         # 5 秒内完全相同的消息去重（防手抖/网络重试）
@@ -156,7 +157,7 @@ class ChatSession:
 
             target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
 
-            response = await self._chat_via_coordinator(user_id, group_id, message, target_key)
+            response = await self._chat_via_coordinator(user_id, group_id, message, target_key, image_data_urls=image_data_urls)
             return response
 
         except asyncio.CancelledError:
@@ -184,14 +185,17 @@ class ChatSession:
     # ── coordinator 回调 ──────────────────────────────────────
 
     async def _coordinator_chat_call_fn(
-        self, user_id: str, group_id: str, messages: List[str]
+        self, user_id: str, group_id: str, messages: List[str],
+        image_data_urls: Optional[List[str]] = None,
     ) -> Optional[str]:
         """coordinator chat 路径的单轮 LLM 调用。"""
         current_message = "\n".join(messages) if messages else ""
 
         messages_for_llm = await self._build_messages(user_id, group_id)
 
-        response = await self._chat_with_tools(user_id, group_id, messages_for_llm)
+        response = await self._chat_with_tools(
+            user_id, group_id, messages_for_llm, image_data_urls=image_data_urls,
+        )
 
         await self._after_response(user_id, group_id, current_message, response)
 
@@ -278,7 +282,8 @@ class ChatSession:
         await self._response_handler.persist_and_send(user_id, group_id, result)
 
     async def _chat_via_coordinator(
-        self, user_id: str, group_id: str, message: str, target_key: str
+        self, user_id: str, group_id: str, message: str, target_key: str,
+        image_data_urls: Optional[List[str]] = None,
     ) -> Optional[str]:
         fallback_response: Optional[str] = None
         current_message_for_exhausted = message
@@ -287,7 +292,9 @@ class ChatSession:
             nonlocal current_message_for_exhausted
             current_message = "\n".join(messages) if messages else message
             current_message_for_exhausted = current_message
-            return await self._coordinator_chat_call_fn(user_id, group_id, messages)
+            return await self._coordinator_chat_call_fn(
+                user_id, group_id, messages, image_data_urls=image_data_urls,
+            )
 
         async def on_exhausted(last_exception: Optional[Exception] = None):
             nonlocal fallback_response
@@ -315,6 +322,7 @@ class ChatSession:
 
     async def _chat_with_tools(
         self, user_id: str, group_id: str, messages: List[Dict],
+        image_data_urls: Optional[List[str]] = None,
     ) -> str:
         from ..agent.runtime import AgentRuntime
         from ..agent.tool_bridge import build_registry
@@ -344,6 +352,7 @@ class ChatSession:
         result = await runtime.run_chat(
             messages=messages, user_id=user_id, group_id=group_id,
             tool_registry=new_registry,
+            image_data_urls=image_data_urls,
         )
 
         if result.status != "completed":
@@ -381,6 +390,7 @@ class ChatSession:
                     "turn_id": msg.turn_id,
                     "segment_index": msg.segment_index,
                     "segment_phase": msg.segment_phase,
+                    "image_meta": msg.image_meta,
                 }
                 for msg in history
             ]
@@ -447,6 +457,7 @@ class ChatSession:
                 "turn_id": msg.turn_id,
                 "segment_index": msg.segment_index,
                 "segment_phase": msg.segment_phase,
+                "image_meta": msg.image_meta,
             })
             total_tokens += msg_cost
 

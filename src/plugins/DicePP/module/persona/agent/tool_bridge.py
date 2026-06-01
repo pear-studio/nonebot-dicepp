@@ -70,6 +70,10 @@ class GenerateImageArgs(BaseModel):
     prompt: str = Field(..., description="图片描述")
 
 
+class LookAtPastImageArgs(BaseModel):
+    image_index: int = Field(..., description="倒数第几张，1=最近，仅限当前上下文窗口内")
+
+
 # ── 旧 ScoringAgent / ActionEvaluator 工具 Args Schema（桥接兼容）──
 
 
@@ -95,6 +99,7 @@ _ARGS_SCHEMA_MAP: Dict[str, Type[BaseModel]] = {
     "suggest_action": SuggestActionArgs,
     "send_reply_segment": SendReplySegmentArgs,
     "generate_image": GenerateImageArgs,
+    "look_at_past_image": LookAtPastImageArgs,
     # M2: 结构化采集工具
     "record_event": RecordEventArgs,
     "record_reaction": RecordReactionArgs,
@@ -106,7 +111,7 @@ _ARGS_SCHEMA_MAP: Dict[str, Type[BaseModel]] = {
     "score_relationship": ScoreRelationshipArgs,
 }
 
-_EXTERNAL_TOOLS = {"send_reply_segment", "generate_image"}
+_EXTERNAL_TOOLS = {"send_reply_segment", "generate_image", "look_at_past_image"}
 _STATE_WRITE_TOOLS = {
     "record_event", "record_reaction", "record_diary_entry",
     "record_share_message", "record_score",

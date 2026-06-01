@@ -42,3 +42,7 @@ SelectionPolicy.SUMMARIZE = SelectionPolicy(
     category="llm", required_capabilities=("text", "tool_calls"),
     prefer_quality=False, prefer_cost=True,
 )
+SelectionPolicy.CHAT_WITH_IMAGE = SelectionPolicy(
+    category="llm", required_capabilities=("text", "tool_calls", "vision"),
+    prefer_quality=True, prefer_cost=False,
+)

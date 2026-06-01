@@ -56,7 +56,11 @@ def extract_segments(raw_msg: str) -> List[MessageSegment]:
             segments.append(MessageSegment.at(user_id=user_id, display_name=display_name))
         elif cq_type == "image":
             url = params.get("url", params.get("file", ""))
-            segments.append(MessageSegment.image(url=url))
+            segments.append(MessageSegment.image(
+                url=url,
+                file=params.get("file", ""),
+                sub_type=params.get("subType", ""),
+            ))
         else:
             segments.append(MessageSegment.cq(cq_type=cq_type, params=params))
 

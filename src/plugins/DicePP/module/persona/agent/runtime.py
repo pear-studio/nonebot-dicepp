@@ -68,6 +68,7 @@ class AgentRuntime:
         tools: Optional[List[dict]] = None,
         temperature: Optional[float] = None,
         timeout: Optional[int] = None,
+        image_data_urls: Optional[List[str]] = None,
     ) -> AgentRunResult:
         """执行一次 Agent run（chat 路径）。"""
         if self._router.quota_check_enabled and self._router.data_store:
@@ -80,14 +81,18 @@ class AgentRuntime:
                 if count >= self._router.daily_limit:
                     raise QuotaExceeded(f"今日额度已用完 ({count}/{self._router.daily_limit})")
 
+        has_images = bool(image_data_urls)
+        selection = SelectionPolicy.CHAT_WITH_IMAGE if has_images else SelectionPolicy.CHAT
+
         return await self._run_internal(
             messages=messages, user_id=user_id, group_id=group_id,
             tool_registry=tool_registry, mode="segmented_chat",
-            tools=tools, tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
-            required_tools=["send_reply_segment"],
-            selection=SelectionPolicy.CHAT,
+            tools=tools, tool_use_mode=ToolUseMode.REQUIRED,
+            required_tools=None,
+            selection=selection,
             temperature=temperature, timeout=timeout,
             bill_usage=True, with_action_sinks=True,
+            image_data_urls=image_data_urls,
         )
 
     async def _is_quota_exempt(self, user_id: str, group_id: str) -> bool:
@@ -151,6 +156,7 @@ class AgentRuntime:
         timeout: Optional[int],
         bill_usage: bool,
         with_action_sinks: bool,
+        image_data_urls: Optional[List[str]] = None,
     ) -> AgentRunResult:
         """公共装配逻辑：创建 state/event_store/bus/gateway/executor/loop，执行并返回。"""
         run_id = new_run_id()
@@ -200,6 +206,10 @@ class AgentRuntime:
 
         tool_defs = tools or tool_registry.get_openai_schemas()
 
+        # T3: 当前消息带图 → 将图片嵌入最后一条 user 消息
+        if image_data_urls:
+            messages = _embed_images_in_last_user_message(messages, image_data_urls)
+
         return await loop.run(
             messages=messages, state=state, tools=tool_defs,
             tool_use_mode=tool_use_mode, required_tools=required_tools,
@@ -214,3 +224,29 @@ class AgentRuntime:
     ) -> ToolRegistry:
         """从旧 ToolRegistry 构建新 ToolRegistry（迁移期桥梁）。"""
         return build_registry(old_registry, domains, ctx=tool_ctx)
+
+
+def _build_image_content_parts(text: str, data_urls: List[str]) -> List[dict]:
+    """构建多模态 content parts：text + image_url 列表。"""
+    parts: List[dict] = [{"type": "text", "text": text}]
+    for url in data_urls:
+        parts.append({"type": "image_url", "image_url": {"url": url}})
+    return parts
+
+
+def _embed_images_in_last_user_message(
+    messages: List[dict], image_data_urls: List[str],
+) -> List[dict]:
+    """将图片嵌入最后一条 user 消息（T3 流程：当前消息带图）。
+
+    将最后一条 user 消息的 content 从 str 转为 List[dict]（多模态 parts）。
+    """
+    result = []
+    for i, msg in enumerate(messages):
+        if i == len(messages) - 1 and msg.get("role") == "user":
+            text = msg.get("content", "")
+            parts = _build_image_content_parts(text, image_data_urls)
+            result.append({**msg, "content": parts})
+        else:
+            result.append(msg)
+    return result

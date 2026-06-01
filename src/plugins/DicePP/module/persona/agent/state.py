@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -35,3 +35,6 @@ class AgentRunState:
     delivery_performed: bool = False
     final_reason: str = ""
     error: str = ""
+
+    # Phase 3: 图片理解 — observation 方案
+    pending_images: Optional[Dict[int, str]] = None

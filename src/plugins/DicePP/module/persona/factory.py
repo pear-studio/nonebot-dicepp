@@ -101,9 +101,10 @@ class PersonaApp:
         await self.chat.clear_history(user_id, group_id)
 
     async def chat_with_user(
-        self, user_id: str, group_id: str, message: str, nickname: str
+        self, user_id: str, group_id: str, message: str, nickname: str,
+        image_data_urls: Optional[List[str]] = None,
     ) -> Optional[str]:
-        return await self.chat.chat(user_id, group_id, message, nickname)
+        return await self.chat.chat(user_id, group_id, message, nickname, image_data_urls=image_data_urls)
 
     # ── 消息发送 ──────────────────────────────────────────────
 
@@ -379,6 +380,10 @@ def _build_tooling(
         character_appearance=character_appearance,
     )
     tool_registry.register(ToolDomain.CHAT, gen_tool_def, gen_executor)
+
+    # Phase 3: 图片理解工具（始终注册）
+    from .tools.look_at_past_image import LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor
+    tool_registry.register(ToolDomain.CHAT, LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor)
 
     logger.info("工具注册表与分段调度器已初始化")
     return tool_registry, event_agent, character_life, action_evaluator

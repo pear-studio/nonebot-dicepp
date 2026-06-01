@@ -16,6 +16,34 @@ from utils.time import wall_now, format_timestamp, format_relative_time
 DEFAULT_DELAY_BEFORE = 1.0
 
 
+def _safe_estimate_tokens(content: Any) -> float:
+    """estimate_tokens 防御：content 可能是 str 或 List[dict]（多模态 parts）。"""
+    if isinstance(content, str):
+        return estimate_tokens(content)
+    if isinstance(content, list):
+        return sum(estimate_tokens(p.get("text", "")) for p in content if isinstance(p, dict))
+    return 0.0
+
+
+def _build_image_markers(msg: Dict) -> str:
+    """为含图片的历史消息构建 [图片 #n] / [表情 #n] 标记前缀。"""
+    indices = msg.get("_img_indices")
+    if not indices:
+        return ""
+    image_meta = msg.get("image_meta")
+    if not image_meta:
+        return ""
+    markers = []
+    for i, idx in enumerate(indices):
+        if i < len(image_meta):
+            sub_type = image_meta[i].get("sub_type", "0")
+            tag = "表情" if sub_type == "1" else "图片"
+        else:
+            tag = "图片"
+        markers.append(f"[{tag} #{idx}]")
+    return "".join(markers) + " "
+
+
 @dataclass
 class SegmentGuide:
     """分段回复引导参数，None 表示不注入分段引导。"""
@@ -240,7 +268,9 @@ class ContextBuilder:
                 rel = format_relative_time(m.get("created_at"), now)
                 extra = f" {rel}" if rel else ""
                 prefix = f"[{ts}{extra}] " if ts else ""
-                lines.append(f"{prefix}{m['content']}")
+                # 图片标记
+                img_prefix = _build_image_markers(m)
+                lines.append(f"{prefix}{img_prefix}{m['content']}")
             result.append({"role": "user", "content": "\n".join(lines)})
             buffer.clear()
 
@@ -288,7 +318,8 @@ class ContextBuilder:
                 extra = f" {rel}" if rel else ""
                 ts_prefix = f"[{ts}{extra}] " if ts else ""
                 speaker = m.get("speaker_name") or "系统"
-                lines.append(f"{ts_prefix}[{speaker}] {m['content']}")
+                img_prefix = _build_image_markers(m)
+                lines.append(f"{ts_prefix}[{speaker}] {img_prefix}{m['content']}")
             result.append({"role": "user", "content": "\n".join(lines)})
             buffer.clear()
 
@@ -319,7 +350,24 @@ class ContextBuilder:
 
         Phase M1: 格式化后自动合并同一 agent_run_id 的连续 assistant segments，
         避免 LLM 看到多条连续 assistant 消息破坏 user/assistant 交替契约。
+
+        Phase 3: 预扫描分配 image index（最近的 = 1），格式化时插入 [图片 #n] / [表情 #n] 标记。
         """
+        # 预扫描：统计总图片数，反向分配 index（最近的 = 1）
+        total_images = 0
+        for msg in history:
+            meta = msg.get("image_meta")
+            if meta:
+                total_images += len(meta)
+
+        cursor = total_images
+        for msg in reversed(history):
+            meta = msg.get("image_meta")
+            if meta:
+                count = len(meta)
+                msg["_img_indices"] = list(range(cursor, cursor - count, -1))
+                cursor -= count
+
         if is_group:
             formatted = self._format_group_history(history)
         else:
@@ -422,7 +470,7 @@ class ContextBuilder:
         result = []
         total_tokens = 0.0
         for user_msg, assistant_msg in reversed(turns):
-            pair_cost = estimate_tokens(user_msg.get("content", "")) + estimate_tokens(
+            pair_cost = _safe_estimate_tokens(user_msg.get("content", "")) + _safe_estimate_tokens(
                 assistant_msg.get("content", "")
             )
             if len(result) // 2 >= max_turns:
