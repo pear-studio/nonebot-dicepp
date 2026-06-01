@@ -41,72 +41,82 @@ class AdminDispatcher:
 
     # ── 公开 API ──────────────────────────────────────────────
 
-    async def dispatch(self, user_id: str, group_id: str, args: List[str]) -> str:
+    async def dispatch(self, user_id: str, group_id: str, args: List[str],
+                       tick_pending: bool = False, daily_pending: bool = False) -> str:
         """分发 admin 子命令"""
         if not self._is_admin(user_id):
             return "权限不足"
         if not args:
             return self._help_text()
         subcmd = args[0]
-        # snapshot 不依赖 PersonaApp 和 data_store，独立可用
-        if subcmd == "snapshot":
-            return await self._admin_snapshot(user_id, group_id, args)
+
+        # 兼容映射：today/yesterday → diary
+        if subcmd in ("today", "yesterday"):
+            args = ["diary", "-1"] if subcmd == "yesterday" else ["diary"]
+            subcmd = "diary"
+
+        # debug 特殊处理：需要 data_store 和 app，接收 tick_pending/daily_pending
+        if subcmd == "debug":
+            if not self.data_store:
+                return "模块未初始化"
+            if self.app is None:
+                return "模块未初始化"
+            return await self._admin_debug(user_id, group_id, args,
+                                           tick_pending=tick_pending,
+                                           daily_pending=daily_pending)
+
+        # code 已迁移到 whitelist code
+        if subcmd == "code":
+            return "此命令已迁移，请使用 .ai admin whitelist code <口令>"
+
+        # 通用 data_store 检查
         if not self.data_store:
             return "模块未初始化"
         if self.app is None:
             return "模块未初始化"
+
+        # 直接匹配 _admin_{subcmd}
         handler = getattr(self, f"_admin_{subcmd}", None)
-        if handler is None and subcmd in ("trace", "stats", "errors"):
-            handler = getattr(self, f"_handle_admin_{subcmd}", None)
-        if handler is None and subcmd in ("today", "yesterday", "diary"):
-            handler = getattr(self, "_admin_diary", None)
         if handler:
             return await handler(user_id, group_id, args)
+
         return "未知的管理员命令"
 
     @staticmethod
     def _help_text() -> str:
         return (
             "管理员命令:\n"
-            ".ai admin code <新口令> - 设置/更新口令\n"
-            ".ai admin code clear - 清除口令\n"
+            ".ai admin whitelist code <口令> - 设置/更新口令\n"
+            ".ai admin whitelist code clear - 清除口令\n"
             ".ai admin whitelist - 查看白名单\n"
             ".ai admin whitelist add group <group_id> - 添加群到白名单\n"
             ".ai admin whitelist remove <user_id> - 移除用户\n"
             ".ai admin whitelist remove group <group_id> - 移除群\n"
             ".ai admin whitelist clear - 清空白名单\n"
-            ".ai admin trace <user_id> - 导出最近 5 次 LLM trace\n"
-            ".ai admin trace <user_id> full - 导出最近 1 次完整 trace\n"
-            ".ai admin stats - 查看今日 LLM 调用统计\n"
-            ".ai admin errors - 查看最近 24h 错误摘要\n"
-            ".ai admin debug - 查看当前上下文\n"
+            ".ai admin debug - 运行诊断（LLM统计、错误摘要、调度器状态、群活跃度）\n"
             ".ai admin rel <用户ID> - 查看指定用户关系\n"
             ".ai admin setrel <用户ID> <分数> - 修改好感度\n"
             ".ai admin reload - 热重载角色卡\n"
             ".ai admin events - 查看事件配置\n"
-            ".ai admin list - 查看白名单\n"
-            ".ai admin today - 查看今天的事件和日记\n"
-            ".ai admin yesterday - 查看昨天的事件和日记\n"
-            ".ai admin diary - 查看今天的事件和日记\n"
+            ".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）\n"
             ".ai admin probe reset <provider>/<model> - 重置 exhausted 模型\n"
             ".ai admin pause - 暂停主动消息\n"
-            ".ai admin resume - 恢复主动消息\n"
-            ".ai admin snapshot - 查看当前运营快照"
+            ".ai admin resume - 恢复主动消息"
         )
 
     # ── admin 子命令 ──────────────────────────────────────────
 
-    async def _admin_code(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if len(args) < 2:
+    async def _admin_whitelist_code(self, user_id: str, group_id: str, args: List[str]) -> str:
+        if not args:
             current_code = await self.data_store.get_global_setting("code")
             if current_code:
                 return f"当前已设置口令（{len(current_code)}位字符）"
             else:
                 return "当前未设置口令，白名单功能未激活"
-        if args[1] == "clear":
+        if args[0] == "clear":
             await self.data_store.delete_global_setting("code")
             return "口令已清除，白名单功能已停用"
-        new_code = args[1]
+        new_code = args[0]
         await self.data_store.set_global_setting("code", new_code)
         return "已更新，白名单功能已激活"
 
@@ -132,6 +142,8 @@ class AdminDispatcher:
                     lines.append(f"  ... 还有 {len(groups) - 10} 个")
             return "\n".join(lines)
         action = args[1]
+        if action == "code":
+            return await self._admin_whitelist_code(user_id, group_id, args[2:])
         if action == "add" and len(args) >= 3 and args[2] == "group":
             target_group_id = args[3] if len(args) > 3 else ""
             if not target_group_id:
@@ -197,27 +209,67 @@ class AdminDispatcher:
                 lines.append(f"  ... 还有 {len(profile.facts) - 5} 条")
         else:
             lines.append(f"\n[用户画像] 暂无")
+
+        # LLM 统计（本次运行）
+        lines.append(f"\n[LLM 统计]")
+        if self.app.get_router():
+            stats = self.app.get_router_stats()
+            total_requests = 0
+            total_errors = 0
+            stat_lines = []
+            for provider_name in sorted(stats.keys()):
+                s = stats[provider_name]
+                req = s["requests"]
+                err = s["errors"]
+                total_requests += req
+                total_errors += err
+                error_rate = f"{(err / max(1, req) * 100):.1f}%" if req else "0.0%"
+                p = self.app.get_router_latency_percentiles(provider_name)
+                p50 = p["p50"] / 1000.0
+                p90 = p["p90"] / 1000.0
+                p99 = p["p99"] / 1000.0
+                stat_lines.append(
+                    f"  {provider_name}: {req} 次, 错误率 {error_rate}, "
+                    f"p50/p90/p99={p50:.1f}s/{p90:.1f}s/{p99:.1f}s"
+                )
+            if stat_lines:
+                lines.append(f"  总调用: {total_requests} 次 (错误 {total_errors})")
+                lines.extend(stat_lines)
+            else:
+                lines.append(f"  暂无统计数据")
+            token_in_total, token_out_total = 0, 0
+            if self.data_store and self.config.trace_enabled:
+                ti, to = await self.data_store.get_today_token_usage()
+                token_in_total = ti or 0
+                token_out_total = to or 0
+            lines.append(f"  Token: 输入 {token_in_total} / 输出 {token_out_total}")
+        else:
+            lines.append(f"  路由器未初始化")
+
+        # 24h 错误摘要
+        lines.append(f"\n[24h 错误摘要]")
+        if self.data_store:
+            from utils.time import wall_now
+            since = (wall_now(self.config.timezone) - timedelta(hours=24)).isoformat()
+            error_rows = await self.data_store.get_error_summary_since(since)
+            if error_rows:
+                err_total = sum(count for _, count in error_rows)
+                lines.append(f"  总计: {err_total} 次")
+                for status, count in error_rows:
+                    lines.append(f"  - {status}: {count} 次")
+            else:
+                lines.append(f"  最近 24h 没有错误记录")
+        else:
+            lines.append(f"  数据存储未初始化")
+
         config = self.config
-        lines.append(f"\n[配置]")
-        lines.append(f"  角色: {config.character_name}")
-        lines.append(f"  日限: {config.daily_limit} 次")
-        lines.append(f"  群聊: {'开启' if config.group_chat_enabled else '关闭'}")
-        lines.append(f"\n[Phase 2 系统]")
-        lines.append(f"  衰减: {'开启' if config.decay_enabled else '关闭'}")
-        lines.append(f"  生活模拟: {'开启' if config.character_life_enabled else '关闭'}")
-        lines.append(f"  主动消息: {'开启' if config.proactive_enabled else '关闭'}")
-        lines.append(f"  群活跃度: {'开启' if config.group_activity_enabled else '关闭'}")
-        if config.decay_enabled:
-            lines.append(f"\n[衰减配置]")
-            lines.append(f"  免衰减期: {config.decay_grace_period_hours}h")
-            lines.append(f"  衰减率: {config.decay_rate_per_hour}/h")
-            lines.append(f"  每日上限: {config.decay_daily_cap}")
+        lines.append(f"\n[调度器状态]")
         if self.app and self.app.get_scheduler():
             scheduler_status = self.app.get_scheduler_status()
-            lines.append(f"\n[调度器状态]")
             lines.append(f"  上次主动数: {scheduler_status.get('last_proactive_count', 0)}")
             lines.append(f"  角色活跃中: {'是' if scheduler_status.get('is_character_active') else '否'}")
-        lines.append(f"\n[异步 tick]")
+        else:
+            lines.append(f"  调度器未初始化")
         lines.append(f"  proactive tick 进行中: {'是' if tick_pending else '否'}")
         lines.append(f"  tick_daily 进行中: {'是' if daily_pending else '否'}")
         if group_id and config.group_activity_enabled:
@@ -316,33 +368,21 @@ class AdminDispatcher:
             lines.append(f"  {low}-{high}: {label}")
         return "\n".join(lines)
 
-    async def _admin_list(self, user_id: str, group_id: str, args: List[str]) -> str:
-        entries = await self.data_store.list_whitelist()
-        users = [e for e in entries if e.type == "user"]
-        groups = [e for e in entries if e.type == "group"]
-        lines = ["=== 白名单列表 ==="]
-        lines.append(f"\n用户: {len(users)} 个")
-        for u in users[:20]:
-            lines.append(f"  {u.id}")
-        if len(users) > 20:
-            lines.append(f"  ... 还有 {len(users)-20} 个")
-        lines.append(f"\n群组: {len(groups)} 个")
-        for g in groups[:20]:
-            lines.append(f"  {g.id}")
-        if len(groups) > 20:
-            lines.append(f"  ... 还有 {len(groups)-20} 个")
-        return "\n".join(lines)
-
     async def _admin_diary(self, user_id: str, group_id: str, args: List[str]) -> str:
         from utils.time import wall_now
-        subcmd = args[0]
         wall = wall_now(self.config.timezone)
-        if subcmd == "yesterday":
-            date = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
-            date_label = "昨天"
-        else:
+        if len(args) < 2:
             date = wall.strftime("%Y-%m-%d")
             date_label = "今天"
+        elif args[1] == "-1":
+            date = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
+            date_label = "昨天"
+        elif args[1] == "-2":
+            date = (wall - timedelta(days=2)).strftime("%Y-%m-%d")
+            date_label = "前天"
+        else:
+            date = args[1]
+            date_label = date
         diary = await self.data_store.get_diary(date)
         events = await self.data_store.get_daily_events(date)
         lines = [f"=== {date_label} ({date}) ==="]
@@ -373,14 +413,6 @@ class AdminDispatcher:
             return "已恢复主动消息发送"
         return "调度器未初始化"
 
-    async def _admin_snapshot(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not self._report_generator:
-            return "日报生成器未初始化"
-        success = await self._report_generator.send_snapshot_to(user_id, group_id)
-        if not success:
-            return "快照发送失败"
-        return ""
-
     async def _admin_probe(self, user_id: str, group_id: str, args: List[str]) -> str:
         if not self._is_admin(user_id):
             return "权限不足"
@@ -405,114 +437,6 @@ class AdminDispatcher:
         if ok:
             return f"模型 {provider_name}/{model_name} 已从 exhausted 重置为 disabled，恢复探针循环"
         return f"模型 {provider_name}/{model_name} 不存在或未处于 exhausted 状态"
-
-    async def _handle_admin_trace(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not self._is_admin(user_id):
-            return "权限不足"
-        if not self.data_store or not self.app.get_router():
-            return "模块未初始化"
-        if len(args) < 2:
-            return "用法: .ai admin trace <user_id> [full]"
-        target_user = args[1]
-        full_mode = len(args) >= 3 and args[2] == "full"
-        limit = 1 if full_mode else 5
-        traces = await self.data_store.get_llm_traces(target_user, limit=limit)
-        if not traces:
-            return f"用户 {target_user} 暂无 trace 记录"
-        lines = [f"用户 {target_user} 的 LLM trace:"]
-        for i, t in enumerate(traces, 1):
-            latency_str = f"{t.latency_ms}ms" if t.latency_ms is not None else "N/A"
-            resp_preview = t.response[:200] + "..." if len(t.response) > 200 else t.response
-            lines.append(
-                f"\n[{i}] {t.created_at} | model={t.model} provider={t.selected_provider}/{t.selected_model} "
-                f"latency={latency_str} status={t.status}\n"
-                f"response: {resp_preview}"
-            )
-            if full_mode:
-                try:
-                    msgs = json.loads(t.messages)
-                    visible_msgs = []
-                    for m in msgs:
-                        if m.get("role") == "system" and len(str(m.get("content", ""))) > 500:
-                            m = {**m, "content": str(m["content"])[:500] + "...(truncated)"}
-                        visible_msgs.append(m)
-                    msgs_preview = json.dumps(visible_msgs, ensure_ascii=False, indent=None)
-                    if len(msgs_preview) > 2000:
-                        msgs_preview = msgs_preview[:2000] + "..."
-                    lines.append(f"messages: {msgs_preview}")
-                except json.JSONDecodeError:
-                    lines.append("messages: (invalid json)")
-                except Exception as e:
-                    lines.append(f"messages: (parse failed: {type(e).__name__})")
-                resp_full = t.response[:1000]
-                if len(t.response) > 1000:
-                    resp_full += "..."
-                lines.append(f"response_full: {resp_full}")
-        return "\n".join(lines)
-
-    async def _handle_admin_stats(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not self._is_admin(user_id):
-            return "权限不足"
-        if not self.app.get_router():
-            return "模块未初始化"
-        stats = self.app.get_router_stats()
-
-        token_in_total: Optional[int] = None
-        token_out_total: Optional[int] = None
-        if self.data_store and self.config.trace_enabled:
-            token_in_total, token_out_total = await self.data_store.get_today_token_usage()
-            token_in_total = token_in_total or 0
-            token_out_total = token_out_total or 0
-
-        total_requests = 0
-        total_errors = 0
-        lines = []
-
-        for provider_name in sorted(stats.keys()):
-            s = stats[provider_name]
-            req = s["requests"]
-            err = s["errors"]
-            total_requests += req
-            total_errors += err
-            error_rate = f"{(err / max(1, req) * 100):.1f}%" if req else "0.0%"
-            p = self.app.get_router_latency_percentiles(provider_name)
-            p50 = p["p50"] / 1000.0
-            p90 = p["p90"] / 1000.0
-            p99 = p["p99"] / 1000.0
-            lines.append(
-                f"{provider_name}: {req} 次, 错误率 {error_rate}, "
-                f"p50/p90/p99={p50:.1f}s/{p90:.1f}s/{p99:.1f}s"
-            )
-
-        if not lines:
-            lines.append("暂无统计数据")
-
-        token_str = (
-            f"Token 消耗: 输入 {token_in_total} / 输出 {token_out_total}"
-            if token_in_total is not None
-            else "Token 消耗: 输入 N/A / 输出 N/A"
-        )
-
-        return (
-            f"今日调用: {total_requests} 次 (错误 {total_errors})\n"
-            + "\n".join(lines) + f"\n{token_str}"
-        )
-
-    async def _handle_admin_errors(self, user_id: str, group_id: str, args: List[str]) -> str:
-        if not self._is_admin(user_id):
-            return "权限不足"
-        if not self.data_store:
-            return "模块未初始化"
-        from utils.time import wall_now
-        since = (wall_now(self.config.timezone) - timedelta(hours=24)).isoformat()
-        rows = await self.data_store.get_error_summary_since(since)
-        if not rows:
-            return "最近 24h 没有错误记录"
-        total = sum(count for _, count in rows)
-        lines = [f"最近 24h 错误: {total} 次"]
-        for status, count in rows:
-            lines.append(f"- {status}: {count} 次")
-        return "\n".join(lines)
 
     # ── 辅助方法 ──────────────────────────────────────────────
 

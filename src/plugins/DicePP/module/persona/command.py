@@ -340,7 +340,7 @@ class PersonaCommand(UserCommandBase):
                 return False, False, None
 
         # 不调用 LLM 的工具类命令：无需白名单
-        if cmd in ("ping", "clear", "status", "profile", "mute", "unmute"):
+        if cmd in ("clear", "status", "profile", "mute"):
             return True, False, None
         if cmd == "":
             return False, False, None
@@ -412,9 +412,7 @@ class PersonaCommand(UserCommandBase):
 
         response = None
 
-        if content == "ping":
-            response = "pong"
-        elif content == "clear":
+        if content == "clear":
             if self.app:
                 await self.app.clear_chat_history(user_id, group_id)
                 response = "对话历史已清空"
@@ -423,15 +421,7 @@ class PersonaCommand(UserCommandBase):
         elif content == "status" or hint == "status":
             response = await self._get_status(user_id, group_id, is_private)
         elif content == "mute":
-            if not is_private:
-                response = "请在私聊中使用此命令~"
-            else:
-                response = await self._handle_mute(user_id, True)
-        elif content == "unmute":
-            if not is_private:
-                response = "请在私聊中使用此命令~"
-            else:
-                response = await self._handle_mute(user_id, False)
+            response = await self._handle_mute_toggle(user_id)
         elif content == "key" or content.startswith("key "):
             response = "用户自定义 API Key 功能升级中，暂不可用。当前所有对话使用全局 provider 配置。"
         elif not content:
@@ -538,35 +528,28 @@ class PersonaCommand(UserCommandBase):
         """处理 admin 命令（管理员功能）——分发给 AdminDispatcher"""
         if not self.admin_dispatcher:
             return "模块未初始化"
-        # debug 子命令需要传入 command 的实时状态
-        if args and args[0] == "debug":
-            tick_p = self._async_tick_task is not None and not self._async_tick_task.done()
-            daily_p = (
-                self._async_tick_daily_task is not None and not self._async_tick_daily_task.done()
-            )
-            return await self.admin_dispatcher._admin_debug(
-                user_id, group_id, args,
-                tick_pending=tick_p, daily_pending=daily_p,
-            )
-        return await self.admin_dispatcher.dispatch(user_id, group_id, args)
+        tick_p = self._async_tick_task is not None and not self._async_tick_task.done()
+        daily_p = (
+            self._async_tick_daily_task is not None and not self._async_tick_daily_task.done()
+        )
+        return await self.admin_dispatcher.dispatch(
+            user_id, group_id, args,
+            tick_pending=tick_p, daily_pending=daily_p,
+        )
 
-    async def _handle_mute(self, user_id: str, mute: bool) -> str:
-        """处理 mute/unmute 命令"""
+    async def _handle_mute_toggle(self, user_id: str) -> str:
+        """处理 mute toggle 命令（翻转主动消息开关）"""
         if not self.data_store:
             return "模块未初始化"
 
         is_muted = await self.data_store.is_user_muted(user_id)
 
-        if mute:
-            if is_muted:
-                return "你已经关闭了主动消息~"
-            await self.data_store.mute_user(user_id)
-            return "已关闭主动消息，我不会再主动发消息给你了~"
-        else:
-            if not is_muted:
-                return "你已经开启了主动消息~"
+        if is_muted:
             await self.data_store.unmute_user(user_id)
-            return "已开启主动消息，想我的时候可以找我聊天哦~"
+            return "已开启主动消息（再次发送 .ai mute 可重新关闭）"
+        else:
+            await self.data_store.mute_user(user_id)
+            return "已关闭主动消息（再次发送 .ai mute 可重新开启）"
 
     async def _handle_profile(self, user_id: str, group_id: str) -> str:
         if not self.data_store:
@@ -723,17 +706,19 @@ class PersonaCommand(UserCommandBase):
                 ".ai clear - 清空对话历史",
                 ".ai status - 查看状态",
                 ".ai profile - 查看你的档案",
+                ".ai mute - 切换主动消息开关",
                 ".ai join <口令> - 加入白名单（私聊）",
             ]
             if self._is_admin(meta.user_id):
                 lines.append("")
                 lines.append("[管理员调试]")
-                lines.append(".ai admin debug - 调试信息")
+                lines.append(".ai admin debug - 运行诊断（LLM统计、错误摘要、调度器状态、群活跃度）")
                 lines.append(".ai admin rel <用户ID> - 查看关系")
                 lines.append(".ai admin setrel <用户ID> <分数> - 修改好感度")
                 lines.append(".ai admin reload - 热重载角色卡")
                 lines.append(".ai admin events - 事件配置")
-                lines.append(".ai admin today/yesterday - 查看今天/昨天的事件和日记")
+                lines.append(".ai admin diary [日期] - 查看日记（缺省今天，-1=昨天，或日期如2026-05-30）")
+                lines.append(".ai admin whitelist code <口令> - 设置/更新口令")
                 lines.append(".ai admin pause/resume - 暂停/恢复主动消息")
             return "\n".join(lines)
         return ""

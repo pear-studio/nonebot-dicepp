@@ -151,7 +151,7 @@ class TestCanProcessMsg(IsolatedAsyncioTestCase):
 
     async def test_tool_commands_exempt_whitelist(self):
         cmd = _make_cmd()
-        for sub in ["ping", "clear", "status", "profile", "mute", "unmute"]:
+        for sub in ["clear", "status", "profile", "mute"]:
             meta = _make_private_meta(f".ai {sub}")
             ok, _, _ = await cmd.can_process_msg(f".ai {sub}", meta)
             assert ok is True, f"failed for {sub}"
@@ -273,10 +273,15 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         await self.cmd.process_msg(".ai admin", meta, "admin")
         assert "管理员命令" in _get_sent_content(self.cmd)
 
-    async def test_admin_code(self):
-        self.store.get_global_setting = AsyncMock(return_value=None)
+    async def test_admin_code_migration(self):
         meta = _make_private_meta(".ai admin code newcode", user_id=self.user_id)
         await self.cmd.process_msg(".ai admin code newcode", meta, "admin")
+        assert "此命令已迁移" in _get_sent_content(self.cmd)
+
+    async def test_admin_whitelist_code(self):
+        self.store.get_global_setting = AsyncMock(return_value=None)
+        meta = _make_private_meta(".ai admin whitelist code newcode", user_id=self.user_id)
+        await self.cmd.process_msg(".ai admin whitelist code newcode", meta, "admin")
         assert "已更新" in _get_sent_content(self.cmd)
 
     async def test_admin_whitelist_and_confirm(self):
@@ -352,7 +357,22 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         await self.cmd.process_msg(".ai admin events", meta, "admin")
         assert "事件配置" in _get_sent_content(self.cmd)
 
-    async def test_admin_diary_today_and_yesterday(self):
+    async def test_admin_diary(self):
+        self.store.get_diary = AsyncMock(return_value=None)
+        self.store.get_daily_events = AsyncMock(return_value=[])
+        with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
+            mock_wall.return_value = datetime(2026, 4, 15, 12, 0, 0)
+            meta = _make_private_meta(".ai admin diary", user_id=self.user_id)
+            await self.cmd.process_msg(".ai admin diary", meta, "admin")
+            assert "今天" in _get_sent_content(self.cmd)
+
+        with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
+            mock_wall.return_value = datetime(2026, 4, 15, 12, 0, 0)
+            meta2 = _make_private_meta(".ai admin diary -1", user_id=self.user_id)
+            await self.cmd.process_msg(".ai admin diary -1", meta2, "admin")
+            assert "昨天" in _get_sent_content(self.cmd)
+
+    async def test_admin_today_yesterday_compat(self):
         self.store.get_diary = AsyncMock(return_value=None)
         self.store.get_daily_events = AsyncMock(return_value=[])
         with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
@@ -402,11 +422,6 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         self.cmd.app.clear_chat_history = AsyncMock()
         self.cmd.app.chat_with_user = AsyncMock(return_value="你好呀")
 
-    async def test_ping(self):
-        meta = _make_private_meta(".ai ping")
-        await self.cmd.process_msg(".ai ping", meta, None)
-        assert "pong" in _get_sent_content(self.cmd)
-
     async def test_clear(self):
         meta = _make_private_meta(".ai clear")
         await self.cmd.process_msg(".ai clear", meta, None)
@@ -428,15 +443,15 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         await self.cmd.process_msg(".ai profile", meta, None)
         assert "你的档案" in _get_sent_content(self.cmd)
 
-    async def test_mute_unmute(self):
+    async def test_mute_toggle(self):
         self.store.is_user_muted = AsyncMock(return_value=False)
         meta = _make_private_meta(".ai mute")
         await self.cmd.process_msg(".ai mute", meta, None)
         assert "已关闭主动消息" in _get_sent_content(self.cmd)
 
         self.store.is_user_muted = AsyncMock(return_value=True)
-        meta2 = _make_private_meta(".ai unmute")
-        await self.cmd.process_msg(".ai unmute", meta2, None)
+        meta2 = _make_private_meta(".ai mute")
+        await self.cmd.process_msg(".ai mute", meta2, None)
         assert "已开启主动消息" in _get_sent_content(self.cmd)
 
     async def test_join(self):
