@@ -71,6 +71,7 @@ class LLMRouter:
         self.stats: Dict[str, dict] = {}
         self._latency_window: Dict[str, deque] = {}
 
+        self._providers = providers
         self._build_providers(providers)
 
         # 后台探针任务
@@ -131,14 +132,19 @@ class LLMRouter:
 
         # step1: category 隔离（隐式，通过 model_list 区分）
 
-        # step2: 熔断器过滤 + capability 交集
+        # step2: 熔断器过滤 + enabled 检查 + capability 交集
         candidates = []
         for key in model_list:
-            cb = self.circuit_breakers.get(key[0], key[1])
-            if cb and not cb.is_available():
+            pconfig = self._providers.get(key[0])
+            if pconfig and not pconfig.enabled:
                 continue
             mconfig = self._model_configs.get(key)
             if not mconfig:
+                continue
+            if not mconfig.enabled:
+                continue
+            cb = self.circuit_breakers.get(key[0], key[1])
+            if cb and not cb.is_available():
                 continue
             if not set(policy.required_capabilities).issubset(set(mconfig.capabilities)):
                 continue
@@ -172,11 +178,16 @@ class LLMRouter:
         """返回当前最佳 gen 模型（quality 降序，过滤 disabled/dead）。"""
         candidates = []
         for key in self._gen_models:
-            cb = self.circuit_breakers.get(key[0], key[1])
-            if cb and not cb.is_available():
+            pconfig = self._providers.get(key[0])
+            if pconfig and not pconfig.enabled:
                 continue
             mconfig = self._model_configs.get(key)
             if not mconfig:
+                continue
+            if not mconfig.enabled:
+                continue
+            cb = self.circuit_breakers.get(key[0], key[1])
+            if cb and not cb.is_available():
                 continue
             if "image" not in mconfig.capabilities:
                 continue

@@ -6,8 +6,14 @@ from plugins.DicePP.module.persona.llm.router import LLMRouter
 from plugins.DicePP.module.persona.llm.selection import SelectionPolicy, CHAT, SCORING
 
 
+def _make_provider_config(enabled=True):
+    pc = MagicMock()
+    pc.enabled = enabled
+    return pc
+
+
 def _make_model_config(name, category="llm", capabilities=None,
-                       quality=0.5, cost=0.5, circuit_breaker=None):
+                       quality=0.5, cost=0.5, circuit_breaker=None, enabled=True):
     mc = MagicMock()
     mc.name = name
     mc.category = category
@@ -15,6 +21,7 @@ def _make_model_config(name, category="llm", capabilities=None,
     mc.quality = quality
     mc.cost = cost
     mc.circuit_breaker = circuit_breaker
+    mc.enabled = enabled
     return mc
 
 
@@ -24,16 +31,23 @@ def _make_router_with_models(models):
     router.circuit_breakers = MagicMock()
     router.circuit_breakers.get.return_value = None  # 无熔断限制
     router._model_configs = {}
+    router._model_providers = {}
     router._llm_models = []
     router._gen_models = []
+    router._providers = {}
 
     for pname, mname, mconfig in models:
         key = (pname, mname)
+        mock_provider = MagicMock()
+        mock_provider._router_key = key
+        router._model_providers[key] = mock_provider
         router._model_configs[key] = mconfig
         if mconfig.category == "llm":
             router._llm_models.append(key)
         else:
             router._gen_models.append(key)
+        if pname not in router._providers:
+            router._providers[pname] = _make_provider_config()
 
     return router
 
@@ -140,6 +154,47 @@ class TestCircuitBreakerFilter:
 
         candidates = router.build_candidates(CHAT)
         assert len(candidates) == 1
+
+
+class TestEnabledFilter:
+    def test_provider_disabled_filters_all_models(self):
+        """Provider enabled=False 时，其下所有模型被排除。"""
+        cfg_a = _make_model_config("m1")
+        cfg_b = _make_model_config("m2")
+        router = _make_router_with_models([
+            ("p1", "m1", cfg_a),
+            ("p1", "m2", cfg_b),
+        ])
+        router._providers["p1"].enabled = False
+
+        candidates = router.build_candidates(CHAT)
+        assert len(candidates) == 0
+
+    def test_model_disabled_filters_only_that_model(self):
+        """Model enabled=False 时仅该模型被排除，同 provider 下其他模型不受影响。"""
+        cfg_a = _make_model_config("m1", enabled=False)
+        cfg_b = _make_model_config("m2")
+        router = _make_router_with_models([
+            ("p1", "m1", cfg_a),
+            ("p1", "m2", cfg_b),
+        ])
+
+        candidates = router.build_candidates(CHAT)
+        assert len(candidates) == 1
+        assert candidates[0] == ("p1", "m2")
+
+    def test_disabled_model_excluded_from_gen_provider(self):
+        """get_gen_provider 也排除 disabled 的 gen 模型。"""
+        cfg_enabled = _make_model_config("gen1", category="gen", capabilities=["image"])
+        cfg_disabled = _make_model_config("gen2", category="gen", capabilities=["image"], enabled=False)
+        router = _make_router_with_models([
+            ("p1", "gen1", cfg_enabled),
+            ("p1", "gen2", cfg_disabled),
+        ])
+
+        provider = router.get_gen_provider()
+        assert provider is not None
+        assert getattr(provider, '_router_key', None) == ("p1", "gen1")
 
 
 class TestLexicographicTieBreak:

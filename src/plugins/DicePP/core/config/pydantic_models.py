@@ -26,6 +26,7 @@ class ModelConfig(BaseModel):
     quality: float = Field(default=0.5, ge=0.0, le=1.0)
     cost: float = Field(default=0.5, ge=0.0, le=1.0)
     thinking: bool = False
+    enabled: bool = True
     circuit_breaker: Optional[CircuitBreakerConfig] = None
     max_prompt_chars: Optional[int] = Field(default=None, ge=1)
 
@@ -53,6 +54,7 @@ class ProviderConfig(BaseModel):
     base_url: str
     models: List[ModelConfig]
     max_concurrent: Optional[int] = Field(default=None, ge=1)
+    enabled: bool = True
 
 
 class PersonaConfig(BaseModel):
