@@ -37,6 +37,22 @@
   - 影响面：module/persona/agent/factory.py
   - 可选：在 NoneBot 启动事件中发送一条管理员消息
 
+### [B-260601-fb1b04] LLM 模型/provider 增加手动开关
+- 创建: 2026-06-01
+- 优先级: P2
+- 类型: feature
+- 改动量: M
+- 问题表现:
+  - 当前无单模型或单 provider 的手动 disable 机制，禁用只能删除配置
+  - 熔断器是自动机制（连续失败才触发），管理员无法主动干预路由策略
+  - 临时切换模型（如某 provider 维护中）需要改配置文件重启，不灵活
+- 工作计划:
+  - ProviderConfig 增加 enabled: bool = True 字段，ModelConfig 同理
+  - LLMRouter 三步筛选前先过滤 disabled 的 provider/model
+  - 可选：增加 NoneBot 命令 /persona model toggle 支持运行时切换（需持久化到配置）
+  - 影响面：pydantic_models.py、router.py、selection.py
+  - 风险点：运行时切换需考虑正在进行的会话如何处理
+
 ### [B-260515-dd50eb] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-05-28
 - 优先级: P2
