@@ -49,15 +49,3 @@
   - 影响面：pydantic_models.py、router.py、selection.py
   - 风险点：运行时切换需考虑正在进行的会话如何处理
 
-### [B-260529-ed2000] SQL 行映射使用位置索引 — store.py 统一重构
-- 创建: 2026-05-29
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-  - store.py 的 get_llm_traces() 使用 row[4], row[5], ..., row[25] 进行列映射，新增列后所有后续索引需手动偏移，易出错
-  - store.py 所有方法（add_message_stream、get_recent_messages 等）都用 row[N]，仅改一处造成风格不一致
-- 工作计划:
-  - 作为独立重构 PR，统一将 store.py 所有查询方法改为 sqlite3.Row 或 dict 解包，消除位置依赖
-  - 影响面: module/persona/data/store.py 所有查询方法
-

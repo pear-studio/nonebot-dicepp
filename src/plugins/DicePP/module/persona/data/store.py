@@ -113,6 +113,7 @@ class PersonaDataStore:
     async def ensure_tables(self) -> None:
         """确保所有表已创建，并对旧表名做透明迁移。"""
         persona_db = self.db
+        persona_db.row_factory = lambda cur, row: {col[0]: row[i] for i, col in enumerate(cur.description)}
         core_db = self._core_db
         # 如果旧表 persona_unified_messages 存在，先重命名到 message_stream（persona_db 侧）
         try:
@@ -170,29 +171,23 @@ class PersonaDataStore:
     # ========== 消息流表 (message_stream) ==========
 
     @staticmethod
-    def _row_to_message(row: tuple) -> UnifiedMessage:
-        """将数据库行反序列化为 UnifiedMessage。
-
-        列序与 SELECT 语句对应：
-          0:id 1:user_id 2:group_id 3:role 4:type 5:content 6:display_name
-          7:created_at 8:agent_run_id 9:turn_id 10:segment_index
-          11:segment_phase 12:image_meta
-        """
-        image_meta_raw = row[12] if len(row) > 12 else None
+    def _row_to_message(row: dict) -> UnifiedMessage:
+        """将数据库行反序列化为 UnifiedMessage（dict row_factory 模式）。"""
+        image_meta_raw = row.get("image_meta")
         image_meta = json.loads(image_meta_raw) if image_meta_raw else None
         return UnifiedMessage(
-            id=row[0],
-            user_id=row[1],
-            group_id=row[2],
-            role=row[3],
-            type=MessageType(row[4]),
-            content=row[5],
-            display_name=row[6] or "",
-            created_at=datetime.fromisoformat(row[7]) if row[7] else None,
-            agent_run_id=row[8] if len(row) > 8 else "",
-            turn_id=row[9] if len(row) > 9 else "",
-            segment_index=row[10] if len(row) > 10 else -1,
-            segment_phase=row[11] if len(row) > 11 else "",
+            id=row["id"],
+            user_id=row["user_id"],
+            group_id=row["group_id"],
+            role=row["role"],
+            type=MessageType(row["type"]),
+            content=row["content"],
+            display_name=row.get("display_name") or "",
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+            agent_run_id=row.get("agent_run_id", ""),
+            turn_id=row.get("turn_id", ""),
+            segment_index=row.get("segment_index", -1),
+            segment_phase=row.get("segment_phase", ""),
             image_meta=image_meta,
         )
 
@@ -289,7 +284,7 @@ class PersonaDataStore:
         # flatten: 从最近到最旧收集图片，直到够数
         all_images: List[dict] = []
         for row in rows:
-            msg_id, raw_meta = row[0], row[1]
+            msg_id, raw_meta = row["id"], row["image_meta"]
             if not raw_meta:
                 continue
             try:
@@ -340,18 +335,18 @@ class PersonaDataStore:
             (user_id, group_id),
         ) as cursor:
             row = await cursor.fetchone()
-            if row and row[0]:
-                return datetime.fromisoformat(row[0])
+            if row and row.get("created_at"):
+                return datetime.fromisoformat(row["created_at"])
             return None
 
     async def count_messages(self, user_id: str, group_id: str = "") -> int:
         """统计用户消息数量（使用 SELECT COUNT(*) 避免全量加载）"""
         async with self.db.execute(
-            f"SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
+            f"SELECT COUNT(*) as cnt FROM message_stream WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
             (user_id, group_id),
         ) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else 0
+            return row["cnt"] if row else 0
 
     async def get_group_messages(
         self,
@@ -450,10 +445,10 @@ class PersonaDataStore:
         async with self.db.execute(
             f"""
             SELECT
-                SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END),
-                COUNT(DISTINCT user_id),
-                COUNT(DISTINCT CASE WHEN group_id != '' THEN group_id END)
+                SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) as bot,
+                SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) as user,
+                COUNT(DISTINCT user_id) as users,
+                COUNT(DISTINCT CASE WHEN group_id != '' THEN group_id END) as groups
             FROM message_stream
             WHERE {chat_filter} AND date(created_at) = ?
             """,
@@ -461,14 +456,14 @@ class PersonaDataStore:
         ) as cursor:
             row = await cursor.fetchone()
 
-        bot = row[0] or 0
-        user = row[1] or 0
-        users = row[2] or 0
-        groups = row[3] or 0
+        bot = row["bot"] or 0
+        user = row["user"] or 0
+        users = row["users"] or 0
+        groups = row["groups"] or 0
 
         async with self.db.execute(
             f"""
-            SELECT COUNT(DISTINCT user_id)
+            SELECT COUNT(DISTINCT user_id) as new_users
             FROM message_stream
             WHERE {chat_filter} AND date(created_at) = ?
               AND user_id NOT IN (
@@ -479,7 +474,7 @@ class PersonaDataStore:
             (date, date),
         ) as cursor:
             row = await cursor.fetchone()
-        new_users = row[0] if row else 0
+        new_users = row["new_users"] if row else 0
 
         async with self.db.execute(
             f"""
@@ -511,22 +506,22 @@ class PersonaDataStore:
             "new_users": new_users,
             "groups": groups,
             "top_users": [
-                {"user_id": r[0], "display_name": r[1] or "", "cnt": r[2]}
+                {"user_id": r["user_id"], "display_name": r["name"] or "", "cnt": r["cnt"]}
                 for r in top_user_rows
             ],
             "top_groups": [
-                {"group_id": r[0], "cnt": r[1]} for r in top_group_rows
+                {"group_id": r["group_id"], "cnt": r["cnt"]} for r in top_group_rows
             ],
         }
 
     async def _prune_message_stream_private(self, user_id: str) -> set:
         """私聊按 user_id 维度保留最近 N 条。返回需清理的 cache_hash 集合。"""
         async with self.db.execute(
-            f"SELECT COUNT(*) FROM message_stream WHERE user_id = ? AND group_id = '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
+            f"SELECT COUNT(*) as cnt FROM message_stream WHERE user_id = ? AND group_id = '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
             (user_id,),
         ) as cursor:
             row = await cursor.fetchone()
-            if row and row[0] <= self._message_stream_max_per_group:
+            if row and row["cnt"] <= self._message_stream_max_per_group:
                 return set()
         # 收集被裁剪消息的图片缓存 hash
         cache_hashes = await self._collect_pruned_image_cache_hashes(user_id, "")
@@ -550,11 +545,11 @@ class PersonaDataStore:
     async def _prune_message_stream_group(self, group_id: str) -> set:
         """群聊按 group_id 维度保留最近 N 条。返回需清理的 cache_hash 集合。"""
         async with self.db.execute(
-            f"SELECT COUNT(*) FROM message_stream WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
+            f"SELECT COUNT(*) as cnt FROM message_stream WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
             (group_id,),
         ) as cursor:
             row = await cursor.fetchone()
-            if row and row[0] <= self._message_stream_max_per_group:
+            if row and row["cnt"] <= self._message_stream_max_per_group:
                 return set()
         # 收集被裁剪消息的图片缓存 hash
         cache_hashes = await self._collect_pruned_image_cache_hashes("", group_id)
@@ -601,10 +596,10 @@ class PersonaDataStore:
             ) as cursor:
                 rows = await cursor.fetchall()
             for row in rows:
-                if not row[0]:
+                if not row.get("image_meta"):
                     continue
                 try:
-                    meta_list = json.loads(row[0])
+                    meta_list = json.loads(row["image_meta"])
                     if isinstance(meta_list, list):
                         for entry in meta_list:
                             ch = entry.get("cache_hash")
@@ -738,32 +733,32 @@ class PersonaDataStore:
             traces: List[LLMTraceRecord] = []
             for row in rows:
                 traces.append(LLMTraceRecord(
-                    id=row[0],
-                    session_id=row[1],
-                    user_id=row[2],
-                    group_id=row[3],
-                    run_id=row[4] or "",
-                    model=row[5],
-                    tier=row[6],
-                    messages=row[7],
-                    response=row[8],
-                    tool_calls=row[9] or "",
-                    round_messages=row[10] or "",
-                    selected_provider=row[11] or "",
-                    selected_model=row[12] or "",
-                    selection_policy=row[13] or "",
-                    candidate_count=row[14] or 0,
-                    latency_ms=row[15],
-                    tokens_in=row[16] or 0,
-                    tokens_out=row[17] or 0,
-                    temperature=row[18],
-                    status=row[19],
-                    error=row[20] or "",
-                    reasoning_content=row[21] or "",
-                    cache_read=row[22] or 0,
-                    cache_creation=row[23] or 0,
-                    reasoning_tokens=row[24] or 0,
-                    created_at=datetime.fromisoformat(row[25]) if row[25] else None,
+                    id=row["id"],
+                    session_id=row["session_id"],
+                    user_id=row["user_id"],
+                    group_id=row["group_id"],
+                    run_id=row["run_id"] or "",
+                    model=row["model"],
+                    tier=row["tier"],
+                    messages=row["messages"],
+                    response=row["response"],
+                    tool_calls=row["tool_calls"] or "",
+                    round_messages=row["round_messages"] or "",
+                    selected_provider=row["selected_provider"] or "",
+                    selected_model=row["selected_model"] or "",
+                    selection_policy=row["selection_policy"] or "",
+                    candidate_count=row["candidate_count"] or 0,
+                    latency_ms=row["latency_ms"],
+                    tokens_in=row["tokens_in"] or 0,
+                    tokens_out=row["tokens_out"] or 0,
+                    temperature=row["temperature"],
+                    status=row["status"],
+                    error=row["error"] or "",
+                    reasoning_content=row["reasoning_content"] or "",
+                    cache_read=row["cache_read"] or 0,
+                    cache_creation=row["cache_creation"] or 0,
+                    reasoning_tokens=row["reasoning_tokens"] or 0,
+                    created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
                 ))
             return traces
 
@@ -780,12 +775,12 @@ class PersonaDataStore:
         """返回今日 LLM trace 的 token 总消耗 (tokens_in, tokens_out)"""
         today = self._wall_now().strftime("%Y-%m-%d")
         async with self.db.execute(
-            "SELECT SUM(tokens_in), SUM(tokens_out) FROM persona_llm_traces WHERE date(created_at) = ?",
+            "SELECT SUM(tokens_in) as tokens_in, SUM(tokens_out) as tokens_out FROM persona_llm_traces WHERE date(created_at) = ?",
             (today,),
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                return row[0], row[1]
+                return row["tokens_in"], row["tokens_out"]
             return None, None
 
     async def get_daily_token_usage(self, date: str) -> list[dict]:
@@ -795,10 +790,10 @@ class PersonaDataStore:
                "tokens_in": int, ...}, ...]
         """
         async with self.db.execute(
-            "SELECT selected_provider, selected_model, COUNT(*),"
-            " COALESCE(SUM(tokens_in),0), COALESCE(SUM(tokens_out),0),"
-            " COALESCE(SUM(cache_read),0), COALESCE(SUM(cache_creation),0),"
-            " COALESCE(SUM(reasoning_tokens),0)"
+            "SELECT selected_provider, selected_model, COUNT(*) as requests,"
+            " COALESCE(SUM(tokens_in),0) as tokens_in, COALESCE(SUM(tokens_out),0) as tokens_out,"
+            " COALESCE(SUM(cache_read),0) as cache_read, COALESCE(SUM(cache_creation),0) as cache_creation,"
+            " COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens"
             " FROM persona_llm_traces WHERE date(created_at) = ?"
             " GROUP BY selected_provider, selected_model"
             " ORDER BY SUM(tokens_in) + SUM(tokens_out) DESC",
@@ -807,14 +802,14 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
         return [
             {
-                "provider": row[0] or "",
-                "model": row[1] or "",
-                "requests": row[2],
-                "tokens_in": row[3],
-                "tokens_out": row[4],
-                "cache_read": row[5],
-                "cache_creation": row[6],
-                "reasoning_tokens": row[7],
+                "provider": row["selected_provider"] or "",
+                "model": row["selected_model"] or "",
+                "requests": row["requests"],
+                "tokens_in": row["tokens_in"],
+                "tokens_out": row["tokens_out"],
+                "cache_read": row["cache_read"],
+                "cache_creation": row["cache_creation"],
+                "reasoning_tokens": row["reasoning_tokens"],
             }
             for row in rows
         ]
@@ -822,11 +817,11 @@ class PersonaDataStore:
     async def get_error_summary_since(self, since_iso: str) -> list[tuple[str, int]]:
         """返回自 since_iso 以来的错误统计 [(status, count), ...]"""
         async with self.db.execute(
-            "SELECT status, COUNT(*) FROM persona_llm_traces WHERE datetime(created_at) > datetime(?) AND status != 'ok' GROUP BY status",
+            "SELECT status, COUNT(*) as count FROM persona_llm_traces WHERE datetime(created_at) > datetime(?) AND status != 'ok' GROUP BY status",
             (since_iso,),
         ) as cursor:
             rows = await cursor.fetchall()
-            return [(status, count) for status, count in rows]
+            return [(row["status"], row["count"]) for row in rows]
 
     async def get_recent_score_events(self, user_id: str, limit: int = 2) -> List[ScoreEvent]:
         """获取最近评分事件，用于趋势计算"""
@@ -845,19 +840,19 @@ class PersonaDataStore:
             events = []
             for row in reversed(list(rows)):  # Reverse to get chronological order
                 events.append(ScoreEvent(
-                    user_id=row[0],
-                    group_id=row[1],
+                    user_id=row["user_id"],
+                    group_id=row["group_id"],
                     deltas=ScoreDeltas(
-                        intimacy=row[2],
-                        passion=row[3],
-                        trust=row[4],
-                        secureness=row[5]
+                        intimacy=row["intimacy_delta"],
+                        passion=row["passion_delta"],
+                        trust=row["trust_delta"],
+                        secureness=row["secureness_delta"]
                     ),
-                    composite_before=row[6],
-                    composite_after=row[7],
-                    reason=row[8],
-                    conversation_digest=row[9] or "",
-                    created_at=datetime.fromisoformat(row[10]) if row[10] else None
+                    composite_before=row["composite_before"],
+                    composite_after=row["composite_after"],
+                    reason=row["reason"],
+                    conversation_digest=row["conversation_digest"] or "",
+                    created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None
                 ))
             return events
 
@@ -943,12 +938,14 @@ class PersonaDataStore:
         async with self._core_db.execute(
             "SELECT id, type, joined_at FROM persona_whitelist ORDER BY type, joined_at"
         ) as cursor:
-            rows = await cursor.fetchall()
+            raw_rows = await cursor.fetchall()
+            cols = [desc[0] for desc in cursor.description]
+            rows = [dict(zip(cols, r)) for r in raw_rows]
             return [
                 WhitelistEntry(
-                    id=row[0],
-                    type=row[1],
-                    joined_at=datetime.fromisoformat(row[2]) if row[2] else None
+                    id=row["id"],
+                    type=row["type"],
+                    joined_at=datetime.fromisoformat(row["joined_at"]) if row.get("joined_at") else None
                 )
                 for row in rows
             ]
@@ -967,7 +964,7 @@ class PersonaDataStore:
             (key,)
         ) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else None
+            return row["value"] if row else None
 
     async def set_setting(self, key: str, value: str) -> None:
         """设置角色级设置值"""
@@ -1029,7 +1026,7 @@ class PersonaDataStore:
             (user_id, date)
         ) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else 0
+            return row["count"] if row else 0
 
     async def increment_daily_usage(self, user_id: str, date: str) -> None:
         """增加用量"""
@@ -1111,14 +1108,14 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [
                 ScoringFailure(
-                    id=row[0],
-                    user_id=row[1],
-                    group_id=row[2],
-                    messages_count=row[3] or 0,
-                    error=row[4] or "",
-                    raw_response=row[5] or "",
-                    conversation_digest=row[6] or "",
-                    created_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    group_id=row["group_id"],
+                    messages_count=row["messages_count"] or 0,
+                    error=row["error"] or "",
+                    raw_response=row["raw_response"] or "",
+                    conversation_digest=row["conversation_digest"] or "",
+                    created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
                 )
                 for row in rows
             ]
@@ -1142,7 +1139,7 @@ class PersonaDataStore:
             (date,)
         ) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else None
+            return row["content"] if row else None
 
     async def save_diary(self, date: str, content: str) -> None:
         """保存日记"""
@@ -1221,18 +1218,18 @@ class PersonaDataStore:
             return [
                 DailyEvent(
                     date=date,
-                    event_type=row[0],
-                    description=row[1],
-                    reaction=row[2],
-                    share_desire=row[3] if row[3] is not None else 0.0,
-                    duration_minutes=row[4] if row[4] is not None else 0,
-                    created_at=datetime.fromisoformat(row[5]) if row[5] else None,
-                    system_prompt_digest=row[6] or "",
-                    raw_response=row[7] or "",
-                    energy_delta=row[8],
-                    mood_delta=row[9],
-                    health_delta=row[10],
-                    context_summary=row[11] or "",
+                    event_type=row["event_type"],
+                    description=row["description"],
+                    reaction=row["reaction"],
+                    share_desire=row["share_desire"] if row.get("share_desire") is not None else 0.0,
+                    duration_minutes=row["duration_minutes"] if row.get("duration_minutes") is not None else 0,
+                    created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+                    system_prompt_digest=row.get("system_prompt_digest") or "",
+                    raw_response=row.get("raw_response") or "",
+                    energy_delta=row.get("energy_delta"),
+                    mood_delta=row.get("mood_delta"),
+                    health_delta=row.get("health_delta"),
+                    context_summary=row.get("context_summary") or "",
                 )
                 for row in rows
             ]
@@ -1263,7 +1260,7 @@ class PersonaDataStore:
             "SELECT text FROM persona_character_state WHERE id = 1"
         ) as cursor:
             row = await cursor.fetchone()
-            raw = row[0] if row else ""
+            raw = row["text"] if row else ""
 
         if not raw:
             return CharacterState()
@@ -1308,8 +1305,8 @@ class PersonaDataStore:
                 return None
             return UserProfile(
                 user_id=user_id,
-                facts=json.loads(row[0]) if row[0] else {},
-                updated_at=datetime.fromisoformat(row[1]) if row[1] else None
+                facts=json.loads(row["facts"]) if row.get("facts") else {},
+                updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
             )
 
     async def save_user_profile(self, profile: UserProfile) -> None:
@@ -1340,17 +1337,17 @@ class PersonaDataStore:
                 return None
             return RelationshipState(
                 user_id=user_id,
-                intimacy=row[0],
-                passion=row[1],
-                trust=row[2],
-                secureness=row[3],
-                last_interaction_at=datetime.fromisoformat(row[4]) if row[4] else None,
+                intimacy=row["intimacy"],
+                passion=row["passion"],
+                trust=row["trust"],
+                secureness=row["secureness"],
+                last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
                 last_relationship_decay_applied_at=(
-                    datetime.fromisoformat(row[5]) if row[5] else None
+                    datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
                 ),
-                last_miss_sent_at=datetime.fromisoformat(row[6]) if row[6] else None,
-                peak_stage=row[7] if row[7] is not None else 0,
-                updated_at=datetime.fromisoformat(row[8]) if row[8] else None
+                last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
+                peak_stage=row["peak_stage"] if row.get("peak_stage") is not None else 0,
+                updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
             )
 
     async def init_relationship(self, user_id: str, initial_score: float = 40.0) -> RelationshipState:
@@ -1450,18 +1447,18 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [
                 RelationshipState(
-                    user_id=row[0],
-                    intimacy=row[1],
-                    passion=row[2],
-                    trust=row[3],
-                    secureness=row[4],
-                    last_interaction_at=datetime.fromisoformat(row[5]) if row[5] else None,
+                    user_id=row["user_id"],
+                    intimacy=row["intimacy"],
+                    passion=row["passion"],
+                    trust=row["trust"],
+                    secureness=row["secureness"],
+                    last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
                     last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row[6]) if row[6] else None
+                        datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
                     ),
-                    last_miss_sent_at=datetime.fromisoformat(row[7]) if row[7] else None,
-                    peak_stage=row[8] if row[8] is not None else 0,
-                    updated_at=datetime.fromisoformat(row[9]) if row[9] else None
+                    last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
+                    peak_stage=row["peak_stage"] if row.get("peak_stage") is not None else 0,
+                    updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
                 )
                 for row in rows
             ]
@@ -1491,8 +1488,8 @@ class PersonaDataStore:
             if not row:
                 return GroupActivity(group_id=group_id)
 
-            score = row[0]
-            last_interaction = datetime.fromisoformat(row[1]) if row[1] else None
+            score = row["score"]
+            last_interaction = datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None
 
             now = self._wall_now()
             decay = self._calculate_decay(now, last_interaction)
@@ -1570,10 +1567,10 @@ class PersonaDataStore:
             daily_add_date: Optional[str] = None
             daily_add_total = 0.0
         else:
-            raw_score = float(row[0])
-            last_interaction = datetime.fromisoformat(row[1]) if row[1] else None
-            daily_add_date = row[2]
-            daily_add_total = float(row[3]) if row[3] is not None else 0.0
+            raw_score = float(row["score"])
+            last_interaction = datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None
+            daily_add_date = row["daily_add_date"]
+            daily_add_total = float(row["daily_add_total"]) if row.get("daily_add_total") is not None else 0.0
 
         now = self._wall_now()
         decay = self._calculate_decay(now, last_interaction)
@@ -1641,13 +1638,13 @@ class PersonaDataStore:
             activities = []
             now = self._wall_now()
             for row in rows:
-                last_interaction = datetime.fromisoformat(row[2]) if row[2] else None
+                last_interaction = datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None
 
                 decay = self._calculate_decay(now, last_interaction)
-                score = max(0.0, row[1] - decay)
+                score = max(0.0, row["score"] - decay)
 
                 activity = GroupActivity(
-                    group_id=row[0],
+                    group_id=row["group_id"],
                     score=score,
                     last_interaction_at=last_interaction,
                 )
@@ -1668,18 +1665,18 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [
                 RelationshipState(
-                    user_id=row[0],
-                    intimacy=row[1],
-                    passion=row[2],
-                    trust=row[3],
-                    secureness=row[4],
-                    last_interaction_at=datetime.fromisoformat(row[5]) if row[5] else None,
+                    user_id=row["user_id"],
+                    intimacy=row["intimacy"],
+                    passion=row["passion"],
+                    trust=row["trust"],
+                    secureness=row["secureness"],
+                    last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
                     last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row[6]) if row[6] else None
+                        datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
                     ),
-                    last_miss_sent_at=datetime.fromisoformat(row[7]) if row[7] else None,
-                    peak_stage=row[8] if row[8] is not None else 0,
-                    updated_at=datetime.fromisoformat(row[9]) if row[9] else None,
+                    last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
+                    peak_stage=row["peak_stage"] if row.get("peak_stage") is not None else 0,
+                    updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
                 )
                 for row in rows
             ]
@@ -1711,18 +1708,18 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [
                 RelationshipState(
-                    user_id=row[0],
-                    intimacy=row[1],
-                    passion=row[2],
-                    trust=row[3],
-                    secureness=row[4],
-                    last_interaction_at=datetime.fromisoformat(row[5]) if row[5] else None,
+                    user_id=row["user_id"],
+                    intimacy=row["intimacy"],
+                    passion=row["passion"],
+                    trust=row["trust"],
+                    secureness=row["secureness"],
+                    last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
                     last_relationship_decay_applied_at=(
-                        datetime.fromisoformat(row[6]) if row[6] else None
+                        datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
                     ),
-                    last_miss_sent_at=datetime.fromisoformat(row[7]) if row[7] else None,
-                    peak_stage=row[8] if row[8] is not None else 0,
-                    updated_at=datetime.fromisoformat(row[9]) if row[9] else None
+                    last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
+                    peak_stage=row["peak_stage"] if row.get("peak_stage") is not None else 0,
+                    updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
                 )
                 for row in rows
             ]
@@ -1860,9 +1857,10 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             results = []
             for row in rows:
-                date = row[0]
-                content = row[1][:200]  # 只显示前200字
-                if len(row[1]) > 200:
+                date = row["date"]
+                raw_content = row.get("content") or ""
+                content = raw_content[:200]
+                if len(raw_content) > 200:
                     content += "..."
                 results.append(f"[{date}] {content}")
             return results
@@ -1925,27 +1923,31 @@ class PersonaDataStore:
             """,
             (user_id,)
         ) as cursor:
-            row = await cursor.fetchone()
-            if not row:
+            raw_row = await cursor.fetchone()
+            if not raw_row:
                 return None
+            cols = [desc[0] for desc in cursor.description]
+            row = dict(zip(cols, raw_row))
 
             # 解密 API Keys
-            primary_key = self.decrypt_api_key(row[1] if row[1] else None)
-            auxiliary_key = self.decrypt_api_key(row[4] if row[4] else None)
+            primary_enc = row.get("primary_api_key_encrypted")
+            auxiliary_enc = row.get("auxiliary_api_key_encrypted")
+            primary_key = self.decrypt_api_key(primary_enc) if primary_enc else None
+            auxiliary_key = self.decrypt_api_key(auxiliary_enc) if auxiliary_enc else None
 
             decrypt_failed = bool(
-                (row[1] and primary_key is None) or (row[4] and auxiliary_key is None)
+                (primary_enc and primary_key is None) or (auxiliary_enc and auxiliary_key is None)
             )
 
             return UserLLMConfig(
-                user_id=row[0],
-                primary_api_key=primary_key or "",  # 已从数据库解密
-                primary_base_url=row[2] or "",
-                primary_model=row[3] or "",
-                auxiliary_api_key=auxiliary_key or "",  # 已从数据库解密
-                auxiliary_base_url=row[5] or "",
-                auxiliary_model=row[6] or "",
-                updated_at=datetime.fromisoformat(row[7]) if row[7] else None,
+                user_id=row["user_id"],
+                primary_api_key=primary_key or "",
+                primary_base_url=row.get("primary_base_url") or "",
+                primary_model=row.get("primary_model") or "",
+                auxiliary_api_key=auxiliary_key or "",
+                auxiliary_base_url=row.get("auxiliary_base_url") or "",
+                auxiliary_model=row.get("auxiliary_model") or "",
+                updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
                 decrypt_failed=decrypt_failed,
             )
 
@@ -2076,25 +2078,7 @@ class PersonaDataStore:
             row = await cursor.fetchone()
         if not row:
             return None
-        return {
-            "run_id": row[0],
-            "turn_id": row[1],
-            "user_id": row[2],
-            "group_id": row[3],
-            "mode": row[4],
-            "status": row[5],
-            "started_at": row[6],
-            "finished_at": row[7],
-            "final_reason": row[8],
-            "provider": row[9],
-            "model": row[10],
-            "tokens_in": row[11],
-            "tokens_out": row[12],
-            "tool_rounds": row[13],
-            "warning_count": row[14],
-            "sink_failure_count": row[15],
-            "error": row[16],
-        }
+        return row  # dict row_factory 已返回与所需 key 一致的 dict
 
     async def insert_agent_event(
         self,
@@ -2132,17 +2116,6 @@ class PersonaDataStore:
             (run_id,),
         ) as cursor:
             rows = await cursor.fetchall()
-        return [
-            {
-                "id": r[0],
-                "run_id": r[1],
-                "seq": r[2],
-                "event_type": r[3],
-                "payload_json": r[4],
-                "schema_version": r[5],
-                "created_at": r[6],
-            }
-            for r in rows
-        ]
+        return rows  # dict row_factory 已返回与所需 key 一致的 dict 列表
 
 

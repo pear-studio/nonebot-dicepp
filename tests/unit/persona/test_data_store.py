@@ -183,11 +183,11 @@ class TestMessageCRUD:
 
         # 但仍在数据库中（通过原始查询验证）
         cursor = await store.db.execute(
-            "SELECT COUNT(*) FROM message_stream WHERE type = ?",
+            "SELECT COUNT(*) as cnt FROM message_stream WHERE type = ?",
             (MessageType.SYSTEM_LOG.value,),
         )
         row = await cursor.fetchone()
-        assert row[0] == 1
+        assert row["cnt"] == 1
 
 class TestWhitelistCRUD:
     """测试白名单 CRUD"""
@@ -322,7 +322,7 @@ class TestDiaryAndDailyEventsCRUD:
             "SELECT updated_at FROM persona_character_state WHERE id = 1"
         ) as cursor:
             row = await cursor.fetchone()
-            updated_at = datetime.fromisoformat(row[0])
+            updated_at = datetime.fromisoformat(row["updated_at"])
             # 应该是最近的时间，而不是 2024-01-01
             assert updated_at.year >= 2026
 
