@@ -20,7 +20,7 @@ def _make_mock_bot():
     bot.clear_expired_data = AsyncMock(return_value=[])
     bot.loc_helper.format_loc_text = MagicMock(return_value="")
     bot.send_msg_to_master = AsyncMock()
-    bot.handle_exception = MagicMock(return_value=("", ""))
+    bot.handle_exception = MagicMock(return_value=[])
     bot.data_path = "/tmp/test_bot_data"
     return bot
 
@@ -68,5 +68,6 @@ async def test_tick_daily_skips_command_on_exception():
     await Bot.tick_daily(bot, bot_commands)
 
     assert len(bot_commands) == 1
+    bot.handle_exception.assert_called_once()
     bad_cmd.tick_daily.assert_called_once()
     good_cmd.tick_daily.assert_called_once()

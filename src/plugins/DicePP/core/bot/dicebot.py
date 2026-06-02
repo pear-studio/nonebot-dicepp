@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import inspect
 import random
+import traceback
 from typing import List, Optional, Dict, Callable, Set, Awaitable, Protocol, runtime_checkable
 from random import choice
 
@@ -191,8 +192,11 @@ class Bot:
                 for command in self.command_dict.values():
                     try:
                         bot_commands += command.tick()
-                    except (AttributeError, TypeError, KeyError, RuntimeError):
-                        dice_log(str(self.handle_exception(f"Tick: {command.readable_name} CODE110")[0]))
+                    except Exception as _ex:
+                        _type = type(_ex).__name__
+                        dice_log(f"[TickLoop] 未预期异常 {_type}: {_ex}")
+                        dice_log(traceback.format_exc())
+                        bot_commands += self.handle_exception(f"Tick: {command.readable_name} CODE110 ({_type})")
 
                 if loop_begin_time - time_counter[0] > 60 * 5:  # 5分钟执行一次
                     # 更新在线时间并尝试每日更新
@@ -221,8 +225,11 @@ class Bot:
                 if self.proxy:
                     for command in bot_commands:
                         await self.proxy.process_bot_command(command)
-            except (AttributeError, TypeError, KeyError, RuntimeError):
-                bot_commands += self.handle_exception(f"Tick Loop: CODE113")
+            except Exception as _ex:
+                _type = type(_ex).__name__
+                dice_log(f"[TickLoop] 未预期异常 {_type}: {_ex}")
+                dice_log(traceback.format_exc())
+                bot_commands += self.handle_exception(f"Tick Loop: CODE113 ({_type})")
 
             # 最多每秒执行一次循环
             free_time = max(loop_begin_time + 1 - loop.time(), 0)
@@ -323,8 +330,11 @@ class Bot:
                 if inspect.isawaitable(daily_result):
                     daily_result = await daily_result
                 bot_commands += daily_result
-            except (AttributeError, TypeError, KeyError, RuntimeError):
-                dice_log(str(self.handle_exception(f"Tick Daily: {command.readable_name} CODE111")[0]))
+            except Exception as _ex:
+                _type = type(_ex).__name__
+                dice_log(f"[TickLoop] 未预期异常 {_type}: {_ex}")
+                dice_log(traceback.format_exc())
+                bot_commands += self.handle_exception(f"Tick Daily: {command.readable_name} CODE111 ({_type})")
         # 给Master发送每日更新通知（Persona 日报启用时跳过）
         # 检查 PersonaCommand 实例的实际运行状态，而非 config 静态值：
         # config.enabled=True 但 PersonaApp 初始化失败时，实例 enabled=False，
@@ -564,16 +574,6 @@ class Bot:
         bot_commands: List[BotCommandBase] = []
 
         # 统计信息 —— 从 SQLite 读取，失败则创建默认值
-        _meta_stat_row = await self.db.meta_stat.get("meta")
-        if _meta_stat_row and _meta_stat_row.data:
-            meta_stat = MetaStatInfo()
-            try:
-                meta_stat.deserialize(_meta_stat_row.data)
-            except Exception:
-                meta_stat = MetaStatInfo()
-        else:
-            meta_stat = MetaStatInfo()
-
         _user_stat_row = await self.db.user_stat.get(meta.user_id)
         if _user_stat_row and _user_stat_row.data:
             user_stat = UserStatInfo()
@@ -612,7 +612,6 @@ class Bot:
         else:
             group_stat = GroupStatInfo()
         # 统计收到的消息数量
-        meta_stat.msg.inc()
         group_stat.msg.inc()
         user_stat.msg.inc()
 
@@ -688,7 +687,6 @@ class Bot:
 
                 # 统计处理的指令情况
                 if command.flag and res_commands:
-                    meta_stat.cmd.record(command)
                     user_stat.cmd.record(command)
                     group_stat.cmd.record(command)
 
@@ -733,7 +731,6 @@ class Bot:
         # 将统计数据写回 SQLite
         try:
             await self.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=user_stat.serialize()))
-            await self.db.meta_stat.upsert(MetaStat(key="meta", data=meta_stat.serialize()))
             if meta.group_id:
                 await self.db.group_stat.upsert(GroupStat(group_id=meta.group_id, data=group_stat.serialize()))
         except Exception as _exc:

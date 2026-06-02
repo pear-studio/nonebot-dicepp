@@ -793,11 +793,16 @@ class PersonaCommand(UserCommandBase):
             loop = asyncio.get_running_loop()
 
             async def _run_daily() -> None:
-                diary = await self.app.tick_daily()
-                if diary:
-                    dice_log(f"[Persona] 生成日记: {len(diary)} 字")
-                if self.report_generator and self.config.daily_report_enabled:
-                    await self.report_generator.generate_and_send(diary)
+                try:
+                    diary = await asyncio.wait_for(self.app.tick_daily(), timeout=300)
+                    if diary:
+                        dice_log(f"[Persona] 生成日记: {len(diary)} 字")
+                    if self.report_generator and self.config.daily_report_enabled:
+                        await self.report_generator.generate_and_send(diary)
+                except asyncio.TimeoutError:
+                    dice_log("[Persona] tick_daily 超时(>5min)，日报生成失败")
+                    if self.report_generator:
+                        await self.report_generator.send_master_notification("日报生成超时(>5min)，请检查 LLM 服务状态")
 
             # 清理已完成的任务
             dt = self._async_tick_daily_task

@@ -423,3 +423,16 @@ class DailyReportGenerator:
         if not masters:
             return None
         return masters[0]
+
+    async def send_master_notification(self, msg: str) -> None:
+        """发送简短通知给 Master"""
+        master_id = self._get_master_id()
+        if not master_id:
+            return
+        try:
+            await self._port.send(
+                master_id, "", f"[Persona] {msg}",
+                message_type=MessageType.SYSTEM_LOG,
+            )
+        except Exception:
+            logger.exception("send_master_notification 失败")
