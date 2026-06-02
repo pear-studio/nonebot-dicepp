@@ -96,7 +96,7 @@ class TestCapabilityFilter:
         assert len(candidates) == 1
 
     def test_superset_capability_passes(self):
-        cfg = _make_model_config("m1", capabilities=["text", "tool_calls", "vision"])
+        cfg = _make_model_config("m1", capabilities=["text", "tool_calls", "image_input"])
         router = _make_router_with_models([("p1", "m1", cfg)])
         candidates = router.build_candidates(SCORING)
         assert len(candidates) == 1
@@ -195,6 +195,57 @@ class TestEnabledFilter:
         provider = router.get_gen_provider()
         assert provider is not None
         assert getattr(provider, '_router_key', None) == ("p1", "gen1")
+
+
+class TestBuildProvidersEnabledFilter:
+    """_build_providers 构造阶段即跳过 disabled 的 provider/model。"""
+
+    def test_disabled_provider_not_built(self):
+        """pconfig.enabled=False 时整个 provider 不注册信号量/统计。"""
+        enabled_model = _make_model_config("m1")
+        disabled_model = _make_model_config("m2")
+
+        enabled_provider = _make_provider_config(enabled=True)
+        enabled_provider.api_key = "k1"
+        enabled_provider.base_url = "http://a"
+        enabled_provider.max_concurrent = None
+        enabled_provider.models = [enabled_model]
+
+        disabled_provider = _make_provider_config(enabled=False)
+        disabled_provider.api_key = "k2"
+        disabled_provider.base_url = "http://b"
+        disabled_provider.max_concurrent = None
+        disabled_provider.models = [disabled_model]
+
+        router = LLMRouter(
+            providers={"on": enabled_provider, "off": disabled_provider},
+            global_max_concurrent=1,
+        )
+
+        assert "on" in router._semaphores
+        assert "off" not in router._semaphores
+        assert "on" in router.stats
+        assert "off" not in router.stats
+
+    def test_disabled_model_not_built(self):
+        """mconfig.enabled=False 时该模型不加入 _llm_models。"""
+        enabled_model = _make_model_config("m_on")
+        disabled_model = _make_model_config("m_off", enabled=False)
+
+        provider = _make_provider_config(enabled=True)
+        provider.api_key = "k1"
+        provider.base_url = "http://a"
+        provider.max_concurrent = None
+        provider.models = [enabled_model, disabled_model]
+
+        router = LLMRouter(
+            providers={"p": provider},
+            global_max_concurrent=1,
+        )
+
+        keys = router._llm_models
+        assert ("p", "m_on") in keys
+        assert ("p", "m_off") not in keys
 
 
 class TestLexicographicTieBreak:

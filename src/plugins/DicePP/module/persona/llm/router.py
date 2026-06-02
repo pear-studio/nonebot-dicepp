@@ -81,17 +81,21 @@ class LLMRouter:
         logger.info(
             f"LLMRouter 初始化完成: {len(self._llm_models)} LLM 模型, "
             f"{len(self._gen_models)} gen 模型, "
-            f"{len(providers)} providers"
+            f"{sum(1 for p in providers.values() if p.enabled)} providers"
         )
 
     def _build_providers(self, providers: Dict[str, ProviderConfig]) -> None:
         for pname, pconfig in providers.items():
+            if not pconfig.enabled:
+                continue
             max_conc = pconfig.max_concurrent if pconfig.max_concurrent is not None else self.global_max_concurrent
             self._semaphores[pname] = asyncio.Semaphore(max_conc)
             self.stats[pname] = {"requests": 0, "errors": 0}
             self._latency_window[pname] = deque(maxlen=100)
 
             for mconfig in pconfig.models:
+                if not mconfig.enabled:
+                    continue
                 key = (pname, mconfig.name)
                 cb_config = mconfig.circuit_breaker
                 self.circuit_breakers.get_or_create(
