@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from typing import List, Tuple
+from xml.sax.saxutils import unescape
 
 from core.command.parse_result import CommandParseResult, MentionInfo, MessageSegment
 
@@ -27,7 +28,7 @@ def _parse_cq_params(params_str: str) -> dict:
     """将 CQ 参数字符串解析为字典，如 "qq=12345,name=测试" → {"qq": "12345", "name": "测试"}"""
     if not params_str:
         return {}
-    return {m.group(1): m.group(2) for m in _CQ_PARAM_RE.finditer(params_str)}
+    return {m.group(1): unescape(m.group(2)) for m in _CQ_PARAM_RE.finditer(params_str)}
 
 
 def extract_segments(raw_msg: str) -> List[MessageSegment]:
