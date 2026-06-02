@@ -131,7 +131,7 @@ class MiniMaxImageProvider:
                 )
                 return resp.status_code in (200, 400, 401, 403, 404, 422)
         except Exception as e:
-            logger.debug(f"image gen probe failed: {e}")
+            logger.debug(f"image gen probe failed for {self.model}: {type(e).__name__}: {e}", exc_info=True)
             return False
 
     @staticmethod

@@ -6,8 +6,7 @@ LLM 路由器
 from __future__ import annotations
 
 import asyncio
-import random
-from collections import deque
+from collections import defaultdict, deque
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from nonebot.log import logger
@@ -361,35 +360,62 @@ class LLMRouter:
     # ── 启动探针 ──────────────────────────────────────────────
 
     async def probe_all_models(self) -> Dict[tuple, bool]:
-        """启动时并行 probe 所有模型。返回 {key: success}。"""
-        async def _probe_one(key):
-            await asyncio.sleep(random.uniform(0, 2))
-            provider = self._model_providers.get(key)
-            if provider and hasattr(provider, 'probe'):
-                try:
-                    return key, await asyncio.wait_for(provider.probe(), timeout=10)
-                except Exception:
-                    return key, False
-            return key, False
+        """启动时按 (api_key, base_url) 分组、组内串行 1s 错峰、组间并行的方式 probe。
 
-        tasks = [_probe_one(key) for key in list(self._model_providers.keys())]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        行为对比之前的 random.uniform(0, 2) 抖动：
+        - 之前：每模型独立 0-2s 随机延迟，全局仍是 N 路并发。
+        - 现在：同 api_key 下请求确定 1s 间距，跨 api_key 仍并行；行为可预测、可测试。
+        """
+        groups: Dict[tuple, list] = defaultdict(list)
+        for key, provider in self._model_providers.items():
+            api_key = getattr(provider, "api_key", "")
+            base_url = getattr(provider, "base_url", "")
+            groups[(api_key, base_url)].append(key)
+
+        async def _probe_one(key):
+            provider = self._model_providers.get(key)
+            if not (provider and hasattr(provider, 'probe')):
+                return key, False
+            try:
+                return key, await asyncio.wait_for(provider.probe(), timeout=10)
+            except Exception as e:
+                logger.debug(
+                    f"probe failed for {key[0]}/{key[1]}: {type(e).__name__}: {e}",
+                    exc_info=True,
+                )
+                return key, False
+
+        async def _probe_group(group_keys):
+            results = []
+            for i, key in enumerate(group_keys):
+                if i > 0:
+                    await asyncio.sleep(1)
+                results.append(await _probe_one(key))
+            return results
+
+        group_results = await asyncio.gather(
+            *(_probe_group(g) for g in groups.values()),
+            return_exceptions=True,
+        )
 
         outcome: Dict[tuple, bool] = {}
-        for r in results:
+        for r in group_results:
             if isinstance(r, BaseException):
+                logger.error(
+                    f"probe group failed: {type(r).__name__}: {r}",
+                    exc_info=r,
+                )
                 continue
-            key, success = r
-            outcome[key] = success
-            if not success:
+            for key, success in r:
+                outcome[key] = success
                 cb = self.circuit_breakers.get(key[0], key[1])
-                if cb:
+                if not cb:
+                    continue
+                if success:
+                    cb.record_success()
+                else:
                     cb.mark_disabled("startup probe failed")
                     cb.on_probe_start()
-            else:
-                cb = self.circuit_breakers.get(key[0], key[1])
-                if cb:
-                    cb.record_success()
 
         return outcome
 

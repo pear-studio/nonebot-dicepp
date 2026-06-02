@@ -248,7 +248,8 @@ class OpenAIProvider:
                 timeout=10,
             )
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"probe failed for {self.model}: {type(e).__name__}: {e}", exc_info=True)
             return False
 
     @staticmethod

@@ -4,6 +4,7 @@
 """
 import asyncio
 import os
+from enum import Enum
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 from nonebot.log import logger
@@ -173,6 +174,29 @@ class _Infra:
     router: LLMRouter
     port: MessagePort
     segment_dispatcher: Optional[SegmentDispatcher]
+
+
+class _StartupStatus(str, Enum):
+    """启动汇总里模型条目的状态枚举。"""
+    OK = "ok"
+    FAIL = "fail"
+    DISABLED = "disabled"
+
+
+_STATUS_PREFIX: Dict[_StartupStatus, str] = {
+    _StartupStatus.OK: "[OK]",
+    _StartupStatus.FAIL: "[FAIL]",
+    _StartupStatus.DISABLED: "[OFF]",
+}
+
+
+def _status_note(status: _StartupStatus) -> str:
+    """根据状态返回附加说明文本。"""
+    if status is _StartupStatus.OK:
+        return ""
+    if status is _StartupStatus.FAIL:
+        return " (probe 失败)"
+    return " (已禁用)"
 
 
 @dataclass
@@ -522,17 +546,30 @@ async def _startup_summary(
     infra: _Infra,
     bot: Bot,
 ) -> None:
-    """输出启动汇总：结构化日志 + master 消息（仅可用模型）"""
+    """输出启动汇总：结构化日志 + master 消息（仅可用模型）。
+
+    状态语义：
+    - OK: enabled 且 probe 成功
+    - FAIL: enabled 但 probe 失败
+    - DISABLED: provider 或 model 配置为 enabled=False（不会触发 probe）
+    """
     llm_entries: List[tuple] = []
     gen_entries: List[tuple] = []
     for pname, pconfig in providers.items():
         for mconfig in pconfig.models:
-            key = (pname, mconfig.name)
-            ok = probe_results.get(key, False)
+            if not pconfig.enabled or not mconfig.enabled:
+                status = _StartupStatus.DISABLED
+            else:
+                key = (pname, mconfig.name)
+                status = (
+                    _StartupStatus.OK
+                    if probe_results.get(key, False)
+                    else _StartupStatus.FAIL
+                )
             if mconfig.category == "llm":
-                llm_entries.append((pname, mconfig, ok))
+                llm_entries.append((pname, mconfig, status))
             elif mconfig.category == "gen":
-                gen_entries.append((pname, mconfig, ok))
+                gen_entries.append((pname, mconfig, status))
 
     desc = character.description or ""
     if len(desc) > 60:
@@ -543,19 +580,24 @@ async def _startup_summary(
     lines.append(f"角色卡: {character.name}" + (f" — {desc}" if desc else ""))
 
     if llm_entries:
-        lines.append(f"LLM 模型 ({len(llm_entries)}):")
-        for pname, mconfig, ok in llm_entries:
-            status = "✅" if ok else "❌"
+        ok_count = sum(1 for _, _, s in llm_entries if s is _StartupStatus.OK)
+        fail_count = sum(1 for _, _, s in llm_entries if s is _StartupStatus.FAIL)
+        lines.append(f"LLM 模型 ({ok_count} 可用 / {fail_count} 失败 / {len(llm_entries)} 总计):")
+        for pname, mconfig, status in llm_entries:
             thinking_note = " (thinking: on)" if getattr(mconfig, "thinking", False) else ""
-            fail_note = "" if ok else " (probe 失败)"
-            lines.append(f"  {status} {pname}/{mconfig.name}{thinking_note}{fail_note}")
+            lines.append(
+                f"  {_STATUS_PREFIX[status]} {pname}/{mconfig.name}"
+                f"{thinking_note}{_status_note(status)}"
+            )
 
     if gen_entries:
-        lines.append(f"图像生成模型 ({len(gen_entries)}):")
-        for pname, mconfig, ok in gen_entries:
-            status = "✅" if ok else "❌"
-            fail_note = "" if ok else " (probe 失败)"
-            lines.append(f"  {status} {pname}/{mconfig.name}{fail_note}")
+        ok_count = sum(1 for _, _, s in gen_entries if s is _StartupStatus.OK)
+        fail_count = sum(1 for _, _, s in gen_entries if s is _StartupStatus.FAIL)
+        lines.append(f"图像生成模型 ({ok_count} 可用 / {fail_count} 失败 / {len(gen_entries)} 总计):")
+        for pname, mconfig, status in gen_entries:
+            lines.append(
+                f"  {_STATUS_PREFIX[status]} {pname}/{mconfig.name}{_status_note(status)}"
+            )
 
     lines.append("════════════════════════════════════")
 
@@ -566,15 +608,27 @@ async def _startup_summary(
     if not master_ids:
         return
 
-    available_llm = [f"{p}/{m.name}" for p, m, ok in llm_entries if ok]
-    available_gen = [f"{p}/{m.name}" for p, m, ok in gen_entries if ok]
+    available_llm = [f"{p}/{m.name}" for p, m, s in llm_entries if s is _StartupStatus.OK]
+    failed_llm = [f"{p}/{m.name}" for p, m, s in llm_entries if s is _StartupStatus.FAIL]
+    available_gen = [f"{p}/{m.name}" for p, m, s in gen_entries if s is _StartupStatus.OK]
+    failed_gen = [f"{p}/{m.name}" for p, m, s in gen_entries if s is _StartupStatus.FAIL]
 
     msg_lines = ["Persona AI 启动完成"]
     msg_lines.append(f"角色卡: {character.name}" + (f" — {desc}" if desc else ""))
+
+    # 全失败告警（开 LLM 全部不可用时单独提示）
+    if llm_entries and not available_llm and failed_llm:
+        msg_lines.append(
+            f"[ALERT] 所有 {len(failed_llm)} 个 LLM 模型 probe 失败"
+        )
     if available_llm:
         msg_lines.append(f"可用 LLM: {', '.join(available_llm)}")
+    if failed_llm:
+        msg_lines.append(f"不可用 (probe 失败): {', '.join(failed_llm)}")
     if available_gen:
         msg_lines.append(f"可用图像生成: {', '.join(available_gen)}")
+    if failed_gen:
+        msg_lines.append(f"不可用 (probe 失败): {', '.join(failed_gen)}")
 
     try:
         await infra.port.send(
