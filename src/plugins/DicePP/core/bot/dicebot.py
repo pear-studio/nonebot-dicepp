@@ -633,11 +633,14 @@ class Bot:
                         should_proc, should_pass, hint = await command.can_process_msg(msg_cur, meta)
                     else:
                         should_proc, should_pass, hint = command.can_process_msg(msg_cur, meta)
-                except (AttributeError, TypeError, ValueError):
-                    # 发现未处理的错误, 汇报给主Master
+                except Exception as e:
+                    # 抓全所有异常类型（原限定 3 种会导致 KeyError/OSError/asyncio.TimeoutError
+                    # 等逃到 nonebot 事件循环无任何日志，与"沉默"行为吻合）。
+                    # 与 process_msg:686 同步扩展。
                     should_proc, should_pass, hint = False, False, None
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
                     group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"
+                    dice_log(f"[Bot] can_process_msg 未处理异常: {type(e).__name__}: {e}")
                     bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info}出错位置:{command.readable_name}\n错误代码：CODE100")
                 if not should_proc:
                     continue
@@ -679,10 +682,12 @@ class Bot:
                 try:
                     res_commands = await command.process_msg(msg_cur, meta, hint)
                     bot_commands += res_commands
-                except (AttributeError, TypeError, ValueError, RuntimeError):
-                    # 发现未处理的错误, 汇报给主Master
+                except Exception as e:
+                    # 抓全所有异常类型（原限定 4 种会导致 KeyError/OSError/asyncio.TimeoutError
+                    # 等逃到 nonebot 事件循环无任何日志，与"沉默"行为吻合）
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
                     group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"
+                    dice_log(f"[Bot] 未处理异常上报 master: {type(e).__name__}: {e}")
                     bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info} CODE101")
 
                 # 统计处理的指令情况

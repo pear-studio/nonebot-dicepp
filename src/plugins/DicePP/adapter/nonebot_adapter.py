@@ -3,10 +3,12 @@ NoneBot API https://v2.nonebot.dev/api/plugin.html
 """
 from typing import List, Dict, Optional, Any
 import asyncio
+import traceback
 from fastapi import FastAPI
 
 import nonebot
 from nonebot import on_message, on_notice, on_request
+from nonebot.log import logger
 from nonebot.rule import Rule
 from nonebot.adapters.onebot.v11.event import MessageEvent, PrivateMessageEvent, GroupMessageEvent
 from nonebot.adapters.onebot.v11.event import NoticeEvent, GroupIncreaseNoticeEvent, FriendAddNoticeEvent, GroupRecallNoticeEvent
@@ -20,7 +22,7 @@ from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, 
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotSendForwardMsgCommand, BotSendFileCommand
-from utils.logger import dice_log
+from utils.logger import dice_log, _request_id_var
 
 from module.common.log_command import delete_log_record_by_message_id
 
@@ -107,7 +109,7 @@ class NoneBotClientProxy(ClientProxy):
         except ActionFailed as e:
             dice_log(f"[OneBot] [ActionFailed] {e}")
         except Exception as e:
-            dice_log(f"[OneBot] [UnknownException] {e}")
+            dice_log(f"[OneBot] [UnknownException] {e}\n{traceback.format_exc()}")
 
     async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
         from core.message_types import MessageType
@@ -117,7 +119,12 @@ class NoneBotClientProxy(ClientProxy):
         skip_hook = getattr(command, "skip_history_record", False)
 
         for target in command.targets:
+            rid = _request_id_var.get()
             if target.group_id:
+                logger.bind(request_id=rid).info(
+                    f"[OneBot] send_group_msg -> group_id={target.group_id}"
+                    f" msg_len={len(command.msg)}"
+                )
                 await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
                 if not skip_hook:
                     await _trigger_post_send_hooks(
@@ -125,6 +132,10 @@ class NoneBotClientProxy(ClientProxy):
                         "assistant", msg_type_val, command.msg, "我", msg_id,
                     )
             else:
+                logger.bind(request_id=rid).info(
+                    f"[OneBot] send_private_msg -> user_id={target.user_id}"
+                    f" msg_len={len(command.msg)}"
+                )
                 await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
                 if not skip_hook:
                     await _trigger_post_send_hooks(
@@ -405,6 +416,7 @@ else:
 
     @driver.on_bot_disconnect
     async def disconnect(bot: NoneBot) -> None:
+        dice_log(f"[NB Adapter] Bot {bot.self_id} Disconnected!")
         await all_bots[bot.self_id].shutdown_async()
 
 # ================= Recall Sync Support ==================

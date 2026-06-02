@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Callable, Any, Awaitable, TypeVar, Generic, List, Literal
 import asyncio
 from nonebot.log import logger
+from utils.logger import _request_id_var
 from .errors import classify
 
 T = TypeVar("T")
@@ -91,6 +92,11 @@ class LLMCallCoordinator:
                          循环最终失败 → SubmitResult.failed()
             pending caller（发现 executing=True）→ SubmitResult.buffered()
         """
+        rid = _request_id_var.get()
+        logger.bind(request_id=rid).debug(
+            f"[Persona] coordinator.submit enter: target={target_key}"
+            f" message_len={len(message) if message else 0}"
+        )
         lock = self._get_lock(target_key)
         async with lock:
             if self._executing.get(target_key, False):
@@ -99,8 +105,8 @@ class LLMCallCoordinator:
                         self._pending_messages[target_key] = []
                     self._pending_messages[target_key].append(message)
                 self._has_buffered[target_key] = True
-                logger.debug(
-                    f"coordinator: target={target_key} 正在执行中，标记 buffered"
+                logger.bind(request_id=rid).debug(
+                    f"[Persona] coordinator: target={target_key} 正在执行中，标记 buffered"
                 )
                 return SubmitResult.buffered()
             self._executing[target_key] = True

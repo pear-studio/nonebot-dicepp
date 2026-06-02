@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from nonebot.log import logger
 
 from utils.string import estimate_tokens
+from utils.logger import _request_id_var
 
 from ..data.store import PersonaDataStore
 from ..data.models import (
@@ -107,6 +108,7 @@ class ChatSession:
         for k in expired:
             self._last_messages.pop(k, None)
 
+        response: Optional[str] = None
         try:
             is_chat_message = not message.startswith(".") or message.lower().startswith(".ai")
 
@@ -118,7 +120,8 @@ class ChatSession:
                 if msgs:
                     msg = random.choice(msgs)
                     logger.info(f"睡眠门控触发: user={user_id}, character={self.character.name}")
-                    return msg
+                    response = msg
+                    return response
 
             if self.config.relationship_refuse_enabled and is_chat_message:
                 if group_id:
@@ -153,10 +156,18 @@ class ChatSession:
                                         f"冷淡拒绝触发: user={user_id}, score={score:.2f}, "
                                         f"p_refuse={p_refuse:.2%}"
                                     )
-                                    return refuse_response
+                                    response = refuse_response
+                                    return response
 
             target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
 
+            rid = _request_id_var.get()
+            logger.bind(request_id=rid).debug(
+                f"[Persona] ChatSession.chat enter: user={user_id} group={group_id}"
+                f" message_len={len(message) if message else 0}"
+                f" image_count={len(image_data_urls) if image_data_urls else 0}"
+                f" target_key={target_key}"
+            )
             response = await self._chat_via_coordinator(user_id, group_id, message, target_key, image_data_urls=image_data_urls)
             return response
 
@@ -164,7 +175,15 @@ class ChatSession:
             raise
         except Exception as exc:
             logger.exception("对话处理失败")
-            return "抱歉，我出错了，请稍后再试..."
+            response = "抱歉，我出错了，请稍后再试..."
+            return response
+        finally:
+            rid = _request_id_var.get()
+            logger.bind(request_id=rid).debug(
+                f"[Persona] ChatSession.chat return: user={user_id}"
+                f" return_type={type(response).__name__}"
+                f" return_len={len(response) if response else 0}"
+            )
 
     async def clear_history(self, user_id: str, group_id: str) -> None:
         """清空对话历史"""
@@ -199,9 +218,20 @@ class ChatSession:
 
         await self._after_response(user_id, group_id, current_message, response)
 
+        rid = _request_id_var.get()
         if self._delivery_performed:
+            logger.bind(request_id=rid).debug(
+                f"[Persona] _coordinator_chat_call_fn return: user={user_id}"
+                f" delivery_performed=True will_return_empty=True"
+                f" dropped_response_len={len(response) if response else 0}"
+            )
             return ""
 
+        logger.bind(request_id=rid).debug(
+            f"[Persona] _coordinator_chat_call_fn return: user={user_id}"
+            f" delivery_performed=False will_return_empty=False"
+            f" response_len={len(response) if response else 0}"
+        )
         return response
 
     async def _coordinator_on_exhausted(
@@ -222,6 +252,11 @@ class ChatSession:
         await self._response_handler.persist_and_send(user_id, group_id, fallback_response)
         await self._after_response(user_id, group_id, current_message, fallback_response)
         if self._response_handler.port is not None:
+            rid = _request_id_var.get()
+            logger.bind(request_id=rid).info(
+                f"[Persona] _delivery_performed set True: user={user_id}"
+                f" source=on_exhausted"
+            )
             self._delivery_performed = True
             return ""
         else:
@@ -276,6 +311,11 @@ class ChatSession:
            → coordinator 跑 3 轮 → 3 次扣费
         """
         if self._delivery_performed:
+            rid = _request_id_var.get()
+            logger.bind(request_id=rid).info(
+                f"[Persona] _delivery_performed set False: user={user_id}"
+                f" source=on_result"
+            )
             self._delivery_performed = False
             return
 
@@ -313,9 +353,19 @@ class ChatSession:
             on_exhausted=on_exhausted,
             on_result=_on_result,
         )
+        rid = _request_id_var.get()
         if result.status == "success":
             # 计费由 UsageSink 在 AgentRuntime 内 best effort 处理。
+            logger.bind(request_id=rid).info(
+                f"[Persona] _chat_via_coordinator return: user={user_id}"
+                f" result.status=success fallback_used=False"
+                f" value_len={len(result.value) if result.value else 0}"
+            )
             return result.value
+        logger.bind(request_id=rid).info(
+            f"[Persona] _chat_via_coordinator return: user={user_id}"
+            f" result.status={result.status} fallback_used={fallback_response is not None}"
+        )
         return fallback_response if fallback_response is not None else None
 
     # ── 工具调用 ──────────────────────────────────────────────
@@ -360,6 +410,11 @@ class ChatSession:
             return "抱歉，我出错了，请稍后再试..."
 
         if result.delivery_performed and result.final_reason != "direct_content":
+            rid = _request_id_var.get()
+            logger.bind(request_id=rid).info(
+                f"[Persona] _delivery_performed set True: user={user_id}"
+                f" source=on_chat_with_tools final_reason={result.final_reason}"
+            )
             self._delivery_performed = True
 
         return result.final_text

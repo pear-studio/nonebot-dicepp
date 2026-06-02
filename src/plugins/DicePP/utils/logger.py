@@ -1,7 +1,8 @@
 import sys
 import traceback
 import re
-from typing import List
+import contextvars
+from typing import List, Optional
 
 
 def dice_log(*args, **kwargs):
@@ -18,5 +19,14 @@ def get_exception_info() -> List[str]:
     msg = traceback.format_exception(et, ev, tb)
     for i, m in enumerate(msg):
         msg[i] = re.sub(r'File ".*DicePP(.*)"', lambda match: str(match.groups()[-1])[1:], m).strip()
-        msg[i] = re.sub(r", in.*\s{2,}", lambda match: str(match.group()).strip()+": ", msg[i])
+        msg[i] = re.sub(r", in.*\s{2,}", lambda match: str(match.group()).strip()+": ", m)
     return msg[1:]
+
+
+# 单次 chat 请求的 trace_id 上下文（最小实现，不抽公共 wrapper）
+# 在 process_msg 入口 _request_id_var.set()，finally 块 _request_id_var.reset()。
+# asyncio task 之间通过 contextvars 自动传播，无需手动传参。
+# 调用方直接使用 logger.bind(request_id=_request_id_var.get()).info(...) 注入结构化字段。
+_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "chat_request_id", default="--------",
+)
