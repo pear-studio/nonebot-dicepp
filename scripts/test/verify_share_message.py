@@ -270,7 +270,7 @@ async def run():
         global_cfg = json.load(f)
     persona_cfg = global_cfg.get("persona_ai", {})
     base_url = persona_cfg.get("primary_base_url", "https://api.minimaxi.com/v1")
-    model = persona_cfg.get("primary_model", "MiniMax-M2.7")
+    model = persona_cfg.get("primary_model", "MiniMax-M3")
 
     print(f"模型: {model}")
     print(f"端点: {base_url}")

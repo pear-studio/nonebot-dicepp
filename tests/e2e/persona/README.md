@@ -8,7 +8,7 @@
 
 1. `config/secrets.json` 中配置有效的 `persona_ai.primary_api_key`
 2. `config/secrets.json` 中配置 `primary_base_url`（如 `https://api.minimaxi.com/v1`）
-3. `config/secrets.json` 中配置 `primary_model`（如 `MiniMax-M2.7`）
+3. `config/secrets.json` 中配置 `primary_model`（如 `MiniMax-M3`）
 
 示例 `config/secrets.json`：
 
@@ -17,7 +17,7 @@
   "persona_ai": {
     "primary_api_key": "sk-your-key-here",
     "primary_base_url": "https://api.minimaxi.com/v1",
-    "primary_model": "MiniMax-M2.7"
+    "primary_model": "MiniMax-M3"
   }
 }
 ```

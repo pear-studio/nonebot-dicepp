@@ -6,7 +6,7 @@
 前置条件：
 - config/secrets.json 中配置有效的 persona_ai.primary_api_key
 - config/secrets.json 中配置 persona_ai.primary_base_url（如 https://api.minimaxi.com/v1）
-- config/secrets.json 中配置 persona_ai.primary_model（如 MiniMax-M2.7）
+- config/secrets.json 中配置 persona_ai.primary_model（如 MiniMax-M3）
 
 运行方式：
     # 作为 pytest 测试运行（有 API key 时执行，无时自动跳过）
@@ -132,7 +132,7 @@ async def _run_full_day_lifecycle() -> dict:
     """执行完整一天模拟，返回收集的结果供断言。"""
     api_key = _API_CFG["primary_api_key"]
     base_url = _API_CFG.get("primary_base_url", "https://api.minimaxi.com/v1")
-    model = _API_CFG.get("primary_model", "MiniMax-M2.7")
+    model = _API_CFG.get("primary_model", "MiniMax-M3")
 
     results: dict = {
         "events": [],
@@ -327,7 +327,7 @@ if __name__ == "__main__":
     if not _HAS_API_KEY:
         print("ERROR: 未找到 API Key。请在 config/secrets.json 中配置 persona_ai.primary_api_key")
         print("示例配置:")
-        print('  {"persona_ai": {"primary_api_key": "sk-xxx", "primary_base_url": "https://api.minimaxi.com/v1", "primary_model": "MiniMax-M2.7"}}')
+        print('  {"persona_ai": {"primary_api_key": "sk-xxx", "primary_base_url": "https://api.minimaxi.com/v1", "primary_model": "MiniMax-M3"}}')
         sys.exit(1)
 
     async def _main():

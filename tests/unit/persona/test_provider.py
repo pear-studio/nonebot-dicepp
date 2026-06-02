@@ -214,19 +214,6 @@ class TestOpenAIProvider:
         assert result.reasoning_content is None
 
     @pytest.mark.asyncio
-    async def test_reasoning_details_fallback(self, provider):
-        """MiniMax reasoning_details 回退路径：无 reasoning_content 时从 reasoning_details 拼接"""
-        resp = self._mock_openai_response(content="answer")
-        del resp.choices[0].message.reasoning_content
-        resp.choices[0].message.reasoning_details = [{"text": "step one"}, {"text": "step two"}]
-        mock_client = Mock()
-        mock_client.chat.completions.create = AsyncMock(return_value=resp)
-        provider._client = mock_client
-
-        result = await provider.generate(messages=[{"role": "user", "content": "hi"}])
-        assert result.reasoning_content == "step one\nstep two"
-
-    @pytest.mark.asyncio
     async def test_output_tokens_equals_reasoning_tokens(self, provider):
         """completion_tokens == reasoning_tokens 时 output 应为 0（纯推理无文本输出）"""
         resp = self._mock_openai_response(content="", completion_tokens=100)

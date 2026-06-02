@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from nonebot.log import logger
 
-from .providers import _PROVIDER_CLASSES
+from .providers import _PROVIDER_CLASSES, _PROVIDER_OVERRIDES
 from .providers.protocol import ImageGenProvider
 from .errors import classify_from_provider
 from .circuit_breaker import CircuitBreakerRegistry
@@ -100,7 +100,11 @@ class LLMRouter:
                     probe_interval_seconds=cb_config.probe_interval_seconds if cb_config else 300,
                 )
 
-                provider_cls = _PROVIDER_CLASSES.get(mconfig.category)
+                provider_cls = _PROVIDER_OVERRIDES.get((pname, mconfig.category))
+                if provider_cls is None:
+                    provider_cls = _PROVIDER_CLASSES.get(mconfig.category)
+                else:
+                    logger.info(f"模型 '{mconfig.name}' (provider={pname}) 使用覆盖 {provider_cls.__name__}")
                 if provider_cls is None:
                     logger.warning(
                         f"模型 '{mconfig.name}' (provider={pname}) 跳过: "

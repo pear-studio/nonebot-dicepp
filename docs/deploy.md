@@ -442,7 +442,7 @@ make logs
     "minimax": {
       "base_url": "https://api.minimaxi.com/v1",
       "models": [
-        {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
+        {"name": "MiniMax-M3", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
       ]
     }
   },
@@ -468,8 +468,8 @@ make logs
 **⚠️ 重要**：`secrets.json` 与 `global.json` 是**深度合并**，只需在 `secrets.json` 中放置敏感字段（如 API key），其他配置保留在 `global.json` 中即可。
 
 **支持的模型**（MiniMax）：
-- `MiniMax-M2.7` - 标准版
-- `MiniMax-M2.7-highspeed` - 高速版
+- `MiniMax-M3` - 标准版
+- `MiniMax-M3-t` - 思考版（自适应推理）
 
 ### 验证 DicePP 是否正常工作
 
@@ -542,7 +542,7 @@ pip install docker-compose
 
 #### 回复包含 `<think>` 标签
 **症状**：回复中显示思考过程
-**原因**：MiniMax-M2.7 模型的思维链输出
+**原因**：MiniMax-M3 模型的思维链输出
 **解决**：代码已自动过滤 `<think>...</think>` 标签
 
 #### 配置未生效

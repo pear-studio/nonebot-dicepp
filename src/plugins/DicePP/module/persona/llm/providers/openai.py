@@ -122,18 +122,7 @@ class OpenAIProvider:
         if temperature is not None and not thinking:
             create_kwargs["temperature"] = temperature
 
-        # 构建 extra_body
-        extra_body: Dict[str, Any] = {}
-
-        # 仅在 thinking=True 时注入，不支持 thinking 的 API 不会收到意外参数
-        if thinking:
-            extra_body["thinking"] = {"type": "enabled"}
-
-        # TODO: 当引入 MiniMaxProvider 子类时，将以下 MiniMax 特殊逻辑迁移
-        # MiniMax reasoning_split 强制启用，确保 thinking 内容不混入 content
-        if "minimax" in (self.base_url or "").lower():
-            extra_body.setdefault("reasoning_split", True)
-
+        extra_body = self._build_extra_body(thinking)
         if extra_body:
             create_kwargs["extra_body"] = extra_body
 
@@ -146,19 +135,9 @@ class OpenAIProvider:
         message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason or "stop"
 
-        # 提取 reasoning_content（使用 getattr + 类型检查，兼容 Mock 和真实 API response）
-        raw_reasoning = getattr(message, "reasoning_content", None)
-        reasoning = raw_reasoning if isinstance(raw_reasoning, str) else None
+        reasoning = self._extract_reasoning(message)
 
-        # MiniMax reasoning_details 兼容（reasoning_split=True 时）
-        if not reasoning:
-            raw_details = getattr(message, "reasoning_details", None)
-            if isinstance(raw_details, list):
-                reasoning = "\n".join(
-                    d["text"] for d in raw_details if isinstance(d, dict) and d.get("text")
-                ) or None
-
-        # content 直接使用（三家 API 在 reasoning_split=True 下均为干净文本）
+        # content 直接使用（MiniMax 通过 reasoning_split=True 确保分离；其他 API 默认行为即干净文本）
         content = message.content or ""
 
         # 检查：如果 tool_calls 出现在 reasoning_content 里，记录警告
@@ -198,6 +177,18 @@ class OpenAIProvider:
             reasoning_content=reasoning,
             latency_ms=latency * 1000,
         )
+
+    def _build_extra_body(self, thinking: bool) -> dict:
+        """构建 extra_body，子类可覆盖以注入 provider 特定参数。"""
+        extra: dict = {}
+        if thinking:
+            extra["thinking"] = {"type": "enabled"}
+        return extra
+
+    def _extract_reasoning(self, message) -> Optional[str]:
+        """从 message 提取推理内容，子类可覆盖以兼容不同格式。"""
+        raw = getattr(message, "reasoning_content", None)
+        return raw if isinstance(raw, str) else None
 
     def _extract_usage(self, response) -> TokenUsage:
         if not response.usage:

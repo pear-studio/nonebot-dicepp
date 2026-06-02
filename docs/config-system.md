@@ -69,7 +69,7 @@ cp config/bots/_template.json config/bots/你的QQ号.json
       "minimax": {
         "base_url": "https://api.minimaxi.com/v1",
         "models": [
-          {"name": "MiniMax-M2.7", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
+          {"name": "MiniMax-M3", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.7, "cost": 0.5}
         ]
       }
     },

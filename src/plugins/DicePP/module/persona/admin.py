@@ -425,7 +425,7 @@ class AdminDispatcher:
 
         model_ref = args[2]
         if "/" not in model_ref:
-            return f"格式错误，请使用 provider/model 格式（如 minimax/MiniMax-M2.7），实际: {model_ref}"
+            return f"格式错误，请使用 provider/model 格式（如 minimax/MiniMax-M3），实际: {model_ref}"
         parts = model_ref.split("/", 1)
         provider_name, model_name = parts[0], parts[1]
 
