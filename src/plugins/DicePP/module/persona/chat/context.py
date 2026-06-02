@@ -278,13 +278,9 @@ class ContextBuilder:
             role = msg.get("role", "user")
             if role == "assistant":
                 flush_buffer()
-                ts = format_timestamp(msg.get("created_at"), now)
-                rel = format_relative_time(msg.get("created_at"), now)
-                extra = f" {rel}" if rel else ""
-                prefix = f"[{ts}{extra}] " if ts else ""
                 entry: Dict[str, str] = {
                     "role": "assistant",
-                    "content": f"{prefix}{msg['content']}",
+                    "content": msg["content"],
                 }
                 run_id = msg.get("agent_run_id", "")
                 if run_id:
@@ -327,13 +323,9 @@ class ContextBuilder:
             role = msg.get("role", "user")
             if role == "assistant":
                 flush_buffer()
-                ts = format_timestamp(msg.get("created_at"), now)
-                rel = format_relative_time(msg.get("created_at"), now)
-                extra = f" {rel}" if rel else ""
-                prefix = f"[{ts}{extra}] " if ts else ""
                 entry: Dict[str, str] = {
                     "role": "assistant",
-                    "content": f"{prefix}{msg['content']}",
+                    "content": msg["content"],
                 }
                 run_id = msg.get("agent_run_id", "")
                 if run_id:

@@ -14,14 +14,6 @@
 
 ## persona
 
-### [B-260602-e78f1d] LLM 回复带时间戳前缀 [HH:MM 刚刚]
-- 创建: 2026-06-02
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现: bot 回复自动带 [HH:MM 刚刚] 前缀，如 [15:42 刚刚] ……下午好。根因: context.py _format_private_history 和 _format_group_history 给 assistant 历史消息注入了 format_timestamp 时间戳前缀 (context.py:280-287, 265-273, session.py:441-445)。LLM 看到自己的历史回复都以此格式开头，学会模仿。这是 prompt 格式设计问题，assistant 历史消息不应带时间戳。
-- 工作计划: 在 _format_private_history / _format_group_history 中，仅给 user 消息注入时间戳前缀，assistant 消息不加。影响面: context.py 两个 format 方法
-
 ### [B-260602-4263c4] user_stat/group_stat 的 read-modify-write 写竞争
 - 创建: 2026-06-02
 - 优先级: P1
