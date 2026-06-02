@@ -87,7 +87,7 @@ class AgentRuntime:
         return await self._run_internal(
             messages=messages, user_id=user_id, group_id=group_id,
             tool_registry=tool_registry, mode="segmented_chat",
-            tools=tools, tool_use_mode=ToolUseMode.REQUIRED,
+            tools=tools, tool_use_mode=ToolUseMode.AUTO,
             required_tools=None,
             selection=selection,
             temperature=temperature, timeout=timeout,

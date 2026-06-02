@@ -10,7 +10,6 @@ class ToolUseMode(str, Enum):
     """模型工具策略 — 替代旧 provider tool_choice 硬编码"""
 
     AUTO = "auto"
-    REQUIRED = "required"
     REQUIRED_ONE_OF = "required_one_of"
 
 

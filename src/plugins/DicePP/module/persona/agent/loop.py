@@ -195,7 +195,7 @@ class AgentLoop:
 
             required_tool_output = (
                 bool(tools)
-                and tool_use_mode in {ToolUseMode.REQUIRED, ToolUseMode.REQUIRED_ONE_OF}
+                and tool_use_mode == ToolUseMode.REQUIRED_ONE_OF
             )
 
             # ── L1 纠正：要求工具输出时，不能直接输出文本或空响应 ──

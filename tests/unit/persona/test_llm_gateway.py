@@ -200,7 +200,8 @@ class TestLLMGateway:
         assert provider.generate.call_args.kwargs["tool_choice"] == "auto"
 
     @pytest.mark.asyncio
-    async def test_required_tool_mode_passes_required_choice(self, gateway, mock_router):
+    async def test_required_tool_mode_passes_auto_choice(self, gateway, mock_router):
+        """REQUIRED_ONE_OF 也不传 "required"——thinking 模型不兼容，由 loop L1 纠正兜底"""
         provider = Mock()
         provider.generate = AsyncMock(return_value=_make_llm_resp(content="hello"))
         mock_router.build_candidates.return_value = [("p1", "m1")]
@@ -215,7 +216,19 @@ class TestLLMGateway:
         )
         await gateway.complete(req, state)
 
-        assert provider.generate.call_args.kwargs["tool_choice"] == "required"
+        assert provider.generate.call_args.kwargs["tool_choice"] == "auto"
+
+    def test_tool_choice_for_no_tools_returns_none(self):
+        """tools=None 时 _tool_choice_for 返回 None"""
+        from plugins.DicePP.module.persona.agent.llm_gateway import _tool_choice_for
+        req = _make_request(tools=None)
+        assert _tool_choice_for(req) is None
+
+    def test_tool_choice_for_empty_tools_returns_none(self):
+        """tools=[] 时 _tool_choice_for 返回 None"""
+        from plugins.DicePP.module.persona.agent.llm_gateway import _tool_choice_for
+        req = _make_request(tools=[])
+        assert _tool_choice_for(req) is None
 
     @pytest.mark.asyncio
     async def test_increment_usage(self, mock_router, mock_event_store):

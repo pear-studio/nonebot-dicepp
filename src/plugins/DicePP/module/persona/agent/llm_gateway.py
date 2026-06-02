@@ -286,8 +286,7 @@ def _normalize_tool_calls(resp: LLMResponse) -> List[dict]:
 def _tool_choice_for(request: LLMRequest) -> Optional[str]:
     if not request.tools:
         return None
-    if request.tool_use_mode == ToolUseMode.AUTO:
-        return "auto"
-    if request.tool_use_mode in {ToolUseMode.REQUIRED, ToolUseMode.REQUIRED_ONE_OF}:
-        return "required"
-    return None
+    # 始终使用 "auto"，不依赖 API 层 tool_choice 强制工具调用——
+    # thinking 模型不兼容 "required"，且 REQUIRED_ONE_OF 的强制语义
+    # 由 AgentLoop L1 纠正 + 同名校验承担，层次更清晰。
+    return "auto"

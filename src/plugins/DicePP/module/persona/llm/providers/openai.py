@@ -117,7 +117,8 @@ class OpenAIProvider:
         }
         if tools:
             create_kwargs["tools"] = tools
-            create_kwargs["tool_choice"] = tool_choice or "auto"
+            if tool_choice is not None:
+                create_kwargs["tool_choice"] = tool_choice
         # thinking 模式下跳过 temperature（MiMo/DeepSeek 静默忽略，但主动跳过更安全）
         if temperature is not None and not thinking:
             create_kwargs["temperature"] = temperature
