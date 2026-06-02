@@ -342,9 +342,6 @@ class PersonaCommand(UserCommandBase):
         # 不调用 LLM 的工具类命令：无需白名单
         if cmd in ("clear", "status", "profile", "mute"):
             return True, False, None
-        if cmd == "":
-            return False, False, None
-
         # 聊天触发（@bot）：无需 .ai 前缀，也无需白名单以外的命令
         if meta.to_me and not msg.startswith(".ai"):
             is_private = not meta.group_id
@@ -424,11 +421,6 @@ class PersonaCommand(UserCommandBase):
             response = await self._handle_mute_toggle(user_id)
         elif content == "key" or content.startswith("key "):
             response = "用户自定义 API Key 功能升级中，暂不可用。当前所有对话使用全局 provider 配置。"
-        elif not content:
-            if is_at_trigger:
-                response = await self._get_status(user_id, group_id, is_private)
-            else:
-                response = self._get_introduction()
         elif is_at_trigger:
             if self.app and self.enabled:
                 try:
@@ -442,13 +434,16 @@ class PersonaCommand(UserCommandBase):
                             f" image_count={len(image_data_urls)} user={user_id}"
                         )
 
-                    response = await self.app.chat_with_user(
-                        user_id=user_id,
-                        group_id=group_id,
-                        message=content,
-                        nickname=nickname,
-                        image_data_urls=image_data_urls,
-                    )
+                    if not content and not image_data_urls:
+                        response = await self._get_status(user_id, group_id, is_private)
+                    else:
+                        response = await self.app.chat_with_user(
+                            user_id=user_id,
+                            group_id=group_id,
+                            message=content,
+                            nickname=nickname,
+                            image_data_urls=image_data_urls,
+                        )
                 except QuotaExceeded as e:
                     dice_log(f"[Persona] 配额超限: user={user_id}, group={group_id}")
                     response = str(e)

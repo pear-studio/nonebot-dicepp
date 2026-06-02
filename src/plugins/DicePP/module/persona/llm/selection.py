@@ -43,6 +43,6 @@ SUMMARIZE = SelectionPolicy(
     prefer_quality=False, prefer_cost=True,
 )
 CHAT_WITH_IMAGE = SelectionPolicy(
-    category="llm", required_capabilities=("text", "tool_calls", "vision"),
+    category="llm", required_capabilities=("text", "tool_calls", "image_input"),
     prefer_quality=True, prefer_cost=False,
 )

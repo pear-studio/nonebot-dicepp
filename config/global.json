@@ -84,8 +84,8 @@
         "api_key": "",
         "base_url": "https://api.minimaxi.com/v1",
         "models": [
-          {"name": "MiniMax-M3",   "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.4, "cost": 0.3},
-          {"name": "MiniMax-M3-t", "api_model": "MiniMax-M3", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.5, "cost": 0.4, "thinking": true}
+          {"name": "MiniMax-M3",   "category": "llm", "capabilities": ["text", "tool_calls", "image_input"], "quality": 0.4, "cost": 0.3},
+          {"name": "MiniMax-M3-t", "api_model": "MiniMax-M3", "category": "llm", "capabilities": ["text", "tool_calls", "image_input"], "quality": 0.5, "cost": 0.4, "thinking": true}
         ]
       },
       "deepseek": {
