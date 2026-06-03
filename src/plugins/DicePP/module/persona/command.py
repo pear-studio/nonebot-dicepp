@@ -429,7 +429,7 @@ class PersonaCommand(UserCommandBase):
                 if self.app and self.enabled:
                     try:
                         # 检测当前消息中的图片（始终下载）
-                        _, image_data_urls = await resolve_images(
+                        image_meta, image_data_urls = await resolve_images(
                             meta.raw_msg, self.image_cache, force_download=True,
                         )
                         if image_data_urls:
@@ -439,7 +439,32 @@ class PersonaCommand(UserCommandBase):
                             )
 
                         if not content and not image_data_urls:
-                            response = await self._get_status(user_id, group_id, is_private)
+                            if image_meta:
+                                has_non_emoji = any(
+                                    not ImageCache.is_emoji(e.get("sub_type", ""))
+                                    for e in image_meta
+                                )
+                                if has_non_emoji:
+                                    # 有非表情图片但全部下载失败
+                                    response = await self.app.chat_with_user(
+                                        user_id=user_id,
+                                        group_id=group_id,
+                                        message="[图片下载失败，请重试]",
+                                        nickname=nickname,
+                                        image_data_urls=None,
+                                    )
+                                else:
+                                    # 全部是表情：默认不下载，提示 LLM 让它决定如何回应
+                                    response = await self.app.chat_with_user(
+                                        user_id=user_id,
+                                        group_id=group_id,
+                                        message="[表情包]",
+                                        nickname=nickname,
+                                        image_data_urls=None,
+                                    )
+                            else:
+                                # 真的没发任何内容（纯 @bot 无附带）
+                                response = await self._get_status(user_id, group_id, is_private)
                         else:
                             logger.bind(request_id=_request_id_var.get()).debug(
                                 f"[Persona] chat enter: user={user_id} group={group_id}"

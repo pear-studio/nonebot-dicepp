@@ -186,3 +186,115 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
         # response is None → 在群活跃度更新之前 return [],store 不被触达
         self.store.update_group_activity.assert_not_awaited()
         self.cmd._send.assert_not_awaited()
+
+
+@pytest.mark.unit
+class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
+    """B-260602-4d9e05 回归: 纯表情/纯图片下载失败时不应再回退到 _get_status"""
+
+    async def asyncSetUp(self):
+        self.bot = self.make_mock_bot()
+        self.cmd = self.make_cmd(self.bot)
+        self.store = AsyncMock()
+        self.cmd.data_store = self.store
+        self.cmd._send = AsyncMock()
+
+        self.cmd.app = MagicMock()
+        self.cmd.app.chat_with_user = AsyncMock(return_value="收到表情包啦")
+
+        # 让 image_cache 走真实路径但行为可控：emoji 默认跳过，其他图片成功
+        from plugins.DicePP.module.persona.image_cache import ImageCache
+        self.cmd.image_cache = ImageCache()
+        # 使用临时目录避免污染 data/persona_images
+        import tempfile
+        self._tmp = tempfile.mkdtemp()
+        self.cmd.image_cache.IMAGE_DIR = self._tmp
+
+    async def test_private_emoji_only_routes_to_chat_with_hint(self):
+        """私聊纯表情 (sub_type=1) → chat_with_user 收到 [表情包] 文本提示"""
+        raw = "[CQ:image,file=CA59D5,subType=1,url=http://x.com/e.png,file_size=98936]"
+        meta = MessageMetaData(plain_msg="", raw_msg=raw,
+                               sender=MessageSender("u1", "测试用户"),
+                               group_id="", to_me=True)
+        await self.cmd.process_msg("", meta, None)
+
+        self.cmd.app.chat_with_user.assert_awaited_once()
+        call_kwargs = self.cmd.app.chat_with_user.await_args.kwargs
+        assert call_kwargs["message"] == "[表情包]"
+        assert call_kwargs["image_data_urls"] is None
+
+    async def test_group_at_emoji_routes_to_chat_with_hint(self):
+        """群 @bot + 表情 → chat_with_user 收到 [表情包] 文本提示, 不回退 status"""
+        raw = "[CQ:at,qq=bot] [CQ:image,file=CA59D5,subType=1,url=http://x.com/e.png,file_size=98936]"
+        meta = MessageMetaData(plain_msg="", raw_msg=raw,
+                               sender=MessageSender("u1", "测试用户"),
+                               group_id="g1", to_me=True)
+        await self.cmd.process_msg("", meta, None)
+
+        self.cmd.app.chat_with_user.assert_awaited_once()
+        call_kwargs = self.cmd.app.chat_with_user.await_args.kwargs
+        assert call_kwargs["message"] == "[表情包]"
+
+    async def test_private_regular_image_falls_back_to_chat(self):
+        """私聊纯 sub_type=0 图片（下载成功）→ 正常进 chat_with_user，image_data_urls 非空"""
+        from unittest.mock import patch
+        fake_content = b"\x89PNG\r\n"
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.content = fake_content
+        fake_response.headers = {"content-type": "image/png"}
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=fake_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        raw = "[CQ:image,file=IMG,subType=0,url=http://x.com/i.png,file_size=1234]"
+        meta = MessageMetaData(plain_msg="", raw_msg=raw,
+                               sender=MessageSender("u1", "测试用户"),
+                               group_id="", to_me=True)
+
+        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+            await self.cmd.process_msg("", meta, None)
+
+        self.cmd.app.chat_with_user.assert_awaited_once()
+        call_kwargs = self.cmd.app.chat_with_user.await_args.kwargs
+        # 正常路径：message 是用户原文(空)，image_data_urls 是真实 data URL
+        assert call_kwargs["image_data_urls"] is not None
+        assert len(call_kwargs["image_data_urls"]) == 1
+        assert call_kwargs["image_data_urls"][0].startswith("data:image/")
+
+    async def test_private_mixed_emoji_and_image_download_failed(self):
+        """混合 emoji + 普通图片，全部下载失败 → [图片下载失败，请重试]"""
+        from unittest.mock import patch
+        fake_response = MagicMock()
+        fake_response.status_code = 404
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=fake_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        raw = (
+            "[CQ:image,file=E,subType=1,url=http://x.com/e.png,file_size=98936]"
+            "[CQ:image,file=I,subType=0,url=http://x.com/i.png,file_size=1234]"
+        )
+        meta = MessageMetaData(plain_msg="", raw_msg=raw,
+                               sender=MessageSender("u1", "测试用户"),
+                               group_id="", to_me=True)
+
+        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+            await self.cmd.process_msg("", meta, None)
+
+        self.cmd.app.chat_with_user.assert_awaited_once()
+        call_kwargs = self.cmd.app.chat_with_user.await_args.kwargs
+        assert call_kwargs["message"] == "[图片下载失败，请重试]"
+        assert call_kwargs["image_data_urls"] is None
+
+    async def test_private_truly_empty_message_still_returns_status(self):
+        """私聊纯 @bot (raw_msg 无图片段) → 仍走 _get_status（无内容）"""
+        meta = self.make_private_meta("", user_id="u1")
+        meta.raw_msg = ""  # 显式置空，避免有内容
+        await self.cmd.process_msg("", meta, None)
+
+        self.cmd.app.chat_with_user.assert_not_awaited()
+        # _send 被调用, 内容是 status 报告
+        assert self.cmd._send.await_args is not None

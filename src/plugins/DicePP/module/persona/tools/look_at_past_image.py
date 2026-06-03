@@ -6,6 +6,7 @@ import json
 from typing import Any, Dict
 
 from utils.logger import dice_log
+from ..image_cache import ImageCache
 from .context import ToolContext
 from .registry import ToolDef
 
@@ -15,7 +16,8 @@ LOOK_AT_PAST_IMAGE_TOOL = ToolDef(
     description=(
         "查看对话历史中用户发送的图片。"
         "image_index=1 表示最近一张，2=倒数第二张。"
-        "仅限当前上下文窗口内的图片。表情无法查看。"
+        "仅限当前上下文窗口内的图片。表情（QQ 贴纸）默认不入库，"
+        "调用本工具时会按需下载并解码返回。"
     ),
     parameters={
         "type": "object",
@@ -71,11 +73,7 @@ async def look_at_past_image_executor(args: Dict[str, Any], ctx: ToolContext) ->
 
     # 取目标图片（image_index=1 → meta_list[0]）
     target = meta_list[image_index - 1]
-
-    # 表情包不可查看
-    if target.get("sub_type") == "1":
-        dice_log(f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id} error=sticker")
-        return json.dumps({"error": "该消息为表情，无法查看"}, ensure_ascii=False)
+    is_emoji = ImageCache.is_emoji(target.get("sub_type", ""))
 
     # 检查缓存
     image_cache = store.image_cache
@@ -86,9 +84,9 @@ async def look_at_past_image_executor(args: Dict[str, Any], ctx: ToolContext) ->
         if data_url:
             cache_hit = True
 
-    # 缓存未命中 → 按需下载
+    # 缓存未命中 → 按需下载（表情强制走 force_emoji=True 绕过默认跳过）
     if not data_url and image_cache:
-        await image_cache.download_and_cache([target])
+        await image_cache.download_and_cache([target], force_emoji=is_emoji)
         if target.get("cache_hash"):
             data_url = image_cache.read_cache(target["cache_hash"])
             # 持久化 cache_hash，避免下次重复下载
@@ -104,13 +102,13 @@ async def look_at_past_image_executor(args: Dict[str, Any], ctx: ToolContext) ->
     if not data_url:
         dice_log(
             f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id}"
-            f" error=download_failed"
+            f" error=download_failed sub_type={target.get('sub_type', '')}"
         )
         return json.dumps({"error": "图片下载失败（URL 可能已过期）"}, ensure_ascii=False)
 
     dice_log(
         f"[LookAtPastImage] 成功: image_index={image_index} user={ctx.user_id}"
-        f" cache_hit={cache_hit}"
+        f" cache_hit={cache_hit} is_emoji={is_emoji}"
     )
     return json.dumps(
         {"image_index": image_index, "data_url": data_url},

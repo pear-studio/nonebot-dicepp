@@ -239,6 +239,30 @@ class TestImageCache:
         meta = [{"url": "http://example.com/emoji.png", "sub_type": "1", "cache_hash": None}]
         await cache.download_and_cache(meta)
         assert meta[0].get("cache_hash") is None
+        # 默认跳过应打上 download_status 标记，便于日志/统计区分
+        assert meta[0].get("download_status") == "skipped_emoji"
+
+    @pytest.mark.asyncio
+    async def test_download_and_cache_force_emoji_downloads(self, cache, cache_dir):
+        """force_emoji=True 时表情按需下载（供 LLM 工具主动请求）"""
+        fake_content = b"\x89PNG\r\n"
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.content = fake_content
+        fake_response.headers = {"content-type": "image/gif"}
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=fake_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+            meta = [{"url": "http://example.com/emoji.png", "sub_type": "1", "cache_hash": None}]
+            await cache.download_and_cache(meta, force_emoji=True)
+
+        assert meta[0].get("cache_hash") is not None
+        assert meta[0].get("download_status") != "skipped_emoji"
+        assert (cache_dir / f"{meta[0]['cache_hash']}.b64").exists()
 
     @pytest.mark.asyncio
     async def test_download_and_cache_skips_already_cached(self, cache, cache_dir):
