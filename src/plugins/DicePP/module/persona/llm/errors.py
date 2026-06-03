@@ -46,7 +46,7 @@ _INPUT_ERROR_KINDS: frozenset[ErrorKind] = frozenset([ErrorKind.CONTENT_FILTERED
 
 _RECOVERY_MAP = {
     ErrorKind.QUOTA_EXCEEDED: RecoveryAction.ABORT,
-    ErrorKind.CONTENT_FILTERED: RecoveryAction.ABORT,
+    ErrorKind.CONTENT_FILTERED: RecoveryAction.SWITCH_CANDIDATE,
     ErrorKind.CONTEXT_TOO_LONG: RecoveryAction.COMPACT_RETRY,
     ErrorKind.RATE_LIMITED: RecoveryAction.SWITCH_CANDIDATE,
     ErrorKind.TEMPORARILY_DOWN: RecoveryAction.SWITCH_CANDIDATE,
