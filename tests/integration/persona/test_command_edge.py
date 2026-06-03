@@ -202,7 +202,7 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
         self.cmd.app = MagicMock()
         self.cmd.app.chat_with_user = AsyncMock(return_value="收到表情包啦")
 
-        # 让 image_cache 走真实路径但行为可控：emoji 默认跳过，其他图片成功
+        # 让 image_cache 走真实路径但行为可控：chat 路径 force_emoji=True 强制下载表情
         from plugins.DicePP.module.persona.image_cache import ImageCache
         self.cmd.image_cache = ImageCache()
         # 使用临时目录避免污染 data/persona_images
@@ -210,30 +210,59 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
         self._tmp = tempfile.mkdtemp()
         self.cmd.image_cache.IMAGE_DIR = self._tmp
 
-    async def test_private_emoji_only_routes_to_chat_with_hint(self):
-        """私聊纯表情 (sub_type=1) → chat_with_user 收到 [表情包] 文本提示"""
+    async def test_private_emoji_downloaded_and_passed_to_chat(self):
+        """私聊纯表情 (sub_type=1) → force_emoji 下载后作为 data URL 传入 chat_with_user"""
+        from unittest.mock import patch
+        fake_content = b"\x89PNG\r\n"
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.content = fake_content
+        fake_response.headers = {"content-type": "image/gif"}
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=fake_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
         raw = "[CQ:image,file=CA59D5,subType=1,url=http://x.com/e.png,file_size=98936]"
         meta = MessageMetaData(plain_msg="", raw_msg=raw,
                                sender=MessageSender("u1", "测试用户"),
                                group_id="", to_me=True)
-        await self.cmd.process_msg("", meta, None)
+
+        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+            await self.cmd.process_msg("", meta, None)
 
         self.cmd.app.chat_with_user.assert_awaited_once()
         call_kwargs = self.cmd.app.chat_with_user.await_args.kwargs
-        assert call_kwargs["message"] == "[表情包]"
-        assert call_kwargs["image_data_urls"] is None
+        assert call_kwargs["image_data_urls"] is not None
+        assert len(call_kwargs["image_data_urls"]) == 1
+        assert call_kwargs["image_data_urls"][0].startswith("data:image/")
 
-    async def test_group_at_emoji_routes_to_chat_with_hint(self):
-        """群 @bot + 表情 → chat_with_user 收到 [表情包] 文本提示, 不回退 status"""
+    async def test_group_at_emoji_downloaded_and_passed_to_chat(self):
+        """群 @bot + 表情 → force_emoji 下载后作为 data URL 传入 chat_with_user"""
+        from unittest.mock import patch
+        fake_content = b"\x89PNG\r\n"
+        fake_response = MagicMock()
+        fake_response.status_code = 200
+        fake_response.content = fake_content
+        fake_response.headers = {"content-type": "image/gif"}
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=fake_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
         raw = "[CQ:at,qq=bot] [CQ:image,file=CA59D5,subType=1,url=http://x.com/e.png,file_size=98936]"
         meta = MessageMetaData(plain_msg="", raw_msg=raw,
                                sender=MessageSender("u1", "测试用户"),
                                group_id="g1", to_me=True)
-        await self.cmd.process_msg("", meta, None)
+
+        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+            await self.cmd.process_msg("", meta, None)
 
         self.cmd.app.chat_with_user.assert_awaited_once()
         call_kwargs = self.cmd.app.chat_with_user.await_args.kwargs
-        assert call_kwargs["message"] == "[表情包]"
+        assert call_kwargs["image_data_urls"] is not None
+        assert len(call_kwargs["image_data_urls"]) == 1
+        assert call_kwargs["image_data_urls"][0].startswith("data:image/")
 
     async def test_private_regular_image_falls_back_to_chat(self):
         """私聊纯 sub_type=0 图片（下载成功）→ 正常进 chat_with_user，image_data_urls 非空"""
