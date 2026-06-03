@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from nonebot.log import logger
 
 from utils.string import estimate_tokens
-from utils.logger import _request_id_var
+from utils.logger import _request_id_var, dice_log
 
 from ..data.store import PersonaDataStore
 from ..data.models import (
@@ -242,6 +242,8 @@ class ChatSession:
         last_exception: Optional[Exception] = None,
     ) -> str:
         """coordinator 耗尽时的兜底回复。"""
+        if last_exception is not None:
+            dice_log(f"[Persona] coordinator on_exhausted: exception={type(last_exception).__name__}: {last_exception}")
         if isinstance(last_exception, QuotaExceeded):
             fallback_response = (
                 f"{last_exception}\n\n"
@@ -406,7 +408,7 @@ class ChatSession:
         )
 
         if result.status != "completed":
-            logger.error(f"AgentRun 失败: status={result.status}, reason={result.final_reason}")
+            dice_log(f"[Persona] AgentRun 失败: status={result.status}, reason={result.final_reason}")
             return "抱歉，我出错了，请稍后再试..."
 
         if result.delivery_performed and result.final_reason != "direct_content":

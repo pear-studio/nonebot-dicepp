@@ -181,6 +181,8 @@ class AgentLoop:
                     run_id=state.run_id,
                 )
             except Exception as e:
+                from utils.logger import dice_log as _dlog
+                _dlog(f"[AgentLoop] LLM 调用失败: {type(e).__name__}: {e}")
                 logger.error(f"AgentLoop LLM 调用失败: {e}")
                 return await self._finish(state, "failed", "llm_error", total_tokens_in, total_tokens_out, is_error=True)
 

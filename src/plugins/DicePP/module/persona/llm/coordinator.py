@@ -180,6 +180,8 @@ class LLMCallCoordinator:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                from utils.logger import dice_log as _dlog
+                _dlog(f"[Coordinator] call_fn 异常: {type(e).__name__}: {e}")
                 if not classify(e).is_retryable:
                     failures = self.max_failures
                 else:

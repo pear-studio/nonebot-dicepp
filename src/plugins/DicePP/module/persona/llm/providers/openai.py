@@ -127,10 +127,36 @@ class OpenAIProvider:
         if extra_body:
             create_kwargs["extra_body"] = extra_body
 
-        response = await asyncio.wait_for(
-            client.chat.completions.create(**create_kwargs),
-            timeout=timeout,
-        )
+        try:
+            response = await asyncio.wait_for(
+                client.chat.completions.create(**create_kwargs),
+                timeout=timeout,
+            )
+        except Exception as e:
+            import json
+            error_msg = str(e)
+            has_image = any(
+                isinstance(m.get("content"), list)
+                for m in messages
+            )
+            debug_info = {
+                "error_type": type(e).__name__,
+                "error_msg": error_msg[:500],
+                "model": self.model,
+                "message_count": len(messages),
+                "has_image_content": has_image,
+                "has_tools": bool(tools),
+                "tool_count": len(tools) if tools else 0,
+                "total_text_chars": sum(
+                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+                    for m in messages
+                ),
+            }
+            logger.error(
+                f"[DEBUG_API_ERROR] LLM API 调用异常: "
+                f"{json.dumps(debug_info, ensure_ascii=False)}"
+            )
+            raise
 
         latency = time.monotonic() - start_time
         message = response.choices[0].message
