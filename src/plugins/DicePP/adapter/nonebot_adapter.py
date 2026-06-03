@@ -8,7 +8,6 @@ from fastapi import FastAPI
 
 import nonebot
 from nonebot import on_message, on_notice, on_request
-from nonebot.log import logger
 from nonebot.rule import Rule
 from nonebot.adapters.onebot.v11.event import MessageEvent, PrivateMessageEvent, GroupMessageEvent
 from nonebot.adapters.onebot.v11.event import NoticeEvent, GroupIncreaseNoticeEvent, FriendAddNoticeEvent, GroupRecallNoticeEvent
@@ -22,7 +21,7 @@ from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, 
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotSendForwardMsgCommand, BotSendFileCommand
-from utils.logger import dice_log, _request_id_var
+from utils.logger import logger
 
 from module.common.log_command import delete_log_record_by_message_id
 
@@ -87,7 +86,7 @@ async def _trigger_post_send_hooks(
                 msg_id=msg_id,
             )
         except Exception as e:
-            dice_log(f"[PostSendHook] 记录失败: {e}")
+            logger.error(f"[PostSendHook] 记录失败: {e}")
 
 
 class NoneBotClientProxy(ClientProxy):
@@ -103,13 +102,13 @@ class NoneBotClientProxy(ClientProxy):
         }
 
     async def process_bot_command(self, command: BotCommandBase) -> None:
-        dice_log(f"[OneBot] [BotCommand] {command}")
+        logger.debug(f"[OneBot] [BotCommand] {command}")
         try:
             await super().process_bot_command(command)
         except ActionFailed as e:
-            dice_log(f"[OneBot] [ActionFailed] {e}")
+            logger.info(f"[OneBot] [ActionFailed] {e}")
         except Exception as e:
-            dice_log(f"[OneBot] [UnknownException] {e}\n{traceback.format_exc()}")
+            logger.error(f"[OneBot] [UnknownException] {e}\n{traceback.format_exc()}")
 
     async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
         from core.message_types import MessageType
@@ -119,9 +118,8 @@ class NoneBotClientProxy(ClientProxy):
         skip_hook = getattr(command, "skip_history_record", False)
 
         for target in command.targets:
-            rid = _request_id_var.get()
             if target.group_id:
-                logger.bind(request_id=rid).info(
+                logger.info(
                     f"[OneBot] send_group_msg -> group_id={target.group_id}"
                     f" msg_len={len(command.msg)}"
                 )
@@ -132,7 +130,7 @@ class NoneBotClientProxy(ClientProxy):
                         "assistant", msg_type_val, command.msg, "我", msg_id,
                     )
             else:
-                logger.bind(request_id=rid).info(
+                logger.info(
                     f"[OneBot] send_private_msg -> user_id={target.user_id}"
                     f" msg_len={len(command.msg)}"
                 )
@@ -212,13 +210,13 @@ class NoneBotClientProxy(ClientProxy):
                         await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name)
                     primary_done = True
                 except Exception as e1:
-                    dice_log(f"[OneBot][Upload][PrimaryFail] group={target.group_id} file={real_name} err={e1}")
+                    logger.info(f"[OneBot][Upload][PrimaryFail] group={target.group_id} file={real_name} err={e1}")
                     if folder_id:
                         try:
                             await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name)
                             primary_done = True
                         except Exception as e2:
-                            dice_log(f"[OneBot][Upload][FallbackFail] group={target.group_id} file={real_name} err={e2}")
+                            logger.info(f"[OneBot][Upload][FallbackFail] group={target.group_id} file={real_name} err={e2}")
                 if primary_done:
                     try:
                         await _trigger_post_send_hooks(
@@ -230,7 +228,7 @@ class NoneBotClientProxy(ClientProxy):
                 else:
                     await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
             except Exception as ex_outer:
-                dice_log(f"[OneBot][Upload][Unexpected] group={target.group_id} file={real_name} err={ex_outer}")
+                logger.error(f"[OneBot][Upload][Unexpected] group={target.group_id} file={real_name} err={ex_outer}")
                 await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
 
     async def _handle_delay(self, command: BotDelayCommand) -> None:
@@ -239,7 +237,7 @@ class NoneBotClientProxy(ClientProxy):
     async def process_bot_command_list(self, command_list: List[BotCommandBase]):
         if len(command_list) > 1:
             log_str = "\n".join([str(command) for command in command_list])
-            dice_log(f"[Proxy Bot Command List]\n[{log_str}]")
+            logger.info(f"[Proxy Bot Command List]\n[{log_str}]")
         for command in command_list:
             await self.process_bot_command(command)
 
@@ -295,7 +293,7 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
     # Ignore messages sent by the bot itself to avoid echo loops
     try:
         if user_id == bot.self_id:
-            dice_log(f"[Proxy Message] ignore self message from {user_id}")
+            logger.info(f"[Proxy Message] ignore self message from {user_id}")
             return
     except Exception:
         pass
@@ -305,7 +303,6 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
     #     log_str += f"\033[0;34m|Group: {group_id} User: {user_id}|\033[0m"
     # else:
     #     log_str += f"\033[0;35m|Private: {user_id}|\033[0m"
-    # dice_log(log_str)
 
     sender = MessageSender(user_id, event.sender.nickname)
     sender.sex, sender.age, sender.card = event.sender.sex, event.sender.age, event.sender.card
@@ -327,7 +324,7 @@ async def handle_command(bot: NoneBot, event: MessageEvent):
 
 @notice_matcher.handle()
 async def handle_notice(bot: NoneBot, event: NoticeEvent):
-    dice_log(f"[Proxy Notice] {event.get_event_name()}")
+    logger.debug(f"[Proxy Notice] {event.get_event_name()}")
 
     # 构建data
     data: Optional[NoticeData] = None
@@ -341,7 +338,7 @@ async def handle_notice(bot: NoneBot, event: NoticeEvent):
             if isinstance(event, GroupRecallNoticeEvent):
                 await _handle_group_recall(event, bot)
         except Exception as e:
-            dice_log(f"[Recall] handle error {e}")
+            logger.debug(f"[Recall] handle error {e}")
 
     # 处理消息提示
     if data:
@@ -349,7 +346,7 @@ async def handle_notice(bot: NoneBot, event: NoticeEvent):
 
 @request_matcher.handle()
 async def handle_request(bot: NoneBot, event: RequestEvent):
-    dice_log(f"[Proxy Request] {event.get_event_name()}")
+    logger.debug(f"[Proxy Request] {event.get_event_name()}")
 
     # 构建data
     data: Optional[RequestData] = None
@@ -412,11 +409,11 @@ else:
             await all_bots[bot.self_id].update_nickname(bot.self_id, "default", "骰娘")
         except Exception:
             pass
-        dice_log(f"[NB Adapter] Bot {bot.self_id} Connected!")
+        logger.info(f"[NB Adapter] Bot {bot.self_id} Connected!")
 
     @driver.on_bot_disconnect
     async def disconnect(bot: NoneBot) -> None:
-        dice_log(f"[NB Adapter] Bot {bot.self_id} Disconnected!")
+        logger.info(f"[NB Adapter] Bot {bot.self_id} Disconnected!")
         await all_bots[bot.self_id].shutdown_async()
 
 # ================= Recall Sync Support ==================
@@ -426,7 +423,7 @@ def _remove_log_record(bot_obj, group_id: str, message_id: str):
         delete_log_record_by_message_id(bot_obj, group_id, str(message_id))
     except Exception as e:
         try:
-            dice_log(f"[Recall] remove fail: {e}")
+            logger.debug(f"[Recall] remove fail: {e}")
         except Exception:
             pass
 
@@ -435,7 +432,7 @@ async def _handle_group_recall(event: GroupRecallNoticeEvent, nb_bot: NoneBot):
     """处理群消息撤回事件，移除对应日志记录。
     OneBot v11 字段: group_id, user_id(操作者?), operator_id, message_id, time
     """
-    dice_log(f"[Recall] group {event.group_id} message {getattr(event,'message_id',None)}")
+    logger.debug(f"[Recall] group {event.group_id} message {getattr(event,'message_id',None)}")
     message_id = str(getattr(event, 'message_id', '')) if getattr(event, 'message_id', None) is not None else ''
     if not message_id:
         return

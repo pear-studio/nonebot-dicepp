@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from ..data.models import MessageType
 from ..data.store import PersonaDataStore

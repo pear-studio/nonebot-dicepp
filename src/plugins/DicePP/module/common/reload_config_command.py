@@ -11,7 +11,7 @@ from core.command import BotCommandBase, BotSendMsgCommand
 from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_MANAGE
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.config.loader import ConfigValidationError
-from utils.logger import dice_log
+from utils.logger import logger
 
 LOC_RELOAD_OK = "reload_ok"
 LOC_RELOAD_FAIL = "reload_fail"
@@ -47,7 +47,7 @@ class ReloadConfigCommand(UserCommandBase):
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        dice_log(f"[Reload] User {meta.user_id} triggered .reload at {timestamp}")
+        logger.info(f"[Reload] User {meta.user_id} triggered .reload at {timestamp}")
 
         try:
             # Atomically reload config (raises ConfigValidationError on failure)
@@ -61,15 +61,15 @@ class ReloadConfigCommand(UserCommandBase):
             self.bot.loc_helper.reset_to_default()
             self.bot.loc_helper.set_persona(new_config.persona)
 
-            dice_log(f"[Reload] Config reloaded successfully by {meta.user_id}")
+            logger.info(f"[Reload] Config reloaded successfully by {meta.user_id}")
             feedback = self.bot.loc_helper.format_loc_text(LOC_RELOAD_OK, timestamp=timestamp)
         except ConfigValidationError as exc:
             error_msg = str(exc)
-            dice_log(f"[Reload] Config reload FAILED by {meta.user_id}: {error_msg}")
+            logger.error(f"[Reload] Config reload FAILED by {meta.user_id}: {error_msg}")
             feedback = self.bot.loc_helper.format_loc_text(LOC_RELOAD_FAIL, error=error_msg)
         except Exception as exc:
             error_msg = f"{type(exc).__name__}: {exc}"
-            dice_log(f"[Reload] Config reload FAILED by {meta.user_id}: {error_msg}")
+            logger.error(f"[Reload] Config reload FAILED by {meta.user_id}: {error_msg}")
             feedback = self.bot.loc_helper.format_loc_text(LOC_RELOAD_FAIL, error=error_msg)
 
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]

@@ -2,7 +2,7 @@ import time
 import datetime
 
 from typing import Optional, Union
-from nonebot.log import logger
+from utils.logger import logger
 
 china_tz = datetime.timezone(datetime.timedelta(hours=8), "北京时间")
 DATE_STR_FORMAT = "%Y/%m/%d %H:%M:%S"

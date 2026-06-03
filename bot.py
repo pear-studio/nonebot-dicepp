@@ -22,27 +22,20 @@ if _IS_FROZEN:
     _plugins_base = os.path.join(_INTERNAL_DIR, 'src', 'plugins')
     if _plugins_base not in sys.path:
         sys.path.insert(0, _plugins_base)
+    # 4. 把 src/plugins/DicePP 加入 sys.path，让 DicePP 模块可直接 import
+    _plugin_root = os.path.join(_plugins_base, 'DicePP')
+    if _plugin_root not in sys.path:
+        sys.path.insert(0, _plugin_root)
 else:
     # 开发环境：保持原有行为
     dir_path = os.path.abspath(os.path.dirname(__file__))
     sys.path.insert(0, dir_path)
+    _plugin_root = os.path.join(dir_path, "src", "plugins", "DicePP")
+    sys.path.insert(0, _plugin_root)
 
 import nonebot
-from nonebot.log import logger, default_format
 from nonebot.adapters.onebot.v11 import Adapter as OneBot_V11_Adapter
-
-# 日志配置：控制台显示 INFO 及以上（可通过 LOG_LEVEL=DEBUG 调低），错误写入文件
-_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-logger.remove()
-logger.add(sys.stderr,
-           level=_log_level,
-           format=default_format)
-logger.add("error.log",
-           rotation="10 MB",
-           diagnose=False,
-           level="ERROR",
-           format=default_format,
-           delay=True)  # 延迟创建：只有真正写入错误时才创建文件
+from utils.logger import logger
 
 # 初始化 NoneBot
 nonebot.init()

@@ -9,7 +9,7 @@ from core.communication import MessageMetaData, PrivateMessagePort, GroupMessage
 
 from module.dice_hub.manager import HubManager
 from module.dice_hub.api_client import HubAPIError
-from utils.logger import dice_log
+from utils.logger import logger
 
 
 def run_async(coro):
@@ -172,10 +172,10 @@ class HubCommand(UserCommandBase):
     def _handle_register(self, port) -> List[BotCommandBase]:
         command_list = []
 
-        dice_log(f"[DiceHub] 收到注册请求, is_configured={self.bot.hub_manager.is_configured()}")
+        logger.info(f"[DiceHub] 收到注册请求, is_configured={self.bot.hub_manager.is_configured()}")
 
         if not self.bot.hub_manager.is_configured():
-            dice_log(f"[DiceHub] 注册失败: 未配置 API 地址")
+            logger.warning(f"[DiceHub] 注册失败: 未配置 API 地址")
             return [BotSendMsgCommand(
                 self.bot.account,
                 self.format_loc(LOC_HUB_NOT_CONFIGURED),
@@ -184,16 +184,16 @@ class HubCommand(UserCommandBase):
 
         async def do_register():
             try:
-                dice_log(f"[DiceHub] 开始注册机器人...")
+                logger.info(f"[DiceHub] 开始注册机器人...")
                 result = await self.bot.hub_manager.register()
                 api_key = result.get("api_key", "")
-                dice_log(f"[DiceHub] 注册成功, api_key={api_key[:8]}...")
+                logger.info(f"[DiceHub] 注册成功, api_key={api_key[:8]}...")
                 return self.format_loc(LOC_HUB_REGISTER_SUCCESS, api_key=api_key)
             except HubAPIError as e:
-                dice_log(f"[DiceHub] 注册失败 (API错误): {e}")
+                logger.error(f"[DiceHub] 注册失败 (API错误): {e}")
                 return self.format_loc(LOC_HUB_REGISTER_ERROR, error=str(e))
             except Exception as e:
-                dice_log(f"[DiceHub] 注册失败 (异常): {e}")
+                logger.error(f"[DiceHub] 注册失败 (异常): {e}")
                 return self.format_loc(LOC_HUB_REGISTER_ERROR, error=str(e))
 
         feedback = run_async(do_register())
@@ -201,7 +201,7 @@ class HubCommand(UserCommandBase):
         return command_list
 
     def _handle_key(self, port) -> List[BotCommandBase]:
-        dice_log(f"[DiceHub] 收到查看 Key 请求, is_registered={self.bot.hub_manager.is_registered()}")
+        logger.info(f"[DiceHub] 收到查看 Key 请求, is_registered={self.bot.hub_manager.is_registered()}")
         if not self.bot.hub_manager.is_registered():
             return [BotSendMsgCommand(
                 self.bot.account,
@@ -210,7 +210,7 @@ class HubCommand(UserCommandBase):
             )]
 
         api_key = self.bot.hub_manager.get_api_key()
-        dice_log(f"[DiceHub] 返回 API Key: {api_key[:8]}...")
+        logger.info(f"[DiceHub] 返回 API Key: {api_key[:8]}...")
         return [BotSendMsgCommand(
             self.bot.account,
             self.format_loc(LOC_HUB_KEY, api_key=api_key),
@@ -218,7 +218,7 @@ class HubCommand(UserCommandBase):
         )]
 
     def _handle_list(self, port) -> List[BotCommandBase]:
-        dice_log(f"[DiceHub] 收到查看列表请求, is_registered={self.bot.hub_manager.is_registered()}")
+        logger.info(f"[DiceHub] 收到查看列表请求, is_registered={self.bot.hub_manager.is_registered()}")
         if not self.bot.hub_manager.is_registered():
             return [BotSendMsgCommand(
                 self.bot.account,
@@ -229,19 +229,19 @@ class HubCommand(UserCommandBase):
         async def do_list():
             try:
                 robots = await self.bot.hub_manager.get_online_robots()
-                dice_log(f"[DiceHub] 获取到 {len(robots)} 个在线机器人")
+                logger.info(f"[DiceHub] 获取到 {len(robots)} 个在线机器人")
                 if not robots:
                     return self.format_loc(LOC_HUB_LIST_EMPTY)
                 return self.format_loc(LOC_HUB_LIST, list=self.bot.hub_manager.generate_list_message())
             except Exception as e:
-                dice_log(f"[DiceHub] 获取列表失败: {e}")
+                logger.error(f"[DiceHub] 获取列表失败: {e}")
                 return f"获取列表失败: {str(e)}"
 
         feedback = run_async(do_list())
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 
     def _handle_online(self, port) -> List[BotCommandBase]:
-        dice_log(f"[DiceHub] 收到心跳请求, is_registered={self.bot.hub_manager.is_registered()}")
+        logger.info(f"[DiceHub] 收到心跳请求, is_registered={self.bot.hub_manager.is_registered()}")
         if not self.bot.hub_manager.is_registered():
             return [BotSendMsgCommand(
                 self.bot.account,
@@ -253,10 +253,10 @@ class HubCommand(UserCommandBase):
             try:
                 success = await self.bot.hub_manager.heartbeat()
                 if success:
-                    dice_log(f"[DiceHub] 手动心跳成功")
+                    logger.info(f"[DiceHub] 手动心跳成功")
                     return self.format_loc(LOC_HUB_ONLINE_SUCCESS)
                 else:
-                    dice_log(f"[DiceHub] 手动心跳失败")
+                    logger.warning(f"[DiceHub] 手动心跳失败")
                     return self.format_loc(LOC_HUB_ONLINE_FAIL, error="心跳请求失败")
             except Exception as e:
                 return self.format_loc(LOC_HUB_ONLINE_FAIL, error=str(e))

@@ -11,7 +11,7 @@ import websockets
 from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
 
 from core.communication import MessageMetaData, MessageSender
-from utils.logger import dice_log
+from utils.logger import logger
 
 
 MAX_FRAME_BYTES = 64 * 1024
@@ -91,12 +91,12 @@ class WebChatAdapter:
     async def enqueue_payload(self, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, ensure_ascii=False)
         if len(encoded.encode("utf-8")) > MAX_FRAME_BYTES:
-            dice_log("[WebChat] outbound payload too large, drop one frame")
+            logger.warning("[WebChat] outbound payload too large, drop one frame")
             return
         async with self._send_cond:
             if len(self._send_queue) >= SEND_QUEUE_MAX:
                 dropped = self._send_queue.popleft()
-                dice_log(
+                logger.warning(
                     "[WebChat] outbound queue overflow "
                     f"user={dropped.get('user_id', 'unknown')} "
                     f"correlation_id={dropped.get('correlation_id', '')} "
@@ -113,12 +113,12 @@ class WebChatAdapter:
                 backoff = BACKOFF_MIN_SECONDS
             except WebChatAuthFailed as exc:
                 host = urlparse(self._hub_url).netloc or self._hub_url
-                dice_log(f"[WebChat][AuthFailed] host={host} reason={exc}")
+                logger.error(f"[WebChat][AuthFailed] host={host} reason={exc}")
                 break
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                dice_log(f"[WebChat][WARN] disconnected, retry in {backoff}s error={exc}")
+                logger.warning(f"[WebChat][WARN] disconnected, retry in {backoff}s error={exc}")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, BACKOFF_MAX_SECONDS)
 

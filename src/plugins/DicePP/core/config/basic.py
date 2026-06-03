@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from utils.logger import dice_log
+from utils.logger import logger
 from utils.frozen import get_project_root
 
 
@@ -38,7 +38,7 @@ class Paths:
         ]:
             if not d.exists():
                 d.mkdir(parents=True, exist_ok=True)
-                dice_log("[Config] [Init] 创建文件夹: " + str(d))
+                logger.info("[Config] [Init] 创建文件夹: " + str(d))
 
     @classmethod
     def safe_content_path(cls, base_dir: Path, name: str, suffix: str = "") -> Path:

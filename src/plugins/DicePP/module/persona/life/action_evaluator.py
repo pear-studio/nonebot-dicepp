@@ -7,7 +7,7 @@ ActionEvaluator — 独立的 LLM 评估管线
 import re
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from ..data.store import PersonaDataStore
 from ..llm.selection import SelectionPolicy, SCORING

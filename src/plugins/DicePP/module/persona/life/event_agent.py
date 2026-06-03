@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional
 from datetime import datetime
 import json
-from nonebot.log import logger
+from utils.logger import logger
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy, EVENT_GEN, DIARY, SUMMARIZE
 from ..tools.registry import ToolRegistry

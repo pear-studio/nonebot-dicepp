@@ -9,7 +9,7 @@ from core.command import (
     BotSendMsgCommand,
 )
 from core.communication import GroupInfo, GroupMemberInfo
-from utils.logger import dice_log
+from utils.logger import logger
 
 
 DEFAULT_GROUP_ID = "10000"
@@ -28,21 +28,21 @@ class StandaloneClientProxy(ClientProxy):
         }
 
     async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
-        dice_log(f"[Standalone] [BotCommand] {command}")
+        logger.debug(f"[Standalone] [BotCommand] {command}")
         async with self._lock:
             self._outputs.append(command.msg)
 
     async def _handle_send_forward_msg(self, command: BotSendForwardMsgCommand) -> None:
-        dice_log(f"[Standalone] [BotCommand] {command}")
+        logger.debug(f"[Standalone] [BotCommand] {command}")
         async with self._lock:
             self._outputs.extend(command.msg)
 
     async def _handle_delay(self, command: BotDelayCommand) -> None:
-        dice_log(f"[Standalone] [BotCommand] {command}")
+        logger.debug(f"[Standalone] [BotCommand] {command}")
         await asyncio.sleep(command.seconds)
 
     async def _handle_unknown(self, command: BotCommandBase) -> None:
-        dice_log(f"[Standalone] [BotCommand] {command}")
+        logger.debug(f"[Standalone] [BotCommand] {command}")
         async with self._lock:
             self._outputs.append(str(command))
 

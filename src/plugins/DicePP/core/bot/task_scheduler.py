@@ -1,7 +1,7 @@
 import asyncio
 from typing import Callable, Dict, List, Optional, Union
 
-from utils.logger import dice_log
+from utils.logger import logger
 
 
 class TaskScheduler:
@@ -64,7 +64,7 @@ class TaskScheduler:
             func: Callable
             del self._tasks[func]
             if not info["is_async"]:
-                dice_log(f"[Async Task] Init Sync: {func.__name__}")
+                logger.debug(f"[Async Task] Init Sync: {func.__name__}")
 
                 async def task_wrapper(_func=func):
                     future = loop.run_in_executor(None, _func)
@@ -73,12 +73,12 @@ class TaskScheduler:
 
                 task: asyncio.Task = asyncio.create_task(task_wrapper())
             else:
-                dice_log(f"[Async Task] Init Async: {func.__name__}")
+                logger.debug(f"[Async Task] Init Async: {func.__name__}")
                 task: asyncio.Task = asyncio.create_task(func())
             info["init"] = True
             self._tasks[task] = info
 
-        dice_log(
+        logger.info(
             f"[Async Task] Try: "
             f"{[(task.get_coro().cr_code.co_name, self._tasks[task]['timeout']) for task in self._tasks.keys()]}"
             f" for {free_time} s"
@@ -90,20 +90,20 @@ class TaskScheduler:
                 try:
                     results += task.result()
                 except (AttributeError, TypeError, RuntimeError):
-                    dice_log(str(self._error_handler("Async Task: CODE114")[0]))
+                    logger.info(str(self._error_handler("Async Task: CODE114")[0]))
                 del self._tasks[task]
-                dice_log(f"[Async Task] Finish {task.get_coro().cr_code.co_name}")
+                logger.debug(f"[Async Task] Finish {task.get_coro().cr_code.co_name}")
             for task in pending_tasks:
                 if self._tasks[task]["timeout"] > 0:
                     self._tasks[task]["timeout"] -= free_time
                     if self._tasks[task]["timeout"] < 0:
-                        dice_log(f"[Async Task] Timeout: {task.get_coro().cr_code.co_name}")
+                        logger.info(f"[Async Task] Timeout: {task.get_coro().cr_code.co_name}")
                         if self._tasks[task]["callback"]:
-                            dice_log(f"[Async Task] Timeout callback: {self._tasks[task]['callback'].__name__}")
+                            logger.info(f"[Async Task] Timeout callback: {self._tasks[task]['callback'].__name__}")
                             results += self._tasks[task]["callback"]()
                         task.cancel()
                         del self._tasks[task]
         except (AttributeError, TypeError, KeyError, RuntimeError):
-            dice_log(str(self._error_handler("Async Task: CODE112")[0]))
+            logger.info(str(self._error_handler("Async Task: CODE112")[0]))
 
         return results

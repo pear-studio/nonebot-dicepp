@@ -5,7 +5,7 @@ Executor 通过 ToolContext 访问 store 和 image_cache。
 import json
 from typing import Any, Dict
 
-from utils.logger import dice_log
+from utils.logger import logger
 from ..image_cache import ImageCache
 from .context import ToolContext
 from .registry import ToolDef
@@ -43,13 +43,13 @@ async def look_at_past_image_executor(args: Dict[str, Any], ctx: ToolContext) ->
     """
     image_index = args.get("image_index", 1)
     if not isinstance(image_index, int) or image_index < 1:
-        dice_log(f"[LookAtPastImage] 失败: user={ctx.user_id} error=invalid_index")
+        logger.warning(f"[LookAtPastImage] 失败: user={ctx.user_id} error=invalid_index")
         return json.dumps({"error": "image_index 必须为正整数"}, ensure_ascii=False)
     image_index = min(image_index, 20)  # 硬限制防止查询过大
 
     store = ctx.store
     if not store:
-        dice_log(f"[LookAtPastImage] 失败: user={ctx.user_id} error=store_uninitialized")
+        logger.warning(f"[LookAtPastImage] 失败: user={ctx.user_id} error=store_uninitialized")
         return json.dumps({"error": "数据存储未初始化"}, ensure_ascii=False)
 
     # 获取最近的图片列表
@@ -57,12 +57,12 @@ async def look_at_past_image_executor(args: Dict[str, Any], ctx: ToolContext) ->
         ctx.user_id, ctx.group_id, count=image_index,
     )
     if not meta_list:
-        dice_log(f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id} error=no_images")
+        logger.warning(f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id} error=no_images")
         return json.dumps({"error": "未找到历史图片"}, ensure_ascii=False)
 
     # 越界检查
     if image_index > len(meta_list):
-        dice_log(
+        logger.warning(
             f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id}"
             f" error=out_of_range available={len(meta_list)}"
         )
@@ -100,13 +100,13 @@ async def look_at_past_image_executor(args: Dict[str, Any], ctx: ToolContext) ->
                     pass  # 持久化失败不影响返回
 
     if not data_url:
-        dice_log(
+        logger.warning(
             f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id}"
             f" error=download_failed sub_type={target.get('sub_type', '')}"
         )
         return json.dumps({"error": "图片下载失败（URL 可能已过期）"}, ensure_ascii=False)
 
-    dice_log(
+    logger.info(
         f"[LookAtPastImage] 成功: image_index={image_index} user={ctx.user_id}"
         f" cache_hit={cache_hit} is_emoji={is_emoji}"
     )

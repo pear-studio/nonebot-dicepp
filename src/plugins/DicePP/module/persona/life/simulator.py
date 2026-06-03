@@ -8,7 +8,7 @@ import time
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from dataclasses import dataclass
 import random
-from nonebot.log import logger
+from utils.logger import logger
 from ..data.store import PersonaDataStore
 from ..data.models import RelationshipState, ScoreEvent, MessageType
 from ..character.models import Character

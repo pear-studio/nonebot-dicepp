@@ -4,7 +4,6 @@
 在 tick_daily 日记生成完毕后，收集核心统计与 Persona 数据，
 以角色口吻包装开场白后分段发送给 Master。
 """
-import logging
 from typing import Optional, List, Dict, Any
 from datetime import timedelta
 
@@ -13,8 +12,7 @@ from core.statistics import UserStatInfo, GroupStatInfo
 from ..data.models import MessageType, CharacterState
 from ..gateway.port import MessagePort
 from utils.time import wall_now
-
-logger = logging.getLogger(__name__)
+from utils.logger import logger
 
 _DATA_UNAVAILABLE = "数据暂不可用"
 _DIARY_UNAVAILABLE = "今日日记未生成"

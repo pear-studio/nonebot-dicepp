@@ -4,7 +4,7 @@
 组装四层记忆到 LLM 消息列表
 """
 from dataclasses import dataclass
-from nonebot.log import logger
+from utils.logger import logger
 from typing import List, Dict, Optional, Any, Tuple
 
 from utils.string import estimate_tokens

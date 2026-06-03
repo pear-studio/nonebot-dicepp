@@ -9,7 +9,7 @@ exhausted → disabled (管理员手动 reset)
 import time
 from typing import Dict, Tuple
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from .errors import ErrorKind
 

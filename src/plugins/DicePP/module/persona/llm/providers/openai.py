@@ -7,7 +7,7 @@ import asyncio
 import time
 from typing import List, Dict, Optional, Any
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from .protocol import LLMProvider, LLMResponse, TokenUsage, ToolCall, ErrorClass, NonRetryableError
 

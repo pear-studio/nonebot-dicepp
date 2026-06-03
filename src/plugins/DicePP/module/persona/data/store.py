@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from ..image_cache import ImageCacheProtocol
 from datetime import datetime, timedelta
 import json
-from nonebot.log import logger
+from utils.logger import logger
 import os
 import base64
 import sqlite3
@@ -608,7 +608,7 @@ class PersonaDataStore:
                 except (json.JSONDecodeError, TypeError):
                     pass
         except Exception as e:
-            dice_log(f"[Persona] 图片缓存裁剪扫描异常: {e}")
+            logger.warning(f"[Persona] 图片缓存裁剪扫描异常: {e}")
         return hashes
 
     def _tick_and_check_prune(self, now: datetime) -> bool:

@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 
 from pydantic import ValidationError
 
-from utils.logger import dice_log
+from utils.logger import logger
 from core.config.pydantic_models import BotConfig
 from core.config.basic import Paths
 
@@ -44,10 +44,10 @@ def _load_json_file(path: Path) -> Dict[str, Any]:
         text = path.read_text(encoding="utf-8")
         return json.loads(text)
     except json.JSONDecodeError as exc:
-        dice_log(f"[Config] [Load] JSON parse error in {path}: {exc}")
+        logger.error(f"[Config] [Load] JSON parse error in {path}: {exc}")
         return {}
     except OSError as exc:
-        dice_log(f"[Config] [Load] Cannot read {path}: {exc}")
+        logger.error(f"[Config] [Load] Cannot read {path}: {exc}")
         return {}
 
 
@@ -79,6 +79,7 @@ def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
         "DICE_DICEHUB_API_KEY": ["dicehub", "api_key"],
         "DICE_DICEHUB_ENABLE": ["dicehub", "enable"],
         "DICE_DICEHUB_HEARTBEAT_INTERVAL": ["dicehub", "heartbeat_interval"],
+        "DICE_LOG_LEVEL": ["log", "level"],
     }
 
     for env_key, path in env_mappings.items():
@@ -152,8 +153,8 @@ class ConfigLoader:
             ) from exc
 
         if not cfg.master:
-            dice_log(f"[Config] [Warn] No master configured for account '{self._account}'. "
-                     f"Edit {self._account_config_path} to set master IDs.")
+            logger.warning(f"[Config] [Warn] No master configured for account '{self._account}'. "
+                           f"Edit {self._account_config_path} to set master IDs.")
         return cfg
 
     @property
@@ -168,10 +169,10 @@ class ConfigLoader:
             if template.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(template, path)
-                dice_log(f"[Config] [Init] Created account config from template: {path}. "
-                         f"Please edit this file to set your master/admin IDs.")
+                logger.info(f"[Config] [Init] Created account config from template: {path}. "
+                            f"Please edit this file to set your master/admin IDs.")
             else:
-                dice_log(f"[Config] [Warn] No account config or template found for '{self._account}'.")
+                logger.warning(f"[Config] [Warn] No account config or template found for '{self._account}'.")
                 return {}
         return _load_json_file(path)
 

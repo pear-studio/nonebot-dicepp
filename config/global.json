@@ -53,6 +53,7 @@
   },
 
   "log": {
+    "level": "DEBUG",
     "upload_enable": true,
     "upload_endpoint": "https://dice.weizaima.com/dice/api/log",
     "upload_token": "",

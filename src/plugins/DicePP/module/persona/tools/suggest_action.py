@@ -2,7 +2,7 @@
 import asyncio
 from typing import Any, Callable
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from .registry import ToolDef
 

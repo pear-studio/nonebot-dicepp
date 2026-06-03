@@ -22,7 +22,7 @@ r"""LLM 响应 JSON 解析的统一容错实现
 from __future__ import annotations
 
 import json
-from nonebot.log import logger
+from utils.logger import logger
 import re
 from typing import Any, Optional
 

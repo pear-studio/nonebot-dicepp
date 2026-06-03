@@ -6,10 +6,11 @@ gets RollResult objects, AST semantic errors are wrapped as RollDiceError, and
 the hot sampling path stays AST-only.
 """
 
-import logging
+from io import StringIO
 from unittest.mock import patch
 
 import pytest
+from utils.logger import logger
 
 from module.roll.ast_engine.adapter import exec_roll_exp_unified
 from module.roll.roll_utils import RollDiceError
@@ -42,17 +43,21 @@ class TestDefaultPathIsAST:
             with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
                 exec_roll_exp_unified("1D20")
 
-    def test_ast_errors_are_logged(self, caplog):
+    def test_ast_errors_are_logged(self):
         from module.roll.ast_engine.errors import RollSyntaxError
 
-        with patch(
-            "module.roll.ast_engine.adapter.exec_roll_exp_ast",
-            side_effect=RollSyntaxError("err", expression="x"),
-        ):
-            with caplog.at_level(logging.ERROR):
+        output = StringIO()
+        handler_id = logger.add(output, level="ERROR", format="{message}")
+        try:
+            with patch(
+                "module.roll.ast_engine.adapter.exec_roll_exp_ast",
+                side_effect=RollSyntaxError("err", expression="x"),
+            ):
                 with pytest.raises(RollDiceError):
                     exec_roll_exp_unified("x")
-        assert any("roll_engine=ast" in r.message for r in caplog.records)
+        finally:
+            logger.remove(handler_id)
+        assert "roll_engine=ast" in output.getvalue()
 
 
 @pytest.mark.unit
@@ -77,7 +82,7 @@ class TestComputeExpAstPath:
         assert 3 <= result.get_val() <= 8
 
 
-def test_unexpected_ast_error_wraps_as_roll_dice_error(monkeypatch, caplog):
+def test_unexpected_ast_error_wraps_as_roll_dice_error(monkeypatch):
     """AST 引擎内部非 RollEngineError 异常必须包装为 RollDiceError（守门测试，禁止静默吞错）。"""
     from module.roll.ast_engine import adapter
     from module.roll.roll_utils import RollDiceError
@@ -86,9 +91,14 @@ def test_unexpected_ast_error_wraps_as_roll_dice_error(monkeypatch, caplog):
         raise RuntimeError("boom")
     monkeypatch.setattr(adapter, "build_roll_result", _explode)
 
-    with caplog.at_level(logging.ERROR):
+    output = StringIO()
+    handler_id = logger.add(output, level="ERROR", format="{message}")
+    try:
         with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
             adapter.exec_roll_exp_unified("1D20")
+    finally:
+        logger.remove(handler_id)
 
-    assert any("roll_engine=ast" in rec.message and "RuntimeError" in rec.message for rec in caplog.records), \
-        f"应记录 roll_engine=ast + RuntimeError 日志，实际: {[r.message for r in caplog.records]}"
+    logs = output.getvalue()
+    assert "roll_engine=ast" in logs and "RuntimeError" in logs, \
+        f"应记录 roll_engine=ast + RuntimeError 日志，实际: {logs}"

@@ -7,7 +7,7 @@ import traceback
 from typing import List, Optional, Dict, Callable, Set, Awaitable, Protocol, runtime_checkable
 from random import choice
 
-from utils.logger import dice_log, get_exception_info
+from utils.logger import logger, get_exception_info, configure_log_level
 from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
 from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from core.config import Paths
@@ -95,6 +95,7 @@ class Bot:
         # New config system: ConfigLoader + PersonaLoader
         self._cfg_loader = ConfigLoader(account=account)
         self.config: BotConfig = self._cfg_loader.load()
+        configure_log_level(self.config.log.level)
         self._persona_loader = PersonaLoader(self.config.persona_ai.character_path)
 
         # LocalizationManager now takes a PersonaLoader; no file paths needed
@@ -194,8 +195,8 @@ class Bot:
                         bot_commands += command.tick()
                     except Exception as _ex:
                         _type = type(_ex).__name__
-                        dice_log(f"[TickLoop] 未预期异常 {_type}: {_ex}")
-                        dice_log(traceback.format_exc())
+                        logger.error(f"[TickLoop] 未预期异常 {_type}: {_ex}")
+                        logger.error(traceback.format_exc())
                         bot_commands += self.handle_exception(f"Tick: {command.readable_name} CODE110 ({_type})")
 
                 if loop_begin_time - time_counter[0] > 60 * 5:  # 5分钟执行一次
@@ -227,8 +228,8 @@ class Bot:
                         await self.proxy.process_bot_command(command)
             except Exception as _ex:
                 _type = type(_ex).__name__
-                dice_log(f"[TickLoop] 未预期异常 {_type}: {_ex}")
-                dice_log(traceback.format_exc())
+                logger.error(f"[TickLoop] 未预期异常 {_type}: {_ex}")
+                logger.error(traceback.format_exc())
                 bot_commands += self.handle_exception(f"Tick Loop: CODE113 ({_type})")
 
             # 最多每秒执行一次循环
@@ -254,13 +255,13 @@ class Bot:
 
         if percent >= restart_pct or rss_mb >= restart_mb:
             msg = f"⚠️ 内存超限，正在自动重启\n当前: {rss_mb:.0f}MB ({percent:.1f}%)\n阈值: {restart_pct}% 或 {restart_mb}MB"
-            dice_log(f"[MemoryMonitor] 内存超限，触发自动重启: {rss_mb:.0f}MB ({percent:.1f}%)")
+            logger.error(f"[MemoryMonitor] 内存超限，触发自动重启: {rss_mb:.0f}MB ({percent:.1f}%)")
             await self.send_msg_to_master(msg)
             await asyncio.sleep(2)
             self.reboot()
         elif percent >= warn_pct:
             msg = f"⚠️ 内存使用较高\n当前: {rss_mb:.0f}MB ({percent:.1f}%)\n警告阈值: {warn_pct}%\n建议关注运行状态"
-            dice_log(f"[MemoryMonitor] 内存警告: {rss_mb:.0f}MB ({percent:.1f}%)")
+            logger.warning(f"[MemoryMonitor] 内存警告: {rss_mb:.0f}MB ({percent:.1f}%)")
             # 避免频繁警告，这里只记录日志，Master消息由用户手动查询
             # await self.send_msg_to_master(msg)
 
@@ -332,8 +333,8 @@ class Bot:
                 bot_commands += daily_result
             except Exception as _ex:
                 _type = type(_ex).__name__
-                dice_log(f"[TickLoop] 未预期异常 {_type}: {_ex}")
-                dice_log(traceback.format_exc())
+                logger.error(f"[TickLoop] 未预期异常 {_type}: {_ex}")
+                logger.error(traceback.format_exc())
                 bot_commands += self.handle_exception(f"Tick Daily: {command.readable_name} CODE111 ({_type})")
         # 给Master发送每日更新通知（Persona 日报启用时跳过）
         # 检查 PersonaCommand 实例的实际运行状态，而非 config 静态值：
@@ -391,7 +392,7 @@ class Bot:
             if isinstance(result, Exception):
                 import traceback
                 tb_str = traceback.format_exception(type(result), result, result.__traceback__)
-                dice_log(
+                logger.error(
                     f"[Bot] 命令 {command.__class__.readable_name} shutdown 失败: {result}\n"
                     f"{''.join(tb_str)}"
                 )
@@ -412,7 +413,7 @@ class Bot:
         asyncio.create_task(self.reboot_async())
 
     async def reboot_async(self):
-        dice_log("[Bot] [Reboot] 开始重启")
+        logger.info("[Bot] [Reboot] 开始重启")
         await self.shutdown_async()
         import sys
         import platform
@@ -421,14 +422,14 @@ class Bot:
         cwd = os.getcwd()
         
         # 记录重启信息用于调试
-        dice_log(f"[Bot] [Reboot] Python: {python}")
-        dice_log(f"[Bot] [Reboot] Args: {sys.argv}")
-        dice_log(f"[Bot] [Reboot] CWD: {cwd}")
+        logger.debug(f"[Bot] [Reboot] Python: {python}")
+        logger.debug(f"[Bot] [Reboot] Args: {sys.argv}")
+        logger.debug(f"[Bot] [Reboot] CWD: {cwd}")
         
         if platform.system() == "Windows":
             # Windows: 使用 subprocess 启动新进程，然后退出当前进程
             import subprocess
-            dice_log("[Bot] [Reboot] Windows 模式：启动新进程后退出")
+            logger.info("[Bot] [Reboot] Windows 模式：启动新进程后退出")
             try:
                 # 保留环境变量（包括虚拟环境的 PATH）
                 env = os.environ.copy()
@@ -439,14 +440,14 @@ class Bot:
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 )
             except (OSError, RuntimeError) as e:
-                dice_log(f"[Bot] [Reboot] 启动新进程失败: {e}")
+                logger.error(f"[Bot] [Reboot] 启动新进程失败: {e}")
                 # 回退到简单方式
                 subprocess.Popen([python] + sys.argv, cwd=cwd)
             await asyncio.sleep(1)
             os._exit(0)
         else:
             # Linux/macOS: 使用 os.execl 替换当前进程
-            dice_log("[Bot] [Reboot] Unix 模式：execl 替换进程")
+            logger.info("[Bot] [Reboot] Unix 模式：execl 替换进程")
             # 切换到原始工作目录
             os.chdir(cwd)
             os.execl(python, python, *sys.argv)
@@ -480,7 +481,7 @@ class Bot:
             try:
                 await self.db.connect()
             except Exception as exc:
-                dice_log(f"[Migration] 数据库迁移失败，启动中断: {exc}")
+                logger.error(f"[Migration] 数据库迁移失败，启动中断: {exc}")
                 if self.proxy:
                     bc_list = self.handle_exception("启动前数据库迁移失败")
                     for bc in bc_list:
@@ -491,7 +492,7 @@ class Bot:
             try:
                 await self.hub_manager.load_config()
             except Exception as exc:
-                dice_log(f"[DiceHub] 读取 Hub 配置失败，将使用内置默认值: {exc}")
+                logger.warning(f"[DiceHub] 读取 Hub 配置失败，将使用内置默认值: {exc}")
 
             # 注册日志记录 hook，消除 adapter -> log_command 反向导入
             from module.common.log_command import register_log_hooks
@@ -527,11 +528,11 @@ class Bot:
                         if init_info[i] and init_info[i] != "$":
                             feedback_prefix += init_info[i] + "\n"
                     feedback = f"{feedback_prefix}\n{feedback}"
-                    dice_log(feedback)
+                    logger.info(feedback)
 
                     # 如果开启了静默模式，跳过发送通知
                     if is_silent:
-                        dice_log("[Bot] 静默模式已开启，跳过发送启动通知")
+                        logger.info("[Bot] 静默模式已开启，跳过发送启动通知")
                     else:
                         # 给上次reboot的Admin或Master汇报
                         _rebooter_row = await self.db.bot_control.get("rebooter")
@@ -546,7 +547,7 @@ class Bot:
                                 command = BotSendMsgCommand(self.account, feedback, [PrivateMessagePort(master)])
                                 await self.proxy.process_bot_command(command)
                 else:
-                    dice_log(init_info)
+                    logger.info(init_info)
 
             if not self._no_tick and (self.tick_task is None or self.tick_task.done()):
                 try:
@@ -640,7 +641,7 @@ class Bot:
                     should_proc, should_pass, hint = False, False, None
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
                     group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"
-                    dice_log(f"[Bot] can_process_msg 未处理异常: {type(e).__name__}: {e}")
+                    logger.error(f"[Bot] can_process_msg 未处理异常: {type(e).__name__}: {e}")
                     bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info}出错位置:{command.readable_name}\n错误代码：CODE100")
                 if not should_proc:
                     continue
@@ -661,7 +662,7 @@ class Bot:
                                 raw_msg=meta.raw_msg,
                             )
                         except Exception as e:
-                            dice_log(f"[InboundHook] 记录失败: {e}")
+                            logger.warning(f"[InboundHook] 记录失败: {e}")
                     recorded = True
                 # 在非群聊中企图执行群聊指令, 回复一条提示
                 if command.group_only and not meta.group_id:
@@ -687,7 +688,7 @@ class Bot:
                     # 等逃到 nonebot 事件循环无任何日志，与"沉默"行为吻合）
                     info = f"{msg_list}中的{msg_cur}" if is_multi_command else msg
                     group_info = f"群:{meta.group_id}" if meta.group_id else "私聊"
-                    dice_log(f"[Bot] 未处理异常上报 master: {type(e).__name__}: {e}")
+                    logger.error(f"[Bot] 未处理异常上报 master: {type(e).__name__}: {e}")
                     bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info} CODE101")
 
                 # 统计处理的指令情况
@@ -713,7 +714,7 @@ class Bot:
                             raw_msg=meta.raw_msg,
                         )
                     except Exception as e:
-                        dice_log(f"[InboundHook] 记录失败: {e}")
+                        logger.warning(f"[InboundHook] 记录失败: {e}")
 
         if is_multi_command:  # 多行指令的话合并port相同的send msg
             invalid_command_count = 0
@@ -739,7 +740,7 @@ class Bot:
             if meta.group_id:
                 await self.db.group_stat.upsert(GroupStat(group_id=meta.group_id, data=group_stat.serialize()))
         except Exception as _exc:
-            dice_log(f"[Stat] 写入统计 DB 失败: {_exc}")
+            logger.error(f"[Stat] 写入统计 DB 失败: {_exc}")
 
         return bot_commands
 

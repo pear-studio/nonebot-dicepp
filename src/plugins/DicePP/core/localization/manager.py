@@ -2,7 +2,7 @@ from typing import Dict, Optional
 import re
 import random
 
-from utils.logger import dice_log
+from utils.logger import logger
 from core.communication import preprocess_msg
 from core.localization.localization_text import LocalizationText
 from core.localization.common import COMMON_LOCAL_TEXT, COMMON_LOCAL_COMMENT

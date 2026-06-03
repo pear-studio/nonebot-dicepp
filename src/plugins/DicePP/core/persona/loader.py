@@ -7,7 +7,7 @@ from typing import Dict, Optional
 import yaml
 from pydantic import ValidationError
 
-from utils.logger import dice_log
+from utils.logger import logger
 from core.persona.models import PersonaModel
 from core.config.basic import Paths
 
@@ -40,14 +40,14 @@ class PersonaLoader:
         if name in self._cache:
             return self._cache[name]
         if name != _DEFAULT_PERSONA:
-            dice_log(f"[Persona] Persona '{name}' not found, falling back to 'default'")
+            logger.warning(f"[Persona] Persona '{name}' not found, falling back to 'default'")
         return self._cache.get(_DEFAULT_PERSONA, PersonaModel())
 
     def reload(self) -> None:
         """Reload all persona files from disk (for hot-reload support)."""
         self._cache = {}
         self._load_all()
-        dice_log(f"[Persona] Reloaded {len(self._cache)} persona(s)")
+        logger.info(f"[Persona] Reloaded {len(self._cache)} persona(s)")
 
     def available_names(self) -> list[str]:
         return list(self._cache.keys())
@@ -56,7 +56,7 @@ class PersonaLoader:
 
     def _load_all(self) -> None:
         if not self._dir.exists():
-            dice_log(f"[Persona] Characters directory not found: {self._dir}")
+            logger.warning(f"[Persona] Characters directory not found: {self._dir}")
             self._cache[_DEFAULT_PERSONA] = PersonaModel()
             return
 
@@ -67,27 +67,27 @@ class PersonaLoader:
                 self._cache[name] = persona
 
         if _DEFAULT_PERSONA not in self._cache:
-            dice_log("[Persona] No 'default' persona found; using empty defaults")
+            logger.warning("[Persona] No 'default' persona found; using empty defaults")
             self._cache[_DEFAULT_PERSONA] = PersonaModel()
 
     def _load_one(self, path: Path, name: str) -> Optional[PersonaModel]:
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
-                dice_log(f"[Persona] Invalid YAML structure in {path}: expected dict")
+                logger.warning(f"[Persona] Invalid YAML structure in {path}: expected dict")
                 return None
             yaml_name = data.get("name")
             if yaml_name is not None and yaml_name != name:
-                dice_log(
+                logger.warning(
                     f"[Persona] skin.yaml name {yaml_name!r} differs from "
                     f"directory name {name!r}; using directory name"
                 )
             data["name"] = name
             return PersonaModel.model_validate(data)
         except yaml.YAMLError as exc:
-            dice_log(f"[Persona] YAML parse error in {path}: {exc}")
+            logger.error(f"[Persona] YAML parse error in {path}: {exc}")
         except ValidationError as exc:
-            dice_log(f"[Persona] Validation error in {path}: {exc}")
+            logger.error(f"[Persona] Validation error in {path}: {exc}")
         except OSError as exc:
-            dice_log(f"[Persona] Cannot read {path}: {exc}")
+            logger.error(f"[Persona] Cannot read {path}: {exc}")
         return None

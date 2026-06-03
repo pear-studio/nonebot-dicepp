@@ -1,12 +1,12 @@
 """Bot 运行包装器 - 管理 Bot 实例、捕获输出、控制骰子"""
 
 import asyncio
-import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from ..core.bot import Bot
 from ..core.communication import MessageMetaData, MessageSender, GroupInfo, GroupMemberInfo
+from ..utils.logger import logger
 from ..adapter import ClientProxy
 from ..core.command import BotCommandBase, BotSendMsgCommand
 from ..utils.sequence_runtime import SequenceRuntime
@@ -132,9 +132,9 @@ class BotRunner:
                         break
                     await asyncio.sleep(BotRunner.TODO_POLL_INTERVAL)
                 if completed:
-                    logging.info("pending tasks 处理完成")
+                    logger.info("pending tasks 处理完成")
                 else:
-                    logging.warning("pending tasks 等待超时（30s），仍有未完成任务")
+                    logger.warning("pending tasks 等待超时（30s），仍有未完成任务")
 
             self._started = True
         finally:

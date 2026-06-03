@@ -9,7 +9,7 @@ import asyncio
 from collections import defaultdict, deque
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from .providers import _PROVIDER_CLASSES, _PROVIDER_OVERRIDES
 from .providers.protocol import ImageGenProvider

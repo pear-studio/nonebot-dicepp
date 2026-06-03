@@ -13,7 +13,7 @@ from core.command import (
     BotSendMsgCommand,
 )
 from core.communication import GroupInfo, GroupMemberInfo
-from utils.logger import dice_log
+from utils.logger import logger
 
 
 def _normalize_web_user_id(user_id: str) -> str:
@@ -37,7 +37,7 @@ class WebChatProxy(ClientProxy):
     def _resolve_and_check_target(self, command: BotCommandBase) -> tuple[str, str] | None:
         user_id, correlation_id = self._resolve_turn_target(command)
         if not user_id:
-            dice_log(f"[WebChat] skip outbound command without web target: {command.__class__.__name__}")
+            logger.warning(f"[WebChat] skip outbound command without web target: {command.__class__.__name__}")
             return None
         return user_id, correlation_id
 

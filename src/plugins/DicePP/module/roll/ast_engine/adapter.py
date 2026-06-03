@@ -6,8 +6,8 @@ The legacy regex engine has been removed; all execution goes through the AST
 parser/evaluator.
 """
 
-import logging
 from typing import Optional, Union, Callable, Any, Tuple
+from utils.logger import logger
 from dataclasses import dataclass, field
 
 from .parser import parse_expression
@@ -200,16 +200,16 @@ def exec_roll_exp_unified(
         ast_result = exec_roll_exp_ast(expression, dice_roller=dice_roller)
         return build_roll_result(ast_result)
     except RollEngineError as e:
-        logging.getLogger(__name__).error(
-            "roll_engine=ast expression=%r error=%s: %s",
+        logger.error(
+            "roll_engine=ast expression={!r} error={}: {}",
             expression,
             type(e).__name__,
             e.info,
         )
         raise RollDiceError(e.info) from e
     except Exception as e:
-        logging.getLogger(__name__).error(
-            "roll_engine=ast expression=%r unexpected_error=%s: %s",
+        logger.error(
+            "roll_engine=ast expression={!r} unexpected_error={}: {}",
             expression,
             type(e).__name__,
             e,

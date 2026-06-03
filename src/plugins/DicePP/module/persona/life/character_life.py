@@ -7,7 +7,7 @@
 import asyncio
 import json
 import time
-from nonebot.log import logger
+from utils.logger import logger
 import random
 import uuid
 from dataclasses import dataclass

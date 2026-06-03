@@ -33,7 +33,7 @@ from adapter.standalone_proxy import StandaloneClientProxy  # noqa: E402
 from adapter.web_chat_adapter import WebChatAdapter  # noqa: E402
 from adapter.web_chat_proxy import WebChatProxy  # noqa: E402
 from module.fastapi.api import dpp_api, bind_runtime  # noqa: E402
-from utils.logger import dice_log  # noqa: E402
+from utils.logger import logger  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -127,13 +127,13 @@ def create_app(bot_id: str) -> FastAPI:
                 except Exception as exc:
                     error_type = exc.__class__.__name__
                     if attempt >= max_attempts - 1:
-                        dice_log(
+                        logger.error(
                             f"[Standalone][HubRegister][ERROR] hub_url={cfg.dicehub.api_url} bot_id={bot_id} "
                             f"attempt={attempt + 1}/{max_attempts} error_type={error_type} detail={exc}"
                         )
                         break
                     wait_s = waits[attempt]
-                    dice_log(
+                    logger.warning(
                         f"[Standalone][HubRegister][WARN] hub_url={cfg.dicehub.api_url} bot_id={bot_id} "
                         f"attempt={attempt + 1}/{max_attempts} error_type={error_type} next_retry_in={wait_s}s detail={exc}"
                     )
@@ -149,7 +149,7 @@ def create_app(bot_id: str) -> FastAPI:
             if not final_api_key and registration_success:
                 final_api_key = bot.hub_manager.get_api_key()
                 if final_api_key:
-                    dice_log("[Standalone] Using api_key from hub registration for WebChat")
+                    logger.info("[Standalone] Using api_key from hub registration for WebChat")
 
             if final_api_key:
                 try:
@@ -158,15 +158,15 @@ def create_app(bot_id: str) -> FastAPI:
                     webchat_active = True
                     await webchat_adapter.start(bot)
                     bot.set_client_proxy(active_proxy)
-                    dice_log(f"[Standalone] WebChat started for hub={webchat_hub_url}")
+                    logger.info(f"[Standalone] WebChat started for hub={webchat_hub_url}")
                 except Exception as exc:
-                    dice_log(f"[Standalone][WARN] WebChat initialization failed, running without WebChat: {exc}")
+                    logger.warning(f"[Standalone][WARN] WebChat initialization failed, running without WebChat: {exc}")
                     active_proxy = standalone_proxy
                     webchat_active = False
             else:
-                dice_log("[Standalone][WARN] DiceHub URL configured but no api_key available, WebChat disabled")
+                logger.warning("[Standalone][WARN] DiceHub URL configured but no api_key available, WebChat disabled")
         else:
-            dice_log("[Standalone] No DiceHub URL configured, running in standalone mode")
+            logger.info("[Standalone] No DiceHub URL configured, running in standalone mode")
 
         bind_runtime(bot, active_proxy, webchat_enabled=webchat_active)
         try:

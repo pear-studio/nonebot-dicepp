@@ -13,7 +13,7 @@ from typing import List, Optional, Protocol
 
 import httpx
 
-from utils.logger import dice_log
+from utils.logger import logger
 
 
 class ImageCacheProtocol(Protocol):
@@ -48,7 +48,7 @@ class ImageCache:
                 return  # 已缓存
             if ImageCache.is_emoji(entry.get("sub_type", "")) and not force_emoji:
                 entry["download_status"] = "skipped_emoji"
-                dice_log(
+                logger.info(
                     f"[ImageResolve] 表情按设计跳过: url={entry.get('url', '')}"
                     f"（force_emoji=True 可强制下载）"
                 )
@@ -60,11 +60,11 @@ class ImageCache:
                 r = await client.get(url, follow_redirects=True, timeout=10)
                 if r.status_code != 200:
                     entry["download_attempted_at"] = int(time.time())
-                    dice_log(f"[ImageResolve] HTTP {r.status_code}: {url}")
+                    logger.warning(f"[ImageResolve] HTTP {r.status_code}: {url}")
                     return
                 if len(r.content) > self.MAX_IMAGE_SIZE:
                     entry["download_attempted_at"] = int(time.time())
-                    dice_log(f"[ImageResolve] 图片超限 ({len(r.content)} bytes): {url}")
+                    logger.warning(f"[ImageResolve] 图片超限 ({len(r.content)} bytes): {url}")
                     return
                 mime = r.headers.get("content-type", "image/png").split(";")[0]
                 b64 = base64.b64encode(r.content).decode()
@@ -78,7 +78,7 @@ class ImageCache:
                 entry["download_attempted_at"] = int(time.time())
             except Exception as e:
                 entry["download_attempted_at"] = int(time.time())
-                dice_log(f"[ImageResolve] 下载失败 {type(e).__name__}: {url}")
+                logger.warning(f"[ImageResolve] 下载失败 {type(e).__name__}: {url}")
 
         async with httpx.AsyncClient() as client:
             await asyncio.gather(*[_download_one(client, e) for e in image_meta])
@@ -88,7 +88,7 @@ class ImageCache:
         downloaded = sum(1 for e in image_meta if e.get("cache_hash") and e.get("download_attempted_at"))
         failed = sum(1 for e in image_meta if not e.get("cache_hash") and e.get("download_attempted_at"))
         skipped = sum(1 for e in image_meta if e.get("download_status") == "skipped_emoji")
-        dice_log(
+        logger.info(
             f"[ImageCache] download_and_cache: total={len(image_meta)}"
             f" cached={cached} downloaded={downloaded} failed={failed} skipped={skipped}"
         )

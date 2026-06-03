@@ -8,7 +8,7 @@ CH6 修复: 统一异常/parse_error 重试逻辑，SCORING_MAX_RETRIES = 3。
 """
 from collections import deque
 from typing import Dict, Tuple, Optional, List, Any
-from nonebot.log import logger
+from utils.logger import logger
 
 from ..data.store import PersonaDataStore
 from ..data.models import (

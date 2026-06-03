@@ -2,7 +2,7 @@ import re
 import random
 
 from core.config.basic import Paths
-from utils.logger import dice_log
+from utils.logger import logger
 from utils.cq_code import get_cq_image
 
 
@@ -29,7 +29,7 @@ class LocalizationText:
             if file_path.exists():
                 return get_cq_image(file_path.read_bytes())
             else:
-                dice_log(f"[LocalImage] 找不到图片 {file_path}")
+                logger.warning(f"[LocalImage] 找不到图片 {file_path}")
                 return match.group(0)
 
         loc_text = random.choice(self.loc_texts) if self.loc_texts else (self.default_text or "")

@@ -5,7 +5,7 @@
 from typing import List, Dict, Any, Optional
 import json
 import time
-from nonebot.log import logger
+from utils.logger import logger
 from datetime import timedelta
 
 from core.bot import Bot

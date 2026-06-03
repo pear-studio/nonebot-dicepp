@@ -4,7 +4,7 @@
 """
 from typing import Optional, List
 from dataclasses import dataclass
-from nonebot.log import logger
+from utils.logger import logger
 from datetime import timedelta
 
 from ..data.store import PersonaDataStore

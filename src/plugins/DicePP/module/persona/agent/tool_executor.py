@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type
 
-from nonebot.log import logger
+from utils.logger import logger
 from pydantic import BaseModel, ValidationError
 
 from .actions import EffectKind

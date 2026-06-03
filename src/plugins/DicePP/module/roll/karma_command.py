@@ -13,7 +13,7 @@ from core.communication import GroupMessagePort, MessageMetaData
 from core.localization import LOC_PERMISSION_DENIED_NOTICE
 
 from .karma_manager import get_karma_manager, MODE_DISPLAY, ENGINE_DISPLAY
-from utils.logger import dice_log
+from utils.logger import logger
 
 LOC_KARMA_ON = "karma_enable_on"
 LOC_KARMA_ALREADY_ON = "karma_enable_already_on"
@@ -185,7 +185,7 @@ class KarmaDiceCommand(UserCommandBase):
         try:
             manager = get_karma_manager(self.bot)
         except (AttributeError, TypeError, ValueError) as exc:
-            dice_log(f"[KarmaDice] 获取管理器失败: {exc}")
+            logger.error(f"[KarmaDice] 获取管理器失败: {exc}")
             feedback = "业力骰子功能初始化失败，请联系管理员检查日志。"
             return [BotSendMsgCommand(self.bot.account, feedback, [port])]
         action = hint.get("action", "")
@@ -216,14 +216,14 @@ class KarmaDiceCommand(UserCommandBase):
                 else:
                     feedback = self.format_loc(LOC_KARMA_ALREADY_ON)
             except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
-                dice_log(f"[KarmaDice] 启用失败: {exc}")
+                logger.error(f"[KarmaDice] 启用失败: {exc}")
                 feedback = "业力骰子开启失败，请检查日志。"
         elif action == "off":
             try:
                 changed = await manager.disable(meta.group_id)
                 feedback = self.format_loc(LOC_KARMA_OFF if changed else LOC_KARMA_ALREADY_OFF)
             except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
-                dice_log(f"[KarmaDice] 关闭失败: {exc}")
+                logger.error(f"[KarmaDice] 关闭失败: {exc}")
                 feedback = "业力骰子关闭失败，请检查日志。"
         elif action == "status":
             try:
@@ -274,7 +274,7 @@ class KarmaDiceCommand(UserCommandBase):
                             count=status["group_user_count"],
                         )
             except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
-                dice_log(f"[KarmaDice] 查询状态失败: {exc}")
+                logger.error(f"[KarmaDice] 查询状态失败: {exc}")
                 feedback = "业力骰子状态查询失败，请检查日志。"
         elif action == "help":
             feedback = self.format_loc(LOC_KARMA_HELP)
@@ -290,7 +290,7 @@ class KarmaDiceCommand(UserCommandBase):
                         await manager.set_custom_params(meta.group_id, target, window)
                         feedback = self.format_loc(LOC_KARMA_SET_OK, target=target, window=window)
                     except (AttributeError, TypeError, KeyError, ValueError, RuntimeError) as exc:
-                        dice_log(f"[KarmaDice] 设置参数失败: {exc}")
+                        logger.error(f"[KarmaDice] 设置参数失败: {exc}")
                         feedback = "业力骰子参数更新失败，请检查日志。"
                 except ValueError:
                     feedback = self.format_loc(LOC_KARMA_SET_INVALID)
@@ -311,7 +311,7 @@ class KarmaDiceCommand(UserCommandBase):
                         if not changed:
                             feedback += "（已在当前模式）"
                     except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
-                        dice_log(f"[KarmaDice] 切换模式失败: {exc}")
+                        logger.error(f"[KarmaDice] 切换模式失败: {exc}")
                         feedback = "业力模式切换失败，请检查日志。"
         elif action == "engine":
             if not params:
@@ -330,7 +330,7 @@ class KarmaDiceCommand(UserCommandBase):
                         if not changed:
                             feedback += "（已在当前引擎）"
                     except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
-                        dice_log(f"[KarmaDice] 切换引擎失败: {exc}")
+                        logger.error(f"[KarmaDice] 切换引擎失败: {exc}")
                         feedback = "业力引擎切换失败，请检查日志。"
         elif action == "reset":
             try:
@@ -341,7 +341,7 @@ class KarmaDiceCommand(UserCommandBase):
                     manager.reset_history(meta.group_id)
                     feedback = self.format_loc(LOC_KARMA_RESET_OK)
             except (AttributeError, TypeError, KeyError, RuntimeError) as exc:
-                dice_log(f"[KarmaDice] 重置历史失败: {exc}")
+                logger.error(f"[KarmaDice] 重置历史失败: {exc}")
                 feedback = "业力历史清空失败，请检查日志。"
         else:
             feedback = self.format_loc(LOC_KARMA_HELP)

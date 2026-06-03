@@ -6,7 +6,7 @@ from typing import List
 
 import aiosqlite
 
-from utils.logger import dice_log
+from utils.logger import logger
 
 from .base import Migration, MigrationContext
 from .registry import MigrationRegistry, MigrationRegistryError
@@ -91,7 +91,7 @@ class MigrationRunner:
             return MigrationRunResult(current_version=current, target_version=latest, applied_versions=[])
 
         for migration in pending:
-            dice_log(f"[Migration] Applying v{migration.version}: {migration.name}")
+            logger.info(f"[Migration] Applying v{migration.version}: {migration.name}")
             try:
                 await migration.up(self._ctx)
                 await self._db.execute(

@@ -1,5 +1,5 @@
 """唯一消息发送出口"""
-from nonebot.log import logger
+from utils.logger import logger
 from typing import Optional, Callable
 
 from core.bot import Bot

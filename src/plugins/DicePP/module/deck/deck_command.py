@@ -14,7 +14,7 @@ from core.config.basic import Paths
 from core.localization import LocalizationManager, LOC_FUNC_DISABLE
 from utils import read_xlsx, update_xlsx, col_based_workbook_to_dict, create_parent_dir, get_empty_col_based_workbook
 from utils.string import match_substring
-from utils.logger import dice_log
+from utils.logger import logger
 from utils.cq_code import get_cq_image
 from module.roll.ast_engine.adapter import preprocess_roll_exp, is_roll_exp, exec_roll_exp_unified
 
@@ -144,7 +144,7 @@ class DeckItem:
             elif file_path_local_img.exists():
                 return get_cq_image(file_path_local_img.read_bytes())
             else:
-                dice_log(f"[DeckImage] 找不到图片 {file_path_relative.resolve()}")
+                logger.warning(f"[DeckImage] 找不到图片 {file_path_relative.resolve()}")
                 return key
 
         result = self.content.strip()
@@ -348,7 +348,6 @@ class DeckCommand(UserCommandBase):
                 for item_index in range(item_num):
                     content = sheet_data[DECK_ITEM_FIELD_CONTENT][item_index]
                     if not content:
-                        # dice_log(f"表格{wb.path}/{sheet_name}第{item_index + 2}行缺少content, 该条目未加载")
                         continue
 
                     weight = sheet_data[DECK_ITEM_FIELD_WEIGHT][item_index]

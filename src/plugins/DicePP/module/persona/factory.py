@@ -7,7 +7,7 @@ import os
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
-from nonebot.log import logger
+from utils.logger import logger
 from core.bot import Bot
 from core.config.basic import Paths
 

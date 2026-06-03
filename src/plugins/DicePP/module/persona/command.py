@@ -9,7 +9,8 @@ import json
 import time
 import asyncio
 import uuid
-from nonebot.log import logger
+from utils.logger import logger, _request_id_var
+
 from datetime import timedelta
 
 from core.bot import Bot
@@ -17,7 +18,6 @@ from core.command.user_cmd import UserCommandBase, custom_user_command
 from core.command.bot_cmd import BotCommandBase
 from core.communication import MessageMetaData
 from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FUN
-from utils.logger import dice_log, _request_id_var
 
 
 from .factory import PersonaApp, create_persona
@@ -67,7 +67,7 @@ async def resolve_images(
         if e.get("cache_hash")
     ]
     cached_count = sum(1 for e in image_meta if e.get("cache_hash"))
-    dice_log(
+    logger.info(
         f"[Persona] resolve_images: total={len(image_meta)}"
         f" cached={cached_count} download={'forced' if force_download else 'lazy'}"
     )
@@ -141,7 +141,7 @@ class PersonaCommand(UserCommandBase):
                 self.app = await create_persona(self.bot)
             except PersonaInitError as e:
                 self.init_error = f"{type(e).__name__}: {e}"
-                dice_log(f"[Persona] 模块初始化失败: {self.init_error}")
+                logger.error(f"[Persona] 模块初始化失败: {self.init_error}")
                 self.app = None
                 self.data_store = None
                 self.enabled = False
@@ -161,10 +161,10 @@ class PersonaCommand(UserCommandBase):
                 if hasattr(self, "_inbound_hook_unregister"):
                     self._inbound_hook_unregister()
                 self._inbound_hook_unregister = self.bot.add_inbound_message_hook(self._inbound_message_recorder)
-                dice_log(f"[Persona] 模块初始化成功: {config.character_name}")
+                logger.info(f"[Persona] 模块初始化成功: {config.character_name}")
             else:
                 # config.enabled=False 走这里：禁用而非失败
-                dice_log("[Persona] 模块未启用")
+                logger.info("[Persona] 模块未启用")
                 self.enabled = False
             return []
 
@@ -216,7 +216,7 @@ class PersonaCommand(UserCommandBase):
                 display_name=display_name,
             )
         except Exception as e:
-            dice_log(f"[Persona] 出站记录器写入失败: {e}")
+            logger.warning(f"[Persona] 出站记录器写入失败: {e}")
 
     async def _inbound_message_recorder(
         self,
@@ -234,7 +234,7 @@ class PersonaCommand(UserCommandBase):
         try:
             msg_type = MessageType.from_str(type)
             if type not in (MessageType.CHAT.value, MessageType.COMMAND.value, MessageType.SYSTEM_NOTICE.value, MessageType.SYSTEM_LOG.value):
-                dice_log(f"[Persona] 未知 message_type='{type}'，fallback 到 CHAT")
+                logger.warning(f"[Persona] 未知 message_type='{type}'，fallback 到 CHAT")
 
             # 检测图片（私聊立即下载缓存）
             is_private = not group_id
@@ -252,7 +252,7 @@ class PersonaCommand(UserCommandBase):
                 image_meta=image_meta,
             )
         except Exception as e:
-            dice_log(f"[Persona] 入站记录器写入失败: {e}")
+            logger.warning(f"[Persona] 入站记录器写入失败: {e}")
 
     def _is_admin(self, user_id: str) -> bool:
         """检查用户是否是管理员"""
@@ -373,151 +373,152 @@ class PersonaCommand(UserCommandBase):
         # 设置本次请求的 trace_id 上下文；finally 块保证异常路径也能 reset
         _trace_token = _request_id_var.set(uuid.uuid4().hex[:8])
         try:
-            # 提取命令内容
-            msg = msg_str.strip()
-            if msg.startswith(".ai") or msg.startswith("。ai"):
-                content = msg[3:].strip()
-            else:
-                content = msg
-
-            # 特殊提示：群聊中发送 join
-            if hint == "join_group_hint":
-                response = "请私聊发送此命令"
-                await self._send(user_id, group_id, response)
-                return []
-
-            # 解析命令
-            parts = content.split()
-            cmd = parts[0] if parts else ""
-            args = parts[1:] if len(parts) > 1 else []
-
-            # 处理 join 命令
-            if cmd == "join" or hint == "join":
-                response = await self._handle_join(user_id, args)
-                await self._send(user_id, group_id, response)
-                return []
-
-            # 处理 admin 命令
-            if cmd == "admin" or hint == "admin":
-                response = await self._handle_admin(user_id, group_id, args)
-                if response:
-                    await self._send(user_id, group_id, response)
-                return []
-
-            # 处理 profile 命令
-            if cmd == "profile":
-                response = await self._handle_profile(user_id, group_id)
-                await self._send(user_id, group_id, response)
-                return []
-
-            # 特殊命令处理
-            is_at_trigger = meta.to_me and not msg_str.strip().startswith(".ai")
-
-            response = None
-
-            if content == "clear":
-                if self.app:
-                    await self.app.clear_chat_history(user_id, group_id)
-                    response = "对话历史已清空"
+            with logger.contextualize(request_id=_request_id_var.get()):
+                # 提取命令内容
+                msg = msg_str.strip()
+                if msg.startswith(".ai") or msg.startswith("。ai"):
+                    content = msg[3:].strip()
                 else:
-                    response = "模块未初始化"
-            elif content == "status" or hint == "status":
-                response = await self._get_status(user_id, group_id, is_private)
-            elif content == "mute":
-                response = await self._handle_mute_toggle(user_id)
-            elif content == "key" or content.startswith("key "):
-                response = "用户自定义 API Key 功能升级中，暂不可用。当前所有对话使用全局 provider 配置。"
-            elif is_at_trigger:
-                if self.app and self.enabled:
-                    try:
-                        # 检测当前消息中的图片（始终下载，包括表情包）
-                        image_meta, image_data_urls = await resolve_images(
-                            meta.raw_msg, self.image_cache, force_download=True,
-                            force_emoji=True,
-                        )
-                        if image_data_urls:
-                            dice_log(
-                                f"[Persona] CHAT_WITH_IMAGE trigger: source=current_message"
-                                f" image_count={len(image_data_urls)} user={user_id}"
-                            )
+                    content = msg
 
-                        if not content and not image_data_urls:
-                            if image_meta:
-                                # 全部图片下载失败（已尝试下载包括表情在内的所有图片）
+                # 特殊提示：群聊中发送 join
+                if hint == "join_group_hint":
+                    response = "请私聊发送此命令"
+                    await self._send(user_id, group_id, response)
+                    return []
+
+                # 解析命令
+                parts = content.split()
+                cmd = parts[0] if parts else ""
+                args = parts[1:] if len(parts) > 1 else []
+
+                # 处理 join 命令
+                if cmd == "join" or hint == "join":
+                    response = await self._handle_join(user_id, args)
+                    await self._send(user_id, group_id, response)
+                    return []
+
+                # 处理 admin 命令
+                if cmd == "admin" or hint == "admin":
+                    response = await self._handle_admin(user_id, group_id, args)
+                    if response:
+                        await self._send(user_id, group_id, response)
+                    return []
+
+                # 处理 profile 命令
+                if cmd == "profile":
+                    response = await self._handle_profile(user_id, group_id)
+                    await self._send(user_id, group_id, response)
+                    return []
+
+                # 特殊命令处理
+                is_at_trigger = meta.to_me and not msg_str.strip().startswith(".ai")
+
+                response = None
+
+                if content == "clear":
+                    if self.app:
+                        await self.app.clear_chat_history(user_id, group_id)
+                        response = "对话历史已清空"
+                    else:
+                        response = "模块未初始化"
+                elif content == "status" or hint == "status":
+                    response = await self._get_status(user_id, group_id, is_private)
+                elif content == "mute":
+                    response = await self._handle_mute_toggle(user_id)
+                elif content == "key" or content.startswith("key "):
+                    response = "用户自定义 API Key 功能升级中，暂不可用。当前所有对话使用全局 provider 配置。"
+                elif is_at_trigger:
+                    if self.app and self.enabled:
+                        try:
+                            # 检测当前消息中的图片（始终下载，包括表情包）
+                            image_meta, image_data_urls = await resolve_images(
+                                meta.raw_msg, self.image_cache, force_download=True,
+                                force_emoji=True,
+                            )
+                            if image_data_urls:
+                                logger.info(
+                                    f"[Persona] CHAT_WITH_IMAGE trigger: source=current_message"
+                                    f" image_count={len(image_data_urls)} user={user_id}"
+                                )
+
+                            if not content and not image_data_urls:
+                                if image_meta:
+                                    # 全部图片下载失败（已尝试下载包括表情在内的所有图片）
+                                    response = await self.app.chat_with_user(
+                                        user_id=user_id,
+                                        group_id=group_id,
+                                        message="[图片下载失败，请重试]",
+                                        nickname=nickname,
+                                        image_data_urls=None,
+                                    )
+                                else:
+                                    # 真的没发任何内容（纯 @bot 无附带）
+                                    response = await self._get_status(user_id, group_id, is_private)
+                            else:
+                                logger.debug(
+                                    f"[Persona] chat enter: user={user_id} group={group_id}"
+                                    f" content_len={len(content) if content else 0}"
+                                    f" image_count={len(image_data_urls) if image_data_urls else 0}"
+                                )
                                 response = await self.app.chat_with_user(
                                     user_id=user_id,
                                     group_id=group_id,
-                                    message="[图片下载失败，请重试]",
+                                    message=content,
                                     nickname=nickname,
-                                    image_data_urls=None,
+                                    image_data_urls=image_data_urls,
                                 )
-                            else:
-                                # 真的没发任何内容（纯 @bot 无附带）
-                                response = await self._get_status(user_id, group_id, is_private)
-                        else:
-                            logger.bind(request_id=_request_id_var.get()).debug(
-                                f"[Persona] chat enter: user={user_id} group={group_id}"
-                                f" content_len={len(content) if content else 0}"
-                                f" image_count={len(image_data_urls) if image_data_urls else 0}"
-                            )
-                            response = await self.app.chat_with_user(
-                                user_id=user_id,
-                                group_id=group_id,
-                                message=content,
-                                nickname=nickname,
-                                image_data_urls=image_data_urls,
-                            )
-                            logger.bind(request_id=_request_id_var.get()).info(
-                                f"[Persona] chat return: user={user_id}"
-                                f" response_type={type(response).__name__}"
-                                f" response_len={len(response) if response else 0}"
-                                f" response_preview={(response or '')[:60]!r}"
-                            )
-                    except QuotaExceeded as e:
-                        dice_log(f"[Persona] 配额超限: user={user_id}, group={group_id}")
-                        response = str(e)
+                                logger.info(
+                                    f"[Persona] chat return: user={user_id}"
+                                    f" response_type={type(response).__name__}"
+                                    f" response_len={len(response) if response else 0}"
+                                    f" response_preview={(response or '')[:60]!r}"
+                                )
+                        except QuotaExceeded as e:
+                            logger.warning(f"[Persona] 配额超限: user={user_id}, group={group_id}")
+                            response = str(e)
+                    else:
+                        response = "Persona AI 模块未启用或未初始化"
                 else:
-                    response = "Persona AI 模块未启用或未初始化"
-            else:
-                response = self._get_introduction()
+                    response = self._get_introduction()
 
-            # 发送回复
-            # - response is None：去重命中或未进入 chat 路径，静默早退
-            # - response 是空字符串但非 None：分段路径已通过调度器实时发送，
-            #   仍需更新群活跃度，但跳过再次 _send
-            if response is None:
+                # 发送回复
+                # - response is None：去重命中或未进入 chat 路径，静默早退
+                # - response 是空字符串但非 None：分段路径已通过调度器实时发送，
+                #   仍需更新群活跃度，但跳过再次 _send
+                if response is None:
+                    return []
+
+                # 更新群活跃度（群聊且是@触发或AI命令）
+                if group_id and self.data_store and self.config.group_activity_enabled:
+                    try:
+                        is_whitelisted = await self.data_store.is_group_whitelisted(group_id)
+                        await self.data_store.update_group_activity(
+                            group_id=group_id,
+                            score_delta=self.config.group_activity_add_per_interaction,
+                            max_daily_add=self.config.group_activity_max_daily_add,
+                            is_whitelisted=is_whitelisted,
+                        )
+                    except Exception as e:
+                        logger.warning(f"[Persona] 群活跃度更新失败（已忽略）: {e}")
+
+                # 分段路径下 response 是 falsy sentinel，已通过 dispatcher 发出，不再次 _send
+                if response:
+                    await self._send(user_id, group_id, response)
                 return []
-
-            # 更新群活跃度（群聊且是@触发或AI命令）
-            if group_id and self.data_store and self.config.group_activity_enabled:
-                try:
-                    is_whitelisted = await self.data_store.is_group_whitelisted(group_id)
-                    await self.data_store.update_group_activity(
-                        group_id=group_id,
-                        score_delta=self.config.group_activity_add_per_interaction,
-                        max_daily_add=self.config.group_activity_max_daily_add,
-                        is_whitelisted=is_whitelisted,
-                    )
-                except Exception as e:
-                    dice_log(f"[Persona] 群活跃度更新失败（已忽略）: {e}")
-
-            # 分段路径下 response 是 falsy sentinel，已通过 dispatcher 发出，不再次 _send
-            if response:
-                await self._send(user_id, group_id, response)
-            return []
         finally:
             _request_id_var.reset(_trace_token)
 
     async def _send(self, user_id: str, group_id: str, content: str) -> None:
         """通过 MessagePort 发送单条消息"""
         if self.app:
-            logger.bind(request_id=_request_id_var.get()).debug(
+            logger.debug(
                 f"[Persona] _send call: user={user_id} group={group_id}"
                 f" content_len={len(content)}"
             )
             await self.app.send_message(user_id, group_id, content)
         else:
-            dice_log(
+            logger.error(
                 f"[Persona] MessagePort 未初始化，丢弃消息: "
                 f"user={user_id}, group={group_id}, content={content[:30]}..."
             )
@@ -788,7 +789,7 @@ class PersonaCommand(UserCommandBase):
                 await self.app.tick()
                 elapsed = time.monotonic() - t0
                 if elapsed > 10:
-                    dice_log(f"[Persona] tick 耗时 {elapsed:.1f}s (>10s)，可能阻塞后续槽位")
+                    logger.warning(f"[Persona] tick 耗时 {elapsed:.1f}s (>10s)，可能阻塞后续槽位")
 
             # 清理已完成的任务（消费结果，不返回命令）
             t = self._async_tick_task
@@ -799,7 +800,7 @@ class PersonaCommand(UserCommandBase):
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
-                    dice_log(f"[Persona] tick 异步任务失败: {e}")
+                    logger.error(f"[Persona] tick 异步任务失败: {e}")
                 finally:
                     self._async_tick_task = None
 
@@ -811,7 +812,7 @@ class PersonaCommand(UserCommandBase):
             loop.run_until_complete(self.app.tick())
             return []
         except Exception as e:
-            dice_log(f"[Persona] tick 失败: {e}")
+            logger.error(f"[Persona] tick 失败: {e}")
             return []
 
     def tick_daily(self) -> List[BotCommandBase]:
@@ -826,11 +827,11 @@ class PersonaCommand(UserCommandBase):
                 try:
                     diary = await asyncio.wait_for(self.app.tick_daily(), timeout=300)
                     if diary:
-                        dice_log(f"[Persona] 生成日记: {len(diary)} 字")
+                        logger.info(f"[Persona] 生成日记: {len(diary)} 字")
                     if self.report_generator and self.config.daily_report_enabled:
                         await self.report_generator.generate_and_send(diary)
                 except asyncio.TimeoutError:
-                    dice_log("[Persona] tick_daily 超时(>5min)，日报生成失败")
+                    logger.error("[Persona] tick_daily 超时(>5min)，日报生成失败")
                     if self.report_generator:
                         await self.report_generator.send_master_notification("日报生成超时(>5min)，请检查 LLM 服务状态")
 
@@ -843,7 +844,7 @@ class PersonaCommand(UserCommandBase):
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:
-                    dice_log(f"[Persona] tick_daily 异步任务失败: {e}")
+                    logger.error(f"[Persona] tick_daily 异步任务失败: {e}")
                 finally:
                     self._async_tick_daily_task = None
 
@@ -855,5 +856,5 @@ class PersonaCommand(UserCommandBase):
             # unreachable: get_running_loop() 成功时 loop.is_running() 必为 True
             return []
         except Exception as e:
-            dice_log(f"[Persona] tick_daily 失败: {e}")
+            logger.error(f"[Persona] tick_daily 失败: {e}")
             return []

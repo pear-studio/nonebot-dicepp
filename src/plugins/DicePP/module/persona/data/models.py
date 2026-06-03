@@ -6,7 +6,7 @@ Persona 模块数据模型
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from nonebot.log import logger
+from utils.logger import logger
 
 from core.message_types import MessageType  # noqa: F401 — re-export from central location
 

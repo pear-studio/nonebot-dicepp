@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from ..llm.providers.protocol import LLMResponse
 from ..llm.router import LLMRouter, QuotaExceeded, ServiceUnavailableError

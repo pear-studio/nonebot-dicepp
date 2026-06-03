@@ -5,7 +5,7 @@
 """
 from typing import Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
-from nonebot.log import logger
+from utils.logger import logger
 from ..data.models import RelationshipState, ScoreDeltas, STAGE_FLOORS
 from utils.time import wall_now
 

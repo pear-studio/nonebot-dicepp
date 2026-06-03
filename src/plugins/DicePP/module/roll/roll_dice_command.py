@@ -30,7 +30,7 @@ from module.roll.default_dice import (
 )
 from module.roll.karma_manager import get_karma_manager, KarmaConfig
 from core.data.models import UserKarma
-from utils.logger import dice_log
+from utils.logger import logger
 
 LOC_ROLL_RESULT = "roll_result"
 LOC_ROLL_RESULT_REASON = "roll_result_reason"
@@ -167,7 +167,7 @@ class RollDiceCommand(UserCommandBase):
             try:
                 karma_manager = get_karma_manager(self.bot)
             except (AttributeError, TypeError, ValueError) as exc:
-                dice_log(f"[KarmaDice] 获取管理器失败: {exc}")
+                logger.warning(f"[KarmaDice] 获取管理器失败: {exc}")
             if karma_manager and meta.group_id:
                 try:
                     group_cfg = await self.bot.db.group_config.get(meta.group_id)
@@ -175,7 +175,7 @@ class RollDiceCommand(UserCommandBase):
                         karma_cfg = KarmaConfig.from_group_config(group_cfg.data)
                         karma_manager.set_runtime(meta.group_id, karma_cfg)
                 except Exception as exc:
-                    dice_log(f"[KarmaDice] 加载群配置失败: {exc}")
+                    logger.warning(f"[KarmaDice] 加载群配置失败: {exc}")
 
             def _exec_ast_once() -> RollResult:
                 """通过 AST 统一入口执行当前 exp_str（含完整异常兜底）。"""
@@ -188,7 +188,7 @@ class RollDiceCommand(UserCommandBase):
                         karma_enabled = active
                         res_list: List[RollResult] = [_exec_ast_once() for _ in range(times)]
                 except (AttributeError, TypeError, RuntimeError) as exc:
-                    dice_log(f"[KarmaDice] 激活失败，回退普通掷骰: {exc}")
+                    logger.warning(f"[KarmaDice] 激活失败，回退普通掷骰: {exc}")
                     karma_enabled = False
                     res_list = [_exec_ast_once() for _ in range(times)]
             else:
@@ -335,7 +335,7 @@ class RollDiceCommand(UserCommandBase):
                         )
                         await self.bot.db.karma.upsert(karma_record)
                 except Exception as exc:
-                    dice_log(f"[KarmaDice] 写入 DB 失败: {exc}")
+                    logger.warning(f"[KarmaDice] 写入 DB 失败: {exc}")
         commands.append(BotSendMsgCommand(self.bot.account, feedback, [port]))
         return commands
 
@@ -537,7 +537,7 @@ async def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollR
     try:
         await bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=user_stat.serialize()))
     except Exception as _exc:
-        dice_log(f"[RollStat] 写入用户统计 DB 失败: {_exc}")
+        logger.warning(f"[RollStat] 写入用户统计 DB 失败: {_exc}")
 
     # 更新群数据
     if not meta.group_id:
@@ -555,4 +555,4 @@ async def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollR
     try:
         await bot.db.group_stat.upsert(GroupStat(group_id=meta.group_id, data=group_stat.serialize()))
     except Exception as _exc:
-        dice_log(f"[RollStat] 写入群统计 DB 失败: {_exc}")
+        logger.warning(f"[RollStat] 写入群统计 DB 失败: {_exc}")

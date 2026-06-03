@@ -5,7 +5,7 @@ Executor 读取 / 更新 chat-local 状态，不持有全局状态。
 
 from typing import Dict, Any, Optional
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from ..chat.segment_dispatcher import SegmentDispatcher, SegmentItem
 from ..chat.segment_state import SegmentBudgetState

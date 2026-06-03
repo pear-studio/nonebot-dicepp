@@ -2,7 +2,7 @@
 import asyncio
 from typing import Optional
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from .context import ToolContext
 from .registry import ToolDef

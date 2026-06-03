@@ -5,12 +5,9 @@ All bot configuration is represented as typed fields here.
 Config is loaded hierarchically by ConfigLoader:
   global defaults < global secrets < persona < account overrides < env vars
 """
-import logging
 from typing import List, Literal, Optional, Dict
 
 from pydantic import AliasChoices, BaseModel, Field, model_validator
-
-logger = logging.getLogger(__name__)
 
 
 class CircuitBreakerConfig(BaseModel):
@@ -326,6 +323,7 @@ class QueryConfig(BaseModel):
 
 
 class LogConfig(BaseModel):
+    level: str = "DEBUG"
     upload_enable: bool = True
     upload_endpoint: str = "https://dice.weizaima.com/dice/api/log"
     upload_token: str = ""

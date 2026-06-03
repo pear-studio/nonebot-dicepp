@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from nonebot.log import logger
+from utils.logger import logger
 
 from .actions import EffectKind, SendMessageAction, GenerateImageAction
 from .event_bus import AgentEventBus
@@ -181,8 +181,7 @@ class AgentLoop:
                     run_id=state.run_id,
                 )
             except Exception as e:
-                from utils.logger import dice_log as _dlog
-                _dlog(f"[AgentLoop] LLM 调用失败: {type(e).__name__}: {e}")
+                logger.debug(f"[AgentLoop] LLM 调用失败: {type(e).__name__}: {e}")
                 logger.error(f"AgentLoop LLM 调用失败: {e}")
                 return await self._finish(state, "failed", "llm_error", total_tokens_in, total_tokens_out, is_error=True)
 

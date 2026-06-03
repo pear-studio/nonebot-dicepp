@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from nonebot.log import logger
+from utils.logger import logger
 from pydantic import BaseModel, Field
 
 from .registry import ToolDef

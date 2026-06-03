@@ -3,7 +3,7 @@ import asyncio
 from typing import Optional
 
 import httpx
-from nonebot.log import logger
+from utils.logger import logger
 
 from ...llm.errors import ErrorKind
 from .protocol import ImageGenProvider, ErrorClass

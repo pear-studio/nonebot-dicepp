@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import asyncio
 import json
 import random
-from nonebot.log import logger
+from utils.logger import logger
 import re
 
 from ..data.store import PersonaDataStore

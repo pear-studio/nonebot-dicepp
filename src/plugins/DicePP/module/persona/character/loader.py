@@ -3,7 +3,7 @@
 
 从 YAML 文件加载角色卡
 """
-from nonebot.log import logger
+from utils.logger import logger
 from pathlib import Path
 from typing import Optional
 import yaml

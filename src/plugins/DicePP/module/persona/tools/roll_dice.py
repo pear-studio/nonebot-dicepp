@@ -4,7 +4,7 @@
 将 module.roll 的调用隔离在 persona 模块外部，
 负责异常转换和结果格式化。
 """
-from nonebot.log import logger
+from utils.logger import logger
 from module.roll import RollDiceError
 from module.roll.ast_engine.adapter import exec_roll_exp_unified
 from .context import ToolContext

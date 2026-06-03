@@ -4,7 +4,7 @@
 组合 force / normal 策略生成候选目标；最终发送前的 mute 与最小间隔检查由调度器负责。
 """
 from typing import TYPE_CHECKING, List, Optional, Set
-from nonebot.log import logger
+from utils.logger import logger
 from .models import ShareTarget
 from ..data.store import PersonaDataStore
 from ..game.decay import DecayCalculator

@@ -17,7 +17,7 @@ from core.command import BotCommandBase, BotSendFileCommand, BotSendMsgCommand
 from core.command import UserCommandBase, custom_user_command
 from core.communication import GroupMessagePort, MessageMetaData
 from utils.time import get_current_date_str, str_to_datetime
-from utils.logger import dice_log
+from utils.logger import logger
 
 # 旧版本使用的常量，保留以兼容外部引用或进行数据迁移
 DC_LOG_SESSION = "log_session"
@@ -470,7 +470,7 @@ def _append_record_to_db(group_id: str, log_id: str, log_entry: Dict[str, Any], 
             finally:
                 conn.close()
         except (OSError, RuntimeError, sqlite3.Error) as e:
-            dice_log(f"[LogDB] upsert before insert error: {e}")
+            logger.error(f"[LogDB] upsert before insert error: {e}")
 
     # 2) 写入记录
     if get_connection and insert_record:
@@ -491,7 +491,7 @@ def _append_record_to_db(group_id: str, log_id: str, log_entry: Dict[str, Any], 
             finally:
                 conn.close()
         except (OSError, RuntimeError, sqlite3.Error) as e:
-            dice_log(f"[LogDB] insert_record error: {e}")
+            logger.error(f"[LogDB] insert_record error: {e}")
 
     # 3) 内存：只维护统计与颜色映射
     color_map = log_entry.setdefault(LOG_KEY_COLOR_MAP, {})
@@ -1061,7 +1061,7 @@ class LogCommand(UserCommandBase):
                 finally:
                     conn.close()
             except Exception as e:
-                dice_log(f"[LogDB] upsert new log error: {e}")
+                logger.error(f"[LogDB] upsert new log error: {e}")
         return self.messages.new_started.format(name=name)
 
     def _handle_on(self, payload: Dict[str, Any], group_id: str, name: str) -> str:
@@ -1125,7 +1125,7 @@ class LogCommand(UserCommandBase):
                 finally:
                     conn.close()
             except Exception as e:
-                dice_log(f"[LogDB] upsert on error: {e}")
+                logger.error(f"[LogDB] upsert on error: {e}")
         return self.messages.resume.format(name=entry.get(LOG_KEY_NAME, target_id))
 
     def _handle_off(self, payload: Dict[str, Any], group_id: str) -> str:
@@ -1170,7 +1170,7 @@ class LogCommand(UserCommandBase):
                 finally:
                     conn.close()
             except Exception as e:
-                dice_log(f"[LogDB] upsert off error: {e}")
+                logger.error(f"[LogDB] upsert off error: {e}")
         return self.messages.paused.format(name=entry.get(LOG_KEY_NAME, current_id))
 
     def _handle_halt(self, payload: Dict[str, Any], group_id: str) -> str:
@@ -1214,7 +1214,7 @@ class LogCommand(UserCommandBase):
                 finally:
                     conn.close()
             except Exception as e:
-                dice_log(f"[LogDB] upsert halt error: {e}")
+                logger.error(f"[LogDB] upsert halt error: {e}")
         return self.messages.halted.format(name=entry.get(LOG_KEY_NAME, current_id))
 
     def _handle_end(self, payload: Dict[str, Any], group_id: str) -> List[BotCommandBase]:
@@ -1264,7 +1264,7 @@ class LogCommand(UserCommandBase):
                 finally:
                     conn.close()
             except Exception as e:
-                dice_log(f"[LogDB] update upload error: {e}")
+                logger.error(f"[LogDB] update upload error: {e}")
 
         feedback_lines = [self.messages.end_summary.format(name=entry.get(LOG_KEY_NAME, current_id), count=count)]
         if upload_feedback:
@@ -1317,7 +1317,7 @@ class LogCommand(UserCommandBase):
                 finally:
                     conn.close()
             except Exception as e:
-                dice_log(f"[LogDB] delete log error: {e}")
+                logger.error(f"[LogDB] delete log error: {e}")
         return self.messages.deleted.format(name=entry.get(LOG_KEY_NAME, name) if entry else name)
 
     def _handle_get(self, payload: Dict[str, Any], group_id: str, name: str) -> str:
@@ -1428,7 +1428,7 @@ class LogCommand(UserCommandBase):
                 finally:
                     conn.close()
             except Exception as e:
-                dice_log(f"[LogDB] fetch_records error: {e}")
+                logger.error(f"[LogDB] fetch_records error: {e}")
                 records_db = []
         # Merge DB-backed and payload records, sort by timestamp to preserve order
         if records_db and records_payload:
@@ -1550,7 +1550,7 @@ class LogCommand(UserCommandBase):
             docx_path = os.path.join(logs_dir, display_name_base + ".docx")
             document.save(docx_path)
         except Exception as exc:
-            dice_log(f"[LogExport] docx generation failed: {type(exc).__name__}: {exc}")
+            logger.warning(f"[LogExport] docx generation failed: {type(exc).__name__}: {exc}")
             docx_path = None
 
         extra_files: List[Tuple[str, str]] = []
@@ -1561,7 +1561,7 @@ class LogCommand(UserCommandBase):
                     forum_file.write(_generate_forum_code_log(records))
                 extra_files.append((forum_txt_path, os.path.basename(forum_txt_path)))
             except Exception as exc:
-                dice_log(f"[LogExport] forum code generation failed: {type(exc).__name__}: {exc}")
+                logger.warning(f"[LogExport] forum code generation failed: {type(exc).__name__}: {exc}")
         if docx_path:
             extra_files.append((txt_path, os.path.basename(txt_path)))
             return docx_path, os.path.basename(docx_path), extra_files
@@ -1591,7 +1591,7 @@ class LogCommand(UserCommandBase):
                 finally:
                     conn.close()
             except Exception as e:
-                dice_log(f"[LogDB] fetch_records for upload error: {e}")
+                logger.error(f"[LogDB] fetch_records for upload error: {e}")
                 records_db = []
         if records_db and records_payload:
             try:
@@ -1740,7 +1740,7 @@ def delete_log_record_by_message_id(bot: Bot, group_id: str, message_id: str) ->
                 conn.close()
     except (OSError, sqlite3.Error, RuntimeError) as e:
         try:
-            dice_log(f"[LogDB] delete by message_id error: {e}")
+            logger.error(f"[LogDB] delete by message_id error: {e}")
         except (AttributeError, TypeError):
             pass
 

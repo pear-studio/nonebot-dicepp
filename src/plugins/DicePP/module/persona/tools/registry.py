@@ -1,6 +1,6 @@
 """工具注册表 — 按 domain 注册/查找/执行"""
 import json
-from nonebot.log import logger
+from utils.logger import logger
 from typing import Dict, List, Callable, Set, Any
 from dataclasses import dataclass
 

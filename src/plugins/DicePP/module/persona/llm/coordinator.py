@@ -13,8 +13,7 @@ buffered merge-retry 状态机：``pending_consumed`` 标记最近一轮 result
 from dataclasses import dataclass
 from typing import Dict, Optional, Callable, Any, Awaitable, TypeVar, Generic, List, Literal
 import asyncio
-from nonebot.log import logger
-from utils.logger import _request_id_var
+from utils.logger import logger
 from .errors import classify
 
 T = TypeVar("T")
@@ -92,8 +91,7 @@ class LLMCallCoordinator:
                          循环最终失败 → SubmitResult.failed()
             pending caller（发现 executing=True）→ SubmitResult.buffered()
         """
-        rid = _request_id_var.get()
-        logger.bind(request_id=rid).debug(
+        logger.debug(
             f"[Persona] coordinator.submit enter: target={target_key}"
             f" message_len={len(message) if message else 0}"
         )
@@ -105,7 +103,7 @@ class LLMCallCoordinator:
                         self._pending_messages[target_key] = []
                     self._pending_messages[target_key].append(message)
                 self._has_buffered[target_key] = True
-                logger.bind(request_id=rid).debug(
+                logger.debug(
                     f"[Persona] coordinator: target={target_key} 正在执行中，标记 buffered"
                 )
                 return SubmitResult.buffered()
@@ -180,8 +178,7 @@ class LLMCallCoordinator:
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                from utils.logger import dice_log as _dlog
-                _dlog(f"[Coordinator] call_fn 异常: {type(e).__name__}: {e}")
+                logger.warning(f"[Coordinator] call_fn 异常: {type(e).__name__}: {e}")
                 if not classify(e).is_retryable:
                     failures = self.max_failures
                 else:

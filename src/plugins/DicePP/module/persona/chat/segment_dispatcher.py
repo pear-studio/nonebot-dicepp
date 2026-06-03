@@ -11,7 +11,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from nonebot.log import logger
+from utils.logger import logger
 
 _DEFAULT_IDLE_SECONDS = 300
 _DEFAULT_MAX_PER_RUN = 20

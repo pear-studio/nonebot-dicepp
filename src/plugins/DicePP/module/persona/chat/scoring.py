@@ -5,7 +5,7 @@
 """
 import json
 from typing import List, Dict, Any, Optional
-from nonebot.log import logger
+from utils.logger import logger
 from pydantic import BaseModel
 from ..data.models import ScoreDeltas, UserProfile, RelationshipState
 from ..data.store import PersonaDataStore
