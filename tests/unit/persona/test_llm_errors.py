@@ -13,14 +13,13 @@ from plugins.DicePP.module.persona.llm.providers.protocol import NonRetryableErr
 
 class TestErrorKindProperties:
     def test_is_retryable_abort_kinds(self):
-        for kind in (ErrorKind.QUOTA_EXCEEDED, ErrorKind.CONTENT_FILTERED,
-                     ErrorKind.PROVIDER_ERROR):
+        for kind in (ErrorKind.QUOTA_EXCEEDED, ErrorKind.PROVIDER_ERROR):
             assert not kind.is_retryable, f"{kind} should not be retryable"
             assert kind.recovery == RecoveryAction.ABORT
 
     def test_is_retryable_switch_kinds(self):
-        for kind in (ErrorKind.RATE_LIMITED, ErrorKind.TEMPORARILY_DOWN,
-                     ErrorKind.UNKNOWN):
+        for kind in (ErrorKind.CONTENT_FILTERED, ErrorKind.RATE_LIMITED,
+                     ErrorKind.TEMPORARILY_DOWN, ErrorKind.UNKNOWN):
             assert kind.is_retryable, f"{kind} should be retryable"
             assert kind.recovery == RecoveryAction.SWITCH_CANDIDATE
 
