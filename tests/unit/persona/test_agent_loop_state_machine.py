@@ -416,7 +416,9 @@ class TestAgentLoopCorrections:
 
     @pytest.mark.asyncio
     async def test_empty_response_handled(self, loop, mock_llm, mock_executor, mock_event_bus):
-        """LLM 返回空内容且无工具 → completed + empty_response"""
+        """LLM 返回空内容且无工具 → completed + empty_response
+
+        "empty_response" 字面量在 src/.../agent/loop.py:247 是唯一赋值点，断言 == 严格匹配当前契约。"""
         mock_llm.complete.side_effect = [
             _make_gateway_result(content=""),  # L1 fires (no tools, empty)
             _make_gateway_result(content=""),  # L1 fires again
@@ -432,7 +434,7 @@ class TestAgentLoopCorrections:
         )
 
         # After all corrections exhausted, empty content + no tools → empty_response
-        assert result.final_reason == "empty_response" or result.final_reason != ""
+        assert result.final_reason == "empty_response"
 
 
 class TestAgentLoopError:

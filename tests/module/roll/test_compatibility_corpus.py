@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from module.roll.ast_engine.adapter import exec_roll_exp_unified as exec_roll_exp
 from module.roll.roll_utils import RollDiceError
 from module.roll.ast_engine import exec_roll_exp_ast
-from module.roll.ast_engine.errors import RollEngineError
 
 pytestmark = pytest.mark.compatibility
 
@@ -206,56 +205,8 @@ class TestLocalizationCorpus:
 
 
 # =============================================================================
-# AST ENGINE CORPUS TESTS
-# The same corpus tested directly against the raw AST engine API.
+# AST ENGINE HIGH-RISK PROCESS-TEXT CHECKS
 # =============================================================================
-
-@pytest.mark.unit
-class TestASTArithmeticCorpus:
-    """AST engine: arithmetic expressions must match expected exact values."""
-
-    @pytest.mark.parametrize("entry", ARITHMETIC_CORPUS, ids=lambda e: e.description)
-    def test_ast_arithmetic_value(self, entry: CorpusEntry):
-        result = exec_roll_exp_ast(entry.expression)
-        assert result.get_val() == entry.expected_value, (
-            f"[AST] Expression '{entry.expression}' expected {entry.expected_value}, "
-            f"got {result.get_val()}"
-        )
-
-
-@pytest.mark.unit
-class TestASTDiceCorpus:
-    """AST engine: dice expressions must parse and execute without error."""
-
-    @pytest.mark.parametrize("entry", DICE_CORPUS, ids=lambda e: e.description)
-    def test_ast_dice_executes(self, entry: CorpusEntry):
-        result = exec_roll_exp_ast(entry.expression)
-        assert isinstance(result.get_val(), (int, float))
-        assert result.get_val() >= -1000, f"[AST] Dice result {result.get_val()} unexpectedly low for '{entry.expression}'"
-        assert result.get_val() <= 100000, f"[AST] Dice result {result.get_val()} unexpectedly high for '{entry.expression}'"
-
-
-@pytest.mark.unit
-class TestASTModifierCorpus:
-    """AST engine: modifier expressions must execute without error."""
-
-    @pytest.mark.parametrize("entry", MODIFIER_CORPUS, ids=lambda e: e.description)
-    def test_ast_modifier_executes(self, entry: CorpusEntry):
-        result = exec_roll_exp_ast(entry.expression)
-        assert isinstance(result.get_val(), (int, float))
-        assert result.get_val() >= 0, f"[AST] Modifier result {result.get_val()} should be >= 0 for '{entry.expression}'"
-        assert result.get_val() <= 100000, f"[AST] Modifier result {result.get_val()} should be <= 100000 for '{entry.expression}'"
-
-
-@pytest.mark.unit
-class TestASTErrorCorpus:
-    """AST engine: invalid expressions must raise RollEngineError."""
-
-    @pytest.mark.parametrize("entry", ERROR_CORPUS, ids=lambda e: e.description)
-    def test_ast_error_raised(self, entry: CorpusEntry):
-        with pytest.raises(RollEngineError):
-            exec_roll_exp_ast(entry.expression)
-
 
 @pytest.mark.unit
 class TestAstHighRiskProcessText:
@@ -280,3 +231,14 @@ class TestAstHighRiskProcessText:
         result = exec_roll_exp_ast("D20优势", dice_roller=lambda _s: 10)
         info = result.get_info()
         assert "MAX{" in info
+
+
+class TestASTErrorCorpus:
+    """AST 层独立回归：ERROR_CORPUS 应抛 RollEngineError（不是包装后的 RollDiceError）。
+    守门 adapter.py:200-218 的 RollEngineError 包装路径。"""
+
+    @pytest.mark.parametrize("entry", ERROR_CORPUS, ids=lambda e: e.description)
+    def test_ast_engine_raises_roll_engine_error(self, entry: CorpusEntry):
+        from module.roll.ast_engine.errors import RollEngineError
+        with pytest.raises(RollEngineError):
+            exec_roll_exp_ast(entry.expression)

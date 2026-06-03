@@ -260,8 +260,9 @@ async def test_dedup_within_5_seconds_returns_none(mock_agent_runtime):
     # 立刻发送相同消息：应被去重
     again = await session.chat("u1", "", "你好")
     assert again is None
-    # 第二次不应触发额外的 agent 调用（去重前最多 1 次）
-    assert len(mock_agent_runtime) <= 1
+    # 第二次不应触发额外的 agent 调用（去重后正好 1 次）
+    # 当前契约：第一次 chat 走 agent 产生 reply 并写入 _last_messages；第二次命中 dedup 直接 return None；agent 总调用次数恒为 1
+    assert len(mock_agent_runtime) == 1
 
 
 @pytest.mark.asyncio

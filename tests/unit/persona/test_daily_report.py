@@ -338,35 +338,6 @@ class TestTickDailyIntegration:
 
         gen.generate_and_send.assert_not_awaited()
 
-    def test_loc_daily_update_suppressed(self):
-        """PersonaCommand enabled=True + daily_report_enabled=True 时抑制 LOC"""
-        # 模拟 R1 修复后 dicebot.py 的条件：遍历 command_dict 检查实例 enabled
-        persona_running = True  # PersonaCommand.enabled = True
-        daily_report_enabled = True
-        should_send_loc = not (persona_running and daily_report_enabled)
-        assert should_send_loc is False
-
-    def test_loc_daily_update_sent_when_persona_disabled(self):
-        """PersonaCommand enabled=False 时发送 LOC（即使 config 上 enabled=True）"""
-        persona_running = False  # PersonaCommand.enabled = False（init 失败）
-        daily_report_enabled = True
-        should_send_loc = not (persona_running and daily_report_enabled)
-        assert should_send_loc is True
-
-    def test_loc_daily_update_sent_when_daily_report_disabled(self):
-        """daily_report_enabled=False 时发送 LOC"""
-        persona_running = True
-        daily_report_enabled = False
-        should_send_loc = not (persona_running and daily_report_enabled)
-        assert should_send_loc is True
-
-    def test_loc_daily_update_sent_when_command_not_registered(self):
-        """command_dict 中没有 PersonaCommand 时发送 LOC"""
-        persona_running = False  # 未找到 enabled 属性 → 保持 False
-        daily_report_enabled = True
-        should_send_loc = not (persona_running and daily_report_enabled)
-        assert should_send_loc is True
-
 
 class MockConfig:
     timezone = "Asia/Shanghai"

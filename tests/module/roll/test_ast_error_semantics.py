@@ -20,6 +20,7 @@ from module.roll.ast_engine.errors import (
     RollErrorCode,
 )
 from module.roll.ast_engine.limits import SafetyLimits
+from tests.helpers.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 
 
 # ===========================================================================
@@ -214,15 +215,7 @@ class TestHistoricalEdgeRegressions:
 
     def test_dice_with_advantage_deterministic(self):
         """Advantage (2D20K1) should return max of two rolls."""
-        from module.roll.karma_runtime import set_runtime, reset_runtime
-
-        class FixedRuntime:
-            def __init__(self, vals):
-                self._vals = iter(vals)
-            def roll(self, _sides):
-                return next(self._vals)
-
-        runtime = FixedRuntime([5, 15])
+        runtime = SequenceRuntime([5, 15])
         token = set_runtime(runtime)
         try:
             result = exec_roll_exp("2D20K1")
@@ -232,15 +225,7 @@ class TestHistoricalEdgeRegressions:
 
     def test_dice_with_disadvantage_deterministic(self):
         """Disadvantage (2D20KL1) should return min of two rolls."""
-        from module.roll.karma_runtime import set_runtime, reset_runtime
-
-        class FixedRuntime:
-            def __init__(self, vals):
-                self._vals = iter(vals)
-            def roll(self, _sides):
-                return next(self._vals)
-
-        runtime = FixedRuntime([5, 15])
+        runtime = SequenceRuntime([5, 15])
         token = set_runtime(runtime)
         try:
             result = exec_roll_exp("2D20KL1")
@@ -250,16 +235,8 @@ class TestHistoricalEdgeRegressions:
 
     def test_cs_modifier_counts_successes(self):
         """CS>10 should count successes correctly."""
-        from module.roll.karma_runtime import set_runtime, reset_runtime
-
-        class FixedRuntime:
-            def __init__(self, vals):
-                self._vals = iter(vals)
-            def roll(self, _sides):
-                return next(self._vals)
-
         # 3D20CS>10: rolls [12, 5, 15], expected 2 successes
-        runtime = FixedRuntime([12, 5, 15])
+        runtime = SequenceRuntime([12, 5, 15])
         token = set_runtime(runtime)
         try:
             result = exec_roll_exp("3D20CS>10")

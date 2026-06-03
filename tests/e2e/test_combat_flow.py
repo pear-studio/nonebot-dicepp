@@ -1,6 +1,14 @@
 """
 跨模块 E2E 战斗流程测试
 验证完整的战斗流程涉及多个模块的协同工作
+
+TODO(test-merge): test_combat_flow__* 系列仍存在重叠（多个用例验证"加入先攻+查询"）。
+目标合并为以下聚焦用例：
+- test_combat_create_to_round: 建群 → 创建先攻 → 加入 → 查询先攻
+- test_combat_hp_damage_round: 先攻 → HP 损耗 → 下一轮
+- 保留 test_combat_long_rest (长休流程)
+当前仅移除 2 个明显重复的子用例（__initiative_with_character_stats, __player_join_leave_initiative），
+其余用例仍有差异化覆盖（HP 治疗、豁免、多轮、DM 控制、死亡豁免、状态查询），不宜硬合并。
 """
 import pytest
 
@@ -161,31 +169,6 @@ class TestCombatFlow:
         )
         assert "日志" in result or "log" in result.lower(), f"日志命令应返回日志相关响应: {result}"
 
-    async def test_combat_flow__initiative_with_character_stats(self, e2e_bot: Bot):
-        """任务 7.2: 先攻与角色卡属性联动"""
-        bot = e2e_bot
-        group_id = "combat_group_2"
-
-        # 创建高敏捷角色
-        cmds, result = await send_as_user(
-            bot,
-            _char_cmd("游荡者", 3, 24, "D8", "8/16/12/14/10/8", "潜行/巧手"),
-            user_id="player_rogue", nickname="游荡者玩家", group_id=group_id,
-        )
-        assert "设置" in result or "成功" in result, f"游荡者角色卡创建失败: {result}"
-
-        # 查看先攻列表（初始为空）
-        cmds, result = await send_as_user(
-            bot, ".init", user_id="dm2", nickname="DM", group_id=group_id
-        )
-        assert "没有找到" in result or "先攻" in result, "初始先攻列表应为空"
-
-        # 游荡者使用 .ri 加入先攻
-        cmds, result = await send_as_user(
-            bot, ".ri 游荡者", user_id="player_rogue", nickname="游荡者玩家", group_id=group_id, dice_values=[17]
-        )
-        assert "游荡者" in result and "先攻" in result, f"游荡者应加入先攻: {result}"
-
     async def test_combat_flow__hp_tracking_during_combat(self, e2e_bot: Bot):
         """任务 7.3: 战斗中 HP 追踪"""
         bot = e2e_bot
@@ -333,35 +316,6 @@ class TestCombatFlow:
         )
         # 应成功移除（删除后列表为空，会提示先攻列表不存在）
         assert "移除" in result or "删除" in result or "没有" in result or "不存在" in result, f"应成功移除巨魔: {result}"
-
-    async def test_combat_flow__player_join_leave_initiative(self, e2e_bot: Bot):
-        """任务 7.8: 玩家加入和离开先攻"""
-        bot = e2e_bot
-        group_id = "combat_group_8"
-
-        # 创建角色
-        cmds, result = await send_as_user(
-            bot,
-            _char_cmd("游侠", 3, 28, "D10", "12/16/14/10/14/8", "自然/生存"),
-            user_id="player_ranger", nickname="游侠玩家", group_id=group_id,
-        )
-        assert "设置" in result or "成功" in result, f"游侠角色卡创建失败: {result}"
-
-        # DM 查看先攻
-        cmds, result = await send_as_user(bot, ".init", user_id="dm8", nickname="DM", group_id=group_id)
-        assert "没有找到" in result, "初始应无先攻列表"
-
-        # 玩家使用 .ri 加入先攻
-        cmds, result = await send_as_user(
-            bot, ".ri 游侠", user_id="player_ranger", nickname="游侠玩家", group_id=group_id, dice_values=[16]
-        )
-        assert "游侠" in result and "先攻" in result, f"玩家应能加入先攻: {result}"
-
-        # 查看列表
-        cmds, result = await send_as_user(
-            bot, ".init", user_id="dm8", nickname="DM", group_id=group_id
-        )
-        assert "游侠" in result, f"先攻列表应包含游侠: {result}"
 
     async def test_combat_flow__death_saving_throws(self, e2e_bot: Bot):
         """任务 7.9: 死亡豁免流程"""

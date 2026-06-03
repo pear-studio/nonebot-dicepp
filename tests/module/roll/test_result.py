@@ -309,30 +309,3 @@ class TestBuildRollResult:
         """1D20+5 的 info 应为 '[10]+5'（常量不加方括号）。"""
         res = self._run("1D20+5", roller=lambda _: 10)
         assert res.info == "[10]+5"
-
-    # ── Fix 4: except Exception 日志（集成验证）────────────────────────────────
-
-    def test_unexpected_ast_error_raises_roll_dice_error(self, caplog):
-        """AST 引擎非预期内部错误应抛出 RollDiceError（不再 fallback 到 legacy）。
-
-        BREAKING CHANGE: 原测试期望 fallback 行为，迁移后默认路径不允许静默 fallback。
-        现行为：非预期内部错误抛出 RollDiceError 并写 ERROR 日志，字段包含 roll_engine=ast。
-        """
-        import logging
-        from unittest.mock import patch
-        from module.roll.ast_engine.adapter import exec_roll_exp_unified
-        from module.roll.roll_utils import RollDiceError
-
-        with patch(
-            "module.roll.ast_engine.adapter.build_roll_result",
-            side_effect=RuntimeError("simulated internal bug"),
-        ):
-            with caplog.at_level(logging.ERROR):
-                # 新行为：非预期错误应抛出 RollDiceError，不 fallback
-                with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
-                    exec_roll_exp_unified("1D20")
-
-        # 应留有 ERROR 日志，包含 roll_engine=ast
-        assert any("roll_engine=ast" in r.message for r in caplog.records), (
-            f"Expected 'roll_engine=ast' in error log, got: {[r.message for r in caplog.records]}"
-        )

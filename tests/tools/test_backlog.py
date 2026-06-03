@@ -255,7 +255,7 @@ class TestSortValidate:
 
     def test_validate_fail_missing_symptom_and_plan(self, tmp_dir):
         backlog = tmp_dir / "backlog.md"
-        # 手工写入一个缺 问题表现 / 工作计划 的非法条目
+        # 手工写入一个缺 问题表现 / 开发备忘 的非法条目
         backlog.write_text(
             "# Backlog\n\n---\n\n## roll\n\n"
             "### [B-260506-000000] Bad\n"
@@ -269,4 +269,4 @@ class TestSortValidate:
         rc, _, err = run("--file", str(backlog), "validate")
         assert rc != 0
         assert "缺少问题表现" in err
-        assert "缺少工作计划" in err
+        assert "缺少开发备忘" in err

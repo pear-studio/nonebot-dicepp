@@ -2,6 +2,11 @@
 PersonaCommand 集成测试 — 边界/异常/录播/分段
 
 从 test_command.py 拆分，保留独立的测试套件。
+
+共享的 helper（make_group_meta/make_private_meta/make_mock_bot/make_cmd/
+get_sent_content）已迁移至 tests/integration/persona/conftest.py 并通过
+autouse fixture 注入到 self 上，本文件直接使用 self.make_group_meta(...) 等
+访问。
 """
 
 import pytest
@@ -23,76 +28,13 @@ from plugins.DicePP.module.persona.data.models import (
 from core.communication import MessageMetaData, MessageSender
 
 
-def _make_group_meta(msg: str, user_id: str = "user", nickname: str = "测试用户",
-                     group_id: str = "group", to_me: bool = False) -> MessageMetaData:
-    return MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id, to_me)
-
-
-def _make_private_meta(msg: str, user_id: str = "user", nickname: str = "测试用户") -> MessageMetaData:
-    return MessageMetaData(msg, msg, MessageSender(user_id, nickname), "", True)
-
-
-def _default_persona_config():
-    from plugins.DicePP.core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
-    return PersonaConfig(
-        enabled=True,
-        character_name="test_char",
-        character_path="./content/characters",
-        providers={
-            "openai": ProviderConfig(
-                api_key="fake_key",
-                base_url="http://localhost",
-                models=[
-                    ModelConfig(name="gpt-4o", category="llm", capabilities=["text", "tool_calls"], quality=0.9, cost=0.5)
-                ],
-            ),
-        },
-        group_activity_enabled=False,
-        trace_enabled=False,
-        whitelist_enabled=True,
-        daily_limit=100,
-        quota_check_enabled=False,
-        relationship_refuse_enabled=False,
-        decay_enabled=False,
-        proactive_enabled=False,
-        character_life_enabled=False,
-        group_chat_enabled=False,
-    )
-
-
-def _make_mock_bot(persona_config=None):
-    bot = MagicMock()
-    bot.config.persona_ai = persona_config or _default_persona_config()
-    bot.config.admin = []
-    bot.config.master = ["master_user"]
-    bot.account = "test_bot"
-    return bot
-
-
-def _make_cmd(bot=None, enabled=True):
-    bot = bot or _make_mock_bot()
-    cmd = PersonaCommand(bot)
-    cmd.enabled = enabled
-    cmd.config = bot.config.persona_ai
-    cmd._register_admin_handlers()
-    return cmd
-
-
-def _get_sent_content(cmd) -> str:
-    """从 mock 的 _send 调用中提取发送的消息内容"""
-    if cmd._send.call_args is None:
-        return ""
-    args = cmd._send.call_args[0]
-    return args[2] if len(args) > 2 else ""
-
-
 @pytest.mark.unit
 class TestEdgeAndExceptionPaths(IsolatedAsyncioTestCase):
     """异常/边界路径（3个）"""
 
     async def asyncSetUp(self):
-        self.bot = _make_mock_bot()
-        self.cmd = _make_cmd(self.bot)
+        self.bot = self.make_mock_bot()
+        self.cmd = self.make_cmd(self.bot)
         self.store = AsyncMock()
         self.cmd.data_store = self.store
         self.cmd._send = AsyncMock()
@@ -109,25 +51,25 @@ class TestEdgeAndExceptionPaths(IsolatedAsyncioTestCase):
     async def test_quota_exceeded(self):
         from plugins.DicePP.module.persona.llm.router import QuotaExceeded
         self.cmd.app.chat_with_user = AsyncMock(side_effect=QuotaExceeded("配额超限"))
-        meta = _make_private_meta("你好")
+        meta = self.make_private_meta("你好")
         meta.to_me = True
         await self.cmd.process_msg("你好", meta, None)
-        assert "配额超限" in _get_sent_content(self.cmd)
+        assert "配额超限" in self.get_sent_content(self.cmd)
 
     async def test_app_none_for_clear(self):
         self.cmd.app = None
-        meta = _make_private_meta(".ai clear")
+        meta = self.make_private_meta(".ai clear")
         await self.cmd.process_msg(".ai clear", meta, None)
-        assert "模块未初始化" in _get_sent_content(self.cmd)
+        assert "模块未初始化" in self.get_sent_content(self.cmd)
 
     async def test_introduction_and_empty_command(self):
-        meta = _make_private_meta(".ai unknown")
+        meta = self.make_private_meta(".ai unknown")
         await self.cmd.process_msg(".ai unknown", meta, None)
-        assert "你好，我是" in _get_sent_content(self.cmd)
+        assert "你好，我是" in self.get_sent_content(self.cmd)
 
-        meta2 = _make_private_meta(".ai")
+        meta2 = self.make_private_meta(".ai")
         await self.cmd.process_msg(".ai", meta2, None)
-        assert "你好，我是" in _get_sent_content(self.cmd)
+        assert "你好，我是" in self.get_sent_content(self.cmd)
 
 
 @pytest.mark.unit
@@ -135,8 +77,8 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
     """_group_chat_recorder 写库路径与边界"""
 
     async def asyncSetUp(self):
-        self.bot = _make_mock_bot()
-        self.cmd = _make_cmd(self.bot)
+        self.bot = self.make_mock_bot()
+        self.cmd = self.make_cmd(self.bot)
         self.store = AsyncMock()
         self.cmd.data_store = self.store
 
@@ -179,7 +121,7 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         from plugins.DicePP.core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
-        # 与 _default_persona_config() 同源, 但启用 group_activity
+        # 与 default_persona_config() 同源, 但启用 group_activity
         persona = PersonaConfig(
             enabled=True,
             character_name="test_char",
@@ -205,8 +147,8 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
             character_life_enabled=False,
             group_chat_enabled=False,
         )
-        self.bot = _make_mock_bot(persona)
-        self.cmd = _make_cmd(self.bot)
+        self.bot = self.make_mock_bot(persona)
+        self.cmd = self.make_cmd(self.bot)
         self.store = AsyncMock()
         self.cmd.data_store = self.store
         self.cmd._send = AsyncMock()
@@ -222,7 +164,7 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
         )
 
     async def test_segmented_response_updates_activity_without_resend(self):
-        meta = _make_group_meta("hello", to_me=True)
+        meta = self.make_group_meta("hello", to_me=True)
         await self.cmd.process_msg("hello", meta, None)
 
         # @ 触发后 chat_with_user 走过一次
@@ -237,7 +179,7 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
     async def test_none_response_short_circuits_before_activity(self):
         """response is None(去重命中或未进 chat 路径)应在 update_group_activity 之前早退"""
         self.cmd.app.chat_with_user = AsyncMock(return_value=None)
-        meta = _make_group_meta("hello", to_me=True)
+        meta = self.make_group_meta("hello", to_me=True)
         await self.cmd.process_msg("hello", meta, None)
 
         self.cmd.app.chat_with_user.assert_awaited_once()

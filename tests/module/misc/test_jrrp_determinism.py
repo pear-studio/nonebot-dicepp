@@ -49,22 +49,6 @@ class TestJrrpDeterminism:
 
         assert result1 == result2, f"同一天同一用户的 JRRP 应相同: {result1} vs {result2}"
 
-    async def test_jrrp__different_users_different_results(self, e2e_bot: Bot, mock_jrrp_date):
-        """任务 6.2: 同一天不同用户的 JRRP 结果应不同（概率上）"""
-        bot = e2e_bot
-        group_id = "group_jrrp"
-        nickname = "测试用户"
-
-        # JRRP 为每个用户生成基于 user_id 和日期的确定性值
-        # 不同 user_id 应该产生不同的值
-        cmds1, result1 = await send_as_user(bot, ".jrrp", user_id="user_a", nickname=nickname, group_id=group_id)
-        cmds2, result2 = await send_as_user(bot, ".jrrp", user_id="user_b", nickname=nickname, group_id=group_id)
-
-        jrrp1 = _extract_jrrp_value(result1)
-        jrrp2 = _extract_jrrp_value(result2)
-        # 注意：不同用户可能偶然得到相同值，这是概率性的
-        # 这里我们只验证都拿到了有效值
-
     async def test_jrrp__different_days_different_results(self, e2e_bot: Bot):
         """任务 6.3: 不同日期的 JRRP 使用不同的 seed 生成"""
         bot = e2e_bot

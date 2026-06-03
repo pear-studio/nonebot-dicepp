@@ -42,11 +42,13 @@ class TestDatetimeToStr:
 @pytest.mark.unit
 class TestDatetimeToInt:
     def test_conversion(self):
-        dt = datetime.datetime(2024, 1, 15, 10, 30, 45, tzinfo=china_tz)
+        # 测试环境本地时区为东八区，与 china_tz 一致。
+        # datetime_to_int 通过 time.mktime(timetuple()) 将 datetime 视为本地时间戳。
+        # 2024-01-15 14:10:45 +0800 == 1705299045
+        dt = datetime.datetime(2024, 1, 15, 14, 10, 45, tzinfo=china_tz)
         result = datetime_to_int(dt)
-        # 精确值依赖 time.mktime 的本地时区行为，无法固定预期值
         assert isinstance(result, int)
-        assert result > 0
+        assert result == 1705299045
 
 
 @pytest.mark.unit

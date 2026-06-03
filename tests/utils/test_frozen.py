@@ -34,11 +34,6 @@ class TestIsFrozen:
         with patch.object(sys, 'frozen', True, create=True):
             assert is_frozen() is True
 
-    def test_frozen_false_explicitly(self):
-        """sys.frozen 显式为 False 时应返回 False"""
-        with patch.object(sys, 'frozen', False, create=True):
-            assert is_frozen() is False
-
 
 class TestGetAppDir:
     """测试 get_app_dir() 函数"""

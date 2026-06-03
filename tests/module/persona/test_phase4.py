@@ -361,8 +361,8 @@ class TestRollDiceTool:
 
 # ── R6: 补充测试覆盖 ──────────────────────────────────────────────────────────
 
-class TestQuotaExemptions:
-    """测试配额豁免场景"""
+class TestWhitelistMembership:
+    """测试白名单成员判定"""
 
     @pytest.mark.asyncio
     async def test_whitelist_user_exempt_from_quota(self, tmp_path, monkeypatch):

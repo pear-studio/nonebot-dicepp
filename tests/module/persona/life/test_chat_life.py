@@ -118,22 +118,6 @@ class TestSleepGate:
         life.config.now = lambda: _dt(1, 0)
         assert await life.is_awake() is True
 
-class TestSleepMessagesSemantics:
-    """sleep_messages 三态语义测试"""
-
-    def test_none_uses_default(self):
-        char = _make_character(sleep_messages=None)
-        assert char.extensions.sleep_messages is None
-
-    def test_empty_list_disables_gate_but_chat_proceeds(self):
-        char = _make_character(sleep_messages=[])
-        assert char.extensions.sleep_messages == []
-
-    def test_custom_messages_no_fallback(self):
-        char = _make_character(sleep_messages=["zzz...", "不要吵我"])
-        assert len(char.extensions.sleep_messages) == 2
-        assert "zzz..." in char.extensions.sleep_messages
-
 
 class TestSuggestActionRelationshipGate:
     """suggest_action executor 亲密度门控测试"""

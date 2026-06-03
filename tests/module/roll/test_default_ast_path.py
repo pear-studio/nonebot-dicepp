@@ -75,3 +75,20 @@ class TestComputeExpAstPath:
     def test_normal_roll_path_still_works_for_dice(self):
         result = exec_roll_exp_unified("1D6+2")
         assert 3 <= result.get_val() <= 8
+
+
+def test_unexpected_ast_error_wraps_as_roll_dice_error(monkeypatch, caplog):
+    """AST 引擎内部非 RollEngineError 异常必须包装为 RollDiceError（守门测试，禁止静默吞错）。"""
+    from module.roll.ast_engine import adapter
+    from module.roll.roll_utils import RollDiceError
+
+    def _explode(*args, **kwargs):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(adapter, "build_roll_result", _explode)
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
+            adapter.exec_roll_exp_unified("1D20")
+
+    assert any("roll_engine=ast" in rec.message and "RuntimeError" in rec.message for rec in caplog.records), \
+        f"应记录 roll_engine=ast + RuntimeError 日志，实际: {[r.message for r in caplog.records]}"

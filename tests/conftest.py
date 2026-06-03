@@ -1,4 +1,5 @@
 import sys
+import time
 import pytest
 import asyncio
 import hashlib
@@ -13,6 +14,15 @@ from typing import Callable, List, Any, Optional
 from unittest.mock import MagicMock, AsyncMock
 
 from tests.fs_utils import rmtree_retry
+
+# 全局时区固定：datetime_to_int 等本地时区 API 在 CI (UTC) 与开发机 (Asia/Shanghai) 结果不同；
+# 强制 TZ=Asia/Shanghai 与生产代码 utils/time.py 注释"时区默认为东八区"对齐。
+os.environ.setdefault("TZ", "Asia/Shanghai")
+try:
+    _t = time.tzset
+    _t()
+except (AttributeError, OSError):
+    pass  # Windows / 非 glibc 平台 tzset 可能不可用，但 TZ env 仍生效
 
 # Isolate each pytest process into its own app/data directory.
 _PYTEST_WORKER_ID = os.getenv("PYTEST_XDIST_WORKER", "main")
