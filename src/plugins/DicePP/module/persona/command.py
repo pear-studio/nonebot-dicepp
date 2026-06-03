@@ -35,10 +35,12 @@ from core.command.cq_extractor import extract_segments
 
 async def resolve_images(
     raw_msg: str, image_cache: ImageCache, *, force_download: bool = False,
+    force_emoji: bool = False,
 ) -> Tuple[Optional[List[dict]], Optional[List[str]]]:
     """从 raw_msg 提取图片元信息，按需下载缓存，返回 (image_meta, data_urls)。
 
     force_download=True 时始终下载；否则仅在已有缓存时读取。
+    force_emoji=True 时同时下载表情包（sub_type=1）。
     返回 (None, None) 表示无图片或提取失败。
     """
     if not raw_msg:
@@ -58,7 +60,7 @@ async def resolve_images(
         for s in image_segs[:PersonaCommand.MAX_IMAGES_PER_MESSAGE]
     ]
     if force_download:
-        await image_cache.download_and_cache(image_meta)
+        await image_cache.download_and_cache(image_meta, force_emoji=force_emoji)
     urls = [
         image_cache.read_cache(e["cache_hash"])
         for e in image_meta
@@ -428,9 +430,10 @@ class PersonaCommand(UserCommandBase):
             elif is_at_trigger:
                 if self.app and self.enabled:
                     try:
-                        # 检测当前消息中的图片（始终下载）
+                        # 检测当前消息中的图片（始终下载，包括表情包）
                         image_meta, image_data_urls = await resolve_images(
                             meta.raw_msg, self.image_cache, force_download=True,
+                            force_emoji=True,
                         )
                         if image_data_urls:
                             dice_log(
@@ -440,28 +443,14 @@ class PersonaCommand(UserCommandBase):
 
                         if not content and not image_data_urls:
                             if image_meta:
-                                has_non_emoji = any(
-                                    not ImageCache.is_emoji(e.get("sub_type", ""))
-                                    for e in image_meta
+                                # 全部图片下载失败（已尝试下载包括表情在内的所有图片）
+                                response = await self.app.chat_with_user(
+                                    user_id=user_id,
+                                    group_id=group_id,
+                                    message="[图片下载失败，请重试]",
+                                    nickname=nickname,
+                                    image_data_urls=None,
                                 )
-                                if has_non_emoji:
-                                    # 有非表情图片但全部下载失败
-                                    response = await self.app.chat_with_user(
-                                        user_id=user_id,
-                                        group_id=group_id,
-                                        message="[图片下载失败，请重试]",
-                                        nickname=nickname,
-                                        image_data_urls=None,
-                                    )
-                                else:
-                                    # 全部是表情：默认不下载，提示 LLM 让它决定如何回应
-                                    response = await self.app.chat_with_user(
-                                        user_id=user_id,
-                                        group_id=group_id,
-                                        message="[表情包]",
-                                        nickname=nickname,
-                                        image_data_urls=None,
-                                    )
                             else:
                                 # 真的没发任何内容（纯 @bot 无附带）
                                 response = await self._get_status(user_id, group_id, is_private)
