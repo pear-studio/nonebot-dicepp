@@ -423,12 +423,16 @@ class AgentLoop:
 
                     if "data_url" in obs_data:
                         # executor 返回了图片 data_url → 暂存到 pending_images
-                        img_index = obs_data.get("image_index", 0)
-                        if state.pending_images is None:
-                            state.pending_images = {}
-                        state.pending_images[img_index] = obs_data["data_url"]
-                        has_pending_observation = True
-                        tr["content"] = json.dumps({"status": "已获取图片，将在下一轮查看"}, ensure_ascii=False)
+                        img_hash = obs_data.get("image_hash", "")
+                        if not img_hash:
+                            logger.warning("[AgentLoop] executor 返回 data_url 但缺少 image_hash，跳过该 observation")
+                            tr["content"] = json.dumps({"error": "图片获取失败：缺少 image_hash"}, ensure_ascii=False)
+                        else:
+                            if state.pending_images is None:
+                                state.pending_images = {}
+                            state.pending_images[img_hash] = obs_data["data_url"]
+                            has_pending_observation = True
+                            tr["content"] = json.dumps({"status": "已获取图片，将在下一轮查看"}, ensure_ascii=False)
                     elif "error" in obs_data:
                         # executor 返回错误 → 保持原样回填给 LLM
                         pass
@@ -572,25 +576,24 @@ class AgentLoop:
 
 
 def _embed_images_in_messages(
-    messages: List[dict], image_data_urls: Dict[int, str],
+    messages: List[dict], image_data_urls: Dict[str, str],
 ) -> List[dict]:
-    """将含 [图片 #n] 标记的消息替换为多模态 content parts。
+    """将含 [图片 <hash>] 标记的消息替换为多模态 content parts。
 
-    [表情 #n] 标记保留为纯文本（不嵌入图片）。
+    [表情 <hash>] 标记保留为纯文本（不嵌入图片）。
     仅对匹配的消息做结构性变化（content: str → List[dict]），其余保持不变。
     注意：必须在 truncate_by_turns 之后调用（estimate_tokens 期望 content 为 str）。
     """
     result = []
     for msg in messages:
         content = msg.get("content", "")
-        if not isinstance(content, str) or "[图片 #" not in content:
+        if not isinstance(content, str) or "[图片 " not in content:
             result.append(msg)
             continue
-        # 解析文本和标记，按 Dict key 匹配而非按列表位置
         parts: list = []
         remaining = content
-        for idx, img_url in sorted(image_data_urls.items()):
-            marker = f"[图片 #{idx}]"
+        for img_hash, img_url in sorted(image_data_urls.items()):
+            marker = f"[图片 {img_hash}]"
             if marker in remaining:
                 before, _, remaining = remaining.partition(marker)
                 if before.strip():

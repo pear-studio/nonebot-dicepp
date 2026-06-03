@@ -36,6 +36,14 @@ class ImageCache:
     def is_emoji(sub_type: str) -> bool:
         return sub_type == "1"
 
+    @staticmethod
+    def compute_image_hash(entry: dict) -> Optional[str]:
+        """从 image_meta entry 的 url（优先）或 file（兜底）计算 8 位 hex hash。
+        两者都为空时返回 None。
+        """
+        raw = entry.get("url") or entry.get("file") or ""
+        return hashlib.sha256(raw.encode()).hexdigest()[:8] if raw else None
+
     async def download_and_cache(
         self, image_meta: List[dict], *, force_emoji: bool = False,
     ) -> None:

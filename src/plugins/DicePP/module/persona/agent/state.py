@@ -37,4 +37,4 @@ class AgentRunState:
     error: str = ""
 
     # Phase 3: 图片理解 — observation 方案
-    pending_images: Optional[Dict[int, str]] = None
+    pending_images: Optional[Dict[str, str]] = None

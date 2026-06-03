@@ -56,6 +56,10 @@ async def resolve_images(
             "sub_type": s.data.get("sub_type", ""),
             "size": 0,
             "cache_hash": None,
+            "image_hash": ImageCache.compute_image_hash({
+                "url": s.data.get("url", ""),
+                "file": s.data.get("file", ""),
+            }),
         }
         for s in image_segs[:PersonaCommand.MAX_IMAGES_PER_MESSAGE]
     ]

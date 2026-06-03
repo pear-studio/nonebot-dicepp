@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..image_cache import ImageCacheProtocol
+from ..image_cache import ImageCache
 from datetime import datetime, timedelta
 import json
 from utils.logger import logger
@@ -48,6 +49,10 @@ class PersonaDataStore:
     # 消息流裁剪限频：每 N 次写入或每 M 秒触发一次实际裁剪
     _PRUNE_INTERVAL_WRITES = 50
     _PRUNE_INTERVAL_SECONDS = 300
+
+    # 图片 hash 查找的最大消息扫描数。远大于 MAX_CONTEXT_MESSAGES(30)，
+    # 覆盖群聊中偶发的纯文本刷屏导致图片消息被推远的情况。
+    _IMAGE_HASH_SCAN_LIMIT = 200
 
     # SYSTEM_LOG 过滤条件，用于所有面向外部的 message_stream 查询
     _EXCLUDE_SYSTEM_LOG = "type != 'system_log'"
@@ -256,17 +261,17 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [self._row_to_message(r) for r in reversed(list(rows))]
 
-    async def get_recent_images(
+    async def get_image_by_hash(
         self,
         user_id: str,
         group_id: str,
-        count: int = 5,
-    ) -> List[dict]:
-        """获取最近的图片元信息（flatten 所有消息的 image_meta）。
+        image_hash: str,
+    ) -> Optional[dict]:
+        """通过 image_hash 查找图片元信息。
 
-        返回最近 count 张图片的元信息列表，按时间正序（index 0 = 最近一张）。
-        image_index=1 对应 list[0]，与 [图片 #1] 标记一致。
-        每个 entry 包含额外的 _message_id 字段，供 update_image_meta 使用。
+        扫描最近消息的 image_meta，上限 _IMAGE_HASH_SCAN_LIMIT。
+        返回匹配的 entry（带 _message_id 和 _image_meta_list），找不到返回 None。
+        存量数据无 image_hash 时，用 url/file 现场计算比对。
         """
         async with self.db.execute(
             f"""
@@ -275,14 +280,12 @@ class PersonaDataStore:
               AND image_meta IS NOT NULL AND image_meta != ''
               AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT {PersonaDataStore._IMAGE_HASH_SCAN_LIMIT}
             """,
-            (user_id, group_id, count * 3),  # 多取几条以覆盖多图消息
+            (user_id, group_id),
         ) as cursor:
             rows = await cursor.fetchall()
 
-        # flatten: 从最近到最旧收集图片，直到够数
-        all_images: List[dict] = []
         for row in rows:
             msg_id, raw_meta = row["id"], row["image_meta"]
             if not raw_meta:
@@ -290,20 +293,18 @@ class PersonaDataStore:
             try:
                 meta_list = json.loads(raw_meta)
                 if isinstance(meta_list, list):
-                    # 同一消息内的图片保持原始顺序
                     for entry in meta_list:
-                        entry["_message_id"] = msg_id
-                        all_images.append(entry)
-                        if len(all_images) >= count:
-                            break
+                        entry_hash = entry.get("image_hash")
+                        if not entry_hash:
+                            # 存量数据现场计算
+                            entry_hash = ImageCache.compute_image_hash(entry)
+                        if entry_hash == image_hash:
+                            entry["_message_id"] = msg_id
+                            entry["_image_meta_list"] = meta_list
+                            return entry
             except (json.JSONDecodeError, TypeError):
                 continue
-            if len(all_images) >= count:
-                break
-
-        # 反转使 index 0 = 最近一张
-        all_images.reverse()
-        return all_images
+        return None
 
     async def update_image_meta(
         self,

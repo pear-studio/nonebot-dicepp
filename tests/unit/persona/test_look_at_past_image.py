@@ -1,4 +1,4 @@
-"""look_at_past_image 工具测试 — 表情按需下载 / 普通图片缓存命中"""
+"""look_at_past_image 工具测试 — image_hash 查询 / 表情按需下载 / 缓存命中"""
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,6 +22,7 @@ async def test_emoji_can_now_be_viewed_on_demand():
         "url": "http://example.com/emoji.png",
         "sub_type": "1",
         "cache_hash": None,
+        "image_hash": "abc12345",
     }
 
     async def fake_download(meta, *, force_emoji=False):
@@ -33,12 +34,12 @@ async def test_emoji_can_now_be_viewed_on_demand():
     image_cache.read_cache.side_effect = lambda h: f"data:image/gif;base64,FAKE" if h == "abc12345" else None
 
     store = MagicMock()
-    store.get_recent_images = AsyncMock(return_value=[target])
+    store.get_image_by_hash = AsyncMock(return_value=target)
     store.update_image_meta = AsyncMock()
     store.image_cache = image_cache
 
     ctx = _make_ctx(store, image_cache)
-    result = json.loads(await look_at_past_image_executor({"image_index": 1}, ctx))
+    result = json.loads(await look_at_past_image_executor({"image_hash": "abc12345"}, ctx))
 
     assert "data_url" in result
     assert result["data_url"].startswith("data:image/")
@@ -57,13 +58,14 @@ async def test_regular_image_cache_hit_skips_download():
         "url": "http://example.com/img.png",
         "sub_type": "0",
         "cache_hash": "existing",
+        "image_hash": "abcd1234",
     }
     store = MagicMock()
-    store.get_recent_images = AsyncMock(return_value=[target])
+    store.get_image_by_hash = AsyncMock(return_value=target)
     store.image_cache = image_cache
 
     ctx = _make_ctx(store, image_cache)
-    result = json.loads(await look_at_past_image_executor({"image_index": 1}, ctx))
+    result = json.loads(await look_at_past_image_executor({"image_hash": "abcd1234"}, ctx))
 
     assert result["data_url"] == "data:image/png;base64,CACHED"
     image_cache.download_and_cache.assert_not_called()
@@ -71,7 +73,7 @@ async def test_regular_image_cache_hit_skips_download():
 
 @pytest.mark.asyncio
 async def test_emoji_download_failure_returns_error():
-    """表情 URL 失效时返回错误信息，不再是"该消息为表情"硬拒绝"""
+    """表情 URL 失效时返回错误信息"""
     image_cache = MagicMock()
     image_cache.read_cache.return_value = None
 
@@ -79,6 +81,7 @@ async def test_emoji_download_failure_returns_error():
         "url": "http://example.com/expired.png",
         "sub_type": "1",
         "cache_hash": None,
+        "image_hash": "deadbeef",
     }
 
     async def fake_download(meta, *, force_emoji=False):
@@ -87,12 +90,35 @@ async def test_emoji_download_failure_returns_error():
     image_cache.download_and_cache = AsyncMock(side_effect=fake_download)
 
     store = MagicMock()
-    store.get_recent_images = AsyncMock(return_value=[target])
+    store.get_image_by_hash = AsyncMock(return_value=target)
     store.image_cache = image_cache
 
     ctx = _make_ctx(store, image_cache)
-    result = json.loads(await look_at_past_image_executor({"image_index": 1}, ctx))
+    result = json.loads(await look_at_past_image_executor({"image_hash": "deadbeef"}, ctx))
 
     assert "error" in result
-    assert "表情" not in result["error"]  # 不再是"该消息为表情"硬拒绝
-    assert "URL" in result["error"]  # 是下载失败的语义
+    assert "URL" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_hash_not_found_returns_error():
+    """image_hash 查不到时返回语义化错误"""
+    store = MagicMock()
+    store.get_image_by_hash = AsyncMock(return_value=None)
+
+    ctx = _make_ctx(store, None)
+    result = json.loads(await look_at_past_image_executor({"image_hash": "ffffffff"}, ctx))
+
+    assert "error" in result
+    assert "未找到图片" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_hash_returns_error():
+    """非法 image_hash 参数返回错误"""
+    store = MagicMock()
+    ctx = _make_ctx(store, None)
+    result = json.loads(await look_at_past_image_executor({"image_hash": "short"}, ctx))
+
+    assert "error" in result
+    assert "8 位" in result["error"]

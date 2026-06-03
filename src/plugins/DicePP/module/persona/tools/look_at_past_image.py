@@ -15,21 +15,19 @@ LOOK_AT_PAST_IMAGE_TOOL = ToolDef(
     name="look_at_past_image",
     description=(
         "查看对话历史中用户发送的图片。"
-        "image_index=1 表示最近一张，2=倒数第二张。"
-        "仅限当前上下文窗口内的图片。表情（QQ 贴纸）默认不入库，"
-        "调用本工具时会按需下载并解码返回。"
+        "image_hash 从上下文标记 [图片 <hash>] 或 [表情 <hash>] 中复制。"
     ),
     parameters={
         "type": "object",
         "properties": {
-            "image_index": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "description": "倒数第几张，1=最近，仅限当前上下文窗口内",
+            "image_hash": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 8,
+                "description": "图片的 8 位十六进制标识，从上下文标记中复制",
             },
         },
-        "required": ["image_index"],
+        "required": ["image_hash"],
     },
 )
 
@@ -38,41 +36,30 @@ async def look_at_past_image_executor(args: Dict[str, Any], ctx: ToolContext) ->
     """执行 look_at_past_image 工具。
 
     返回 JSON:
-      - {"image_index": int, "data_url": str} — 成功
+      - {"image_hash": str, "data_url": str} — 成功
       - {"error": str} — 失败
     """
-    image_index = args.get("image_index", 1)
-    if not isinstance(image_index, int) or image_index < 1:
-        logger.warning(f"[LookAtPastImage] 失败: user={ctx.user_id} error=invalid_index")
-        return json.dumps({"error": "image_index 必须为正整数"}, ensure_ascii=False)
-    image_index = min(image_index, 20)  # 硬限制防止查询过大
+    image_hash = args.get("image_hash", "")
+    if not isinstance(image_hash, str) or len(image_hash) != 8 \
+       or not all(c in "0123456789abcdef" for c in image_hash):
+        logger.warning(f"[LookAtPastImage] 失败: user={ctx.user_id} error=invalid_hash")
+        return json.dumps({"error": "image_hash 必须为 8 位十六进制字符串"}, ensure_ascii=False)
 
     store = ctx.store
     if not store:
         logger.warning(f"[LookAtPastImage] 失败: user={ctx.user_id} error=store_uninitialized")
         return json.dumps({"error": "数据存储未初始化"}, ensure_ascii=False)
 
-    # 获取最近的图片列表
-    meta_list = await store.get_recent_images(
-        ctx.user_id, ctx.group_id, count=image_index,
-    )
-    if not meta_list:
-        logger.warning(f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id} error=no_images")
-        return json.dumps({"error": "未找到历史图片"}, ensure_ascii=False)
-
-    # 越界检查
-    if image_index > len(meta_list):
+    target = await store.get_image_by_hash(ctx.user_id, ctx.group_id, image_hash)
+    if not target:
         logger.warning(
-            f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id}"
-            f" error=out_of_range available={len(meta_list)}"
+            f"[LookAtPastImage] 失败: image_hash={image_hash} user={ctx.user_id} error=not_found"
         )
         return json.dumps(
-            {"error": f"上下文中只有 {len(meta_list)} 张图片，无法查看第 {image_index} 张"},
+            {"error": f"未找到图片 {image_hash}，请检查上下文中的图片标记"},
             ensure_ascii=False,
         )
 
-    # 取目标图片（image_index=1 → meta_list[0]）
-    target = meta_list[image_index - 1]
     is_emoji = ImageCache.is_emoji(target.get("sub_type", ""))
 
     # 检查缓存
@@ -84,33 +71,34 @@ async def look_at_past_image_executor(args: Dict[str, Any], ctx: ToolContext) ->
         if data_url:
             cache_hit = True
 
-    # 缓存未命中 → 按需下载（表情强制走 force_emoji=True 绕过默认跳过）
+    # 缓存未命中 → 按需下载（表情强制走 force_emoji=True）
     if not data_url and image_cache:
         await image_cache.download_and_cache([target], force_emoji=is_emoji)
         if target.get("cache_hash"):
             data_url = image_cache.read_cache(target["cache_hash"])
-            # 持久化 cache_hash，避免下次重复下载
+            # 持久化 cache_hash
             msg_id = target.get("_message_id")
-            if msg_id:
+            meta_list = target.get("_image_meta_list")
+            if msg_id and meta_list:
                 try:
                     await store.update_image_meta(
                         ctx.user_id, ctx.group_id, msg_id, meta_list,
                     )
                 except Exception:
-                    pass  # 持久化失败不影响返回
+                    pass  # 持久化 cache_hash 是优化，失败不影响本次图片返回
 
     if not data_url:
         logger.warning(
-            f"[LookAtPastImage] 失败: image_index={image_index} user={ctx.user_id}"
+            f"[LookAtPastImage] 失败: image_hash={image_hash} user={ctx.user_id}"
             f" error=download_failed sub_type={target.get('sub_type', '')}"
         )
         return json.dumps({"error": "图片下载失败（URL 可能已过期）"}, ensure_ascii=False)
 
     logger.info(
-        f"[LookAtPastImage] 成功: image_index={image_index} user={ctx.user_id}"
+        f"[LookAtPastImage] 成功: image_hash={image_hash} user={ctx.user_id}"
         f" cache_hit={cache_hit} is_emoji={is_emoji}"
     )
     return json.dumps(
-        {"image_index": image_index, "data_url": data_url},
+        {"image_hash": image_hash, "data_url": data_url},
         ensure_ascii=False,
     )

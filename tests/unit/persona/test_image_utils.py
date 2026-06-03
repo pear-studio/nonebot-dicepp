@@ -45,16 +45,16 @@ class TestBuildImageContentParts:
 
 
 class TestEmbedImagesInMessages:
-    """_embed_images_in_messages: [图片 #n] 标记替换为多模态 parts"""
+    """_embed_images_in_messages: [图片 <hash>] 标记替换为多模态 parts"""
 
     def test_no_markers_unchanged(self):
         messages = [{"role": "user", "content": "hello world"}]
-        result = _embed_images_in_messages(messages, {1: "url1"})
+        result = _embed_images_in_messages(messages, {"abc12345": "url1"})
         assert result == messages
 
     def test_single_image_replace(self):
-        messages = [{"role": "user", "content": "看看 [图片 #1] 吧"}]
-        result = _embed_images_in_messages(messages, {1: "data_url_1"})
+        messages = [{"role": "user", "content": "看看 [图片 abc12345] 吧"}]
+        result = _embed_images_in_messages(messages, {"abc12345": "data_url_1"})
         assert len(result) == 1
         parts = result[0]["content"]
         assert isinstance(parts, list)
@@ -64,102 +64,140 @@ class TestEmbedImagesInMessages:
         assert parts[2] == {"type": "text", "text": " 吧"}
 
     def test_multiple_images_ordered(self):
-        messages = [{"role": "user", "content": "[图片 #1] 和 [图片 #2]"}]
-        data_urls = {1: "url_a", 2: "url_b"}
+        messages = [{"role": "user", "content": "[图片 aaa] 和 [图片 bbb]"}]
+        data_urls = {"aaa": "url_a", "bbb": "url_b"}
         result = _embed_images_in_messages(messages, data_urls)
         parts = result[0]["content"]
-        # 按 dict key 排序：先 #1 再 #2，marker 在开头时空 text 被跳过
         assert parts[0] == {"type": "image_url", "image_url": {"url": "url_a"}}
         assert parts[1] == {"type": "text", "text": " 和 "}
         assert parts[2] == {"type": "image_url", "image_url": {"url": "url_b"}}
 
     def test_emoji_marker_kept_as_text(self):
-        """[表情 #n] 标记不替换，保留纯文本"""
-        messages = [{"role": "user", "content": "看看 [表情 #1]"}]
+        """[表情 <hash>] 标记不替换，保留纯文本"""
+        messages = [{"role": "user", "content": "看看 [表情 abc12345]"}]
         result = _embed_images_in_messages(messages, {})
-        # 没有 [图片 #] 标记，原样返回
-        assert result[0]["content"] == "看看 [表情 #1]"
+        # 没有 [图片 ] 标记，原样返回
+        assert result[0]["content"] == "看看 [表情 abc12345]"
 
     def test_non_string_content_skipped(self):
         messages = [{"role": "user", "content": [{"type": "text", "text": "already parts"}]}]
-        result = _embed_images_in_messages(messages, {1: "url"})
+        result = _embed_images_in_messages(messages, {"abc": "url"})
         assert result == messages
 
     def test_empty_content(self):
         messages = [{"role": "user", "content": ""}]
-        result = _embed_images_in_messages(messages, {1: "url"})
+        result = _embed_images_in_messages(messages, {"abc": "url"})
         assert result == messages
 
     def test_no_match_marker_not_in_data(self):
-        """标记存在但 data_urls 中没有对应 key → 标记保留为文本"""
-        messages = [{"role": "user", "content": "[图片 #5]"}]
-        result = _embed_images_in_messages(messages, {1: "url"})
-        # #5 不在 {1: url} 中，标记不会被替换
+        """标记存在但 data_urls 中没有对应 hash → 标记保留为文本"""
+        messages = [{"role": "user", "content": "[图片 ffffffff]"}]
+        result = _embed_images_in_messages(messages, {"abc": "url"})
         parts = result[0]["content"]
         assert isinstance(parts, list)
-        # 整个文本保留
-        assert parts[0]["text"] == "[图片 #5]"
+        assert parts[0]["text"] == "[图片 ffffffff]"
 
     def test_preserves_other_messages(self):
         messages = [
             {"role": "system", "content": "sys"},
-            {"role": "user", "content": "[图片 #1]"},
+            {"role": "user", "content": "[图片 abc12345]"},
             {"role": "assistant", "content": "ok"},
         ]
-        result = _embed_images_in_messages(messages, {1: "url"})
-        assert result[0]["content"] == "sys"  # unchanged
-        assert isinstance(result[1]["content"], list)  # replaced
-        assert result[2]["content"] == "ok"  # unchanged
+        result = _embed_images_in_messages(messages, {"abc12345": "url"})
+        assert result[0]["content"] == "sys"
+        assert isinstance(result[1]["content"], list)
+        assert result[2]["content"] == "ok"
 
 
 # ── _build_image_markers ─────────────────────────────────────────────────────
 
 
 class TestBuildImageMarkers:
-    """_build_image_markers: 为含图片的历史消息构建标记前缀"""
-
-    def test_no_indices(self):
-        msg = {"content": "hello", "image_meta": [{"sub_type": "0"}]}
-        assert _build_image_markers(msg) == ""
+    """_build_image_markers: 为含图片的历史消息构建 [图片 <hash>] 标记前缀"""
 
     def test_no_image_meta(self):
-        msg = {"content": "hello", "_img_indices": [1]}
+        msg = {"content": "hello"}
         assert _build_image_markers(msg) == ""
 
     def test_single_image(self):
         msg = {
-            "_img_indices": [1],
-            "image_meta": [{"sub_type": "0"}],
+            "image_meta": [{"sub_type": "0", "image_hash": "abc12345"}],
         }
-        assert _build_image_markers(msg) == "[图片 #1] "
+        assert _build_image_markers(msg) == "[图片 abc12345] "
 
     def test_single_emoji(self):
         msg = {
-            "_img_indices": [1],
-            "image_meta": [{"sub_type": "1"}],
+            "image_meta": [{"sub_type": "1", "image_hash": "deadbeef"}],
         }
-        assert _build_image_markers(msg) == "[表情 #1] "
+        assert _build_image_markers(msg) == "[表情 deadbeef] "
 
     def test_multiple_images(self):
         msg = {
-            "_img_indices": [1, 2],
-            "image_meta": [{"sub_type": "0"}, {"sub_type": "1"}],
+            "image_meta": [
+                {"sub_type": "0", "image_hash": "aaa11111"},
+                {"sub_type": "1", "image_hash": "bbb22222"},
+            ],
         }
-        assert _build_image_markers(msg) == "[图片 #1][表情 #2] "
+        assert _build_image_markers(msg) == "[图片 aaa11111][表情 bbb22222] "
 
-    def test_indices_longer_than_meta(self):
-        """_img_indices 比 image_meta 长时，超出部分默认为 [图片]"""
+    def test_old_data_no_image_hash_computed_on_the_fly(self):
+        """存量数据无 image_hash 时用 url/file 现场计算"""
         msg = {
-            "_img_indices": [1, 2, 3],
-            "image_meta": [{"sub_type": "0"}],
+            "image_meta": [{"sub_type": "0", "url": "http://example.com/img.png"}],
         }
         result = _build_image_markers(msg)
-        assert "[图片 #1]" in result
-        assert "[图片 #2]" in result
-        assert "[图片 #3]" in result
+        # 应有 [图片 <8位hex>] 格式
+        assert result.startswith("[图片 ")
+        assert result.endswith("] ")
+        # hash 是 8 位 hex
+        hash_part = result[4:12]
+        assert len(hash_part) == 8
+        assert all(c in "0123456789abcdef" for c in hash_part)
+
+    def test_entry_missing_url_and_file_skipped_with_warning(self):
+        """url 和 file 都为空时跳过该图片标记"""
+        msg = {
+            "image_meta": [
+                {"sub_type": "0", "url": "", "file": ""},
+                {"sub_type": "0", "image_hash": "ccc33333"},
+            ],
+        }
+        result = _build_image_markers(msg)
+        # 第一个 entry 被跳过，只有第二个的标记
+        assert result == "[图片 ccc33333] "
 
     def test_empty_msg(self):
         assert _build_image_markers({}) == ""
+
+
+# ── ImageCache.compute_image_hash ─────────────────────────────────────────────
+
+
+class TestComputeImageHash:
+    """ImageCache.compute_image_hash: url 优先、file 兜底、空输入返回 None"""
+
+    def test_url_priority(self):
+        entry = {"url": "http://example.com/a.png", "file": "b.png"}
+        h = ImageCache.compute_image_hash(entry)
+        assert h == ImageCache.compute_image_hash({"url": "http://example.com/a.png"})
+
+    def test_file_fallback(self):
+        entry = {"file": "abc.png"}
+        h = ImageCache.compute_image_hash(entry)
+        assert h is not None
+        assert len(h) == 8
+
+    def test_both_empty_returns_none(self):
+        assert ImageCache.compute_image_hash({"url": "", "file": ""}) is None
+
+    def test_empty_dict_returns_none(self):
+        assert ImageCache.compute_image_hash({}) is None
+
+    def test_deterministic(self):
+        entry = {"url": "http://example.com/same.png"}
+        h1 = ImageCache.compute_image_hash(entry)
+        h2 = ImageCache.compute_image_hash(entry)
+        assert h1 == h2
 
 
 # ── _safe_estimate_tokens ────────────────────────────────────────────────────
@@ -178,14 +216,11 @@ class TestSafeEstimateTokens:
             {"type": "image_url", "image_url": {"url": "data:..."}},
         ]
         result = _safe_estimate_tokens(parts)
-        # image_url part 没有 text key → get("text", "") = "" → 0 tokens
-        # text part 有 tokens
         assert result > 0
 
     def test_list_with_non_dict_elements(self):
         parts = ["not a dict", {"type": "text", "text": "hello"}]
         result = _safe_estimate_tokens(parts)
-        # "not a dict" 被 isinstance(p, dict) 过滤
         assert result > 0
 
     def test_empty_list(self):
@@ -239,7 +274,6 @@ class TestImageCache:
         meta = [{"url": "http://example.com/emoji.png", "sub_type": "1", "cache_hash": None}]
         await cache.download_and_cache(meta)
         assert meta[0].get("cache_hash") is None
-        # 默认跳过应打上 download_status 标记，便于日志/统计区分
         assert meta[0].get("download_status") == "skipped_emoji"
 
     @pytest.mark.asyncio
@@ -270,7 +304,6 @@ class TestImageCache:
         fpath.write_text("data:image/png;base64,old")
         meta = [{"url": "http://example.com/img.png", "cache_hash": "existing", "sub_type": "0"}]
         await cache.download_and_cache(meta)
-        # 已有 cache_hash，不应重新下载
         assert meta[0]["cache_hash"] == "existing"
 
     @pytest.mark.asyncio
@@ -292,7 +325,6 @@ class TestImageCache:
 
         assert meta[0]["cache_hash"] is not None
         assert meta[0]["size"] == len(fake_content)
-        # 验证文件写入
         h = meta[0]["cache_hash"]
         assert (cache_dir / f"{h}.b64").exists()
 

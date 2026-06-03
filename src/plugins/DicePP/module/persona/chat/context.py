@@ -11,6 +11,7 @@ from utils.string import estimate_tokens
 
 from ..character.models import Character
 from ..data.models import UserProfile
+from ..image_cache import ImageCache
 from utils.time import wall_now, format_timestamp, format_relative_time
 
 DEFAULT_DELAY_BEFORE = 1.0
@@ -26,21 +27,22 @@ def _safe_estimate_tokens(content: Any) -> float:
 
 
 def _build_image_markers(msg: Dict) -> str:
-    """为含图片的历史消息构建 [图片 #n] / [表情 #n] 标记前缀。"""
-    indices = msg.get("_img_indices")
-    if not indices:
-        return ""
+    """为含图片的历史消息构建 [图片 <hash>] / [表情 <hash>] 标记前缀。"""
     image_meta = msg.get("image_meta")
     if not image_meta:
         return ""
     markers = []
-    for i, idx in enumerate(indices):
-        if i < len(image_meta):
-            sub_type = image_meta[i].get("sub_type", "0")
-            tag = "表情" if sub_type == "1" else "图片"
-        else:
-            tag = "图片"
-        markers.append(f"[{tag} #{idx}]")
+    for entry in image_meta:
+        image_hash = entry.get("image_hash")
+        if not image_hash:
+            # 存量数据无 image_hash，用 url/file 现场计算
+            image_hash = ImageCache.compute_image_hash(entry)
+            if not image_hash:
+                logger.warning(f"[Context] 图片 entry 缺少 url/file，跳过标记: {entry}")
+                continue
+        sub_type = entry.get("sub_type", "0")
+        tag = "表情" if sub_type == "1" else "图片"
+        markers.append(f"[{tag} {image_hash}]")
     return "".join(markers) + " "
 
 
@@ -342,24 +344,7 @@ class ContextBuilder:
 
         Phase M1: 格式化后自动合并同一 agent_run_id 的连续 assistant segments，
         避免 LLM 看到多条连续 assistant 消息破坏 user/assistant 交替契约。
-
-        Phase 3: 预扫描分配 image index（最近的 = 1），格式化时插入 [图片 #n] / [表情 #n] 标记。
         """
-        # 预扫描：统计总图片数，反向分配 index（最近的 = 1）
-        total_images = 0
-        for msg in history:
-            meta = msg.get("image_meta")
-            if meta:
-                total_images += len(meta)
-
-        cursor = total_images
-        for msg in reversed(history):
-            meta = msg.get("image_meta")
-            if meta:
-                count = len(meta)
-                msg["_img_indices"] = list(range(cursor, cursor - count, -1))
-                cursor -= count
-
         if is_group:
             formatted = self._format_group_history(history)
         else:

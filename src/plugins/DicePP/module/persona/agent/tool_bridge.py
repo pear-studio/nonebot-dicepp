@@ -71,7 +71,7 @@ class GenerateImageArgs(BaseModel):
 
 
 class LookAtPastImageArgs(BaseModel):
-    image_index: int = Field(..., description="倒数第几张，1=最近，仅限当前上下文窗口内")
+    image_hash: str = Field(..., description="图片的 8 位十六进制标识，从上下文标记中复制", min_length=8, max_length=8)
 
 
 # ── 旧 ScoringAgent / ActionEvaluator 工具 Args Schema（桥接兼容）──
