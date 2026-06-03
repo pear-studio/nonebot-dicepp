@@ -5,14 +5,17 @@
 字段说明：
     创建      自动填入的录入日期
     问题表现  详细症状、现场数据、错误日志、量化指标、复现路径
-    工作计划  可能的修复方向、需先验证的假设、影响范围、风险点
+    开发备忘  历史背景、相关线索、可能的修复方向（仅供参考，agent 应独立诊断，
+              允许推翻）
 
-问题表现 / 工作计划支持单行或多行写法：
+问题表现 / 开发备忘支持单行或多行写法：
     - 问题表现: 简短描述
     或
     - 问题表现:
       - 现象 1
       - 现象 2
+
+向后兼容：旧条目中的「工作计划」字段仍可正确解析，写入时统一转为「开发备忘」。
 """
 
 import argparse
@@ -37,10 +40,10 @@ BACKLOG_PATH = Path("docs/dev/backlog.md")
 
 ID_RE = re.compile(r"^B-\d{6}-[0-9a-f]{6}$")
 ENTRY_HEADER_RE = re.compile(r"^### \[(B-\d{6}-[0-9a-f]{6})\] (.*)$")
-FIELD_RE = re.compile(r"^- (创建|优先级|类型|改动量|问题表现|工作计划):\s*(.*)$")
+FIELD_RE = re.compile(r"^- (创建|优先级|类型|改动量|问题表现|开发备忘|工作计划):\s*(.*)$")
 INDENT_RE = re.compile(r"^  (.*)$")  # 2-space indent → 字段多行内容
 
-FIELD_KEYS = ("创建", "优先级", "类型", "改动量", "问题表现", "工作计划")
+FIELD_KEYS = ("创建", "优先级", "类型", "改动量", "问题表现", "开发备忘")
 
 PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2}
 TYPE_ORDER = {"bug": 0, "feature": 1, "refactor": 2}
@@ -97,7 +100,7 @@ class BacklogItem:
         if not self.symptom:
             errors.append("缺少问题表现")
         if not self.plan:
-            errors.append("缺少工作计划")
+            errors.append("缺少开发备忘")
         return errors
 
     def to_md(self) -> str:
@@ -107,7 +110,7 @@ class BacklogItem:
         lines.append(f"- 类型: {self.type}")
         lines.append(f"- 改动量: {self.effort}")
         lines.append(_render_field("问题表现", self.symptom))
-        lines.append(_render_field("工作计划", self.plan))
+        lines.append(_render_field("开发备忘", self.plan))
         lines.append("")
         return "\n".join(lines)
 
@@ -167,7 +170,7 @@ def parse_backlog(path: Path) -> tuple[list[str], dict[str, list[BacklogItem]]]:
         body = "\n".join(field_buffer).rstrip()
         if current_field == "问题表现":
             current_item.symptom = body
-        elif current_field == "工作计划":
+        elif current_field in ("开发备忘", "工作计划"):
             current_item.plan = body
         elif current_field == "优先级":
             current_item.priority = body
@@ -232,7 +235,7 @@ def parse_backlog(path: Path) -> tuple[list[str], dict[str, list[BacklogItem]]]:
                 current_item.type = val
             elif key == "改动量":
                 current_item.effort = val
-            elif key in ("问题表现", "工作计划"):
+            elif key in ("问题表现", "开发备忘", "工作计划"):
                 if val:
                     if key == "问题表现":
                         current_item.symptom = val
@@ -474,7 +477,7 @@ def cmd_show(args):
                 print("问题表现:")
                 for line in item.symptom.splitlines() or [""]:
                     print(f"  {line}")
-                print("工作计划:")
+                print("开发备忘:")
                 for line in item.plan.splitlines() or [""]:
                     print(f"  {line}")
                 return
@@ -561,7 +564,7 @@ def cmd_validate(args):
             if not item.symptom:
                 errors.append(f"[{item.id}] 缺少问题表现")
             if not item.plan:
-                errors.append(f"[{item.id}] 缺少工作计划")
+                errors.append(f"[{item.id}] 缺少开发备忘")
 
     if not errors:
         total = sum(len(v) for v in modules.values())
@@ -587,7 +590,7 @@ def main():
     p_add.add_argument("--type", required=True, choices=["bug", "feature", "refactor"])
     p_add.add_argument("--effort", "-e", required=True, choices=["S", "M", "L", "XL"])
     p_add.add_argument("--symptom", required=True, help="问题表现（必填，可含换行）")
-    p_add.add_argument("--plan", required=True, help="工作计划（必填，可含换行）")
+    p_add.add_argument("--plan", required=True, help="开发备忘（必填，可含换行；历史背景、相关线索、可能方向，agent 应独立判断）")
     p_add.add_argument("--id", help="手动指定 ID（默认自动生成）")
     p_add.set_defaults(func=cmd_add)
 
