@@ -358,7 +358,7 @@ class ChatSession:
             # 计费由 UsageSink 在 AgentRuntime 内 best effort 处理。
             logger.bind(request_id=rid).info(
                 f"[Persona] _chat_via_coordinator return: user={user_id}"
-                f" result.status=success fallback_used=False"
+                f" result.status=success fallback_used={fallback_response is not None}"
                 f" value_len={len(result.value) if result.value else 0}"
             )
             return result.value

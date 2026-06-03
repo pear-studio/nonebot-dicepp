@@ -36,6 +36,13 @@ class ErrorKind(str, Enum):
         """是否可重试（与旧 ErrorClass.RETRYABLE 兼容）"""
         return self.recovery != RecoveryAction.ABORT
 
+    @property
+    def is_input_error(self) -> bool:
+        """错误归因于用户输入（而非模型/Provider），不应影响熔断器"""
+        return self in _INPUT_ERROR_KINDS
+
+
+_INPUT_ERROR_KINDS: frozenset[ErrorKind] = frozenset([ErrorKind.CONTENT_FILTERED])
 
 _RECOVERY_MAP = {
     ErrorKind.QUOTA_EXCEEDED: RecoveryAction.ABORT,
@@ -59,6 +66,7 @@ _KEYWORD_RULES: list[tuple[ErrorKind, tuple[str, ...]]] = [
     (ErrorKind.CONTENT_FILTERED, (
         "content_filter", "content filter", "moderation",
         "content policy", "safety", "content filtering",
+        "new_sensitive", "input_sensitive", "output_sensitive",
     )),
     (ErrorKind.CONTEXT_TOO_LONG, (
         "context length", "context_length_exceeded", "maximum context",
@@ -117,11 +125,24 @@ def classify(exception: Exception) -> ErrorKind:
 def classify_from_provider(exception: Exception, provider: object) -> ErrorKind:
     """结合 provider 特定知识和通用规则进行分类。
 
-    若 provider 提供了 classify_error 且返回旧 ErrorClass.NON_RETRYABLE，
-    则提升为 ErrorKind.PROVIDER_ERROR（保守，将不可重试标记为 abort）。
+    优先级：
+    1. classify_error_kind（provider 细粒度分类）→ 命中直接返回
+    2. classify_error（旧 ErrorClass 二元分类）→ NON_RETRYABLE 细分
+    3. classify 通用关键词兜底
     """
     from .providers.protocol import ErrorClass
 
+    # 1. Provider 细粒度分类（优先）
+    classify_kind = getattr(type(provider), 'classify_error_kind', None)
+    if classify_kind is not None:
+        try:
+            result = classify_kind(exception)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+
+    # 2. Provider 旧 ErrorClass 分类
     classify_method = getattr(type(provider), 'classify_error', None)
     if classify_method is not None:
         try:
@@ -144,7 +165,8 @@ def _classify_non_retryable(exception: Exception) -> ErrorKind:
         if kw in error_msg:
             return ErrorKind.PROVIDER_ERROR
 
-    for kw in ("content_filter", "moderation", "content policy", "safety"):
+    for kw in ("content_filter", "moderation", "content policy", "safety",
+               "new_sensitive", "input_sensitive", "output_sensitive"):
         if kw in error_msg:
             return ErrorKind.CONTENT_FILTERED
 

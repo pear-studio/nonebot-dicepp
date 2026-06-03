@@ -5,6 +5,7 @@ from typing import Optional
 import httpx
 from nonebot.log import logger
 
+from ...llm.errors import ErrorKind
 from .protocol import ImageGenProvider, ErrorClass
 
 _IMAGE_GEN_PATH = "/image_generation"
@@ -149,3 +150,15 @@ class MiniMaxImageProvider:
             if f"[{code}]" in error_msg:
                 return ErrorClass.NON_RETRYABLE
         return ErrorClass.RETRYABLE
+
+    @staticmethod
+    def classify_error_kind(exception: Exception) -> Optional[ErrorKind]:
+        """MiniMax 图生细粒度错误分类 — 匹配内容过滤错误码"""
+        error_msg = str(exception).lower()
+        # 2013 细分：MiniMax 复用此码表示参数错误和内容审核
+        if "2013" in error_msg and "invalid params" not in error_msg:
+            return ErrorKind.CONTENT_FILTERED
+        for kw in ("new_sensitive", "input_sensitive", "output_sensitive", "1026", "1027"):
+            if kw in error_msg:
+                return ErrorKind.CONTENT_FILTERED
+        return None

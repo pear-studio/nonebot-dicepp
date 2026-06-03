@@ -11,6 +11,8 @@ from typing import Dict, Tuple
 
 from nonebot.log import logger
 
+from .errors import ErrorKind
+
 # disabled 状态下连续 probe 失败达到此次数后进入 exhausted
 EXHAUSTED_PROBE_THRESHOLD = 10
 
@@ -69,6 +71,15 @@ class CircuitBreaker:
         if self._state == "dead":
             return
         self._transition("dead", reason or "marked dead")
+
+    def record_error(self, kind: ErrorKind, detail: str = "") -> None:
+        """根据错误分类更新熔断器状态——输入错误不影响熔断器。"""
+        if kind.is_input_error:
+            return
+        if kind.is_retryable:
+            self.record_failure()
+        else:
+            self.mark_dead(f"{kind.value}: {detail}")
 
     def mark_disabled(self, reason: str = "") -> None:
         """标记为临时不可用（probe 失败等），供启动探针与后台探针统一调用。"""

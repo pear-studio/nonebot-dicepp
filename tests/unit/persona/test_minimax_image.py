@@ -1,6 +1,7 @@
 """MiniMaxImageProvider 单元测试 — classify_error 错误码 2013 细分"""
 import pytest
 
+from plugins.DicePP.module.persona.llm.errors import ErrorKind
 from plugins.DicePP.module.persona.llm.providers.minimax_image import MiniMaxImageProvider
 from plugins.DicePP.module.persona.llm.providers.protocol import ErrorClass
 
@@ -41,3 +42,33 @@ class TestClassifyErrorOtherCodes:
     def test_unknown_code_is_retryable(self):
         e = RuntimeError("image gen API error [9999]: unknown error")
         assert MiniMaxImageProvider.classify_error(e) == ErrorClass.RETRYABLE
+
+
+class TestClassifyErrorKind:
+    """classify_error_kind 细粒度错误分类"""
+
+    def test_1026_content_filtered(self):
+        e = RuntimeError("image gen API error [1026]: input new_sensitive")
+        assert MiniMaxImageProvider.classify_error_kind(e) == ErrorKind.CONTENT_FILTERED
+
+    def test_1027_content_filtered(self):
+        e = RuntimeError("image gen API error [1027]: output content error")
+        assert MiniMaxImageProvider.classify_error_kind(e) == ErrorKind.CONTENT_FILTERED
+
+    def test_new_sensitive_keyword(self):
+        e = RuntimeError("image gen failed: new_sensitive check")
+        assert MiniMaxImageProvider.classify_error_kind(e) == ErrorKind.CONTENT_FILTERED
+
+    def test_2013_content_moderation(self):
+        """2013 内容审核 → CONTENT_FILTERED"""
+        e = RuntimeError("image gen API error [2013]: content moderation failed")
+        assert MiniMaxImageProvider.classify_error_kind(e) == ErrorKind.CONTENT_FILTERED
+
+    def test_2013_invalid_params_not_content_filtered(self):
+        """2013 参数错误不误杀为内容过滤"""
+        e = RuntimeError("image gen API error [2013]: invalid params, prompt too long")
+        assert MiniMaxImageProvider.classify_error_kind(e) is None
+
+    def test_unknown_error_not_content_filtered(self):
+        e = RuntimeError("image gen API error [9999]: unknown error")
+        assert MiniMaxImageProvider.classify_error_kind(e) is None

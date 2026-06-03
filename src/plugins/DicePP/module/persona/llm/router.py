@@ -228,10 +228,7 @@ class LLMRouter:
         if not cb:
             return
         kind = classify_from_provider(error, provider)
-        if kind.is_retryable:
-            cb.record_failure()
-        else:
-            cb.mark_dead(f"{kind.value}: {error}")
+        cb.record_error(kind, str(error))
 
     def reset_provider_probe(self, provider_name: str, model_name: str) -> bool:
         """将 exhausted 模型重置为 disabled，恢复探针循环。返回是否成功。"""

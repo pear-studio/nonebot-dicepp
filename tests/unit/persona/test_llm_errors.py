@@ -32,6 +32,13 @@ class TestErrorKindProperties:
         assert ErrorKind.CONTEXT_TOO_LONG.is_retryable
         assert ErrorKind.CONTEXT_TOO_LONG.recovery == RecoveryAction.COMPACT_RETRY
 
+    def test_is_input_error(self):
+        """仅 CONTENT_FILTERED 为输入错误"""
+        assert ErrorKind.CONTENT_FILTERED.is_input_error is True
+        for kind in ErrorKind:
+            if kind != ErrorKind.CONTENT_FILTERED:
+                assert not kind.is_input_error, f"{kind} should not be input error"
+
 
 # ── classify() 关键词匹配 ───────────────────────────────────
 
@@ -43,6 +50,11 @@ class TestClassifyKeywords:
     def test_content_filtered(self):
         assert classify(Exception("content_filter triggered")) == ErrorKind.CONTENT_FILTERED
         assert classify(Exception("moderation flag")) == ErrorKind.CONTENT_FILTERED
+
+    def test_new_sensitive_keywords(self):
+        assert classify(Exception("input new_sensitive (1026)")) == ErrorKind.CONTENT_FILTERED
+        assert classify(Exception("output_sensitive: blocked")) == ErrorKind.CONTENT_FILTERED
+        assert classify(Exception("input_sensitive check failed")) == ErrorKind.CONTENT_FILTERED
 
     def test_context_too_long(self):
         assert classify(Exception("context_length_exceeded")) == ErrorKind.CONTEXT_TOO_LONG
@@ -108,6 +120,14 @@ class TestClassifyFromProvider:
                 return ErrorClass.NON_RETRYABLE
             return ErrorClass.RETRYABLE
 
+    class MockProviderWithKind:
+        @staticmethod
+        def classify_error_kind(exception: Exception):
+            msg = str(exception).lower()
+            if "1026" in msg:
+                return ErrorKind.CONTENT_FILTERED
+            return None
+
     class NoClassifyProvider:
         pass
 
@@ -132,6 +152,27 @@ class TestClassifyFromProvider:
             def classify_error(exception: Exception) -> ErrorClass:
                 raise RuntimeError("boom")
         provider = BadProvider()
+        result = classify_from_provider(Exception("rate limit"), provider)
+        assert result == ErrorKind.RATE_LIMITED
+
+    def test_prefers_classify_error_kind_over_classify_error(self):
+        """classify_error_kind 命中时直接返回，不调用 classify_error"""
+        provider = self.MockProviderWithKind()
+        result = classify_from_provider(Exception("error code 1026: new_sensitive"), provider)
+        assert result == ErrorKind.CONTENT_FILTERED
+
+    def test_classify_error_kind_returns_none_falls_through(self):
+        """classify_error_kind 返回 None 时继续走 classify"""
+        provider = self.MockProviderWithKind()
+        result = classify_from_provider(Exception("rate limit"), provider)
+        assert result == ErrorKind.RATE_LIMITED
+
+    def test_classify_error_kind_raises_falls_through(self):
+        class BadKindProvider:
+            @staticmethod
+            def classify_error_kind(exception: Exception):
+                raise RuntimeError("boom")
+        provider = BadKindProvider()
         result = classify_from_provider(Exception("rate limit"), provider)
         assert result == ErrorKind.RATE_LIMITED
 

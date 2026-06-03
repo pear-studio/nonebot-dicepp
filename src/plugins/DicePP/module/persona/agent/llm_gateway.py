@@ -146,10 +146,7 @@ class LLMGateway:
                     cb = self._router.circuit_breakers.get(provider_name, model_name)
                     kind = classify_from_provider(e, provider)
                     if cb:
-                        if kind.is_retryable:
-                            cb.record_failure()
-                        else:
-                            cb.mark_dead(f"{kind.value}: {e}")
+                        cb.record_error(kind, str(e))
 
                     await self._event_bus.emit(
                         "ModelCandidateFailed",

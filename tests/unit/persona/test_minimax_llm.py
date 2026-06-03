@@ -5,6 +5,7 @@ import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock
 
+from plugins.DicePP.module.persona.llm.errors import ErrorKind
 from plugins.DicePP.module.persona.llm.providers.minimax_llm import MiniMaxProvider
 from plugins.DicePP.module.persona.llm.providers.openai import OpenAIProvider
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, ErrorClass
@@ -97,3 +98,42 @@ class TestMiniMaxProvider:
         assert MiniMaxProvider.classify_error(Exception("authentication failed")) == ErrorClass.NON_RETRYABLE
         assert MiniMaxProvider.classify_error(Exception("content_filter triggered")) == ErrorClass.NON_RETRYABLE
         assert MiniMaxProvider.classify_error(Exception("rate limit exceeded")) == ErrorClass.RETRYABLE
+
+
+class TestClassifyErrorKind:
+    """classify_error_kind 细粒度错误分类"""
+
+    def test_openai_sdk_body_format_1026(self):
+        """OpenAI SDK 格式 body.error.code=1026 → CONTENT_FILTERED"""
+        e = Exception("some error")
+        e.body = {"error": {"code": 1026, "message": "input new_sensitive"}}
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.CONTENT_FILTERED
+
+    def test_openai_sdk_body_format_1027(self):
+        """OpenAI SDK 格式 body.error.code=1027 → CONTENT_FILTERED"""
+        e = Exception("some error")
+        e.body = {"error": {"code": 1027, "message": "output content error"}}
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.CONTENT_FILTERED
+
+    def test_minimax_native_body_format(self):
+        """MiniMax 原生格式 base_resp.status_code=1026 → CONTENT_FILTERED"""
+        e = Exception("some error")
+        e.body = {"base_resp": {"status_code": 1026, "status_msg": "input new_sensitive"}}
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.CONTENT_FILTERED
+
+    def test_keyword_fallback_no_body(self):
+        """无 body 时从异常消息匹配关键词"""
+        e = Exception("Error: input new_sensitive (1026)")
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.CONTENT_FILTERED
+
+    def test_body_not_dict_falls_through(self):
+        """body 非 dict 时跳过解析"""
+        e = Exception("some random error")
+        e.body = "not a dict"
+        assert MiniMaxProvider.classify_error_kind(e) is None
+
+    def test_exact_match_not_substring(self):
+        """精确匹配：10260 不误命中"""
+        e = Exception("some error")
+        e.body = {"error": {"code": 10260, "message": "some other error"}}
+        assert MiniMaxProvider.classify_error_kind(e) is None
