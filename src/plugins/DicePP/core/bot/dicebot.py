@@ -571,6 +571,14 @@ class Bot:
 
         msg = preprocess_msg(msg)  # 转换中文符号, 转换小写等等
 
+        # 展开用户定义的宏（.define）：在命令分发前把消息文本里能匹配的宏替换掉。
+        # apply_user_macros 内部对没定义宏的用户会快速返回原文，对错误也会兜底返回原文。
+        try:
+            from module.common.macro_command import apply_user_macros
+            msg = await apply_user_macros(self, meta.user_id, msg)
+        except Exception:
+            dice_log(f"[Macro] [Expand] 宏展开失败，回退原始消息: {get_exception_info()}")
+
         bot_commands: List[BotCommandBase] = []
 
         # 统计信息 —— 从 SQLite 读取，失败则创建默认值
