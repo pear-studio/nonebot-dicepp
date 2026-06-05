@@ -187,7 +187,6 @@ class TestAgentRunStateInitialSnapshot:
             "delivery_performed": False,
             "final_reason": "",
             "error": "",
-            "pending_images": None,
         }
 
 

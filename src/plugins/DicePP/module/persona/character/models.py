@@ -91,6 +91,7 @@ class CharacterBook(BaseModel):
 
 
 class Character(BaseModel):
+    character_id: str = ""
     name: str
     description: str = ""
     personality: str = ""

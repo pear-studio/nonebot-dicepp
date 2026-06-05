@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
 
+from ..data.models import DEFAULT_SESSION_TOKEN_BUDGET
+
 
 @dataclass
 class ChatConfig:
@@ -34,6 +36,11 @@ class ChatConfig:
     segment_count_max: int = 10
     segment_max_delay: float = 10.0
     segment_round_callbacks_max: int = 3
+    # ── Session 配置
+    private_session_gap_seconds: int = 86400
+    group_session_gap_seconds: int = 1800
+    private_session_token_budget: int = DEFAULT_SESSION_TOKEN_BUDGET
+    group_session_token_budget: int = DEFAULT_SESSION_TOKEN_BUDGET
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "ChatConfig":
@@ -60,4 +67,8 @@ class ChatConfig:
             segment_count_max=persona.segment_count_max,
             segment_max_delay=persona.segment_max_delay,
             segment_round_callbacks_max=persona.segment_round_callbacks_max,
+            private_session_gap_seconds=persona.private_session_gap_seconds,
+            group_session_gap_seconds=persona.group_session_gap_seconds,
+            private_session_token_budget=persona.private_session_token_budget,
+            group_session_token_budget=persona.group_session_token_budget,
         )

@@ -13,6 +13,7 @@ from ..character.models import Character
 from ..data.models import UserProfile
 from ..image_cache import ImageCache
 from utils.time import wall_now, format_timestamp, format_relative_time
+from ..chat.compression import estimate_image_token
 
 DEFAULT_DELAY_BEFORE = 1.0
 
@@ -22,8 +23,19 @@ def _safe_estimate_tokens(content: Any) -> float:
     if isinstance(content, str):
         return estimate_tokens(content)
     if isinstance(content, list):
-        return sum(estimate_tokens(p.get("text", "")) for p in content if isinstance(p, dict))
+        total = 0.0
+        for p in content:
+            if isinstance(p, dict):
+                if p.get("type") == "image_url":
+                    image_url = p.get("image_url", {})
+                    url = image_url.get("url", "") if isinstance(image_url, dict) else ""
+                    if url.startswith("data:"):
+                        total += estimate_image_token(url)
+                else:
+                    total += estimate_tokens(p.get("text", ""))
+        return total
     return 0.0
+
 
 
 def _build_image_markers(msg: Dict) -> str:
@@ -80,36 +92,108 @@ class ContextBuilder:
         """同步新的角色卡引用"""
         self.character = character
 
+    def _render_character_base(self) -> List[str]:
+        """渲染角色卡静态段落（描述/性格/场景/名称/示例对话/尾部指令）。
+
+        build_static_prompt 和 _build_system_prompt 共用此方法。
+        """
+        parts = []
+        if self.character.system_prompt:
+            parts.append(self.character.system_prompt)
+        else:
+            if self.character.description:
+                parts.append(self.character.description)
+            if self.character.personality:
+                parts.append(f"性格: {self.character.personality}")
+            if self.character.scenario:
+                parts.append(f"场景: {self.character.scenario}")
+        parts.append(f"你的名字是: {self.character.name}")
+        if self.character.mes_example:
+            example = self.character.format_mes_example()
+            parts.append(f"示例对话:\n{example}")
+        parts.append("请记住用户说过的话，在适当时候提及。不承认自己是AI。")
+        return parts
+
+    def build_static_prompt(self) -> str:
+        """构建静态基座 prompt（不包含动态信息，可被 prompt caching 复用）。"""
+        parts = self._render_character_base()
+
+        # 分段回复引导（仅 chat 路径 + segment_guide.enabled），插入到尾部指令之前
+        if self.segment_guide and self.segment_guide.enabled:
+            sg = self.segment_guide
+            guide = (
+                f"【回复规则】\n"
+                f"你必须使用 send_reply_segment 工具发送回复，不要直接在 content 中输出。\n"
+                f"- 每段建议 {sg.target_chars} 字，单段上限 {sg.max_chars} 字\n"
+                f"- 单次回复总字数软上限 {sg.soft_limit} 字，硬上限 {sg.hard_limit} 字\n"
+                f"- 短句 delay_before 用 {DEFAULT_DELAY_BEFORE} 秒，长句用 2–3 秒\n"
+                f"- 回复完成后直接结束，禁止输出任何状态描述（如\"已经回复过了\"、\"回复完成\"等）\n"
+                f"\n"
+                f"【系统消息说明】\n"
+                f"对话中可能出现以 [系统指令] 开头的消息，"
+                f"这些是工具调用提醒，不是用户输入。"
+                f"看到后直接按指令操作，不要输出任何思考或回应文字。"
+            )
+            parts.insert(-1, guide)
+
+        return "\n\n".join(parts)
+
     def build(
         self,
-        formatted_history: List[Dict[str, str]],
-        history_dicts: List[Dict[str, str]],
+        messages: List[Any] = None,
+        *,
+        static_prompt: str = "",
+        notifications: Optional[List[str]] = None,
+        # ── Legacy parameters (deprecated, kept for backward compat in debug paths) ──
+        formatted_history: Optional[List[Dict[str, str]]] = None,
+        history_dicts: Optional[List[Dict[str, str]]] = None,
         user_profile: Optional[UserProfile] = None,
         diary_context: str = "",
         warmth_label: str = "友好",
     ) -> List[Dict[str, str]]:
-        messages = []
+        """构建 LLM 消息列表（支持新旧两种调用方式）。
 
-        # 世界书扫描仍用 raw dicts（未格式化的 content 避免时间戳/speaker 前缀干扰匹配）
-        lore_sections = self.build_lore_text(history_dicts)
+        **新方式（session 模式）**：
+        - messages: 已格式化的 session 消息（PersonaSessionMessage 或 dict 列表）
+        - static_prompt: 预构建的静态基座
+        - notifications: 待注入的动态通知
 
-        # 合并所有 system 内容为一条（某些提供商如 MiniMax 不支持多条 system 消息）
+        **旧方式（legacy，保留给 debug_info）**：
+        - formatted_history + history_dicts + user_profile + diary_context + warmth_label
+        """
+        # 新路径：session 模式
+        if messages is not None:
+            result: List[Dict[str, str]] = []
+
+            # System 消息只含静态基座
+            result.append({"role": "system", "content": static_prompt})
+
+            # 注入通知（独立 user role 消息，在历史消息之前）
+            for note in (notifications or []):
+                result.append({"role": "user", "content": note})
+
+            # 追加 session 历史消息
+            for msg in messages:
+                if isinstance(msg, dict):
+                    result.append({"role": msg["role"], "content": msg["content"]})
+                else:
+                    result.append({"role": msg.role, "content": msg.content})
+
+            return result
+
+        # 旧路径：legacy（保留给 build_debug_info 等场景）
+        result_legacy = []
+        lore_sections = self.build_lore_text(history_dicts or [])
         system_parts = []
-
         system_prompt = self._build_system_prompt(user_profile, diary_context, warmth_label, lore_sections)
         system_parts.append(system_prompt)
-
         if self.character.mes_example:
             example = self.character.format_mes_example()
             system_parts.append(f"示例对话:\n{example}")
-
-        messages.append({"role": "system", "content": "\n\n".join(system_parts)})
-
-        # 追加格式化后的历史消息对（末尾即为当前用户消息，带时间戳前缀）
-        for msg in formatted_history:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-
-        return messages
+        result_legacy.append({"role": "system", "content": "\n\n".join(system_parts)})
+        for msg in (formatted_history or []):
+            result_legacy.append({"role": msg["role"], "content": msg["content"]})
+        return result_legacy
 
     def build_lore_text(
         self,
@@ -201,20 +285,13 @@ class ContextBuilder:
         time_str = now.strftime(f"%Y年%m月%d日 %H:%M {weekday}")
         parts.append(f"当前时间: {time_str}")
 
-        if self.character.system_prompt:
-            parts.append(self.character.system_prompt)
-        else:
-            if self.character.description:
-                parts.append(self.character.description)
-            if self.character.personality:
-                parts.append(f"性格: {self.character.personality}")
-            if self.character.scenario:
-                parts.append(f"场景: {self.character.scenario}")
+        # 角色卡基座（描述/性格/场景/名称/示例对话/尾部指令）
+        parts.extend(self._render_character_base())
 
-        parts.append(f"你的名字是: {self.character.name}")
-        parts.append(f"当前你和用户的关系: {warmth_label}")
+        # 温暖度 — 插入到尾部指令之前
+        parts.insert(-1, f"当前你和用户的关系: {warmth_label}")
 
-        # ── 分段回复引导（仅 chat 路径注入）
+        # ── 分段回复引导（仅 chat 路径注入）──
         if self.segment_guide and self.segment_guide.enabled:
             sg = self.segment_guide
             guide = (
@@ -230,22 +307,20 @@ class ContextBuilder:
                 f"这些是工具调用提醒，不是用户输入。"
                 f"看到后直接按指令操作，不要输出任何思考或回应文字。"
             )
-            parts.append(guide)
+            parts.insert(-1, guide)
 
         if user_profile and user_profile.facts:
             facts_text = "\n".join([f"- {k}: {v}" for k, v in user_profile.facts.items()])
-            parts.append(f"【你对用户的了解】\n{facts_text}")
+            parts.insert(-1, f"【你对用户的了解】\n{facts_text}")
 
         # after_char 位置的世界书（当前默认位置）放在用户了解之后
         after_lore = lore_sections.get("after_char", [])
         if after_lore:
             bullets = "\n".join([f"- {c}" for c in after_lore])
-            parts.append(f"【世界书】\n{bullets}")
+            parts.insert(-1, f"【世界书】\n{bullets}")
 
         if diary_context:
-            parts.append(f"【今天发生的事】\n{diary_context}")
-
-        parts.append("请记住用户说过的话，在适当时候提及。不承认自己是AI。")
+            parts.insert(-1, f"【今天发生的事】\n{diary_context}")
 
         return "\n\n".join(parts)
 

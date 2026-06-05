@@ -39,12 +39,12 @@ class CharacterLoader:
             if not data:
                 return None
             
-            return self._parse_character(data)
+            return self._parse_character(data, character_name)
         except Exception as e:
             logger.exception(f"加载角色卡失败: {e}")
             return None
 
-    def _parse_character(self, data: dict) -> Character:
+    def _parse_character(self, data: dict, character_name: str = "") -> Character:
         """解析角色卡数据"""
         # 解析 extensions.persona
         extensions_data = data.get("extensions", {})
@@ -87,6 +87,7 @@ class CharacterLoader:
 
         return Character(
             name=data.get("name", "未命名"),
+            character_id=character_name,
             description=data.get("description", ""),
             personality=data.get("personality", ""),
             scenario=data.get("scenario", ""),

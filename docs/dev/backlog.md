@@ -41,3 +41,18 @@
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
 
+### [B-260604-270f2a] LLM 历史对话查询工具
+- 创建: 2026-06-04
+- 优先级: P2
+- 类型: feature
+- 改动量: M
+- 问题表现: Session 归档或压缩后 LLM 完全丢失历史上下文，只能依赖压缩摘要（200-300字）。用户追问历史细节（如上次我说的那个地方叫什么）时 LLM 无法查阅。message_stream 中存有完整历史记录，但没有工具让 LLM 主动查询。
+- 开发备忘:
+  新增 search_history 工具，LLM 可主动搜索 message_stream 中的历史对话。
+  方案方向：
+    - 定义 tool schema：关键词、时间范围、用户ID、返回条数上限
+    - executor 调用现有 PersonaDataStore.search_messages()，返回格式化后的历史消息摘要
+    - 注册到 ToolDomain.CHAT，在 _chat_with_tools 路径中可用
+  影响面：tools/ 新增工具文件、tool_registry 注册、可能需调整 search_messages 返回格式以适应 LLM 上下文窗口
+  风险：搜索结果可能很长（需截断）；搜索精度依赖 message_stream 的内容质量
+

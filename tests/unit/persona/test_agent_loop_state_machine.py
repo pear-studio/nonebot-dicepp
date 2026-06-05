@@ -318,10 +318,10 @@ class TestAgentLoopGenerateImage:
 
     @pytest.mark.asyncio
     async def test_image_and_segment_order(self, loop, mock_llm, mock_executor, mock_delivery, mock_image, mock_event_bus):
-        """generate_image + send_reply_segment 同时出现时，
-        observation 后的 final segment 被跳过"""
+        """generate_image + send_reply_segment(finish) 同时出现时，
+        final segment 正常发送（不再因 observation 而跳过）"""
         mock_llm.complete.side_effect = [
-            # Round 1: generate_image + send_reply_segment(final)
+            # Round 1: generate_image + send_reply_segment(final) — final triggers finish
             _make_gateway_result(
                 content="",
                 tool_calls=[
@@ -331,8 +331,6 @@ class TestAgentLoopGenerateImage:
                     }), "tc_2"),
                 ],
             ),
-            # Round 2: continue with observation回填后，可能再发 final
-            _make_gateway_result(content="图片已生成"),
         ]
         mock_executor.execute_many.side_effect = [
             [
@@ -351,10 +349,10 @@ class TestAgentLoopGenerateImage:
             tool_use_mode=ToolUseMode.AUTO,
         )
 
-        # image 后面的 final segment 应被跳过
         assert result.status == "completed"
         mock_image.handle_generate.assert_called_once()
-        mock_delivery.handle_send.assert_not_awaited()
+        # final segment now gets delivered normally
+        mock_delivery.handle_send.assert_called_once()
 
 
 class TestAgentLoopCorrections:

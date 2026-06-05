@@ -12,7 +12,7 @@ import asyncio
 import json
 import time
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as tz
 
 from utils.string import estimate_tokens
 from utils.logger import logger
@@ -21,6 +21,7 @@ from ..data.store import PersonaDataStore
 from ..data.models import (
     RelationshipState,
     UnifiedMessage,
+    MessageType,
 )
 from ..llm.router import LLMRouter, QuotaExceeded
 from ..character.models import Character
@@ -33,12 +34,26 @@ from ..tools.context import ToolContext
 from ..life.protocols import SleepGate
 from ..llm.coordinator import LLMCallCoordinator
 from ..gateway.port import MessagePort
+from ..data.models import PersonaSessionMessage
+from ..chat.compression import estimate_session_tokens, should_compress
+from ..chat.session_manager import _make_time_notification
 
 _DEFAULT_SLEEP_MESSAGES = ("角色正在休息，请稍后再来",)
 
 if TYPE_CHECKING:
     from .scoring_trigger import ScoringTrigger
     from .response_handler import ResponseHandler
+    from .session_manager import SessionManager
+
+
+def _format_group_message(msg_dict: Dict[str, Any], ts: str, img_prefix: str, content: str) -> str:
+    """群聊消息格式化（[HH:MM] [speaker_name] content + 图片标记）。
+
+    session.py 和 command.py 共用此函数。
+    """
+    speaker = msg_dict.get("speaker_name") or msg_dict.get("display_name", "")
+    speaker_part = f"[{speaker}] " if speaker else ""
+    return f"[{ts}] {speaker_part}{img_prefix}{content}"
 
 
 class ChatSession:
@@ -59,7 +74,10 @@ class ChatSession:
         query_store: Any = None,
         resolve_db: Any = None,
         sleep_gate: Optional[SleepGate] = None,
+        session_manager: Optional["SessionManager"] = None,
     ):
+        # session_manager 通过 factory 在构造后立即注入（非构造时传入），
+        # _build_messages 开头保留 `if self.session_manager is None` 防御检查。
         self.store = store
         self.router = router
         self.tool_registry = tool_registry
@@ -73,8 +91,10 @@ class ChatSession:
         self.query_store = query_store
         self.resolve_db = resolve_db
         self._sleep_gate = sleep_gate
+        self.session_manager = session_manager
         self._delivery_performed = False
         self._last_messages: Dict[str, Tuple[str, float]] = {}
+        # 动态信息追踪统一由 session_manager 管理（get_warmth_label / set_warmth_label）
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
@@ -182,8 +202,11 @@ class ChatSession:
             )
 
     async def clear_history(self, user_id: str, group_id: str) -> None:
-        """清空对话历史"""
+        """清空对话历史（message_stream + session）"""
         await self.store.clear_messages(user_id, group_id)
+        if self.session_manager:
+            scope_id = group_id or user_id
+            await self.session_manager.delete_session(scope_id)
 
     # ── 回复后处理 ──────────────────────────────────────────────
 
@@ -213,6 +236,10 @@ class ChatSession:
         )
 
         await self._after_response(user_id, group_id, current_message, response)
+
+        # Session 后处理：追加 assistant 消息 + token 估算 + 压缩检查
+        if self.session_manager:
+            await self.session_manager.on_chat_complete(user_id, group_id, response, current_message, self.router)
 
         if self._delivery_performed:
             logger.debug(
@@ -513,6 +540,227 @@ class ChatSession:
 
     # ── 消息构建 ──────────────────────────────────────────────
 
+    def _format_message_for_session(
+        self, msg_dict: Dict[str, Any], is_group: bool,
+    ) -> str:
+        """按 session 格式格式化单条消息。
+
+        私聊: [HH:MM] [图片 hash] [表情 hash] 消息内容
+        群聊: [HH:MM] [speaker_name] [图片 hash] 消息内容
+        assistant: 回复内容（无前缀）
+        """
+        from ..chat.context import _build_image_markers
+
+        role = msg_dict.get("role", "user")
+        if role == "assistant":
+            return msg_dict.get("content", "")
+
+        content = msg_dict.get("content", "")
+        created_at = msg_dict.get("created_at")
+        ts = ""
+        if created_at:
+            if isinstance(created_at, datetime):
+                ts = created_at.strftime("%H:%M")
+            else:
+                ts = str(created_at)
+
+        img_prefix = _build_image_markers(msg_dict)
+
+        if is_group:
+            return _format_group_message(msg_dict, ts, img_prefix, content)
+        else:
+            return f"[{ts}] {img_prefix}{content}"
+
+    @staticmethod
+    def _hash_facts(facts: dict) -> str:
+        import hashlib
+        import json as _json
+        raw = _json.dumps(facts, sort_keys=True, ensure_ascii=False)
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    def _collect_notifications(
+        self,
+        decision,
+        scope_id: str,
+        warmth_label: str,
+        lore_keys: set,
+        diary_context: str,
+        now,
+        profile,
+    ) -> List[str]:
+        """组装通知列表（6a-6d），从 _build_messages 提取以缩短方法长度。"""
+        notifications = list(decision.notifications)
+
+        # 6a. 温暖度变化
+        prev_label = self.session_manager.get_warmth_label(scope_id)
+        if prev_label is not None and warmth_label != prev_label:
+            notifications.append(f"[通知] 你和用户的关系变得更{warmth_label}了。")
+        self.session_manager.set_warmth_label(scope_id, warmth_label)
+
+        # 6b. 世界书新命中（纯增量）
+        tracker = self.session_manager.get_tracker(scope_id)
+        new_lore = lore_keys - tracker.get("activated_lore_keys", set())
+        if new_lore:
+            for key in new_lore:
+                notifications.append(f"[通知] 【世界书】{key}")
+            tracker["activated_lore_keys"] |= new_lore
+
+        # 6c. 日记忆要（每日首次）
+        today = now.date()
+        if diary_context and tracker.get("last_diary_date") != today:
+            notifications.append(f"[通知] {diary_context}")
+            tracker["last_diary_date"] = today
+
+        # 6d. profile facts 变更
+        if profile and profile.facts:
+            current_hash = self._hash_facts(profile.facts)
+            if current_hash != tracker.get("last_profile_hash"):
+                facts_lines = "\n".join([f"- {k}: {v}" for k, v in profile.facts.items()])
+                notifications.append(f"[通知] 你对用户有了新的了解：\n{facts_lines}")
+                tracker["last_profile_hash"] = current_hash
+
+        return notifications
+
+    async def _build_messages(
+        self,
+        user_id: str,
+        group_id: str,
+    ) -> List[Dict[str, str]]:
+        is_group = bool(group_id)
+        scope_id = group_id or user_id
+        now = wall_now(self.config.timezone)
+
+        # 防御性回退：session_manager 未注入时不崩溃（factory 中 ChatSession 构造早于 session_manager 注入）
+        if self.session_manager is None:
+            return await self._build_messages_legacy(user_id, group_id)
+
+        # 1. 构建 static_prompt + hash
+        static_prompt = self.context_builder.build_static_prompt()
+        from ..chat.session_manager import SessionManager
+        static_hash = SessionManager.compute_static_hash(static_prompt)
+
+        decision = await self.session_manager.get_or_create(
+            user_id=scope_id,
+            character_id=self.character.character_id,
+            static_prompt=static_prompt,
+            static_hash=static_hash,
+            is_group=is_group,
+        )
+        session = decision.session
+
+        # 3. 加载已有消息
+        session_msgs = await self.store.get_session_messages(session.session_id)
+        # 转换为 dict 格式以便处理
+        session_msg_dicts = [
+            {"role": m.role, "content": m.content, "created_at": m.created_at}
+            for m in session_msgs
+        ]
+
+        # 4. 跨天检测 + 格式化当前消息
+        last_msg = session_msgs[-1] if session_msgs else None
+        if last_msg and last_msg.created_at:
+            last_date = last_msg.created_at.date() if hasattr(last_msg.created_at, 'date') else None
+            # 跨天检测（统一用 UTC 日期比较，避免本地时间与 UTC 偏移导致的误触发或遗漏）
+            today_utc = datetime.now(tz.utc).date()
+            if last_date and last_date != today_utc:
+                cross_day = _make_time_notification(self.config.timezone)
+                cross_day_msg = PersonaSessionMessage(
+                    session_id=session.session_id,
+                    role="user",
+                    content=cross_day,
+                )
+                await self.session_manager.append_messages(session.session_id, [cross_day_msg])
+                session_msg_dicts.append({"role": "user", "content": cross_day})
+
+        # 格式化并追加当前用户消息（从 _fetch_short_term_history 获取）
+        history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
+        if history_dicts:
+            current_msg_dict = history_dicts[-1]
+            formatted_current = self._format_message_for_session(current_msg_dict, is_group)
+            current_persona_msg = PersonaSessionMessage(
+                session_id=session.session_id,
+                role=current_msg_dict.get("role", "user"),
+                content=formatted_current,
+            )
+            await self.session_manager.append_messages(session.session_id, [current_persona_msg])
+            session_msg_dicts.append({"role": current_persona_msg.role, "content": formatted_current})
+
+        # 5. 获取动态数据
+        profile = await self.store.get_user_profile(user_id)
+        rel = await self.store.get_relationship(user_id)
+        warmth_label = self._resolve_warmth_label(user_id, rel)
+        diary_context = await self._build_diary_context()
+
+        # 世界书扫描
+        lore_sections = self._build_lore_sections(history_dicts)
+        lore_keys = set()
+        for section_list in lore_sections.values():
+            for entry_text in section_list:
+                lore_keys.add(entry_text)
+
+        # 6. 组装通知列表
+        notifications = self._collect_notifications(
+            decision, scope_id, warmth_label, lore_keys, diary_context, now, profile,
+        )
+
+        # 7. 构建最终消息列表
+        result = self.context_builder.build(
+            messages=session_msg_dicts,
+            static_prompt=static_prompt,
+            notifications=notifications,
+        )
+
+        # 调试信息
+        debug_info = self.context_builder.build_debug_info(
+            short_term_history=session_msg_dicts,
+            user_profile=profile,
+            diary_context=diary_context,
+            warmth_label=warmth_label,
+            lore_sections=lore_sections,
+        )
+        logger.debug(f"context_debug: {debug_info}")
+
+        return result
+
+    async def _build_messages_legacy(
+        self,
+        user_id: str,
+        group_id: str,
+    ) -> List[Dict[str, str]]:
+        """旧版 _build_messages（当 session_manager 为 None 时回退）"""
+        history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
+        is_group = bool(group_id)
+
+        formatted = self.context_builder.format_history(history_dicts, is_group)
+        truncated = self.context_builder.truncate_by_turns(
+            formatted,
+            self.config.max_history_turns,
+            self.config.max_history_tokens,
+        )
+
+        profile = await self.store.get_user_profile(user_id)
+        rel = await self.store.get_relationship(user_id)
+        warmth_label = self._resolve_warmth_label(user_id, rel)
+        diary_context = await self._build_diary_context()
+        lore_sections = self._build_lore_sections(history_dicts)
+
+        debug_info = self.context_builder.build_debug_info(
+            short_term_history=truncated,
+            user_profile=profile,
+            diary_context=diary_context,
+            warmth_label=warmth_label,
+            lore_sections=lore_sections,
+        )
+        logger.debug(f"context_debug (legacy): {debug_info}")
+
+        return self.context_builder.build(
+            formatted_history=truncated,
+            history_dicts=history_dicts,
+            user_profile=profile,
+            diary_context=diary_context,
+            warmth_label=warmth_label,
+        )
+
     def _resolve_warmth_label(self, user_id: str, rel: Optional[RelationshipState]) -> str:
         """根据关系状态（含衰减计算）解析温暖度标签"""
         initial = float(self.character.extensions.initial_relationship)
@@ -524,7 +772,7 @@ class ChatSession:
         else:
             temp_rel = RelationshipState(
                 user_id=user_id, intimacy=initial, passion=initial,
-                trust=initial, secureness=initial
+                trust=initial, secureness=initial,
             )
             _, warmth_label = temp_rel.get_warmth_level(self.character.get_warmth_labels())
 
@@ -575,51 +823,5 @@ class ChatSession:
     ) -> Dict[str, List[str]]:
         """构建世界书 lore 段落"""
         return self.context_builder.build_lore_text(history_dicts)
-
-    async def _build_messages(
-        self,
-        user_id: str,
-        group_id: str,
-    ) -> List[Dict[str, str]]:
-        # 前置条件：当前用户消息已由 inbound_message_hook 写入 unified_messages，
-        # _fetch_short_term_history 返回的历史末尾即为当前消息。
-        history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
-        is_group = bool(group_id)
-
-        formatted = self.context_builder.format_history(history_dicts, is_group)
-        # 群聊双层截断：_apply_token_window 在存储层按时间窗口 + token budget + max messages
-        # 做首轮过滤，truncate_by_turns 在格式化后按 max_history_turns + max_history_tokens 兜底。
-        # 当前 max_history_tokens=4000 > group_context_budget_tokens=2000，第二层通常不触发。
-        # WHY 群聊保留双层：_apply_token_window 负责群聊特有的时间窗口收敛和说话人合并，
-        # 这些逻辑超出 truncate_by_turns 通用截断的职责范围。私聊消息直接来自 DB 按时间升序，
-        # 无需首层过滤，因此仅走 truncate_by_turns 单层截断。
-        truncated = self.context_builder.truncate_by_turns(
-            formatted,
-            self.config.max_history_turns,
-            self.config.max_history_tokens,
-        )
-
-        profile = await self.store.get_user_profile(user_id)
-        rel = await self.store.get_relationship(user_id)
-        warmth_label = self._resolve_warmth_label(user_id, rel)
-        diary_context = await self._build_diary_context()
-        lore_sections = self._build_lore_sections(history_dicts)
-
-        debug_info = self.context_builder.build_debug_info(
-            short_term_history=truncated,
-            user_profile=profile,
-            diary_context=diary_context,
-            warmth_label=warmth_label,
-            lore_sections=lore_sections,
-        )
-        logger.debug(f"context_debug: {debug_info}")
-
-        return self.context_builder.build(
-            formatted_history=truncated,
-            history_dicts=history_dicts,
-            user_profile=profile,
-            diary_context=diary_context,
-            warmth_label=warmth_label,
-        )
 
 

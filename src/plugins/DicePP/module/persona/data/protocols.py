@@ -15,6 +15,8 @@ from .models import (
     ScoringFailure,
     UnifiedMessage,
     UserProfile,
+    PersonaSession,
+    PersonaSessionMessage,
 )
 
 
@@ -138,3 +140,40 @@ class EventStore(Protocol):
     async def get_diary(self, date: str) -> Optional[str]: ...
 
     async def save_diary(self, date: str, content: str) -> None: ...
+
+
+class SessionStore(Protocol):
+    """persona_session + persona_session_message 表"""
+
+    async def create_session(
+        self,
+        user_id: str,
+        character_id: str,
+        static_prompt: str,
+        static_hash: str,
+        token_budget: int,
+        status: str,
+        last_active_at: datetime,
+    ) -> "PersonaSession": ...
+
+    async def get_active_session(
+        self, user_id: str
+    ) -> Optional["PersonaSession"]: ...
+
+    async def get_session_by_id(
+        self, session_id: int
+    ) -> Optional["PersonaSession"]: ...
+
+    async def update_session(
+        self, session_id: int, **updates: object
+    ) -> None: ...
+
+    async def delete_session(self, session_id: int) -> None: ...
+
+    async def add_session_messages(
+        self, session_id: int, messages: List["PersonaSessionMessage"]
+    ) -> None: ...
+
+    async def get_session_messages(
+        self, session_id: int
+    ) -> List["PersonaSessionMessage"]: ...

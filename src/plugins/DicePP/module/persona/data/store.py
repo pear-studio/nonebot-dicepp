@@ -29,6 +29,7 @@ from .models import (
     RelationshipState, DailyEvent, GroupActivity, UserLLMConfig,
     LLMTraceRecord, CharacterState,
     ScoringFailure, UnifiedMessage, MessageType, DEFAULT_WARMTH_LABELS,
+    DEFAULT_SESSION_TOKEN_BUDGET,
 )
 from .migrations import (
     PERSONA_DB_MIGRATIONS, CORE_DB_MIGRATIONS,
@@ -1771,6 +1772,175 @@ class PersonaDataStore:
         if total:
             logger.info(f"Persona 数据清理完成: 共清理 {total} 条记录, 明细={results}")
         return results
+
+    # ========== Session 相关 (persona_session + persona_session_message) ==========
+
+    @staticmethod
+    def _row_to_persona_session(row: dict) -> "PersonaSession":
+        from .models import PersonaSession
+        return PersonaSession(
+            session_id=row["session_id"],
+            user_id=row["user_id"],
+            character_id=row["character_id"],
+            static_prompt=row.get("static_prompt") or "",
+            static_hash=row.get("static_hash") or "",
+            token_budget=row.get("token_budget", DEFAULT_SESSION_TOKEN_BUDGET),
+            token_estimate=row.get("token_estimate", 0),
+            status=row["status"],
+            last_active_at=datetime.fromisoformat(row["last_active_at"]) if row.get("last_active_at") else None,
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+        )
+
+    @staticmethod
+    def _row_to_persona_session_message(row: dict) -> "PersonaSessionMessage":
+        from .models import PersonaSessionMessage
+        tool_calls_raw = row.get("tool_calls") or ""
+        return PersonaSessionMessage(
+            message_id=row["message_id"],
+            session_id=row["session_id"],
+            role=row["role"],
+            content=row["content"],
+            tool_calls=tool_calls_raw,
+            tool_call_id=row.get("tool_call_id") or "",
+            name=row.get("name"),
+            sequence=row.get("sequence", 0),
+            created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+        )
+
+    async def create_session(
+        self,
+        user_id: str,
+        character_id: str,
+        static_prompt: str,
+        static_hash: str,
+        token_budget: int,
+        status: str,
+        last_active_at: datetime,
+    ) -> "PersonaSession":
+        from .models import PersonaSession
+        now_iso = last_active_at.isoformat()
+        cursor = await self.db.execute(
+            """
+            INSERT INTO persona_session
+            (user_id, character_id, static_prompt, static_hash,
+             token_budget, token_estimate, status, last_active_at, created_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)
+            """,
+            (user_id, character_id, static_prompt, static_hash,
+             token_budget, status, now_iso, now_iso),
+        )
+        await self.db.commit()
+        return PersonaSession(
+            session_id=cursor.lastrowid,
+            user_id=user_id,
+            character_id=character_id,
+            static_prompt=static_prompt,
+            static_hash=static_hash,
+            token_budget=token_budget,
+            token_estimate=0,
+            status=status,
+            last_active_at=last_active_at,
+            created_at=last_active_at,
+        )
+
+    async def get_active_session(self, user_id: str) -> Optional["PersonaSession"]:
+        async with self.db.execute(
+            """
+            SELECT session_id, user_id, character_id, static_prompt, static_hash,
+                   token_budget, token_estimate, status, last_active_at, created_at
+            FROM persona_session
+            WHERE user_id = ? AND status = 'active'
+            ORDER BY last_active_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return self._row_to_persona_session(row)
+
+    async def get_session_by_id(self, session_id: int) -> Optional["PersonaSession"]:
+        async with self.db.execute(
+            """
+            SELECT session_id, user_id, character_id, static_prompt, static_hash,
+                   token_budget, token_estimate, status, last_active_at, created_at
+            FROM persona_session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return self._row_to_persona_session(row)
+
+    async def update_session(self, session_id: int, **updates: object) -> None:
+        allowed = {
+            "static_prompt", "static_hash", "token_budget",
+            "token_estimate", "status", "last_active_at",
+        }
+        cols = []
+        vals: list = []
+        for key, val in updates.items():
+            if key not in allowed:
+                continue
+            cols.append(f"{key} = ?")
+            if isinstance(val, datetime):
+                vals.append(val.isoformat())
+            else:
+                vals.append(val)
+        if not cols:
+            return
+        vals.append(session_id)
+        await self.db.execute(
+            f"UPDATE persona_session SET {', '.join(cols)} WHERE session_id = ?",
+            vals,
+        )
+        await self.db.commit()
+
+    async def delete_session(self, session_id: int) -> None:
+        await self.db.execute(
+            "DELETE FROM persona_session WHERE session_id = ?",
+            (session_id,),
+        )
+        await self.db.commit()
+
+    async def add_session_messages(
+        self, session_id: int, messages: List["PersonaSessionMessage"],
+    ) -> None:
+        now_iso = self._wall_now().isoformat()
+        for msg in messages:
+            await self.db.execute(
+                """
+                INSERT INTO persona_session_message
+                (session_id, role, content, tool_calls, tool_call_id, name,
+                 sequence, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, COALESCE(
+                  (SELECT MAX(sequence) + 1 FROM persona_session_message WHERE session_id = ?),
+                  1
+                ), ?)
+                """,
+                (session_id, msg.role, msg.content, msg.tool_calls,
+                 msg.tool_call_id, msg.name, session_id, msg.created_at.isoformat() if msg.created_at else now_iso),
+            )
+        await self.db.commit()
+
+    async def get_session_messages(
+        self, session_id: int,
+    ) -> List["PersonaSessionMessage"]:
+        async with self.db.execute(
+            """
+            SELECT message_id, session_id, role, content, tool_calls,
+                   tool_call_id, name, sequence, created_at
+            FROM persona_session_message
+            WHERE session_id = ?
+            ORDER BY sequence ASC
+            """,
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [self._row_to_persona_session_message(r) for r in rows]
 
     # ========== Phase 3: 记忆搜索工具 ==========
 

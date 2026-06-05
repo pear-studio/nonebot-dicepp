@@ -111,7 +111,7 @@ _ARGS_SCHEMA_MAP: Dict[str, Type[BaseModel]] = {
     "score_relationship": ScoreRelationshipArgs,
 }
 
-_EXTERNAL_TOOLS = {"send_reply_segment", "generate_image", "look_at_past_image"}
+_EXTERNAL_TOOLS = {"send_reply_segment", "generate_image"}
 _STATE_WRITE_TOOLS = {
     "record_event", "record_reaction", "record_diary_entry",
     "record_share_message", "record_score",

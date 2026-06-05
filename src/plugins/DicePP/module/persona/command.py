@@ -92,6 +92,7 @@ class PersonaCommand(UserCommandBase):
         self.enabled: bool = False
         self.app: Optional[PersonaApp] = None
         self.data_store: Optional[PersonaDataStore] = None
+        self._session_manager: Optional[Any] = None  # 由 factory 注入，用于群聊旁路
         self.init_error: Optional[str] = None  # create_persona 抛出的具名异常文本，供 _admin_debug 展示
         self._whitelist_confirm_pending: Dict[str, float] = {}  # user_id -> timestamp
         # 主循环在 async 中调用同步 tick() 时，单槽异步任务（避免 life.tick 慢于 1s 时堆积）
@@ -152,6 +153,8 @@ class PersonaCommand(UserCommandBase):
                 return []
             if self.app:
                 self.data_store = self.app.store
+                # 注入 SessionManager（供群聊 session 旁路写入）
+                self._session_manager = self.app.session_manager
                 # 注入 ImageCache 到 data_store（供裁剪时清理图片缓存）
                 self.data_store.image_cache = self.image_cache
                 # 注入 app 引用到日报生成器
@@ -255,6 +258,26 @@ class PersonaCommand(UserCommandBase):
                 display_name=display_name,
                 image_meta=image_meta,
             )
+
+            # 群聊 session 旁路：非触发消息也追加到活跃 session（仅存在活跃 session 时）
+            if group_id and self._session_manager:
+                try:
+                    active = await self.data_store.get_active_session(group_id)
+                    if active:
+                        from .chat.session import _format_group_message
+                        ts_prefix = ""
+                        try:
+                            from utils.time import wall_now as _wn
+                            ts_prefix = _wn(self.config.timezone).strftime("%H:%M")
+                        except Exception:
+                            pass
+                        msg_dict = {"speaker_name": display_name, "display_name": display_name}
+                        formatted = _format_group_message(msg_dict, ts_prefix, "", content)
+                        await self._session_manager.add_bypass_message(active.session_id, formatted)
+                    else:
+                        logger.debug(f"[Persona] 群聊 session 旁路：无活跃 session (group_id={group_id})，跳过写入")
+                except Exception as e:
+                    logger.warning(f"[Persona] 群聊 session 旁路写入失败: {e}")
         except Exception as e:
             logger.warning(f"[Persona] 入站记录器写入失败: {e}")
 

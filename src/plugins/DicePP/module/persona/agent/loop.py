@@ -38,7 +38,7 @@ from .request import AgentRunLimits, ToolUseMode
 from .sinks import DeliverySink, ImageGenerationSink
 from .state import AgentRunState
 from .tool_executor import ToolExecutor, ToolRegistry
-from ..llm.selection import SelectionPolicy, CHAT, CHAT_WITH_IMAGE
+from ..llm.selection import SelectionPolicy, CHAT
 
 _L1_CORRECTION_MSG = {
     "role": "user",
@@ -52,7 +52,7 @@ _CORRECTION_INTERIM_MSG = (
 )
 
 # 工具排序常量：vision 工具 > 其他 > send_reply_segment
-_VISION_TOOLS = frozenset({"look_at_past_image", "generate_image"})
+_VISION_TOOLS = frozenset({"generate_image"})
 
 
 def _tool_sort_key(tc: dict) -> int:
@@ -136,19 +136,7 @@ class AgentLoop:
         model = ""
 
         while round_index < self._limits.max_tool_rounds:
-            # ── Phase 3: 检测 pending_images（observation 方案）──
-            if state.pending_images:
-                logger.info(
-                    f"[AgentLoop] pending_images detected: count={len(state.pending_images)}"
-                    f" source=model_requested_history"
-                )
-                state.messages = _embed_images_in_messages(
-                    state.messages, state.pending_images,
-                )
-                effective_selection = CHAT_WITH_IMAGE
-                state.pending_images = None
-            else:
-                effective_selection = selection
+            effective_selection = selection
 
             # ── 构造 LLM 请求 ──
             req = LLMRequest(
@@ -327,10 +315,10 @@ class AgentLoop:
 
             # ── 按调用顺序处理 EXTERNAL_ACTION 结果 ──
             delivery_performed_this_round = False
-            has_pending_observation = False
             interim_found = False
             skip_rest = False
             ordered_results: List[dict] = []
+            _pending_image_msgs: List[dict] = []
 
             for idx, (tc, tr) in enumerate(zip(tool_calls, tool_results)):
                 tc_name = tc["name"]
@@ -352,12 +340,6 @@ class AgentLoop:
 
                     phase = action_data.get("phase", "final")
                     seg_content = action_data.get("content", result_content)
-
-                    if phase == "final" and has_pending_observation:
-                        tr["content"] = "跳过：前面有待回填 observation，等待下一轮"
-                        skip_rest = True
-                        ordered_results.append(tr)
-                        continue
 
                     if not action_id or not self._delivery:
                         ordered_results.append(tr)
@@ -412,32 +394,26 @@ class AgentLoop:
 
                     observation = await self._image.handle_generate(gen_action)
                     tr["content"] = observation
-                    has_pending_observation = True
 
-                # look_at_past_image → observation 方案
-                elif tc_name == "look_at_past_image" and action_id:
+                # look_at_past_image → 注入图片到上下文
+                elif tc_name == "look_at_past_image":
                     try:
-                        obs_data = json.loads(result_content)
+                        action_data = json.loads(result_content)
                     except (json.JSONDecodeError, TypeError):
-                        obs_data = {}
+                        action_data = {}
 
-                    if "data_url" in obs_data:
-                        # executor 返回了图片 data_url → 暂存到 pending_images
-                        img_hash = obs_data.get("image_hash", "")
-                        if not img_hash:
-                            logger.warning("[AgentLoop] executor 返回 data_url 但缺少 image_hash，跳过该 observation")
-                            tr["content"] = json.dumps({"error": "图片获取失败：缺少 image_hash"}, ensure_ascii=False)
-                        else:
-                            if state.pending_images is None:
-                                state.pending_images = {}
-                            state.pending_images[img_hash] = obs_data["data_url"]
-                            has_pending_observation = True
-                            tr["content"] = json.dumps({"status": "已获取图片，将在下一轮查看"}, ensure_ascii=False)
-                    elif "error" in obs_data:
-                        # executor 返回错误 → 保持原样回填给 LLM
-                        pass
-                    else:
-                        tr["content"] = result_content
+                    data_url = action_data.get("data_url")
+                    image_hash = action_data.get("image_hash", "")
+
+                    if data_url:
+                        tr["content"] = f"图片 {image_hash} 已获取"
+                        _pending_image_msgs.append({
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "[系统指令] 以下是你要查看的历史图片内容："},
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                            ],
+                        })
 
                 ordered_results.append(tr)
 
@@ -449,12 +425,16 @@ class AgentLoop:
                     "content": tr["content"],
                 })
 
+            # ── 注入 look_at_past_image 图片消息（tool 消息之后，LLM 可见图片）──
+            for img_msg in _pending_image_msgs:
+                state.messages.append(img_msg)
+
             # ── 判断下一步 ──
             if state.final_reason == "terminal_final_segment":
                 return await self._finish(state, "completed", "terminal_final_segment",
                                           total_tokens_in, total_tokens_out, provider, model)
 
-            if interim_found and not has_pending_observation:
+            if interim_found:
                 # 只有 interim 没有 observation 和 final：注入 correction
                 if state.correction_count < self._limits.max_corrections:
                     state.messages.append({
@@ -489,9 +469,6 @@ class AgentLoop:
                                               total_tokens_in, total_tokens_out,
                                               provider, model)
 
-            # 有 pending observation 或 pending images → 继续循环
-            if has_pending_observation or state.pending_images:
-                continue
 
             # ── structured_collect：本轮命中 required STATE_WRITE → 完成 ──
             if (state.mode == "structured_collect"
@@ -575,34 +552,3 @@ class AgentLoop:
         )
 
 
-def _embed_images_in_messages(
-    messages: List[dict], image_data_urls: Dict[str, str],
-) -> List[dict]:
-    """将含 [图片 <hash>] 标记的消息替换为多模态 content parts。
-
-    [表情 <hash>] 标记保留为纯文本（不嵌入图片）。
-    仅对匹配的消息做结构性变化（content: str → List[dict]），其余保持不变。
-    注意：必须在 truncate_by_turns 之后调用（estimate_tokens 期望 content 为 str）。
-    """
-    result = []
-    for msg in messages:
-        content = msg.get("content", "")
-        if not isinstance(content, str) or "[图片 " not in content:
-            result.append(msg)
-            continue
-        parts: list = []
-        remaining = content
-        for img_hash, img_url in sorted(image_data_urls.items()):
-            marker = f"[图片 {img_hash}]"
-            if marker in remaining:
-                before, _, remaining = remaining.partition(marker)
-                if before.strip():
-                    parts.append({"type": "text", "text": before})
-                parts.append({"type": "image_url", "image_url": {"url": img_url}})
-        if remaining.strip():
-            parts.append({"type": "text", "text": remaining})
-        if parts:
-            result.append({**msg, "content": parts})
-        else:
-            result.append(msg)
-    return result

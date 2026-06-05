@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
-from plugins.DicePP.module.persona.agent.loop import _embed_images_in_messages
 from plugins.DicePP.module.persona.agent.runtime import _build_image_content_parts
 from plugins.DicePP.module.persona.chat.context import _build_image_markers, _safe_estimate_tokens
 from plugins.DicePP.module.persona.image_cache import ImageCache
@@ -39,74 +38,6 @@ class TestBuildImageContentParts:
     def test_empty_text(self):
         parts = _build_image_content_parts("", ["url1"])
         assert parts[0] == {"type": "text", "text": ""}
-
-
-# ── _embed_images_in_messages ─────────────────────────────────────────────────
-
-
-class TestEmbedImagesInMessages:
-    """_embed_images_in_messages: [图片 <hash>] 标记替换为多模态 parts"""
-
-    def test_no_markers_unchanged(self):
-        messages = [{"role": "user", "content": "hello world"}]
-        result = _embed_images_in_messages(messages, {"abc12345": "url1"})
-        assert result == messages
-
-    def test_single_image_replace(self):
-        messages = [{"role": "user", "content": "看看 [图片 abc12345] 吧"}]
-        result = _embed_images_in_messages(messages, {"abc12345": "data_url_1"})
-        assert len(result) == 1
-        parts = result[0]["content"]
-        assert isinstance(parts, list)
-        assert len(parts) == 3
-        assert parts[0] == {"type": "text", "text": "看看 "}
-        assert parts[1] == {"type": "image_url", "image_url": {"url": "data_url_1"}}
-        assert parts[2] == {"type": "text", "text": " 吧"}
-
-    def test_multiple_images_ordered(self):
-        messages = [{"role": "user", "content": "[图片 aaa] 和 [图片 bbb]"}]
-        data_urls = {"aaa": "url_a", "bbb": "url_b"}
-        result = _embed_images_in_messages(messages, data_urls)
-        parts = result[0]["content"]
-        assert parts[0] == {"type": "image_url", "image_url": {"url": "url_a"}}
-        assert parts[1] == {"type": "text", "text": " 和 "}
-        assert parts[2] == {"type": "image_url", "image_url": {"url": "url_b"}}
-
-    def test_emoji_marker_kept_as_text(self):
-        """[表情 <hash>] 标记不替换，保留纯文本"""
-        messages = [{"role": "user", "content": "看看 [表情 abc12345]"}]
-        result = _embed_images_in_messages(messages, {})
-        # 没有 [图片 ] 标记，原样返回
-        assert result[0]["content"] == "看看 [表情 abc12345]"
-
-    def test_non_string_content_skipped(self):
-        messages = [{"role": "user", "content": [{"type": "text", "text": "already parts"}]}]
-        result = _embed_images_in_messages(messages, {"abc": "url"})
-        assert result == messages
-
-    def test_empty_content(self):
-        messages = [{"role": "user", "content": ""}]
-        result = _embed_images_in_messages(messages, {"abc": "url"})
-        assert result == messages
-
-    def test_no_match_marker_not_in_data(self):
-        """标记存在但 data_urls 中没有对应 hash → 标记保留为文本"""
-        messages = [{"role": "user", "content": "[图片 ffffffff]"}]
-        result = _embed_images_in_messages(messages, {"abc": "url"})
-        parts = result[0]["content"]
-        assert isinstance(parts, list)
-        assert parts[0]["text"] == "[图片 ffffffff]"
-
-    def test_preserves_other_messages(self):
-        messages = [
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "[图片 abc12345]"},
-            {"role": "assistant", "content": "ok"},
-        ]
-        result = _embed_images_in_messages(messages, {"abc12345": "url"})
-        assert result[0]["content"] == "sys"
-        assert isinstance(result[1]["content"], list)
-        assert result[2]["content"] == "ok"
 
 
 # ── _build_image_markers ─────────────────────────────────────────────────────

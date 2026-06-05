@@ -36,5 +36,3 @@ class AgentRunState:
     final_reason: str = ""
     error: str = ""
 
-    # Phase 3: 图片理解 — observation 方案
-    pending_images: Optional[Dict[str, str]] = None

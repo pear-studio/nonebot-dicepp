@@ -333,8 +333,54 @@ ALTER_MESSAGE_STREAM_ADD_SEGMENT_PHASE = """
 ALTER TABLE message_stream ADD COLUMN segment_phase TEXT DEFAULT '';
 """
 
+# Session 表
+CREATE_PERSONA_SESSION_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_session (
+    session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    character_id TEXT NOT NULL,
+    static_prompt TEXT DEFAULT '',
+    static_hash TEXT DEFAULT '',
+    token_budget INTEGER DEFAULT 64000,
+    token_estimate INTEGER DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',
+    last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+CREATE_PERSONA_SESSION_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_persona_session_user_status
+ON persona_session(user_id, status);
+"""
+
+CREATE_PERSONA_SESSION_MESSAGE_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_session_message (
+    message_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    tool_calls TEXT DEFAULT '',
+    tool_call_id TEXT DEFAULT '',
+    name TEXT,
+    sequence INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES persona_session(session_id) ON DELETE CASCADE
+);
+"""
+
+CREATE_PERSONA_SESSION_MESSAGE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_persona_session_message_session
+ON persona_session_message(session_id, sequence);
+"""
+
+
 # ── 跟角色走 → persona_db（14 张表 + 索引） ──────────────────────
 PERSONA_DB_MIGRATIONS = [
+    CREATE_PERSONA_SESSION_TABLE,
+    CREATE_PERSONA_SESSION_INDEX,
+    CREATE_PERSONA_SESSION_MESSAGE_TABLE,
+    CREATE_PERSONA_SESSION_MESSAGE_INDEX,
     CREATE_MESSAGE_STREAM_TABLE,
     CREATE_MESSAGE_STREAM_USER_INDEX,
     CREATE_MESSAGE_STREAM_GROUP_INDEX,

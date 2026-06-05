@@ -11,6 +11,9 @@ from utils.logger import logger
 from core.message_types import MessageType  # noqa: F401 — re-export from central location
 
 
+DEFAULT_SESSION_TOKEN_BUDGET: int = 64000
+
+
 # 阶段下界表：冷淡=0 / 疏远=20 / 友好=40 / 默契=60 / 亲密=80
 STAGE_FLOORS = [0.0, 20.0, 40.0, 60.0, 80.0]
 
@@ -150,6 +153,33 @@ class WhitelistEntry(BaseModel):
     id: str  # user_id 或 group_id
     type: str  # "user" | "group"
     joined_at: Optional[datetime] = None
+
+
+class PersonaSession(BaseModel):
+    """对话 session 持久化记录"""
+    session_id: Optional[int] = None
+    user_id: str
+    character_id: str
+    static_prompt: str = ""
+    static_hash: str = ""
+    token_budget: int = DEFAULT_SESSION_TOKEN_BUDGET
+    token_estimate: int = 0
+    status: str = "active"
+    last_active_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class PersonaSessionMessage(BaseModel):
+    """对话 session 中的单条消息"""
+    message_id: Optional[int] = None
+    session_id: int
+    role: str
+    content: str
+    tool_calls: str = ""  # JSON string
+    tool_call_id: str = ""
+    name: Optional[str] = None
+    sequence: int = 0
+    created_at: Optional[datetime] = None
 
 
 class DailyUsage(BaseModel):

@@ -271,6 +271,24 @@ class PersonaConfig(BaseModel):
     daily_events_keep_days: int = 30
     diary_keep_days: int = 30
 
+    # ── Session 上下文持久化
+    private_session_gap_seconds: int = Field(
+        default=86400, ge=60,
+        description="私聊 session gap 超时秒数（默认 1 天）",
+    )
+    group_session_gap_seconds: int = Field(
+        default=1800, ge=60,
+        description="群聊 session gap 超时秒数（默认 30 分钟）",
+    )
+    private_session_token_budget: int = Field(
+        default=64000, ge=1000,
+        description="私聊 session token 预算上限",
+    )
+    group_session_token_budget: int = Field(
+        default=64000, ge=1000,
+        description="群聊 session token 预算上限",
+    )
+
     observation_store_raw_digest: bool = False
 
     # ── Phase 2: 厌倦拒绝机制配置

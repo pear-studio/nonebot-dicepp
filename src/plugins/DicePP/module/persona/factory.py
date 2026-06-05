@@ -49,6 +49,7 @@ from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_database
 from .tools.search_knowledge import SEARCH_KNOWLEDGE_TOOL, search_knowledge_executor
 from .tools.suggest_action import SUGGEST_ACTION_TOOL, make_suggest_action_executor
 from .tools.generate_image import make_generate_image_tool_def, make_generate_image_executor
+from .tools.look_at_past_image import LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor
 from .tools.collecting import (
     RECORD_EVENT_TOOL,
     RECORD_REACTION_TOOL,
@@ -68,6 +69,7 @@ class PersonaApp:
     life: LifeSimulator
     store: PersonaDataStore
     port: MessagePort
+    session_manager: Any = None
     segment_dispatcher: Optional[SegmentDispatcher] = None
     all_providers_disabled: bool = False
     current_character_name: str = ""
@@ -83,6 +85,11 @@ class PersonaApp:
         """切换到新角色的 persona_db"""
         await self.store.switch_persona_db(new_character_name)
         self.current_character_name = new_character_name
+
+    async def shutdown(self) -> None:
+        """应用关闭时取消所有未完成的 background task。"""
+        if self.session_manager:
+            await self.session_manager.shutdown()
 
     def get_character(self) -> Optional[Character]:
         return self.chat.character
@@ -404,9 +411,6 @@ def _build_tooling(
         character_appearance=character_appearance,
     )
     tool_registry.register(ToolDomain.CHAT, gen_tool_def, gen_executor)
-
-    # Phase 3: 图片理解工具（始终注册）
-    from .tools.look_at_past_image import LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor
     tool_registry.register(ToolDomain.CHAT, LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor)
 
     logger.info("工具注册表与分段调度器已初始化")
@@ -680,6 +684,14 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("衰减计算器已初始化")
 
+    from .chat.session_manager import SessionManager
+    session_manager = SessionManager(
+        store=infra.store,
+        config=ChatConfig.from_persona(config),
+        timezone=config.timezone,
+    )
+    logger.info("SessionManager 已初始化")
+
     chat = _build_chat(ChatDeps(
         store=infra.store,
         message_store=infra.store,
@@ -698,6 +710,9 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         resolve_db=_make_resolve_query_db(bot),
         sleep_gate=character_life,
     ))
+
+    # 注入 session_manager 到 ChatSession
+    chat.session_manager = session_manager
 
     life = await _build_life(
         infra.store, character, config, coordinator, infra.port, decay_calculator,
@@ -721,6 +736,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     logger.info("Persona 模块初始化完成")
     return PersonaApp(
         chat=chat, life=life, store=infra.store, port=infra.port,
+        session_manager=session_manager,
         segment_dispatcher=infra.segment_dispatcher,
         all_providers_disabled=all_disabled,
         current_character_name=config.character_name,
