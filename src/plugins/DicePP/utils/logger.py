@@ -10,7 +10,7 @@ LOG_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
     "<level>{level: <8}</level> | "
     "<cyan>{name}</cyan>:<cyan>{line}</cyan> | "
-    "{extra[request_id]:--------} | "
+    "{extra[request_id]} | "
     "<level>{message}</level>"
 )
 
