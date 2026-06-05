@@ -4,7 +4,7 @@
 PersonaDataStore 已实现全部方法，隐式满足所有 Protocol。
 """
 
-from typing import List, Optional, Protocol
+from typing import List, Optional, Protocol, Tuple
 from datetime import datetime
 
 from .models import (
@@ -54,6 +54,12 @@ class MessageStore(Protocol):
         self, user_id: str, group_id: str = ""
     ) -> int: ...
 
+    async def read_messages(
+        self, user_id: str, group_id: str = "",
+        *, limit: int = 20, offset: int = 0,
+        filter_user_id: Optional[str] = None,
+    ) -> List[UnifiedMessage]: ...
+
     async def search_messages(
         self,
         group_id: str,
@@ -61,6 +67,7 @@ class MessageStore(Protocol):
         keyword: Optional[str] = None,
         type: Optional[MessageType] = None,
         user_id: Optional[str] = None,
+        filter_user_id: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         hours_back: Optional[int] = None,
@@ -140,6 +147,14 @@ class EventStore(Protocol):
     async def get_diary(self, date: str) -> Optional[str]: ...
 
     async def save_diary(self, date: str, content: str) -> None: ...
+
+    async def get_recent_diaries(
+        self, days: int = 7, limit: int = 5
+    ) -> List[Tuple[str, str]]: ...
+
+    async def search_diaries(
+        self, query: str, days: int, limit: int,
+    ) -> List[Tuple[str, str]]: ...
 
 
 class SessionStore(Protocol):

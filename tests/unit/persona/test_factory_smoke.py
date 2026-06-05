@@ -1,7 +1,7 @@
 """create_persona 成功路径 smoke 测试
 
 覆盖 Round 4 R1 第 7 步：工具注册表在组装时不抛异常，
-且工具（search_persona / roll_dice 等）正确注册到 chat 域。
+且工具（read_history / search_history / roll_dice 等）正确注册到 chat 域。
 """
 
 import pytest
@@ -154,7 +154,11 @@ async def test_create_persona_success_registers_tools(monkeypatch):
     definitions = app.chat.tool_registry.get_definitions_for(ToolDomain.CHAT)
     names = {d["function"]["name"] for d in definitions}
 
-    assert "search_persona" in names, f"缺失 search_persona，实际注册: {names}"
+    assert "read_history" in names, f"缺失 read_history，实际注册: {names}"
+    assert "search_history" in names, f"缺失 search_history，实际注册: {names}"
+    assert "read_profile" in names, f"缺失 read_profile，实际注册: {names}"
+    assert "read_diary" in names, f"缺失 read_diary，实际注册: {names}"
+    assert "search_diary" in names, f"缺失 search_diary，实际注册: {names}"
     assert "roll_dice" in names, f"缺失 roll_dice，实际注册: {names}"
     assert "send_reply_segment" in names, f"缺失 send_reply_segment，实际注册: {names}"
     assert "suggest_action" in names, f"缺失 suggest_action，实际注册: {names}"

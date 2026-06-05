@@ -42,7 +42,7 @@ class ToolRegistry:
     LLM 看到？"目前的取值：
 
       - ``chat``  ：用户消息处理路径（``ChatSession._chat_with_tools``）
-        可注入的工具集；典型成员有 ``search_persona``、``search_knowledge``、
+        可注入的工具集；典型成员有 ``read_history``、``search_knowledge``、
         ``roll_dice``——它们让模型在回复用户时能查档案、查历史、查规则、掷骰。
       - 未来可能扩展 ``life`` / ``proactive`` 等域，区分主动事件路径下
         允许的工具子集。

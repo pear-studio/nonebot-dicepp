@@ -3,7 +3,7 @@ Persona 数据存储层
 
 统一的数据访问接口
 """
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..image_cache import ImageCacheProtocol
@@ -379,6 +379,43 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [self._row_to_message(r) for r in reversed(list(rows))]
 
+    async def read_messages(
+        self, user_id: str, group_id: str = "",
+        *, limit: int = 20, offset: int = 0,
+        filter_user_id: Optional[str] = None,
+    ) -> List[UnifiedMessage]:
+        """分页读取聊天记录（不需要关键词），时间降序返回（最新的在前）。"""
+        conditions = [PersonaDataStore._EXCLUDE_SYSTEM_LOG]
+        params: List[Any] = []
+
+        if group_id:
+            conditions.append("group_id = ?")
+            params.append(group_id)
+        else:
+            conditions.append("group_id = ''")
+            if not filter_user_id:
+                conditions.append("user_id = ?")
+                params.append(user_id)
+
+        if filter_user_id:
+            conditions.append("user_id = ?")
+            params.append(filter_user_id)
+
+        where_clause = " AND ".join(conditions)
+        sql = f"""
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at,
+                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
+            FROM message_stream
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+
+        async with self.db.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+            return [self._row_to_message(r) for r in rows]
+
     async def search_messages(
         self,
         group_id: str,
@@ -386,6 +423,7 @@ class PersonaDataStore:
         keyword: Optional[str] = None,
         type: Optional[MessageType] = None,
         user_id: Optional[str] = None,
+        filter_user_id: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         hours_back: Optional[int] = None,
@@ -400,8 +438,16 @@ class PersonaDataStore:
         if (start_time is None) != (end_time is None):
             raise ValueError("start_time 和 end_time 必须同时提供或同时省略")
 
-        conditions = ["group_id = ?", "group_id != ''", PersonaDataStore._EXCLUDE_SYSTEM_LOG]
-        params: List[Any] = [group_id]
+        conditions = [PersonaDataStore._EXCLUDE_SYSTEM_LOG]
+        params: List[Any] = []
+
+        if group_id:
+            conditions.append("group_id = ?")
+            params.append(group_id)
+        else:
+            conditions.append("group_id = ''")
+            conditions.append("user_id = ?")
+            params.append(user_id)
 
         if keyword:
             safe_query = self._sanitize_search_query(keyword)
@@ -412,9 +458,9 @@ class PersonaDataStore:
             conditions.append("type = ?")
             params.append(type.value)
 
-        if user_id is not None:
+        if filter_user_id is not None:
             conditions.append("user_id = ?")
-            params.append(user_id)
+            params.append(filter_user_id)
 
         if hours_back is not None:
             cutoff = self._wall_now() - timedelta(hours=hours_back)
@@ -1154,6 +1200,22 @@ class PersonaDataStore:
             (date, content, self._wall_now().isoformat())
         )
         await self.db.commit()
+
+    async def get_recent_diaries(self, days: int = 7, limit: int = 5) -> List[Tuple[str, str]]:
+        """获取最近 N 天的日记全文（按日期降序）"""
+        cutoff_date = (self._wall_now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        async with self.db.execute(
+            """
+            SELECT date, content
+            FROM persona_diary
+            WHERE date >= ?
+            ORDER BY date DESC
+            LIMIT ?
+            """,
+            (cutoff_date, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [(row["date"], row["content"] or "") for row in rows]
 
     # ========== 每日事件 ==========
 
@@ -1954,64 +2016,13 @@ class PersonaDataStore:
         """
         return query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
-    async def search_memory(
-        self,
-        user_id: str,
-        group_id: str,
-        query: str,
-        search_type: str = "all",
-        days: Optional[int] = None,
-        limit: int = 5,
-    ) -> str:
-        """
-        搜索记忆，返回格式化的文本结果
-
-        Args:
-            search_type: all/profile/diary
-            days: 日记搜索天数
-            limit: 最多返回几条
-
-        Returns:
-            格式化的搜索结果文本，或"未找到相关记忆"
-        """
-        results = []
-
-        # 1. 搜索用户档案
-        if search_type in ("all", "profile"):
-            profile = await self.get_user_profile(user_id)
-            if profile and profile.facts:
-                # 简单匹配：query 是否出现在 key 或 value 中
-                matched_facts = []
-                for key, value in profile.facts.items():
-                    if query.lower() in key.lower() or query.lower() in str(value).lower():
-                        matched_facts.append(f"{key}: {value}")
-                if matched_facts:
-                    results.append("【用户档案】\n" + "\n".join(matched_facts[:limit]))
-
-        # 2. 搜索日记
-        # R8/R11: 根据场景自动调整搜索范围（仅当用户未指定时）
-        if search_type in ("all", "diary"):
-            if days is None:
-                # 用户未指定，根据场景自动调整：私聊近7天，群聊近3天
-                actual_days = self.DEFAULT_DIARY_DAYS_PRIVATE if self._is_private_chat(group_id) else self.DEFAULT_DIARY_DAYS_GROUP
-            else:
-                # 用户显式指定，尊重用户选择
-                actual_days = days
-            diaries = await self._search_diaries(query, actual_days, limit)
-            if diaries:
-                results.append("【相关日记】\n" + "\n".join(diaries))
-
-        if results:
-            return "\n\n".join(results)
-        return ""
-
-    async def _search_diaries(
+    async def search_diaries(
         self,
         query: str,
         days: int,
         limit: int,
-    ) -> List[str]:
-        """搜索日记"""
+    ) -> List[Tuple[str, str]]:
+        """搜索日记，返回 [(date, snippet), ...]"""
         cutoff_date = (self._wall_now() - timedelta(days=days)).strftime("%Y-%m-%d")
         safe_query = self._sanitize_search_query(query)
 
@@ -2019,7 +2030,7 @@ class PersonaDataStore:
             """
             SELECT date, content
             FROM persona_diary
-            WHERE date >= ? AND content LIKE ? ESCAPE '\'
+            WHERE date >= ? AND content LIKE ? ESCAPE '\\'
             ORDER BY date DESC
             LIMIT ?
             """,
@@ -2033,7 +2044,7 @@ class PersonaDataStore:
                 content = raw_content[:200]
                 if len(raw_content) > 200:
                     content += "..."
-                results.append(f"[{date}] {content}")
+                results.append((date, content))
             return results
 
     # ========== Phase 4: 用户 LLM 配置（core_db 侧） ==========

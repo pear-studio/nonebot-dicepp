@@ -42,7 +42,11 @@ from .life.target import TargetSelector
 from .llm.coordinator import LLMCallCoordinator
 from .llm.router import LLMRouter
 from .tools.registry import ToolRegistry, ToolDomain
-from .tools.search_persona import SEARCH_PERSONA_TOOL, make_search_persona_executor
+from .tools.read_history import READ_HISTORY_TOOL, make_read_history_executor
+from .tools.search_history import SEARCH_HISTORY_TOOL, make_search_history_executor
+from .tools.read_profile import READ_PROFILE_TOOL, read_profile_executor
+from .tools.read_diary import READ_DIARY_TOOL, make_read_diary_executor
+from .tools.search_diary import SEARCH_DIARY_TOOL, make_search_diary_executor
 from .tools.roll_dice import ROLL_DICE_TOOL, roll_dice_executor
 from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
 from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_databases_executor
@@ -377,8 +381,24 @@ def _build_tooling(
 
     tool_registry.register(
         ToolDomain.CHAT,
-        SEARCH_PERSONA_TOOL,
-        make_search_persona_executor(config.search_max_chars),
+        READ_HISTORY_TOOL,
+        make_read_history_executor(config.search_max_chars),
+    )
+    tool_registry.register(
+        ToolDomain.CHAT,
+        SEARCH_HISTORY_TOOL,
+        make_search_history_executor(config.search_max_chars),
+    )
+    tool_registry.register(ToolDomain.CHAT, READ_PROFILE_TOOL, read_profile_executor)
+    tool_registry.register(
+        ToolDomain.CHAT,
+        READ_DIARY_TOOL,
+        make_read_diary_executor(),
+    )
+    tool_registry.register(
+        ToolDomain.CHAT,
+        SEARCH_DIARY_TOOL,
+        make_search_diary_executor(),
     )
     tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
     tool_registry.register(ToolDomain.CHAT, LIST_QUERY_DATABASES_TOOL, list_query_databases_executor)

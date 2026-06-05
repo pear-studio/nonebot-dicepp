@@ -27,14 +27,6 @@ from .tool_executor import ToolRegistry, ToolSpec
 # ── Args Schema 定义 ────────────────────────────────────────────
 
 
-class SearchPersonaArgs(BaseModel):
-    keyword: str = Field(default="", description="搜索关键词")
-    source: str = Field(default="all", description="搜索来源")
-    days: int = Field(default=7, description="搜索天数")
-    limit: int = Field(default=5, ge=1, le=20, description="结果数量")
-    user_id: str = Field(default="", description="按用户ID过滤")
-
-
 class RollDiceArgs(BaseModel):
     expression: str = Field(..., description="骰子表达式")
 
@@ -53,6 +45,34 @@ class SearchKnowledgeArgs(BaseModel):
     limit: int = Field(default=5, ge=1, le=10, description="结果上限")
     fulltext: bool = Field(default=False, description="全文搜索")
     detail_index: Optional[int] = Field(default=None, description="获取完整内容")
+
+
+class ReadHistoryArgs(BaseModel):
+    limit: int = Field(default=10, ge=1, le=50, description="返回条数")
+    offset: int = Field(default=0, ge=0, description="跳过前N条")
+    user_id: str = Field(default="", description="按用户ID过滤")
+
+
+class SearchHistoryArgs(BaseModel):
+    keyword: str = Field(..., description="搜索关键词")
+    limit: int = Field(default=10, ge=1, le=50, description="返回条数")
+    days: int = Field(default=30, ge=1, le=365, description="搜索最近N天")
+    user_id: str = Field(default="", description="按用户ID过滤")
+
+
+class ReadProfileArgs(BaseModel):
+    pass
+
+
+class ReadDiaryArgs(BaseModel):
+    days: int = Field(default=7, ge=1, le=365, description="读取最近N天")
+    limit: int = Field(default=5, ge=1, le=30, description="最多返回篇数")
+
+
+class SearchDiaryArgs(BaseModel):
+    keyword: str = Field(..., description="搜索关键词")
+    days: int = Field(default=30, ge=1, le=365, description="搜索最近N天")
+    limit: int = Field(default=5, ge=1, le=20, description="最多返回条数")
 
 
 class SuggestActionArgs(BaseModel):
@@ -92,10 +112,14 @@ class RecordEvaluationArgs(BaseModel):
 # ── 工具名 → args_schema 映射 ──────────────────────────────────
 
 _ARGS_SCHEMA_MAP: Dict[str, Type[BaseModel]] = {
-    "search_persona": SearchPersonaArgs,
     "roll_dice": RollDiceArgs,
     "list_query_databases": ListQueryDatabasesArgs,
     "search_knowledge": SearchKnowledgeArgs,
+    "read_history": ReadHistoryArgs,
+    "search_history": SearchHistoryArgs,
+    "read_profile": ReadProfileArgs,
+    "read_diary": ReadDiaryArgs,
+    "search_diary": SearchDiaryArgs,
     "suggest_action": SuggestActionArgs,
     "send_reply_segment": SendReplySegmentArgs,
     "generate_image": GenerateImageArgs,

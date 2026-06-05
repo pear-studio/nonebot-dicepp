@@ -362,23 +362,97 @@ class TestDiaryAndDailyEventsCRUD:
         assert await store.get_diary(recent_date) == "recent"
 
 
-class TestSearchMemory:
-    """测试 search_memory 综合搜索"""
+class TestReadMessages:
+    """测试 read_messages 分页读取"""
 
     @pytest.mark.asyncio
-    async def test_search_memory_profile(self, temp_db):
+    async def test_read_messages_group_basic(self, temp_db):
         store = temp_db
-        profile = UserProfile(user_id="u1", facts={"hobby": "painting"})
-        await store.save_user_profile(profile)
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "hello", "Alice")
+        await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "hi", "Bob")
 
-        result = await store.search_memory("u1", "", "paint", "profile")
-        assert "painting" in result
+        results = await store.read_messages("u1", "g1", limit=10)
+        assert len(results) == 2
+        assert results[0].content == "hi"
+        assert results[1].content == "hello"
 
     @pytest.mark.asyncio
-    async def test_search_memory_not_found(self, temp_db):
+    async def test_read_messages_private(self, temp_db):
         store = temp_db
-        result = await store.search_memory("u1", "", "xyz", "all")
-        assert result == ""
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream("u1", "", "user", MessageType.CHAT, "private msg")
+        await store.add_message_stream("u2", "", "user", MessageType.CHAT, "other msg")
+
+        results = await store.read_messages("u1", "", limit=10)
+        assert len(results) == 1
+        assert results[0].content == "private msg"
+
+    @pytest.mark.asyncio
+    async def test_read_messages_with_offset(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        for i in range(5):
+            await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, f"msg{i}", "Alice")
+
+        results = await store.read_messages("u1", "g1", limit=2, offset=2)
+        assert len(results) == 2
+        assert results[0].content == "msg2"
+        assert results[1].content == "msg1"
+
+    @pytest.mark.asyncio
+    async def test_read_messages_filter_user(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream("u1", "g1", "user", MessageType.CHAT, "from u1")
+        await store.add_message_stream("u2", "g1", "user", MessageType.CHAT, "from u2")
+
+        results = await store.read_messages("u1", "g1", limit=10, filter_user_id="u2")
+        assert len(results) == 1
+        assert results[0].content == "from u2"
+
+
+class TestSearchMessagesPrivate:
+    """测试 search_messages 私聊场景"""
+
+    @pytest.mark.asyncio
+    async def test_search_messages_private(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream("u1", "", "user", MessageType.CHAT, "奈雪的茶好喝")
+        await store.add_message_stream("u2", "", "user", MessageType.CHAT, "奈雪不好喝")
+
+        results = await store.search_messages("", keyword="奈雪", user_id="u1", limit=10)
+        assert len(results) == 1
+        assert results[0].content == "奈雪的茶好喝"
+
+
+class TestRecentDiaries:
+    """测试 get_recent_diaries 和 search_diaries"""
+
+    @pytest.mark.asyncio
+    async def test_get_recent_diaries(self, temp_db):
+        store = temp_db
+        await store.save_diary("2026-06-01", "content1")
+        await store.save_diary("2026-06-02", "content2")
+
+        diaries = await store.get_recent_diaries(days=7, limit=5)
+        assert len(diaries) == 2
+        assert diaries[0][0] == "2026-06-02"
+        assert diaries[0][1] == "content2"
+        assert diaries[1][0] == "2026-06-01"
+        assert diaries[1][1] == "content1"
+
+    @pytest.mark.asyncio
+    async def test_search_diaries_public(self, temp_db):
+        store = temp_db
+        await store.save_diary("2026-06-01", "今天天气很好")
+        await store.save_diary("2026-06-02", "下雨了")
+
+        results = await store.search_diaries(query="天气", days=7, limit=5)
+        assert len(results) == 1
+        assert results[0][0] == "2026-06-01"
+        assert "天气" in results[0][1]
 
 
 class TestCharacterStateCRUD:
@@ -892,64 +966,6 @@ class TestMuteFunctionality:
         assert await store.is_user_muted(user_id) is True
 
 
-class TestSearchMemoryPhase3:
-    """测试 search_memory 功能（从 test_phase3_features 合并）"""
-
-    @pytest.mark.asyncio
-    async def test_search_user_profile(self, temp_db):
-        """搜索用户档案"""
-        store = temp_db
-        user_id = "test_user"
-
-        profile = UserProfile(
-            user_id=user_id,
-            facts={"name": "Xiao Ming", "pet": "cat", "hobby": "games"},
-            updated_at=wall_now()
-        )
-        await store.save_user_profile(profile)
-
-        result = await store.search_memory(
-            user_id=user_id,
-            group_id="",
-            query="cat",
-            search_type="profile"
-        )
-        assert "cat" in result.lower()
-
-    @pytest.mark.asyncio
-    async def test_search_not_found(self, temp_db):
-        """搜索不存在的"""
-        store = temp_db
-        user_id = "test_user"
-
-        result = await store.search_memory(
-            user_id=user_id,
-            group_id="",
-            query="nonexistent_word_xyz",
-            search_type="profile"
-        )
-        assert result == ""
-
-    @pytest.mark.asyncio
-    async def test_search_all_includes_profile(self, temp_db):
-        """all 类型应该搜索用户档案"""
-        store = temp_db
-        user_id = "test_user"
-
-        profile = UserProfile(
-            user_id=user_id,
-            facts={"name": "Test User"},
-            updated_at=wall_now()
-        )
-        await store.save_user_profile(profile)
-
-        result = await store.search_memory(
-            user_id=user_id,
-            group_id="",
-            query="Test",
-            search_type="all"
-        )
-        assert len(result) >= 1
 
 
 # ── switch_persona_db / _migrate_code_setting 测试 ────────────────────────────
