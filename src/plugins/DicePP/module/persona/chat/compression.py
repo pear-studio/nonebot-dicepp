@@ -52,7 +52,7 @@ def estimate_session_tokens(messages: List) -> int:
                             total += estimate_image_token(url)
                     else:
                         total += estimate_tokens(part.get("text", ""))
-    return total
+    return int(total)
 
 
 def should_compress(token_estimate: int, token_budget: int) -> bool:

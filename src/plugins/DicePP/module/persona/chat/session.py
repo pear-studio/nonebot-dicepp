@@ -726,6 +726,7 @@ class ChatSession:
             messages=session_msg_dicts,
             static_prompt=static_prompt,
             notifications=notifications,
+            warmth_label=warmth_label,
         )
 
         # 调试信息

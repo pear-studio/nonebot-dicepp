@@ -149,7 +149,7 @@ class ContextBuilder:
         history_dicts: Optional[List[Dict[str, str]]] = None,
         user_profile: Optional[UserProfile] = None,
         diary_context: str = "",
-        warmth_label: str = "友好",
+        warmth_label: str = "",
     ) -> List[Dict[str, str]]:
         """构建 LLM 消息列表（支持新旧两种调用方式）。
 
@@ -165,8 +165,11 @@ class ContextBuilder:
         if messages is not None:
             result: List[Dict[str, str]] = []
 
-            # System 消息只含静态基座
-            result.append({"role": "system", "content": static_prompt})
+            # System 消息：静态基座 + 动态温暖度
+            system_content = static_prompt
+            if warmth_label:
+                system_content += f"\n\n当前你和用户的关系: {warmth_label}"
+            result.append({"role": "system", "content": system_content})
 
             # 注入通知（独立 user role 消息，在历史消息之前）
             for note in (notifications or []):
@@ -266,7 +269,7 @@ class ContextBuilder:
         self,
         user_profile: Optional[UserProfile],
         diary_context: str,
-        warmth_label: str = "友好",
+        warmth_label: str = "",
         lore_sections: Optional[Dict[str, List[str]]] = None,
     ) -> str:
         parts = []
@@ -289,7 +292,8 @@ class ContextBuilder:
         parts.extend(self._render_character_base())
 
         # 温暖度 — 插入到尾部指令之前
-        parts.insert(-1, f"当前你和用户的关系: {warmth_label}")
+        if warmth_label:
+            parts.insert(-1, f"当前你和用户的关系: {warmth_label}")
 
         # ── 分段回复引导（仅 chat 路径注入）──
         if self.segment_guide and self.segment_guide.enabled:
@@ -550,7 +554,7 @@ class ContextBuilder:
         short_term_history: List[Dict[str, str]],
         user_profile: Optional[UserProfile] = None,
         diary_context: str = "",
-        warmth_label: str = "友好",
+        warmth_label: str = "",
         lore_sections: Optional[Dict[str, List[str]]] = None,
     ) -> Dict[str, Any]:
         system_prompt = self._build_system_prompt(

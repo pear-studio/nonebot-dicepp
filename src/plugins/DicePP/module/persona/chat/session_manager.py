@@ -450,8 +450,13 @@ class SessionManager:
 async def _llm_summarize(
     router, old_msgs: List,
 ) -> Optional[str]:
-    """调用 LLM 对旧消息生成摘要。"""
+    """调用 LLM 对旧消息生成摘要。
+
+    通过 router 的候选链调用 LLM，与 LLMGateway 使用相同的 provider 选择逻辑。
+    失败时返回 None，由调用方走硬截断兜底。
+    """
     from .compression import _get_msg_attr
+    from ..llm.selection import SUMMARIZE
 
     lines = []
     for msg in old_msgs:
@@ -474,9 +479,19 @@ async def _llm_summarize(
         {"role": "user", "content": f"对话记录：\n{conversation_text}"},
     ]
 
-    resp = await router.generate(
-        messages=messages,
-        temperature=0.3,
-        timeout=30,
-    )
-    return resp.content.strip() if resp and resp.content else None
+    candidates = router.build_candidates(SUMMARIZE)
+    for key in candidates:
+        provider = router.get_model_provider(key)
+        if provider is None:
+            continue
+        try:
+            resp = await provider.generate(
+                messages=messages,
+                temperature=0.3,
+                timeout=30,
+            )
+            return resp.content.strip() if resp and resp.content else None
+        except Exception:
+            continue
+
+    return None
