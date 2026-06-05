@@ -113,6 +113,7 @@ class ChatSession:
         image_data_urls: Optional[List[str]] = None,
     ) -> Optional[str]:
         """处理单条用户消息，返回回复文本（None 表示不回复）"""
+        self._delivery_performed = False
         # 5 秒内完全相同的消息去重（防手抖/网络重试）
         dedup_key = f"{user_id}:{group_id}"
         now = time.monotonic()
