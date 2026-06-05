@@ -715,15 +715,14 @@ class TestCollectEventNotifications:
 class TestFlagLifecycle:
     @pytest.mark.asyncio
     async def test_delivery_performed_flag_set_by_chat_with_tools(self, seg_session):
-        result = await seg_session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
-        assert result == "hello"
-        assert seg_session._delivery_performed is True
+        result_text, dp = await seg_session._chat_with_tools("u1", "", [{"role": "user", "content": "hi"}])
+        assert result_text == "hello"
+        assert dp is True
 
     @pytest.mark.asyncio
     async def test_chat_via_coordinator_returns_empty_str_for_delivery_performed(self, seg_session):
         result = await seg_session._chat_via_coordinator("u1", "", "hi", "user:u1")
         assert result == ""
-        assert seg_session._delivery_performed is True
 
     @pytest.mark.asyncio
     async def test_exception_does_not_produce_sentinel(self, seg_session):

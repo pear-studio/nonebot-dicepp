@@ -92,7 +92,6 @@ class ChatSession:
         self.resolve_db = resolve_db
         self._sleep_gate = sleep_gate
         self.session_manager = session_manager
-        self._delivery_performed = False
         self._last_messages: Dict[str, Tuple[str, float]] = {}
         # 动态信息追踪统一由 session_manager 管理（get_warmth_label / set_warmth_label）
 
@@ -113,7 +112,6 @@ class ChatSession:
         image_data_urls: Optional[List[str]] = None,
     ) -> Optional[str]:
         """处理单条用户消息，返回回复文本（None 表示不回复）"""
-        self._delivery_performed = False
         # 5 秒内完全相同的消息去重（防手抖/网络重试）
         dedup_key = f"{user_id}:{group_id}"
         now = time.monotonic()
@@ -232,23 +230,23 @@ class ChatSession:
 
         messages_for_llm = await self._build_messages(user_id, group_id)
 
-        response = await self._chat_with_tools(
+        response, delivery_performed = await self._chat_with_tools(
             user_id, group_id, messages_for_llm, image_data_urls=image_data_urls,
         )
 
-        await self._after_response(user_id, group_id, current_message, response)
-
-        # Session 后处理：追加 assistant 消息 + token 估算 + 压缩检查
-        if self.session_manager:
-            await self.session_manager.on_chat_complete(user_id, group_id, response, current_message, self.router)
-
-        if self._delivery_performed:
+        if delivery_performed:
             logger.debug(
                 f"[Persona] _coordinator_chat_call_fn return: user={user_id}"
                 f" delivery_performed=True will_return_empty=True"
                 f" dropped_response_len={len(response) if response else 0}"
             )
             return ""
+
+        await self._after_response(user_id, group_id, current_message, response)
+
+        # Session 后处理：追加 assistant 消息 + token 估算 + 压缩检查
+        if self.session_manager:
+            await self.session_manager.on_chat_complete(user_id, group_id, response, current_message, self.router)
 
         logger.debug(
             f"[Persona] _coordinator_chat_call_fn return: user={user_id}"
@@ -278,10 +276,8 @@ class ChatSession:
         await self._after_response(user_id, group_id, current_message, fallback_response)
         if self._response_handler.port is not None:
             logger.info(
-                f"[Persona] _delivery_performed set True: user={user_id}"
-                f" source=on_exhausted"
+                f"[Persona] on_exhausted: fallback sent via port user={user_id}"
             )
-            self._delivery_performed = True
             return ""
         else:
             logger.warning(
@@ -334,12 +330,7 @@ class ChatSession:
            同 E 时间轴
            → coordinator 跑 3 轮 → 3 次扣费
         """
-        if self._delivery_performed:
-            logger.info(
-                f"[Persona] _delivery_performed set False: user={user_id}"
-                f" source=on_result"
-            )
-            self._delivery_performed = False
+        if not result:
             return
 
         await self._response_handler.persist_and_send(user_id, group_id, result)
@@ -395,7 +386,7 @@ class ChatSession:
     async def _chat_with_tools(
         self, user_id: str, group_id: str, messages: List[Dict],
         image_data_urls: Optional[List[str]] = None,
-    ) -> str:
+    ) -> Tuple[str, bool]:
         from ..agent.runtime import AgentRuntime
         from ..agent.tool_bridge import build_registry
         from ..agent.request import AgentRunLimits
@@ -430,16 +421,16 @@ class ChatSession:
 
         if result.status != "completed":
             logger.error(f"[Persona] AgentRun 失败: status={result.status}, reason={result.final_reason}")
-            return "抱歉，我出错了，请稍后再试..."
+            return ("抱歉，我出错了，请稍后再试...", False)
 
-        if result.delivery_performed and result.final_reason != "direct_content":
+        delivery_performed = result.delivery_performed and result.final_reason != "direct_content"
+        if delivery_performed:
             logger.info(
-                f"[Persona] _delivery_performed set True: user={user_id}"
-                f" source=on_chat_with_tools final_reason={result.final_reason}"
+                f"[Persona] delivery_performed=True user={user_id}"
+                f" final_reason={result.final_reason}"
             )
-            self._delivery_performed = True
 
-        return result.final_text
+        return (result.final_text, delivery_performed)
 
     # ── 历史管理 ──────────────────────────────────────────────
 
