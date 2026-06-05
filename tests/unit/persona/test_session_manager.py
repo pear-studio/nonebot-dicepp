@@ -218,15 +218,18 @@ class TestCompactSession:
         store.create_session.return_value = new_session
 
         router = AsyncMock()
+        router.build_candidates = MagicMock(return_value=[("p1", "m1")])
+        provider = AsyncMock()
         resp = MagicMock()
         resp.content = "这是一段测试摘要"
-        router.generate = AsyncMock(return_value=resp)
+        provider.generate = AsyncMock(return_value=resp)
+        router.get_model_provider = MagicMock(return_value=provider)
 
         ok, text = await mgr.compact_session(1, router=router)
 
         assert ok is True
         assert "测试摘要" in text
-        router.generate.assert_called_once()
+        provider.generate.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_llm_failure_falls_back_to_hard_truncation(self, mgr, store):
@@ -240,7 +243,10 @@ class TestCompactSession:
         store.create_session.return_value = new_session
 
         router = AsyncMock()
-        router.generate = AsyncMock(side_effect=RuntimeError("LLM down"))
+        router.build_candidates = MagicMock(return_value=[("p1", "m1")])
+        provider = AsyncMock()
+        provider.generate = AsyncMock(side_effect=RuntimeError("LLM down"))
+        router.get_model_provider = MagicMock(return_value=provider)
 
         ok, text = await mgr.compact_session(1, router=router)
 

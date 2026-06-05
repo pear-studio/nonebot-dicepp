@@ -9,6 +9,7 @@
 
 import asyncio
 import random
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from plugins.DicePP.utils.time import wall_now
 
@@ -856,3 +857,268 @@ class TestChargingPath:
         # 兜底文案
         assert "暂时不可用" in result
         session.router.increment_usage.assert_not_awaited()
+
+
+# ── Level 1: 跨调用状态隔离 ──────────────────────────────────────────────────
+
+
+@contextmanager
+def _patch_run_chat_seq(results: list):
+    """Mock AgentRuntime.run_chat 按序返回 results。
+
+    results 中非 Exception 项应均为 AgentRunResult。
+    Exception 项会在 run_chat 中被抛出。
+
+    使用 contextmanager 确保无论测试是否抛出异常，最终均恢复原始 run_chat。
+    """
+    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+
+    original = AgentRuntime.run_chat
+    idx = 0
+
+    async def fake_run_chat(self, messages, user_id, group_id, **kwargs):
+        nonlocal idx
+        if idx >= len(results):
+            raise RuntimeError(f"mock exhausted: only {len(results)} results")
+        item = results[idx]
+        idx += 1
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    AgentRuntime.run_chat = fake_run_chat
+    try:
+        yield idx  # number of calls consumed
+    finally:
+        AgentRuntime.run_chat = original
+
+
+def _make_result(**kw) -> "AgentRunResult":
+    from plugins.DicePP.module.persona.agent.loop import AgentRunResult
+
+    defaults = dict(
+        run_id="test", turn_id="test", status="completed",
+        final_reason="direct_content", final_text="reply",
+        delivery_performed=False,
+    )
+    defaults.update(kw)
+    return AgentRunResult(**defaults)
+
+
+class TestCrossCallStateIsolation:
+    """同一 ChatSession 实例上连续多次 chat() 调用不互相污染"""
+
+    @pytest.mark.asyncio
+    async def test_seg_normal_seg_does_not_leak(self):
+        """场景 1: 分段→普通→分段 — delivery_performed 不污染后续"""
+        session = _make_session()
+
+        with _patch_run_chat_seq([
+            _make_result(delivery_performed=True, final_reason="terminal_final_segment", final_text="seg1"),
+            _make_result(delivery_performed=False, final_text="normal"),
+            _make_result(delivery_performed=True, final_reason="terminal_final_segment", final_text="seg2"),
+        ]):
+            r1 = await session.chat("u1", "", "msg1")
+            assert r1 == ""  # delivery_performed → 空字符串
+
+            r2 = await session.chat("u1", "", "msg2")
+            assert r2 == "normal"
+
+            r3 = await session.chat("u1", "", "msg3")
+            assert r3 == ""  # delivery_performed → 空字符串
+
+    @pytest.mark.asyncio
+    async def test_normal_seg_normal_does_not_leak(self):
+        """场景 2: 普通→分段→普通 — 对称验证"""
+        session = _make_session()
+
+        with _patch_run_chat_seq([
+            _make_result(delivery_performed=False, final_text="normal1"),
+            _make_result(delivery_performed=True, final_reason="terminal_final_segment", final_text="seg"),
+            _make_result(delivery_performed=False, final_text="normal2"),
+        ]):
+            assert await session.chat("u1", "", "msg1") == "normal1"
+            assert await session.chat("u1", "", "msg2") == ""
+            assert await session.chat("u1", "", "msg3") == "normal2"
+
+    @pytest.mark.asyncio
+    async def test_dedup_then_normal(self):
+        """场景 3: 去重→正常 — 去重返回 None 后下一条正常"""
+        session = _make_session()
+
+        with _patch_run_chat_seq([
+            _make_result(final_text="first"),
+            _make_result(final_text="second"),
+        ]):
+            r1 = await session.chat("u1", "", "hello")
+            assert r1 == "first"
+
+            # 5 秒内相同消息 → 去重
+            r2 = await session.chat("u1", "", "hello")
+            assert r2 is None
+
+            # 不同消息 → 正常
+            r3 = await session.chat("u1", "", "world")
+            assert r3 == "second"
+
+    @pytest.mark.asyncio
+    async def test_exception_then_normal(self):
+        """场景 4: 异常→正常 — LLM 抛异常后恢复"""
+        # 使用 max_failures=1 使得单次 call_fn 异常立即触发 on_exhausted
+        coordinator = LLMCallCoordinator(max_failures=1, max_iterations=5)
+        session = _make_session(coordinator=coordinator)
+
+        with _patch_run_chat_seq([
+            RuntimeError("LLM down"),
+            _make_result(final_text="recovered"),
+        ]):
+            r1 = await session.chat("u1", "", "msg1")
+            assert "暂时不可用" in r1
+
+            r2 = await session.chat("u1", "", "msg2")
+            assert r2 == "recovered"
+
+    @pytest.mark.asyncio
+    async def test_refuse_then_normal(self, monkeypatch):
+        """场景 5: 拒绝→正常 — warmth=0 触发拒绝后，关掉拒绝功能，下条正常"""
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+
+        rel = RelationshipState(
+            user_id="u1", intimacy=0, passion=0, trust=0, secureness=0,
+        )
+        session = _make_session(
+            refuse_enabled=True,
+            relationship=rel,
+            refuse_messages=["...（已读不回）"],
+        )
+        # 历史已有消息，绕开 is_first 分支
+        session.store.get_recent_messages = AsyncMock(return_value=[
+            MagicMock(role="user", content="prev"),
+        ])
+        monkeypatch.setattr(random, "random", lambda: 0.0)
+
+        with _patch_run_chat_seq([
+            _make_result(final_text="normal_reply"),
+        ]):
+            r1 = await session.chat("u1", "", "msg1")
+            assert r1 == "...（已读不回）"
+
+            # 关闭拒绝 → 下条正常进入 LLM
+            session.config.relationship_refuse_enabled = False
+            r2 = await session.chat("u1", "", "msg2")
+            assert r2 == "normal_reply"
+
+    @pytest.mark.asyncio
+    async def test_sleep_then_awake(self):
+        """场景 6: 睡眠→唤醒 — is_awake=False 的睡眠消息不污染后续"""
+        sleep_gate = MagicMock()
+        sleep_gate.is_awake = AsyncMock(return_value=False)
+
+        session = _make_session()
+        session._sleep_gate = sleep_gate
+        session.character.extensions.sleep_messages = ["角色正在休息..."]
+
+        with _patch_run_chat_seq([
+            _make_result(final_text="awake_reply"),
+        ]):
+            r1 = await session.chat("u1", "", "msg1")
+            assert r1 == "角色正在休息..."
+
+            # 唤醒
+            sleep_gate.is_awake = AsyncMock(return_value=True)
+            r2 = await session.chat("u1", "", "msg2")
+            assert r2 == "awake_reply"
+
+    @pytest.mark.asyncio
+    async def test_buffered_then_standalone(self):
+        """场景 7: 缓冲合并→独立消息 — 并发触发 coordinator 缓冲后，独立消息正常"""
+        coordinator = LLMCallCoordinator(max_iterations=10)
+        session = _make_session(coordinator=coordinator)
+
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        call_count = 0
+
+        async def slow_coordinator_call(user_id, group_id, messages, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                first_started.set()
+                await release_first.wait()
+            return f"reply_{call_count}"
+
+        # 保存原始方法引用，测试结束后恢复
+        original_fn = session._coordinator_chat_call_fn
+        session._coordinator_chat_call_fn = slow_coordinator_call
+
+        # 第一条消息启动 coordinator
+        task1 = asyncio.create_task(session.chat("u1", "", "msg1"))
+        await asyncio.wait_for(first_started.wait(), timeout=1.0)
+
+        # 并发发送 → 被缓冲
+        r2, r3 = await asyncio.gather(
+            session.chat("u1", "", "msg2"),
+            session.chat("u1", "", "msg3"),
+        )
+        assert r2 is None
+        assert r3 is None
+
+        # 释放第一条，让 coordinator 继续处理缓冲
+        release_first.set()
+        r1 = await task1
+        assert r1 is not None
+
+        # 缓冲处理完后，独立消息正常
+        session._coordinator_chat_call_fn = original_fn
+        with _patch_run_chat_seq([_make_result(final_text="standalone")]):
+            r4 = await session.chat("u1", "", "msg4")
+            assert r4 == "standalone"
+
+    @pytest.mark.asyncio
+    async def test_coordinator_exhausted_then_normal(self):
+        """场景 8: coordinator 耗尽→正常 — max_failures=1 导致首次失败即 on_exhausted，之后恢复"""
+        coordinator = LLMCallCoordinator(max_failures=1, max_iterations=5)
+        session = _make_session(coordinator=coordinator)
+
+        call_count = 0
+
+        async def fail_then_recover(user_id, group_id, messages, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("fail_1")
+            return f"recovered_{call_count}"
+
+        original_fn = session._coordinator_chat_call_fn
+        session._coordinator_chat_call_fn = fail_then_recover
+
+        # 第一次失败触发 on_exhausted
+        r1 = await session.chat("u1", "", "msg1")
+        assert "暂时不可用" in r1
+
+        # 第二次恢复
+        r2 = await session.chat("u1", "", "msg2")
+        assert "recovered" in r2
+
+        session._coordinator_chat_call_fn = original_fn
+
+    @pytest.mark.asyncio
+    async def test_multi_user_alternating(self):
+        """场景 9: 多用户交替 — 不同 user_id 交替调用，互不干扰"""
+        session = _make_session()
+
+        with _patch_run_chat_seq([
+            _make_result(final_text="reply_u1_a"),
+            _make_result(final_text="reply_u2_a"),
+            _make_result(final_text="reply_u1_b"),
+        ]):
+            r1 = await session.chat("u1", "", "hi from u1")
+            assert r1 == "reply_u1_a"
+
+            r2 = await session.chat("u2", "", "hi from u2")
+            assert r2 == "reply_u2_a"
+
+            r3 = await session.chat("u1", "", "u1 again")
+            assert r3 == "reply_u1_b"
+
+            # 去重 key 按 user_id:group_id 隔离，不同用户不互相影响
