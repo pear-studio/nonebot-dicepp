@@ -9,7 +9,7 @@
 
 import asyncio
 import random
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from plugins.DicePP.utils.time import wall_now
 
 import pytest
@@ -588,6 +588,125 @@ class TestBuildDiaryContext:
         result = await session._build_diary_context()
         assert "昨天" in result
         assert "公园" in result
+
+
+class TestCollectEventNotifications:
+    """_collect_event_notifications — 增量事件通知"""
+
+    @pytest.fixture
+    def _session_with_sm(self):
+        """构造带 session_manager 的 ChatSession，用于 _collect_event_notifications 测试"""
+        from plugins.DicePP.module.persona.chat.session_manager import SessionManager
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+
+        session = _make_session()
+        sm = SessionManager(
+            store=session.store,
+            config=ChatConfig(),
+        )
+        session.session_manager = sm
+        session.store.get_daily_events = AsyncMock(return_value=[])
+        return session
+
+    @pytest.mark.asyncio
+    async def test_new_events_generate_notifications(self, _session_with_sm):
+        """新事件不在 notified_event_ids 中时生成 [通知]"""
+        session = _session_with_sm
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(id=1, date="2026-01-01", event_type="system",
+                       description="描述A", context_summary="摘要A"),
+            DailyEvent(id=2, date="2026-01-01", event_type="system",
+                       description="描述B", context_summary=""),
+        ])
+
+        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        assert len(notes) == 2
+        assert "[通知] 摘要A" == notes[0]
+        assert "[通知] 描述B" == notes[1]
+
+    @pytest.mark.asyncio
+    async def test_already_notified_events_skipped(self, _session_with_sm):
+        """已在 notified_event_ids 中的事件不再通知"""
+        session = _session_with_sm
+        tracker = session.session_manager.get_tracker("scope1")
+        tracker["notified_event_ids"] = {1}
+
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(id=1, date="2026-01-01", event_type="system",
+                       description="已通知", context_summary="已通知摘要"),
+            DailyEvent(id=2, date="2026-01-01", event_type="system",
+                       description="新事件", context_summary="新摘要"),
+        ])
+
+        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        assert len(notes) == 1
+        assert "[通知] 新摘要" == notes[0]
+        assert tracker["notified_event_ids"] == {1, 2}
+
+    @pytest.mark.asyncio
+    async def test_cross_day_resets_notified_ids(self, _session_with_sm):
+        """跨天时 notified_event_ids 自动 reset"""
+        session = _session_with_sm
+        tracker = session.session_manager.get_tracker("scope1")
+        tracker["notified_event_ids"] = {1, 2, 3}
+        tracker["last_event_notification_date"] = date(2026, 6, 1)
+
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(id=4, date="2026-01-01", event_type="system",
+                       description="新年事件", context_summary="新年摘要"),
+        ])
+
+        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        assert len(notes) == 1
+        assert tracker["notified_event_ids"] == {4}
+
+    @pytest.mark.asyncio
+    async def test_no_events_returns_empty(self, _session_with_sm):
+        """没有事件时返回空列表"""
+        session = _session_with_sm
+        session.store.get_daily_events = AsyncMock(return_value=[])
+
+        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        assert notes == []
+
+    @pytest.mark.asyncio
+    async def test_same_day_no_reset(self, _session_with_sm):
+        """同一天多次调用不会 reset notified_event_ids"""
+        session = _session_with_sm
+        tracker = session.session_manager.get_tracker("scope1")
+        tracker["last_event_notification_date"] = date(2026, 1, 1)
+        tracker["notified_event_ids"] = {1}
+
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(id=1, date="2026-01-01", event_type="system",
+                       description="已通知", context_summary="已通知摘要"),
+            DailyEvent(id=2, date="2026-01-01", event_type="system",
+                       description="新来", context_summary="新来摘要"),
+        ])
+
+        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        assert len(notes) == 1
+        assert tracker["notified_event_ids"] == {1, 2}
+
+    @pytest.mark.asyncio
+    async def test_first_call_with_none_last_date(self, _session_with_sm):
+        """首次调用时 last_event_notification_date 为 None，应正确初始化日期并正常工作"""
+        session = _session_with_sm
+        tracker = session.session_manager.get_tracker("scope1")
+        # 模拟首次调用：tracker 默认值中 last_event_notification_date 为 None
+        assert tracker.get("last_event_notification_date") is None
+
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(id=1, date="2026-06-05", event_type="system",
+                       description="首个事件", context_summary="首个摘要"),
+        ])
+
+        notes, events = await session._collect_event_notifications("scope1", date(2026, 6, 5))
+        assert len(notes) == 1
+        assert "[通知] 首个摘要" == notes[0]
+        assert tracker["notified_event_ids"] == {1}
+        # 验证日期被正确设置（R1 修复后）
+        assert tracker["last_event_notification_date"] == date(2026, 6, 5)
 
 
 # ── 分段回复集成测试（原 test_chat_session_segmented.py）────────────────────

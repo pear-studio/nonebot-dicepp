@@ -361,6 +361,122 @@ class TestDiaryAndDailyEventsCRUD:
         assert await store.get_diary(old_date) is None
         assert await store.get_diary(recent_date) == "recent"
 
+    @pytest.mark.asyncio
+    async def test_add_daily_event_returns_id(self, temp_db):
+        """add_daily_event 返回新事件的自增 ID"""
+        store = temp_db
+        id1 = await store.add_daily_event("2026-04-14", "system", "Event A")
+        id2 = await store.add_daily_event("2026-04-14", "system", "Event B")
+        assert isinstance(id1, int)
+        assert isinstance(id2, int)
+        assert id1 > 0
+        assert id2 > id1
+
+    @pytest.mark.asyncio
+    async def test_get_daily_events_includes_id(self, temp_db):
+        """get_daily_events 返回的事件包含 id 字段"""
+        store = temp_db
+        eid = await store.add_daily_event("2026-04-14", "system", "Event A")
+        events = await store.get_daily_events("2026-04-14")
+        assert len(events) == 1
+        assert events[0].id == eid
+
+    @pytest.mark.asyncio
+    async def test_search_events_by_keyword(self, temp_db):
+        """search_events 按关键词搜索 description 和 reaction"""
+        store = temp_db
+        today = wall_now().strftime("%Y-%m-%d")
+        await store.add_daily_event(today, "system", "在酒馆喝酒", reaction="很开心")
+        await store.add_daily_event(today, "system", "在森林散步", reaction="看见了兔子")
+
+        # 搜索匹配 description 中酒馆
+        results = await store.search_events(query="酒馆", days=7, limit=10)
+        assert len(results) == 1
+        assert results[0].description == "在酒馆喝酒"
+
+        # 搜索匹配 reaction 中兔子
+        results2 = await store.search_events(query="兔子", days=7, limit=10)
+        assert len(results2) == 1
+        assert results2[0].description == "在森林散步"
+
+        # 无匹配
+        results3 = await store.search_events(query="不存在的词", days=7, limit=10)
+        assert len(results3) == 0
+
+    @pytest.mark.asyncio
+    async def test_search_events_respects_days_and_limit(self, temp_db):
+        """search_events 遵守 days 和 limit 参数"""
+        store = temp_db
+        today = wall_now().strftime("%Y-%m-%d")
+        await store.add_daily_event(today, "system", "事件A 关键词")
+        await store.add_daily_event(today, "system", "事件B 关键词")
+        # days=7 能查到今天的数据
+        results = await store.search_events(query="关键词", days=7, limit=10)
+        assert len(results) == 2
+
+        # limit 限制
+        results = await store.search_events(query="关键词", days=7, limit=1)
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_search_events_days_window(self, temp_db):
+        """days 参数正确过滤旧数据"""
+        store = temp_db
+        old_date = (wall_now() - timedelta(days=60)).strftime("%Y-%m-%d")
+        await store.add_daily_event(old_date, "system", "远古事件")
+
+        results = await store.search_events(query="远古", days=7, limit=10)
+        assert len(results) == 0
+
+        results = await store.search_events(query="远古", days=365, limit=10)
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_event_by_id_found(self, temp_db):
+        """get_event_by_id 按 ID 查到单条事件"""
+        store = temp_db
+        eid = await store.add_daily_event(
+            "2026-04-14", "system", "测试事件",
+            reaction="测试反应", share_desire=0.8,
+            energy_delta=2, mood_delta=-1,
+            context_summary="测试摘要",
+        )
+        ev = await store.get_event_by_id(eid)
+        assert ev is not None
+        assert ev.id == eid
+        assert ev.date == "2026-04-14"
+        assert ev.description == "测试事件"
+        assert ev.reaction == "测试反应"
+        assert ev.share_desire == 0.8
+        assert ev.energy_delta == 2
+        assert ev.mood_delta == -1
+        assert ev.context_summary == "测试摘要"
+
+    @pytest.mark.asyncio
+    async def test_get_event_by_id_not_found(self, temp_db):
+        """get_event_by_id 查不到时返回 None"""
+        store = temp_db
+        ev = await store.get_event_by_id(99999)
+        assert ev is None
+
+    @pytest.mark.asyncio
+    async def test_search_events_escapes_special_chars(self, temp_db):
+        """search_events 正确转义 LIKE 特殊字符 % 和 _"""
+        store = temp_db
+        today = wall_now().strftime("%Y-%m-%d")
+        await store.add_daily_event(today, "system", "100% 完成度")
+        await store.add_daily_event(today, "system", "test_event_name")
+
+        # % 字符不导致通配
+        results = await store.search_events(query="100%", days=7, limit=10)
+        assert len(results) == 1
+        assert results[0].description == "100% 完成度"
+
+        # _ 字符不导致通配
+        results = await store.search_events(query="test_event", days=7, limit=10)
+        assert len(results) == 1
+        assert results[0].description == "test_event_name"
+
 
 class TestReadMessages:
     """测试 read_messages 分页读取"""

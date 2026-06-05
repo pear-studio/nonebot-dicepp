@@ -414,6 +414,7 @@ class ChatSession:
             user_id=user_id, group_id=group_id, store=self.store,
             send=self._response_handler.port,
             query=self.query_store, resolve_db=self.resolve_db,
+            timezone=self.config.timezone,
         )
 
         new_registry = build_registry(
@@ -584,7 +585,6 @@ class ChatSession:
         scope_id: str,
         warmth_label: str,
         lore_keys: set,
-        diary_context: str,
         now,
         profile,
     ) -> List[str]:
@@ -605,12 +605,6 @@ class ChatSession:
                 notifications.append(f"[通知] 【世界书】{key}")
             tracker["activated_lore_keys"] |= new_lore
 
-        # 6c. 日记忆要（每日首次）
-        today = now.date()
-        if diary_context and tracker.get("last_diary_date") != today:
-            notifications.append(f"[通知] {diary_context}")
-            tracker["last_diary_date"] = today
-
         # 6d. profile facts 变更
         if profile and profile.facts:
             current_hash = self._hash_facts(profile.facts)
@@ -620,6 +614,36 @@ class ChatSession:
                 tracker["last_profile_hash"] = current_hash
 
         return notifications
+
+    async def _collect_event_notifications(self, scope_id: str, today: "date") -> Tuple[List[str], List["DailyEvent"]]:
+        """获取今日事件，与 notified_event_ids 差集，每个新事件生成独立通知。
+
+        跨天时自动 reset notified_event_ids 集合。
+        返回 (通知列表, 事件列表)，调用方可复用事件列表避免重复 SQL 查询。
+        """
+        from ..data.protocols import DailyEvent
+
+        tracker = self.session_manager.get_tracker(scope_id)
+        today_str = today.strftime("%Y-%m-%d")
+
+        last_diary_date = tracker.get("last_event_notification_date")
+        if last_diary_date is not None and last_diary_date != today:
+            tracker["notified_event_ids"] = set()
+        tracker["last_event_notification_date"] = today
+
+        events = await self.store.get_daily_events(today_str)
+        if not events:
+            return [], []
+
+        notified_ids: set = tracker["notified_event_ids"]
+        notifications = []
+        for e in events:
+            if e.id is not None and e.id not in notified_ids:
+                text = e.context_summary if e.context_summary else e.description
+                notifications.append(f"[通知] {text}")
+                notified_ids.add(e.id)
+
+        return notifications, events
 
     async def _build_messages(
         self,
@@ -689,7 +713,6 @@ class ChatSession:
         profile = await self.store.get_user_profile(user_id)
         rel = await self.store.get_relationship(user_id)
         warmth_label = self._resolve_warmth_label(user_id, rel)
-        diary_context = await self._build_diary_context()
 
         # 世界书扫描
         lore_sections = self._build_lore_sections(history_dicts)
@@ -698,10 +721,13 @@ class ChatSession:
             for entry_text in section_list:
                 lore_keys.add(entry_text)
 
-        # 6. 组装通知列表
+        # 6. 组装通知列表（含增量事件通知）
         notifications = self._collect_notifications(
-            decision, scope_id, warmth_label, lore_keys, diary_context, now, profile,
+            decision, scope_id, warmth_label, lore_keys, now, profile,
         )
+        event_notes, daily_events = await self._collect_event_notifications(scope_id, now.date())
+        notifications.extend(event_notes)
+        diary_context = await self._build_diary_context(events=daily_events)
 
         # 7. 构建最终消息列表
         result = self.context_builder.build(
@@ -778,14 +804,21 @@ class ChatSession:
 
         return warmth_label
 
-    async def _build_diary_context(self) -> str:
-        """构建日记/事件上下文：优先今日事件，fallback 昨日日记"""
+    async def _build_diary_context(self, events: Optional[List["DailyEvent"]] = None) -> str:
+        """构建日记/事件上下文：优先今日事件，fallback 昨日日记
+
+        Args:
+            events: 可选的今日事件列表。若传入则复用该列表，跳过内部 get_daily_events 查询。
+        """
+        from ..data.protocols import DailyEvent
+
         wall = wall_now(self.config.timezone)
         today = wall.strftime("%Y-%m-%d")
         yesterday = (wall - timedelta(days=1)).strftime("%Y-%m-%d")
         max_diary_len = self.config.max_diary_context_chars
 
-        events = await self.store.get_daily_events(today)
+        if events is None:
+            events = await self.store.get_daily_events(today)
         if events:
             valid_events = [
                 e for e in events

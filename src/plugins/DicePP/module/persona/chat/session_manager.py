@@ -74,10 +74,11 @@ class SessionManager:
         if user_id not in self._trackers:
             self._trackers[user_id] = {
                 "last_warmth_label": None,
-                "last_diary_date": None,
+                "last_event_notification_date": None,
                 "activated_lore_keys": set(),
                 "last_profile_hash": None,
                 "seen_speakers": set(),
+                "notified_event_ids": set(),
             }
         return self._trackers[user_id]
 

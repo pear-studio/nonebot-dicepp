@@ -142,7 +142,7 @@ class EventStore(Protocol):
         mood_delta: Optional[int] = None,
         health_delta: Optional[int] = None,
         context_summary: str = "",
-    ) -> None: ...
+    ) -> int: ...
 
     async def get_diary(self, date: str) -> Optional[str]: ...
 
@@ -155,6 +155,14 @@ class EventStore(Protocol):
     async def search_diaries(
         self, query: str, days: int, limit: int,
     ) -> List[Tuple[str, str]]: ...
+
+    async def search_events(
+        self, query: str, days: int, limit: int,
+    ) -> List[DailyEvent]: ...
+
+    async def get_event_by_id(
+        self, event_id: int
+    ) -> Optional[DailyEvent]: ...
 
 
 class SessionStore(Protocol):

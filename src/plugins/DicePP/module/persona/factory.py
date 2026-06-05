@@ -47,6 +47,8 @@ from .tools.search_history import SEARCH_HISTORY_TOOL, make_search_history_execu
 from .tools.read_profile import READ_PROFILE_TOOL, read_profile_executor
 from .tools.read_diary import READ_DIARY_TOOL, make_read_diary_executor
 from .tools.search_diary import SEARCH_DIARY_TOOL, make_search_diary_executor
+from .tools.read_events import READ_EVENTS_TOOL, make_read_events_executor
+from .tools.search_events import SEARCH_EVENTS_TOOL, make_search_events_executor
 from .tools.roll_dice import ROLL_DICE_TOOL, roll_dice_executor
 from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
 from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_databases_executor
@@ -399,6 +401,16 @@ def _build_tooling(
         ToolDomain.CHAT,
         SEARCH_DIARY_TOOL,
         make_search_diary_executor(),
+    )
+    tool_registry.register(
+        ToolDomain.CHAT,
+        READ_EVENTS_TOOL,
+        make_read_events_executor(),
+    )
+    tool_registry.register(
+        ToolDomain.CHAT,
+        SEARCH_EVENTS_TOOL,
+        make_search_events_executor(),
     )
     tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
     tool_registry.register(ToolDomain.CHAT, LIST_QUERY_DATABASES_TOOL, list_query_databases_executor)

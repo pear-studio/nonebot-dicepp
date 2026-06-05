@@ -1233,9 +1233,9 @@ class PersonaDataStore:
         mood_delta: Optional[int] = None,
         health_delta: Optional[int] = None,
         context_summary: str = "",
-    ) -> None:
-        """添加每日事件"""
-        await self.db.execute(
+    ) -> int:
+        """添加每日事件，返回新事件 ID"""
+        cursor = await self.db.execute(
             """
             INSERT INTO persona_daily_events (
                 date, event_type, description, reaction,
@@ -1262,12 +1262,13 @@ class PersonaDataStore:
             )
         )
         await self.db.commit()
+        return cursor.lastrowid
 
     async def get_daily_events(self, date: str) -> List[DailyEvent]:
         """获取某天的所有事件"""
         async with self.db.execute(
             """
-            SELECT event_type, description, reaction, share_desire,
+            SELECT id, event_type, description, reaction, share_desire,
                    duration_minutes, created_at,
                    system_prompt_digest, raw_response,
                    energy_delta, mood_delta, health_delta,
@@ -1281,10 +1282,11 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [
                 DailyEvent(
+                    id=row["id"],
                     date=date,
                     event_type=row["event_type"],
                     description=row["description"],
-                    reaction=row["reaction"],
+                    reaction=row["reaction"] or "",
                     share_desire=row["share_desire"] if row.get("share_desire") is not None else 0.0,
                     duration_minutes=row["duration_minutes"] if row.get("duration_minutes") is not None else 0,
                     created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
@@ -1305,6 +1307,86 @@ class PersonaDataStore:
             (date,)
         )
         await self.db.commit()
+
+    async def search_events(
+        self,
+        query: str,
+        days: int,
+        limit: int,
+    ) -> List[DailyEvent]:
+        """搜索每日事件，按关键词匹配 description 和 reaction"""
+        cutoff_date = (self._wall_now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        safe_query = self._sanitize_search_query(query)
+
+        async with self.db.execute(
+            """
+            SELECT id, date, event_type, description, reaction, share_desire,
+                   duration_minutes, created_at,
+                   system_prompt_digest, raw_response,
+                   energy_delta, mood_delta, health_delta,
+                   context_summary
+            FROM persona_daily_events
+            WHERE date >= ?
+              AND (description LIKE ? ESCAPE '\\' OR reaction LIKE ? ESCAPE '\\')
+            ORDER BY date DESC, created_at DESC
+            LIMIT ?
+            """,
+            (cutoff_date, f"%{safe_query}%", f"%{safe_query}%", limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                DailyEvent(
+                    id=row["id"],
+                    date=row["date"],
+                    event_type=row["event_type"],
+                    description=row["description"],
+                    reaction=row["reaction"] or "",
+                    share_desire=row["share_desire"] if row.get("share_desire") is not None else 0.0,
+                    duration_minutes=row["duration_minutes"] if row.get("duration_minutes") is not None else 0,
+                    created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+                    system_prompt_digest=row.get("system_prompt_digest") or "",
+                    raw_response=row.get("raw_response") or "",
+                    energy_delta=row.get("energy_delta"),
+                    mood_delta=row.get("mood_delta"),
+                    health_delta=row.get("health_delta"),
+                    context_summary=row.get("context_summary") or "",
+                )
+                for row in rows
+            ]
+
+    async def get_event_by_id(self, event_id: int) -> Optional[DailyEvent]:
+        """按 ID 查询单条事件"""
+        async with self.db.execute(
+            """
+            SELECT id, date, event_type, description, reaction, share_desire,
+                   duration_minutes, created_at,
+                   system_prompt_digest, raw_response,
+                   energy_delta, mood_delta, health_delta,
+                   context_summary
+            FROM persona_daily_events
+            WHERE id = ?
+            """,
+            (event_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return DailyEvent(
+                id=row["id"],
+                date=row["date"],
+                event_type=row["event_type"],
+                description=row["description"],
+                reaction=row["reaction"] or "",
+                share_desire=row["share_desire"] if row.get("share_desire") is not None else 0.0,
+                duration_minutes=row["duration_minutes"] if row.get("duration_minutes") is not None else 0,
+                created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+                system_prompt_digest=row.get("system_prompt_digest") or "",
+                raw_response=row.get("raw_response") or "",
+                energy_delta=row.get("energy_delta"),
+                mood_delta=row.get("mood_delta"),
+                health_delta=row.get("health_delta"),
+                context_summary=row.get("context_summary") or "",
+            )
 
     async def prune_daily_events(self, keep_days: int) -> int:
         """清理 keep_days 天之前的每日事件"""

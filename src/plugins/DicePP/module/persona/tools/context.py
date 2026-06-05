@@ -35,3 +35,4 @@ class ToolContext:
     query: Any = None          # QueryStore 实例
     resolve_db: Any = None     # Callable[[str, str], Awaitable[str]]
     collected_args: Optional[list] = None  # life 工具收集型 executor 写入
+    timezone: str = "Asia/Shanghai"  # 配置时区，供工具确定"今天"
