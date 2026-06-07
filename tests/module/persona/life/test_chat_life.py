@@ -119,6 +119,49 @@ class TestSleepGate:
         assert await life.is_awake() is True
 
 
+class TestSleepGateExtendedEnd:
+    """SleepGate 对 end_hour >= 24（扩展活跃窗）的测试"""
+
+    @staticmethod
+    def _make_life(*, start: int, end: int) -> CharacterLife:
+        from unittest.mock import MagicMock
+        config = CharacterLifeConfig(enabled=True, timezone="Asia/Shanghai")
+        char = MagicMock()
+        char.extensions.event_day_start_hour = start // 60
+        char.extensions.event_day_end_hour = end // 60
+        life = CharacterLife(
+            config=config,
+            event_agent=MagicMock(),
+            data_store=MagicMock(),
+            character=char,
+        )
+        life._today_jittered_start = start
+        life._today_jittered_end = end
+        life._slot_minutes_today = [(start % 1440, "wake_up"), (end % 1440, "good_night")]
+        return life
+
+    @pytest.mark.asyncio
+    async def test_end_hour_25_awake_at_midnight(self):
+        """end_hour=25: 午夜 00:00 应判定为清醒"""
+        life = self._make_life(start=480, end=1500)
+        life.config.now = lambda: _dt(0, 0)
+        assert await life.is_awake() is True
+
+    @pytest.mark.asyncio
+    async def test_end_hour_25_awake_at_1am(self):
+        """01:00 仍在活跃窗内"""
+        life = self._make_life(start=480, end=1500)
+        life.config.now = lambda: _dt(1, 0)
+        assert await life.is_awake() is True
+
+    @pytest.mark.asyncio
+    async def test_end_hour_25_asleep_at_2am(self):
+        """02:00 已过活跃窗"""
+        life = self._make_life(start=480, end=1500)
+        life.config.now = lambda: _dt(2, 0)
+        assert await life.is_awake() is False
+
+
 class TestSuggestActionRelationshipGate:
     """suggest_action executor 亲密度门控测试"""
 

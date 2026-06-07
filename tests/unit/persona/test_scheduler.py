@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
 from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 from plugins.DicePP.module.persona.data.models import RelationshipState
+from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 
 
 def _make_mock_character():
@@ -239,3 +240,131 @@ class TestProactiveSchedulerPersistence:
         mock_data_store.get_setting.return_value = raw
         await scheduler.load_persistent_state()
         assert scheduler._last_event_date == "2024-01-02"
+
+
+class TestCharacterActiveExtendedEnd:
+    """_is_character_active 对 end_hour >= 24 的判定"""
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.get_top_relationships = AsyncMock(return_value=[])
+        return store
+
+    @pytest.fixture
+    def mock_config(self):
+        from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
+        return ProactiveConfig(
+            enabled=True,
+            timezone="Asia/Shanghai",
+        )
+
+    @pytest.fixture
+    def scheduler(self, mock_data_store, mock_config):
+        ext = PersonaExtensions(
+            initial_relationship=50,
+            event_day_start_hour=8,
+            event_day_end_hour=25,  # 凌晨 1 点结束
+            event_day_start_jitter_minutes=0,
+            event_day_end_jitter_minutes=0,
+        )
+        char = Character(name="夜猫子", extensions=ext)
+        return ProactiveScheduler(
+            config=mock_config,
+            data_store=mock_data_store,
+            character=char,
+            target_selector=MagicMock(),
+            coordinator=MagicMock(),
+        )
+
+    def test_jittered_end_hour_25_midnight_active(self, scheduler, monkeypatch):
+        """jittered 边界 end=1500，午夜应判定为活跃"""
+        scheduler._jittered_start_minute = 480   # 08:00
+        scheduler._jittered_end_minute = 1500     # 25:00
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: datetime(2024, 1, 1, 0, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+    def test_jittered_end_hour_25_2am_inactive(self, scheduler, monkeypatch):
+        """02:00 已过活跃窗"""
+        scheduler._jittered_start_minute = 480
+        scheduler._jittered_end_minute = 1500
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+    def test_fallback_end_hour_25_midnight_active(self, scheduler, monkeypatch):
+        """回退分支：end_hour=25 时午夜应判定为活跃"""
+        scheduler._jittered_start_minute = None  # 强制走回退分支
+        scheduler._jittered_end_minute = None
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: datetime(2024, 1, 1, 0, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+    def test_fallback_end_hour_25_2am_inactive(self, scheduler, monkeypatch):
+        """回退分支：02:00 已过活跃窗"""
+        scheduler._jittered_start_minute = None
+        scheduler._jittered_end_minute = None
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+    # ── end_hour=24 + 非零 jitter 测试（R1/R2 修复验证） ──
+
+    def test_end_hour_24_negative_jitter_not_active_at_2am(self, scheduler, monkeypatch):
+        """end_hour=24, 负抖动使 end < 1440: 02:00 判定为不活跃（修复前为 24/7 活跃）"""
+        scheduler._jittered_start_minute = 480    # 08:00
+        scheduler._jittered_end_minute = 1410     # 23:30（负抖动，不跨午夜）
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
+        )
+        assert scheduler._is_character_active() is False
+
+    def test_end_hour_24_negative_jitter_active_at_10am(self, scheduler, monkeypatch):
+        """end_hour=24, 负抖动使 end < 1440: 10:00 判定为活跃"""
+        scheduler._jittered_start_minute = 480
+        scheduler._jittered_end_minute = 1410
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+    def test_end_hour_24_positive_jitter_active_at_midnight(self, scheduler, monkeypatch):
+        """end_hour=24, 正抖动使 end >= 1440: 午夜判定为活跃"""
+        scheduler._jittered_start_minute = 480    # 08:00
+        scheduler._jittered_end_minute = 1470     # 00:30 next day（正抖动，跨午夜）
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: datetime(2024, 1, 1, 0, 0, 0),
+        )
+        assert scheduler._is_character_active() is True
+
+    def test_end_hour_24_positive_jitter_inactive_at_2am(self, scheduler, monkeypatch):
+        """end_hour=24, 正抖动使 end >= 1440: 02:00 判定为不活跃"""
+        scheduler._jittered_start_minute = 480
+        scheduler._jittered_end_minute = 1470
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
+        )
+        assert scheduler._is_character_active() is False

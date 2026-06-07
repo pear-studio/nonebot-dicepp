@@ -8,7 +8,7 @@ import random
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..data.models import DEFAULT_WARMTH_LABELS
 
@@ -29,6 +29,13 @@ class PersonaExtensions(BaseModel):
     event_jitter_minutes: int = 60
     event_day_start_jitter_minutes: int = 30
     event_day_end_jitter_minutes: int = 30
+
+    @field_validator('event_day_start_hour', 'event_day_end_hour')
+    @classmethod
+    def check_hour_range(cls, v: int) -> int:
+        if not (0 <= v <= 47):
+            raise ValueError(f'event hour must be 0-47, got {v}')
+        return v
     # Phase 3: 好感度低时的拒绝回复语（可选，不配置则使用系统默认）
     # 语义说明：
     # - None（或未配置）：使用系统默认拒绝语

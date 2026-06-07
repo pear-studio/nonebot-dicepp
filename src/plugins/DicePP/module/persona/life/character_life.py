@@ -53,6 +53,7 @@ class CharacterLifeConfig:
         default_energy: int = 50,
         default_mood: int = 50,
         default_health: int = 50,
+        good_night_cooldown_hours: int = 22,
     ):
         self.enabled = enabled
         # 当前「时:分」与计划槽位（自 0 点起的分钟）相差不超过该值则触发；tick 约 60s 一轮
@@ -70,6 +71,8 @@ class CharacterLifeConfig:
         self.default_energy = default_energy
         self.default_mood = default_mood
         self.default_health = default_health
+        # good_night 冷却时间（小时），防止再生后同窗口内重复触发
+        self.good_night_cooldown_hours = good_night_cooldown_hours
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "CharacterLifeConfig":
@@ -118,6 +121,8 @@ class CharacterLife:
         self._chain_triggered_today: bool = False
         # 上次执行跨天恢复的日期（防止无 good_night 时每日重复恢复）
         self._day_transition_recovered_date: Optional[str] = None
+        # good_night 冷却：记录上次触发时间，防止再生后同窗口内重复触发（跨午夜场景）
+        self._last_good_night_fired_at: Optional[datetime] = None
         # 可选的边界接收器，用于同步波动边界和标记边界事件
         self.boundary_receiver: Optional[BoundaryReceiver] = None
         self._boundaries_loaded = False
@@ -138,6 +143,18 @@ class CharacterLife:
 
     def _get_today_str(self) -> str:
         return self.config.now().strftime("%Y-%m-%d")
+
+    @property
+    def _spans_midnight(self) -> bool:
+        """角色活跃时间是否跨午夜。优先使用抖动后的实际边界。"""
+        if self._today_jittered_start is not None and self._today_jittered_end is not None:
+            end = self._today_jittered_end
+            start = self._today_jittered_start
+            return end >= 1440 or start > end
+        # 回退：基础小时（仅在 _reset_daily_state 首次调用且无旧槽位时使用）
+        start_base = self.character.extensions.event_day_start_hour * 60
+        end_base = self.character.extensions.event_day_end_hour * 60
+        return (start_base >= end_base) or (end_base >= 1440)
 
     def _compute_daily_boundaries(self) -> tuple[int, int, random.Random]:
         """根据日期+角色名 seed 稳定采样今日波动边界，返回(起床分钟, 睡觉分钟, seeded_rng)。"""
@@ -166,32 +183,35 @@ class CharacterLife:
         start, end, rng = self._compute_daily_boundaries()
         self._today_jittered_start = start
         self._today_jittered_end = end
-        # 同步波动边界到 receiver，确保活跃时间判定一致
+        # 同步波动边界到 receiver（保持扩展范围值，下游自行归一化）
         if self.boundary_receiver is not None:
             self.boundary_receiver.set_jittered_boundaries(start, end)
         else:
             logger.debug("boundary_receiver 未注入，跳过波动边界同步")
         min_interval = self.config.min_event_interval_minutes
-        # 前置约束：调整可用区间以避开边界区域
+        # 前置约束：调整可用区间以避开边界区域（使用扩展范围值）
         constrained_start = start + min_interval
         constrained_end = end - min_interval
-        slots: List[Tuple[int, str]] = []
-        # 边界槽位
-        slots.append((start, "wake_up"))
-        slots.append((end, "good_night"))
-        # 日常槽位
+        raw: List[Tuple[int, str]] = []
+        # 边界槽位（原始分钟，可能 > 1440）
+        raw.append((start, "wake_up"))
+        raw.append((end, "good_night"))
+        # 日常槽位（generate_event_times 也需要扩展范围值）
         if constrained_start < constrained_end:
             raw_slots = self.character.extensions.generate_event_times(
                 start_minute=constrained_start, end_minute=constrained_end, rng=rng
             )
             for s in raw_slots:
-                slots.append((s, "system"))
+                raw.append((s, "system"))
         else:
             logger.warning(
                 "角色 %s 当日可用区间过短（%02d:%02d-%02d:%02d，min_interval=%d），仅生成边界槽位",
                 self.character.name, start // 60, start % 60, end // 60, end % 60, min_interval
             )
-        self._slot_minutes_today = sorted(slots, key=lambda x: x[0])
+        # 按原始分钟排序（保证逻辑顺序：wake_up → system → good_night），
+        # 然后归一化分钟到 [0, 1440) 供 tick 时钟匹配
+        raw.sort(key=lambda x: x[0])
+        self._slot_minutes_today = [(m % 1440, t) for m, t in raw]
         logger.debug(
             "角色生活当日槽位 %s: %s (边界: %02d:%02d-%02d:%02d)",
             self._get_today_str(), self._slot_minutes_today,
@@ -199,12 +219,27 @@ class CharacterLife:
         )
 
     def _reset_daily_state(self) -> None:
-        """按日历日切换时重置槽位；同日则保证槽位已加载。"""
+        """按日历日切换时重置槽位；同日则保证槽位已加载。
+
+        跨午夜角色（end_hour >= 24）在角色日结束前推迟 reset，
+        避免前一天的 good_night 槽位在 00:00 被清空。
+        """
         today = self._get_today_str()
         if self._last_event_date == today:
             if self._slot_minutes_today is None:
                 self._regenerate_slots_for_today()
             return
+
+        # 跨午夜保护：角色日尚未结束时延迟 reset
+        if self._spans_midnight:
+            has_unfired = (
+                self._slot_minutes_today is not None
+                and len(self._fired_slot_indices) < len(self._slot_minutes_today)
+            )
+            if has_unfired:
+                self._last_event_date = today
+                return
+
         self._fired_slot_indices.clear()
         self._chain_triggered_today = False
         self._today_jittered_start = None
@@ -258,6 +293,10 @@ class CharacterLife:
                     self._slot_minutes_today.append((int(item[0]), str(item[1])))
                 else:
                     self._slot_minutes_today.append((int(item), "system"))
+            # 归一化旧持久化槽位分钟到 [0, 1440)（兼容 end_hour >= 24 的旧数据）
+            self._slot_minutes_today = [
+                (m % 1440, t) for m, t in self._slot_minutes_today
+            ]
         else:
             # 旧版仅持久化 hours，无法还原分钟槽位：当日重新采样
             self._regenerate_slots_for_today()
@@ -284,6 +323,13 @@ class CharacterLife:
         self._chain_triggered_today = bool(data.get("chain_triggered"))
         # 加载上次跨天恢复日期
         self._day_transition_recovered_date = data.get("day_transition_recovered_date")
+        # 加载 good_night 冷却时间戳
+        lg = data.get("last_good_night_fired_at")
+        if isinstance(lg, str):
+            try:
+                self._last_good_night_fired_at = datetime.fromisoformat(lg)
+            except ValueError:
+                self._last_good_night_fired_at = None
         # 恢复波动边界（兼容旧持久化数据）
         js = data.get("jittered_start")
         je = data.get("jittered_end")
@@ -311,6 +357,10 @@ class CharacterLife:
             ],
             "chain_triggered": self._chain_triggered_today,
             "day_transition_recovered_date": self._day_transition_recovered_date,
+            "last_good_night_fired_at": (
+                self._last_good_night_fired_at.isoformat()
+                if self._last_good_night_fired_at else None
+            ),
             "jittered_start": self._today_jittered_start,
             "jittered_end": self._today_jittered_end,
         }
@@ -354,7 +404,14 @@ class CharacterLife:
         for i, (slot_m, slot_type) in enumerate(slots):
             if i in self._fired_slot_indices:
                 continue
-            if abs(now_m - slot_m) > win:
+            # good_night 冷却：防止再生后新槽位在窗口内立即重复触发
+            if (slot_type == "good_night"
+                    and self._last_good_night_fired_at is not None
+                    and (now - self._last_good_night_fired_at).total_seconds() < 3600 * self.config.good_night_cooldown_hours):
+                continue
+            # 循环距离：处理 slot_m 接近 0 / now_m 接近 1439 的跨午夜边界
+            dist = min(abs(now_m - slot_m), 1440 - abs(now_m - slot_m))
+            if dist > win:
                 continue
             logger.debug(
                 f"tick 槽位触发: slot={i}/{len(slots)} type={slot_type} "
@@ -363,6 +420,16 @@ class CharacterLife:
             event_chain = await self.generate_daily_event(slot_type)
             if event_chain:
                 self._fired_slot_indices.add(i)
+                # 跨午夜模式下，最后一个槽位（good_night）触发后
+                # 立即为当前日历日再生槽位，避免"僵尸日"
+                if self._spans_midnight and len(self._fired_slot_indices) == len(slots):
+                    self._fired_slot_indices.clear()
+                    self._regenerate_slots_for_today()
+                # good_night 冷却：防止再生后新槽位在窗口内立即重复触发
+                # 先于 save 设置，确保持久化快照包含冷却时间戳
+                if slot_type == "good_night":
+                    self._last_good_night_fired_at = now
+
                 await self.save_persistent_state()
                 return event_chain
 
@@ -700,7 +767,12 @@ class CharacterLife:
         end = self._today_jittered_end
 
         in_window: bool
-        if end >= start:
+        if self._spans_midnight:
+            # end >= 1440 或 start > end：跨午夜活跃窗
+            start_n = start % 1440
+            end_n = end % 1440
+            in_window = now_m >= start_n or now_m <= end_n
+        elif end >= start:
             in_window = start <= now_m <= end
         else:
             in_window = now_m >= start or now_m <= end

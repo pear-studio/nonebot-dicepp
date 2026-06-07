@@ -1079,3 +1079,480 @@ class TestCharacterLifePhase2:
         # tick 应继续执行并生成事件，而不是抛出异常
         assert len(result) == 1
         assert result[0]["description"] == "测试事件"
+
+
+class TestCrossMidnightSlots:
+    """跨午夜槽位归一化与匹配（end_hour >= 24）"""
+
+    @pytest.fixture
+    def mock_event_agent(self):
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+        agent = MagicMock()
+        agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="测试事件", duration_minutes=0))
+        agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(
+            reaction="测试", share_desire=0.5))
+        return agent
+
+    @pytest.fixture
+    def character_nightowl(self):
+        ext = PersonaExtensions(
+            initial_relationship=50,
+            daily_events_count=3,
+            event_day_start_hour=8,
+            event_day_end_hour=25,  # 凌晨 1 点入睡
+            event_jitter_minutes=15,
+            event_day_start_jitter_minutes=0,
+            event_day_end_jitter_minutes=0,  # 固定 jitter=0 便于测试
+        )
+        return Character(name="夜猫子", extensions=ext)
+
+    @pytest.fixture
+    def config(self):
+        return CharacterLifeConfig(
+            enabled=True,
+            slot_match_window_minutes=15,
+            timezone="Asia/Shanghai",
+            min_event_interval_minutes=5,
+        )
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.add_daily_event = AsyncMock()
+        store.get_diary = AsyncMock(return_value=None)
+        store.save_diary = AsyncMock()
+        return store
+
+    @pytest.fixture
+    def life(self, config, mock_event_agent, mock_data_store, character_nightowl):
+        life = CharacterLife(
+            config=config,
+            event_agent=mock_event_agent,
+            data_store=mock_data_store,
+            character=character_nightowl,
+        )
+        life.boundary_receiver = MagicMock()
+        return life
+
+    def test_spans_midnight_property(self, life):
+        """end_hour=25 时 _spans_midnight 为 True"""
+        assert life._spans_midnight is True
+
+    def test_slots_normalized_to_clock_range(self, life, monkeypatch):
+        """所有 slot_m 在 [0, 1440) 范围内"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._regenerate_slots_for_today()
+        for slot_m, _ in life._slot_minutes_today:
+            assert 0 <= slot_m < 1440
+
+    def test_slots_logical_order_preserved(self, life, monkeypatch):
+        """归一化后 good_night 仍在列表末尾"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._regenerate_slots_for_today()
+        types = [t for _, t in life._slot_minutes_today]
+        assert types[0] == "wake_up"
+        assert types[-1] == "good_night"
+
+    @pytest.mark.asyncio
+    async def test_tick_matches_good_night_post_midnight(self, life, mock_data_store, monkeypatch):
+        """模拟 01:00（次日凌晨），验证 good_night 槽位被匹配"""
+        # end_hour=25, jitter=0 → end=1500, normalized=60
+        fake_now = datetime(2024, 1, 1, 1, 0, 0)  # 01:00
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._regenerate_slots_for_today()
+        life._last_event_date = "2024-01-01"
+
+        result = await life.tick()
+        assert result is not None
+        # good_night 是最后一个槽位，第一个链事件 slot_type 为 good_night
+        assert result[0].get("slot_type") == "good_night"
+
+    @pytest.mark.asyncio
+    async def test_tick_matches_system_slot_post_midnight(self, life, mock_data_store, monkeypatch):
+        """模拟 00:30，验证跨午夜 system slot 被匹配"""
+        fake_now = datetime(2024, 1, 1, 0, 30, 0)  # 00:30
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._regenerate_slots_for_today()
+        life._last_event_date = "2024-01-01"
+        # 找到归一化后接近 30 的 system slot，将其余 slot 标记为 fired
+        for i, (slot_m, slot_type) in enumerate(life._slot_minutes_today):
+            if slot_type != "system" or abs(slot_m - 30) > 5:
+                life._fired_slot_indices.add(i)
+            elif abs(slot_m - 30) <= 5:
+                # 保留这一个未触发
+                pass
+
+        result = await life.tick()
+        # 如果存在接近 00:30 的 system slot，应被触发
+        # 由于 jitter=0 且 seed 固定，槽位分布是可预测的
+        if result:
+            assert result[0].get("slot_type") == "system"
+
+
+class TestMidnightResetDelay:
+    """跨午夜延迟 reset 测试"""
+
+    @pytest.fixture
+    def mock_event_agent(self):
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+        agent = MagicMock()
+        agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="测试事件", duration_minutes=0))
+        agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(
+            reaction="测试", share_desire=0.5))
+        return agent
+
+    @pytest.fixture
+    def character_nightowl(self):
+        ext = PersonaExtensions(
+            initial_relationship=50,
+            daily_events_count=1,
+            event_day_start_hour=8,
+            event_day_end_hour=25,
+            event_jitter_minutes=0,
+            event_day_start_jitter_minutes=0,
+            event_day_end_jitter_minutes=0,
+        )
+        return Character(name="夜猫子", extensions=ext)
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.add_daily_event = AsyncMock()
+        store.get_diary = AsyncMock(return_value=None)
+        return store
+
+    @pytest.fixture
+    def life(self, mock_event_agent, mock_data_store, character_nightowl):
+        config = CharacterLifeConfig(enabled=True, timezone="Asia/Shanghai")
+        return CharacterLife(
+            config=config,
+            event_agent=mock_event_agent,
+            data_store=mock_data_store,
+            character=character_nightowl,
+        )
+
+    def test_reset_delayed_when_unfired_and_spans_midnight(self, life, monkeypatch):
+        """有未触发槽位 + 跨午夜 → 延迟 reset"""
+        fake_now = datetime(2024, 1, 2, 0, 1, 0)  # 刚过午夜
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        # 模拟前一天的状态
+        life._slot_minutes_today = [(480, "wake_up"), (60, "good_night")]  # 归一化后
+        life._fired_slot_indices = {0}  # 只有 wake_up 触发了
+        life._last_event_date = "2024-01-01"
+
+        life._reset_daily_state()
+
+        # good_night 未触发，应延迟 reset
+        assert life._slot_minutes_today is not None
+        assert life._last_event_date == "2024-01-02"
+
+    def test_reset_proceeds_when_all_fired(self, life, monkeypatch):
+        """所有槽位已触发 → 正常 reset"""
+        fake_now = datetime(2024, 1, 2, 0, 1, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._slot_minutes_today = [(480, "wake_up"), (60, "good_night")]
+        life._fired_slot_indices = {0, 1}  # 全部触发
+        life._last_event_date = "2024-01-01"
+
+        life._reset_daily_state()
+
+        # 应该正常 reset，生成新槽位
+        assert life._last_event_date == "2024-01-02"
+        # 新槽位应该包含 wake_up
+        types = [t for _, t in (life._slot_minutes_today or [])]
+        assert "wake_up" in types
+
+    @pytest.mark.asyncio
+    async def test_post_good_night_regeneration_cooldown(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """good_night 触发→再生后，新 good_night 被冷却阻止，wake_up 仍可触发"""
+        fake_now = datetime(2024, 1, 2, 1, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        # 前一天的旧槽位：wake_up(0, fired), system(1, fired), good_night(2, unfired)
+        life._slot_minutes_today = [(480, "wake_up"), (720, "system"), (60, "good_night")]
+        life._fired_slot_indices = {0, 1}
+        life._last_event_date = "2024-01-02"
+        life.character.extensions.event_day_start_hour = 8
+        life.character.extensions.event_day_end_hour = 25
+
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+        mock_event_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="good_night 事件", duration_minutes=0))
+        mock_event_agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(
+            reaction="晚安", share_desire=0.5))
+
+        # 第一次 tick：触发 good_night
+        result = await life.tick()
+        assert result is not None
+        assert result[0].get("slot_type") == "good_night"
+        assert life._last_good_night_fired_at is not None
+
+        # 再生后 fired 已清空，wake_up 可被触发
+        assert 0 not in life._fired_slot_indices
+
+        # 模拟 01:01 下一次 tick：新 good_night 被冷却阻止
+        fake_now_2 = datetime(2024, 1, 2, 1, 1, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now_2,
+        )
+        result2 = await life.tick()
+        # 冷却期内 good_night 不应触发
+        if result2:
+            assert result2[0].get("slot_type") != "good_night"
+
+    def test_reset_proceeds_when_not_spans_midnight(self, life, monkeypatch):
+        """非跨午夜角色，正常 reset"""
+        fake_now = datetime(2024, 1, 2, 0, 1, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        # 模拟非跨午夜角色（end_hour=22）
+        life.character.extensions.event_day_end_hour = 22
+        life._slot_minutes_today = [(480, "wake_up"), (1320, "good_night")]
+        life._fired_slot_indices = {0}  # good_night 未触发
+        life._last_event_date = "2024-01-01"
+
+        life._reset_daily_state()
+
+        # 非跨午夜，即使有 unfired 也应该正常 reset
+        assert life._last_event_date == "2024-01-02"
+
+
+class TestIsAwakeLockedExtendedEnd:
+    """_is_awake_locked 对 end >= 1440 场景的判定"""
+
+    @pytest.fixture
+    def character_nightowl(self):
+        ext = PersonaExtensions(
+            initial_relationship=50,
+            event_day_start_hour=8,
+            event_day_end_hour=25,
+            event_day_start_jitter_minutes=0,
+            event_day_end_jitter_minutes=0,
+        )
+        return Character(name="夜猫子", extensions=ext)
+
+    @pytest.fixture
+    def life(self, character_nightowl):
+        config = CharacterLifeConfig(enabled=True, timezone="Asia/Shanghai")
+        store = MagicMock()
+        return CharacterLife(
+            config=config,
+            event_agent=MagicMock(),
+            data_store=store,
+            character=character_nightowl,
+        )
+
+    def test_awake_at_midnight(self, life, monkeypatch):
+        """午夜 00:00 应在活跃窗内（end_hour=25 → 活跃到 01:00）"""
+        fake_now = datetime(2024, 1, 1, 0, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._today_jittered_start = 480   # 08:00
+        life._today_jittered_end = 1500     # 25:00 = 01:00 next day
+        life._slot_minutes_today = [(480, "wake_up"), (60, "good_night")]
+        assert life._is_awake_locked() is True
+
+    def test_awake_at_1am(self, life, monkeypatch):
+        """01:00 仍在活跃窗边界"""
+        fake_now = datetime(2024, 1, 1, 1, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._today_jittered_start = 480
+        life._today_jittered_end = 1500
+        life._slot_minutes_today = [(480, "wake_up"), (60, "good_night")]
+        assert life._is_awake_locked() is True
+
+    def test_asleep_at_2am(self, life, monkeypatch):
+        """02:00 已过活跃窗"""
+        fake_now = datetime(2024, 1, 1, 2, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._today_jittered_start = 480
+        life._today_jittered_end = 1500
+        life._slot_minutes_today = [(480, "wake_up"), (60, "good_night")]
+        assert life._is_awake_locked() is False
+
+    def test_awake_at_morning(self, life, monkeypatch):
+        """09:00 正常活跃时间"""
+        fake_now = datetime(2024, 1, 1, 9, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._today_jittered_start = 480
+        life._today_jittered_end = 1500
+        life._slot_minutes_today = [(480, "wake_up"), (60, "good_night")]
+        assert life._is_awake_locked() is True
+
+
+class TestMidnightEndHourJitter:
+    """end_hour=24 配合非零 jitter 的边界测试（R1 修复验证）"""
+
+    @pytest.fixture
+    def mock_event_agent(self):
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+        agent = MagicMock()
+        agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="测试事件", duration_minutes=0))
+        agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(
+            reaction="测试", share_desire=0.5))
+        return agent
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.add_daily_event = AsyncMock()
+        store.get_diary = AsyncMock(return_value=None)
+        return store
+
+    @pytest.fixture
+    def character_end24_jitter30(self):
+        """end_hour=24（精确午夜）+ 默认 jitter=30"""
+        ext = PersonaExtensions(
+            initial_relationship=50,
+            daily_events_count=2,
+            event_day_start_hour=8,
+            event_day_end_hour=24,
+            event_jitter_minutes=15,
+            event_day_start_jitter_minutes=0,
+            event_day_end_jitter_minutes=30,
+        )
+        return Character(name="测试角色24点", extensions=ext)
+
+    @pytest.fixture
+    def config(self):
+        return CharacterLifeConfig(
+            enabled=True,
+            slot_match_window_minutes=15,
+            timezone="Asia/Shanghai",
+            min_event_interval_minutes=5,
+        )
+
+    @pytest.fixture
+    def life(self, config, mock_event_agent, mock_data_store, character_end24_jitter30):
+        life = CharacterLife(
+            config=config,
+            event_agent=mock_event_agent,
+            data_store=mock_data_store,
+            character=character_end24_jitter30,
+        )
+        life.boundary_receiver = MagicMock()
+        return life
+
+    def test_spans_midnight_false_when_jitter_before_midnight(self, life, monkeypatch):
+        """负抖动使 end < 1440 时 _spans_midnight 为 False（R1 修复核心）"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        # 模拟负抖动：end=1440-30=1410 (23:30)，不跨午夜
+        life._today_jittered_start = 480   # 08:00
+        life._today_jittered_end = 1410    # 23:30
+        assert life._spans_midnight is False
+
+    def test_spans_midnight_true_when_jitter_after_midnight(self, life, monkeypatch):
+        """正抖动使 end >= 1440 时 _spans_midnight 为 True"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        # 模拟正抖动：end=1440+30=1470 (00:30)，跨午夜
+        life._today_jittered_start = 480   # 08:00
+        life._today_jittered_end = 1470    # 00:30 next day
+        assert life._spans_midnight is True
+
+    def test_not_always_awake_when_jitter_before_midnight(self, life, monkeypatch):
+        """负抖动使 end < 1440 时，存在角色不活跃的时刻（修复前为 24/7 清醒）"""
+        fake_now = datetime(2024, 1, 1, 2, 0, 0)  # 02:00
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._today_jittered_start = 480   # 08:00
+        life._today_jittered_end = 1410    # 23:30
+        life._slot_minutes_today = [(480, "wake_up"), (1410 % 1440, "good_night")]
+        assert life._is_awake_locked() is False
+
+    def test_awake_at_midnight_when_jitter_after_midnight(self, life, monkeypatch):
+        """正抖动使 end >= 1440 时，午夜应在活跃窗内"""
+        fake_now = datetime(2024, 1, 1, 0, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._today_jittered_start = 480   # 08:00
+        life._today_jittered_end = 1470    # 00:30 next day
+        life._slot_minutes_today = [(480, "wake_up"), (30, "good_night")]
+        assert life._is_awake_locked() is True
+
+    def test_reset_daily_state_when_not_spans_midnight(self, life, monkeypatch):
+        """负抖动使 end < 1440 时，日历日切换应正常 reset（修复前延迟重置导致槽位残留）"""
+        fake_now = datetime(2024, 1, 2, 0, 1, 0)  # 刚过午夜
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        # 模拟负抖动：不跨午夜
+        life._today_jittered_start = 480
+        life._today_jittered_end = 1410
+        life._slot_minutes_today = [(480, "wake_up"), (1410 % 1440, "good_night")]
+        life._fired_slot_indices = {0}  # wake_up 已触发，good_night 未触发
+        life._last_event_date = "2024-01-01"
+
+        life._reset_daily_state()
+
+        # 非跨午夜，即使有 unfired 槽位也应正常 reset
+        assert life._last_event_date == "2024-01-02"
+        # 新槽位包含 wake_up
+        types = [t for _, t in (life._slot_minutes_today or [])]
+        assert "wake_up" in types

@@ -143,6 +143,8 @@ class ProactiveScheduler(BoundaryReceiver):
 
         优先使用 CharacterLife 同步的 jittered 边界（分钟级精度），
         未同步时回退到角色卡原始小时边界。
+
+        活跃窗口使用包含结束边界（inclusive end），与 CharacterLife._is_awake_locked 保持一致。
         """
         now = self._now()
         now_m = now.hour * 60 + now.minute
@@ -151,18 +153,23 @@ class ProactiveScheduler(BoundaryReceiver):
             start = self._jittered_start_minute
             end = self._jittered_end_minute
             if start < end:
-                return start <= now_m < end
+                if end >= 1440:
+                    # end_hour >= 24：活跃窗跨午夜
+                    return now_m >= start or now_m <= (end % 1440)
+                return start <= now_m <= end
             elif start > end:
-                return now_m >= start or now_m < end
+                return now_m >= start or now_m <= end
             else:
                 return True
 
-        # 回退：角色卡原始小时边界
+        # 回退：角色卡原始小时边界（使用包含结束边界）
         hour = now.hour
         start_h = self.character.extensions.event_day_start_hour
         end_h = self.character.extensions.event_day_end_hour
 
-        if start_h < end_h:
+        if end_h >= 24:
+            return hour >= start_h or hour < (end_h % 24)
+        elif start_h < end_h:
             return start_h <= hour < end_h
         elif start_h > end_h:
             return hour >= start_h or hour < end_h
