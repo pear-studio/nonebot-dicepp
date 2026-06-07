@@ -1241,3 +1241,97 @@ class TestMigrateCodeSetting:
             assert global_code is None
 
 
+class TestPersonaScopeFilter:
+    """_PERSONA_SCOPE 正确排除 ambient，保留 chat / command / proactive"""
+
+    @pytest.mark.asyncio
+    async def test_ambient_excluded_from_recent_messages(self, temp_db):
+        from plugins.DicePP.core.message_types import MessageType
+
+        await temp_db.add_message_stream("u1", "", "user", MessageType.CHAT, "hello")
+        await temp_db.add_message_stream("u1", "", "user", MessageType.AMBIENT, "ambient noise")
+
+        msgs = await temp_db.get_recent_messages("u1", "")
+        assert len(msgs) == 1
+        assert msgs[0].type == MessageType.CHAT
+
+    @pytest.mark.asyncio
+    async def test_ambient_excluded_from_earliest_message_time(self, temp_db):
+        from plugins.DicePP.core.message_types import MessageType
+
+        t_early = "2026-01-01T10:00:00"
+        t_late = "2026-06-01T10:00:00"
+
+        await temp_db.add_message_stream("u1", "", "user", MessageType.AMBIENT, "noise")
+        await temp_db.db.execute("UPDATE message_stream SET created_at = ?", (t_early,))
+        await temp_db.db.commit()
+
+        await temp_db.add_message_stream("u1", "", "user", MessageType.CHAT, "hello")
+        await temp_db.db.execute("UPDATE message_stream SET created_at = ? WHERE type = 'chat'", (t_late,))
+        await temp_db.db.commit()
+
+        earliest = await temp_db.get_earliest_message_time("u1", "")
+        assert earliest is not None
+        assert earliest.strftime("%Y-%m-%d") == "2026-06-01"
+
+    @pytest.mark.asyncio
+    async def test_ambient_excluded_from_count_messages(self, temp_db):
+        from plugins.DicePP.core.message_types import MessageType
+
+        await temp_db.add_message_stream("u1", "", "user", MessageType.AMBIENT, "a")
+        await temp_db.add_message_stream("u1", "", "user", MessageType.AMBIENT, "b")
+        await temp_db.add_message_stream("u1", "", "user", MessageType.CHAT, "hello")
+
+        cnt = await temp_db.count_messages("u1", "")
+        assert cnt == 1
+
+    @pytest.mark.asyncio
+    async def test_ambient_excluded_from_read_messages(self, temp_db):
+        from plugins.DicePP.core.message_types import MessageType
+
+        await temp_db.add_message_stream("u1", "", "user", MessageType.AMBIENT, "noise")
+        await temp_db.add_message_stream("u1", "", "user", MessageType.CHAT, "hello")
+
+        msgs = await temp_db.read_messages("u1", "")
+        assert len(msgs) == 1
+        assert msgs[0].content == "hello"
+
+    @pytest.mark.asyncio
+    async def test_proactive_not_counted_in_chat_stats(self, temp_db):
+        from plugins.DicePP.core.message_types import MessageType
+
+        y = (wall_now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        ts = f"{y}T10:00:00"
+
+        await temp_db.add_message_stream("u1", "", "assistant", MessageType.CHAT, "chat reply")
+        await temp_db.add_message_stream("u1", "", "assistant", MessageType.PROACTIVE, "miss you")
+
+        await temp_db.db.execute("UPDATE message_stream SET created_at = ?", (ts,))
+        await temp_db.db.commit()
+
+        stats = await temp_db.get_daily_chat_stats(y)
+        # Only CHAT assistant → 1 Bot reply; PROACTIVE assistant not counted
+        assert stats["bot"] == 1
+
+    @pytest.mark.asyncio
+    async def test_search_messages_ambient_excluded(self, temp_db):
+        from plugins.DicePP.core.message_types import MessageType
+
+        await temp_db.add_message_stream("u1", "", "user", MessageType.AMBIENT, "ambient msg")
+        await temp_db.add_message_stream("u1", "", "user", MessageType.CHAT, "chat msg")
+
+        results = await temp_db.search_messages("", user_id="u1")
+        assert len(results) == 1
+        assert results[0].content == "chat msg"
+
+    @pytest.mark.asyncio
+    async def test_search_messages_chat_type_excludes_ambient(self, temp_db):
+        from plugins.DicePP.core.message_types import MessageType
+
+        await temp_db.add_message_stream("u1", "", "user", MessageType.AMBIENT, "noise")
+        await temp_db.add_message_stream("u1", "", "user", MessageType.CHAT, "hello")
+
+        results = await temp_db.search_messages("", user_id="u1", type=MessageType.CHAT)
+        assert len(results) == 1
+        assert results[0].content == "hello"
+

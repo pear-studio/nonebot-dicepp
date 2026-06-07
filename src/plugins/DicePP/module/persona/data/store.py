@@ -55,8 +55,14 @@ class PersonaDataStore:
     # 覆盖群聊中偶发的纯文本刷屏导致图片消息被推远的情况。
     _IMAGE_HASH_SCAN_LIMIT = 200
 
-    # SYSTEM_LOG 过滤条件，用于所有面向外部的 message_stream 查询
+    # SYSTEM_LOG 过滤条件，用于裁剪和内部逻辑
     _EXCLUDE_SYSTEM_LOG = "type != 'system_log'"
+
+    # 每个 user_id/group_id 保留的 AMBIENT 消息上限
+    _AMBIENT_MAX_PER_SCOPE = 50
+
+    # Persona 面层查询过滤：排除系统日志和环境消息
+    _PERSONA_SCOPE = "type NOT IN ('system_log', 'ambient')"
 
     def __init__(
         self,
@@ -253,7 +259,7 @@ class PersonaDataStore:
                    agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE user_id = ? AND group_id = ?
-              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+              AND {PersonaDataStore._PERSONA_SCOPE}
             ORDER BY created_at DESC
             LIMIT ?
             """,
@@ -279,7 +285,7 @@ class PersonaDataStore:
             SELECT id, image_meta FROM message_stream
             WHERE user_id = ? AND group_id = ?
               AND image_meta IS NOT NULL AND image_meta != ''
-              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+              AND {PersonaDataStore._PERSONA_SCOPE}
             ORDER BY created_at DESC
             LIMIT {PersonaDataStore._IMAGE_HASH_SCAN_LIMIT}
             """,
@@ -330,7 +336,7 @@ class PersonaDataStore:
         async with self.db.execute(
             f"""
             SELECT created_at FROM message_stream
-            WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._PERSONA_SCOPE}
             ORDER BY created_at ASC
             LIMIT 1
             """,
@@ -344,7 +350,7 @@ class PersonaDataStore:
     async def count_messages(self, user_id: str, group_id: str = "") -> int:
         """统计用户消息数量（使用 SELECT COUNT(*) 避免全量加载）"""
         async with self.db.execute(
-            f"SELECT COUNT(*) as cnt FROM message_stream WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
+            f"SELECT COUNT(*) as cnt FROM message_stream WHERE user_id = ? AND group_id = ? AND {PersonaDataStore._PERSONA_SCOPE}",
             (user_id, group_id),
         ) as cursor:
             row = await cursor.fetchone()
@@ -361,7 +367,7 @@ class PersonaDataStore:
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
                    agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
-            WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._PERSONA_SCOPE}
             ORDER BY created_at DESC
             """
             params = (group_id,)
@@ -370,7 +376,7 @@ class PersonaDataStore:
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
                    agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
-            WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
+            WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._PERSONA_SCOPE}
             ORDER BY created_at DESC
             LIMIT ?
             """
@@ -385,7 +391,7 @@ class PersonaDataStore:
         filter_user_id: Optional[str] = None,
     ) -> List[UnifiedMessage]:
         """分页读取聊天记录（不需要关键词），时间降序返回（最新的在前）。"""
-        conditions = [PersonaDataStore._EXCLUDE_SYSTEM_LOG]
+        conditions = [PersonaDataStore._PERSONA_SCOPE]
         params: List[Any] = []
 
         if group_id:
@@ -438,7 +444,7 @@ class PersonaDataStore:
         if (start_time is None) != (end_time is None):
             raise ValueError("start_time 和 end_time 必须同时提供或同时省略")
 
-        conditions = [PersonaDataStore._EXCLUDE_SYSTEM_LOG]
+        conditions = [PersonaDataStore._PERSONA_SCOPE]
         params: List[Any] = []
 
         if group_id:
@@ -687,12 +693,43 @@ class PersonaDataStore:
         if cache_hashes and self.image_cache:
             for ch in cache_hashes:
                 self.image_cache.delete_cache(ch)
+        await self._prune_ambient_messages(user_id, group_id)
         await self._prune_system_log()
 
     async def _prune_system_log(self) -> None:
         """清理 30 天前的 SYSTEM_LOG 消息（不占用户配额，独立过期淘汰）"""
         await self.db.execute(
             "DELETE FROM message_stream WHERE type = 'system_log' AND created_at < date('now', '-30 days')"
+        )
+        await self.db.commit()
+
+    async def _prune_ambient_messages(self, user_id: str, group_id: str) -> None:
+        """清理超出限额的 AMBIENT 消息，保留每个 scope 最近 N 条"""
+        if group_id:
+            where = "group_id = ? AND group_id != ''"
+            params = (group_id,)
+        else:
+            where = "user_id = ? AND group_id = ''"
+            params = (user_id,)
+        async with self.db.execute(
+            f"SELECT COUNT(*) as cnt FROM message_stream WHERE {where} AND type = 'ambient'",
+            params,
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row["cnt"] <= self._AMBIENT_MAX_PER_SCOPE:
+                return
+        await self.db.execute(
+            f"""
+            DELETE FROM message_stream
+            WHERE {where} AND type = 'ambient'
+              AND id NOT IN (
+                SELECT id FROM message_stream
+                WHERE {where} AND type = 'ambient'
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+              )
+            """,
+            (*params, self._AMBIENT_MAX_PER_SCOPE),
         )
         await self.db.commit()
 

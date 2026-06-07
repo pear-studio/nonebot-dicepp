@@ -623,7 +623,7 @@ class Bot:
         is_multi_command = len(msg_list) > 1
 
         # 遍历所有指令, 尝试处理消息
-        msg_type_default = "chat"  # 兜底：不匹配任何命令时使用
+        msg_type_default = "ambient"  # 兜底：不匹配任何命令时使用
         for msg_cur in msg_list:
             recorded = False
             for command in self.command_dict.values():
@@ -699,7 +699,7 @@ class Bot:
                 if not should_pass:  # 已经处理过, 不需要再传递给后面的指令
                     break
 
-            # 未匹配任何命令的消息：以 chat 类型记录
+            # 未匹配任何命令的消息：以 ambient 类型记录（不参与 persona 上下文）
             if not recorded and self._inbound_message_hooks:
                 display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
                 for hook in self._inbound_message_hooks:

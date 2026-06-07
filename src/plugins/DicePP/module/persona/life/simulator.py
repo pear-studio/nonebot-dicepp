@@ -251,7 +251,7 @@ class LifeSimulator:
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",
-            type=MessageType.CHAT,
+            type=MessageType.PROACTIVE,
             content=content,
             display_name="我",
         )

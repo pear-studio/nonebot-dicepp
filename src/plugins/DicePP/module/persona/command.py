@@ -240,8 +240,9 @@ class PersonaCommand(UserCommandBase):
             return
         try:
             msg_type = MessageType.from_str(type)
-            if type not in (MessageType.CHAT.value, MessageType.COMMAND.value, MessageType.SYSTEM_NOTICE.value, MessageType.SYSTEM_LOG.value):
-                logger.warning(f"[Persona] 未知 message_type='{type}'，fallback 到 CHAT")
+            known_types = {m.value for m in MessageType}
+            if type not in known_types:
+                logger.warning(f"[Persona] 未知 message_type='{type}'，from_str 回退为 '{msg_type.value}'")
 
             # 检测图片（私聊立即下载缓存）
             is_private = not group_id

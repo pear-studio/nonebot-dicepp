@@ -3,19 +3,24 @@
 from enum import StrEnum
 from typing import Type, TypeVar
 
+from utils.logger import logger
+
 T = TypeVar("T", bound="MessageType")
 
 
 class MessageType(StrEnum):
     CHAT = "chat"
     COMMAND = "command"
+    PROACTIVE = "proactive"
+    AMBIENT = "ambient"
     SYSTEM_NOTICE = "system_notice"
     SYSTEM_LOG = "system_log"
 
     @classmethod
     def from_str(cls: Type[T], value: str) -> T:
-        """从字符串解析 MessageType，不合法时返回 CHAT"""
+        """从字符串解析 MessageType，不合法时返回 AMBIENT"""
         try:
             return cls(value)
         except ValueError:
-            return cls.CHAT
+            logger.warning("Unknown MessageType value %r, falling back to AMBIENT", value)
+            return cls.AMBIENT
