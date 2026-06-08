@@ -399,6 +399,19 @@ else:
     # 在Bot连接时调用
     @driver.on_bot_connect
     async def connect(bot: NoneBot) -> None:
+        # 先清理已有实例，防止连接闪断/重连导致双重 tick
+        existing = all_bots.pop(bot.self_id, None)
+        if existing is not None:
+            logger.warning(
+                f"[NB Adapter] 检测到 {bot.self_id} 已有运行中实例，先执行 shutdown"
+            )
+            try:
+                await existing.shutdown_async()
+            except Exception:
+                logger.exception(
+                    f"[NB Adapter] 旧实例 shutdown 失败: {bot.self_id}"
+                )
+
         proxy = NoneBotClientProxy(bot)
         all_bots[bot.self_id] = DicePPBot(bot.self_id)
         all_bots[bot.self_id].set_client_proxy(proxy)
@@ -414,7 +427,9 @@ else:
     @driver.on_bot_disconnect
     async def disconnect(bot: NoneBot) -> None:
         logger.info(f"[NB Adapter] Bot {bot.self_id} Disconnected!")
-        await all_bots[bot.self_id].shutdown_async()
+        instance = all_bots.pop(bot.self_id, None)
+        if instance is not None:
+            await instance.shutdown_async()
 
 # ================= Recall Sync Support ==================
 def _remove_log_record(bot_obj, group_id: str, message_id: str):

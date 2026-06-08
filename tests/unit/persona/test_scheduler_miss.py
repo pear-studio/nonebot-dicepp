@@ -32,7 +32,19 @@ class TestProactiveSchedulerMissYou:
         store.is_user_muted = AsyncMock(return_value=False)
         store.list_active_relationships = AsyncMock(return_value=[])
         store.get_daily_events = AsyncMock(return_value=[])
+        store.update_relationship = AsyncMock()
+        store.get_relationship = AsyncMock(return_value=None)
+        store.get_user_profile = AsyncMock(return_value=None)
+        store.get_recent_messages = AsyncMock(return_value=[])
+        store.get_character_state = AsyncMock(return_value=MagicMock())
         return store
+
+    @staticmethod
+    def _make_event():
+        evt = MagicMock()
+        evt.description = "吃了蛋糕"
+        evt.reaction = "开心"
+        return evt
 
     @pytest.fixture
     def mock_character(self):
@@ -101,6 +113,61 @@ class TestProactiveSchedulerMissYou:
         mock_data_store.list_active_relationships.return_value = [rel]
         result = await scheduler._check_missed_users()
         assert result == []  # idle=10h < 72h
+
+    @pytest.mark.asyncio
+    async def test_miss_skips_when_last_miss_sent_at_set(self, scheduler, mock_data_store, monkeypatch):
+        """R10: DB 中 last_miss_sent_at 非 None 时跳过（防多实例/重启重复发送）"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: fake_now,
+        )
+        rel = RelationshipState(
+            user_id="u1",
+            intimacy=80,
+            passion=80,
+            trust=80,
+            secureness=80,
+            last_interaction_at=fake_now - timedelta(hours=100),
+            last_miss_sent_at=fake_now - timedelta(hours=50),  # 已发过想念
+        )
+        mock_data_store.list_active_relationships.return_value = [rel]
+        mock_data_store.get_daily_events.return_value = [self._make_event()]
+
+        mock_agent = AsyncMock()
+        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+        scheduler.event_agent = mock_agent
+
+        result = await scheduler._check_missed_users()
+        # 即使内存 _last_proactive_time 为空，也应因 DB 中已有 last_miss_sent_at 而跳过
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_miss_allows_when_last_miss_sent_at_is_none(self, scheduler, mock_data_store, monkeypatch):
+        """R10 对照：last_miss_sent_at=None 时允许触发（用户已回应，开关已重置）"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: fake_now,
+        )
+        rel = RelationshipState(
+            user_id="u1",
+            intimacy=80,
+            passion=80,
+            trust=80,
+            secureness=80,
+            last_interaction_at=fake_now - timedelta(hours=100),
+            last_miss_sent_at=None,  # 用户已回应，允许再发
+        )
+        mock_data_store.list_active_relationships.return_value = [rel]
+        mock_data_store.get_daily_events.return_value = [self._make_event()]
+
+        mock_agent = AsyncMock()
+        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+        scheduler.event_agent = mock_agent
+
+        result = await scheduler._check_missed_users()
+        assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_miss_muted_user_skipped(self, scheduler, mock_data_store, monkeypatch):

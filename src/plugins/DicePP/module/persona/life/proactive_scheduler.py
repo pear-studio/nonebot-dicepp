@@ -289,8 +289,18 @@ class ProactiveScheduler(BoundaryReceiver):
                     )
                     continue
 
-                # 检查最小间隔
                 user_id = rel.user_id
+
+                # R10: 检查 DB 中是否已记录过想念（防多实例/重启重复发送）
+                # last_miss_sent_at 非 None 表示已发出想念且用户尚未回应
+                if rel.last_miss_sent_at is not None:
+                    logger.debug(
+                        f"想念跳过(已发过): user={user_id}, "
+                        f"last_miss_sent_at={rel.last_miss_sent_at}"
+                    )
+                    continue
+
+                # 检查最小间隔（内存字典，同一实例内的节流）
                 if not self._can_send_to_key(f"user:{user_id}"):
                     logger.debug(f"想念跳过(间隔): user={user_id}")
                     continue
