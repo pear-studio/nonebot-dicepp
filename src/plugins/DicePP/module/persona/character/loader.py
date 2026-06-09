@@ -49,10 +49,25 @@ class CharacterLoader:
         # 解析 extensions.persona
         extensions_data = data.get("extensions", {})
         persona_data = extensions_data.get("persona", {})
-        
+
+        # 兼容旧字段：warmth_labels -> relation_labels
+        relation_labels = persona_data.get("relation_labels", [])
+        warmth_labels = persona_data.get("warmth_labels", [])
+        if warmth_labels and not relation_labels:
+            logger.warning(
+                "角色卡 [%s] 使用已废弃的 warmth_labels 键名，请更新为 relation_labels",
+                character_name or data.get("name", "未知"),
+            )
+            relation_labels = warmth_labels
+        # initial_relationship 已废弃，忽略
+        if "initial_relationship" in persona_data:
+            logger.warning(
+                "角色卡 [%s] 使用已废弃的 initial_relationship 字段，已忽略",
+                character_name or data.get("name", "未知"),
+            )
+
         extensions = PersonaExtensions(
-            initial_relationship=persona_data.get("initial_relationship", 40),
-            warmth_labels=persona_data.get("warmth_labels", []),
+            relation_labels=relation_labels,
             world=persona_data.get("world", ""),
             daily_events_count=persona_data.get("daily_events_count", 5),
             event_day_start_hour=persona_data.get("event_day_start_hour", 8),

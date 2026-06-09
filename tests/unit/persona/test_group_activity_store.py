@@ -71,15 +71,15 @@ async def test_get_top_relationships_global_ranking():
         await persona_db.execute(
             """
             INSERT INTO persona_user_relationships
-            (user_id, intimacy, passion, trust, secureness, last_interaction_at, updated_at)
-            VALUES ('u_high', 80, 80, 80, 80, datetime('now'), datetime('now'))
+            (user_id, intimacy, familiarity, reputation, last_interaction_at, updated_at)
+            VALUES ('u_high', 80, 80, 100, datetime('now'), datetime('now'))
             """,
         )
         await persona_db.execute(
             """
             INSERT INTO persona_user_relationships
-            (user_id, intimacy, passion, trust, secureness, last_interaction_at, updated_at)
-            VALUES ('u_mid', 70, 70, 70, 70, datetime('now'), datetime('now'))
+            (user_id, intimacy, familiarity, reputation, last_interaction_at, updated_at)
+            VALUES ('u_mid', 70, 70, 100, datetime('now'), datetime('now'))
             """,
         )
         await persona_db.commit()

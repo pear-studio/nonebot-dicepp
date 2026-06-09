@@ -44,7 +44,7 @@ def base_context():
         reaction="吓了一跳，然后笑了",
         character_name="七七", character_description="一个喜欢户外活动的女孩",
         target_user_id="u1", relationship_score=65.0,
-        warmth_label="友好", user_profile_facts="- 昵称：小明\n- 爱好：摄影",
+        relation_label="友好", user_profile_facts="- 昵称：小明\n- 爱好：摄影",
         recent_history="- 用户: 今天天气不错\n- 我: 是啊，适合出去走走",
         message_type="random_event", environment="private",
     )

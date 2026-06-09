@@ -99,7 +99,7 @@ class LookAtPastImageArgs(BaseModel):
 
 class ScoreRelationshipArgs(BaseModel):
     """score_relationship 参数 — ScoringAgent 当前使用"""
-    deltas: Dict[str, float] = Field(default_factory=dict, description="好感度变化，含 intimacy/passion/trust/secureness")
+    deltas: Dict[str, float] = Field(default_factory=dict, description="好感度变化，含 intimacy/reputation_delta")
     facts: Dict[str, Any] = Field(default_factory=dict, description="提取的用户事实")
 
 

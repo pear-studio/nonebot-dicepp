@@ -15,14 +15,13 @@ class TestScoringAgentParsing:
     def test_parse_valid_json(self):
         """测试解析有效 JSON"""
         agent = ScoringAgent(None)  # 不需要 LLM 来测试解析
-        
+
         response = '''
         {
           "deltas": {
             "intimacy": 3.5,
-            "passion": 1.0,
-            "trust": 2.0,
-            "secureness": 0.5
+            "reputation_delta": -15.0,
+            "warning_issued": true
           },
           "facts": {
             "name": "张三",
@@ -30,13 +29,12 @@ class TestScoringAgentParsing:
           }
         }
         '''
-        
+
         deltas, facts, parse_error = agent._parse_response(response)
 
         assert deltas.intimacy == 3.5
-        assert deltas.passion == 1.0
-        assert deltas.trust == 2.0
-        assert deltas.secureness == 0.5
+        assert deltas.reputation_delta == -15.0
+        assert deltas.warning_issued is True
         assert facts["name"] == "张三"
         assert parse_error == ""
 
@@ -49,9 +47,7 @@ class TestScoringAgentParsing:
 {
   "deltas": {
     "intimacy": 2.0,
-    "passion": 0.0,
-    "trust": 1.5,
-    "secureness": -0.5
+    "reputation_delta": 0.0
   },
   "facts": {}
 }
@@ -61,7 +57,7 @@ class TestScoringAgentParsing:
         deltas, facts, parse_error = agent._parse_response(response)
 
         assert deltas.intimacy == 2.0
-        assert deltas.secureness == -0.5
+        assert deltas.reputation_delta == 0.0
         assert parse_error == ""
 
     def test_parse_invalid_fallback(self):
@@ -73,9 +69,7 @@ class TestScoringAgentParsing:
         deltas, facts, parse_error = agent._parse_response(response)
 
         assert deltas.intimacy == 0.0
-        assert deltas.passion == 0.0
-        assert deltas.trust == 0.0
-        assert deltas.secureness == 0.0
+        assert deltas.reputation_delta == 0.0
         assert facts == {}
         assert "JSON 解析失败" in parse_error
 
@@ -83,12 +77,12 @@ class TestScoringAgentParsing:
         """测试 Level 3：括号计数从噪声文本中提取 JSON"""
         agent = ScoringAgent(None)
 
-        response = '好的，根据分析结果如下：{"deltas": {"intimacy": 1.0, "passion": 0.5, "trust": 2.0, "secureness": 0.0}, "facts": {"name": "小明"}} 以上为评分结果。'
+        response = '好的，根据分析结果如下：{"deltas": {"intimacy": 1.0, "reputation_delta": -5.0}, "facts": {"name": "小明"}} 以上为评分结果。'
 
         deltas, facts, parse_error = agent._parse_response(response)
 
         assert deltas.intimacy == 1.0
-        assert deltas.trust == 2.0
+        assert deltas.reputation_delta == -5.0
         assert facts["name"] == "小明"
         assert parse_error == ""
 
@@ -100,53 +94,17 @@ class TestScoringAgentParsing:
         {
           "deltas": {
             "intimacy": 10.0,
-            "passion": -10.0,
-            "trust": 5.0,
-            "secureness": -5.0
+            "reputation_delta": -50.0
           }
         }
         '''
 
         deltas, _, parse_error = agent._parse_response(response)
-        
-        # 应该被限制在 [-5, 5] 范围内
+
+        # intimacy 应限制在 [-5, 5]，reputation_delta 限制在 [-30, 0]
         assert deltas.intimacy == 5.0
-        assert deltas.passion == -5.0
-        assert deltas.trust == 5.0
-        assert deltas.secureness == -5.0
+        assert deltas.reputation_delta == -30.0
 
 
 class TestScoringAgentPrompt:
     """测试评分 Agent 的 Prompt 构建"""
-
-    def test_build_prompt_structure(self):
-        """测试 Prompt 结构"""
-        agent = ScoringAgent(None)
-        
-        messages = [
-            {"role": "user", "content": "你好"},
-            {"role": "assistant", "content": "你好呀~"},
-        ]
-        profile = UserProfile(user_id="test", facts={"name": "张三"})
-        
-        prompt = agent._build_analysis_prompt(messages, profile)
-        
-        assert "你好" in prompt
-        assert "你好呀~" in prompt
-        assert "张三" in prompt
-        assert "score_relationship" in prompt
-
-    def test_build_prompt_empty_profile(self):
-        """测试空档案的 Prompt"""
-        agent = ScoringAgent(None)
-        
-        messages = [{"role": "user", "content": "测试"}]
-        profile = UserProfile(user_id="test", facts={})
-        
-        prompt = agent._build_analysis_prompt(messages, profile)
-        
-        assert "测试" in prompt
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

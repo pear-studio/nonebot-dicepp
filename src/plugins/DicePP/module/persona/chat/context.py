@@ -149,7 +149,7 @@ class ContextBuilder:
         history_dicts: Optional[List[Dict[str, str]]] = None,
         user_profile: Optional[UserProfile] = None,
         diary_context: str = "",
-        warmth_label: str = "",
+        relation_label: str = "",
     ) -> List[Dict[str, str]]:
         """构建 LLM 消息列表（支持新旧两种调用方式）。
 
@@ -159,16 +159,16 @@ class ContextBuilder:
         - notifications: 待注入的动态通知
 
         **旧方式（legacy，保留给 debug_info）**：
-        - formatted_history + history_dicts + user_profile + diary_context + warmth_label
+        - formatted_history + history_dicts + user_profile + diary_context + relation_label
         """
         # 新路径：session 模式
         if messages is not None:
             result: List[Dict[str, str]] = []
 
-            # System 消息：静态基座 + 动态温暖度
+            # System 消息：静态基座 + 动态关系
             system_content = static_prompt
-            if warmth_label:
-                system_content += f"\n\n当前你和用户的关系: {warmth_label}"
+            if relation_label:
+                system_content += f"\n\n当前你和用户的关系: {relation_label}"
             result.append({"role": "system", "content": system_content})
 
             # 注入通知（独立 user role 消息，在历史消息之前）
@@ -188,7 +188,7 @@ class ContextBuilder:
         result_legacy = []
         lore_sections = self.build_lore_text(history_dicts or [])
         system_parts = []
-        system_prompt = self._build_system_prompt(user_profile, diary_context, warmth_label, lore_sections)
+        system_prompt = self._build_system_prompt(user_profile, diary_context, relation_label, lore_sections)
         system_parts.append(system_prompt)
         if self.character.mes_example:
             example = self.character.format_mes_example()
@@ -269,7 +269,7 @@ class ContextBuilder:
         self,
         user_profile: Optional[UserProfile],
         diary_context: str,
-        warmth_label: str = "",
+        relation_label: str = "",
         lore_sections: Optional[Dict[str, List[str]]] = None,
     ) -> str:
         parts = []
@@ -291,9 +291,9 @@ class ContextBuilder:
         # 角色卡基座（描述/性格/场景/名称/示例对话/尾部指令）
         parts.extend(self._render_character_base())
 
-        # 温暖度 — 插入到尾部指令之前
-        if warmth_label:
-            parts.insert(-1, f"当前你和用户的关系: {warmth_label}")
+        # 关系标签 — 插入到尾部指令之前
+        if relation_label:
+            parts.insert(-1, f"当前你和用户的关系: {relation_label}")
 
         # ── 分段回复引导（仅 chat 路径注入）──
         if self.segment_guide and self.segment_guide.enabled:
@@ -554,13 +554,13 @@ class ContextBuilder:
         short_term_history: List[Dict[str, str]],
         user_profile: Optional[UserProfile] = None,
         diary_context: str = "",
-        warmth_label: str = "",
+        relation_label: str = "",
         lore_sections: Optional[Dict[str, List[str]]] = None,
     ) -> Dict[str, Any]:
         system_prompt = self._build_system_prompt(
             user_profile=user_profile,
             diary_context=diary_context,
-            warmth_label=warmth_label,
+            relation_label=relation_label,
             lore_sections=lore_sections or self.build_lore_text(short_term_history),
         )
         # short_term_history 已由调用方格式化并截断（truncated），直接统计即可

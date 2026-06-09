@@ -76,11 +76,10 @@ class RecordShareMessageArgs(BaseModel):
 
 
 class RecordScoreArgs(BaseModel):
-    """记录评分结果：好感度变化和用户事实提取。统一替代旧的 score_relationship 和 record_evaluation 工具"""
+    """记录评分结果：亲密度变化、信誉标记和用户事实提取。"""
     intimacy: float = Field(default=0.0, ge=-5.0, le=5.0, description="亲密度变化，范围 -5.0 到 +5.0")
-    passion: float = Field(default=0.0, ge=-5.0, le=5.0, description="激情变化，范围 -5.0 到 +5.0")
-    trust: float = Field(default=0.0, ge=-5.0, le=5.0, description="信任变化，范围 -5.0 到 +5.0")
-    secureness: float = Field(default=0.0, ge=-5.0, le=5.0, description="安全感变化，范围 -5.0 到 +5.0")
+    reputation_delta: float = Field(default=0.0, ge=-30.0, le=0.0, description="信誉扣分标记，范围 -30 到 0")
+    warning_issued: bool = Field(default=False, description="本次是否对用户发出了警告（扣分前的前置信号）")
     facts: Dict[str, Any] = Field(default_factory=dict, description="提取或更新的用户事实，key-value 形式")
 
 

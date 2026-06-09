@@ -14,7 +14,7 @@ from .factory import PersonaApp
 from .data.store import PersonaDataStore
 from .report.daily_report import DailyReportGenerator
 from utils.time import wall_now
-from .game.decay import STAGE_FLOORS
+from .data.models import STAGE_FLOORS
 
 
 class AdminDispatcher:
@@ -293,7 +293,7 @@ class AdminDispatcher:
         if rel:
             lines.extend(self._format_relationship_base(rel))
             if self.app and self.app.get_character():
-                level, label = rel.get_warmth_level(self.app.get_warmth_labels())
+                level, label = rel.get_relation_level(self.app.get_relation_labels())
                 lines.append(f"  等级: {level} ({label})")
         else:
             lines.append("\n暂无关系记录")
@@ -319,12 +319,11 @@ class AdminDispatcher:
             return "分数必须在 0-100 之间"
         rel = await self.data_store.get_relationship(target_user)
         if not rel:
-            initial = self.app.get_initial_relationship() if self.app else 40.0
-            rel = await self.data_store.init_relationship(target_user, initial)
+            rel = await self.data_store.init_relationship(target_user)
+        rel.familiarity = new_score
         rel.intimacy = new_score
-        rel.passion = new_score
-        rel.trust = new_score
-        rel.secureness = new_score
+        rel.peak_familiarity = max(rel.peak_familiarity, new_score)
+        rel.peak_intimacy = max(rel.peak_intimacy, new_score)
         await self.data_store.update_relationship(rel)
         return f"已设置用户 {target_user} 的好感度为 {new_score:.2f}"
 
@@ -361,7 +360,7 @@ class AdminDispatcher:
         if ext.world:
             lines.append(f"\n[世界观]")
             lines.append(f"  {ext.world}")
-        labels = char.get_warmth_labels()
+        labels = char.get_relation_labels()
         lines.append(f"\n[好感度等级]")
         floors = list(zip(STAGE_FLOORS, STAGE_FLOORS[1:] + [100.0]))
         for (low, high), label in zip(floors, labels):
@@ -445,10 +444,9 @@ class AdminDispatcher:
         """格式化好感度基础信息，返回字符串列表"""
         fmt = f"  {{}}: {{:.{precision}f}}"
         lines = ["\n[好感度]"]
+        lines.append(fmt.format("熟悉度", rel.familiarity))
         lines.append(fmt.format("亲密度", rel.intimacy))
-        lines.append(fmt.format("激情", rel.passion))
-        lines.append(fmt.format("信任", rel.trust))
-        lines.append(fmt.format("安全感", rel.secureness))
+        lines.append(fmt.format("信誉", rel.reputation))
         lines.append(fmt.format("综合", rel.composite_score))
         lines.append(f"  最后互动: {rel.last_interaction_at.strftime('%Y-%m-%d %H:%M') if rel.last_interaction_at else '无'}")
         return lines

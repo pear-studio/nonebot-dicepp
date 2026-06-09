@@ -19,7 +19,7 @@ def _make_mock_character():
     char = MagicMock()
     char.name = "七七"
     char.description = "一个喜欢户外活动的女孩"
-    char.get_warmth_labels = MagicMock(return_value=["冷淡", "疏远", "友好", "默契", "亲密"])
+    char.get_relation_labels = MagicMock(return_value=["冷淡", "疏远", "友好", "默契", "亲密"])
     char.extensions = MagicMock()
     char.extensions.share_message_examples = None
     return char
@@ -98,7 +98,7 @@ class TestBuildAndGenerateShareMessage:
         # 验证传给 generate_share_message 的 context 包含默认值
         ctx = mock_agent.generate_share_message.call_args[0][0]
         assert ctx.relationship_score == 0.0
-        assert ctx.warmth_label == ""
+        assert ctx.relation_label == ""
         assert ctx.user_profile_facts == "（无）"
         assert ctx.recent_history == "（无）"
 
@@ -107,7 +107,7 @@ class TestBuildAndGenerateShareMessage:
         """当有关系记录时 warmth_label 和 score 正确解析"""
         from plugins.DicePP.module.persona.life.models import ShareTarget
 
-        rel = RelationshipState(user_id="u1", intimacy=65.0, passion=60.0, trust=70.0, secureness=60.0)
+        rel = RelationshipState(user_id="u1", intimacy=100, familiarity=50)
         mock_data_store.get_relationship = AsyncMock(return_value=rel)
 
         mock_agent = MagicMock()
@@ -124,8 +124,9 @@ class TestBuildAndGenerateShareMessage:
         )
 
         ctx = mock_agent.generate_share_message.call_args[0][0]
-        assert ctx.relationship_score == 64.5  # composite_score = 65*0.3 + 60*0.2 + 70*0.3 + 60*0.2
-        assert ctx.warmth_label == "默契"
+        # composite_score = familiarity*0.6 + intimacy*0.4 = 50*0.6 + 100*0.4 = 70
+        assert ctx.relationship_score == 70.0
+        assert ctx.relation_label == "默契"
         assert ctx.message_type == "miss_you"
 
     @pytest.mark.asyncio

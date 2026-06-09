@@ -12,7 +12,7 @@ import re
 
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_SCHEDULER
-from ..data.models import RelationshipState, DEFAULT_WARMTH_LABELS
+from ..data.models import RelationshipState, DEFAULT_RELATION_LABELS
 from ..character.models import Character
 from ..game.decay import DecayCalculator
 from utils.time import wall_now, format_timestamp, format_relative_time
@@ -268,7 +268,17 @@ class ProactiveScheduler(BoundaryReceiver):
             logger.debug(f"想念检查: 活跃关系数={len(relationships)}")
 
             for rel in relationships:
+                # reputation 每日恢复（在门控之前，通过 store 原子方法持久化）
+                await self.data_store.try_daily_reputation_recovery(rel, now)
+
                 eff = effective_for_proactive(rel, self._decay_calculator, self.character)
+                # 信誉门控
+                if eff.reputation < self.config.reputation_refuse_threshold:
+                    logger.debug(
+                        f"想念跳过(信誉低): user={rel.user_id}, "
+                        f"reputation={eff.reputation:.1f}"
+                    )
+                    continue
                 # 检查最小好感度（与对话展示一致）
                 if eff.composite_score < self.config.miss_min_score:
                     logger.debug(
@@ -310,11 +320,11 @@ class ProactiveScheduler(BoundaryReceiver):
                     continue
 
                 # 阶段固定概率表
-                warmth_level, _ = eff.get_warmth_level(DEFAULT_WARMTH_LABELS)
-                probability = self._MISS_PROBABILITY.get(warmth_level, 0.0)
+                relation_level, _ = eff.get_relation_level(DEFAULT_RELATION_LABELS)
+                probability = self._MISS_PROBABILITY.get(relation_level, 0.0)
                 if random.random() > probability:
                     logger.debug(
-                        f"想念跳过(概率): user={user_id}, stage={warmth_level}, p={probability:.2f}"
+                        f"想念跳过(概率): user={user_id}, level={relation_level}, p={probability:.2f}"
                     )
                     continue
 
@@ -450,12 +460,12 @@ class ProactiveScheduler(BoundaryReceiver):
             user_profile = await self.data_store.get_user_profile(target.user_id)
             rel = await self.data_store.get_relationship(target.user_id)
 
-            warmth_label = ""
+            relation_label = ""
             relationship_score = 0.0
             if rel:
                 relationship_score = rel.composite_score
-                labels = self.character.get_warmth_labels()
-                _, warmth_label = rel.get_warmth_level(labels)
+                labels = self.character.get_relation_labels()
+                _, relation_label = rel.get_relation_level(labels)
 
             if target.group_id:
                 recent_msgs = await self.data_store.get_group_messages(
@@ -484,7 +494,7 @@ class ProactiveScheduler(BoundaryReceiver):
                 character_description=self.character.description,
                 target_user_id=target.user_id,
                 relationship_score=relationship_score,
-                warmth_label=warmth_label,
+                relation_label=relation_label,
                 user_profile_facts=self._format_user_profile_facts(user_profile),
                 recent_history=self._format_recent_history(recent_msgs, self.config.share_context_history_limit),
                 message_type=message_type,

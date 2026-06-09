@@ -18,6 +18,7 @@ class ProactiveConfig:
         miss_enabled: bool = True,
         miss_min_hours: int = 72,
         miss_min_score: float = 20.0,
+        reputation_refuse_threshold: float = 30.0,
         timezone: str = "Asia/Shanghai",
         share_message_concurrent: int = 3,
         share_max_chars: int = 200,
@@ -31,6 +32,7 @@ class ProactiveConfig:
         self.miss_enabled = miss_enabled
         self.miss_min_hours = miss_min_hours
         self.miss_min_score = miss_min_score
+        self.reputation_refuse_threshold = reputation_refuse_threshold
         self.timezone = timezone
         self.share_message_concurrent = share_message_concurrent
         self.share_max_chars = share_max_chars
@@ -47,6 +49,7 @@ class ProactiveConfig:
             miss_enabled=persona.proactive_miss_enabled,
             miss_min_hours=persona.proactive_miss_min_hours,
             miss_min_score=persona.proactive_miss_min_score,
+            reputation_refuse_threshold=persona.reputation_refuse_threshold,
             timezone=persona.timezone,
             share_message_concurrent=persona.proactive_share_message_concurrent,
             share_max_chars=persona.proactive_share_max_chars,

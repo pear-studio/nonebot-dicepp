@@ -3,7 +3,7 @@
 覆盖 chat() 入口前置逻辑（不进入 coordinator 路径）：
 
 1. 5 秒去重：相同消息 5 秒内重复返回 None
-2. 厌倦拒绝：relationship_refuse_enabled 且 warmth_level=0，按概率返回 refuse_messages
+2. 厌倦拒绝：relationship_refuse_enabled 且 relation_level=0，按概率返回 refuse_messages
 3. 分段回复集成：_chat_with_tools flag 生命周期、coordinator 协作、返回值语义
 """
 
@@ -82,17 +82,14 @@ def _make_session(
     character = MagicMock()
     character.name = "Test"
     character.extensions = MagicMock()
-    character.extensions.initial_relationship = 30.0
     character.extensions.refuse_messages = refuse_messages
-    # 默认全部冰冷（warmth_level=0），方便触发拒绝
-    character.get_warmth_labels = MagicMock(
+    # 默认全部冰冷（relation_level=0），方便触发拒绝
+    character.get_relation_labels = MagicMock(
         return_value=["冰冷", "陌生", "熟识", "亲密", "深爱", "灵魂"]
     )
 
     config = ChatConfig(
         relationship_refuse_enabled=refuse_enabled,
-        relationship_refuse_prob_base=0.3,
-        relationship_refuse_prob_max=0.9,
         scoring_interval=999,
         timezone="Asia/Shanghai",  # 与 wall_now() 默认时区一致
     )
@@ -297,11 +294,11 @@ async def test_first_group_message_goes_through_coordinator(mock_agent_runtime):
 
 
 @pytest.mark.asyncio
-async def test_refuse_triggers_at_warmth_zero(monkeypatch, mock_agent_runtime):
-    """warmth_level=0 时按概率返回 refuse 文案，跳过 LLM"""
+async def test_refuse_triggers_at_low_reputation(mock_agent_runtime):
+    """reputation < 30 时返回 refuse 文案，跳过 LLM"""
     rel = RelationshipState(
         user_id="u1",
-        intimacy=0, passion=0, trust=0, secureness=0,
+        reputation=0.0,
     )
     session = _make_session(
         refuse_enabled=True,
@@ -314,9 +311,6 @@ async def test_refuse_triggers_at_warmth_zero(monkeypatch, mock_agent_runtime):
         MagicMock(role="user", content="prev"),
     ])
 
-    # 概率始终 < p_refuse
-    monkeypatch.setattr(random, "random", lambda: 0.0)
-
     result = await session.chat("u1", "", "你好")
 
     assert result == "...（已读不回）"
@@ -324,12 +318,12 @@ async def test_refuse_triggers_at_warmth_zero(monkeypatch, mock_agent_runtime):
 
 
 @pytest.mark.asyncio
-async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch, mock_agent_runtime):
-    """warmth_level>0 时不进入拒绝分支"""
-    # 高分 → warmth_level>0
+async def test_refuse_does_not_trigger_above_reputation_threshold(mock_agent_runtime):
+    """reputation >= 30 时不进入拒绝分支"""
+    # 高信誉 → 不触发拒绝
     rel = RelationshipState(
         user_id="u1",
-        intimacy=80, passion=80, trust=80, secureness=80,
+        reputation=50.0,
     )
     session = _make_session(
         refuse_enabled=True,
@@ -340,8 +334,6 @@ async def test_refuse_does_not_trigger_above_warmth_zero(monkeypatch, mock_agent
     session.store.get_recent_messages = AsyncMock(return_value=[
         MagicMock(role="user", content="prev"),
     ])
-
-    monkeypatch.setattr(random, "random", lambda: 0.0)
 
     result = await session.chat("u1", "", "你好")
 
@@ -480,11 +472,11 @@ class TestDecayInScoringTrigger:
         decay_calc.should_apply_decay = MagicMock(return_value=True)
         decay_calc.calculate_decay = MagicMock(return_value=(
             ScoreDeltas(intimacy=-3.0),
+            0.5,
             "超过7天未互动",
         ))
 
         character = MagicMock()
-        character.extensions.initial_relationship = 30.0
 
         config = MagicMock()
         config.timezone = ""
@@ -500,6 +492,8 @@ class TestDecayInScoringTrigger:
 
         rel = RelationshipState(user_id="u1")
         store.get_relationship = AsyncMock(return_value=rel)
+        store.get_familiarity_daily = AsyncMock(return_value=0.0)
+        store.add_familiarity_daily = AsyncMock(return_value=0.6)
         store.update_relationship = AsyncMock()
         store.add_score_event = AsyncMock()
         store.init_relationship = AsyncMock(return_value=rel)
@@ -979,12 +973,12 @@ class TestCrossCallStateIsolation:
             assert r2 == "recovered"
 
     @pytest.mark.asyncio
-    async def test_refuse_then_normal(self, monkeypatch):
-        """场景 5: 拒绝→正常 — warmth=0 触发拒绝后，关掉拒绝功能，下条正常"""
+    async def test_refuse_then_normal(self):
+        """场景 5: 拒绝→正常 — reputation < 30 触发拒绝后，关掉拒绝功能，下条正常"""
         from plugins.DicePP.module.persona.data.models import RelationshipState
 
         rel = RelationshipState(
-            user_id="u1", intimacy=0, passion=0, trust=0, secureness=0,
+            user_id="u1", reputation=0.0,
         )
         session = _make_session(
             refuse_enabled=True,
@@ -995,7 +989,6 @@ class TestCrossCallStateIsolation:
         session.store.get_recent_messages = AsyncMock(return_value=[
             MagicMock(role="user", content="prev"),
         ])
-        monkeypatch.setattr(random, "random", lambda: 0.0)
 
         with _patch_run_chat_seq([
             _make_result(final_text="normal_reply"),

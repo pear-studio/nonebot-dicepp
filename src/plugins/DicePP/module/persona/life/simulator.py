@@ -182,12 +182,17 @@ class LifeSimulator:
             for rel in await self.store.list_all_relationships_raw():
                 if not self.decay_calculator.should_apply_decay(rel, now):
                     continue
-                deltas, reason = self.decay_calculator.calculate_decay(rel, now=now)
+                deltas, familiarity_delta, reason = self.decay_calculator.calculate_decay(rel, now=now)
                 rel.last_relationship_decay_applied_at = now
-                if abs(deltas.intimacy) <= 0.01:
+                has_intimacy_decay = abs(deltas.intimacy) > 0.01
+                has_fam_decay = abs(familiarity_delta) > 0.01
+                if not has_intimacy_decay and not has_fam_decay:
                     continue
                 composite_before = rel.composite_score
-                rel.apply_deltas(deltas, updated_at=now)
+                if has_intimacy_decay:
+                    rel.apply_deltas(deltas, updated_at=now)
+                if has_fam_decay:
+                    rel.apply_familiarity_delta(familiarity_delta, updated_at=now)
                 await self.store.update_relationship(rel)
                 await self.store.add_score_event(
                     ScoreEvent(
@@ -195,6 +200,7 @@ class LifeSimulator:
                         # 关系统一后衰减为全局行为，group_id 仅作审计（reason 字段已记录衰减标识）
                         group_id="",
                         deltas=deltas,
+                        familiarity_delta=familiarity_delta,
                         composite_before=composite_before,
                         composite_after=rel.composite_score,
                         reason=f"time_decay_batch: {reason}",

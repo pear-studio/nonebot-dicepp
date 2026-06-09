@@ -36,7 +36,7 @@ class TestScoringToolPath:
     @pytest.mark.asyncio
     async def test_normal_tool_call_collection(self, agent, mock_router):
         """正常工具调用收集 → _extract_result 解析"""
-        mock_router._pending_tool_args = {"deltas": {"intimacy": 1.5, "passion": 0, "trust": 0.5, "secureness": 0}, "facts": {"爱好": "摄影"}}
+        mock_router._pending_tool_args = {"deltas": {"intimacy": 1.5, "reputation_delta": -5.0, "warning_issued": True}, "facts": {"爱好": "摄影"}}
 
         result = await agent.batch_analyze(
             messages=[
@@ -46,7 +46,8 @@ class TestScoringToolPath:
         )
 
         assert result.deltas.intimacy == 1.5
-        assert result.deltas.trust == 0.5
+        assert result.deltas.reputation_delta == -5.0
+        assert result.deltas.warning_issued is True
         assert result.facts == {"爱好": "摄影"}
         assert result.parse_error == ""
 
@@ -54,7 +55,7 @@ class TestScoringToolPath:
     async def test_empty_collected_fallback_to_parse_response(self, agent, mock_router):
         """collected 为空 → fallback 到 _parse_response(content)"""
         mock_router._pending_tool_args = None
-        mock_router._pending_final_output = '{"deltas": {"intimacy": -1.0, "passion": 0, "trust": 0, "secureness": 0}, "facts": {}}'
+        mock_router._pending_final_output = '{"deltas": {"intimacy": -1.0, "reputation_delta": 0.0}, "facts": {}}'
 
         result = await agent.batch_analyze(
             messages=[{"role": "user", "content": "test"}, {"role": "assistant", "content": "ok"}],

@@ -82,7 +82,7 @@ class TestGetOrCreate:
     async def test_cold_start_clears_tracker(self, mgr, store):
         """冷启动时清理旧 tracker"""
         # Pre-populate tracker
-        mgr._trackers["u1"] = {"last_warmth_label": "友好"}
+        mgr._trackers["u1"] = {"last_relation_label": "友好"}
         new_session = _make_session(session_id=1)
         store.create_session.return_value = new_session
 

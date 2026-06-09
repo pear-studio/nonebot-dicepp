@@ -16,7 +16,6 @@ from plugins.DicePP.module.persona.character.models import Character, PersonaExt
 def _make_mock_character():
     char = MagicMock()
     char.extensions = MagicMock()
-    char.extensions.initial_relationship = 50
     char.extensions.event_day_start_hour = 8
     char.extensions.event_day_end_hour = 22
     return char
@@ -264,7 +263,6 @@ class TestCharacterActiveExtendedEnd:
     @pytest.fixture
     def scheduler(self, mock_data_store, mock_config):
         ext = PersonaExtensions(
-            initial_relationship=50,
             event_day_start_hour=8,
             event_day_end_hour=25,  # 凌晨 1 点结束
             event_day_start_jitter_minutes=0,

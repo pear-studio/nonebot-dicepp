@@ -189,14 +189,12 @@ async def test_hard_truncation_triggered(temp_db):
 
 @pytest.mark.asyncio
 async def test_warmth_label_change(temp_db):
-    """预置 warmth=0 写库 → chat() 断言上下文含"冷淡" →
-    更新 warmth=50 → chat() 断言上下文含"友好"。"""
+    """预置 composite=0 写库 → chat() 断言上下文含"冷淡" →
+    更新 intimacy=100 → chat() 断言上下文含"友好"。"""
     store = temp_db
 
-    # 预置 warmth=0（冷淡）关系
-    rel = RelationshipState(
-        user_id="u1", intimacy=0, passion=0, trust=0, secureness=0,
-    )
+    # 预置 composite=0（冷淡）关系
+    rel = RelationshipState(user_id="u1", intimacy=0)
     await store.update_relationship(rel)
 
     sp = ScriptedProvider([
@@ -210,10 +208,8 @@ async def test_warmth_label_change(temp_db):
     # 上下文应包含"冷淡"标签
     assert _llm_messages_contain(sp.calls, "冷淡") or _llm_messages_contain(sp.calls, "陌生")
 
-    # 更新 warmth=50（友好）
-    rel2 = RelationshipState(
-        user_id="u1", intimacy=50, passion=50, trust=50, secureness=50,
-    )
+    # 更新 composite=40（友好）
+    rel2 = RelationshipState(user_id="u1", intimacy=100)
     await store.update_relationship(rel2)
 
     r2 = await session.chat("u1", "", "你好呀")

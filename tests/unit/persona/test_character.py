@@ -28,22 +28,20 @@ class TestCharacter:
     def test_with_extensions(self):
         """测试带扩展的角色"""
         ext = PersonaExtensions(
-            initial_relationship=50,
-            warmth_labels=["陌生", "熟悉", "朋友", "好友", "挚友", "知己"]
+            relation_labels=["陌生", "熟悉", "朋友", "好友", "挚友", "知己"]
         )
         char = Character(
             name="苏晓",
             description="一个温柔的AI伴侣",
             extensions=ext
         )
-        
-        assert char.extensions.initial_relationship == 50
-        assert char.get_warmth_labels()[0] == "陌生"
 
-    def test_get_warmth_labels_default(self):
+        assert char.get_relation_labels()[0] == "陌生"
+
+    def test_get_relation_labels_default(self):
         """测试默认温暖度标签（5元素）"""
         char = Character(name="测试")
-        labels = char.get_warmth_labels()
+        labels = char.get_relation_labels()
 
         assert len(labels) == 5
         assert labels[0] == "冷淡"
@@ -260,8 +258,7 @@ mes_example: |
   {{char}}: 你好呀~
 extensions:
   persona:
-    initial_relationship: 40
-    warmth_labels:
+    relation_labels:
       - 陌生
       - 熟悉
       - 朋友
@@ -269,7 +266,7 @@ extensions:
       - 挚友
       - 知己
 """
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             char_dir = os.path.join(tmpdir, "test_char")
             os.makedirs(char_dir, exist_ok=True)
@@ -279,9 +276,8 @@ extensions:
 
             loader = CharacterLoader(tmpdir)
             char = loader.load("test_char")
-            
+
             assert char.name == "测试角色"
-            assert char.extensions.initial_relationship == 40
 
     def test_load_nonexistent(self):
         """测试加载不存在的角色"""
@@ -319,8 +315,7 @@ extensions:
 name: 全字段角色
 extensions:
   persona:
-    initial_relationship: 60
-    warmth_labels:
+    relation_labels:
       - 冷淡
       - 普通
       - 友好
@@ -356,8 +351,7 @@ extensions:
 
             assert char.name == "全字段角色"
             ext = char.extensions
-            assert ext.initial_relationship == 60
-            assert ext.warmth_labels == ["冷淡", "普通", "友好", "亲密", "挚友"]
+            assert ext.relation_labels == ["冷淡", "普通", "友好", "亲密", "挚友"]
             assert ext.world == "现代都市"
             assert ext.daily_events_count == 8
             assert ext.event_day_start_hour == 7

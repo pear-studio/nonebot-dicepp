@@ -20,8 +20,7 @@ class ChatConfig:
     lore_token_budget: int = 300
     tools_max_rounds: int = 5
     relationship_refuse_enabled: bool = False
-    relationship_refuse_prob_base: float = 0.5
-    relationship_refuse_prob_max: float = 0.9
+    reputation_refuse_threshold: float = 30.0
     scoring_interval: int = 5
     max_messages: int = 100
     group_max_age_minutes: int = 60
@@ -52,8 +51,7 @@ class ChatConfig:
             lore_token_budget=persona.lore_token_budget,
             tools_max_rounds=persona.tools_max_rounds,
             relationship_refuse_enabled=persona.relationship_refuse_enabled,
-            relationship_refuse_prob_base=persona.relationship_refuse_prob_base,
-            relationship_refuse_prob_max=persona.relationship_refuse_prob_max,
+            reputation_refuse_threshold=persona.reputation_refuse_threshold,
             scoring_interval=persona.scoring_interval,
             max_messages=persona.max_messages,
             group_max_age_minutes=persona.group_max_age_minutes,

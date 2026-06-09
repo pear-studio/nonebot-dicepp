@@ -55,7 +55,7 @@ class ShareMessageContext:
     character_description: str = ""
     target_user_id: str = ""
     relationship_score: float = 0.0
-    warmth_label: str = ""
+    relation_label: str = ""
     user_profile_facts: str = ""
     recent_history: str = ""
     message_type: Literal["scheduled_event", "miss_you", "random_event"] = "scheduled_event"
@@ -640,7 +640,7 @@ class EventGenerationAgent:
 - 禁止添加与事件无关的内容
 - 可顺便回应"最近对话"中你尚未回复的消息，但必须紧接着分享当前事件。分享事件是这条消息的核心目的，不可因补答而遗漏分享
 
-关系亲密度（warmth_label）对应的语气参考：
+关系亲密度（relation_label）对应的语气参考：
 - "冷淡" / "陌生"：简短、礼貌、不过界
 - "一般" / "友好"：自然、可带轻微关心
 - "亲近" / "亲密"：放松、可撒娇、可调侃、可分享糗事
@@ -695,7 +695,7 @@ class EventGenerationAgent:
 
 对方信息：
 - 关系分数: {context.relationship_score:.0f}/100
-- 亲密度标签: {context.warmth_label}
+- 亲密度标签: {context.relation_label}
 
 已知关于对方的事实：
 {context.user_profile_facts}

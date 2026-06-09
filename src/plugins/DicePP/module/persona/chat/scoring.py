@@ -7,7 +7,7 @@ import json
 from typing import List, Dict, Any, Optional
 from utils.logger import logger
 from pydantic import BaseModel
-from ..data.models import ScoreDeltas, UserProfile, RelationshipState
+from ..data.models import ScoreDeltas, UserProfile, RelationshipState, DEFAULT_RELATION_LABELS
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import SelectionPolicy, SCORING
@@ -41,6 +41,8 @@ class ScoringAgent:
         relationship: Optional[RelationshipState] = None,
         user_id: str = "",
         group_id: str = "",
+        *,
+        warn_pending: bool = False,
     ) -> ScoringAnalysisResult:
         from ..agent.tool_bridge import run_structured_collect
 
@@ -51,6 +53,7 @@ class ScoringAgent:
             current_profile or UserProfile(user_id="", facts={}),
             relationship,
             tool_name=tool_name,
+            warn_pending=warn_pending,
         )
 
         try:
@@ -119,7 +122,9 @@ class ScoringAgent:
         messages: List[Dict[str, str]],
         profile: UserProfile,
         relationship: Optional[RelationshipState] = None,
-        tool_name: str = "score_relationship",
+        tool_name: str = "record_score",
+        *,
+        warn_pending: bool = False,
     ) -> str:
         dialogue_lines = []
         now = wall_now(self.timezone)
@@ -138,17 +143,30 @@ class ScoringAgent:
 
         relationship_info = ""
         if relationship:
-            level, label = relationship.get_warmth_level(["陌生", "熟悉", "友好", "亲近", "亲密", "知己"])
-            relationship_info = f"当前关系: {label} (综合好感度 {relationship.composite_score:.1f})\n"
-        
-        prompt = f"""分析以下对话，完成两个任务：
+            level, label = relationship.get_relation_level(DEFAULT_RELATION_LABELS)
+            relationship_info = (
+                f"当前关系: {label} (综合 {relationship.composite_score:.1f}, "
+                f"熟悉度 {relationship.familiarity:.1f}, 亲密度 {relationship.intimacy:.1f})\n"
+            )
 
-1. 评估好感度变化（四个维度：亲密度、激情、信任、安全感）
-2. 提取用户相关信息（名字、爱好、宠物等）
+        warn_info = ""
+        if warn_pending:
+            warn_info = (
+                "\n**注意**：上轮对话中用户有不当言论，AI 已设置警告标记（warn_pending）。"
+                "本轮如继续恶意行为，可以扣减 reputation。\n"
+            )
+
+        prompt = f"""分析以下对话，完成三个任务：
+
+1. 评估亲密度（intimacy）变化，范围 -5.0 到 +5.0
+2. 评估是否需要扣减信誉（reputation_delta）——仅限恶意行为（骚扰、谩骂、恶意刷屏等），范围 -30 到 0
+3. 提取用户相关信息（名字、爱好、宠物等）
+
+**注意**：熟悉度（familiarity）由系统自动根据互动频率计算，你不需要评估。
 
 ## 当前关系状态
 {relationship_info}
-
+{warn_info}
 ## 对话记录
 {dialogue}
 
@@ -157,12 +175,14 @@ class ScoringAgent:
 
 你必须通过调用 {tool_name} 工具来输出结果，不要直接回复文本。
 
-注意：
-- 好感度变化基于用户的态度、话题深度、情感表达
+评分指南：
+- intimacy 基于用户的态度、话题深度、情感表达
 - 用户友好、分享个人信息、表达情感 → 正分
 - 用户冷淡、敷衍、负面态度 → 负分
+- reputation_delta 仅在明确恶意行为时扣分（-30~0），正常互动为 0
+- **扣分前警告规则**：检查 AI 回复是否已包含不认可/警告表述；若已警告或上轮有 warn_pending 标记，则可以扣减 reputation；否则 reputation_delta 保持 0，系统会设置 warn_pending 在下一轮警告用户
 - 提取的事实要简洁具体"""
-        
+
         return prompt
 
     def _parse_response(self, response: str) -> tuple[ScoreDeltas, Dict[str, Any], str]:
@@ -193,7 +213,7 @@ class ScoringAgent:
         """从解析的数据中提取结果
 
         兼容两种输入格式：
-        - 新格式 (record_score): 扁平字段 {intimacy, passion, trust, secureness, facts}
+        - 新格式 (record_score): 扁平字段 {intimacy, reputation_delta, facts}
         - 旧格式 (score_relationship): 嵌套 {deltas: {...}, facts: {...}}
         """
         # 判断格式：有 "deltas" 键 → 旧格式；否则 → 新格式
@@ -206,17 +226,16 @@ class ScoringAgent:
             deltas_data = {}
         deltas = ScoreDeltas(
             intimacy=self._safe_float(deltas_data.get("intimacy")),
-            passion=self._safe_float(deltas_data.get("passion")),
-            trust=self._safe_float(deltas_data.get("trust")),
-            secureness=self._safe_float(deltas_data.get("secureness")),
+            reputation_delta=self._safe_float(deltas_data.get("reputation_delta"), default=0.0),
+            warning_issued=bool(deltas_data.get("warning_issued", False)),
         )
-        
+
         # 限制范围
-        deltas = deltas.clamp(-5.0, 5.0)
-        
+        deltas = deltas.clamp()
+
         # 提取 facts
         facts = data.get("facts", {})
         if not isinstance(facts, dict):
             facts = {}
-        
+
         return deltas, facts

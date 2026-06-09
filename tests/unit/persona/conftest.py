@@ -252,8 +252,6 @@ def build_conversation_session(
     # 4. ChatConfig
     config = ChatConfig(
         relationship_refuse_enabled=refuse_enabled,
-        relationship_refuse_prob_base=0.3,
-        relationship_refuse_prob_max=0.9,
         scoring_interval=scoring_interval,
         timezone="Asia/Shanghai",
     )

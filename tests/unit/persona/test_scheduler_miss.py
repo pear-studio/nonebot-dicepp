@@ -15,7 +15,6 @@ from plugins.DicePP.module.persona.data.models import RelationshipState
 def _make_mock_character():
     char = MagicMock()
     char.extensions = MagicMock()
-    char.extensions.initial_relationship = 50
     char.extensions.event_day_start_hour = 8
     char.extensions.event_day_end_hour = 22
     return char
@@ -33,6 +32,7 @@ class TestProactiveSchedulerMissYou:
         store.list_active_relationships = AsyncMock(return_value=[])
         store.get_daily_events = AsyncMock(return_value=[])
         store.update_relationship = AsyncMock()
+        store.try_daily_reputation_recovery = AsyncMock(return_value=False)
         store.get_relationship = AsyncMock(return_value=None)
         store.get_user_profile = AsyncMock(return_value=None)
         store.get_recent_messages = AsyncMock(return_value=[])
@@ -86,14 +86,11 @@ class TestProactiveSchedulerMissYou:
         rel = RelationshipState(
             user_id="u1",
             intimacy=10,
-            passion=10,
-            trust=10,
-            secureness=10,
             last_interaction_at=fake_now - timedelta(hours=100),
         )
         mock_data_store.list_active_relationships.return_value = [rel]
         result = await scheduler._check_missed_users()
-        assert result == []  # score=10 < miss_min_score=20
+        assert result == []  # composite=4.0 < miss_min_score=20
 
     @pytest.mark.asyncio
     async def test_miss_respects_idle_time(self, scheduler, mock_data_store, monkeypatch):
@@ -105,9 +102,6 @@ class TestProactiveSchedulerMissYou:
         rel = RelationshipState(
             user_id="u1",
             intimacy=60,
-            passion=60,
-            trust=60,
-            secureness=60,
             last_interaction_at=fake_now - timedelta(hours=10),
         )
         mock_data_store.list_active_relationships.return_value = [rel]
@@ -125,9 +119,6 @@ class TestProactiveSchedulerMissYou:
         rel = RelationshipState(
             user_id="u1",
             intimacy=80,
-            passion=80,
-            trust=80,
-            secureness=80,
             last_interaction_at=fake_now - timedelta(hours=100),
             last_miss_sent_at=fake_now - timedelta(hours=50),  # 已发过想念
         )
@@ -150,12 +141,13 @@ class TestProactiveSchedulerMissYou:
             "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
             lambda tz: fake_now,
         )
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.random.random",
+            lambda: 0.0,
+        )
         rel = RelationshipState(
             user_id="u1",
             intimacy=80,
-            passion=80,
-            trust=80,
-            secureness=80,
             last_interaction_at=fake_now - timedelta(hours=100),
             last_miss_sent_at=None,  # 用户已回应，允许再发
         )
@@ -179,9 +171,6 @@ class TestProactiveSchedulerMissYou:
         rel = RelationshipState(
             user_id="u1",
             intimacy=60,
-            passion=60,
-            trust=60,
-            secureness=60,
             last_interaction_at=fake_now - timedelta(hours=100),
         )
         mock_data_store.list_active_relationships.return_value = [rel]
@@ -202,6 +191,7 @@ class TestProactiveSchedulerMissProbability:
         store.list_active_relationships = AsyncMock(return_value=[])
         store.get_daily_events = AsyncMock(return_value=[])
         store.update_relationship = AsyncMock()
+        store.try_daily_reputation_recovery = AsyncMock(return_value=False)
         store.get_relationship = AsyncMock(return_value=None)
         store.get_user_profile = AsyncMock(return_value=None)
         store.get_recent_messages = AsyncMock(return_value=[])
@@ -236,9 +226,7 @@ class TestProactiveSchedulerMissProbability:
         return RelationshipState(
             user_id="u1",
             intimacy=score,
-            passion=score,
-            trust=score,
-            secureness=score,
+            familiarity=score,
             last_interaction_at=fake_now - timedelta(hours=100),
         )
 

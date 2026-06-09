@@ -547,8 +547,10 @@ class TestRecentDiaries:
     """测试 get_recent_diaries 和 search_diaries"""
 
     @pytest.mark.asyncio
-    async def test_get_recent_diaries(self, temp_db):
+    async def test_get_recent_diaries(self, temp_db, monkeypatch):
         store = temp_db
+        # 冻结时间为 2026-06-02，确保 7 天窗口覆盖两篇日记
+        monkeypatch.setattr(store, "_wall_now", lambda: datetime(2026, 6, 2, 12, 0, 0))
         await store.save_diary("2026-06-01", "content1")
         await store.save_diary("2026-06-02", "content2")
 
@@ -560,8 +562,10 @@ class TestRecentDiaries:
         assert diaries[1][1] == "content1"
 
     @pytest.mark.asyncio
-    async def test_search_diaries_public(self, temp_db):
+    async def test_search_diaries_public(self, temp_db, monkeypatch):
         store = temp_db
+        # 冻结时间为 2026-06-02，确保 7 天窗口覆盖两篇日记
+        monkeypatch.setattr(store, "_wall_now", lambda: datetime(2026, 6, 2, 12, 0, 0))
         await store.save_diary("2026-06-01", "今天天气很好")
         await store.save_diary("2026-06-02", "下雨了")
 
@@ -959,28 +963,28 @@ class TestRelationshipCRUD:
     @pytest.mark.asyncio
     async def test_init_and_get_relationship(self, temp_db):
         store = temp_db
-        rel = await store.init_relationship("u1", initial_score=40.0)
+        rel = await store.init_relationship("u1")
         assert rel.user_id == "u1"
-        assert rel.intimacy == 40.0
-        assert rel.passion == 40.0
+        assert rel.intimacy == 0.0
+        assert rel.familiarity == 0.0
 
     @pytest.mark.asyncio
     async def test_update_relationship(self, temp_db):
         store = temp_db
-        rel = await store.init_relationship("u1", initial_score=30.0)
+        rel = await store.init_relationship("u1")
         rel.intimacy = 50.0
-        rel.passion = 45.0
+        rel.familiarity = 45.0
         await store.update_relationship(rel)
 
         rel2 = await store.get_relationship("u1")
         assert rel2.intimacy == 50.0
-        assert rel2.passion == 45.0
+        assert rel2.familiarity == 45.0
 
     @pytest.mark.asyncio
     async def test_list_all_relationships_raw(self, temp_db):
         store = temp_db
-        await store.init_relationship("u1", 30.0)
-        await store.init_relationship("u2", 40.0)
+        await store.init_relationship("u1")
+        await store.init_relationship("u2")
 
         rels = await store.list_all_relationships_raw()
         assert len(rels) == 2
@@ -990,7 +994,7 @@ class TestRelationshipCRUD:
     @pytest.mark.asyncio
     async def test_list_active_relationships(self, temp_db):
         store = temp_db
-        await store.init_relationship("u1", 30.0)
+        await store.init_relationship("u1")
         rels = await store.list_active_relationships(min_score=0, active_within_days=30)
         assert len(rels) >= 1
 

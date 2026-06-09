@@ -1,17 +1,23 @@
 """
 时间衰减系统
 
-实现好感度随时间自然衰减的逻辑
+实现好感度随时间自然衰减的逻辑（半衰期模型）
 """
+import math
 from typing import Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 from utils.logger import logger
-from ..data.models import RelationshipState, ScoreDeltas, STAGE_FLOORS
+from ..data.models import RelationshipState, ScoreDeltas
 from utils.time import wall_now
 
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
+
+# 半衰期参数（默认值，实际从 DecayConfig / PersonaConfig 读取）
+HALF_LIFE_FAMILIARITY = 35   # 熟悉度半衰期（天）
+HALF_LIFE_INTIMACY = 21     # 亲密度半衰期（天）
+FLOOR_RATIO = 0.5           # 软下限 = peak × 0.5
 
 
 def _decay_hours_elapsed(
@@ -24,6 +30,21 @@ def _decay_hours_elapsed(
     return max(0.0, idle_hours - grace_hours)
 
 
+def _calc_dim_decay(current: float, peak: float, half_life_days: float, idle_days: float,
+                   floor_ratio: float = 0.5) -> float:
+    """半衰期公式计算单维度衰减量。
+
+    decay = gap × (1 - e^(-ln(2) × idle_days / half_life_days))
+    其中 gap = current - peak × floor_ratio
+    """
+    floor = peak * floor_ratio
+    gap = current - floor
+    if gap <= 0:
+        return 0.0
+    decay = gap * (1.0 - math.exp(-math.log(2) * idle_days / half_life_days))
+    return min(decay, gap)
+
+
 class DecayConfig:
     """衰减配置（运行时用；字段与 `PersonaConfig` 的 decay_* 一一对应）"""
 
@@ -31,13 +52,15 @@ class DecayConfig:
         self,
         enabled: bool = True,
         grace_period_hours: int = 8,
-        decay_rate_per_hour: float = 0.5,
-        daily_cap: float = 5.0,
+        familiarity_half_life_days: int = HALF_LIFE_FAMILIARITY,
+        intimacy_half_life_days: int = HALF_LIFE_INTIMACY,
+        floor_ratio: float = FLOOR_RATIO,
     ):
         self.enabled = enabled
         self.grace_period_hours = grace_period_hours
-        self.decay_rate_per_hour = decay_rate_per_hour
-        self.daily_cap = daily_cap
+        self.familiarity_half_life_days = familiarity_half_life_days
+        self.intimacy_half_life_days = intimacy_half_life_days
+        self.floor_ratio = floor_ratio
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "DecayConfig":
@@ -45,13 +68,14 @@ class DecayConfig:
         return cls(
             enabled=persona.decay_enabled,
             grace_period_hours=persona.decay_grace_period_hours,
-            decay_rate_per_hour=persona.decay_rate_per_hour,
-            daily_cap=persona.decay_daily_cap,
+            familiarity_half_life_days=persona.decay_familiarity_half_life_days,
+            intimacy_half_life_days=persona.decay_intimacy_half_life_days,
+            floor_ratio=persona.decay_floor_ratio,
         )
 
 
 class DecayCalculator:
-    """衰减计算器（增量计费：批处理与对话共用 `last_relationship_decay_applied_at` 水位）。"""
+    """衰减计算器（半衰期模型，增量计费：双维度独立衰减）。"""
 
     def __init__(self, config: DecayConfig, *, timezone_name: str = "Asia/Shanghai"):
         self.config = config
@@ -64,39 +88,39 @@ class DecayCalculator:
         self,
         relationship: RelationshipState,
         now: Optional[datetime] = None,
-    ) -> Tuple[ScoreDeltas, str]:
+    ) -> Tuple[ScoreDeltas, float, str]:
         """
-        计算衰减量
+        计算双维度衰减量（半衰期模型）。
 
         Args:
             relationship: 当前关系状态
             now: 当前时间（默认为配置时区墙钟）
 
         Returns:
-            (衰减量, 计算说明)
+            (deltas, familiarity_decay, 计算说明)
+            - deltas.intimacy: intimacy 衰减量（负值）
+            - familiarity_decay: familiarity 衰减量（负值 delta，可直接用于 apply_familiarity_delta）
         """
         if not self.config.enabled:
-            return ScoreDeltas(), "衰减已禁用"
+            return ScoreDeltas(), 0.0, "衰减已禁用"
 
         if not relationship.last_interaction_at:
-            return ScoreDeltas(), "无上次互动记录"
+            return ScoreDeltas(), 0.0, "无上次互动记录"
 
-        # 开关型衰减：想念消息发出前不衰减。
-        # 时间基准始终为 last_interaction_at；开关仅控制衰减是否执行，不改变时间基准。
-        # 开关打开后会结算开关关闭期间累积的未扣衰减（受 daily_cap 限制）。
+        # 开关型衰减：想念消息发出前不衰减
         if relationship.last_miss_sent_at is None:
-            return ScoreDeltas(), "想念开关关闭，不衰减"
+            return ScoreDeltas(), 0.0, "想念开关关闭，不衰减"
 
         now = self._resolve_now(now)
         t0 = relationship.last_interaction_at
         idle_hours = (now - t0).total_seconds() / 3600.0
 
-        if idle_hours <= self.config.grace_period_hours:
-            return ScoreDeltas(), (
-                f"免衰减期内 ({idle_hours:.1f}h <= {self.config.grace_period_hours}h)"
+        grace = float(self.config.grace_period_hours)
+        if idle_hours <= grace:
+            return ScoreDeltas(), 0.0, (
+                f"免衰减期内 ({idle_hours:.1f}h <= {grace}h)"
             )
 
-        grace = float(self.config.grace_period_hours)
         h_now = _decay_hours_elapsed(t0, now, grace)
 
         ta = relationship.last_relationship_decay_applied_at
@@ -109,35 +133,34 @@ class DecayCalculator:
 
         delta_h = max(0.0, h_now - h_then)
         if delta_h <= 1e-9:
-            return ScoreDeltas(), "自上次衰减评估以来无新增可衰减空闲时长"
+            return ScoreDeltas(), 0.0, "自上次衰减评估以来无新增可衰减空闲时长"
 
-        raw_decay = delta_h * self.config.decay_rate_per_hour
-        decay_amount = min(raw_decay, self.config.daily_cap)
+        idle_days = delta_h / 24.0
 
-        # 阶段下限锁底：以历史最高阶段对应的下界为下限
-        stage_floor = STAGE_FLOORS[relationship.peak_stage]
-        current_score = relationship.composite_score
-        allowed_decay = max(0.0, current_score - stage_floor)
-        actual_decay = min(decay_amount, allowed_decay)
+        intimacy_half = self.config.intimacy_half_life_days
+        familiarity_half = self.config.familiarity_half_life_days
+        floor_ratio = self.config.floor_ratio
 
-        if actual_decay <= 0:
-            return ScoreDeltas(), f"已到达阶段下限 ({current_score:.1f} <= {stage_floor:.1f})"
-
-        deltas = ScoreDeltas(
-            intimacy=-actual_decay,
-            passion=-actual_decay,
-            trust=-actual_decay,
-            secureness=-actual_decay,
+        intimacy_decay = _calc_dim_decay(
+            relationship.intimacy, relationship.peak_intimacy,
+            intimacy_half, idle_days, floor_ratio=floor_ratio,
+        )
+        familiarity_decay = _calc_dim_decay(
+            relationship.familiarity, relationship.peak_familiarity,
+            familiarity_half, idle_days, floor_ratio=floor_ratio,
         )
 
+        deltas = ScoreDeltas(intimacy=-intimacy_decay)
+
         reason = (
-            f"空闲 {idle_hours:.1f}h (免衰减 {self.config.grace_period_hours}h), "
-            f"增量可衰减 {delta_h:.2f}h, 原始衰减 {raw_decay:.2f}, 上限后 {decay_amount:.2f}, "
-            f"阶段下限保护后 {actual_decay:.2f} (下限 {stage_floor:.1f})"
+            f"空闲 {idle_hours:.1f}h (免衰减 {grace}h), "
+            f"增量可衰减 {delta_h:.2f}h ({idle_days:.2f}d), "
+            f"intimacy_decay={intimacy_decay:.2f} (half={intimacy_half}d, floor={floor_ratio}, peak={relationship.peak_intimacy:.1f}), "
+            f"familiarity_decay={familiarity_decay:.2f} (half={familiarity_half}d, floor={floor_ratio}, peak={relationship.peak_familiarity:.1f})"
         )
 
         logger.debug("Decay calculated for {}: {}", relationship.user_id, reason)
-        return deltas, reason
+        return deltas, -familiarity_decay, reason
 
     def effective_relationship(
         self,
@@ -145,10 +168,14 @@ class DecayCalculator:
         now: Optional[datetime] = None,
     ) -> RelationshipState:
         """返回应用时间衰减后的关系副本（不写库），用于对话/展示。"""
-        deltas, _ = self.calculate_decay(relationship, now)
+        deltas, familiarity_decay, _ = self.calculate_decay(relationship, now)
         out = relationship.model_copy(deep=True)
-        if abs(deltas.intimacy) > 0.01:
-            out.apply_deltas(deltas, updated_at=self._resolve_now(now))
+        updated = self._resolve_now(now)
+        if abs(deltas.intimacy) > 0.01 or abs(familiarity_decay) > 0.01:
+            if abs(deltas.intimacy) > 0.01:
+                out.apply_deltas(deltas, updated_at=updated)
+            if abs(familiarity_decay) > 0.01:
+                out.apply_familiarity_delta(familiarity_decay, updated_at=updated)
         return out
 
     def should_apply_decay(
@@ -171,10 +198,10 @@ class DecayCalculator:
         t0 = relationship.last_interaction_at
         idle_hours = (now - t0).total_seconds() / 3600.0
 
-        if idle_hours <= self.config.grace_period_hours:
+        grace = float(self.config.grace_period_hours)
+        if idle_hours <= grace:
             return False
 
-        grace = float(self.config.grace_period_hours)
         h_now = _decay_hours_elapsed(t0, now, grace)
         ta = relationship.last_relationship_decay_applied_at
         if ta is not None:

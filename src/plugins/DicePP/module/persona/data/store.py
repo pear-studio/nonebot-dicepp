@@ -28,7 +28,7 @@ from .models import (
     WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
     RelationshipState, DailyEvent, GroupActivity, UserLLMConfig,
     LLMTraceRecord, CharacterState,
-    ScoringFailure, UnifiedMessage, MessageType, DEFAULT_WARMTH_LABELS,
+    ScoringFailure, UnifiedMessage, MessageType, DEFAULT_RELATION_LABELS,
     DEFAULT_SESSION_TOKEN_BUDGET,
 )
 from .migrations import (
@@ -37,6 +37,8 @@ from .migrations import (
     DROP_LEGACY_USER_INDEX, DROP_LEGACY_GROUP_INDEX,
     ALTER_MESSAGE_STREAM_COLUMNS,
     ALTER_LLM_TRACES_COLUMNS,
+    ALTER_USER_RELATIONSHIPS_COLUMNS,
+    ALTER_SCORE_HISTORY_COLUMNS,
 )
 
 
@@ -151,6 +153,20 @@ class PersonaDataStore:
                     raise
         # Phase 1: persona_llm_traces 扩展列（幂等 ALTER TABLE）
         for alter_sql in ALTER_LLM_TRACES_COLUMNS:
+            try:
+                await persona_db.execute(alter_sql)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    raise
+        # persona_user_relationships 扩展列（四维→三维模型迁移，幂等 ALTER TABLE）
+        for alter_sql in ALTER_USER_RELATIONSHIPS_COLUMNS:
+            try:
+                await persona_db.execute(alter_sql)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    raise
+        # persona_score_history 扩展列（四维→三维模型迁移，幂等 ALTER TABLE）
+        for alter_sql in ALTER_SCORE_HISTORY_COLUMNS:
             try:
                 await persona_db.execute(alter_sql)
             except sqlite3.OperationalError as e:
@@ -912,7 +928,7 @@ class PersonaDataStore:
         """获取最近评分事件，用于趋势计算"""
         async with self.db.execute(
             """
-            SELECT user_id, group_id, intimacy_delta, passion_delta, trust_delta, secureness_delta,
+            SELECT user_id, group_id, intimacy_delta, reputation_delta, familiarity_delta,
                    composite_before, composite_after, reason, conversation_digest, created_at
             FROM persona_score_history
             WHERE user_id = ?
@@ -928,11 +944,10 @@ class PersonaDataStore:
                     user_id=row["user_id"],
                     group_id=row["group_id"],
                     deltas=ScoreDeltas(
-                        intimacy=row["intimacy_delta"],
-                        passion=row["passion_delta"],
-                        trust=row["trust_delta"],
-                        secureness=row["secureness_delta"]
+                        intimacy=row["intimacy_delta"] if row.get("intimacy_delta") is not None else 0.0,
+                        reputation_delta=row["reputation_delta"] if row.get("reputation_delta") is not None else 0.0,
                     ),
+                    familiarity_delta=row["familiarity_delta"] if row.get("familiarity_delta") is not None else 0.0,
                     composite_before=row["composite_before"],
                     composite_after=row["composite_after"],
                     reason=row["reason"],
@@ -1132,17 +1147,16 @@ class PersonaDataStore:
         await self.db.execute(
             """
             INSERT INTO persona_score_history
-            (user_id, group_id, intimacy_delta, passion_delta, trust_delta, secureness_delta,
+            (user_id, group_id, intimacy_delta, reputation_delta, familiarity_delta,
              composite_before, composite_after, reason, conversation_digest, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event.user_id,
                 event.group_id,
                 event.deltas.intimacy,
-                event.deltas.passion,
-                event.deltas.trust,
-                event.deltas.secureness,
+                event.deltas.reputation_delta,
+                event.familiarity_delta,
                 event.composite_before,
                 event.composite_after,
                 event.reason,
@@ -1508,8 +1522,14 @@ class PersonaDataStore:
     async def get_relationship(self, user_id: str) -> Optional[RelationshipState]:
         async with self.db.execute(
             """
-            SELECT intimacy, passion, trust, secureness, last_interaction_at,
-                   last_relationship_decay_applied_at, last_miss_sent_at, peak_stage, updated_at
+            SELECT COALESCE(familiarity, 0.0) AS familiarity,
+                   COALESCE(peak_familiarity, 0.0) AS peak_familiarity,
+                   COALESCE(intimacy, 0.0) AS intimacy,
+                   COALESCE(peak_intimacy, 0.0) AS peak_intimacy,
+                   COALESCE(reputation, 100.0) AS reputation,
+                   last_interaction_at, last_reputation_recovery_date,
+                   last_relationship_decay_applied_at,
+                   last_miss_sent_at, updated_at
             FROM persona_user_relationships
             WHERE user_id = ?
             """,
@@ -1520,46 +1540,45 @@ class PersonaDataStore:
                 return None
             return RelationshipState(
                 user_id=user_id,
+                familiarity=row["familiarity"],
+                peak_familiarity=row["peak_familiarity"],
                 intimacy=row["intimacy"],
-                passion=row["passion"],
-                trust=row["trust"],
-                secureness=row["secureness"],
+                peak_intimacy=row["peak_intimacy"],
+                reputation=row["reputation"],
                 last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
+                last_reputation_recovery_date=(
+                    datetime.fromisoformat(row["last_reputation_recovery_date"])
+                    if row.get("last_reputation_recovery_date")
+                    else None
+                ),
                 last_relationship_decay_applied_at=(
                     datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
                 ),
                 last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
-                peak_stage=row["peak_stage"] if row.get("peak_stage") is not None else 0,
                 updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
             )
 
-    async def init_relationship(self, user_id: str, initial_score: float = 40.0) -> RelationshipState:
-        tmp_rel = RelationshipState(
-            user_id=user_id,
-            intimacy=initial_score,
-            passion=initial_score,
-            trust=initial_score,
-            secureness=initial_score,
-        )
-        initial_stage, _ = tmp_rel.get_warmth_level(DEFAULT_WARMTH_LABELS)
+    async def init_relationship(self, user_id: str) -> RelationshipState:
         await self.db.execute(
             """
             INSERT OR IGNORE INTO persona_user_relationships
-            (user_id, intimacy, passion, trust, secureness,
-             last_interaction_at, last_relationship_decay_applied_at,
-             last_miss_sent_at, peak_stage, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, familiarity, peak_familiarity, intimacy, peak_intimacy, reputation,
+             last_interaction_at, last_reputation_recovery_date,
+             last_relationship_decay_applied_at,
+             last_miss_sent_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
-                initial_score,
-                initial_score,
-                initial_score,
-                initial_score,
+                0.0,   # familiarity
+                0.0,   # peak_familiarity
+                0.0,   # intimacy
+                0.0,   # peak_intimacy
+                100.0, # reputation
                 self._wall_now().isoformat(),
                 None,
                 None,
-                initial_stage,
+                None,
                 self._wall_now().isoformat(),
             )
         )
@@ -1580,49 +1599,116 @@ class PersonaDataStore:
             if rel.last_miss_sent_at
             else None
         )
+        recovery_at = (
+            rel.last_reputation_recovery_date.isoformat()
+            if rel.last_reputation_recovery_date
+            else None
+        )
         await self.db.execute(
             """
             INSERT INTO persona_user_relationships
-            (user_id, intimacy, passion, trust, secureness,
-             last_interaction_at, last_relationship_decay_applied_at,
-             last_miss_sent_at, peak_stage, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (user_id, familiarity, peak_familiarity, intimacy, peak_intimacy, reputation,
+             last_interaction_at, last_reputation_recovery_date,
+             last_relationship_decay_applied_at,
+             last_miss_sent_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
+                familiarity = excluded.familiarity,
+                peak_familiarity = excluded.peak_familiarity,
                 intimacy = excluded.intimacy,
-                passion = excluded.passion,
-                trust = excluded.trust,
-                secureness = excluded.secureness,
+                peak_intimacy = excluded.peak_intimacy,
+                reputation = excluded.reputation,
                 last_interaction_at = excluded.last_interaction_at,
+                last_reputation_recovery_date = excluded.last_reputation_recovery_date,
                 last_relationship_decay_applied_at = excluded.last_relationship_decay_applied_at,
                 last_miss_sent_at = excluded.last_miss_sent_at,
-                peak_stage = excluded.peak_stage,
                 updated_at = excluded.updated_at
             """,
             (
                 rel.user_id,
+                rel.familiarity,
+                rel.peak_familiarity,
                 rel.intimacy,
-                rel.passion,
-                rel.trust,
-                rel.secureness,
+                rel.peak_intimacy,
+                rel.reputation,
                 rel.last_interaction_at.isoformat()
                 if rel.last_interaction_at
                 else self._wall_now().isoformat(),
+                recovery_at,
                 decay_at,
                 miss_at,
-                rel.peak_stage,
                 self._wall_now().isoformat(),
             )
         )
         await self.db.commit()
 
+    async def try_daily_reputation_recovery(
+        self, rel: RelationshipState, now: datetime,
+        *, persist: bool = True,
+    ) -> bool:
+        """执行 reputation 每日恢复。返回是否发生了恢复。
+
+        persist=True（默认）时立即持久化，适用于 session.py 和 proactive_scheduler.py
+        等恢复后方法即返回的场景。
+        persist=False 时仅修改内存，由调用方在后续统一 update_relationship 时持久化，
+        适用于 on_interaction 等已有后续持久化的路径。
+        """
+        if rel.reputation >= 100.0:
+            return False
+        today = now.strftime("%Y-%m-%d")
+        last_recovery = rel.last_reputation_recovery_date
+        last_date = (
+            last_recovery.strftime("%Y-%m-%d") if last_recovery else None
+        )
+        if last_date == today:
+            return False
+        rel.reputation = min(100.0, rel.reputation + 2.0)
+        rel.last_reputation_recovery_date = now
+        if persist:
+            await self.update_relationship(rel)
+        return True
+
+    async def get_familiarity_daily(self, user_id: str, date: str) -> float:
+        """获取用户指定日期的 familiarity 累计值。"""
+        async with self.db.execute(
+            "SELECT total FROM persona_familiarity_daily WHERE user_id = ? AND date = ?",
+            (user_id, date),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row["total"] if row and row.get("total") is not None else 0.0
+
+    async def add_familiarity_daily(
+        self, user_id: str, date: str, delta: float, cap: float = 15.0
+    ) -> float:
+        """原子递增 familiarity 日累计，返回递增后的 total（不超过 cap）。
+        若增量会超过 cap，则截断到 cap。
+        """
+        await self.db.execute(
+            """
+            INSERT INTO persona_familiarity_daily (user_id, date, total)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, date) DO UPDATE SET
+                total = MIN(?, total + excluded.total)
+            """,
+            (user_id, date, delta, cap),
+        )
+        await self.db.commit()
+        return await self.get_familiarity_daily(user_id, date)
+
     async def get_top_relationships(self, limit: int = 10) -> List[RelationshipState]:
         async with self.db.execute(
             """
-            SELECT user_id, intimacy, passion, trust, secureness,
-                   last_interaction_at, last_relationship_decay_applied_at,
-                   last_miss_sent_at, peak_stage, updated_at
+            SELECT user_id,
+                   COALESCE(familiarity, 0.0) AS familiarity,
+                   COALESCE(peak_familiarity, 0.0) AS peak_familiarity,
+                   COALESCE(intimacy, 0.0) AS intimacy,
+                   COALESCE(peak_intimacy, 0.0) AS peak_intimacy,
+                   COALESCE(reputation, 100.0) AS reputation,
+                   last_interaction_at, last_reputation_recovery_date,
+                   last_relationship_decay_applied_at,
+                   last_miss_sent_at, updated_at
             FROM persona_user_relationships
-            ORDER BY (intimacy * 0.3 + passion * 0.2 + trust * 0.3 + secureness * 0.2) DESC
+            ORDER BY (familiarity * 0.6 + intimacy * 0.4) DESC
             LIMIT ?
             """,
             (limit,),
@@ -1631,16 +1717,16 @@ class PersonaDataStore:
             return [
                 RelationshipState(
                     user_id=row["user_id"],
+                    familiarity=row["familiarity"],
+                    peak_familiarity=row["peak_familiarity"],
                     intimacy=row["intimacy"],
-                    passion=row["passion"],
-                    trust=row["trust"],
-                    secureness=row["secureness"],
+                    peak_intimacy=row["peak_intimacy"],
+                    reputation=row["reputation"],
                     last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
                     last_relationship_decay_applied_at=(
                         datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
                     ),
                     last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
-                    peak_stage=row["peak_stage"] if row.get("peak_stage") is not None else 0,
                     updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
                 )
                 for row in rows
@@ -1838,9 +1924,14 @@ class PersonaDataStore:
         """列出所有关系行，无过滤（用于每日衰减批处理等）。"""
         async with self.db.execute(
             """
-            SELECT user_id, intimacy, passion, trust, secureness,
+            SELECT user_id,
+                   COALESCE(familiarity, 0.0) AS familiarity,
+                   COALESCE(peak_familiarity, 0.0) AS peak_familiarity,
+                   COALESCE(intimacy, 0.0) AS intimacy,
+                   COALESCE(peak_intimacy, 0.0) AS peak_intimacy,
+                   COALESCE(reputation, 100.0) AS reputation,
                    last_interaction_at, last_relationship_decay_applied_at,
-                   last_miss_sent_at, peak_stage, updated_at
+                   last_miss_sent_at, updated_at
             FROM persona_user_relationships
             ORDER BY user_id
             """
@@ -1849,16 +1940,16 @@ class PersonaDataStore:
             return [
                 RelationshipState(
                     user_id=row["user_id"],
+                    familiarity=row["familiarity"],
+                    peak_familiarity=row["peak_familiarity"],
                     intimacy=row["intimacy"],
-                    passion=row["passion"],
-                    trust=row["trust"],
-                    secureness=row["secureness"],
+                    peak_intimacy=row["peak_intimacy"],
+                    reputation=row["reputation"],
                     last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
                     last_relationship_decay_applied_at=(
                         datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
                     ),
                     last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
-                    peak_stage=row["peak_stage"] if row.get("peak_stage") is not None else 0,
                     updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None,
                 )
                 for row in rows
@@ -1878,11 +1969,16 @@ class PersonaDataStore:
 
         async with self.db.execute(
             """
-            SELECT user_id, intimacy, passion, trust, secureness,
+            SELECT user_id,
+                   COALESCE(familiarity, 0.0) AS familiarity,
+                   COALESCE(peak_familiarity, 0.0) AS peak_familiarity,
+                   COALESCE(intimacy, 0.0) AS intimacy,
+                   COALESCE(peak_intimacy, 0.0) AS peak_intimacy,
+                   COALESCE(reputation, 100.0) AS reputation,
                    last_interaction_at, last_relationship_decay_applied_at,
-                   last_miss_sent_at, peak_stage, updated_at
+                   last_miss_sent_at, updated_at
             FROM persona_user_relationships
-            WHERE (intimacy * 0.3 + passion * 0.2 + trust * 0.3 + secureness * 0.2) >= ?
+            WHERE (familiarity * 0.6 + intimacy * 0.4) >= ?
               AND last_interaction_at >= ?
             ORDER BY last_interaction_at DESC
             """,
@@ -1892,16 +1988,16 @@ class PersonaDataStore:
             return [
                 RelationshipState(
                     user_id=row["user_id"],
+                    familiarity=row["familiarity"],
+                    peak_familiarity=row["peak_familiarity"],
                     intimacy=row["intimacy"],
-                    passion=row["passion"],
-                    trust=row["trust"],
-                    secureness=row["secureness"],
+                    peak_intimacy=row["peak_intimacy"],
+                    reputation=row["reputation"],
                     last_interaction_at=datetime.fromisoformat(row["last_interaction_at"]) if row.get("last_interaction_at") else None,
                     last_relationship_decay_applied_at=(
                         datetime.fromisoformat(row["last_relationship_decay_applied_at"]) if row.get("last_relationship_decay_applied_at") else None
                     ),
                     last_miss_sent_at=datetime.fromisoformat(row["last_miss_sent_at"]) if row.get("last_miss_sent_at") else None,
-                    peak_stage=row["peak_stage"] if row.get("peak_stage") is not None else 0,
                     updated_at=datetime.fromisoformat(row["updated_at"]) if row.get("updated_at") else None
                 )
                 for row in rows

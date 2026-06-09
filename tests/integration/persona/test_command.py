@@ -177,11 +177,9 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         self.cmd.app.chat.character.name = "TestChar"
         self.cmd.app.chat.character.description = "A test char"
         self.cmd.app.chat.character.extensions = MagicMock()
-        self.cmd.app.chat.character.extensions.initial_relationship = 30.0
-        self.cmd.app.chat.character.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
+        self.cmd.app.chat.character.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.app.get_character.return_value = self.cmd.app.chat.character
-        self.cmd.app.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
-        self.cmd.app.get_initial_relationship.return_value = 30.0
+        self.cmd.app.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.app.current_character_name = "test_char"
 
         self.cmd.app.life = MagicMock()
@@ -356,9 +354,9 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         self.cmd.app.chat.character = MagicMock()
         self.cmd.app.chat.character.name = "TestChar"
         self.cmd.app.chat.character.description = "A test char"
-        self.cmd.app.chat.character.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
+        self.cmd.app.chat.character.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
         self.cmd.app.get_character.return_value = self.cmd.app.chat.character
-        self.cmd.app.get_warmth_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
+        self.cmd.app.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
 
         self.cmd._get_relationship_for_display = AsyncMock(return_value=None)
         self.cmd.app.clear_chat_history = AsyncMock()

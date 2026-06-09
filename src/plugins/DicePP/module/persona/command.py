@@ -622,12 +622,11 @@ class PersonaCommand(UserCommandBase):
         lines = ["你的档案"]
 
         if rel:
-            warmth_level = 0
-            warmth_label = "未知"
+            relation_label = "未知"
             if self.app and self.app.get_character():
-                warmth_level, warmth_label = rel.get_warmth_level(self.app.get_warmth_labels())
+                relation_level, relation_label = rel.get_relation_level(self.app.get_relation_labels())
 
-            lines.append(f"\n好感度: {warmth_label} (区间 {warmth_level}/6)")
+            lines.append(f"\n好感度: {relation_label} (区间 {relation_level}/5)")
             base_lines = self._format_relationship_base(rel, precision=1)
             lines.extend(base_lines[1:])  # 去掉 [好感度] 标题
 

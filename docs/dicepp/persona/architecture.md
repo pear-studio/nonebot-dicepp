@@ -267,22 +267,23 @@ Command.tick_daily() 每天调用
 
 #### `RelationshipState`
 
-四维好感度模型：
-- `intimacy`（亲密度，权重 0.3）
-- `passion`（激情，权重 0.2）
-- `trust`（信任，权重 0.3）
-- `secureness`（安全感，权重 0.2）
+三维好感度模型：
+- `familiarity`（熟悉度，权重 0.6）— 规则引擎驱动，所有互动（指令/聊天）自动结算
+- `intimacy`（亲密度，权重 0.4）— LLM 评分驱动，评估对话情感质量
+- `reputation`（信誉）— 独立门控维度，不参与 composite，仅用于拒绝和想念门控
 
-`composite_score` = 加权平均，映射到 5 个温暖度等级和角色卡自定义标签。
+`composite_score = familiarity × 0.6 + intimacy × 0.4`，映射到 5 个关系等级和角色卡自定义标签。
 
 #### `DecayCalculator`
 
-时间衰减计算：
-- 超过 `grace_period_hours` 后开始衰减
-- 衰减率 `decay_rate_per_hour`，单次上限 `decay_daily_cap`
-- 衰减下限 = `STAGE_FLOORS[peak_stage]`（历史最高阶段下界，单调递增）
+时间衰减计算（半衰期模型）：
+- 超过免衰减期（`grace_period_hours`）后开始衰减
+- 半衰期参数：familiarity 35 天，intimacy 21 天
+- 软下限 = `peak × 0.5`（双维度独立保护）
+- `daily_decay = gap × (1 - e^(-ln(2) / half_life_days))`, 其中 `gap = current - floor`
 - **惰性计算**：对话展示和评分时使用 `effective_relationship()` 计算当前应得分数，不立即写库
 - **每日批处理**：`tick_daily()` 中将长时间未互动用户的衰减批量持久化
+- peak 在分数增加时更新为 `max(peak, current)`，衰减扣分时不更新
 
 ---
 

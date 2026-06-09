@@ -19,6 +19,8 @@ def _make_trigger(*, scoring_agent=None, scoring_interval=2):
     store = AsyncMock()
     store.get_relationship = AsyncMock(return_value=RelationshipState(user_id="u1"))
     store.init_relationship = AsyncMock(return_value=RelationshipState(user_id="u1"))
+    store.get_familiarity_daily = AsyncMock(return_value=0.0)
+    store.add_familiarity_daily = AsyncMock(return_value=0.6)
     store.update_relationship = AsyncMock()
     store.add_score_event = AsyncMock()
     store.get_user_profile = AsyncMock(return_value=None)
@@ -26,7 +28,6 @@ def _make_trigger(*, scoring_agent=None, scoring_interval=2):
     store.record_scoring_failure = AsyncMock()
 
     character = MagicMock()
-    character.extensions.initial_relationship = 30.0
 
     config = ChatConfig(scoring_interval=scoring_interval, timezone="")
 

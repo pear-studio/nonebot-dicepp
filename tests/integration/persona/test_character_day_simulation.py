@@ -38,7 +38,6 @@ async def temp_db():
 @pytest.fixture
 def character():
     ext = PersonaExtensions(
-        initial_relationship=50,
         daily_events_count=3,
         event_day_start_hour=8,
         event_day_end_hour=22,

@@ -100,15 +100,9 @@ class PersonaApp:
     def get_character(self) -> Optional[Character]:
         return self.chat.character
 
-    def get_warmth_labels(self) -> List[str]:
+    def get_relation_labels(self) -> List[str]:
         char = self.chat.character
-        return char.get_warmth_labels() if char else []
-
-    def get_initial_relationship(self) -> float:
-        char = self.chat.character
-        if char and char.extensions:
-            return float(char.extensions.initial_relationship)
-        return 40.0
+        return char.get_relation_labels() if char else []
 
     # ── 对话 ──────────────────────────────────────────────────
 

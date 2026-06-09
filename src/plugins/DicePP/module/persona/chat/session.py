@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone as tz
 
 from utils.string import estimate_tokens
 from utils.logger import logger
+from utils.time import wall_now
 
 from ..data.store import PersonaDataStore
 from ..data.models import (
@@ -93,7 +94,7 @@ class ChatSession:
         self._sleep_gate = sleep_gate
         self.session_manager = session_manager
         self._last_messages: Dict[str, Tuple[str, float]] = {}
-        # 动态信息追踪统一由 session_manager 管理（get_warmth_label / set_warmth_label）
+        # 动态信息追踪统一由 session_manager 管理（get_relation_label / set_relation_label）
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
@@ -148,33 +149,25 @@ class ChatSession:
                 is_first = len(history) == 0
                 if not is_first:
                     rel = await self.store.get_relationship(user_id)
+                    # reputation 每日恢复（在拒绝门控之前，通过 store 原子方法持久化）
                     if rel:
-                        if self._scoring_trigger:
-                            rel = self._scoring_trigger.effective_relationship(rel)
-                        warmth_level, _ = rel.get_warmth_level(self.character.get_warmth_labels())
-                        if warmth_level == 0:
-                            score = rel.composite_score
-                            base = self.config.relationship_refuse_prob_base
-                            max_p = self.config.relationship_refuse_prob_max
-                            # 仅在 warmth_level==0（冷淡）时触发拒绝；阶段边界处的概率跳变是预期行为
-                            p_refuse = base + (max_p - base) * (1 - score / 20)
-                            if random.random() < p_refuse:
-                                default_refuse_messages = [
-                                    "...（对方似乎没有兴趣理你）",
-                                    "...（已读不回）",
-                                    "嗯。",
-                                ]
-                                char_refuse = self.character.extensions.refuse_messages
-                                refuse_messages = char_refuse if char_refuse is not None else default_refuse_messages
+                        await self.store.try_daily_reputation_recovery(rel, wall_now(self.config.timezone))
+                    if rel and rel.reputation < self.config.reputation_refuse_threshold:
+                        default_refuse_messages = [
+                            "...（对方似乎没有兴趣理你）",
+                            "...（已读不回）",
+                            "嗯。",
+                        ]
+                        char_refuse = self.character.extensions.refuse_messages
+                        refuse_messages = char_refuse if char_refuse is not None else default_refuse_messages
 
-                                if refuse_messages:
-                                    refuse_response = random.choice(refuse_messages)
-                                    logger.info(
-                                        f"冷淡拒绝触发: user={user_id}, score={score:.2f}, "
-                                        f"p_refuse={p_refuse:.2%}"
-                                    )
-                                    response = refuse_response
-                                    return response
+                        if refuse_messages:
+                            refuse_response = random.choice(refuse_messages)
+                            logger.info(
+                                f"信誉拒绝触发: user={user_id}, reputation={rel.reputation:.1f}"
+                            )
+                            response = refuse_response
+                            return response
 
             target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
 
@@ -575,7 +568,7 @@ class ChatSession:
         self,
         decision,
         scope_id: str,
-        warmth_label: str,
+        relation_label: str,
         lore_keys: set,
         now,
         profile,
@@ -583,11 +576,11 @@ class ChatSession:
         """组装通知列表（6a-6d），从 _build_messages 提取以缩短方法长度。"""
         notifications = list(decision.notifications)
 
-        # 6a. 温暖度变化
-        prev_label = self.session_manager.get_warmth_label(scope_id)
-        if prev_label is not None and warmth_label != prev_label:
-            notifications.append(f"[通知] 你和用户的关系变得更{warmth_label}了。")
-        self.session_manager.set_warmth_label(scope_id, warmth_label)
+        # 6a. 关系变化
+        prev_label = self.session_manager.get_relation_label(scope_id)
+        if prev_label is not None and relation_label != prev_label:
+            notifications.append(f"[通知] 你和用户的关系变得更{relation_label}了。")
+        self.session_manager.set_relation_label(scope_id, relation_label)
 
         # 6b. 世界书新命中（纯增量）
         tracker = self.session_manager.get_tracker(scope_id)
@@ -704,7 +697,7 @@ class ChatSession:
         # 5. 获取动态数据
         profile = await self.store.get_user_profile(user_id)
         rel = await self.store.get_relationship(user_id)
-        warmth_label = self._resolve_warmth_label(user_id, rel)
+        relation_label = self._resolve_relation_label(user_id, rel)
 
         # 世界书扫描
         lore_sections = self._build_lore_sections(history_dicts)
@@ -715,7 +708,7 @@ class ChatSession:
 
         # 6. 组装通知列表（含增量事件通知）
         notifications = self._collect_notifications(
-            decision, scope_id, warmth_label, lore_keys, now, profile,
+            decision, scope_id, relation_label, lore_keys, now, profile,
         )
         event_notes, daily_events = await self._collect_event_notifications(scope_id, now.date())
         notifications.extend(event_notes)
@@ -726,7 +719,7 @@ class ChatSession:
             messages=session_msg_dicts,
             static_prompt=static_prompt,
             notifications=notifications,
-            warmth_label=warmth_label,
+            relation_label=relation_label,
         )
 
         # 调试信息
@@ -734,7 +727,7 @@ class ChatSession:
             short_term_history=session_msg_dicts,
             user_profile=profile,
             diary_context=diary_context,
-            warmth_label=warmth_label,
+            relation_label=relation_label,
             lore_sections=lore_sections,
         )
         logger.debug(f"context_debug: {debug_info}")
@@ -759,7 +752,7 @@ class ChatSession:
 
         profile = await self.store.get_user_profile(user_id)
         rel = await self.store.get_relationship(user_id)
-        warmth_label = self._resolve_warmth_label(user_id, rel)
+        relation_label = self._resolve_relation_label(user_id, rel)
         diary_context = await self._build_diary_context()
         lore_sections = self._build_lore_sections(history_dicts)
 
@@ -767,7 +760,7 @@ class ChatSession:
             short_term_history=truncated,
             user_profile=profile,
             diary_context=diary_context,
-            warmth_label=warmth_label,
+            relation_label=relation_label,
             lore_sections=lore_sections,
         )
         logger.debug(f"context_debug (legacy): {debug_info}")
@@ -777,25 +770,20 @@ class ChatSession:
             history_dicts=history_dicts,
             user_profile=profile,
             diary_context=diary_context,
-            warmth_label=warmth_label,
+            relation_label=relation_label,
         )
 
-    def _resolve_warmth_label(self, user_id: str, rel: Optional[RelationshipState]) -> str:
-        """根据关系状态（含衰减计算）解析温暖度标签"""
-        initial = float(self.character.extensions.initial_relationship)
-
+    def _resolve_relation_label(self, user_id: str, rel: Optional[RelationshipState]) -> str:
+        """根据关系状态（含衰减计算）解析关系标签"""
         if rel:
             if self._scoring_trigger:
                 rel = self._scoring_trigger.effective_relationship(rel)
-            _, warmth_label = rel.get_warmth_level(self.character.get_warmth_labels())
+            _, relation_label = rel.get_relation_level(self.character.get_relation_labels())
         else:
-            temp_rel = RelationshipState(
-                user_id=user_id, intimacy=initial, passion=initial,
-                trust=initial, secureness=initial,
-            )
-            _, warmth_label = temp_rel.get_warmth_level(self.character.get_warmth_labels())
+            temp_rel = RelationshipState(user_id=user_id, familiarity=0.0, intimacy=0.0)
+            _, relation_label = temp_rel.get_relation_level(self.character.get_relation_labels())
 
-        return warmth_label
+        return relation_label
 
     async def _build_diary_context(self, events: Optional[List["DailyEvent"]] = None) -> str:
         """构建日记/事件上下文：优先今日事件，fallback 昨日日记

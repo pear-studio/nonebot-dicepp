@@ -32,9 +32,8 @@ CREATE TABLE IF NOT EXISTS persona_score_history (
     user_id TEXT NOT NULL,
     group_id TEXT DEFAULT '',
     intimacy_delta REAL DEFAULT 0,
-    passion_delta REAL DEFAULT 0,
-    trust_delta REAL DEFAULT 0,
-    secureness_delta REAL DEFAULT 0,
+    reputation_delta REAL DEFAULT 0,
+    familiarity_delta REAL DEFAULT 0,
     composite_before REAL,
     composite_after REAL,
     reason TEXT DEFAULT '',
@@ -102,14 +101,15 @@ CREATE TABLE IF NOT EXISTS persona_user_profiles (
 CREATE_USER_RELATIONSHIPS_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_user_relationships (
     user_id TEXT PRIMARY KEY,
-    intimacy REAL DEFAULT 40.0,
-    passion REAL DEFAULT 40.0,
-    trust REAL DEFAULT 40.0,
-    secureness REAL DEFAULT 40.0,
+    familiarity REAL DEFAULT 0.0,
+    peak_familiarity REAL DEFAULT 0.0,
+    intimacy REAL DEFAULT 0.0,
+    peak_intimacy REAL DEFAULT 0.0,
+    reputation REAL DEFAULT 100.0,
     last_interaction_at TIMESTAMP,
+    last_reputation_recovery_date TIMESTAMP,
     last_relationship_decay_applied_at TIMESTAMP,
     last_miss_sent_at TIMESTAMP,
-    peak_stage INTEGER DEFAULT 0,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -144,6 +144,16 @@ CREATE TABLE IF NOT EXISTS persona_group_activity (
     last_interaction_at TIMESTAMP,    -- 最后互动时间（@bot/AI回复）
     daily_add_date TEXT,              -- 当日累计加分日期 (YYYY-MM-DD)
     daily_add_total REAL DEFAULT 0    -- 当日累计加分值
+);
+"""
+
+# familiarity 每日累计表（持久化日上限，防重启丢失）
+CREATE_FAMILIARITY_DAILY_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_familiarity_daily (
+    user_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    total REAL DEFAULT 0.0,
+    PRIMARY KEY (user_id, date)
 );
 """
 
@@ -392,6 +402,7 @@ PERSONA_DB_MIGRATIONS = [
     CREATE_CHARACTER_STATE_TABLE,
     CREATE_USER_PROFILES_TABLE,
     CREATE_USER_RELATIONSHIPS_TABLE,
+    CREATE_FAMILIARITY_DAILY_TABLE,
     CREATE_GROUP_ACTIVITY_TABLE,
     CREATE_LLM_TRACES_TABLE,
     CREATE_LLM_TRACES_INDEX_SESSION,
@@ -458,4 +469,47 @@ ALTER_LLM_TRACES_COLUMNS = [
     ALTER_LLM_TRACES_ADD_CACHE_READ,
     ALTER_LLM_TRACES_ADD_CACHE_CREATION,
     ALTER_LLM_TRACES_ADD_REASONING_TOKENS,
+]
+
+# persona_user_relationships 扩展列（四维→三维模型迁移，幂等 ALTER TABLE）
+ALTER_USER_RELATIONSHIPS_ADD_FAMILIARITY = """
+ALTER TABLE persona_user_relationships ADD COLUMN familiarity REAL DEFAULT 0.0;
+"""
+
+ALTER_USER_RELATIONSHIPS_ADD_PEAK_FAMILIARITY = """
+ALTER TABLE persona_user_relationships ADD COLUMN peak_familiarity REAL DEFAULT 0.0;
+"""
+
+ALTER_USER_RELATIONSHIPS_ADD_PEAK_INTIMACY = """
+ALTER TABLE persona_user_relationships ADD COLUMN peak_intimacy REAL DEFAULT 0.0;
+"""
+
+ALTER_USER_RELATIONSHIPS_ADD_REPUTATION = """
+ALTER TABLE persona_user_relationships ADD COLUMN reputation REAL DEFAULT 100.0;
+"""
+
+ALTER_USER_RELATIONSHIPS_ADD_RECOVERY_DATE = """
+ALTER TABLE persona_user_relationships ADD COLUMN last_reputation_recovery_date TIMESTAMP;
+"""
+
+ALTER_USER_RELATIONSHIPS_COLUMNS = [
+    ALTER_USER_RELATIONSHIPS_ADD_FAMILIARITY,
+    ALTER_USER_RELATIONSHIPS_ADD_PEAK_FAMILIARITY,
+    ALTER_USER_RELATIONSHIPS_ADD_PEAK_INTIMACY,
+    ALTER_USER_RELATIONSHIPS_ADD_REPUTATION,
+    ALTER_USER_RELATIONSHIPS_ADD_RECOVERY_DATE,
+]
+
+# persona_score_history 扩展列（四维→三维模型迁移，幂等 ALTER TABLE）
+ALTER_SCORE_HISTORY_ADD_REPUTATION_DELTA = """
+ALTER TABLE persona_score_history ADD COLUMN reputation_delta REAL DEFAULT 0;
+"""
+
+ALTER_SCORE_HISTORY_ADD_FAMILIARITY_DELTA = """
+ALTER TABLE persona_score_history ADD COLUMN familiarity_delta REAL DEFAULT 0;
+"""
+
+ALTER_SCORE_HISTORY_COLUMNS = [
+    ALTER_SCORE_HISTORY_ADD_REPUTATION_DELTA,
+    ALTER_SCORE_HISTORY_ADD_FAMILIARITY_DELTA,
 ]

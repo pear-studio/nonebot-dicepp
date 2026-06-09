@@ -45,7 +45,6 @@ def _make_simulator(
 
     character = MagicMock()
     character.extensions = MagicMock()
-    character.extensions.initial_relationship = 50.0
 
     port = MagicMock()
     port.send = AsyncMock()
@@ -214,6 +213,7 @@ async def test_tick_daily_applies_relationship_decay():
     decay_calc.should_apply_decay = MagicMock(return_value=True)
     decay_calc.calculate_decay = MagicMock(return_value=(
         ScoreDeltas(intimacy=-5.0),
+        0.0,
         "超过3天未互动",
     ))
     sim.decay_calculator = decay_calc

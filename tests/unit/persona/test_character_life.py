@@ -50,7 +50,6 @@ class TestCharacterLifeBasics:
     @pytest.fixture
     def character(self):
         ext = PersonaExtensions(
-            initial_relationship=50,
             daily_events_count=3,
             event_day_start_hour=8,
             event_day_end_hour=22,
@@ -231,7 +230,6 @@ class TestCharacterLifePersistence:
     @pytest.fixture
     def character(self):
         ext = PersonaExtensions(
-            initial_relationship=50,
             daily_events_count=3,
             event_day_start_hour=8,
             event_day_end_hour=22,
@@ -391,7 +389,6 @@ class TestCharacterLifeStatus:
     @pytest.fixture
     def life(self):
         ext = PersonaExtensions(
-            initial_relationship=50,
             daily_events_count=3,
             event_day_start_hour=8,
             event_day_end_hour=22,
@@ -437,7 +434,6 @@ class TestCharacterLifePhase1:
     @pytest.fixture
     def character(self):
         ext = PersonaExtensions(
-            initial_relationship=50,
             daily_events_count=3,
             event_day_start_hour=8,
             event_day_end_hour=22,
@@ -708,7 +704,6 @@ class TestCharacterLifePhase2:
     @pytest.fixture
     def character(self):
         ext = PersonaExtensions(
-            initial_relationship=50,
             daily_events_count=3,
             event_day_start_hour=8,
             event_day_end_hour=22,
@@ -1097,7 +1092,6 @@ class TestCrossMidnightSlots:
     @pytest.fixture
     def character_nightowl(self):
         ext = PersonaExtensions(
-            initial_relationship=50,
             daily_events_count=3,
             event_day_start_hour=8,
             event_day_end_hour=25,  # 凌晨 1 点入睡
@@ -1225,7 +1219,6 @@ class TestMidnightResetDelay:
     @pytest.fixture
     def character_nightowl(self):
         ext = PersonaExtensions(
-            initial_relationship=50,
             daily_events_count=1,
             event_day_start_hour=8,
             event_day_end_hour=25,
@@ -1360,7 +1353,6 @@ class TestIsAwakeLockedExtendedEnd:
     @pytest.fixture
     def character_nightowl(self):
         ext = PersonaExtensions(
-            initial_relationship=50,
             event_day_start_hour=8,
             event_day_end_hour=25,
             event_day_start_jitter_minutes=0,
@@ -1457,7 +1449,6 @@ class TestMidnightEndHourJitter:
     def character_end24_jitter30(self):
         """end_hour=24（精确午夜）+ 默认 jitter=30"""
         ext = PersonaExtensions(
-            initial_relationship=50,
             daily_events_count=2,
             event_day_start_hour=8,
             event_day_end_hour=24,

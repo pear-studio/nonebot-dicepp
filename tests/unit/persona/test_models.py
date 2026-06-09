@@ -1,5 +1,5 @@
 """
-单元测试: Persona 数据模型
+单元测试: Persona 数据模型 (三维好感度)
 """
 
 from datetime import datetime
@@ -11,64 +11,74 @@ from plugins.DicePP.module.persona.data.models import (
     ScoreDeltas,
     RelationshipState,
     UserProfile,
+    DEFAULT_RELATION_LABELS,
 )
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 class TestScoreDeltas:
-    """测试 ScoreDeltas"""
+    """测试 ScoreDeltas (intimacy + reputation_delta)"""
 
     def test_default_values(self):
         """测试默认值"""
         deltas = ScoreDeltas()
         assert deltas.intimacy == 0.0
-        assert deltas.passion == 0.0
-        assert deltas.trust == 0.0
-        assert deltas.secureness == 0.0
+        assert deltas.reputation_delta == 0.0
 
     def test_clamp(self):
         """测试限制范围"""
-        deltas = ScoreDeltas(intimacy=10, passion=-10, trust=3, secureness=-3)
-        clamped = deltas.clamp(-5.0, 5.0)
-        
+        deltas = ScoreDeltas(intimacy=10, reputation_delta=-40)
+        clamped = deltas.clamp()
+
         assert clamped.intimacy == 5.0
-        assert clamped.passion == -5.0
-        assert clamped.trust == 3.0
-        assert clamped.secureness == -3.0
+        assert clamped.reputation_delta == -30.0  # clamped to min -30
+
+    def test_clamp_positive_intimacy(self):
+        """正亲密度正常clamp"""
+        deltas = ScoreDeltas(intimacy=3, reputation_delta=-5)
+        clamped = deltas.clamp()
+
+        assert clamped.intimacy == 3.0
+        assert clamped.reputation_delta == -5.0
 
 
 class TestRelationshipState:
-    """测试 RelationshipState"""
+    """测试 RelationshipState (三维模型)"""
 
     def test_default_values(self):
         """测试默认值"""
         rel = RelationshipState(user_id="test_user")
         assert rel.user_id == "test_user"
-        assert rel.intimacy == 40.0
-        assert rel.passion == 40.0
-        assert rel.trust == 40.0
-        assert rel.secureness == 40.0
+        assert rel.familiarity == 0.0
+        assert rel.peak_familiarity == 0.0
+        assert rel.intimacy == 0.0
+        assert rel.peak_intimacy == 0.0
+        assert rel.reputation == 100.0
         assert rel.last_miss_sent_at is None
-        assert rel.peak_stage == 0
 
     def test_composite_score(self):
-        """测试综合分数计算"""
+        """测试综合分数计算: composite = familiarity × 0.6 + intimacy × 0.4"""
         rel = RelationshipState(
             user_id="test",
-            intimacy=50,  # 权重 0.3
-            passion=40,   # 权重 0.2
-            trust=60,     # 权重 0.3
-            secureness=70 # 权重 0.2
+            familiarity=50,
+            intimacy=50,
         )
-        # 50*0.3 + 40*0.2 + 60*0.3 + 70*0.2 = 15 + 8 + 18 + 14 = 55
-        assert rel.composite_score == 55.0
+        # 50*0.6 + 50*0.4 = 30 + 20 = 50
+        assert rel.composite_score == 50.0
 
-    def test_get_warmth_level(self):
-        """测试温暖度等级（5段）"""
+        rel2 = RelationshipState(
+            user_id="test2",
+            familiarity=80,
+            intimacy=10,
+        )
+        # 80*0.6 + 10*0.4 = 48 + 4 = 52
+        assert rel2.composite_score == 52.0
+
+    def test_get_relation_level(self):
+        """测试关系等级（5段）"""
         labels = ["冷淡", "疏远", "友好", "默契", "亲密"]
 
-        # 边界测试
         test_cases = [
             (0, 0, "冷淡"),
             (19.99, 0, "冷淡"),
@@ -80,43 +90,36 @@ class TestRelationshipState:
             (100, 4, "亲密"),
         ]
         for score, expected_level, expected_label in test_cases:
+            # Set both dims equally so composite = score
             rel = RelationshipState(
-                user_id="test", intimacy=score, passion=score, trust=score, secureness=score
+                user_id="test", familiarity=score, intimacy=score,
             )
-            level, label = rel.get_warmth_level(labels)
+            level, label = rel.get_relation_level(labels)
             assert level == expected_level, f"score={score}: expected level {expected_level}, got {level}"
             assert label == expected_label, f"score={score}: expected label {expected_label}, got {label}"
 
     def test_apply_deltas(self):
-        """测试应用好感度变化"""
-        rel = RelationshipState(user_id="test", intimacy=40, passion=40, trust=40, secureness=40)
-        deltas = ScoreDeltas(intimacy=10, passion=-5, trust=0, secureness=100)
+        """测试应用亲密度变化"""
+        rel = RelationshipState(user_id="test", intimacy=40.0, reputation=80.0)
+        deltas = ScoreDeltas(intimacy=10, reputation_delta=-20)
 
         rel.apply_deltas(deltas, updated_at=datetime(2026, 1, 1, 12, 0, 0))
 
         assert rel.intimacy == 50.0
-        assert rel.passion == 35.0
-        assert rel.trust == 40.0
-        assert rel.secureness == 100.0  # 上限是100
-        # peak_stage 应随 apply_deltas 自动更新
-        assert rel.peak_stage == 2  # composite=56.5 -> 友好(2)
+        assert rel.reputation == 60.0
+        # peak_intimacy 应在增加时更新
+        assert rel.peak_intimacy == 50.0
 
-    def test_peak_stage_never_decreases(self):
-        """peak_stage 随分数下降不应回退"""
+    def test_peak_intimacy_never_decreases(self):
+        """peak_intimacy 不会因衰减而下降"""
         rel = RelationshipState(
-            user_id="test", intimacy=65, passion=65, trust=65, secureness=65
+            user_id="test", intimacy=65.0, peak_intimacy=65.0,
         )
-        # composite=65 -> 默契(3)，peak_stage 应升为 3
-        rel.apply_deltas(ScoreDeltas(), updated_at=datetime(2026, 1, 1, 12, 0, 0))
-        assert rel.peak_stage == 3
-
-        # 分数下降回 40（友好），peak_stage 应保持 3
-        rel.intimacy = 40
-        rel.passion = 40
-        rel.trust = 40
-        rel.secureness = 40
-        rel.apply_deltas(ScoreDeltas(), updated_at=datetime(2026, 1, 1, 13, 0, 0))
-        assert rel.peak_stage == 3
+        # 应用负分（模拟衰减）
+        deltas = ScoreDeltas(intimacy=-10)
+        rel.apply_deltas(deltas, updated_at=datetime(2026, 1, 1, 12, 0, 0))
+        assert rel.intimacy == 55.0
+        assert rel.peak_intimacy == 65.0  # peak 不降
 
     def test_apply_deltas_bounds(self):
         """测试好感度边界"""
@@ -126,11 +129,41 @@ class TestRelationshipState:
         rel.apply_deltas(deltas, updated_at=datetime(2026, 1, 1, 12, 0, 0))
         assert rel.intimacy == 100.0  # 不超过100
 
-        rel2 = RelationshipState(user_id="test", intimacy=5)
-        deltas2 = ScoreDeltas(intimacy=-10)
+        rel2 = RelationshipState(user_id="test", intimacy=5, reputation=5)
+        deltas2 = ScoreDeltas(intimacy=-10, reputation_delta=-10)
 
         rel2.apply_deltas(deltas2, updated_at=datetime(2026, 1, 1, 12, 0, 0))
         assert rel2.intimacy == 0.0  # 不低于0
+        assert rel2.reputation == 0.0  # 不低于0
+
+    def test_apply_familiarity_delta(self):
+        """测试应用熟悉度增量"""
+        rel = RelationshipState(user_id="test", familiarity=10.0)
+        rel.apply_familiarity_delta(5.0, updated_at=datetime(2026, 1, 1, 12, 0, 0))
+        assert rel.familiarity == 15.0
+        assert rel.peak_familiarity == 15.0  # peak 应更新
+
+        # 衰减（负值）不更新 peak
+        rel.apply_familiarity_delta(-3.0, updated_at=datetime(2026, 1, 1, 13, 0, 0))
+        assert rel.familiarity == 12.0
+        assert rel.peak_familiarity == 15.0  # peak 不降
+
+    def test_reputation_bounds(self):
+        """测试信誉边界"""
+        rel = RelationshipState(user_id="test", reputation=100.0)
+        deltas = ScoreDeltas(reputation_delta=10)  # 正值被 clamp 到 0
+        clamped = deltas.clamp()
+        assert clamped.reputation_delta == 0.0  # 不允许正信誉flag
+
+    def test_reputation_apply_upper_bound(self):
+        """测试信誉不超过 100"""
+        rel = RelationshipState(user_id="test", reputation=99.0)
+        # reputation_delta 被 clamp 到 [-30, 0]，正值被限制为 0
+        deltas = ScoreDeltas(reputation_delta=5)
+        clamped = deltas.clamp()
+        assert clamped.reputation_delta == 0.0  # 正值clamp为0
+        rel.apply_deltas(clamped, updated_at=datetime(2026, 1, 1, 12, 0, 0))
+        assert rel.reputation == 99.0  # 不变
 
 
 class TestUserProfile:
@@ -139,13 +172,13 @@ class TestUserProfile:
     def test_merge_facts(self):
         """测试合并事实"""
         profile = UserProfile(user_id="test", facts={"name": "张三", "hobbies": ["读书"]})
-        
+
         new_facts = {
             "name": "李四",  # 不应覆盖已有
             "age": 25,       # 新增
             "hobbies": ["游戏", "读书"]  # 合并列表，去重
         }
-        
+
         profile.merge_facts(new_facts, updated_at=datetime(2026, 1, 1, 12, 0, 0))
 
         assert profile.facts["name"] == "张三"  # 保持原值
@@ -201,41 +234,52 @@ class TestPersonaConfig:
         with pytest.raises(ValidationError):
             PersonaConfig(segment_max_delay=0)
 
+    def test_extra_ignore(self):
+        """旧配置字段应被忽略（extra='ignore'）"""
+        config = PersonaConfig(
+            decay_rate_per_hour=0.5,
+            decay_daily_cap=5.0,
+            relationship_refuse_prob_base=0.5,
+            relationship_refuse_prob_max=0.9,
+        )
+        # 不抛异常即为通过
+        assert config.enabled == False
 
-class TestWarmthLevelRefuse:
-    """测试冷淡拒绝机制"""
 
-    def test_warmth_level_cold(self):
-        """好感度 5 分应该在冷淡区间（0）"""
+class TestRelationLevel:
+    """测试关系等级判定"""
+
+    def test_relation_level_cold(self):
+        """composite < 20 应为冷淡区间（0）"""
         rel = RelationshipState(
             user_id="test",
+            familiarity=5.0,
             intimacy=5.0,
-            passion=5.0,
-            trust=5.0,
-            secureness=5.0,
         )
-
-        ext = PersonaExtensions(initial_relationship=40)
+        # composite = 5*0.6 + 5*0.4 = 5
+        ext = PersonaExtensions()
         char = Character(name="Test", extensions=ext)
 
-        warmth_level, label = rel.get_warmth_level(char.get_warmth_labels())
-        assert warmth_level == 0, f"Expected 0 (cold), got {warmth_level}"
+        relation_level, label = rel.get_relation_level(char.get_relation_labels())
+        assert relation_level == 0, f"Expected 0 (cold), got {relation_level}"
 
-    def test_warmth_level_distant(self):
-        """好感度 30 分应该在疏远区间（1）"""
+    def test_relation_level_distant(self):
+        """composite 30 应在疏远区间（1）"""
         rel = RelationshipState(
             user_id="test",
+            familiarity=30.0,
             intimacy=30.0,
-            passion=30.0,
-            trust=30.0,
-            secureness=30.0,
         )
-
-        ext = PersonaExtensions(initial_relationship=40)
+        # composite = 30*0.6 + 30*0.4 = 30
+        ext = PersonaExtensions()
         char = Character(name="Test", extensions=ext)
 
-        warmth_level, label = rel.get_warmth_level(char.get_warmth_labels())
-        assert warmth_level == 1, f"Expected 1 (distant), got {warmth_level}"
+        relation_level, label = rel.get_relation_level(char.get_relation_labels())
+        assert relation_level == 1, f"Expected 1 (distant), got {relation_level}"
+
+    def test_default_relation_labels(self):
+        """测试默认关系标签"""
+        assert DEFAULT_RELATION_LABELS == ["冷淡", "疏远", "友好", "默契", "亲密"]
 
 
 if __name__ == "__main__":

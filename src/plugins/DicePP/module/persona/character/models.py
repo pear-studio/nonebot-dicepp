@@ -10,7 +10,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..data.models import DEFAULT_WARMTH_LABELS
+from ..data.models import DEFAULT_RELATION_LABELS
 
 
 class SharePolicy(str, Enum):
@@ -20,8 +20,7 @@ class SharePolicy(str, Enum):
 
 
 class PersonaExtensions(BaseModel):
-    initial_relationship: int = 40
-    warmth_labels: List[str] = Field(default_factory=list)
+    relation_labels: List[str] = Field(default_factory=list)
     world: str = ""
     daily_events_count: int = 5
     event_day_start_hour: int = 8
@@ -157,14 +156,14 @@ class Character(BaseModel):
 
         return matched
 
-    def get_warmth_labels(self) -> List[str]:
-        labels = self.extensions.warmth_labels
+    def get_relation_labels(self) -> List[str]:
+        labels = self.extensions.relation_labels
         result = []
         for i in range(5):
             if i < len(labels) and labels[i]:
                 result.append(labels[i])
             else:
-                result.append(DEFAULT_WARMTH_LABELS[i])
+                result.append(DEFAULT_RELATION_LABELS[i])
         return result
 
     def format_mes_example(self, user_name: str = "用户") -> str:

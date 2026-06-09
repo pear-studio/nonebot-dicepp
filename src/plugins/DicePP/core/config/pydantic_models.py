@@ -7,7 +7,7 @@ Config is loaded hierarchically by ConfigLoader:
 """
 from typing import List, Literal, Optional, Dict
 
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class CircuitBreakerConfig(BaseModel):
@@ -55,6 +55,8 @@ class ProviderConfig(BaseModel):
 
 
 class PersonaConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     enabled: bool = False
     daily_report_enabled: bool = True
     daily_report_voice_enabled: bool = True
@@ -168,8 +170,9 @@ class PersonaConfig(BaseModel):
     # ── Phase 2: 好感度时间衰减
     decay_enabled: bool = True
     decay_grace_period_hours: int = 8
-    decay_rate_per_hour: float = 0.5
-    decay_daily_cap: float = 5.0
+    decay_familiarity_half_life_days: int = 35   # 熟悉度半衰期（天）
+    decay_intimacy_half_life_days: int = 21      # 亲密度半衰期（天）
+    decay_floor_ratio: float = 0.5               # 衰减软下限 = peak × floor_ratio
     # ── Phase 2: 角色生活模拟
     character_life_enabled: bool = True
     # 生活事件时刻由角色卡 extensions.persona（generate_event_times）决定；此处仅控制触发容差
@@ -291,10 +294,9 @@ class PersonaConfig(BaseModel):
 
     observation_store_raw_digest: bool = False
 
-    # ── Phase 2: 厌倦拒绝机制配置
-    relationship_refuse_enabled: bool = True      # 是否开启好感度低时的拒绝回复
-    relationship_refuse_prob_base: float = 0.5    # 拒绝概率基础值（默认50%）
-    relationship_refuse_prob_max: float = 0.9     # 拒绝概率最大值（默认90%）
+    # ── Phase 2: 信誉拒绝机制配置
+    relationship_refuse_enabled: bool = True      # 是否开启低信誉时的拒绝回复
+    reputation_refuse_threshold: float = 30.0     # 信誉低于此值时触发拒绝回复
 
     # ── Phase 4+: 主动消息（暂未启用）
     # proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)

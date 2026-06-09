@@ -73,7 +73,7 @@ class SessionManager:
     def get_tracker(self, user_id: str) -> dict:
         if user_id not in self._trackers:
             self._trackers[user_id] = {
-                "last_warmth_label": None,
+                "last_relation_label": None,
                 "last_event_notification_date": None,
                 "activated_lore_keys": set(),
                 "last_profile_hash": None,
@@ -82,11 +82,11 @@ class SessionManager:
             }
         return self._trackers[user_id]
 
-    def get_warmth_label(self, user_id: str) -> Optional[str]:
-        return self.get_tracker(user_id).get("last_warmth_label")
+    def get_relation_label(self, user_id: str) -> Optional[str]:
+        return self.get_tracker(user_id).get("last_relation_label")
 
-    def set_warmth_label(self, user_id: str, label: str) -> None:
-        self.get_tracker(user_id)["last_warmth_label"] = label
+    def set_relation_label(self, user_id: str, label: str) -> None:
+        self.get_tracker(user_id)["last_relation_label"] = label
 
     def _clear_tracker(self, user_id: str) -> None:
         self._trackers.pop(user_id, None)
