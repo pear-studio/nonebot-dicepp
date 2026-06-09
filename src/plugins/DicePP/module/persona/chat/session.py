@@ -104,6 +104,15 @@ class ChatSession:
 
     # ── 公开 API ──────────────────────────────────────────────
 
+    async def is_awake(self) -> bool:
+        """角色是否处于唤醒状态。
+
+        Gate 为 None 时默认返回 True。
+        """
+        if self._sleep_gate is not None:
+            return await self._sleep_gate.is_awake()
+        return True
+
     async def chat(
         self,
         user_id: str,
@@ -111,8 +120,14 @@ class ChatSession:
         message: str,
         nickname: str = "",
         image_data_urls: Optional[List[str]] = None,
+        skip_scoring: bool = False,
     ) -> Optional[str]:
-        """处理单条用户消息，返回回复文本（None 表示不回复）"""
+        """处理单条用户消息，返回回复文本（None 表示不回复）
+
+        Args:
+            skip_scoring: 为 True 时跳过睡眠门控、冷淡拒绝门控和评分。
+                          用于 jrrp 等非对话命令的 persona 介入。
+        """
         # 5 秒内完全相同的消息去重（防手抖/网络重试）
         dedup_key = f"{user_id}:{group_id}"
         now = time.monotonic()
@@ -128,10 +143,10 @@ class ChatSession:
 
         response: Optional[str] = None
         try:
-            is_chat_message = not message.startswith(".") or message.lower().startswith(".ai")
+            should_apply_gates = not skip_scoring and (not message.startswith(".") or message.lower().startswith(".ai"))
 
-            # 睡眠门控（仅拦截聊天消息，命令透传）
-            if is_chat_message and self._sleep_gate is not None and not await self._sleep_gate.is_awake():
+            # 睡眠门控（仅拦截聊天消息，jrrp 等 skip_scoring 路径透传）
+            if should_apply_gates and self._sleep_gate is not None and not await self._sleep_gate.is_awake():
                 msgs = self.character.extensions.sleep_messages
                 if msgs is None:
                     msgs = _DEFAULT_SLEEP_MESSAGES
@@ -141,7 +156,7 @@ class ChatSession:
                     response = msg
                     return response
 
-            if self.config.relationship_refuse_enabled and is_chat_message:
+            if self.config.relationship_refuse_enabled and should_apply_gates:
                 if group_id:
                     history = await self.store.get_group_messages(group_id, limit=1)
                 else:
@@ -177,7 +192,9 @@ class ChatSession:
                 f" image_count={len(image_data_urls) if image_data_urls else 0}"
                 f" target_key={target_key}"
             )
-            response = await self._chat_via_coordinator(user_id, group_id, message, target_key, image_data_urls=image_data_urls)
+            response = await self._chat_via_coordinator(user_id, group_id, message, target_key,
+                                                        image_data_urls=image_data_urls,
+                                                        skip_scoring=skip_scoring)
             return response
 
         except asyncio.CancelledError:
@@ -217,6 +234,7 @@ class ChatSession:
     async def _coordinator_chat_call_fn(
         self, user_id: str, group_id: str, messages: List[str],
         image_data_urls: Optional[List[str]] = None,
+        skip_scoring: bool = False,
     ) -> Optional[str]:
         """coordinator chat 路径的单轮 LLM 调用。"""
         current_message = "\n".join(messages) if messages else ""
@@ -235,7 +253,8 @@ class ChatSession:
             )
             return ""
 
-        await self._after_response(user_id, group_id, current_message, response)
+        if not skip_scoring:
+            await self._after_response(user_id, group_id, current_message, response)
 
         # Session 后处理：追加 assistant 消息 + token 估算 + 压缩检查
         if self.session_manager:
@@ -254,6 +273,7 @@ class ChatSession:
         group_id: str,
         current_message: str,
         last_exception: Optional[Exception] = None,
+        skip_scoring: bool = False,
     ) -> str:
         """coordinator 耗尽时的兜底回复。"""
         if last_exception is not None:
@@ -265,8 +285,11 @@ class ChatSession:
             )
         else:
             fallback_response = "LLM服务暂时不可用，请稍后再试"
-        await self._response_handler.persist_and_send(user_id, group_id, fallback_response)
-        await self._after_response(user_id, group_id, current_message, fallback_response)
+        msg_type = MessageType.COMMAND if skip_scoring else MessageType.CHAT
+        await self._response_handler.persist_and_send(user_id, group_id, fallback_response,
+                                                       message_type=msg_type)
+        if not skip_scoring:
+            await self._after_response(user_id, group_id, current_message, fallback_response)
         if self._response_handler.port is not None:
             logger.info(
                 f"[Persona] on_exhausted: fallback sent via port user={user_id}"
@@ -331,6 +354,7 @@ class ChatSession:
     async def _chat_via_coordinator(
         self, user_id: str, group_id: str, message: str, target_key: str,
         image_data_urls: Optional[List[str]] = None,
+        skip_scoring: bool = False,
     ) -> Optional[str]:
         fallback_response: Optional[str] = None
         current_message_for_exhausted = message
@@ -341,12 +365,14 @@ class ChatSession:
             current_message_for_exhausted = current_message
             return await self._coordinator_chat_call_fn(
                 user_id, group_id, messages, image_data_urls=image_data_urls,
+                skip_scoring=skip_scoring,
             )
 
         async def on_exhausted(last_exception: Optional[Exception] = None):
             nonlocal fallback_response
             fallback_response = await self._coordinator_on_exhausted(
-                user_id, group_id, current_message_for_exhausted, last_exception
+                user_id, group_id, current_message_for_exhausted, last_exception,
+                skip_scoring=skip_scoring,
             )
 
         async def _on_result(result: str):

@@ -333,6 +333,21 @@ class PersonaCommand(UserCommandBase):
         if msg in [".", "。", "..", "。。", ". ", "。 "]:
             return False, False, None
 
+        # .jrrp 拦截：persona 接管运势回复（需绕过下方 . 前缀守卫）
+        if msg in (".jrrp", "。jrrp"):
+            # persona 未初始化或角色睡眠 → 回退到 JrrpCommand
+            if not self.app or not await self.app.is_awake():
+                return False, False, None
+            # 白名单
+            is_private = not meta.group_id
+            whitelisted = await self._check_whitelist(meta.user_id, meta.group_id or "", is_private)
+            if not whitelisted:
+                return False, False, None
+            # 配置开关
+            if not getattr(self.config, 'jrrp_persona_enabled', True):
+                return False, False, None
+            return True, False, "jrrp"
+
         # 如果以 "." 或 "。" 开头但不是有效的 AI 命令，不处理
         # 有效的 "." 前缀命令: .ai
         if msg.startswith(".") and not msg.startswith(".ai"):
@@ -439,6 +454,10 @@ class PersonaCommand(UserCommandBase):
                     await self._send(user_id, group_id, response)
                     return []
 
+                # .jrrp 路由
+                if hint == "jrrp":
+                    return await self._handle_jrrp(user_id, group_id, meta)
+
                 # 特殊命令处理
                 is_at_trigger = meta.to_me and not msg_str.strip().startswith(".ai")
 
@@ -537,14 +556,93 @@ class PersonaCommand(UserCommandBase):
         finally:
             _request_id_var.reset(_trace_token)
 
-    async def _send(self, user_id: str, group_id: str, content: str) -> None:
+
+    async def _handle_jrrp(self, user_id: str, group_id: str, meta: MessageMetaData) -> List[BotCommandBase]:
+        """处理 .jrrp 命令：调 compute_jrrp → 发送数值行 → 事件消息注入 LLM 生成角色评语"""
+        from module.misc.jrrp_utils import compute_jrrp, format_jrrp_info_line, format_jrrp_trend_line, format_compact_trend
+        from utils.time import get_current_date_raw
+
+        # 1. 计算运势
+        result = compute_jrrp(user_id, get_current_date_raw())
+
+        # 2. 获取用户显示名
+        user_name = await self.bot.get_nickname(user_id, group_id)
+
+        # 3. 构建注入 LLM 的事件消息（先于 info_line 构建并写入 message_stream，
+        #    确保 _build_messages() → _fetch_short_term_history() 能读取到）
+        trend = format_compact_trend(result.delta_percent, result.direction)
+
+        event_msg_parts = [
+            f"[请简短回复，一两句话即可]",
+            f"{user_name} 查询了今日运势。今日: {result.jrrp}/100",
+        ]
+        if result.is_max:
+            event_msg_parts.append("[今日是最高值]")
+        elif result.is_min:
+            event_msg_parts.append("[今日是最低值]")
+        event_msg_parts.append(f"，昨日: {result.zrrp}/100，{trend}。")
+        event_msg = "".join(event_msg_parts)
+
+        # 4. 将 event_msg 以 user 角色写入 message_stream，
+        #    使 _build_messages() 的 _fetch_short_term_history() 能将其纳入 LLM 上下文
+        #    持久化失败时跳过 LLM 调用，直接走模板回退
+        event_persisted = False
+        if self.data_store:
+            try:
+                await self.data_store.add_message_stream(
+                    user_id=user_id,
+                    group_id=group_id,
+                    role="user",
+                    type=MessageType.COMMAND,
+                    content=event_msg,
+                )
+                event_persisted = True
+            except Exception as e:
+                logger.warning(f"[Persona] _handle_jrrp event_msg 持久化失败: {e}")
+
+        # 5. 发送数值行（post-send hook 自动持久化，无需手动 add_message_stream）
+        info_line = format_jrrp_info_line(user_name, result.jrrp)
+        await self._send(user_id, group_id, info_line)
+
+        # 6. 调 LLM 生成角色评语（skip_scoring=True）
+        #    segment 启用时：dispatcher 自动发送，chat() 返回空串
+        #    segment 未启用时：chat() 返回评语文本，需手动发送
+        if not event_persisted:
+            # event_msg 未持久化 → LLM 无上下文，直接走模板回退
+            logger.warning("[Persona] _handle_jrrp event_msg 未持久化，跳过 LLM 调用")
+            trend_line = format_jrrp_trend_line(result.zrrp, result.jrrp,
+                                                result.delta_percent, result.direction)
+            if trend_line.strip():
+                await self._send(user_id, group_id, trend_line.strip())
+        else:
+            try:
+                commentary = await self.app.chat.chat(
+                    user_id=user_id,
+                    group_id=group_id,
+                    message=event_msg,
+                    nickname=user_name,
+                    skip_scoring=True,
+                )
+                if commentary:
+                    await self._send(user_id, group_id, commentary)
+            except Exception as e:
+                # LLM 调用失败时，补发趋势信息作为回退
+                logger.warning(f"[Persona] _handle_jrrp LLM 调用失败，回退到模板: {e}")
+                trend_line = format_jrrp_trend_line(result.zrrp, result.jrrp,
+                                                    result.delta_percent, result.direction)
+                if trend_line.strip():
+                    await self._send(user_id, group_id, trend_line.strip())
+
+        return []
+
+    async def _send(self, user_id: str, group_id: str, content: str, msg_id: Optional[int] = None) -> None:
         """通过 MessagePort 发送单条消息"""
         if self.app:
             logger.debug(
                 f"[Persona] _send call: user={user_id} group={group_id}"
-                f" content_len={len(content)}"
+                f" content_len={len(content)} msg_id={msg_id}"
             )
-            await self.app.send_message(user_id, group_id, content)
+            await self.app.send_message(user_id, group_id, content, msg_id=msg_id)
         else:
             logger.error(
                 f"[Persona] MessagePort 未初始化，丢弃消息: "

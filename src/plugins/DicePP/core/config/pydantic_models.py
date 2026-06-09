@@ -65,6 +65,12 @@ class PersonaConfig(BaseModel):
 
     whitelist_enabled: bool = True
 
+    # ── JRRP 集成
+    jrrp_persona_enabled: bool = Field(
+        default=True,
+        description="Persona 是否接管 .jrrp 回复。为 False 时回退到 JrrpCommand 模板渲染",
+    )
+
     providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
 
     max_concurrent_requests: int = 2

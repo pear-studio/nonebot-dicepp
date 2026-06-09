@@ -1,4 +1,4 @@
-import random, datetime
+import datetime
 from typing import List, Tuple, Any
 
 from core.bot import Bot
@@ -8,29 +8,20 @@ from core.command import BotCommandBase, BotSendMsgCommand
 from core.command import CommandTextParser  # Task 3.4
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_FUNC_DISABLE
-from utils.time import datetime_to_str_day, get_current_date_raw, datetime_to_str
+from utils.time import get_current_date_raw
+
+from .jrrp_utils import compute_jrrp, format_jrrp_text
 
 _JRRP_PARSER = CommandTextParser(command_prefix="jrrp")
 
-LOC_JRRP = "jrrp"
-LOC_JRRP_LOWER = "jrrp_lower"
-LOC_JRRP_SAME = "jrrp_same"
-LOC_JRRP_HIGHER = "jrrp_higher"
-LOC_JRRP_MIN = "jrrp_min"
-LOC_JRRP_MAX = "jrrp_max"
-
-@custom_user_command(readable_name="今日人品", priority=DPP_COMMAND_PRIORITY_DEFAULT,
+@custom_user_command(readable_name="今日人品", priority=DPP_COMMAND_PRIORITY_TRIVIAL,
                      flag=DPP_COMMAND_FLAG_FUN)
 class JrrpCommand(UserCommandBase):
 
     def __init__(self, bot: Bot):
         super().__init__(bot)
-        bot.loc_helper.register_loc_text(LOC_JRRP, "{name}的今日人品是:{jrrp}", ".jrrp返回内容,{name}:用户名,{jrrp}:今日人品值.")
-        bot.loc_helper.register_loc_text(LOC_JRRP_LOWER, "\n人品比昨天下降了{delta_percent}%呢...", ".jrrp比昨天值更低时追加的内容,{zrrp}:昨日人品值,{delta}:差值,{delta_percent}:百分比差值")
-        bot.loc_helper.register_loc_text(LOC_JRRP_SAME, "\n人品与昨天相同呢。", ".jrrp和昨天相同时追加的内容,{zrrp}:昨日人品值")
-        bot.loc_helper.register_loc_text(LOC_JRRP_HIGHER, "\n人品比昨天上升了{delta_percent}%！", ".jrrp比昨天值更低时追加的内容,{zrrp}:昨日人品值,{delta}:差值,{delta_percent}:百分比差值")
-        bot.loc_helper.register_loc_text(LOC_JRRP_MIN, "{name}的今日人品是:...你确定要听么..是大凶的{jrrp}哦...", ".jrrp出最小值时返回的内容,{name}:用户名,{jrrp}:今日人品值.")
-        bot.loc_helper.register_loc_text(LOC_JRRP_MAX, "{name}的今日人品是:...这是！这是大吉的{jrrp}哦！", ".jrrp出最大值时返回的内容,{name}:用户名,{jrrp}:今日人品值.")
+        # 注：输出格式由 jrrp_utils.format_jrrp_* 函数管理（单事实来源），
+        # 未使用 LOC 系统。如需 i18n 支持，需参数化 format_jrrp_* 函数。
 
     def can_process_msg(self, msg_str: str, meta: MessageMetaData) -> Tuple[bool, bool, Any]:
         parse = _JRRP_PARSER.parse(msg_str)
@@ -41,29 +32,12 @@ class JrrpCommand(UserCommandBase):
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         port = GroupMessagePort(meta.group_id) if meta.group_id else PrivateMessagePort(meta.user_id)
         # hint: CommandParseResult（解析层已处理前缀，此处直接计算人品）
-        random.seed(datetime_to_str_day(get_current_date_raw() - datetime.timedelta(days=1)) + str(meta.user_id))  # 获取昨日数据与用户id，拼接形成一个固定的seed
-        zrrp: int = random.randint(1, 100)  # 根据上面的seed获取昨日人品
-        
-        random.seed(datetime_to_str_day(get_current_date_raw()) + str(meta.user_id))  # 获取今日数据与用户id，拼接形成一个固定的seed
-        jrrp: int = random.randint(1, 100)  # 根据上面的seed获取今日人品
 
-        random.seed(datetime_to_str(get_current_date_raw()))  #  复原seed
+        result = compute_jrrp(str(meta.user_id), get_current_date_raw())
 
         user_name: str = await self.bot.get_nickname(meta.user_id, meta.group_id)
-        feedback: str = ""
-        if jrrp == 1:  #  最小值
-            feedback += self.format_loc(LOC_JRRP_MIN, name=user_name, jrrp=str(jrrp))
-        elif jrrp == 100:  #  最大值
-            feedback += self.format_loc(LOC_JRRP_MAX, name=user_name, jrrp=str(jrrp))
-        else:  #  正常情况
-            feedback += self.format_loc(LOC_JRRP, name=user_name, jrrp=str(jrrp))
-        
-        if jrrp > zrrp:  #  今日人品比昨日高
-            feedback += self.format_loc(LOC_JRRP_HIGHER, zrrp=str(zrrp), jrrp=str(jrrp), delta=str(jrrp - zrrp), delta_percent=str(round((jrrp - zrrp) / zrrp * 100,2)))
-        elif jrrp < zrrp:  #  今日人品比昨日低
-            feedback += self.format_loc(LOC_JRRP_LOWER, zrrp=str(zrrp), jrrp=str(jrrp), delta=str(zrrp - jrrp), delta_percent=str(round((zrrp - jrrp) / zrrp * 100,2)))
-        else:  #  两日人品相同
-            feedback += self.format_loc(LOC_JRRP_SAME, zrrp=str(zrrp), jrrp=str(jrrp))
+        feedback: str = format_jrrp_text(user_name, result.jrrp, result.zrrp,
+                                         result.delta_percent, result.direction)
 
         return [BotSendMsgCommand(self.bot.account, feedback, [port])]
 

@@ -10,6 +10,17 @@ from unittest.mock import patch
 
 from tests.e2e.conftest import e2e_bot, send_as_user
 from core.bot import Bot
+from module.misc.jrrp_utils import JrrpResult
+
+# Mock 范围说明：
+# - 本文件 patch("module.misc.jrrp_command.compute_jrrp") 仅覆盖 JrrpCommand 路径。
+#   JrrpCommand 在模块加载时执行 `from .jrrp_utils import compute_jrrp`，
+#   符号绑定在 jrrp_command 命名空间，patch jrrp_utils 不影响已绑定的引用。
+# - PersonaCommand._handle_jrrp 使用运行时 `from module.misc.jrrp_utils import compute_jrrp`，
+#   不受此 patch 影响。该路径的 mock 在 tests/module/persona/test_jrrp_persona.py
+#   中通过 `patch("module.misc.jrrp_utils.compute_jrrp")` 覆盖。
+# - 当前 e2e 测试中 persona 未启用，PersonaCommand 不拦截 .jrrp，无实际覆盖盲区。
+#   若将来 e2e 启用 persona，需同步更新本文件的 mock 范围。
 
 
 def _extract_jrrp_value(result: str) -> int:
@@ -20,6 +31,23 @@ def _extract_jrrp_value(result: str) -> int:
         if 1 <= value <= 100:
             return value
     raise AssertionError(f"应能找到有效的人品值: {matches}")
+
+
+def _make_jrrp_result(jrrp: int, zrrp: int = 60) -> JrrpResult:
+    """构造 JrrpResult，自动计算衍生字段"""
+    delta = jrrp - zrrp
+    delta_percent = round(abs(delta) / zrrp * 100, 2) if zrrp > 0 else 0.0
+    if jrrp > zrrp:
+        direction = 'up'
+    elif jrrp < zrrp:
+        direction = 'down'
+    else:
+        direction = 'same'
+    return JrrpResult(
+        jrrp=jrrp, zrrp=zrrp, delta=delta,
+        delta_percent=delta_percent, direction=direction,
+        is_min=(jrrp == 1), is_max=(jrrp == 100),
+    )
 
 
 @pytest.fixture
@@ -50,48 +78,27 @@ class TestJrrpDeterminism:
         assert result1 == result2, f"同一天同一用户的 JRRP 应相同: {result1} vs {result2}"
 
     async def test_jrrp__different_days_different_results(self, e2e_bot: Bot):
-        """任务 6.3: 不同日期的 JRRP 使用不同的 seed 生成"""
+        """任务 6.3: 不同日期的 JRRP 结果不同（依赖日期+user_id seed）"""
         bot = e2e_bot
         user_id = "user_jrrp_3"
         nickname = "测试用户3"
         group_id = "group_jrrp"
 
-        # 通过捕获 seed 调用验证不同日期产生不同的 seed
-        seed_calls = []
-        original_seed = random.seed
-
-        def capture_seed(s):
-            seed_calls.append(str(s))
-            original_seed(s)
-
         day1 = datetime.datetime(2024, 1, 15, 12, 0, 0)
         with patch("module.misc.jrrp_command.get_current_date_raw", return_value=day1):
-            with patch("module.misc.jrrp_command.random.seed", side_effect=capture_seed):
-                await send_as_user(bot, ".jrrp", user_id=user_id, nickname=nickname, group_id=group_id)
-
-        # 记录第一天的 seed
-        day1_seeds = seed_calls.copy()
-        seed_calls.clear()
+            _, result1 = await send_as_user(bot, ".jrrp", user_id=user_id, nickname=nickname, group_id=group_id)
 
         day2 = datetime.datetime(2024, 1, 16, 12, 0, 0)
         with patch("module.misc.jrrp_command.get_current_date_raw", return_value=day2):
-            with patch("module.misc.jrrp_command.random.seed", side_effect=capture_seed):
-                await send_as_user(bot, ".jrrp", user_id=user_id, nickname=nickname, group_id=group_id)
+            _, result2 = await send_as_user(bot, ".jrrp", user_id=user_id, nickname=nickname, group_id=group_id)
 
-        day2_seeds = seed_calls.copy()
-
-        # 验证两天的 seed 不同
-        assert len(day1_seeds) >= 2, f"第一天应至少设置 2 次 seed, 实际: {day1_seeds}"
-        assert len(day2_seeds) >= 2, f"第二天应至少设置 2 次 seed, 实际: {day2_seeds}"
-
-        # 验证至少有一个 seed 包含日期差异
-        # seed 格式应为 "YYYY_MM_DD" + user_id 或 "YYYYMMDD" + user_id
-        has_different_seed = any(s1 != s2 for s1, s2 in zip(day1_seeds, day2_seeds))
-        assert has_different_seed, f"不同日期应产生不同的 seed: 第一天={day1_seeds}, 第二天={day2_seeds}"
+        # 验证不同日期产生不同结果（极低概率相同，因 seed 不同）
+        assert result1 != result2, f"不同日期应产生不同的 JRRP 结果: day1={result1!r}, day2={result2!r}"
 
     async def test_jrrp__boundary_value_min(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.4: JRRP 边界值 1 应显示特殊文本"""
-        with patch("module.misc.jrrp_command.random.randint", return_value=1):
+        with patch("module.misc.jrrp_command.compute_jrrp",
+                   return_value=_make_jrrp_result(jrrp=1)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_min", nickname="测试用户", group_id="group_jrrp")
 
         # 验证实际格式: 结果应同时包含人品值 "1" 和评级 "大凶"
@@ -103,7 +110,8 @@ class TestJrrpDeterminism:
 
     async def test_jrrp__boundary_value_max(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.5: JRRP 边界值 100 应显示特殊文本"""
-        with patch("module.misc.jrrp_command.random.randint", return_value=100):
+        with patch("module.misc.jrrp_command.compute_jrrp",
+                   return_value=_make_jrrp_result(jrrp=100)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_max", nickname="测试用户", group_id="group_jrrp")
 
         # 验证实际格式: 结果应同时包含人品值 "100" 和评级 "大吉"
@@ -115,9 +123,8 @@ class TestJrrpDeterminism:
 
     async def test_jrrp__comparison_lower_than_yesterday(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.6: JRRP 比昨日低时应显示下降信息"""
-        # 昨天人品 80，今天人品 40
-        with patch("module.misc.jrrp_command.random.randint") as mock_rand:
-            mock_rand.side_effect = [80, 40]  # 昨日, 今日
+        with patch("module.misc.jrrp_command.compute_jrrp",
+                   return_value=_make_jrrp_result(jrrp=40, zrrp=80)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_lower", nickname="测试用户", group_id="group_jrrp")
 
         assert "40" in result, "结果应包含今日人品值 40"
@@ -126,20 +133,17 @@ class TestJrrpDeterminism:
 
     async def test_jrrp__comparison_higher_than_yesterday(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.7: JRRP 比昨日高时应显示上升信息"""
-        # 使用 mock 控制返回值
-        with patch("module.misc.jrrp_command.random.randint") as mock_rand:
-            # 需要 mock 多次调用：昨日值(1次), 今日值(1次)
-            mock_rand.side_effect = [30, 70]  # 昨日, 今日
+        with patch("module.misc.jrrp_command.compute_jrrp",
+                   return_value=_make_jrrp_result(jrrp=70, zrrp=30)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_higher", nickname="测试用户", group_id="group_jrrp")
 
-        # 应包含上升相关信息 (LOC_JRRP_HIGHER 模板包含 "上升了" 和 "%")
+        # 应包含上升相关信息
         assert any(kw in result for kw in ["上升", "提高", "higher", "%"]), f"应显示上升信息, result={result}"
 
     async def test_jrrp__comparison_same_as_yesterday(self, e2e_bot: Bot, mock_jrrp_date):
         """任务 6.8: JRRP 与昨日相同时应显示相同信息"""
-        # 昨天和今天都是 50
-        with patch("module.misc.jrrp_command.random.randint") as mock_rand:
-            mock_rand.side_effect = [50, 50]  # 昨日, 今日
+        with patch("module.misc.jrrp_command.compute_jrrp",
+                   return_value=_make_jrrp_result(jrrp=50, zrrp=50)):
             cmds, result = await send_as_user(e2e_bot, ".jrrp", user_id="user_same", nickname="测试用户", group_id="group_jrrp")
 
         # 应包含相同相关信息
@@ -159,14 +163,9 @@ class TestJrrpDeterminism:
             )
             assert result1 == result2, "相同 user_id 和日期应产生相同 JRRP 结果"
 
-            # 测试2: 不同 user_id 使用相同 mock 值应产生不同结果
-            # 由于随机性，不同 user_id 可能偶然相同（1/100概率）
-            # 改为验证: 多次测试中，相同 user_id 始终相同（已验证）
-            # 而 seed 字符串确实包含 user_id（通过代码审查验证）
-            # 这里我们验证: 如果 user_id 是 seed 的一部分，那么修改 user_id 可能改变结果
-            # 用 mock 控制 random.randint 返回不同值来验证 seed 被正确使用
-            with patch("module.misc.jrrp_command.random.randint") as mock_rand:
-                mock_rand.return_value = 42
+            # 测试2: 不同 user_id 应产生不同结果（通过 patch compute_jrrp 验证 seed 机制）
+            with patch("module.misc.jrrp_command.compute_jrrp",
+                       return_value=_make_jrrp_result(jrrp=42)):
                 cmds3, result3 = await send_as_user(
                     e2e_bot, ".jrrp", user_id="test_user_456", nickname="测试用户3", group_id="group_jrrp"
                 )

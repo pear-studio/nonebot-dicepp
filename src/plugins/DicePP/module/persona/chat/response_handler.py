@@ -29,11 +29,15 @@ class ResponseHandler:
         group_id: str,
         content: str,
         display_name: str = "我",
+        message_type: MessageType = MessageType.CHAT,
     ) -> int:
         """持久化 assistant 消息到 message_stream 表
 
         - 群聊: effective_user_id = "assistant"
         - 私聊: effective_user_id = user_id
+
+        Args:
+            message_type: 消息类型，默认 CHAT。jrrp 场景传入 COMMAND。
 
         Returns:
             入库消息的 msg_id
@@ -43,7 +47,7 @@ class ResponseHandler:
             user_id=effective_user_id,
             group_id=group_id or "",
             role="assistant",
-            type=MessageType.CHAT,
+            type=message_type,
             content=content,
             display_name=display_name,
         )
@@ -74,8 +78,9 @@ class ResponseHandler:
         user_id: str,
         group_id: str,
         content: str,
+        message_type: MessageType = MessageType.CHAT,
     ) -> int:
         """持久化并发送消息（便捷方法）"""
-        msg_id = await self.persist(user_id, group_id, content)
+        msg_id = await self.persist(user_id, group_id, content, message_type=message_type)
         await self.send(user_id, group_id, content, msg_id)
         return msg_id

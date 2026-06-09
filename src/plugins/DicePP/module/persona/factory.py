@@ -53,6 +53,7 @@ from .tools.roll_dice import ROLL_DICE_TOOL, roll_dice_executor
 from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
 from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_databases_executor
 from .tools.search_knowledge import SEARCH_KNOWLEDGE_TOOL, search_knowledge_executor
+from .tools.get_jrrp import GET_JRRP_TOOL, get_jrrp_executor
 from .tools.suggest_action import SUGGEST_ACTION_TOOL, make_suggest_action_executor
 from .tools.generate_image import make_generate_image_tool_def, make_generate_image_executor
 from .tools.look_at_past_image import LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor
@@ -117,8 +118,8 @@ class PersonaApp:
 
     # ── 消息发送 ──────────────────────────────────────────────
 
-    async def send_message(self, user_id: str, group_id: str, content: str) -> bool:
-        return await self.port.send(user_id, group_id, content)
+    async def send_message(self, user_id: str, group_id: str, content: str, msg_id: Optional[int] = None) -> bool:
+        return await self.port.send(user_id, group_id, content, msg_id=msg_id)
 
     # ── LLM 路由器 ────────────────────────────────────────────
 
@@ -166,6 +167,10 @@ class PersonaApp:
         return calc.effective_relationship(rel) if calc else rel
 
     # ── 生命周期驱动 ──────────────────────────────────────────
+
+    async def is_awake(self) -> bool:
+        """角色是否处于唤醒状态。委托给 ``ChatSession.is_awake()``。"""
+        return await self.chat.is_awake()
 
     async def tick(self) -> None:
         await self.life.tick()
@@ -407,6 +412,7 @@ def _build_tooling(
         make_search_events_executor(),
     )
     tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
+    tool_registry.register(ToolDomain.CHAT, GET_JRRP_TOOL, get_jrrp_executor)
     tool_registry.register(ToolDomain.CHAT, LIST_QUERY_DATABASES_TOOL, list_query_databases_executor)
     tool_registry.register(ToolDomain.CHAT, SEARCH_KNOWLEDGE_TOOL, search_knowledge_executor)
     tool_registry.register(ToolDomain.CHAT, SUGGEST_ACTION_TOOL, suggest_action_executor)
