@@ -178,9 +178,9 @@ class TestCharacterDaySimulation:
         assert len(result) == 1
         assert result[0].get("slot_type") == "wake_up"
 
-        # 验证状态未变（边界事件无 delta）
+        # 验证状态已应用 wake_up floor（energy_delta=0 → floor=20）
         state = await life.data_store.get_character_state()
-        assert state.energy == 50
+        assert state.energy == 70  # 50 + wake_up floor 20
         # 边界事件不调用 generate_event_reaction，意向由后续槽位事件设置
 
         # ── 10:00 槽位事件，触发链式 ──
@@ -193,9 +193,9 @@ class TestCharacterDaySimulation:
 
         assert len(result) == 3  # 咖啡→散步→看书
 
-        # 验证状态更新（50 + 5 - 10 - 5 = 40 energy, 50 + 10 + 5 + 8 = 73 mood）
+        # 验证状态更新（70 + 5 - 10 - 5 = 60 energy, 50 + 10 + 5 + 8 = 73 mood）
         state = await life.data_store.get_character_state()
-        assert state.energy == 40   # 50+5-10-5=40
+        assert state.energy == 60   # 70+5-10-5=60
         assert state.mood == 73     # 50+10+5+8=73
         assert state.health == 53   # 50+0+3+0=53
 
@@ -259,13 +259,13 @@ class TestCharacterDaySimulation:
         assert len(result) == 1
         assert result[0]["description"] == "吃早餐"
 
-        # 状态不应触发兜底恢复（因为有 good_night 事件）
+        # 跨天兜底恢复已移除，状态不受恢复影响
         state = await life.data_store.get_character_state()
-        assert state.energy == 40  # 未恢复
+        assert state.energy == 60  # 前日 chain 结束后的值，未恢复
 
     @pytest.mark.asyncio
-    async def test_cross_day_recovery_fallback(self, life, monkeypatch):
-        """跨天且无睡觉事件时触发兜底恢复"""
+    async def test_cross_day_no_recovery_fallback(self, life, monkeypatch):
+        """跨天兜底恢复已移除：跨天时不再触发状态恢复"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr(
             "plugins.DicePP.module.persona.life.character_life.wall_now",
@@ -285,6 +285,7 @@ class TestCharacterDaySimulation:
         await life.tick()
 
         state = await life.data_store.get_character_state()
-        assert state.energy == 30  # 10 + 20
-        assert state.mood == 20    # 10 + 10
-        assert state.health == 15  # 10 + 5
+        # 跨天不再触发兜底恢复，状态维持原值（仅有事件链的 delta）
+        assert state.energy == 10  # 未被恢复
+        assert state.mood == 10    # 未被恢复
+        assert state.health == 10  # 未被恢复

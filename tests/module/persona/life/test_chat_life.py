@@ -26,7 +26,7 @@ def _make_cfg(**kw):
         chain_max_depth=1,
         chain_force_extend_once_prob=0.0,
         default_energy=50, default_mood=50, default_health=50,
-        recovery_energy=20, recovery_mood=10, recovery_health=5,
+        recovery_energy=20,
         **kw,
     )
 

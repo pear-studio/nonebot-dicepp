@@ -57,8 +57,6 @@ def _make_bot() -> MagicMock:
     cfg.character_life_default_mood = 50
     cfg.character_life_default_health = 50
     cfg.character_life_recovery_energy = 20
-    cfg.character_life_recovery_mood = 10
-    cfg.character_life_recovery_health = 5
     cfg.character_life_diary_time = "23:30"
     cfg.proactive_coordinator_max_failures = 3
     cfg.proactive_coordinator_max_iterations = 5

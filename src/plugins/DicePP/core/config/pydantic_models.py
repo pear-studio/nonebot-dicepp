@@ -191,10 +191,8 @@ class PersonaConfig(BaseModel):
         description="仅在当天首次事件后、action_tendency 为空时触发一次保底续写的概率，保证链深度至少为 2",
     )
     character_life_min_event_interval_minutes: int = 5
-    # 跨天恢复数值配置
+    # wake_up 体力恢复固定值
     character_life_recovery_energy: int = 20
-    character_life_recovery_mood: int = 10
-    character_life_recovery_health: int = 5
     # 旧版纯文本状态迁移默认值
     character_life_default_energy: int = 50
     character_life_default_mood: int = 50

@@ -12,6 +12,11 @@ from plugins.DicePP.module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
 )
+from plugins.DicePP.module.persona.life.event_agent import (
+    EventContext,
+    EventGenerationResult,
+    EventReactionResult,
+)
 from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.module.persona.data.models import CharacterState
@@ -603,55 +608,8 @@ class TestCharacterLifePhase1:
                 assert slot_m >= start + min_interval
                 assert slot_m <= end - min_interval
 
-    # ── 1.5 跨天基础恢复兜底 ──────────────────────
-
-    @pytest.mark.asyncio
-    async def test_day_transition_recovery_fallback(self, life, mock_data_store, monkeypatch):
-        """跨天且无昨晚睡觉事件时触发兜底恢复"""
-        from types import SimpleNamespace
-
-        fake_now = datetime(2024, 1, 2, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.wall_now",
-            lambda tz: fake_now,
-        )
-        # 昨天没有任何事件
-        mock_data_store.get_daily_events = AsyncMock(return_value=[])
-
-        # 初始状态为低值
-        low_state = CharacterState(energy=10, mood=10, health=10)
-        mock_data_store.get_character_state = AsyncMock(return_value=low_state)
-
-        await life._handle_day_transition("2024-01-01")
-
-        # 验证 update_character_state 被调用，且状态已恢复
-        mock_data_store.update_character_state.assert_awaited_once()
-        updated_state = mock_data_store.update_character_state.call_args[0][0]
-        assert updated_state.energy == 30  # 10 + 20
-        assert updated_state.mood == 20    # 10 + 10
-        assert updated_state.health == 15  # 10 + 5
-
-    @pytest.mark.asyncio
-    async def test_day_transition_no_recovery_when_has_event(self, life, mock_data_store, monkeypatch):
-        """跨天且昨晚有 good_night 事件时不触发兜底"""
-        fake_now = datetime(2024, 1, 2, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.character_life.wall_now",
-            lambda tz: fake_now,
-        )
-        # DB 返回昨晚有 good_night 事件
-        from types import SimpleNamespace
-        mock_data_store.get_daily_events = AsyncMock(return_value=[
-            SimpleNamespace(description="睡了", reaction="", event_type="good_night", created_at=fake_now),
-        ])
-
-        original_state = CharacterState(energy=10, mood=10, health=10)
-        mock_data_store.get_character_state = AsyncMock(return_value=original_state)
-
-        await life._handle_day_transition("2024-01-01")
-
-        # 不调用 update_character_state
-        mock_data_store.update_character_state.assert_not_awaited()
+    # ── 1.5 跨天基础恢复兜底（已删除） ──────────
+    # _handle_day_transition 已删除，对应测试见 TestDayTransitionRemoved
 
     # ── 边界测试补充（R14-1） ─────────────────────
 
@@ -1031,6 +989,130 @@ class TestCharacterLifePhase2:
         assert "follow_up=" in logs
         assert "pending_plan=" in logs
 
+    # ── wake_up floor（energy recovery）─────────────────
+
+    @pytest.mark.asyncio
+    async def test_wake_up_floor_corrects_negative_delta(self, life, mock_data_store, mock_event_agent, monkeypatch):
+        """wake_up 事件：LLM 返回负 delta → floor 修正为 recovery_energy"""
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult
+
+        fake_now = datetime(2024, 1, 1, 8, 15, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._today_jittered_start = 8 * 60 + 15
+        life._today_jittered_end = 22 * 60 - 15
+        life._slot_minutes_today = [(8 * 60 + 15, "wake_up")]
+        life._last_event_date = "2024-01-01"
+
+        # LLM 返回 -5（体力下降）
+        mock_event_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="醒来", duration_minutes=0,
+            energy_delta=-5, mood_delta=0, health_delta=0,
+        ))
+        mock_event_agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(
+            reaction="嗯", share_desire=0.0,
+        ))
+
+        await life.tick()
+
+        # 验证 update_character_state 中 energy 已加 floor 而非 -5
+        updated_state = mock_data_store.update_character_state.call_args[0][0]
+        # energy=50 + max(-5, recovery_energy(20)) = 50 + 20 = 70
+        assert updated_state.energy == 70
+
+    @pytest.mark.asyncio
+    async def test_wake_up_floor_preserves_positive_above_floor(self, life, mock_data_store, mock_event_agent, monkeypatch):
+        """wake_up 事件：LLM 返回正值高于 floor → 保留原值（不经过 clamp）"""
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult
+
+        fake_now = datetime(2024, 1, 1, 8, 15, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._today_jittered_start = 8 * 60 + 15
+        life._today_jittered_end = 22 * 60 - 15
+        life._slot_minutes_today = [(8 * 60 + 15, "wake_up")]
+        life._last_event_date = "2024-01-01"
+
+        # LLM 返回 25（高于 floor=20），wake_up 不经过通用 clamp，保留 25
+        mock_event_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="醒来很有精神", duration_minutes=0,
+            energy_delta=25, mood_delta=0, health_delta=0,
+        ))
+        mock_event_agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(
+            reaction="精神很好", share_desire=0.3,
+        ))
+
+        await life.tick()
+
+        updated_state = mock_data_store.update_character_state.call_args[0][0]
+        # energy=50 + max(25, 20)=25 → 75（不再被 clamp 截断为 20）
+        assert updated_state.energy == 75
+
+    @pytest.mark.asyncio
+    async def test_non_wake_up_no_floor_applied(self, life, mock_data_store, mock_event_agent, monkeypatch):
+        """非 wake_up 事件不受 floor 约束"""
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult
+
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life._slot_minutes_today = [(10 * 60, "system")]
+        life._last_event_date = "2024-01-01"
+
+        # system 槽位返回 -10
+        mock_event_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="日常事件", duration_minutes=0,
+            energy_delta=-10, mood_delta=0, health_delta=0,
+        ))
+        mock_event_agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(
+            reaction="嗯", share_desire=0.0,
+        ))
+
+        await life.tick()
+
+        updated_state = mock_data_store.update_character_state.call_args[0][0]
+        # energy=50 + (-10) = 40，不受 floor 影响
+        assert updated_state.energy == 40
+
+    # ── inject_spontaneous_event 回归 ─────────────
+
+    @pytest.mark.asyncio
+    async def test_inject_spontaneous_event_default_slot_type_system(self, life, mock_data_store, mock_event_agent, monkeypatch):
+        """inject_spontaneous_event 未传 slot_type → EventContext 默认 "system" """
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+
+        # 捕获 EventContext 构造后的 slot_type
+        original_init = EventContext.__init__
+        captured_slot_types = []
+
+        def tracking_init(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            captured_slot_types.append(self.slot_type)
+
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.event_agent.EventContext.__init__",
+            tracking_init,
+        )
+
+        await life.inject_spontaneous_event("角色正在发呆")
+
+        assert len(captured_slot_types) > 0
+        # inject_spontaneous_event 不传 slot_type，应默认为 "system"
+        for st in captured_slot_types:
+            assert st == "system", f"expected 'system' but got {st!r}"
+
     # ── 边界测试补充（R14-2 / R14-3） ─────────────
 
     def test_min_interval_too_large_generates_boundary_slots_only(self, life, monkeypatch):
@@ -1050,30 +1132,97 @@ class TestCharacterLifePhase2:
         assert "good_night" in types
         assert "system" not in types
 
+
+
+class TestDayTransitionRemoved:
+    """跨天兜底已删除的负向测试"""
+
+    @pytest.fixture
+    def mock_event_agent(self):
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+        agent = MagicMock()
+        agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="测试事件", duration_minutes=0))
+        agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(
+            reaction="测试", share_desire=0.5))
+        return agent
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState(
+            energy=10, mood=10, health=10,
+        ))
+        store.update_character_state = AsyncMock()
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.add_daily_event = AsyncMock()
+        store.get_diary = AsyncMock(return_value=None)
+        return store
+
+    @pytest.fixture
+    def character(self):
+        ext = PersonaExtensions(
+            daily_events_count=3,
+            event_day_start_hour=8,
+            event_day_end_hour=22,
+            event_jitter_minutes=15,
+            event_day_start_jitter_minutes=0,
+            event_day_end_jitter_minutes=0,
+        )
+        return Character(name="测试角色", extensions=ext)
+
+    @pytest.fixture
+    def life(self, mock_event_agent, mock_data_store, character):
+        config = CharacterLifeConfig(
+            enabled=True,
+            slot_match_window_minutes=15,
+            timezone="Asia/Shanghai",
+        )
+        life = CharacterLife(
+            config=config,
+            event_agent=mock_event_agent,
+            data_store=mock_data_store,
+            character=character,
+        )
+        life.boundary_receiver = MagicMock()
+        return life
+
+    def test_handle_day_transition_method_removed(self, life):
+        """_handle_day_transition 方法已被删除"""
+        assert not hasattr(life, "_handle_day_transition")
+
+    def test_day_transition_recovered_date_field_removed(self, life):
+        """_day_transition_recovered_date 字段已被删除"""
+        assert not hasattr(life, "_day_transition_recovered_date")
+
     @pytest.mark.asyncio
-    async def test_tick_continue_on_day_transition_exception(self, life, mock_data_store, mock_event_agent, monkeypatch):
-        """跨天恢复数据库异常时不阻断 tick 继续生成事件（R2 容错路径）"""
-        fake_now = datetime(2024, 1, 2, 10, 0, 0)
+    async def test_tick_no_recovery_on_day_cross(self, life, mock_data_store, monkeypatch):
+        """跨天时 tick() 不触发额外恢复（仅有事件正常流程的状态变更）"""
+        # 设置时间为 wake_up 槽位 (8:00)，匹配角色 event_day_start_hour=8
+        fake_now = datetime(2024, 1, 2, 8, 0, 0)
         monkeypatch.setattr(
             "plugins.DicePP.module.persona.life.character_life.wall_now",
             lambda tz: fake_now,
         )
         # 模拟跨天：last_event_date 是昨天
         life._last_event_date = "2024-01-01"
-        life._slot_minutes_today = [(10 * 60, "system")]
 
-        # 仅当查询昨天（old_date）时抛异常，当天查询正常
-        async def _get_daily_events_side_effect(date):
-            if date == "2024-01-01":
-                raise Exception("DB connection lost")
-            return []
+        # 重置 update_character_state 的 mock 计数
+        mock_data_store.update_character_state.reset_mock()
 
-        mock_data_store.get_daily_events = AsyncMock(side_effect=_get_daily_events_side_effect)
+        await life.tick()
 
-        result = await life.tick()
-        # tick 应继续执行并生成事件，而不是抛出异常
-        assert len(result) == 1
-        assert result[0]["description"] == "测试事件"
+        # tick 应正常生成事件（只有事件产生的状态更新），不应有额外的恢复更新
+        # 验证：仅 1 次 update_character_state（正常事件-反应链），没有额外的恢复更新
+        assert mock_data_store.update_character_state.call_count == 1
+        updated_state = mock_data_store.update_character_state.call_args[0][0]
+        # 初始 energy=10，wake_up 固定恢复 +20 → 30（正常事件流程）
+        # mood/health 无 delta（mock 不提供 delta 值）且不再有 recovery_mood/recovery_health 跨天恢复 → 10
+        assert updated_state.energy == 30
+        assert updated_state.mood == 10
+        assert updated_state.health == 10
 
 
 class TestCrossMidnightSlots:

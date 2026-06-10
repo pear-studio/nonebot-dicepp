@@ -87,6 +87,7 @@ class EventContext:
         health: Optional[int] = None,
         current_intention: Optional[str] = None,
         intention_created_at: Optional[datetime] = None,
+        slot_type: str = "system",
     ):
         self.character_name = character_name
         self.character_description = character_description
@@ -101,6 +102,7 @@ class EventContext:
         self.health = health
         self.current_intention = current_intention
         self.intention_created_at = intention_created_at
+        self.slot_type = slot_type
 
 
 class EventGenerationAgent:
@@ -156,18 +158,38 @@ class EventGenerationAgent:
             lines.append(f"当前意向: {intention}")
         return "\n".join(lines) if lines else "无记录"
 
-    # 状态刻度定义（注入 System Agent prompt）
-    _STATE_SCALE_PROMPT = """状态刻度（0-100）：
-- 80-100: 极佳（精力充沛、心情愉悦、身体健康）
-- 60-79: 良好（略有疲惫、情绪平稳、无病痛）
-- 40-59: 一般（明显疲倦、情绪低落、轻微不适）
-- 20-39: 较差（精疲力竭、心情糟糕、生病中）
-- 0-19: 极差（虚弱无力、崩溃绝望、重病缠身）
+    @staticmethod
+    def _slot_type_hint(slot_type: str) -> str:
+        """根据槽位类型返回场景标注文本。"""
+        if slot_type == "wake_up":
+            return "\n当前事件类型: wake_up（角色刚刚醒来）\nwake_up 恢复规则：体力自然恢复，energy_delta 保底 +20\n"
+        elif slot_type == "good_night":
+            return "\n当前事件类型: good_night（角色准备入睡）\n"
+        return ""
 
-状态变化幅度参考：
-- ±1-5: 轻微变化（日常琐事）
-- ±6-10: 明显变化（值得关注的事件）
-- ±11-20: 显著变化（重大事件，极少超过20）"""
+    # 状态刻度定义（注入 System Agent prompt）
+    _STATE_SCALE_PROMPT = """体力（0-100）影响角色能做什么：
+  80-100 → 精力充沛，可承担消耗较大的活动
+  60-79  → 精力正常，日常活动不受限制
+  40-59  → 可以外出，但会自然回避高强度劳作
+  20-39  → 精力有限，倾向低消耗室内活动，回避长途跋涉
+  0-19   → 已无力消耗，应选择就近休息、静养、缓慢整理等恢复性行为
+
+心情（0-100）：
+  80-100 → 愉悦，对周围充满兴趣
+  60-79  → 平稳，日常交流自然
+  40-59  → 情绪低落
+  20-39  → 心情糟糕，易烦躁消沉
+  0-19   → 崩溃绝望
+
+健康（0-100）：
+  80-100 → 身体健康，行动自如
+  60-79  → 无病痛，状态正常
+  40-59  → 轻微不适
+  20-39  → 生病中，行动受限
+  0-19   → 重病缠身
+
+单事件状态变化幅度 ≤ ±20"""
 
     async def _run_life_collect_loop(
         self, messages: list, tools: list, temperature: float, selection: SelectionPolicy,
@@ -222,7 +244,7 @@ class EventGenerationAgent:
 角色当前状态:
 {state_text}
 {self._STATE_SCALE_PROMPT}
-
+{self._slot_type_hint(context.slot_type)}
 生成要求:
 1. 以第三人称客观叙述描述发生了什么（不携带主观情绪）
 2. 只记录可观察的行为和状态（动作、位置、物品、身体状态）

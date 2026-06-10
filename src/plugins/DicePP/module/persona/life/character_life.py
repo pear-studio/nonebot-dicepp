@@ -48,8 +48,6 @@ class CharacterLifeConfig:
         chain_max_depth: int = 3,
         chain_force_extend_once_prob: float = 0.0,
         recovery_energy: int = 20,
-        recovery_mood: int = 10,
-        recovery_health: int = 5,
         default_energy: int = 50,
         default_mood: int = 50,
         default_health: int = 50,
@@ -63,10 +61,8 @@ class CharacterLifeConfig:
         # 事件-反应链配置
         self.chain_max_depth = max(1, min(10, chain_max_depth))
         self.chain_force_extend_once_prob = chain_force_extend_once_prob
-        # 跨天恢复数值
+        # wake_up 体力 delta floor 值
         self.recovery_energy = recovery_energy
-        self.recovery_mood = recovery_mood
-        self.recovery_health = recovery_health
         # 旧版纯文本状态迁移默认值
         self.default_energy = default_energy
         self.default_mood = default_mood
@@ -87,8 +83,6 @@ class CharacterLifeConfig:
             default_mood=persona.character_life_default_mood,
             default_health=persona.character_life_default_health,
             recovery_energy=persona.character_life_recovery_energy,
-            recovery_mood=persona.character_life_recovery_mood,
-            recovery_health=persona.character_life_recovery_health,
         )
 
     def now(self) -> datetime:
@@ -119,8 +113,6 @@ class CharacterLife:
         self._today_jittered_end: Optional[int] = None
         # 今天是否已触发过链式事件（深度 >= 2）
         self._chain_triggered_today: bool = False
-        # 上次执行跨天恢复的日期（防止无 good_night 时每日重复恢复）
-        self._day_transition_recovered_date: Optional[str] = None
         # good_night 冷却：记录上次触发时间，防止再生后同窗口内重复触发（跨午夜场景）
         self._last_good_night_fired_at: Optional[datetime] = None
         # 可选的边界接收器，用于同步波动边界和标记边界事件
@@ -321,8 +313,6 @@ class CharacterLife:
                     continue
         # 加载链式触发标记
         self._chain_triggered_today = bool(data.get("chain_triggered"))
-        # 加载上次跨天恢复日期
-        self._day_transition_recovered_date = data.get("day_transition_recovered_date")
         # 加载 good_night 冷却时间戳
         lg = data.get("last_good_night_fired_at")
         if isinstance(lg, str):
@@ -356,7 +346,6 @@ class CharacterLife:
                 for a in self._ongoing_activities
             ],
             "chain_triggered": self._chain_triggered_today,
-            "day_transition_recovered_date": self._day_transition_recovered_date,
             "last_good_night_fired_at": (
                 self._last_good_night_fired_at.isoformat()
                 if self._last_good_night_fired_at else None
@@ -379,17 +368,8 @@ class CharacterLife:
         if not self.config.enabled:
             return None
 
-        old_date = self._last_event_date
         self._reset_daily_state()
         self._cleanup_expired_activities()
-
-        # 跨天处理：恢复兜底
-        if old_date and old_date != self._last_event_date:
-            try:
-                await self._handle_day_transition(old_date)
-                await self.save_persistent_state()
-            except Exception:
-                logger.exception("跨天恢复失败")
 
         now = self.config.now()
         now_m = now.hour * 60 + now.minute
@@ -443,30 +423,6 @@ class CharacterLife:
             state.mood = self.config.default_mood
         if state.health is None:
             state.health = self.config.default_health
-
-    async def _handle_day_transition(self, old_date: str) -> None:
-        """跨天处理：检查昨晚是否有 good_night 事件，没有则兜底恢复（每 old_date 仅一次）"""
-        # 直接查询数据库判断昨晚是否有 good_night 事件（事件保留 30 天）
-        old_events = await self.data_store.get_daily_events(old_date)
-        has_sleep_event = any(e.event_type == "good_night" for e in old_events)
-
-        if not has_sleep_event and self._day_transition_recovered_date != old_date:
-            state = await self.data_store.get_character_state()
-            if state:
-                self._migrate_legacy_state(state)
-                state.energy = min(100, state.energy + self.config.recovery_energy)
-                state.mood = min(100, state.mood + self.config.recovery_mood)
-                state.health = min(100, state.health + self.config.recovery_health)
-                await self.data_store.update_character_state(state)
-                logger.info(
-                    "跨天基础恢复兜底触发: energy+%d mood+%d health+%d",
-                    self.config.recovery_energy,
-                    self.config.recovery_mood,
-                    self.config.recovery_health,
-                )
-            # 状态恢复完成后再写标记，避免「标记已写但状态未恢复」的竞态窗口
-            self._day_transition_recovered_date = old_date
-            await self.save_persistent_state()
 
     @staticmethod
     def _clamp_delta(d: Optional[int]) -> int:
@@ -587,15 +543,21 @@ class CharacterLife:
                     health=character_state.health,
                     current_intention=character_state.current_intention,
                     intention_created_at=character_state.intention_created_at,
+                    slot_type=slot_type,
                 )
 
                 # 生成事件
                 event_result = await self.event_agent.generate_event_result(context)
 
                 # 单事件 delta 硬约束
-                ed = CharacterLife._clamp_delta(event_result.energy_delta)
                 md = CharacterLife._clamp_delta(event_result.mood_delta)
                 hd = CharacterLife._clamp_delta(event_result.health_delta)
+
+                # wake_up 体力 floor 保底：跳过通用 clamp，保留 LLM 输出
+                if slot_type == "wake_up":
+                    ed = max(event_result.energy_delta or 0, self.config.recovery_energy)
+                else:
+                    ed = CharacterLife._clamp_delta(event_result.energy_delta)
 
                 # 更新状态
                 character_state.energy = max(0, min(100, character_state.energy + ed))

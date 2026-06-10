@@ -134,6 +134,58 @@ class TestGenerateDiary:
         assert "当前日期: 2026年05月23日" in user_msg
 
 
+class TestStateScalePrompt:
+    """测试 _STATE_SCALE_PROMPT 格式"""
+
+    def test_energy_has_behavioral_guidance(self):
+        """体力区间包含行为倾向"""
+        prompt = EventGenerationAgent._STATE_SCALE_PROMPT
+        assert "体力（0-100）影响角色能做什么" in prompt
+        assert "可承担消耗较大的活动" in prompt
+        assert "自然回避高强度劳作" in prompt
+        assert "倾向低消耗室内活动" in prompt
+        assert "应选择就近休息、静养、缓慢整理等恢复性行为" in prompt
+
+    def test_mood_no_behavioral_commands(self):
+        """心情区间无行为指令（保留描述）"""
+        prompt = EventGenerationAgent._STATE_SCALE_PROMPT
+        mood_section_start = prompt.index("心情（0-100）")
+        health_section_start = prompt.index("健康（0-100）")
+        mood_section = prompt[mood_section_start:health_section_start]
+        # 不应包含行为指令关键词
+        assert "应选择" not in mood_section
+        assert "倾向" not in mood_section
+        assert "可承担" not in mood_section
+
+    def test_health_no_behavioral_commands(self):
+        """健康区间无行为指令（保留描述）"""
+        prompt = EventGenerationAgent._STATE_SCALE_PROMPT
+        health_section_start = prompt.index("健康（0-100）")
+        amplitude_start = prompt.index("单事件状态变化幅度")
+        health_section = prompt[health_section_start:amplitude_start]
+        assert "应选择" not in health_section
+        assert "倾向" not in health_section
+        assert "可承担" not in health_section
+
+    def test_wake_up_recovery_rule_present(self):
+        """wake_up 恢复规则存在于 slot_type_hint 中"""
+        hint = EventGenerationAgent._slot_type_hint("wake_up")
+        assert "wake_up" in hint
+        assert "保底 +20" in hint
+        # 通用 prompt 中不应包含 wake_up 规则
+        prompt = EventGenerationAgent._STATE_SCALE_PROMPT
+        assert "wake_up 事件特殊规则" not in prompt
+
+    def test_amplitude_reference_present(self):
+        """幅度参考存在（简洁形式）"""
+        prompt = EventGenerationAgent._STATE_SCALE_PROMPT
+        assert "单事件状态变化幅度" in prompt
+        assert "±20" in prompt
+        # 旧版详细分级参考不应恢复
+        assert "±1-5: 轻微变化" not in prompt
+        assert "±6-10: 明显变化" not in prompt
+
+
 class TestGenerateEventResult:
     @pytest.fixture
     def mock_router(self):
@@ -232,6 +284,76 @@ class TestGenerateEventResult:
         user_msg = mock_run.call_args.kwargs["messages"][1]["content"]
         assert "当前日期: 2024年01月01日" in user_msg
         assert "当前时间: 10:00" in user_msg
+
+    # ── slot_type 注入测试 ──
+
+    @pytest.mark.asyncio
+    async def test_slot_type_wake_up_injects_scene_label(self, agent, mock_router, monkeypatch):
+        """wake_up → 场景标注注入"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        mock_run = AsyncMock()
+        monkeypatch.setattr(AgentRuntime, "run", mock_run)
+
+        await agent.generate_event_result(EventContext(
+            character_name="小雨", character_description="温柔的少女",
+            world="", scenario="", recent_diaries=[], today_events=[],
+            current_time=datetime(2024, 1, 1, 8, 0),
+            slot_type="wake_up"))
+
+        system_prompt = mock_run.call_args.kwargs["messages"][0]["content"]
+        assert "当前事件类型: wake_up" in system_prompt
+        assert "角色刚刚醒来" in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_slot_type_good_night_injects_scene_label(self, agent, mock_router, monkeypatch):
+        """good_night → 场景标注注入"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        mock_run = AsyncMock()
+        monkeypatch.setattr(AgentRuntime, "run", mock_run)
+
+        await agent.generate_event_result(EventContext(
+            character_name="小雨", character_description="温柔的少女",
+            world="", scenario="", recent_diaries=[], today_events=[],
+            current_time=datetime(2024, 1, 1, 22, 0),
+            slot_type="good_night"))
+
+        system_prompt = mock_run.call_args.kwargs["messages"][0]["content"]
+        assert "当前事件类型: good_night" in system_prompt
+        assert "角色准备入睡" in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_slot_type_system_no_injection(self, agent, mock_router, monkeypatch):
+        """system → 无注入"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        mock_run = AsyncMock()
+        monkeypatch.setattr(AgentRuntime, "run", mock_run)
+
+        await agent.generate_event_result(EventContext(
+            character_name="小雨", character_description="温柔的少女",
+            world="", scenario="", recent_diaries=[], today_events=[],
+            current_time=datetime(2024, 1, 1, 10, 0),
+            slot_type="system"))
+
+        system_prompt = mock_run.call_args.kwargs["messages"][0]["content"]
+        assert "当前事件类型:" not in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_slot_type_defaults_to_system(self, agent, mock_router, monkeypatch):
+        """未传 slot_type 时默认 "system"，无场景标注注入"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        mock_run = AsyncMock()
+        monkeypatch.setattr(AgentRuntime, "run", mock_run)
+
+        # 不传 slot_type，依赖默认值
+        context = EventContext(
+            character_name="小雨", character_description="温柔的少女",
+            world="", scenario="", recent_diaries=[], today_events=[],
+            current_time=datetime(2024, 1, 1, 10, 0))
+        assert context.slot_type == "system"
+
+        await agent.generate_event_result(context)
+        system_prompt = mock_run.call_args.kwargs["messages"][0]["content"]
+        assert "当前事件类型:" not in system_prompt
 
 
 class TestGenerateEventReaction:
