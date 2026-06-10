@@ -558,8 +558,8 @@ class PersonaCommand(UserCommandBase):
 
 
     async def _handle_jrrp(self, user_id: str, group_id: str, meta: MessageMetaData) -> List[BotCommandBase]:
-        """处理 .jrrp 命令：调 compute_jrrp → 发送数值行 → 事件消息注入 LLM 生成角色评语"""
-        from module.misc.jrrp_utils import compute_jrrp, format_jrrp_info_line, format_jrrp_trend_line, format_compact_trend
+        """处理 .jrrp 命令：调 compute_jrrp → 事件消息注入 LLM 生成角色评语"""
+        from module.misc.jrrp_utils import compute_jrrp, format_jrrp_text
         from utils.time import get_current_date_raw
 
         # 1. 计算运势
@@ -568,20 +568,21 @@ class PersonaCommand(UserCommandBase):
         # 2. 获取用户显示名
         user_name = await self.bot.get_nickname(user_id, group_id)
 
-        # 3. 构建注入 LLM 的事件消息（先于 info_line 构建并写入 message_stream，
+        # 3. 构建注入 LLM 的事件消息（写入 message_stream，
         #    确保 _build_messages() → _fetch_short_term_history() 能读取到）
-        trend = format_compact_trend(result.delta_percent, result.direction)
+        if result.direction == 'up':
+            change_text = f"上涨 {result.delta_percent}%"
+        elif result.direction == 'down':
+            change_text = f"下跌 {result.delta_percent}%"
+        else:
+            change_text = "与昨日相同"
 
-        event_msg_parts = [
-            f"[请简短回复，一两句话即可]",
-            f"{user_name} 查询了今日运势。今日: {result.jrrp}/100",
-        ]
-        if result.is_max:
-            event_msg_parts.append("[今日是最高值]")
-        elif result.is_min:
-            event_msg_parts.append("[今日是最低值]")
-        event_msg_parts.append(f"，昨日: {result.zrrp}/100，{trend}。")
-        event_msg = "".join(event_msg_parts)
+        event_msg = (
+            f"[事件] {user_name} 查询了今日运势\n"
+            f"今日: {result.jrrp}/100 | 昨日: {result.zrrp}/100 | 变化: {change_text}\n"
+            f"\n"
+            f"请以角色身份就此说一两句话，自然地提及运势数值。"
+        )
 
         # 4. 将 event_msg 以 user 角色写入 message_stream，
         #    使 _build_messages() 的 _fetch_short_term_history() 能将其纳入 LLM 上下文
@@ -600,20 +601,15 @@ class PersonaCommand(UserCommandBase):
             except Exception as e:
                 logger.warning(f"[Persona] _handle_jrrp event_msg 持久化失败: {e}")
 
-        # 5. 发送数值行（post-send hook 自动持久化，无需手动 add_message_stream）
-        info_line = format_jrrp_info_line(user_name, result.jrrp)
-        await self._send(user_id, group_id, info_line)
-
-        # 6. 调 LLM 生成角色评语（skip_scoring=True）
+        # 5. 调 LLM 生成角色评语（skip_scoring=True）
         #    segment 启用时：dispatcher 自动发送，chat() 返回空串
         #    segment 未启用时：chat() 返回评语文本，需手动发送
         if not event_persisted:
-            # event_msg 未持久化 → LLM 无上下文，直接走模板回退
+            # event_msg 未持久化 → LLM 无上下文，回退到模板
             logger.warning("[Persona] _handle_jrrp event_msg 未持久化，跳过 LLM 调用")
-            trend_line = format_jrrp_trend_line(result.zrrp, result.jrrp,
-                                                result.delta_percent, result.direction)
-            if trend_line.strip():
-                await self._send(user_id, group_id, trend_line.strip())
+            fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
+                                        result.delta_percent, result.direction)
+            await self._send(user_id, group_id, fallback)
         else:
             try:
                 commentary = await self.app.chat.chat(
@@ -625,13 +621,18 @@ class PersonaCommand(UserCommandBase):
                 )
                 if commentary:
                     await self._send(user_id, group_id, commentary)
+                elif self.app.segment_dispatcher is None:
+                    # 非 segment 模式下 LLM 返回空串，回退到模板确保用户可见
+                    fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
+                                                result.delta_percent, result.direction)
+                    await self._send(user_id, group_id, fallback)
+                # segment 模式下 chat() 返回空串表示 dispatcher 已发送，不额外回退
             except Exception as e:
-                # LLM 调用失败时，补发趋势信息作为回退
+                # LLM 调用失败时，回退到模板
                 logger.warning(f"[Persona] _handle_jrrp LLM 调用失败，回退到模板: {e}")
-                trend_line = format_jrrp_trend_line(result.zrrp, result.jrrp,
-                                                    result.delta_percent, result.direction)
-                if trend_line.strip():
-                    await self._send(user_id, group_id, trend_line.strip())
+                fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
+                                            result.delta_percent, result.direction)
+                await self._send(user_id, group_id, fallback)
 
         return []
 

@@ -175,7 +175,7 @@ class TestHandleJrrp:
                           direction='up', is_min=False, is_max=False)
 
     async def test_sends_info_line_and_commentary(self, mock_jrrp_result):
-        """正常路径：写入 event_msg → 发送数值行 → LLM 评语"""
+        """正常路径：写入 event_msg → LLM 评语（不发模板数值行）"""
         app = MagicMock()
         app.is_awake = AsyncMock(return_value=True)
         app.chat.chat = AsyncMock(return_value="运气不错呢！")
@@ -189,9 +189,7 @@ class TestHandleJrrp:
         meta = _make_meta()
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
             with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_info_line",
-                           return_value="test_user的今日人品是:75"):
-                    result = await cmd._handle_jrrp("U123", "", meta)
+                result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
         # event_msg 以 user 角色写入 message_stream
@@ -199,13 +197,12 @@ class TestHandleJrrp:
                       if c.kwargs.get("role") == "user"]
         assert len(user_calls) == 1, \
             f"event_msg 应在 chat() 前以 user 角色写入，实际调用: {data_store.add_message_stream.await_args_list}"
-        # info_line 发送（不带 msg_id，post-send hook 自动持久化）
-        cmd._send.assert_any_call("U123", "", "test_user的今日人品是:75")
-        # LLM 评语发送
+        # 只发了 LLM 评语，没有模板数值行
+        assert cmd._send.await_count == 1
         cmd._send.assert_any_call("U123", "", "运气不错呢！")
 
     async def test_fallback_when_llm_raises(self, mock_jrrp_result):
-        """LLM 异常时回退到模板趋势文本"""
+        """LLM 异常时回退到 format_jrrp_text（数值 + 趋势，和原版 JrrpCommand 一致）"""
         app = MagicMock()
         app.chat.chat = AsyncMock(side_effect=RuntimeError("LLM down"))
 
@@ -217,24 +214,25 @@ class TestHandleJrrp:
         meta = _make_meta()
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
             with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_info_line",
-                           return_value="test_user的今日人品是:75"):
-                    with patch("module.misc.jrrp_utils.format_jrrp_text",
-                               return_value="test_user的今日人品是:75\n人品比昨天上升了25.0%！"):
-                        result = await cmd._handle_jrrp("U123", "", meta)
+                with patch("module.misc.jrrp_utils.format_jrrp_text",
+                           return_value="test_user的今日人品是:75\n人品比昨天上升了25.0%！"):
+                    result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
         # event_msg 仍在 chat() 前以 user 角色写入
         user_calls = [c for c in cmd.data_store.add_message_stream.await_args_list
                       if c.kwargs.get("role") == "user"]
         assert len(user_calls) == 1
-        # 回退时发送趋势文本（不含 info_line 部分）
-        cmd._send.assert_any_call("U123", "", "人品比昨天上升了25.0%！")
+        # 回退时发送完整模板文本（数值 + 趋势），仅发送一次
+        cmd._send.assert_any_call("U123", "",
+                                  "test_user的今日人品是:75\n人品比昨天上升了25.0%！")
+        assert cmd._send.await_count == 1
 
-    async def test_commentary_empty_does_not_send(self, mock_jrrp_result):
-        """LLM 返回空串时不再发第二次 _send"""
+    async def test_commentary_empty_segment_mode_no_fallback(self, mock_jrrp_result):
+        """segment 模式 LLM 返回空串时不额外回退（dispatcher 已发送）"""
         app = MagicMock()
         app.chat.chat = AsyncMock(return_value="")
+        app.segment_dispatcher = MagicMock()  # 存在 → segment 模式
 
         cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
@@ -244,13 +242,71 @@ class TestHandleJrrp:
         meta = _make_meta()
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
             with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_info_line",
-                           return_value="test_user的今日人品是:75"):
+                result = await cmd._handle_jrrp("U123", "", meta)
+
+        assert result == []
+        # segment 模式下 dispatcher 已发送，不应额外回退
+        assert cmd._send.await_count == 0
+
+    async def test_commentary_empty_non_segment_fallback(self, mock_jrrp_result):
+        """非 segment 模式 LLM 返回空串时回退到 format_jrrp_text"""
+        app = MagicMock()
+        app.chat.chat = AsyncMock(return_value="")
+        app.segment_dispatcher = None  # 非 segment 模式
+
+        cmd = _make_cmd(app=app)
+        cmd._send = AsyncMock()
+        cmd.data_store = MagicMock()
+        cmd.data_store.add_message_stream = AsyncMock()
+
+        meta = _make_meta()
+        fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
+        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
+            with patch("utils.time.get_current_date_raw"):
+                with patch("module.misc.jrrp_utils.format_jrrp_text",
+                           return_value=fallback_text):
                     result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
-        # 只发了一次（info_line），没有第二次 _send（commentary 空）
+        # 非 segment 模式下 LLM 返回空串，应回退到模板确保用户可见
         assert cmd._send.await_count == 1
+        cmd._send.assert_called_once_with("U123", "", fallback_text)
+
+    async def test_fallback_when_event_not_persisted(self, mock_jrrp_result):
+        """event_msg 持久化失败时回退到 format_jrrp_text"""
+        app = MagicMock()
+        app.chat.chat = AsyncMock(return_value="不会调到这里")
+        cmd = _make_cmd(app=app)
+        cmd._send = AsyncMock()
+
+        meta = _make_meta()
+        fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
+
+        # 子用例 A：data_store=None → event_persisted=False
+        cmd.data_store = None
+        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
+            with patch("utils.time.get_current_date_raw"):
+                with patch("module.misc.jrrp_utils.format_jrrp_text",
+                           return_value=fallback_text):
+                    result_a = await cmd._handle_jrrp("U123", "", meta)
+        assert result_a == []
+        cmd._send.assert_called_once_with("U123", "", fallback_text)
+
+        # 子用例 B：add_message_stream 抛异常 → event_persisted=False
+        cmd._send.reset_mock()
+        cmd.data_store = MagicMock()
+        cmd.data_store.add_message_stream = AsyncMock(side_effect=RuntimeError("DB down"))
+        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
+            with patch("utils.time.get_current_date_raw"):
+                with patch("module.misc.jrrp_utils.format_jrrp_text",
+                           return_value=fallback_text):
+                    with patch("module.persona.command.logger") as mock_logger:
+                        result_b = await cmd._handle_jrrp("U123", "", meta)
+        assert result_b == []
+        cmd._send.assert_called_once_with("U123", "", fallback_text)
+        warning_calls = [c[0][0] for c in mock_logger.warning.call_args_list]
+        assert any("event_msg 持久化失败" in msg for msg in warning_calls), \
+            f"应有持久化失败 warning，实际: {warning_calls}"
 
 
 # ── Test: skip_scoring=True propagation ────────────────────────────────────
@@ -276,9 +332,7 @@ class TestSkipScoringPropagation:
 
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_result):
             with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_info_line",
-                           return_value="test_user的今日人品是:50"):
-                    await cmd._handle_jrrp("U123", "", meta)
+                await cmd._handle_jrrp("U123", "", meta)
 
         # 验证 chat.chat 被调用且 skip_scoring=True
         app.chat.chat.assert_awaited_once()
@@ -421,9 +475,7 @@ class TestJrrpLLMContext:
 
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_result):
             with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_info_line",
-                           return_value="test_user的今日人品是:75"):
-                    await cmd._handle_jrrp("U123", "", meta)
+                await cmd._handle_jrrp("U123", "", meta)
 
         # 收集所有 add_message_stream 调用
         calls = data_store.add_message_stream.await_args_list
@@ -434,8 +486,8 @@ class TestJrrpLLMContext:
         assert len(user_calls) >= 1, f"应有至少一次 user 角色持久化，实际: {call_kwargs}"
 
         user_content = user_calls[0]["content"]
-        assert "[请简短回复，一两句话即可]" in user_content, \
-            f"event_msg 应包含生成指令前缀，实际: {user_content[:80]}..."
+        assert "[事件]" in user_content, \
+            f"event_msg 应包含 [事件] 前缀，实际: {user_content[:80]}..."
         assert "test_user 查询了今日运势" in user_content, \
             f"event_msg 应包含用户和运势信息，实际: {user_content[:80]}..."
         assert "今日: 75/100" in user_content, \
@@ -444,59 +496,10 @@ class TestJrrpLLMContext:
             f"event_msg 应包含昨日运势值，实际: {user_content[:80]}..."
         assert "上涨 25.0%" in user_content, \
             f"event_msg 应包含趋势方向，实际: {user_content[:80]}..."
+        assert "请以角色身份就此说一两句话" in user_content, \
+            f"event_msg 应包含角色指令，实际: {user_content[:80]}..."
 
         # 验证 chat() 在 event_msg 持久化之后调用（通过检查调用顺序）
         app.chat.chat.assert_awaited_once()
         assert app.chat.chat.await_args.kwargs.get("skip_scoring") is True
 
-    async def test_event_msg_includes_extreme_value_marker_for_max(self):
-        """is_max=True 时 event_msg 包含 [今日是最高值]"""
-        from module.misc.jrrp_utils import JrrpResult
-
-        app = MagicMock()
-        app.chat.chat = AsyncMock(return_value="大吉大利！")
-        data_store = MagicMock()
-        data_store.add_message_stream = AsyncMock()
-        cmd = _make_cmd(app=app, data_store=data_store)
-        cmd._send = AsyncMock()
-
-        meta = _make_meta()
-        mock_result = JrrpResult(jrrp=100, zrrp=80, delta=20, delta_percent=25.0,
-                                 direction='up', is_min=False, is_max=True)
-
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_result):
-            with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_info_line",
-                           return_value="test_user的今日人品是:...这是！这是大吉的100哦！"):
-                    await cmd._handle_jrrp("U123", "", meta)
-
-        user_calls = [c.kwargs for c in data_store.add_message_stream.await_args_list
-                      if c.kwargs.get("role") == "user"]
-        assert len(user_calls) >= 1
-        assert "[今日是最高值]" in user_calls[0]["content"]
-
-    async def test_event_msg_includes_extreme_value_marker_for_min(self):
-        """is_min=True 时 event_msg 包含 [今日是最低值]"""
-        from module.misc.jrrp_utils import JrrpResult
-
-        app = MagicMock()
-        app.chat.chat = AsyncMock(return_value="大凶之兆...")
-        data_store = MagicMock()
-        data_store.add_message_stream = AsyncMock()
-        cmd = _make_cmd(app=app, data_store=data_store)
-        cmd._send = AsyncMock()
-
-        meta = _make_meta()
-        mock_result = JrrpResult(jrrp=1, zrrp=50, delta=-49, delta_percent=98.0,
-                                 direction='down', is_min=True, is_max=False)
-
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_result):
-            with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_info_line",
-                           return_value="test_user的今日人品是:...你确定要听么..是大凶的1哦..."):
-                    await cmd._handle_jrrp("U123", "", meta)
-
-        user_calls = [c.kwargs for c in data_store.add_message_stream.await_args_list
-                      if c.kwargs.get("role") == "user"]
-        assert len(user_calls) >= 1
-        assert "[今日是最低值]" in user_calls[0]["content"]

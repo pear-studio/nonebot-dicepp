@@ -112,6 +112,8 @@ def format_jrrp_trend_line(zrrp: int, jrrp: int, delta_percent: float, direction
         return "\n人品与昨天相同呢。"
 
 
+# 注：此函数输出格式与 command.py _handle_jrrp 中 change_text 内联计算保持同步。
+# 修改任一处时需同步更新另一处。
 def format_compact_trend(delta_percent: float, direction: Literal['up', 'down', 'same']) -> str:
     """生成紧凑趋势文本（无换行前缀），供 command.py 和 get_jrrp.py 复用。
 
