@@ -412,31 +412,10 @@ class SessionManager:
                 self._bg_tasks.add(task)
                 task.add_done_callback(self._bg_tasks.discard)
 
-            # 异步入 message_stream（仅 assistant 最终回复，user 消息由 _inbound_message_recorder 负责写入）
-            task = asyncio.ensure_future(
-                self._flush_to_message_stream(user_id, group_id, response)
-            )
-            self._bg_tasks.add(task)
-            task.add_done_callback(self._bg_tasks.discard)
+            # 注意：assistant 回复的 message_stream 写入由 post-send hook
+            # (_group_chat_recorder) 统一负责，此处不重复写入。
         except Exception as e:
             logger.warning(f"[Session] 后处理失败: {e}")
-
-    async def _flush_to_message_stream(
-        self, user_id: str, group_id: str, assistant_text: str,
-    ) -> None:
-        """异步写入 message_stream（仅 assistant 最终回复，user 消息由 _inbound_message_recorder 负责写入）。"""
-        try:
-            if assistant_text:
-                from ..data.models import MessageType
-                await self._store.add_message_stream(
-                    user_id=user_id,
-                    group_id=group_id,
-                    role="assistant",
-                    type=MessageType.CHAT,
-                    content=assistant_text,
-                )
-        except Exception as e:
-            logger.warning(f"[Session] message_stream 异步写入失败: {e}")
 
     async def shutdown(self) -> None:
         """取消所有未完成的 background task 并等待清理。"""
