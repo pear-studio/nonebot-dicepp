@@ -335,17 +335,20 @@ class PersonaCommand(UserCommandBase):
 
         # .jrrp 拦截：persona 接管运势回复（需绕过下方 . 前缀守卫）
         if msg in (".jrrp", "。jrrp"):
-            # persona 未初始化或角色睡眠 → 回退到 JrrpCommand
-            if not self.app or not await self.app.is_awake():
+            if not self.app:
+                logger.info("[Persona] .jrrp 未拦截：模块未初始化，回退到 JrrpCommand")
                 return False, False, None
             # 白名单
             is_private = not meta.group_id
             whitelisted = await self._check_whitelist(meta.user_id, meta.group_id or "", is_private)
             if not whitelisted:
+                logger.info("[Persona] .jrrp 未拦截：用户不在白名单，回退到 JrrpCommand")
                 return False, False, None
             # 配置开关
             if not getattr(self.config, 'jrrp_persona_enabled', True):
+                logger.info("[Persona] .jrrp 未拦截：jrrp_persona_enabled=False，回退到 JrrpCommand")
                 return False, False, None
+            logger.info("[Persona] .jrrp 已拦截，路由到 _handle_jrrp")
             return True, False, "jrrp"
 
         # 如果以 "." 或 "。" 开头但不是有效的 AI 命令，不处理

@@ -80,18 +80,9 @@ class TestCanProcessMsgJrrpBranching:
         result = await self._call_can_process(cmd)
         assert result is False
 
-    async def test_character_sleeping_returns_false(self):
-        """角色睡眠时 .jrrp 返回 False"""
+    async def test_jrrp_with_valid_app_returns_true(self):
+        """角色清醒或睡眠时 .jrrp 均返回 True（is_awake 不参与 jrrp 路由决策）"""
         app = MagicMock()
-        app.is_awake = AsyncMock(return_value=False)
-        cmd = _make_cmd(app=app)
-        result = await self._call_can_process(cmd)
-        assert result is False
-
-    async def test_character_awake_returns_true(self):
-        """角色清醒时 .jrrp 返回 True"""
-        app = MagicMock()
-        app.is_awake = AsyncMock(return_value=True)
         cmd = _make_cmd(app=app)
         result = await self._call_can_process(cmd)
         assert result is True
@@ -104,7 +95,6 @@ class TestCanProcessMsgJrrpBranching:
         config.group_activity_enabled = False
 
         app = MagicMock()
-        app.is_awake = AsyncMock(return_value=True)
 
         data_store = MagicMock()
         data_store.get_global_setting = AsyncMock(return_value="some_code")
@@ -122,7 +112,6 @@ class TestCanProcessMsgJrrpBranching:
         config.group_activity_enabled = False
 
         app = MagicMock()
-        app.is_awake = AsyncMock(return_value=True)
 
         data_store = MagicMock()
         data_store.get_global_setting = AsyncMock(return_value="some_code")
@@ -140,7 +129,6 @@ class TestCanProcessMsgJrrpBranching:
         config.group_activity_enabled = False
 
         app = MagicMock()
-        app.is_awake = AsyncMock(return_value=True)
 
         cmd = _make_cmd(app=app, config=config)
         result = await self._call_can_process(cmd)
@@ -157,7 +145,6 @@ class TestCanProcessMsgJrrpBranching:
     async def test_chinese_period_jrrp_also_works(self):
         """中文句号「。jrrp」也能拦截"""
         app = MagicMock()
-        app.is_awake = AsyncMock(return_value=True)
         cmd = _make_cmd(app=app)
         result = await self._call_can_process(cmd, msg="。jrrp")
         assert result is True
@@ -177,7 +164,6 @@ class TestHandleJrrp:
     async def test_sends_info_line_and_commentary(self, mock_jrrp_result):
         """正常路径：写入 event_msg → LLM 评语（不发模板数值行）"""
         app = MagicMock()
-        app.is_awake = AsyncMock(return_value=True)
         app.chat.chat = AsyncMock(return_value="运气不错呢！")
 
         data_store = MagicMock()
