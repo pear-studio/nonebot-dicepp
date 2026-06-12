@@ -4,7 +4,7 @@ Tests for jrrp persona interception paths.
 Covers:
 - PersonaCommand.can_process_msg .jrrp branching (is_awake, whitelist, config toggle)
 - PersonaCommand._handle_jrrp with mocked compute_jrrp and mocked app.chat.chat
-- skip_scoring=True propagation through ChatSession.chat
+- is_command=True propagation through ChatSession.chat
 - PersonaApp.is_awake() delegation to sleep_gate
 """
 import pytest
@@ -295,13 +295,13 @@ class TestHandleJrrp:
             f"应有持久化失败 warning，实际: {warning_calls}"
 
 
-# ── Test: skip_scoring=True propagation ────────────────────────────────────
+# ── Test: is_command=True propagation ────────────────────────────────────
 
-class TestSkipScoringPropagation:
-    """skip_scoring=True 从 command.py 传播到 ChatSession.chat"""
+class TestIsCommandPropagation:
+    """is_command=True 从 command.py 传播到 ChatSession.chat"""
 
-    async def test_handle_jrrp_calls_chat_with_skip_scoring(self):
-        """_handle_jrrp 通过 app.chat.chat 传入 skip_scoring=True"""
+    async def test_handle_jrrp_calls_chat_with_is_command(self):
+        """_handle_jrrp 通过 app.chat.chat 传入 is_command=True"""
         from module.misc.jrrp_utils import JrrpResult
 
         app = MagicMock()
@@ -320,14 +320,14 @@ class TestSkipScoringPropagation:
             with patch("utils.time.get_current_date_raw"):
                 await cmd._handle_jrrp("U123", "", meta)
 
-        # 验证 chat.chat 被调用且 skip_scoring=True
+        # 验证 chat.chat 被调用且 is_command=True
         app.chat.chat.assert_awaited_once()
         assert app.chat.chat.await_args is not None
-        assert app.chat.chat.await_args.kwargs.get("skip_scoring") is True
+        assert app.chat.chat.await_args.kwargs.get("is_command") is True
 
 
-    async def test_chat_session_skip_scoring_skips_sleep_gate(self):
-        """skip_scoring=True 时绕过睡眠门控"""
+    async def test_chat_session_is_command_skips_sleep_gate(self):
+        """is_command=True 时绕过睡眠门控"""
         from module.persona.chat.session import ChatSession
 
         store = MagicMock()
@@ -352,9 +352,9 @@ class TestSkipScoringPropagation:
         )
         session._chat_via_coordinator = AsyncMock(return_value="jrrp response")
 
-        # skip_scoring=True 时即使角色睡眠也应放行
+        # is_command=True 时即使角色睡眠也应放行
         result = await session.chat(
-            user_id="U123", group_id="", message=".jrrp", skip_scoring=True,
+            user_id="U123", group_id="", message=".jrrp", is_command=True,
         )
         assert result == "jrrp response"
         # 睡眠门控不应被触发
@@ -487,5 +487,5 @@ class TestJrrpLLMContext:
 
         # 验证 chat() 在 event_msg 持久化之后调用（通过检查调用顺序）
         app.chat.chat.assert_awaited_once()
-        assert app.chat.chat.await_args.kwargs.get("skip_scoring") is True
+        assert app.chat.chat.await_args.kwargs.get("is_command") is True
 

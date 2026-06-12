@@ -120,12 +120,12 @@ class ChatSession:
         message: str,
         nickname: str = "",
         image_data_urls: Optional[List[str]] = None,
-        skip_scoring: bool = False,
+        is_command: bool = False,
     ) -> Optional[str]:
         """处理单条用户消息，返回回复文本（None 表示不回复）
 
         Args:
-            skip_scoring: 为 True 时跳过睡眠门控、冷淡拒绝门控和评分。
+            is_command: 为 True 时跳过睡眠门控、冷淡拒绝门控和评分。
                           用于 jrrp 等非对话命令的 persona 介入。
         """
         # 5 秒内完全相同的消息去重（防手抖/网络重试）
@@ -143,9 +143,9 @@ class ChatSession:
 
         response: Optional[str] = None
         try:
-            should_apply_gates = not skip_scoring and (not message.startswith(".") or message.lower().startswith(".ai"))
+            should_apply_gates = not is_command and (not message.startswith(".") or message.lower().startswith(".ai"))
 
-            # 睡眠门控（仅拦截聊天消息，jrrp 等 skip_scoring 路径透传）
+            # 睡眠门控（仅拦截聊天消息，jrrp 等 is_command 路径透传）
             if should_apply_gates and self._sleep_gate is not None and not await self._sleep_gate.is_awake():
                 msgs = self.character.extensions.sleep_messages
                 if msgs is None:
@@ -194,7 +194,7 @@ class ChatSession:
             )
             response = await self._chat_via_coordinator(user_id, group_id, message, target_key,
                                                         image_data_urls=image_data_urls,
-                                                        skip_scoring=skip_scoring)
+                                                        is_command=is_command)
             return response
 
         except asyncio.CancelledError:
@@ -234,7 +234,7 @@ class ChatSession:
     async def _coordinator_chat_call_fn(
         self, user_id: str, group_id: str, messages: List[str],
         image_data_urls: Optional[List[str]] = None,
-        skip_scoring: bool = False,
+        is_command: bool = False,
     ) -> Optional[str]:
         """coordinator chat 路径的单轮 LLM 调用。"""
         current_message = "\n".join(messages) if messages else ""
@@ -253,7 +253,7 @@ class ChatSession:
             )
             return ""
 
-        if not skip_scoring:
+        if not is_command:
             await self._after_response(user_id, group_id, current_message, response)
 
         # Session 后处理：追加 assistant 消息 + token 估算 + 压缩检查
@@ -273,7 +273,7 @@ class ChatSession:
         group_id: str,
         current_message: str,
         last_exception: Optional[Exception] = None,
-        skip_scoring: bool = False,
+        is_command: bool = False,
     ) -> str:
         """coordinator 耗尽时的兜底回复。"""
         if last_exception is not None:
@@ -285,10 +285,10 @@ class ChatSession:
             )
         else:
             fallback_response = "LLM服务暂时不可用，请稍后再试"
-        msg_type = MessageType.COMMAND if skip_scoring else MessageType.CHAT
+        msg_type = MessageType.COMMAND if is_command else MessageType.CHAT
         await self._response_handler.persist_and_send(user_id, group_id, fallback_response,
                                                        message_type=msg_type)
-        if not skip_scoring:
+        if not is_command:
             await self._after_response(user_id, group_id, current_message, fallback_response)
         if self._response_handler.port is not None:
             logger.info(
@@ -354,7 +354,7 @@ class ChatSession:
     async def _chat_via_coordinator(
         self, user_id: str, group_id: str, message: str, target_key: str,
         image_data_urls: Optional[List[str]] = None,
-        skip_scoring: bool = False,
+        is_command: bool = False,
     ) -> Optional[str]:
         fallback_response: Optional[str] = None
         current_message_for_exhausted = message
@@ -365,14 +365,14 @@ class ChatSession:
             current_message_for_exhausted = current_message
             return await self._coordinator_chat_call_fn(
                 user_id, group_id, messages, image_data_urls=image_data_urls,
-                skip_scoring=skip_scoring,
+                is_command=is_command,
             )
 
         async def on_exhausted(last_exception: Optional[Exception] = None):
             nonlocal fallback_response
             fallback_response = await self._coordinator_on_exhausted(
                 user_id, group_id, current_message_for_exhausted, last_exception,
-                skip_scoring=skip_scoring,
+                is_command=is_command,
             )
 
         async def _on_result(result: str):

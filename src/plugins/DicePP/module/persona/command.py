@@ -604,7 +604,7 @@ class PersonaCommand(UserCommandBase):
             except Exception as e:
                 logger.warning(f"[Persona] _handle_jrrp event_msg 持久化失败: {e}")
 
-        # 5. 调 LLM 生成角色评语（skip_scoring=True）
+        # 5. 调 LLM 生成角色评语（is_command=True）
         #    segment 启用时：dispatcher 自动发送，chat() 返回空串
         #    segment 未启用时：chat() 返回评语文本，需手动发送
         if not event_persisted:
@@ -620,7 +620,7 @@ class PersonaCommand(UserCommandBase):
                     group_id=group_id,
                     message=event_msg,
                     nickname=user_name,
-                    skip_scoring=True,
+                    is_command=True,
                 )
                 if commentary:
                     await self._send(user_id, group_id, commentary)
