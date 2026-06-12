@@ -586,7 +586,7 @@ class TestBuildDiaryContext:
 
 
 class TestCollectEventNotifications:
-    """_collect_event_notifications — 增量事件通知"""
+    """_collect_event_notifications — 增量事件通知 + 时间窗口过滤"""
 
     @pytest.fixture
     def _session_with_sm(self):
@@ -603,21 +603,33 @@ class TestCollectEventNotifications:
         session.store.get_daily_events = AsyncMock(return_value=[])
         return session
 
+    # 共享时间常量：now 是「当前时间」，context_since 是「上次上下文更新时间」，
+    # evt_time 介于两者之间，使事件落在注入窗口内
+    _NOW = datetime(2026, 1, 1, 12, 0, 0)
+    _CTX_SINCE = datetime(2026, 1, 1, 10, 0, 0)
+    _EVT_TIME = datetime(2026, 1, 1, 11, 0, 0)
+
     @pytest.mark.asyncio
     async def test_new_events_generate_notifications(self, _session_with_sm):
-        """新事件不在 notified_event_ids 中时生成 [通知]"""
+        """新事件在注入窗口内时生成带时间前缀的 [通知]"""
         session = _session_with_sm
+        tracker = session.session_manager.get_tracker("scope1")
+        tracker["last_context_update_at"] = self._CTX_SINCE
+
         session.store.get_daily_events = AsyncMock(return_value=[
             DailyEvent(id=1, date="2026-01-01", event_type="system",
-                       description="描述A", context_summary="摘要A"),
+                       description="描述A", context_summary="摘要A",
+                       created_at=self._EVT_TIME),
             DailyEvent(id=2, date="2026-01-01", event_type="system",
-                       description="描述B", context_summary=""),
+                       description="描述B", context_summary="",
+                       created_at=self._EVT_TIME),
         ])
 
-        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        notes, events = await session._collect_event_notifications("scope1", self._NOW)
         assert len(notes) == 2
-        assert "[通知] 摘要A" == notes[0]
-        assert "[通知] 描述B" == notes[1]
+        assert "[通知][11:00 1小时前] 摘要A" == notes[0]
+        assert "[通知][11:00 1小时前] 描述B" == notes[1]
+        assert tracker["last_context_update_at"] == self._NOW
 
     @pytest.mark.asyncio
     async def test_already_notified_events_skipped(self, _session_with_sm):
@@ -625,33 +637,39 @@ class TestCollectEventNotifications:
         session = _session_with_sm
         tracker = session.session_manager.get_tracker("scope1")
         tracker["notified_event_ids"] = {1}
+        tracker["last_context_update_at"] = self._CTX_SINCE
 
         session.store.get_daily_events = AsyncMock(return_value=[
             DailyEvent(id=1, date="2026-01-01", event_type="system",
-                       description="已通知", context_summary="已通知摘要"),
+                       description="已通知", context_summary="已通知摘要",
+                       created_at=self._EVT_TIME),
             DailyEvent(id=2, date="2026-01-01", event_type="system",
-                       description="新事件", context_summary="新摘要"),
+                       description="新事件", context_summary="新摘要",
+                       created_at=self._EVT_TIME),
         ])
 
-        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        notes, events = await session._collect_event_notifications("scope1", self._NOW)
         assert len(notes) == 1
-        assert "[通知] 新摘要" == notes[0]
+        assert "[通知][11:00 1小时前] 新摘要" == notes[0]
         assert tracker["notified_event_ids"] == {1, 2}
 
     @pytest.mark.asyncio
-    async def test_cross_day_resets_notified_ids(self, _session_with_sm):
-        """跨天时 notified_event_ids 自动 reset"""
+    async def test_cross_day_resets_notified_ids_keeps_context_since(self, _session_with_sm):
+        """跨天时 notified_event_ids 重置，但 last_context_update_at 保留（仍作窗口下界）"""
         session = _session_with_sm
         tracker = session.session_manager.get_tracker("scope1")
         tracker["notified_event_ids"] = {1, 2, 3}
-        tracker["last_event_notification_date"] = date(2026, 6, 1)
+        tracker["last_event_notification_date"] = "2026-06-01"
+        tracker["last_context_update_at"] = datetime(2026, 1, 1, 10, 0, 0)
 
         session.store.get_daily_events = AsyncMock(return_value=[
             DailyEvent(id=4, date="2026-01-01", event_type="system",
-                       description="新年事件", context_summary="新年摘要"),
+                       description="新年事件", context_summary="新年摘要",
+                       created_at=datetime(2026, 1, 1, 11, 0, 0)),
         ])
 
-        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        notes, events = await session._collect_event_notifications("scope1", self._NOW)
+        # 跨天：notified_event_ids 被重置 → {4}；事件在 context_since 之后 → 注入
         assert len(notes) == 1
         assert tracker["notified_event_ids"] == {4}
 
@@ -661,7 +679,7 @@ class TestCollectEventNotifications:
         session = _session_with_sm
         session.store.get_daily_events = AsyncMock(return_value=[])
 
-        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        notes, events = await session._collect_event_notifications("scope1", self._NOW)
         assert notes == []
 
     @pytest.mark.asyncio
@@ -669,39 +687,86 @@ class TestCollectEventNotifications:
         """同一天多次调用不会 reset notified_event_ids"""
         session = _session_with_sm
         tracker = session.session_manager.get_tracker("scope1")
-        tracker["last_event_notification_date"] = date(2026, 1, 1)
+        tracker["last_event_notification_date"] = "2026-01-01"
         tracker["notified_event_ids"] = {1}
+        tracker["last_context_update_at"] = self._CTX_SINCE
 
         session.store.get_daily_events = AsyncMock(return_value=[
             DailyEvent(id=1, date="2026-01-01", event_type="system",
-                       description="已通知", context_summary="已通知摘要"),
+                       description="已通知", context_summary="已通知摘要",
+                       created_at=self._EVT_TIME),
             DailyEvent(id=2, date="2026-01-01", event_type="system",
-                       description="新来", context_summary="新来摘要"),
+                       description="新来", context_summary="新来摘要",
+                       created_at=self._EVT_TIME),
         ])
 
-        notes, events = await session._collect_event_notifications("scope1", date(2026, 1, 1))
+        notes, events = await session._collect_event_notifications("scope1", self._NOW)
         assert len(notes) == 1
         assert tracker["notified_event_ids"] == {1, 2}
 
     @pytest.mark.asyncio
     async def test_first_call_with_none_last_date(self, _session_with_sm):
-        """首次调用时 last_event_notification_date 为 None，应正确初始化日期并正常工作"""
+        """首次调用时 last_context_update_at 为 None，旧事件静默标记不注入"""
         session = _session_with_sm
         tracker = session.session_manager.get_tracker("scope1")
         # 模拟首次调用：tracker 默认值中 last_event_notification_date 为 None
         assert tracker.get("last_event_notification_date") is None
+        assert tracker.get("last_context_update_at") is None
 
         session.store.get_daily_events = AsyncMock(return_value=[
             DailyEvent(id=1, date="2026-06-05", event_type="system",
-                       description="首个事件", context_summary="首个摘要"),
+                       description="首个事件", context_summary="首个摘要",
+                       created_at=datetime(2026, 6, 5, 8, 0, 0)),
         ])
 
-        notes, events = await session._collect_event_notifications("scope1", date(2026, 6, 5))
-        assert len(notes) == 1
-        assert "[通知] 首个摘要" == notes[0]
+        notes, events = await session._collect_event_notifications("scope1", datetime(2026, 6, 5, 12, 0, 0))
+        # context_since 为 None → 旧事件不注入
+        assert len(notes) == 0
+        # 但事件 ID 已静默标记为已见
         assert tracker["notified_event_ids"] == {1}
-        # 验证日期被正确设置（R1 修复后）
-        assert tracker["last_event_notification_date"] == date(2026, 6, 5)
+        assert tracker["last_event_notification_date"] == "2026-06-05"
+        assert tracker["last_context_update_at"] == datetime(2026, 6, 5, 12, 0, 0)
+
+    @pytest.mark.asyncio
+    async def test_event_before_context_since_is_skipped(self, _session_with_sm):
+        """created_at <= context_since 的事件不注入，仅静默标记"""
+        session = _session_with_sm
+        tracker = session.session_manager.get_tracker("scope1")
+        tracker["last_context_update_at"] = datetime(2026, 1, 1, 15, 0, 0)  # 晚于事件时间
+
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(id=1, date="2026-01-01", event_type="system",
+                       description="早上事件", context_summary="早摘要",
+                       created_at=datetime(2026, 1, 1, 8, 0, 0)),
+            DailyEvent(id=2, date="2026-01-01", event_type="system",
+                       description="下午事件", context_summary="午摘要",
+                       created_at=datetime(2026, 1, 1, 16, 0, 0)),
+        ])
+
+        notes, events = await session._collect_event_notifications("scope1", self._NOW)
+        # id=1: created_at(8:00) <= context_since(15:00) → 不注入
+        # id=2: created_at(16:00) > context_since(15:00) → 注入
+        assert len(notes) == 1
+        assert "午摘要" in notes[0]
+        # 两个事件 ID 都被标记
+        assert tracker["notified_event_ids"] == {1, 2}
+
+    @pytest.mark.asyncio
+    async def test_event_without_created_at_is_skipped(self, _session_with_sm):
+        """created_at 为 None 的事件不注入（positive condition 要求 created_at 不为空）"""
+        session = _session_with_sm
+        tracker = session.session_manager.get_tracker("scope1")
+        tracker["last_context_update_at"] = self._CTX_SINCE
+
+        session.store.get_daily_events = AsyncMock(return_value=[
+            DailyEvent(id=1, date="2026-01-01", event_type="system",
+                       description="无时间事件", context_summary="无时间摘要",
+                       created_at=None),
+        ])
+
+        notes, events = await session._collect_event_notifications("scope1", self._NOW)
+        assert len(notes) == 0
+        assert tracker["notified_event_ids"] == {1}
 
 
 # ── 分段回复集成测试（原 test_chat_session_segmented.py）────────────────────

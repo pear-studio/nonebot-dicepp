@@ -33,12 +33,14 @@ def _now() -> datetime:
 
 
 def _make_time_notification(timezone_name: str = "Asia/Shanghai") -> str:
-    """生成时间通知消息。"""
+    """生成时间通知消息（含时间前缀，与事件通知共享 [通知][时间] 结构）。"""
     from utils.time import wall_now as _wall_now
+    from utils.time import format_timestamp
     local_dt = _wall_now(timezone_name)
     weekdays = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
     wd = weekdays[local_dt.weekday()]
-    return f"[通知] 现在是{local_dt.year}年{local_dt.month}月{local_dt.day}日，{wd}。"
+    ts = format_timestamp(local_dt, local_dt)
+    return f"[通知][{ts}] 现在是{local_dt.year}年{local_dt.month}月{local_dt.day}日，{wd}。"
 
 
 @dataclass
@@ -79,6 +81,7 @@ class SessionManager:
                 "last_profile_hash": None,
                 "seen_speakers": set(),
                 "notified_event_ids": set(),
+                "last_context_update_at": None,
             }
         return self._trackers[user_id]
 
@@ -331,9 +334,6 @@ class SessionManager:
 
             # 归档旧 session
             await self._store.update_session(session_id, status="archived")
-
-            # 清空追踪状态
-            self._clear_tracker(_user_id)
 
             # 计算新 token 估算
             new_msgs = await self._store.get_session_messages(new_session.session_id)

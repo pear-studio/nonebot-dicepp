@@ -37,8 +37,9 @@ def _now():
 class TestMakeTimeNotification:
     def test_formats_chinese_weekday(self):
         note = _make_time_notification("Asia/Shanghai")
-        assert "[通知] 现在是" in note
-        assert "周四" in note or "周" in note
+        assert "[通知][" in note and "现在是" in note
+        valid_weekdays = {"周一", "周二", "周三", "周四", "周五", "周六", "周日"}
+        assert any(wd in note for wd in valid_weekdays)
 
 
 class TestGetOrCreate:
@@ -76,7 +77,7 @@ class TestGetOrCreate:
         assert decision.static_rebuilt is False
         assert decision.session.session_id == 99
         assert len(decision.notifications) == 1
-        assert "[通知] 现在是" in decision.notifications[0]
+        assert "[通知][" in decision.notifications[0] and "现在是" in decision.notifications[0]
 
     @pytest.mark.asyncio
     async def test_cold_start_clears_tracker(self, mgr, store):
@@ -252,3 +253,32 @@ class TestCompactSession:
 
         assert ok is True
         assert "部分历史已丢弃" in text
+
+    @pytest.mark.asyncio
+    async def test_compaction_preserves_tracker_state(self, mgr, store):
+        """压缩后 tracker 状态（notified_event_ids、last_context_update_at）保持连续"""
+        from datetime import datetime as _dt
+
+        session = _make_session(session_id=1)
+        new_session = _make_session(session_id=2)
+        msgs = [{"role": "user", "content": f"u{i}"} for i in range(10)]
+        msgs += [{"role": "assistant", "content": f"a{i}"} for i in range(10)]
+        store.get_session_by_id.return_value = session
+        store.get_session_messages.return_value = msgs
+        store.create_session.return_value = new_session
+
+        # 预填充 tracker 状态
+        ctx_time = _dt(2026, 6, 1, 10, 0, 0)
+        tracker = mgr.get_tracker("u1")
+        tracker["notified_event_ids"] = {1, 2, 3}
+        tracker["last_context_update_at"] = ctx_time
+        tracker["last_event_notification_date"] = "2026-06-01"
+
+        ok, _ = await mgr.compact_session(1, router=None)
+
+        assert ok is True
+        # 压缩后 tracker 状态应保持连续
+        tracker_after = mgr.get_tracker("u1")
+        assert tracker_after["notified_event_ids"] == {1, 2, 3}
+        assert tracker_after["last_context_update_at"] == ctx_time
+        assert tracker_after["last_event_notification_date"] == "2026-06-01"

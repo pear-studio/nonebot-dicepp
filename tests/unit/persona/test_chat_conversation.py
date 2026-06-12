@@ -9,7 +9,7 @@
 """
 
 import asyncio
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from plugins.DicePP.module.persona.data.models import (
@@ -277,11 +277,26 @@ async def test_mid_error_recovery(temp_db):
 
 @pytest.mark.asyncio
 async def test_cross_day_event_notification(temp_db):
-    """模拟跨日，新事件注入上下文，已通知事件不重复。"""
+    """会话期内新增事件注入上下文，已通知事件不重复。"""
     store = temp_db
     today_str = date.today().strftime("%Y-%m-%d")
 
-    # 写入今日事件
+    sp = ScriptedProvider([
+        text("今天天气确实不错。"),
+        text("是的，我知道。"),
+        text("好的。"),
+    ])
+    session = build_conversation_session(store=store, scripted_provider=sp)
+
+    # 第一步：预热——建立 session + 设置 context_since
+    r0 = await session.chat("u1", "", "你好")
+    assert r0 == "今天天气确实不错。"
+
+    # 设置 last_context_update_at 到过去，确保窗口覆盖后续添加的事件
+    tracker = session.session_manager.get_tracker("u1")
+    tracker["last_context_update_at"] = datetime(2000, 1, 1)
+
+    # 写入今日事件（created_at 为 wall_now，在 context_since 之后 → 会注入）
     await store.add_daily_event(
         date=today_str,
         event_type="system",
@@ -295,20 +310,14 @@ async def test_cross_day_event_notification(temp_db):
         context_summary="新开咖啡馆",
     )
 
-    sp = ScriptedProvider([
-        text("今天天气确实不错。"),
-        text("是的，我知道。"),
-    ])
-    session = build_conversation_session(store=store, scripted_provider=sp)
-
     r1 = await session.chat("u1", "", "今天天气怎么样")
-    assert r1 == "今天天气确实不错。"
-    # 第一次调用应包含事件通知
+    assert r1 == "是的，我知道。"
+    # 第二次调用应包含事件通知
     assert _llm_messages_contain(sp.calls, "下雨") or _llm_messages_contain(sp.calls, "咖啡馆")
 
     r2 = await session.chat("u1", "", "那个新开的咖啡馆呢")
-    assert r2 == "是的，我知道。"
-    # 第二次调用：相同事件不应重复生成通知（仅断言不崩溃）
+    assert r2 == "好的。"
+    # 第三次调用：相同事件不应重复生成通知（仅断言不崩溃）
 
 
 # ── Scenario 9: 超长消息 ─────────────────────────────────────────────────────
