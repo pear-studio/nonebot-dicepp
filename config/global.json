@@ -144,8 +144,9 @@
 
     "decay_enabled": true,
     "decay_grace_period_hours": 8,
-    "decay_rate_per_hour": 0.5,
-    "decay_daily_cap": 5.0,
+    "decay_familiarity_half_life_days": 35,
+    "decay_intimacy_half_life_days": 21,
+    "decay_floor_ratio": 0.5,
     "character_life_enabled": true,
     "character_life_jitter_minutes": 15,
     "character_life_diary_time": "23:30",
@@ -177,8 +178,7 @@
     "allow_user_key": true,
 
     "relationship_refuse_enabled": true,
-    "relationship_refuse_prob_base": 0.5,
-    "relationship_refuse_prob_max": 0.9,
+    "reputation_refuse_threshold": 30.0,
 
     "trace_enabled": true,
     "trace_max_age_days": 7,
