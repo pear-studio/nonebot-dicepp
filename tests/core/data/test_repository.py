@@ -96,3 +96,54 @@ class TestRepository:
 
         with pytest.raises(ValueError):
             await repo.delete("user1", "group1", "extra")
+
+    @pytest.mark.asyncio
+    async def test_upsert_insert(self, repo):
+        karma = UserKarma(user_id="user1", group_id="group1", value=50)
+        await repo.upsert(karma)
+
+        result = await repo.get("user1", "group1")
+        assert result == karma
+
+    @pytest.mark.asyncio
+    async def test_upsert_update(self, repo):
+        karma1 = UserKarma(user_id="user1", group_id="group1", value=50)
+        await repo.upsert(karma1)
+
+        karma2 = UserKarma(user_id="user1", group_id="group1", value=200)
+        await repo.upsert(karma2)
+
+        result = await repo.get("user1", "group1")
+        assert result.value == 200
+
+    @pytest.mark.asyncio
+    async def test_upsert_many(self, repo):
+        items = [
+            UserKarma(user_id="u1", group_id="g1", value=10),
+            UserKarma(user_id="u2", group_id="g1", value=20),
+            UserKarma(user_id="u3", group_id="g1", value=30),
+        ]
+        await repo.upsert_many(items)
+
+        results = await repo.list_all()
+        assert len(results) == 3
+
+    @pytest.mark.asyncio
+    async def test_upsert_many_empty(self, repo):
+        await repo.upsert_many([])
+        results = await repo.list_all()
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_upsert_is_alias_for_save(self, repo):
+        """upsert delegates to save, so behaviour is identical."""
+        karma = UserKarma(user_id="u1", group_id="g1", value=42)
+        await repo.upsert(karma)
+        result = await repo.get("u1", "g1")
+        assert result is not None
+        assert result.value == 42
+
+    @pytest.mark.asyncio
+    async def test_list_all_empty(self, repo):
+        results = await repo.list_all()
+        assert results == []

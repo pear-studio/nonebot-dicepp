@@ -1,5 +1,5 @@
 import pytest
-from utils.string import to_english_str, match_substring
+from utils.string import to_english_str, match_substring, estimate_tokens
 
 
 @pytest.mark.unit
@@ -70,4 +70,38 @@ class TestMatchSubstring:
     def test_with_chinese(self):
         result = match_substring("你好", ["你好世界", "再见", "你好的"])
         assert result == ["你好世界", "你好的"]
+
+
+@pytest.mark.unit
+class TestEstimateTokens:
+    def test_empty_string(self):
+        assert estimate_tokens("") == 0.0
+
+    def test_pure_chinese(self):
+        # 10 个中文字符 = 10 tokens
+        result = estimate_tokens("你好世界你好世界你好")
+        assert result == 10.0
+
+    def test_pure_english(self):
+        # 20 个英文字符 / 4 = 5 tokens
+        result = estimate_tokens("hello world test str")
+        assert result == 20 / 4
+
+    def test_mixed_chinese_english(self):
+        # "你好abc hello": 2 Chinese + 9 other = 2 + 9/4 = 4.25
+        result = estimate_tokens("你好abc hello")
+        assert result == 4.25
+
+    def test_with_digits_and_symbols(self):
+        # "测试123!@#": 2 Chinese + 6 other = 2 + 6/4 = 3.5
+        result = estimate_tokens("测试123!@#")
+        assert result == 3.5
+
+    def test_only_whitespace(self):
+        result = estimate_tokens("   ")
+        assert result == 3 / 4
+
+    def test_single_char(self):
+        assert estimate_tokens("a") == 0.25
+        assert estimate_tokens("中") == 1.0
 

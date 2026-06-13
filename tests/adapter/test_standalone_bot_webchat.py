@@ -13,6 +13,8 @@ bind_runtime），从而验证 standalone_bot.py 里的真实代码路径。
   5. 注册失败且无显式 key → WebChat 未启用，proxy 保持 StandaloneClientProxy
 """
 
+import asyncio
+import json
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -31,6 +33,7 @@ for _p in (str(PLUGIN_ROOT), str(PROJECT_ROOT)):
 import standalone_bot  # noqa: E402
 from adapter.standalone_proxy import StandaloneClientProxy  # noqa: E402
 from adapter.web_chat_proxy import WebChatProxy  # noqa: E402
+from adapter.web_chat_adapter import WebChatAdapter  # noqa: E402
 
 
 # ── fixtures & helpers ─────────────────────────────────────────────────────
@@ -208,3 +211,85 @@ async def test_registration_failure_without_explicit_key_stays_standalone():
     assert isinstance(bot._proxy, StandaloneClientProxy)
     _, kwargs = mock_bind.call_args
     assert kwargs.get("webchat_enabled") is False
+
+
+# ── Q2: WebChatAdapter 生命周期边界 ──────────────────────────────────────
+
+
+def _make_mock_ws():
+    """创建一个支持 auth 流程的 mock websocket 连接。"""
+    mock_ws = AsyncMock()
+    mock_ws.send = AsyncMock()
+
+    async def recv_side_effect():
+        return json.dumps({"type": "auth_result", "status": "ok"})
+
+    mock_ws.recv = AsyncMock(side_effect=recv_side_effect)
+    return mock_ws
+
+
+@pytest.mark.asyncio
+async def test_webchat_adapter_duplicate_start_noop():
+    """重复 start 不应创建第二个 _run_task。"""
+    mock_ws = _make_mock_ws()
+    ws_cm = AsyncMock()
+    ws_cm.__aenter__ = AsyncMock(return_value=mock_ws)
+    ws_cm.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("adapter.web_chat_adapter.websockets.connect", return_value=ws_cm):
+        adapter = WebChatAdapter("ws://hub:8000/ws/bot/", "test_key")
+        bot = MagicMock()
+
+        # 第一次 start
+        await adapter.start(bot)
+        task1 = adapter._run_task
+
+        # 第二次 start — 不应替换 task
+        await adapter.start(bot)
+        task2 = adapter._run_task
+
+        assert task1 is task2, "duplicate start should reuse the same task"
+
+        # 清理
+        await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_webchat_adapter_close_then_restart():
+    """close 之后重新 start 应能正常工作。"""
+    mock_ws = _make_mock_ws()
+    ws_cm = AsyncMock()
+    ws_cm.__aenter__ = AsyncMock(return_value=mock_ws)
+    ws_cm.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("adapter.web_chat_adapter.websockets.connect", return_value=ws_cm):
+        adapter = WebChatAdapter("ws://hub:8000/ws/bot/", "test_key")
+        bot = MagicMock()
+
+        await adapter.start(bot)
+        task_before = adapter._run_task
+        assert task_before is not None
+        assert not task_before.done()
+
+        await adapter.close()
+        assert adapter._run_task is None or adapter._run_task.done()
+
+        # 重新 start
+        await adapter.start(bot)
+        task_after = adapter._run_task
+        assert task_after is not None
+        assert task_after is not task_before, "restart should create new task"
+
+        await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_webchat_adapter_start_without_bot_raises():
+    """start 时 bot 为 None → _run_one_session 抛出 RuntimeError。"""
+    adapter = WebChatAdapter("ws://hub:8000/ws/bot/", "test_key")
+
+    # 直接调用 _run_one_session 验证 bot=None 的检查
+    with pytest.raises(RuntimeError, match="started without bot"):
+        await adapter._run_one_session()
+
+    await adapter.close()
