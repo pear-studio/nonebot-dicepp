@@ -6,7 +6,7 @@ LLM 路由器
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict, deque
+from collections import defaultdict
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 from utils.logger import logger
@@ -68,7 +68,6 @@ class LLMRouter:
 
         # 统计数据
         self.stats: Dict[str, dict] = {}
-        self._latency_window: Dict[str, deque] = {}
 
         self._providers = providers
         self._build_providers(providers)
@@ -90,7 +89,6 @@ class LLMRouter:
             max_conc = pconfig.max_concurrent if pconfig.max_concurrent is not None else self.global_max_concurrent
             self._semaphores[pname] = asyncio.Semaphore(max_conc)
             self.stats[pname] = {"requests": 0, "errors": 0}
-            self._latency_window[pname] = deque(maxlen=100)
 
             for mconfig in pconfig.models:
                 if not mconfig.enabled:
@@ -270,27 +268,6 @@ class LLMRouter:
 
     def get_stats(self) -> Dict[str, Any]:
         return {k: v.copy() for k, v in self.stats.items()}
-
-    def get_latency_percentiles(self, provider_name: str) -> Dict[str, float]:
-        window = self._latency_window.get(provider_name)
-        if not window:
-            return {"p50": 0.0, "p90": 0.0, "p99": 0.0}
-        sorted_vals = sorted(window)
-        n = len(sorted_vals)
-
-        def _p(p: float) -> float:
-            if n == 1:
-                return float(sorted_vals[0])
-            rank = (n - 1) * p + 1
-            k = int(rank)
-            d = rank - k
-            if k >= n:
-                return float(sorted_vals[-1])
-            if d == 0:
-                return float(sorted_vals[k - 1])
-            return sorted_vals[k - 1] * (1 - d) + sorted_vals[k] * d
-
-        return {"p50": _p(0.5), "p90": _p(0.9), "p99": _p(0.99)}
 
     def get_error_summary(self) -> Dict[str, int]:
         return {

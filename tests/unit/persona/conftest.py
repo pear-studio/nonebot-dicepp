@@ -1,10 +1,63 @@
 """共享测试工具 — mock provider / router 工厂函数、temp_db fixture"""
 import asyncio
-from collections import deque
 from typing import Optional, List, Dict, Any
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock
+
+from plugins.DicePP.module.persona.data.models import UserLLMConfig
+
+
+class MockDataStore:
+    """配额/白名单测试通用 mock store。"""
+
+    def __init__(self):
+        self._usage: dict = {}
+        self._whitelist_users: set = set()
+        self._whitelist_groups: set = set()
+        self._user_configs: dict = {}
+
+    async def get_daily_usage(self, user_id: str, date: str) -> int:
+        return self._usage.get((user_id, date), 0)
+
+    async def increment_daily_usage(self, user_id: str, date: str) -> None:
+        self._usage[(user_id, date)] = self._usage.get((user_id, date), 0) + 1
+
+    async def is_user_whitelisted(self, user_id: str) -> bool:
+        return user_id in self._whitelist_users
+
+    async def is_group_whitelisted(self, group_id: str) -> bool:
+        return group_id in self._whitelist_groups
+
+    async def get_user_llm_config(self, user_id: str):
+        return self._user_configs.get(user_id)
+
+    async def insert_agent_run(self, **kwargs):
+        return "run_id"
+
+    async def update_run(self, run_id: str, **kwargs):
+        pass
+
+    async def insert_agent_event(self, **kwargs):
+        pass
+
+    def add_whitelist_user(self, user_id: str):
+        self._whitelist_users.add(user_id)
+
+    def add_whitelist_group(self, group_id: str):
+        self._whitelist_groups.add(group_id)
+
+    def set_user_config(self, user_id: str, config: UserLLMConfig):
+        self._user_configs[user_id] = config
+
+
+class MockQuotaConfig:
+    """配额/白名单测试通用 mock config。"""
+
+    def __init__(self):
+        self.whitelist_enabled = True
+        self.timezone = "Asia/Shanghai"
+        self.quota_exceeded_message = "今日配额已用完（{limit}次）"
 
 
 def make_mock_provider():
@@ -218,7 +271,6 @@ def build_conversation_session(
     router._llm_models.append(llm_key)
     router._semaphores["test"] = asyncio.Semaphore(10)
     router.stats["test"] = {"requests": 0, "errors": 0}
-    router._latency_window["test"] = deque(maxlen=100)
     router._providers["test"] = llm_provider_config
 
     # 2. FakeImageGenProvider 注入 gen 槽位
@@ -236,7 +288,6 @@ def build_conversation_session(
         router._gen_models.append(gen_key)
         router._semaphores["test-gen"] = asyncio.Semaphore(10)
         router.stats["test-gen"] = {"requests": 0, "errors": 0}
-        router._latency_window["test-gen"] = deque(maxlen=100)
         gen_provider_config = ProviderConfig(
             api_key="fake-key",
             base_url="http://localhost",
