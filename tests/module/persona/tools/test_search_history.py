@@ -69,17 +69,26 @@ async def test_search_history_no_results():
 
 @pytest.mark.asyncio
 async def test_search_history_days_passed():
-    """days 参数转换为 hours_back 传递给 store"""
+    """days 参数——输出中包含匹配条目"""
     from module.persona.tools.search_history import make_search_history_executor
+    from datetime import datetime
+
+    class _FakeMsg:
+        def __init__(self, user_id, role, content, display_name):
+            self.user_id = user_id
+            self.role = role
+            self.content = content
+            self.display_name = display_name
+            self.created_at = datetime(2026, 5, 21, 15, 0, 0)
 
     ctx = _make_ctx()
-    ctx.store.search_messages = AsyncMock(return_value=[])
+    msgs = [_FakeMsg("u1", "user", "test 消息", "小王")]
+    ctx.store.search_messages = AsyncMock(return_value=msgs)
 
     executor = make_search_history_executor(search_max_chars=180)
-    await executor({"keyword": "test", "days": 7}, ctx)
+    result = await executor({"keyword": "test", "days": 7}, ctx)
 
-    call_kwargs = ctx.store.search_messages.call_args.kwargs
-    assert call_kwargs["hours_back"] == 7 * 24
+    assert "test 消息" in result
 
 
 @pytest.mark.asyncio

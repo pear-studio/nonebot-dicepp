@@ -6,6 +6,7 @@
 """
 
 import pytest_asyncio
+import aiosqlite
 
 from core.data.query_store import QueryStore
 
@@ -32,3 +33,17 @@ async def query_store(tmp_path):
         yield store, _create
     finally:
         await store.close_all()
+
+
+@pytest_asyncio.fixture
+async def in_memory_persona_store():
+    """提供 :memory: SQLite 的 PersonaDataStore（真实 store，非 mock）。"""
+    from plugins.DicePP.module.persona.data.store import PersonaDataStore
+
+    async with aiosqlite.connect(":memory:") as persona_db, \
+         aiosqlite.connect(":memory:") as core_db:
+        await persona_db.execute("PRAGMA foreign_keys=ON")
+        store = PersonaDataStore(":memory:", core_db)
+        store._persona_db = persona_db
+        await store.ensure_tables()
+        yield store

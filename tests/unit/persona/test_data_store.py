@@ -759,52 +759,43 @@ class TestGetDailyChatStats:
 
 
 @pytest.mark.asyncio
-async def test_add_and_get_daily_event_with_new_fields(tmp_path):
-    import aiosqlite
-    persona_db = await aiosqlite.connect(":memory:")
-    core_db = await aiosqlite.connect(":memory:")
-    try:
-        store = PersonaDataStore(":memory:", core_db)
-        store._persona_db = persona_db
-        await store.ensure_tables()
+async def test_add_and_get_daily_event_with_new_fields(temp_db):
+    """新字段（context_summary, share_desire, duration_minutes）应正确存取。"""
+    store = temp_db
+    await store.add_daily_event(
+        date="2024-01-01",
+        event_type="scheduled",
+        description="测试中",
+        reaction="不错",
+        share_desire=0.75,
+        duration_minutes=30,
+        energy_delta=3,
+        mood_delta=-2,
+        health_delta=1,
+        context_summary="在酒馆喝酒",
+    )
+    # 不传 context_summary
+    await store.add_daily_event(
+        date="2024-01-01",
+        event_type="system",
+        description="另一件事",
+    )
 
-        await store.add_daily_event(
-            date="2024-01-01",
-            event_type="scheduled",
-            description="测试中",
-            reaction="不错",
-            share_desire=0.75,
-            duration_minutes=30,
-            energy_delta=3,
-            mood_delta=-2,
-            health_delta=1,
-            context_summary="在酒馆喝酒",
-        )
-        # 不传 context_summary
-        await store.add_daily_event(
-            date="2024-01-01",
-            event_type="system",
-            description="另一件事",
-        )
-
-        events = await store.get_daily_events("2024-01-01")
-        assert len(events) == 2
-        ev = events[0]
-        assert ev.share_desire == 0.75
-        assert ev.duration_minutes == 30
-        assert ev.description == "测试中"
-        assert ev.reaction == "不错"
-        assert ev.event_type == "scheduled"
-        assert ev.energy_delta == 3
-        assert ev.mood_delta == -2
-        assert ev.health_delta == 1
-        assert ev.context_summary == "在酒馆喝酒"
-        # 不传时回读为空字符串
-        ev2 = events[1]
-        assert ev2.context_summary == ""
-    finally:
-        await persona_db.close()
-        await core_db.close()
+    events = await store.get_daily_events("2024-01-01")
+    assert len(events) == 2
+    ev = events[0]
+    assert ev.share_desire == 0.75
+    assert ev.duration_minutes == 30
+    assert ev.description == "测试中"
+    assert ev.reaction == "不错"
+    assert ev.event_type == "scheduled"
+    assert ev.energy_delta == 3
+    assert ev.mood_delta == -2
+    assert ev.health_delta == 1
+    assert ev.context_summary == "在酒馆喝酒"
+    # 不传时回读为空字符串
+    ev2 = events[1]
+    assert ev2.context_summary == ""
 
 
 # ── 以下为从 test_data_store_llm.py 合并 ─────────────────────────────────────

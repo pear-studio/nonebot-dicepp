@@ -140,6 +140,8 @@ class TestAbilityInit:
                                   prof_list=["欺骗"],
                                   ext_dict={})
         assert a.is_init
+        idx = CHECK_ITEM_INDEX_DICT["欺瞒"]
+        assert a.check_prof[idx] == 1  # synonym resolves to correct skill prof
 
     def test_initialize_ext_advantage(self):
         a = AbilityInfo()

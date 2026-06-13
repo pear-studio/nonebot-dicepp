@@ -360,17 +360,6 @@ class TestCharacterLifeDiary:
         mock_data_store.save_diary.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_generate_diary_includes_yesterday_context(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
-        fake_now = datetime(2024, 1, 1, 23, 30, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.diary.wall_now",
-            lambda tz: fake_now,
-        )
-        await diary_generator.generate_diary()
-        call_kwargs = mock_event_agent.generate_diary.call_args.kwargs
-        assert call_kwargs["yesterday_diary"] == "昨天去了公园"
-
-    @pytest.mark.asyncio
     async def test_generate_diary_uses_yesterday_events_at_midnight(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
         """
         tick_daily 在 00:00 执行，此时新的一天尚无事件，
@@ -385,6 +374,8 @@ class TestCharacterLifeDiary:
         assert result == "今天过得很充实"
         mock_data_store.get_daily_events.assert_called_once_with("2024-01-01")
         mock_data_store.get_diary.assert_called_once_with("2023-12-31")
+        mock_event_agent.generate_diary.assert_called_once()
+        assert mock_event_agent.generate_diary.call_args.kwargs["yesterday_diary"] == "昨天去了公园"
         mock_data_store.save_diary.assert_called_once_with("2024-01-01", "今天过得很充实")
 
 
@@ -1188,14 +1179,6 @@ class TestDayTransitionRemoved:
         )
         life.boundary_receiver = MagicMock()
         return life
-
-    def test_handle_day_transition_method_removed(self, life):
-        """_handle_day_transition 方法已被删除"""
-        assert not hasattr(life, "_handle_day_transition")
-
-    def test_day_transition_recovered_date_field_removed(self, life):
-        """_day_transition_recovered_date 字段已被删除"""
-        assert not hasattr(life, "_day_transition_recovered_date")
 
     @pytest.mark.asyncio
     async def test_tick_no_recovery_on_day_cross(self, life, mock_data_store, monkeypatch):

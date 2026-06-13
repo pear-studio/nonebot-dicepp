@@ -1,23 +1,17 @@
-import pytest
+"""Tests for PersonaDataStore LLM trace operations"""
+
 import json
-import asyncio
-import tempfile
-import os
+import pytest
 from datetime import datetime, timedelta
 from plugins.DicePP.utils.time import wall_now
-from unittest.mock import MagicMock
 
-from module.persona.llm.router import LLMRouter
-from module.persona.chat.context import ContextBuilder
-from module.persona.character.models import Character
-from module.persona.data.store import PersonaDataStore
 from module.persona.data.models import LLMTraceRecord
-from conftest import make_mock_providers
 
 
 @pytest.fixture
 async def temp_db():
     import aiosqlite
+    from module.persona.data.store import PersonaDataStore
 
     async with aiosqlite.connect(":memory:") as persona_db, \
          aiosqlite.connect(":memory:") as core_db:
@@ -27,49 +21,9 @@ async def temp_db():
         yield store
 
 
-def _populate_latency(router, provider_name, values):
-    """通过内部窗口填充延迟数据以测试百分位计算。
-    LLMRouter 不暴露公开的 record_latency API；网关层在 LLM 调用完成时
-    直接写入 _latency_window。此 helper 将数据准备集中管理。"""
-    from collections import deque
-    if provider_name not in router._latency_window:
-        router._latency_window[provider_name] = deque(maxlen=100)
-    router._latency_window[provider_name].extend(values)
-
-
-def test_latency_percentiles_empty():
-    router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
-    p = router.get_latency_percentiles("fake")
-    assert p["p50"] == 0.0
-    assert p["p90"] == 0.0
-    assert p["p99"] == 0.0
-
-
-def test_latency_percentiles_per_tier():
-    router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
-    _populate_latency(router, "fake", [100, 200, 300, 400, 500])
-    _populate_latency(router, "fake2", [50, 60, 70])
-    pp = router.get_latency_percentiles("fake")
-    ap = router.get_latency_percentiles("fake2")
-    assert pp["p50"] == 300.0
-    assert ap["p50"] == 60.0
-
-
-def test_build_debug_info():
-    char = Character(name="Test", system_prompt="You are a test character.")
-    builder = ContextBuilder(char, max_history_turns=10, max_history_tokens=100)
-    info = builder.build_debug_info(
-        short_term_history=[{"role": "user", "content": "hi"}],
-        diary_context="今天下雨了",
-    )
-    assert info["system_prompt_chars"] > 0
-    assert info["short_term_chars"] > 0
-    assert info["diary_chars"] == 5
-    assert info["returned_message_count"] == 2
-
-
 @pytest.mark.asyncio
-async def test_trace_lifecycle(temp_db):
+async def test_llm_trace_add_get_and_prune(temp_db):
+    """LLM trace 记录应能写入、查询和按时间裁剪"""
     store = temp_db
     trace = LLMTraceRecord(
         session_id="s1",
@@ -99,8 +53,8 @@ async def test_trace_lifecycle(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_trace_round_messages_round_trip(temp_db):
-    """round_messages 字段在 DB 存储和读取后字段正确保留"""
+async def test_round_messages_field_survives_db_round_trip(temp_db):
+    """round_messages JSON 字段在 DB 存储和读取后应正确保留"""
     store = temp_db
     rr = [
         {
@@ -143,7 +97,8 @@ async def test_trace_round_messages_round_trip(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_today_token_usage_and_errors(temp_db):
+async def test_get_today_token_usage_and_error_summary(temp_db):
+    """get_today_token_usage 和 get_error_summary_since 应返回正确的聚合结果"""
     store = temp_db
     t1 = LLMTraceRecord(
         session_id="s1",

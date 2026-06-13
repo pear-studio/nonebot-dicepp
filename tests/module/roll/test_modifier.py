@@ -12,12 +12,15 @@ from module.roll.roll_config import DICE_CONSTANT_MAX
 @pytest.mark.legacy
 class TestRollModifiers:
     def test_modifier_registration(self):
-        assert "(R|X|XO)(<|>|=|<=|>=|==)?[1-9][0-9]*" in ROLL_MODIFIERS_DICT
-        assert "CS(<|>|=|>=|<=|==)?[1-9][0-9]*" in ROLL_MODIFIERS_DICT
-        assert "F" in ROLL_MODIFIERS_DICT
-        assert "M[1-9][0-9]?" in ROLL_MODIFIERS_DICT
-        assert "P[1-9][0-9]?" in ROLL_MODIFIERS_DICT
-        assert "K[HL]?[1-9][0-9]?" in ROLL_MODIFIERS_DICT
+        """Verify each expected modifier class is registered in ROLL_MODIFIERS_DICT."""
+        from module.roll.modifier import REModReroll, REModCountSuccess, REModFloat, REModMinimum, REModPortent, REModMinMax
+        registered_classes = set(ROLL_MODIFIERS_DICT.values())
+        assert REModReroll in registered_classes
+        assert REModCountSuccess in registered_classes
+        assert REModFloat in registered_classes
+        assert REModMinimum in registered_classes
+        assert REModPortent in registered_classes
+        assert REModMinMax in registered_classes
 
     def test_reroll_modifier_r(self):
         modifier = REModReroll("R<10")

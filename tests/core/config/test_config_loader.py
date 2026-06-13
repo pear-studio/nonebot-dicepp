@@ -224,8 +224,8 @@ def test_invalid_type_raises_config_validation_error(dd):
 
 
 def test_valid_bool_string_accepted(dd):
-    """Pydantic coerces string booleans when using lenient validators."""
-    _write(dd.global_cfg, {"persona_ai": {"enabled": True}})
+    """String boolean 'true' is coerced to True by Pydantic."""
+    _write(dd.global_cfg, {"persona_ai": {"enabled": 'true'}})
     cfg = dd.loader().load()
     assert cfg.persona_ai.enabled is True
 

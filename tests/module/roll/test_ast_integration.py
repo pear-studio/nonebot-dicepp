@@ -30,31 +30,26 @@ class MockDiceRoller:
 
 @pytest.mark.unit
 class TestASTEngineAdapter:
-    """Test raw AST adapter functionality."""
+    """Focused adapter integration test verifying full pipeline."""
 
-    def test_exec_roll_exp_ast_simple(self):
-        result = exec_roll_exp_ast("1+2")
-        assert result.value == 3
-        assert isinstance(result, RollExpressionResult)
-
-    def test_exec_roll_exp_ast_dice(self):
-        roller = MockDiceRoller([15])
-        result = exec_roll_exp_ast("1D20", dice_roller=roller)
-        assert result.value == 15
-
-    def test_exec_roll_exp_ast_complex(self):
+    def test_full_pipeline_roll_dice(self):
+        """Verify exec_roll_exp_unified produces correct RollExpressionResult fields."""
         roller = MockDiceRoller([10, 5])
-        result = exec_roll_exp_ast("2D20K1+5", dice_roller=roller)
-        assert result.value == 15
+        result = exec_roll_exp_unified("2D20K1+5", dice_roller=roller)
+        assert result.get_val() == 15
+        assert "15" in result.get_complete_result()
+        assert result.get_exp() == "2D20K1+5"
 
-    def test_result_has_info(self):
-        roller = MockDiceRoller([15])
-        result = exec_roll_exp_ast("1D20", dice_roller=roller)
-        assert "15" in result.get_info()
+    def test_full_pipeline_arithmetic(self):
+        """Verify exec_roll_exp_unified for pure arithmetic."""
+        result = exec_roll_exp_unified("1+2")
+        assert result.get_val() == 3
+        assert result.get_complete_result() == "1+2=3"
 
     def test_syntax_error_raises(self):
-        with pytest.raises(RollSyntaxError):
-            exec_roll_exp_ast("1+")
+        from module.roll.roll_utils import RollDiceError
+        with pytest.raises(RollDiceError):
+            exec_roll_exp_unified("1+")
 
 
 @pytest.mark.unit

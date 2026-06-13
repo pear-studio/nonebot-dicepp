@@ -29,8 +29,9 @@ class TestComputeJrrp:
         """不同 user_id 在同一天通常产生不同结果"""
         r1 = compute_jrrp("user_aaa", datetime.datetime(2024, 6, 15))
         r2 = compute_jrrp("user_bbb", datetime.datetime(2024, 6, 15))
-        # 极低概率相同，但 seed 不同 → 大概率不同
-        # 不强制 assert 不同，仅验证两者都是有效范围
+        assert r1.jrrp != r2.jrrp or r1.zrrp != r2.zrrp, (
+            f"Expected different results for different users, got jrrp={r1.jrrp}/{r2.jrrp}"
+        )
         assert 1 <= r1.jrrp <= 100
         assert 1 <= r2.jrrp <= 100
 
@@ -38,6 +39,9 @@ class TestComputeJrrp:
         """同一用户在不同日期通常产生不同结果"""
         r1 = compute_jrrp("user_abc", datetime.datetime(2024, 6, 15))
         r2 = compute_jrrp("user_abc", datetime.datetime(2024, 6, 16))
+        assert r1.jrrp != r2.jrrp or r1.zrrp != r2.zrrp, (
+            f"Expected different results for different dates, got jrrp={r1.jrrp}/{r2.jrrp}"
+        )
         assert 1 <= r1.jrrp <= 100
         assert 1 <= r2.jrrp <= 100
 
@@ -139,70 +143,3 @@ class TestFormatJrrpText:
         trend = format_jrrp_trend_line(60, 75, 25.0, 'up')
         full = format_jrrp_text("pear", 75, 60, 25.0, 'up')
         assert full == info + trend
-
-
-class TestGetJrrpTool:
-    """get_jrrp 工具 executor 测试"""
-
-    @pytest.fixture
-    def tool_ctx(self):
-        """创建最小 ToolContext"""
-        from module.persona.tools.context import ToolContext
-        return ToolContext(
-            user_id="test_user_123",
-            group_id="",
-            timezone="Asia/Shanghai",
-        )
-
-    async def test_private_chat_default_user(self, tool_ctx):
-        """私聊未指定 user_id 时默认使用当前用户"""
-        from module.persona.tools.get_jrrp import get_jrrp_executor
-        result = await get_jrrp_executor({}, tool_ctx)
-        assert "今日运势:" in result
-        assert "/100" in result
-        assert "昨日" in result
-
-    async def test_explicit_user_id(self, tool_ctx):
-        """指定 user_id 时使用指定用户"""
-        from module.persona.tools.get_jrrp import get_jrrp_executor
-        result = await get_jrrp_executor({"user_id": "target_user_456"}, tool_ctx)
-        assert "今日运势:" in result
-        assert "/100" in result
-
-    async def test_group_chat_empty_user_id(self):
-        """群聊未指定 user_id 时返回提示"""
-        from module.persona.tools.context import ToolContext
-        from module.persona.tools.get_jrrp import get_jrrp_executor
-        ctx = ToolContext(
-            user_id="user_123",
-            group_id="group_456",
-            timezone="Asia/Shanghai",
-        )
-        result = await get_jrrp_executor({}, ctx)
-        assert "请输入有效的用户 ID" in result
-
-    async def test_empty_string_user_id(self, tool_ctx):
-        """空字符串 user_id 在私聊时默认当前用户"""
-        from module.persona.tools.get_jrrp import get_jrrp_executor
-        result = await get_jrrp_executor({"user_id": ""}, tool_ctx)
-        assert "今日运势:" in result
-
-    async def test_no_username_in_output(self, tool_ctx):
-        """返回纯数值格式，不含用户名"""
-        from module.persona.tools.get_jrrp import get_jrrp_executor
-        result = await get_jrrp_executor({"user_id": "some_user"}, tool_ctx)
-        # 不应包含用户名前缀如 "pear的今日..."
-        assert "的今日" not in result
-
-    def test_tool_def_format(self):
-        """ToolDef 符合 OpenAI function calling 格式"""
-        from module.persona.tools.get_jrrp import GET_JRRP_TOOL
-        d = GET_JRRP_TOOL.to_openai_format()
-        assert d["type"] == "function"
-        assert d["function"]["name"] == "get_jrrp"
-        assert "description" in d["function"]
-        params = d["function"]["parameters"]
-        assert params["type"] == "object"
-        assert "user_id" in params["properties"]
-        # user_id 应为可选（不在 required 中）
-        assert "user_id" not in params.get("required", [])

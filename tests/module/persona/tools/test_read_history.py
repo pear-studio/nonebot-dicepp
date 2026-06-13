@@ -58,33 +58,52 @@ async def test_read_history_empty():
 
 @pytest.mark.asyncio
 async def test_read_history_with_offset():
-    """offset 参数传递给 store"""
+    """offset 参数——输出中包含对应聊天内容"""
     from module.persona.tools.read_history import make_read_history_executor
+    from datetime import datetime
+
+    class _FakeMsg:
+        def __init__(self, user_id, role, content, display_name):
+            self.user_id = user_id
+            self.role = role
+            self.content = content
+            self.display_name = display_name
+            self.created_at = datetime(2026, 5, 21, 15, 0, 0)
 
     ctx = _make_ctx()
-    ctx.store.read_messages = AsyncMock(return_value=[])
+    msgs = [_FakeMsg("u1", "user", "你好", "小王")]
+    ctx.store.read_messages = AsyncMock(return_value=msgs)
 
     executor = make_read_history_executor(search_max_chars=180)
-    await executor({"limit": 5, "offset": 10}, ctx)
+    result = await executor({"limit": 5, "offset": 10}, ctx)
 
-    call_kwargs = ctx.store.read_messages.call_args.kwargs
-    assert call_kwargs["limit"] == 5
-    assert call_kwargs["offset"] == 10
+    assert "你好" in result
+    assert "小王" in result
 
 
 @pytest.mark.asyncio
 async def test_read_history_filter_user_id():
-    """filter_user_id 参数传递"""
+    """filter_user_id 参数——输出中包含对应用户消息"""
     from module.persona.tools.read_history import make_read_history_executor
+    from datetime import datetime
+
+    class _FakeMsg:
+        def __init__(self, user_id, role, content, display_name):
+            self.user_id = user_id
+            self.role = role
+            self.content = content
+            self.display_name = display_name
+            self.created_at = datetime(2026, 5, 21, 15, 0, 0)
 
     ctx = _make_ctx()
-    ctx.store.read_messages = AsyncMock(return_value=[])
+    msgs = [_FakeMsg("target", "user", "特定用户消息", "目标用户")]
+    ctx.store.read_messages = AsyncMock(return_value=msgs)
 
     executor = make_read_history_executor(search_max_chars=180)
-    await executor({"user_id": "target"}, ctx)
+    result = await executor({"user_id": "target"}, ctx)
 
-    call_kwargs = ctx.store.read_messages.call_args.kwargs
-    assert call_kwargs["filter_user_id"] == "target"
+    assert "特定用户消息" in result
+    assert "目标用户" in result
 
 
 @pytest.mark.asyncio

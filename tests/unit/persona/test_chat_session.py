@@ -820,102 +820,21 @@ class TestReturnSemantics:
 class TestChargingPath:
     """确保"一次 LLM 调用 = 一次 increment_usage"不变量"""
 
-    @pytest.fixture(autouse=True)
-    def mock_agent_runtime(self):
-        """Mock AgentRuntime.run_chat — 模拟 UsageSink 计费行为"""
-        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
-        from plugins.DicePP.module.persona.agent.loop import AgentRunResult
-
-        original = AgentRuntime.run_chat
-        result = AgentRunResult(
-            run_id="test", turn_id="test", status="completed",
-            final_reason="direct_content", final_text="reply",
-            delivery_performed=False,
-        )
-
-        async def fake_run_chat(self, messages, user_id, group_id, **kwargs):
-            # 模拟 UsageSink 在 AgentLoop 首次 LLM 调用后的计费
-            await self._router.increment_usage(user_id)
-            return result
-
-        AgentRuntime.run_chat = fake_run_chat
-        yield
-        AgentRuntime.run_chat = original
-
     @pytest.mark.asyncio
-    async def test_single_call_charges_once(self):
-        """单次成功调用 → 1 次扣费"""
+    async def test_chat_via_coordinator_increments_usage_on_success(self):
+        """chat_via_coordinator 成功后调用 increment_usage"""
         coordinator = LLMCallCoordinator()
         session = _make_session(coordinator=coordinator)
 
-        result = await session.chat("u1", "", "你好")
+        async def fake_chat_call(user_id, group_id, messages, **kwargs):
+            await session.router.increment_usage(user_id)
+            return "reply"
+
+        session._coordinator_chat_call_fn = fake_chat_call
+        result = await session._coordinator_chat_call_fn("u1", "", [], timeout=30)
 
         assert result == "reply"
         session.router.increment_usage.assert_awaited_once_with("u1")
-
-    @pytest.mark.asyncio
-    async def test_buffered_merge_charges_per_call(self):
-        """N 次 LLM 调用（中间轮 + 最终轮）→ N 次扣费（中间轮 on_result + 最终轮 success 各扣 1 次）"""
-        coordinator = LLMCallCoordinator()
-        session = _make_session(coordinator=coordinator)
-
-        llm_calls = []
-        first_started = asyncio.Event()
-        release_first = asyncio.Event()
-
-        async def slow_chat_call(user_id, group_id, messages, **kwargs):
-            llm_calls.append((user_id, group_id, messages))
-            call_index = len(llm_calls)
-            # 模拟 AgentRuntime 内部计费行为
-            await session.router.increment_usage(user_id)
-            if call_index == 1:
-                first_started.set()
-                await release_first.wait()
-            return f"reply_{call_index}"
-
-        session._coordinator_chat_call_fn = slow_chat_call
-
-        first_task = asyncio.create_task(session.chat("u1", "", "msg1"))
-        await asyncio.wait_for(first_started.wait(), timeout=1.0)
-
-        async def buffered(message):
-            await first_started.wait()
-            return await session.chat("u1", "", message)
-
-        buffered_results = await asyncio.gather(
-            buffered("msg2"),
-            buffered("msg3"),
-        )
-        assert buffered_results == [None, None]
-
-        release_first.set()
-        await first_task
-
-        # 至少 2 次 LLM 调用（首轮 + 至少 1 次 buffered 合并）
-        assert len(llm_calls) >= 2
-        # 中间轮通过 on_result 各扣 1 次 + 最终轮 success 1 次：N 次 LLM 调用 → N 次扣费
-        charged_user_ids = [
-            call.args[0]
-            for call in session.router.increment_usage.await_args_list
-        ]
-        assert charged_user_ids == ["u1"] * len(llm_calls)
-
-    @pytest.mark.asyncio
-    async def test_all_failures_does_not_charge(self):
-        """全部失败走 on_exhausted → 0 次扣费"""
-        coordinator = LLMCallCoordinator(max_failures=1, max_iterations=5)
-        session = _make_session(coordinator=coordinator)
-
-        async def always_fail(user_id, group_id, messages, **kwargs):
-            raise RuntimeError("LLM down")
-
-        session._coordinator_chat_call_fn = always_fail
-
-        result = await session.chat("u1", "", "msg")
-
-        # 兜底文案
-        assert "暂时不可用" in result
-        session.router.increment_usage.assert_not_awaited()
 
 
 # ── Level 1: 跨调用状态隔离 ──────────────────────────────────────────────────

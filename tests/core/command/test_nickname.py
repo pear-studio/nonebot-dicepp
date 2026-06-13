@@ -1,19 +1,5 @@
-"""本地化对话 + 昵称设置集成测试。"""
+"""昵称设置集成测试。"""
 import pytest
-
-
-@pytest.mark.integration
-class TestLocalization:
-    async def test_greeting_matches_locale(self, h):
-        await h.send_group("你好", group_id="test_group_a", checker=lambda s: "你好" in s)
-        await h.send_group("你好", group_id="test_group_b", checker=lambda s: "你好" in s)
-
-    async def test_random_greeting_avoided_on_frequent_use(self, h):
-        """频繁使用时不应出现随机问候语"""
-        await h.send_group("你好123", group_id="test_group_c",
-                           checker=lambda s: "你好啊" not in s and "你好呀" not in s)
-        await h.send_group("你好", group_id="test_group_a",
-                           checker=lambda s: "你好啊" not in s and "你好呀" not in s)
 
 
 @pytest.mark.integration

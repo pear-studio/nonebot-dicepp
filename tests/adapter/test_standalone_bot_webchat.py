@@ -137,8 +137,8 @@ async def test_webchat_with_hub_url_registers_and_starts():
 
 
 @pytest.mark.asyncio
-async def test_webchat_with_explicit_key_skips_registration():
-    """有显式 WEBCHAT_API_KEY → 使用该 key 构造 adapter，跳过注册。"""
+async def test_webchat_with_explicit_key_uses_explicit_key_with_registration():
+    """when both hub_url and explicit webchat_api_key are set, registration still runs but the explicit key takes priority."""
     bot = _make_bot(webchat_api_key="explicit_key_123", hub_url="http://hub:8000")
     mock_adapter = _make_mock_adapter()
 

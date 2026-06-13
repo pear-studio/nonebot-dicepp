@@ -189,6 +189,15 @@ class TestProactiveSchedulerPersistence:
     async def test_load_empty_state(self, scheduler, mock_data_store):
         mock_data_store.get_setting.return_value = None
         await scheduler.load_persistent_state()
+        # After load_persistent_state with no saved state, _last_event_date stays None
+        # persist_state pushes current date as init payload
+        scheduler._last_persisted_scheduler_blob = None
+        await scheduler.persist_state()
+        call_args = mock_data_store.set_setting.call_args[0]
+        assert call_args[0] == "persona_scheduler"
+        import json
+        payload = json.loads(call_args[1])
+        assert payload["date"] == scheduler._get_today_str()
 
     @pytest.mark.asyncio
     async def test_load_and_save_state(self, scheduler, mock_data_store, monkeypatch):

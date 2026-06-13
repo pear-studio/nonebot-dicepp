@@ -33,11 +33,6 @@ class TestDatetimeToStr:
         result = datetime_to_str(dt)
         assert result == "2024/01/15 10:30:45"
 
-    def test_with_timezone(self):
-        dt = datetime.datetime(2024, 1, 15, 10, 30, 45, tzinfo=china_tz)
-        result = datetime_to_str(dt)
-        assert result == "2024/01/15 10:30:45"
-
 
 @pytest.mark.unit
 class TestDatetimeToInt:

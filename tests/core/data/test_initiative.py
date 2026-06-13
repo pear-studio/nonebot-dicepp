@@ -81,7 +81,7 @@ class TestInitList:
         assert len(init_list2.entities) == 2
         assert init_list2.entities[0].name == "勇者"
 
-    def test_update_entity_init(self):
+    def test_manual_sort_after_direct_field_mutation(self):
         self.init_list.add_entity("勇者", "user1", 15)
         self.init_list.add_entity("怪物", "user2", 10)
         self.init_list.entities[0].init = 25

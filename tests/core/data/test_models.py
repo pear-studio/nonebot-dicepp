@@ -31,12 +31,11 @@ class TestDNDCharacterModel:
         character.hp_info.is_init = True
 
         json_str = character.model_dump_json()
-        assert "TestChar" in json_str
-        assert "10" in json_str
-
         restored = DNDCharacter.model_validate_json(json_str)
         assert restored.name == "TestChar"
         assert restored.hp_info.hp_cur == 10
+        assert restored.hp_info.hp_max == 20
+        assert restored.hp_info.is_init is True
 
 
 class TestHPInfoModel:

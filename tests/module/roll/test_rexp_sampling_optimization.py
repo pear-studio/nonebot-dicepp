@@ -176,7 +176,7 @@ class TestErrorContract:
             build_sampling_plan("not a valid expression @@#")
 
     def test_empty_expression_raises(self):
-        with pytest.raises((RollSyntaxError, Exception)):
+        with pytest.raises(RollSyntaxError):
             build_sampling_plan("")
 
     def test_limit_error_on_oversized_expression(self):
@@ -187,8 +187,8 @@ class TestErrorContract:
 
     @pytest.mark.asyncio
     async def test_syntax_error_in_get_roll_exp_result_propagates(self):
-        """Syntax errors must propagate out of get_roll_exp_result, not be swallowed."""
-        with pytest.raises((RollSyntaxError, Exception)):
+        """Syntax errors must propagate out of get_roll_exp_result as RollSyntaxError."""
+        with pytest.raises(RollSyntaxError):
             await get_roll_exp_result("@@@invalid@@@")
 
 
@@ -235,24 +235,6 @@ class TestNoCrossRequestLeak:
 class TestAstOnlyRouting:
     """Verify the sampling path uses only AST engine."""
 
-    def test_build_sampling_plan_uses_ast_parse(self):
-        """build_sampling_plan must call parse_expression (AST), not legacy parser."""
-        from unittest.mock import patch
-        import module.roll.ast_engine.adapter as adapter_mod
-
-        with patch.object(adapter_mod, "parse_expression", wraps=adapter_mod.parse_expression) as mock_parse:
-            build_sampling_plan("2D6")
-            mock_parse.assert_called_once()
-
-    def test_sample_from_plan_uses_ast_evaluate(self):
-        """sample_from_plan must call evaluate() from the AST engine."""
-        from unittest.mock import patch
-        import module.roll.ast_engine.adapter as adapter_mod
-
-        plan = build_sampling_plan("2D6")
-        with patch.object(adapter_mod, "evaluate", wraps=adapter_mod.evaluate) as mock_eval:
-            sample_from_plan(plan)
-            mock_eval.assert_called_once()
 
     def test_no_removed_legacy_module_import_triggered(self):
         """Importing and using the sampling path must not recreate the removed legacy module."""

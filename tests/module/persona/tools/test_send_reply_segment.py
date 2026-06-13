@@ -102,10 +102,17 @@ class TestBudget:
         assert "收尾" in result2["warning"]
 
     @pytest.mark.asyncio
-    async def test_error_exceeds_hard_limit(self, ctx):
-        result = parse(await send_reply_segment_executor({"content": "a" * 21}, ctx))
+    async def test_error_exceeds_hard_limit(self, ctx, limits):
+        """Accumulate total_chars near hard_limit then trigger overflow."""
+        state = SegmentBudgetState(limits=limits)
+        ctx.segment_state = state
+        # max_chars=10, soft_limit=15, hard_limit=20
+        # Accumulate 19 chars (below hard_limit), then send 2 chars (total=21 > 20)
+        await send_reply_segment_executor({"content": "123456789"}, ctx)   # 9 chars, total=9
+        await send_reply_segment_executor({"content": "1234567890"}, ctx)  # 10 chars, total=19
+        result = parse(await send_reply_segment_executor({"content": "aa"}, ctx))  # +2 = 21 > 20
         assert result["status"] == "error"
-        assert "不超过" in result["error"]
+        assert "hard_limit" in result["error"] or "收尾" not in result.get("warning", "")
 
     @pytest.mark.asyncio
     async def test_count_max_rejected(self, ctx):

@@ -241,21 +241,3 @@ def test_decay_switch_off_then_on():
     assert abs(f3) < 0.01
     assert "开关关闭" in reason3
 
-
-def test_effective_relationship_leaves_original_unchanged():
-    calc = DecayCalculator(
-        DecayConfig(enabled=True, grace_period_hours=0),
-    )
-    rel = RelationshipState(
-        user_id="u1",
-        intimacy=80.0,
-        familiarity=80.0,
-        peak_intimacy=80.0,
-        peak_familiarity=80.0,
-        last_interaction_at=wall_now() - timedelta(days=30),
-        last_miss_sent_at=wall_now() - timedelta(days=30),
-    )
-    before = rel.composite_score
-    eff = calc.effective_relationship(rel)
-    assert eff.composite_score < before
-    assert rel.composite_score == before

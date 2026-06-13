@@ -21,12 +21,9 @@ class TestDeckItem:
         assert not item.redraw
         assert item.final_type == 2
 
-    def test_weight_minimum(self):
-        item = DeckItem("测试", weight=0)
-        assert item.weight == 1
-
-    def test_weight_negative(self):
-        item = DeckItem("测试", weight=-5)
+    @pytest.mark.parametrize("weight_input", [0, -5])
+    def test_weight_minimum(self, weight_input):
+        item = DeckItem("测试", weight=weight_input)
         assert item.weight == 1
 
     def test_final_type_values(self):
@@ -39,13 +36,16 @@ class TestDeckItem:
 
 @pytest.mark.unit
 class TestForceFinal:
-    def test_init(self):
+    @pytest.mark.parametrize("attr,expected", [
+        ("info", "测试错误"),
+        ("__str__()", "测试错误"),
+    ])
+    def test_force_final(self, attr, expected):
         error = ForceFinal("测试错误")
-        assert error.info == "测试错误"
-
-    def test_str(self):
-        error = ForceFinal("测试错误")
-        assert str(error) == "测试错误"
+        if attr == "__str__()":
+            assert str(error) == expected
+        else:
+            assert getattr(error, attr) == expected
 
     def test_is_exception(self):
         assert issubclass(ForceFinal, Exception)
@@ -62,17 +62,13 @@ def _make_loc_helper():
 
 @pytest.mark.unit
 class TestDeckAddItem:
-    def test_add_item_increases_weight_sum(self):
+    @pytest.mark.parametrize("weight_input,expected_sum", [(3, 3), (None, 1)])
+    def test_add_item_increases_weight_sum(self, weight_input, expected_sum):
         deck = Deck("测试牌库", "/tmp")
-        deck.add_item(DeckItem("A", weight=3))
-        deck.add_item(DeckItem("B", weight=2))
-        assert deck.weight_sum == 5
-        assert len(deck.items) == 2
-
-    def test_add_item_default_weight(self):
-        deck = Deck("测试牌库", "/tmp")
-        deck.add_item(DeckItem("A"))
-        assert deck.weight_sum == 1
+        kwargs = {"weight": weight_input} if weight_input is not None else {}
+        deck.add_item(DeckItem("A", **kwargs))
+        assert deck.weight_sum == expected_sum
+        assert len(deck.items) == 1
 
 
 @pytest.mark.unit
@@ -84,23 +80,24 @@ class TestDeckDraw:
         self.deck.add_item(DeckItem("卡牌B"))
         self.deck.add_item(DeckItem("卡牌C"))
 
-    def test_draw_single_returns_content(self):
-        result = self.deck.draw(1, [self.deck], self.loc)
-        assert "卡牌" in result
-
-    def test_draw_multiple_times(self):
-        # loc mock 返回 content，多次抽取不应抛异常
-        result = self.deck.draw(3, [self.deck], self.loc)
-        assert result.count("卡牌") == 3
+    @pytest.mark.parametrize("times", [1, 3])
+    def test_draw_returns_content(self, times):
+        result = self.deck.draw(times, [self.deck], self.loc)
+        assert result.count("卡牌") == times
+        for item_content in ["卡牌A", "卡牌B", "卡牌C"]:
+            if item_content in result:
+                break
+        else:
+            pytest.fail("No item content found in draw result")
 
     def test_draw_no_redraw_exhausts_deck(self):
-        """不放回抽取：在同一次 draw(times=2) 调用中第二次应触发空牌库提示"""
+        """不放回抽取：同一次 draw(times=2) 调用中第二次应触发空牌库提示"""
         deck = Deck("不放回牌库", "/tmp")
         deck.add_item(DeckItem("唯一卡牌", redraw=False))
         loc = _make_loc_helper()
+        result = deck.draw(2, [deck], loc)
+        assert "唯一卡牌" in result
         from module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
-        # times=2：第一次抽到唯一卡，第二次牌库已空
-        deck.draw(2, [deck], loc)
         loc.format_loc_text.assert_any_call(LOC_DRAW_ERR_EMPTY_DECK)
 
     def test_draw_final_type_2_raises_force_final(self):
@@ -117,17 +114,20 @@ class TestDeckDraw:
 
     def test_draw_final_type_1_stops_inner(self):
         """final_type=1 的卡牌终止内层抽取，多次draw仍能执行"""
+        import random
+        from unittest.mock import patch
+
         deck = Deck("内层终止牌库", "/tmp")
         deck.add_item(DeckItem("内层终止卡", final_type=1))
         deck.add_item(DeckItem("普通卡"))
         loc = _make_loc_helper()
         from module.deck.deck_command import LOC_DRAW_FIN_INNER
         loc.format_loc_text.side_effect = lambda key, **kwargs: (
-            "提前结束内层" if key == LOC_DRAW_FIN_INNER else kwargs.get("content", "")
+            "提前结束内层" if key == LOC_DRAW_FIN_INNER else kwargs.get("content", kwargs.get("result", ""))
         )
-        # 抽2次，若第一张是 final_type=1，第二张不会被抽到
-        # 不抛 ForceFinal 即为通过
-        deck.draw(2, [deck], loc)
+        with patch.object(random, "randint", return_value=1):
+            result = deck.draw(2, [deck], loc)
+        assert "提前结束内层" in result
 
     def test_weighted_draw_respects_weight(self):
         """固定 random.randint 返回值，验证权重抽卡逻辑"""

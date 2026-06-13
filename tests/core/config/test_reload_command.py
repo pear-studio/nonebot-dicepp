@@ -104,6 +104,7 @@ async def test_process_msg_success_returns_message():
 @pytest.mark.asyncio
 async def test_process_msg_success_swaps_config():
     bot, new_cfg = _make_bot()
+    bot.config = MagicMock()  # different config before reload
     cmd = ReloadConfigCommand(bot)
     await cmd.process_msg(".reload", _meta("master1"), None)
     assert bot.config is new_cfg

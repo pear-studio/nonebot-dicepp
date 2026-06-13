@@ -26,21 +26,17 @@ class TestScoreDeltas:
         assert deltas.intimacy == 0.0
         assert deltas.reputation_delta == 0.0
 
-    def test_clamp(self):
-        """测试限制范围"""
-        deltas = ScoreDeltas(intimacy=10, reputation_delta=-40)
+    @pytest.mark.parametrize("intimacy_in,rep_in,expected_intimacy,expected_rep", [
+        (10, -40, 5.0, -30.0),   # upper bound clamp
+        (3, -5, 3.0, -5.0),       # in-range pass-through
+        (-2, 0, -2.0, 0.0),       # negative intimacy in [-5, +5] range, passes through
+    ])
+    def test_clamp(self, intimacy_in, rep_in, expected_intimacy, expected_rep):
+        """测试 ScoreDeltas.clamp 边界条件"""
+        deltas = ScoreDeltas(intimacy=intimacy_in, reputation_delta=rep_in)
         clamped = deltas.clamp()
-
-        assert clamped.intimacy == 5.0
-        assert clamped.reputation_delta == -30.0  # clamped to min -30
-
-    def test_clamp_positive_intimacy(self):
-        """正亲密度正常clamp"""
-        deltas = ScoreDeltas(intimacy=3, reputation_delta=-5)
-        clamped = deltas.clamp()
-
-        assert clamped.intimacy == 3.0
-        assert clamped.reputation_delta == -5.0
+        assert clamped.intimacy == expected_intimacy
+        assert clamped.reputation_delta == expected_rep
 
 
 class TestRelationshipState:
@@ -148,22 +144,19 @@ class TestRelationshipState:
         assert rel.familiarity == 12.0
         assert rel.peak_familiarity == 15.0  # peak 不降
 
-    def test_reputation_bounds(self):
-        """测试信誉边界"""
-        rel = RelationshipState(user_id="test", reputation=100.0)
-        deltas = ScoreDeltas(reputation_delta=10)  # 正值被 clamp 到 0
+    @pytest.mark.parametrize("delta_in,expected_delta,initial_rep,expected_rep", [
+        (10, 0.0, 100.0, 100.0),   # out-of-range positive clamped to 0
+        (-5, -5.0, 50.0, 45.0),     # valid negative preserved
+        (5, 0.0, 99.0, 99.0),       # apply_deltas after clamp leaves reputation unchanged
+    ])
+    def test_reputation_bounds(self, delta_in, expected_delta, initial_rep, expected_rep):
+        """测试信誉边界：clamp 后 apply_deltas 结果正确"""
+        deltas = ScoreDeltas(reputation_delta=delta_in)
         clamped = deltas.clamp()
-        assert clamped.reputation_delta == 0.0  # 不允许正信誉flag
-
-    def test_reputation_apply_upper_bound(self):
-        """测试信誉不超过 100"""
-        rel = RelationshipState(user_id="test", reputation=99.0)
-        # reputation_delta 被 clamp 到 [-30, 0]，正值被限制为 0
-        deltas = ScoreDeltas(reputation_delta=5)
-        clamped = deltas.clamp()
-        assert clamped.reputation_delta == 0.0  # 正值clamp为0
+        assert clamped.reputation_delta == expected_delta
+        rel = RelationshipState(user_id="test", reputation=initial_rep)
         rel.apply_deltas(clamped, updated_at=datetime(2026, 1, 1, 12, 0, 0))
-        assert rel.reputation == 99.0  # 不变
+        assert rel.reputation == expected_rep
 
 
 class TestUserProfile:

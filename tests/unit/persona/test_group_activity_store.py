@@ -62,7 +62,7 @@ async def test_group_activity_decay_uses_config():
 
 
 @pytest.mark.asyncio
-async def test_get_top_relationships_global_ranking():
+async def test_get_top_relationships_returns_known_users():
     async with aiosqlite.connect(":memory:") as persona_db, \
          aiosqlite.connect(":memory:") as core_db:
         store = PersonaDataStore(":memory:", core_db)
@@ -82,8 +82,15 @@ async def test_get_top_relationships_global_ranking():
             VALUES ('u_mid', 70, 70, 100, datetime('now'), datetime('now'))
             """,
         )
+        await persona_db.execute(
+            """
+            INSERT INTO persona_user_relationships
+            (user_id, intimacy, familiarity, reputation, last_interaction_at, updated_at)
+            VALUES ('u_low', 50, 50, 100, datetime('now'), datetime('now'))
+            """,
+        )
         await persona_db.commit()
-        top = await store.get_top_relationships(limit=10)
-        ids = {r.user_id for r in top}
-        assert "u_high" in ids
-        assert "u_mid" in ids
+        top = await store.get_top_relationships(limit=2)
+        ids = [r.user_id for r in top]
+        assert ids == ["u_high", "u_mid"], f"Expected ordering u_high, u_mid but got {ids}"
+        assert len(top) == 2

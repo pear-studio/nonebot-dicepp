@@ -7,7 +7,6 @@ import pytest
 import os
 import asyncio
 import tempfile
-from unittest.async_case import IsolatedAsyncioTestCase
 
 
 # ─────────────────────────── 单元测试：QueryStore.create_empty_database ─────────
@@ -87,22 +86,18 @@ class TestRegexpNormalize:
         assert "\\)" in result
         assert result.startswith("\\("), f"'(' 应被转义，实际: {result}"
 
-    def test_normalize_preserves_normal_chars(self):
+    @pytest.mark.parametrize("input_str", ["力量", "火球术"])
+    def test_normalize_preserves_normal_chars(self, input_str):
         """普通汉字和字母不应被转义"""
         from core.data.query_store import regexp_normalize
-        result = regexp_normalize("力量")
-        assert result == "力量"
+        result = regexp_normalize(input_str)
+        assert result == input_str
 
     def test_normalize_escapes_dot(self):
         """点号 '.' 应被转义"""
         from core.data.query_store import regexp_normalize
         result = regexp_normalize("v1.0")
         assert "\\." in result
-
-    def test_normalize_basic_string(self):
-        from core.data.query_store import regexp_normalize
-        result = regexp_normalize("火球术")
-        assert result == "火球术"
 
     def test_normalize_empty_string(self):
         from core.data.query_store import regexp_normalize
@@ -112,84 +107,51 @@ class TestRegexpNormalize:
 
 # ─────────────────────────── 集成测试：.查询 指令 ───────────────────────────
 
+@pytest.fixture
+def _send_group_factory(fresh_bot):
+    """Module-level fixture for sending group messages with a shared bot."""
+    bot, _proxy = fresh_bot
+
+    async def send_group(msg: str, user_id: str = "user1", group_id: str = "group1",
+                         nickname: str = "测试用户"):
+        from core.communication import MessageMetaData, MessageSender
+        meta = MessageMetaData(msg, msg, MessageSender(user_id, nickname), group_id, False)
+        return await bot.process_message(msg, meta)
+
+    return send_group
+
+
 @pytest.mark.integration
-class TestQueryCommandIntegration(IsolatedAsyncioTestCase):
+@pytest.mark.asyncio
+class TestQueryCommandIntegration:
     """QueryCommand (.查询/.q) 集成测试"""
 
-    async def asyncSetUp(self):
-        from core.bot import Bot
-        self.bot = Bot("test_query_bot")
-        self.bot.config.master = ["test_master"]
-        await self.bot.delay_init_command()
-
-    async def asyncTearDown(self):
-        await self.bot.shutdown_async()
-        import os
-        test_path = self.bot.data_path
-        if os.path.exists(test_path):
-            for root, dirs, files in os.walk(test_path, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            os.rmdir(test_path)
-
-    async def _send_group(self, msg: str, user_id: str = "user1", group_id: str = "group1"):
-        from core.communication import MessageMetaData, MessageSender
-        meta = MessageMetaData(msg, msg, MessageSender(user_id, "测试用户"), group_id, False)
-        return await self.bot.process_message(msg, meta)
-
-    async def test_query_no_database_returns_response(self):
-        """没有数据库时 .查询 应返回错误提示而非崩溃"""
-        cmds = await self._send_group(".查询 火球术")
-        self.assertEqual(len(cmds), 1, ".查询 应返回一条提示信息")
+    @pytest.mark.parametrize("command", [".查询 火球术", ".q 火球术"])
+    async def test_query_no_database_returns_response(self, command, _send_group_factory):
+        """没有数据库时 .查询/.q 应返回错误提示而非崩溃"""
+        cmds = await _send_group_factory(command)
+        assert len(cmds) == 1, f"{command.split()[0]} 应返回一条提示信息"
         result = "\n".join([str(c) for c in cmds])
-        self.assertIn("未加载的数据库", result)
-
-    async def test_query_short_form_no_database(self):
-        """.q 短指令同上"""
-        cmds = await self._send_group(".q 火球术")
-        self.assertEqual(len(cmds), 1, ".q 应返回一条提示信息")
-        result = "\n".join([str(c) for c in cmds])
-        self.assertIn("未加载的数据库", result)
+        assert "未加载的数据库" in result
 
 
 @pytest.mark.integration
-class TestHomebrewCommandIntegration(IsolatedAsyncioTestCase):
+@pytest.mark.asyncio
+class TestHomebrewCommandIntegration:
     """HomebrewCommand (.私设/.hb) 集成测试"""
 
-    async def asyncSetUp(self):
-        from core.bot import Bot
-        self.bot = Bot("test_hb_bot")
-        self.bot.config.master = ["test_master"]
-        await self.bot.delay_init_command()
+    async def test_homebrew_status_returns_response(self, _send_group_factory):
+        """查询私设状态——应返回私设状态提示而非空列表"""
+        cmds = await _send_group_factory(".hb status", user_id="test_master")
+        assert len(cmds) == 1, ".hb status 应返回一条提示"
+        result = "\n".join([str(c) for c in cmds])
+        assert "私设" in result
+        assert "未载入" in result
 
-    async def asyncTearDown(self):
-        await self.bot.shutdown_async()
-        import os
-        test_path = self.bot.data_path
-        if os.path.exists(test_path):
-            for root, dirs, files in os.walk(test_path, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            os.rmdir(test_path)
-
-    async def _send_group(self, msg: str, user_id: str = "user1", group_id: str = "group1"):
-        from core.communication import MessageMetaData, MessageSender
-        meta = MessageMetaData(msg, msg, MessageSender(user_id, "测试用户"), group_id, False)
-        return await self.bot.process_message(msg, meta)
-
-    async def test_homebrew_status_returns_response(self):
-        """查询私设状态不应崩溃"""
-        cmds = await self._send_group(".hb status")
-        # 无 homebrew 数据时命令可能不匹配任何处理器返回空列表
-        # 验证 process_message 至少返回 list 而非抛异常
-        self.assertIsInstance(cmds, list, ".hb status 不应抛异常")
-
-    async def test_homebrew_query_no_data_returns_response(self):
+    async def test_homebrew_query_no_data_returns_response(self, _send_group_factory):
         """没有私设数据时查询应返回提示而非崩溃"""
-        cmds = await self._send_group(".私设 测试条目")
-        # 无私设数据时命令可能不匹配处理器返回空列表
-        self.assertIsInstance(cmds, list, ".私设 不应抛异常")
+        cmds = await _send_group_factory(".私设 测试条目", user_id="test_master")
+        assert len(cmds) == 1, ".私设 应返回一条提示"
+        result = "\n".join([str(c) for c in cmds])
+        assert "私设" in result
+        assert "未载入" in result

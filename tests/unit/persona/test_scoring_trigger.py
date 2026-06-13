@@ -163,4 +163,4 @@ class TestScoringRetry:
         # 现在 pending 中有 4 条（保留的 2 条 + 新 2 条）
 
         pending_count = len(trigger._pending_messages.get(key, []))
-        assert pending_count >= 4  # 消息持续累积
+        assert pending_count == 4  # 消息持续累积

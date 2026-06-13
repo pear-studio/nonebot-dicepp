@@ -127,27 +127,39 @@ class TestStructuredCollectSuccess:
     """结构化采集工具的成功执行路径（AUTO 模式）"""
 
     @pytest.mark.asyncio
-    async def test_structured_collect_required_tool(self):
-        """AgentLoop AUTO 模式: 结构化采集工具调用时收集参数
-
-        当 LLM 在 AUTO 模式下调用结构化采集工具时，
-        验证 STATE_WRITE executor 正确接收参数。
-        """
+    @pytest.mark.parametrize("tool_name,args,expected_asserts", [
+        ("record_event", {
+            "description": "窗外下雨了，雨滴打在玻璃上",
+            "context_summary": "下雨天",
+            "duration_minutes": 30,
+        }, lambda c: (
+            c["description"] == "窗外下雨了，雨滴打在玻璃上" and
+            c["context_summary"] == "下雨天" and
+            c["duration_minutes"] == 30
+        )),
+        ("record_event", {
+            "description": "在公园长椅上看书，被鸽子踩醒了",
+            "context_summary": "在公园看书被鸽子打扰",
+            "duration_minutes": 45,
+        }, lambda c: (
+            c["description"] == "在公园长椅上看书，被鸽子踩醒了" and
+            c["context_summary"] == "在公园看书被鸽子打扰" and
+            c["duration_minutes"] == 45
+        )),
+    ])
+    async def test_structured_collect_event(self, tool_name, args, expected_asserts):
+        """AgentLoop AUTO 模式: 采集 record_event 结构化输出，参数正确收集。"""
         bus, _ = _make_event_bus()
         state = _make_run_state()
         reg = ToolRegistry()
 
         collected: list = []
-        reg.register(_make_collecting_spec("record_event", RecordEventArgs, collected))
+        reg.register(_make_collecting_spec(tool_name, RecordEventArgs, collected))
 
         tool_call = {
             "id": "tc_record",
-            "name": "record_event",
-            "arguments": json.dumps({
-                "description": "窗外下雨了，雨滴打在玻璃上",
-                "context_summary": "下雨天",
-                "duration_minutes": 30,
-            }),
+            "name": tool_name,
+            "arguments": json.dumps(args),
         }
 
         gateway = _CountedGateway(first_tool_calls=[tool_call])
@@ -166,11 +178,8 @@ class TestStructuredCollectSuccess:
             tool_use_mode=ToolUseMode.AUTO,
         )
 
-        # 工具被调用 → 参数正确收集
         assert len(collected) == 1, f"expected 1 collected, got {len(collected)}"
-        assert collected[0]["description"] == "窗外下雨了，雨滴打在玻璃上"
-        assert collected[0]["context_summary"] == "下雨天"
-        assert collected[0]["duration_minutes"] == 30
+        assert expected_asserts(collected[0]), f"assertion failed for {args}"
         assert result.status == "completed", f"got {result.status}/{result.final_reason}"
 
     @pytest.mark.asyncio
@@ -214,49 +223,6 @@ class TestStructuredCollectSuccess:
         assert collected[0]["deltas"]["intimacy"] == 3.5
         assert collected[0]["deltas"]["passion"] == 1.0
         assert collected[0]["facts"]["name"] == "张三"
-        assert result.status == "completed"
-
-    @pytest.mark.asyncio
-    async def test_life_event_runtime_collects_event(self):
-        """AgentLoop AUTO 模式: 采集 record_event 结构化输出
-
-        EventGenerationAgent 在 M2 后应通过 AgentLoop 执行此工具路径。
-        验证完整的事件参数（含可选字段）能被正确收集。
-        """
-        bus, _ = _make_event_bus()
-        state = _make_run_state()
-        reg = ToolRegistry()
-
-        collected: list = []
-        reg.register(_make_collecting_spec("record_event", RecordEventArgs, collected))
-
-        tool_call = {
-            "id": "tc_event",
-            "name": "record_event",
-            "arguments": json.dumps({
-                "description": "在公园长椅上看书，被鸽子踩醒了",
-                "context_summary": "在公园看书被鸽子打扰",
-                "duration_minutes": 45,
-            }),
-        }
-
-        gateway = _CountedGateway(first_tool_calls=[tool_call])
-        executor = ToolExecutor(reg, bus)
-        loop = AgentLoop(gateway, executor, bus, limits=AgentRunLimits(max_tool_rounds=5))
-
-        result = await loop.run(
-            messages=[{"role": "system", "content": "你是一个事件生成器"},
-                      {"role": "user", "content": "生成一个生活事件"}],
-            state=state,
-            tools=reg.get_openai_schemas(),
-            tool_use_mode=ToolUseMode.AUTO,
-        )
-
-        # 参数正确收集
-        assert len(collected) == 1
-        assert collected[0]["description"] == "在公园长椅上看书，被鸽子踩醒了"
-        assert collected[0]["context_summary"] == "在公园看书被鸽子打扰"
-        assert collected[0]["duration_minutes"] == 45
         assert result.status == "completed"
 
 

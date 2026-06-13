@@ -187,6 +187,7 @@ class TestOpenAIProvider:
         assert "rate_limit" in provider.retryable_errors
         assert "timeout" in provider.retryable_errors
         assert "connection" in provider.retryable_errors
+        assert "server_error" in provider.retryable_errors
 
     @pytest.mark.asyncio
     async def test_reasoning_content_extraction(self, provider):

@@ -78,17 +78,16 @@ class TestGetAppDir:
         monkeypatch.setenv("DICEPP_APP_DIR", str(override))
         assert get_app_dir() == os.path.abspath(str(override))
 
-
-def test_dicepp_app_dir_sets_config_data_path(tmp_path):
-    """
-    子进程中首次导入 core.config.basic 时，Paths.PROJECT_ROOT 应落在项目根目录下，
-    Paths.CONFIG_DIR 应为 PROJECT_ROOT/config。
-    （主 pytest 进程已导入过 config，需独立进程验证 import-time 行为。）
-    """
-    app_root = tmp_path / "dicepp_app_root"
-    app_root.mkdir()
-    dicepp_src = Path(__file__).resolve().parents[2] / "src" / "plugins" / "DicePP"
-    script = f"""
+    def test_dicepp_app_dir_sets_config_data_path(self, tmp_path):
+        """
+        子进程中首次导入 core.config.basic 时，Paths.PROJECT_ROOT 应落在项目根目录下，
+        Paths.CONFIG_DIR 应为 PROJECT_ROOT/config。
+        （主 pytest 进程已导入过 config，需独立进程验证 import-time 行为。）
+        """
+        app_root = tmp_path / "dicepp_app_root"
+        app_root.mkdir()
+        dicepp_src = Path(__file__).resolve().parents[2] / "src" / "plugins" / "DicePP"
+        script = f"""
 import os, sys
 sys.path.insert(0, {str(dicepp_src)!r})
 import core.config.basic as basic_mod
@@ -96,16 +95,16 @@ expected_root = os.path.abspath({str(app_root)!r})
 assert str(basic_mod.Paths.PROJECT_ROOT) == expected_root, (str(basic_mod.Paths.PROJECT_ROOT), expected_root)
 assert str(basic_mod.Paths.CONFIG_DIR) == os.path.join(expected_root, "config"), str(basic_mod.Paths.CONFIG_DIR)
 """
-    env = os.environ.copy()
-    env["DICEPP_PROJECT_ROOT"] = str(app_root)
-    proc = subprocess.run(
-        [sys.executable, "-c", script],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+        env = os.environ.copy()
+        env["DICEPP_PROJECT_ROOT"] = str(app_root)
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 class TestGetRuntimeInfo:
@@ -114,13 +113,33 @@ class TestGetRuntimeInfo:
     def test_returns_dict_with_required_keys(self):
         """应返回包含所有必需键的字典"""
         info = get_runtime_info()
-        
+
         assert isinstance(info, dict)
         assert 'frozen' in info
         assert 'app_dir' in info
         assert 'project_root' in info
         assert 'executable' in info
         assert 'cwd' in info
+
+    def test_development_environment_info(self):
+        """开发环境的运行时信息"""
+        info = get_runtime_info()
+
+        assert info['frozen'] is False
+        assert os.path.isabs(info['app_dir'])
+        assert info['executable'] == sys.executable
+        assert info['cwd'] == os.getcwd()
+
+    def test_frozen_environment_info(self):
+        """模拟打包环境的运行时信息"""
+        fake_exe_path = os.path.join(os.sep, 'Apps', 'DicePP', 'DicePP.exe')
+
+        with patch.object(sys, 'frozen', True, create=True):
+            with patch.object(sys, 'executable', fake_exe_path):
+                info = get_runtime_info()
+
+                assert info['frozen'] is True
+                assert info['executable'] == fake_exe_path
 
 
 class TestGetProjectRoot:
@@ -146,23 +165,3 @@ class TestGetProjectRoot:
             with patch.object(sys, 'executable', fake_exe):
                 result = get_project_root()
         assert result == expected_dir
-
-    def test_development_environment_info(self):
-        """开发环境的运行时信息"""
-        info = get_runtime_info()
-        
-        assert info['frozen'] is False
-        assert os.path.isabs(info['app_dir'])
-        assert info['executable'] == sys.executable
-        assert info['cwd'] == os.getcwd()
-
-    def test_frozen_environment_info(self):
-        """模拟打包环境的运行时信息"""
-        fake_exe_path = os.path.join(os.sep, 'Apps', 'DicePP', 'DicePP.exe')
-        
-        with patch.object(sys, 'frozen', True, create=True):
-            with patch.object(sys, 'executable', fake_exe_path):
-                info = get_runtime_info()
-                
-                assert info['frozen'] is True
-                assert info['executable'] == fake_exe_path

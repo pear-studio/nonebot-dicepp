@@ -104,7 +104,3 @@ class TestScoringAgentParsing:
         # intimacy 应限制在 [-5, 5]，reputation_delta 限制在 [-30, 0]
         assert deltas.intimacy == 5.0
         assert deltas.reputation_delta == -30.0
-
-
-class TestScoringAgentPrompt:
-    """测试评分 Agent 的 Prompt 构建"""

@@ -1,46 +1,54 @@
-"""read_diary smoke 测试"""
+"""read_diary 测试 — 使用真实 in-memory store"""
+from datetime import timedelta
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 pytestmark = pytest.mark.unit
 
 
-def _make_ctx(**kwargs):
-    from module.persona.tools.context import ToolContext
-    ctx = MagicMock(spec=ToolContext)
-    ctx.user_id = kwargs.get("user_id", "u1")
-    ctx.group_id = kwargs.get("group_id", "g1")
-    store = kwargs.get("store", MagicMock())
-    if store is not None:
-        store.get_recent_diaries = AsyncMock(return_value=[])
-    ctx.store = store
-    return ctx
-
-
 @pytest.mark.asyncio
-async def test_read_diary_with_content():
-    """有日记时返回全文"""
+@pytest.mark.parametrize("args, extra_expected_markers", [
+    ({"days": 7}, set()),
+    ({"days": 14, "limit": 3}, {"【最近日记】", "---"}),
+])
+async def test_read_diary_with_content(in_memory_persona_store, args, extra_expected_markers):
+    """有日记时返回全文，参数透传"""
     from module.persona.tools.read_diary import make_read_diary_executor
+    from module.persona.tools.context import ToolContext
 
-    ctx = _make_ctx()
-    ctx.store.get_recent_diaries = AsyncMock(return_value=[
-        ("2026-05-21", "今天天气很好，出去走了走。"),
-    ])
+    store = in_memory_persona_store
+    today = store._wall_now()
+    diary_date = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    diary_content = "今天天气很好，出去走了走。"
+    await store.save_diary(diary_date, diary_content)
+
+    ctx = MagicMock(spec=ToolContext)
+    ctx.user_id = "u1"
+    ctx.group_id = "g1"
+    ctx.store = store
 
     executor = make_read_diary_executor()
-    result = await executor({"days": 7}, ctx)
+    result = await executor(args, ctx)
 
-    assert "2026-05-21" in result
-    assert "今天天气很好" in result
+    assert diary_date in result
+    assert diary_content in result
+    for marker in extra_expected_markers:
+        assert marker in result
 
 
 @pytest.mark.asyncio
-async def test_read_diary_empty():
+async def test_read_diary_empty(in_memory_persona_store):
     """无日记时返回提示"""
     from module.persona.tools.read_diary import make_read_diary_executor
+    from module.persona.tools.context import ToolContext
 
-    ctx = _make_ctx()
-    ctx.store.get_recent_diaries = AsyncMock(return_value=[])
+    store = in_memory_persona_store
+
+    ctx = MagicMock(spec=ToolContext)
+    ctx.user_id = "u1"
+    ctx.group_id = "g1"
+    ctx.store = store
 
     executor = make_read_diary_executor()
     result = await executor({}, ctx)
@@ -49,27 +57,16 @@ async def test_read_diary_empty():
 
 
 @pytest.mark.asyncio
-async def test_read_diary_params():
-    """days 和 limit 参数传递"""
-    from module.persona.tools.read_diary import make_read_diary_executor
-
-    ctx = _make_ctx()
-    ctx.store.get_recent_diaries = AsyncMock(return_value=[])
-
-    executor = make_read_diary_executor()
-    await executor({"days": 14, "limit": 3}, ctx)
-
-    call_kwargs = ctx.store.get_recent_diaries.call_args.kwargs
-    assert call_kwargs["days"] == 14
-    assert call_kwargs["limit"] == 3
-
-
-@pytest.mark.asyncio
 async def test_read_diary_store_none():
     """store 为 None 时返回不可用提示"""
     from module.persona.tools.read_diary import make_read_diary_executor
+    from module.persona.tools.context import ToolContext
 
-    ctx = _make_ctx(store=None)
+    ctx = MagicMock(spec=ToolContext)
+    ctx.user_id = "u1"
+    ctx.group_id = "g1"
+    ctx.store = None
+
     executor = make_read_diary_executor()
     result = await executor({}, ctx)
 

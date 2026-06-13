@@ -63,10 +63,12 @@ class TestCharacter:
 class TestPersonaExtensions:
     """测试 PersonaExtensions 事件时刻生成"""
 
-    def test_generate_event_times_count(self):
+    @pytest.mark.parametrize("count_param,expected", [(None, 5), (3, 3)])
+    def test_generate_event_times_count(self, count_param, expected):
         ext = PersonaExtensions(daily_events_count=5, event_jitter_minutes=0)
-        times = ext.generate_event_times()
-        assert len(times) == 5
+        kwargs = {} if count_param is None else {"count": count_param}
+        times = ext.generate_event_times(**kwargs)
+        assert len(times) == expected
 
     def test_generate_event_times_within_window(self):
         ext = PersonaExtensions(
@@ -92,11 +94,6 @@ class TestPersonaExtensions:
         # window=720 min, interval=360 → bases at 8*60+180=660, 8*60+540=1020
         assert times[0] == 660
         assert times[1] == 1020
-
-    def test_generate_event_times_custom_count(self):
-        ext = PersonaExtensions(daily_events_count=5, event_jitter_minutes=0)
-        times = ext.generate_event_times(count=3)
-        assert len(times) == 3
 
     def test_generate_event_times_zero_count(self):
         ext = PersonaExtensions(daily_events_count=0)
@@ -288,14 +285,17 @@ extensions:
             assert char is None
 
     def test_load_default_character(self):
-        """测试加载默认角色卡"""
-        loader = CharacterLoader("content/characters")
-        char = loader.load("default")
-
-        if os.path.exists("content/characters/default/character.yaml"):
-            assert char.name
-        else:
-            pytest.skip("默认角色卡不存在")
+        """测试从临时目录加载角色卡"""
+        yaml_content = "name: 默认角色\ndescription: 默认描述\n"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            char_dir = os.path.join(tmpdir, "default")
+            os.makedirs(char_dir, exist_ok=True)
+            with open(os.path.join(char_dir, "character.yaml"), "w", encoding="utf-8") as f:
+                f.write(yaml_content)
+            loader = CharacterLoader(tmpdir)
+            char = loader.load("default")
+            assert char.name == "默认角色"
+            assert char.description == "默认描述"
 
     def test_list_characters(self):
         """测试列出所有角色"""

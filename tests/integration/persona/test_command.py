@@ -30,7 +30,7 @@ from plugins.DicePP.module.persona.data.models import (
 from core.communication import MessageMetaData, MessageSender
 
 
-@pytest.mark.integration
+@pytest.mark.unit
 class TestCanProcessMsg(IsolatedAsyncioTestCase):
     """can_process_msg 分支矩阵（12个）"""
 

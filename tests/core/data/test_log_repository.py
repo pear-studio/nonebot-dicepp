@@ -206,6 +206,11 @@ class TestLogRepository:
         record_id = await log_repo.insert(record)
         assert record_id > 0
 
+        # Verify retrievable
+        records = await log_repo.get_records("session1")
+        assert len(records) >= 1
+        assert records[-1].content == "Test message"
+
     @pytest.mark.asyncio
     async def test_query_by_group(self, log_repo):
         session1 = LogSession(

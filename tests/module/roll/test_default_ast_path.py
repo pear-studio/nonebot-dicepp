@@ -59,6 +59,29 @@ class TestDefaultPathIsAST:
             logger.remove(handler_id)
         assert "roll_engine=ast" in output.getvalue()
 
+    @pytest.mark.parametrize("error_cls", [ValueError, RuntimeError])
+    def test_unexpected_ast_error_wraps_as_roll_dice_error(self, error_cls, monkeypatch):
+        """AST 引擎内部异常必须包装为 RollDiceError（守门测试）。"""
+        from module.roll.ast_engine import adapter
+        from module.roll.roll_utils import RollDiceError
+
+        def _explode(*args, **kwargs):
+            raise error_cls("boom")
+        monkeypatch.setattr(adapter, "build_roll_result", _explode)
+
+        output = StringIO()
+        handler_id = logger.add(output, level="ERROR", format="{message}")
+        try:
+            with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
+                adapter.exec_roll_exp_unified("1D20")
+        finally:
+            logger.remove(handler_id)
+
+        logs = output.getvalue()
+        assert "roll_engine=ast" in logs and error_cls.__name__ in logs, (
+            f"应记录 roll_engine=ast + {error_cls.__name__} 日志，实际: {logs}"
+        )
+
 
 @pytest.mark.unit
 class TestComputeExpAstPath:
@@ -82,23 +105,3 @@ class TestComputeExpAstPath:
         assert 3 <= result.get_val() <= 8
 
 
-def test_unexpected_ast_error_wraps_as_roll_dice_error(monkeypatch):
-    """AST 引擎内部非 RollEngineError 异常必须包装为 RollDiceError（守门测试，禁止静默吞错）。"""
-    from module.roll.ast_engine import adapter
-    from module.roll.roll_utils import RollDiceError
-
-    def _explode(*args, **kwargs):
-        raise RuntimeError("boom")
-    monkeypatch.setattr(adapter, "build_roll_result", _explode)
-
-    output = StringIO()
-    handler_id = logger.add(output, level="ERROR", format="{message}")
-    try:
-        with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
-            adapter.exec_roll_exp_unified("1D20")
-    finally:
-        logger.remove(handler_id)
-
-    logs = output.getvalue()
-    assert "roll_engine=ast" in logs and "RuntimeError" in logs, \
-        f"应记录 roll_engine=ast + RuntimeError 日志，实际: {logs}"

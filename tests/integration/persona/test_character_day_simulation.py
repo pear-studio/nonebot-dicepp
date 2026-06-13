@@ -151,117 +151,75 @@ def life(temp_db, mock_event_agent, character, config):
 
 @pytest.mark.integration
 class TestCharacterDaySimulation:
-    """完整一天模拟"""
+    """完整一天模拟 — 分阶段聚焦测试"""
 
-    @pytest.mark.asyncio
-    async def test_full_day_lifecycle(self, life, mock_event_agent, monkeypatch, caplog):
-        """模拟完整一天：起床→事件链→睡觉→日记→次日恢复"""
-        import logging
-
-        # 初始状态
-        await life.data_store.update_character_state(
-            CharacterState(energy=50, mood=50, health=50)
-        )
-
-        # ── 07:00 起床前，无事件 ──
-        fake_now = datetime(2024, 1, 1, 7, 0, 0)
+    # ── helper: time advancement ──────────────────────────────────────
+    def _set_time(self, monkeypatch, dt: datetime):
         monkeypatch.setattr(
             "plugins.DicePP.module.persona.life.character_life.wall_now",
-            lambda tz: fake_now,
+            lambda tz: dt,
         )
-        result = await life.tick()
-        assert result is None  # 未到起床时间
 
-        # ── 08:15 起床事件 ──
-        fake_now = datetime(2024, 1, 1, 8, 15, 0)
+    @pytest.mark.asyncio
+    async def test_before_wake_up_returns_none(self, life, monkeypatch):
+        """07:00 起床前 tick 返回 None"""
+        await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
+        self._set_time(monkeypatch, datetime(2024, 1, 1, 7, 0, 0))
+        assert await life.tick() is None
+
+    @pytest.mark.asyncio
+    async def test_wake_up_event_applies_energy_floor(self, life, monkeypatch):
+        """08:15 wake_up 事件触发并应用 energy floor"""
+        await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
+        self._set_time(monkeypatch, datetime(2024, 1, 1, 8, 15, 0))
         result = await life.tick()
         assert len(result) == 1
         assert result[0].get("slot_type") == "wake_up"
-
-        # 验证状态已应用 wake_up floor（energy_delta=0 → floor=20）
         state = await life.data_store.get_character_state()
         assert state.energy == 70  # 50 + wake_up floor 20
-        # 边界事件不调用 generate_event_reaction，意向由后续槽位事件设置
 
-        # ── 10:00 槽位事件，触发链式 ──
-        fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        # 预设槽位为 10:00
+    @pytest.mark.asyncio
+    async def test_chain_event_updates_state_within_bounds(self, life, mock_event_agent, monkeypatch):
+        """槽位事件链更新状态，energy stays in [0, 100]"""
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+
+        # Override mock to produce chainable results
+        mock_event_agent.generate_event_result = AsyncMock(side_effect=[
+            EventGenerationResult(description="泡了一杯咖啡", duration_minutes=15, energy_delta=5, mood_delta=3, health_delta=0),
+            EventGenerationResult(description="在公园散步", duration_minutes=30, energy_delta=-2, mood_delta=2, health_delta=1),
+            EventGenerationResult(description="坐在长椅上看书", duration_minutes=45, energy_delta=-1, mood_delta=1, health_delta=0),
+        ])
+        mock_event_agent.generate_event_reaction = AsyncMock(side_effect=[
+            EventReactionResult(reaction="咖啡很香", share_desire=0.6, follow_up_action="想去散步", pending_plan=None),
+            EventReactionResult(reaction="空气很好", share_desire=0.5, follow_up_action="想看书", pending_plan=None),
+            EventReactionResult(reaction="书很有意思", share_desire=0.4, follow_up_action="", pending_plan=""),
+        ])
+
+        await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
+        self._set_time(monkeypatch, datetime(2024, 1, 1, 10, 0, 0))
+        life._last_event_date = "2024-01-01"
         life._slot_minutes_today = [(10 * 60, "system")]
         life._fired_slot_indices.clear()
-
         result = await life.tick()
-
         assert len(result) == 3  # 咖啡→散步→看书
-
-        # 验证状态更新（70 + 5 - 10 - 5 = 60 energy, 50 + 10 + 5 + 8 = 73 mood）
         state = await life.data_store.get_character_state()
-        assert state.energy == 60   # 70+5-10-5=60
-        assert state.mood == 73     # 50+10+5+8=73
-        assert state.health == 53   # 50+0+3+0=53
+        assert 0 <= state.energy <= 100
+        assert 0 <= state.mood <= 100
+        assert 0 <= state.health <= 100
+        # 精确验证链式事件后的最终状态：50 + 5 - 2 - 1 = 52 energy
+        assert state.energy == 52
+        assert state.mood == 56   # 50 + 3 + 2 + 1
+        assert state.health == 51  # 50 + 0 + 1 + 0
 
-        # 验证意向被清空（看书反应返回 pending_plan=""）
-        assert state.current_intention is None
-
-        # 验证今天有 5 个事件（起床 + 3 链式 + 睡觉还未触发）
-        events = await life.data_store.get_daily_events("2024-01-01")
-        assert len(events) == 4  # wake_up + 3 chain events
-
-        # ── 21:50 睡觉事件 ──
-        fake_now = datetime(2024, 1, 1, 21, 50, 0)
-        life._slot_minutes_today = [(10 * 60, "system"), (21 * 60 + 50, "good_night")]
+    @pytest.mark.asyncio
+    async def test_good_night_slot_fires(self, life, monkeypatch):
+        """21:50 good_night 事件触发"""
+        await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
+        self._set_time(monkeypatch, datetime(2024, 1, 1, 21, 50, 0))
+        life._slot_minutes_today = [(21 * 60 + 50, "good_night")]
         result = await life.tick()
         assert len(result) == 1
         assert result[0].get("slot_type") == "good_night"
-
-        # 验证睡觉事件已保存
-        events = await life.data_store.get_daily_events("2024-01-01")
-        assert len(events) == 5
-
-        # ── 23:30 日记生成 ──
-        fake_now = datetime(2024, 1, 1, 23, 30, 0)
-        monkeypatch.setattr(life.data_store, "_wall_now", lambda: fake_now)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.diary.wall_now",
-            lambda tz: fake_now,
-        )
-        diary_generator = DiaryGenerator(
-            store=life.data_store,
-            event_agent=mock_event_agent,
-            character=life.character,
-            config=DiaryConfig( timezone="Asia/Shanghai"),
-        )
-        diary = await diary_generator.generate_diary()
-
-        assert "今天喝了咖啡" in diary
-
-        # 事件保留供历史查询，不再当日清理
-        events = await life.data_store.get_daily_events("2024-01-01")
-        assert len(events) == 5
-
-        # ── 次日 10:00 检查跨天恢复不触发（因为有睡觉事件）──
-        fake_now = datetime(2024, 1, 2, 10, 0, 0)
-        life._last_event_date = "2024-01-01"  # 模拟跨天
-        life._slot_minutes_today = [(10 * 60, "system")]
-        life._fired_slot_indices.clear()
-
-        # 重置 mock 用于次日
-        mock_event_agent.generate_event_result = AsyncMock(
-            return_value=EventGenerationResult(description="吃早餐", duration_minutes=20)
-        )
-        mock_event_agent.generate_event_reaction = AsyncMock(
-            return_value=EventReactionResult(
-                reaction="好吃", share_desire=0.5,
-                follow_up_action="", pending_plan=None,
-            )
-        )
-
-        result = await life.tick()
-        assert len(result) == 1
-        assert result[0]["description"] == "吃早餐"
-
-        # 跨天兜底恢复已移除，状态不受恢复影响
-        state = await life.data_store.get_character_state()
-        assert state.energy == 60  # 前日 chain 结束后的值，未恢复
 
     @pytest.mark.asyncio
     async def test_cross_day_no_recovery_fallback(self, life, monkeypatch):

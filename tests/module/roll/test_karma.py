@@ -106,29 +106,36 @@ class TestKarmaState:
         assert state.tail(10) == [10.0, 20.0, 30.0, 40.0, 50.0]
 
 
-@pytest.mark.slow
+@pytest.mark.unit
 class TestKarmaEngines:
-    def test_standard_is_uniform(self):
+    """Fast unit tests using mocked bot."""
+
+    @pytest.fixture
+    def mock_bot(self):
+        from unittest.mock import MagicMock
+        bot = MagicMock()
+        bot.db = MagicMock()
+        bot.db.group_config = MagicMock()
+        bot.db.group_config.get = MagicMock(return_value=None)
+        return bot
+
+    @pytest.fixture
+    def manager(self, mock_bot):
+        from module.roll.karma_manager import KarmaDiceManager
+        return KarmaDiceManager(mock_bot)
+
+    def test_standard_is_uniform(self, manager):
         import random
         random.seed(42)
-        from module.roll.karma_manager import KarmaDiceManager
-        from core.bot import Bot
-
-        bot = Bot("test_karma")
-        manager = KarmaDiceManager(bot)
         values = [manager.generate_value("g1", "u1", 100) for _ in range(1000)]
         avg = sum(values) / len(values)
         assert avg > 40
         assert avg < 60
 
-    def test_grim_mode_skews_low(self):
+    def test_grim_mode_skews_low(self, manager):
         import random
         random.seed(42)
-        from module.roll.karma_manager import KarmaDiceManager, KarmaConfig
-        from core.bot import Bot
-
-        bot = Bot("test_karma_grim")
-        manager = KarmaDiceManager(bot)
+        from module.roll.karma_manager import KarmaConfig
         cfg = KarmaConfig(is_enabled=True, mode="grim")
         manager.set_runtime("g1", cfg)
 
@@ -136,15 +143,12 @@ class TestKarmaEngines:
         avg = sum(values) / len(values)
         assert avg < 55
 
-    def test_stable_mode_lower_variance(self):
+    def test_stable_mode_lower_variance(self, manager):
         import random
         random.seed(42)
-        from module.roll.karma_manager import KarmaDiceManager, KarmaConfig
-        from core.bot import Bot
+        from module.roll.karma_manager import KarmaConfig
         import statistics
 
-        bot = Bot("test_karma_stable")
-        manager = KarmaDiceManager(bot)
         cfg_standard = KarmaConfig(is_enabled=True, mode="custom")
         cfg_stable = KarmaConfig(is_enabled=True, mode="stable")
         manager.set_runtime("g1", cfg_standard)

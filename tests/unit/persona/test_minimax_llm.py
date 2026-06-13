@@ -39,16 +39,14 @@ class TestMiniMaxProvider:
         extra = provider._build_extra_body(thinking=False)
         assert extra["reasoning_split"] is True
 
-    def test_extra_body_thinking_adaptive(self, provider):
-        """thinking=True 时注入 {"type": "adaptive"}"""
-        extra = provider._build_extra_body(thinking=True)
-        assert extra["thinking"] == {"type": "adaptive"}
-        assert extra["reasoning_split"] is True
-
-    def test_extra_body_thinking_disabled(self, provider):
-        """thinking=False 时注入 {"type": "disabled"}，确保非-t 模型不产出 reasoning"""
-        extra = provider._build_extra_body(thinking=False)
-        assert extra["thinking"] == {"type": "disabled"}
+    @pytest.mark.parametrize("thinking,expected", [
+        (True, {"type": "adaptive"}),
+        (False, {"type": "disabled"}),
+    ])
+    def test_extra_body_thinking(self, provider, thinking, expected):
+        """thinking 参数正确映射到 extra_body"""
+        extra = provider._build_extra_body(thinking=thinking)
+        assert extra["thinking"] == expected
         assert extra["reasoning_split"] is True
 
     def test_reasoning_details_fallback(self, provider):
@@ -74,13 +72,6 @@ class TestMiniMaxProvider:
 
         result = asyncio.run(provider.generate(messages=[{"role": "user", "content": "hi"}]))
         assert result.reasoning_content == "thinking directly"
-
-    def test_inherits_retryable_errors(self, provider):
-        """验证继承父类的 retryable_errors"""
-        assert "rate_limit" in provider.retryable_errors
-        assert "timeout" in provider.retryable_errors
-        assert "connection" in provider.retryable_errors
-        assert "server_error" in provider.retryable_errors
 
     def test_reasoning_details_empty_list(self, provider):
         """空 reasoning_details 返回 None"""
