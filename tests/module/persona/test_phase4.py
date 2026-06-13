@@ -5,7 +5,7 @@ Phase 4: Persona 用户配置保存与读取
 """
 import os
 import pytest
-from datetime import datetime
+from plugins.DicePP.utils.time import wall_now
 
 from plugins.DicePP.module.persona.data.models import UserLLMConfig
 
@@ -53,7 +53,7 @@ class TestUserConfigSaveGet:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             ("u1", "garbage_encrypted_data", "", "gpt-4o",
-             None, "", "", datetime.now().isoformat()),
+             None, "", "", wall_now().isoformat()),
         )
         await temp_db._core_db.commit()
 
