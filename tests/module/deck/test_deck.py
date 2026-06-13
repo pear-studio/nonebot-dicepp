@@ -31,6 +31,185 @@ class TestDeckItem:
             item = DeckItem("测试", final_type=ft)
             assert item.final_type == ft
 
+    # ── DeckItem.get_result ROLL handler (Q32) ─────────────────────────────────
+
+    def test_get_result_roll_valid_expression(self):
+        """ROLL() with valid dice expression should evaluate and return result."""
+        from unittest.mock import patch, MagicMock
+        item = DeckItem("ROLL(1D20)")
+        loc = _make_loc_helper()
+        source_deck = Deck("测试牌库", "/tmp")
+
+        with patch('module.deck.deck_command.exec_roll_exp_unified') as mock_roll:
+            mock_result = MagicMock()
+            mock_result.get_complete_result.return_value = "1D20=15"
+            mock_roll.return_value = mock_result
+            result = item.get_result(source_deck, [], loc)
+
+        assert "1D20=15" in result
+
+    def test_get_result_roll_invalid_expression_ignore(self):
+        """ROLL() with invalid expression and ignore=True returns original text."""
+        item = DeckItem("ROLL(abc)")
+        loc = _make_loc_helper()
+        source_deck = Deck("测试牌库", "/tmp")
+
+        result = item.get_result(source_deck, [], loc, ignore=True)
+
+        assert "abc" in result or result == "abc"
+
+    def test_get_result_roll_invalid_expression_raises(self):
+        """ROLL() with invalid expression and ignore=False raises ValueError."""
+        item = DeckItem("ROLL(abc)")
+        loc = _make_loc_helper()
+        source_deck = Deck("测试牌库", "/tmp")
+
+        with pytest.raises(ValueError):
+            item.get_result(source_deck, [], loc, ignore=False)
+
+    # ── DeckItem.get_result IMG handler (Q34) ─────────────────────────────────
+
+    def test_get_result_img_fallback(self):
+        """IMG() with non-existing file should return the key as fallback."""
+        from unittest.mock import patch
+        item = DeckItem("IMG(test.png)")
+        loc = _make_loc_helper()
+        source_deck = Deck("测试牌库", "/tmp")
+
+        with patch('pathlib.Path.exists', return_value=False):
+            result = item.get_result(source_deck, [], loc)
+
+        assert result == "test.png"
+
+    def test_get_result_img_relative_path_fallback(self):
+        """IMG() with relative subpath and non-existing file returns key."""
+        from unittest.mock import patch
+        item = DeckItem("IMG(subdir/img.jpg)")
+        loc = _make_loc_helper()
+        source_deck = Deck("测试牌库", "/tmp")
+
+        with patch('pathlib.Path.exists', return_value=False):
+            result = item.get_result(source_deck, [], loc)
+
+        assert result == "subdir/img.jpg"
+
+    # ── DeckItem.get_result DRAW handler (Q33) ─────────────────────────────────
+
+    def test_get_result_draw_valid_simple_count(self):
+        """DRAW() with simple integer count draws from target deck."""
+        import random
+        from unittest.mock import patch
+
+        item = DeckItem("DRAW(目标牌库, 1)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+        target_deck = Deck("目标牌库", "/tmp")
+        target_deck.add_item(DeckItem("CardA"))
+
+        with patch.object(random, "randint", return_value=1):
+            result = item.get_result(source_deck, [target_deck], loc)
+
+        assert "CardA" in result
+
+    def test_get_result_draw_invalid_expression_ignore(self):
+        """DRAW() with invalid expression and ignore=True returns fallback."""
+        item = DeckItem("DRAW(t, abc)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+
+        result = item.get_result(source_deck, [], loc, ignore=True)
+
+        assert result == "t*ABC"
+
+    def test_get_result_draw_invalid_expression_raises(self):
+        """DRAW() with invalid expression and ignore=False raises ValueError."""
+        item = DeckItem("DRAW(t, abc)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+
+        with pytest.raises(ValueError, match="invalid roll expression"):
+            item.get_result(source_deck, [], loc, ignore=False)
+
+    def test_get_result_draw_deck_not_found_ignore(self):
+        """DRAW() referencing non-existent deck with ignore=True returns fallback."""
+        item = DeckItem("DRAW(缺失牌库, 2)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+
+        result = item.get_result(source_deck, [], loc, ignore=True)
+
+        assert result == "缺失牌库*2"
+
+    def test_get_result_draw_deck_not_found_raises(self):
+        """DRAW() referencing non-existent deck with ignore=False raises ValueError."""
+        item = DeckItem("DRAW(缺失牌库, 2)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+
+        with pytest.raises(ValueError, match="invalid deck"):
+            item.get_result(source_deck, [], loc, ignore=False)
+
+    def test_get_result_draw_times_zero_ignore(self):
+        """DRAW() with draw_times=0 and ignore=True returns fallback."""
+        item = DeckItem("DRAW(t, 0)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+
+        result = item.get_result(source_deck, [], loc, ignore=True)
+
+        assert result == "t*0"
+
+    def test_get_result_draw_times_zero_raises(self):
+        """DRAW() with draw_times=0 and ignore=False raises ValueError."""
+        item = DeckItem("DRAW(t, 0)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+
+        with pytest.raises(ValueError, match="invalid value"):
+            item.get_result(source_deck, [], loc, ignore=False)
+
+    def test_get_result_draw_times_exceed_limit_ignore(self):
+        """DRAW() with draw_times>HLDL_DRAW_LIMIT and ignore=True returns fallback."""
+        item = DeckItem("DRAW(t, 99)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+
+        result = item.get_result(source_deck, [], loc, ignore=True)
+
+        assert result == "t*99"
+
+    def test_get_result_draw_times_exceed_limit_raises(self):
+        """DRAW() with draw_times>HLDL_DRAW_LIMIT and ignore=False raises ValueError."""
+        item = DeckItem("DRAW(t, 99)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+
+        with pytest.raises(ValueError, match="invalid value"):
+            item.get_result(source_deck, [], loc, ignore=False)
+
+    def test_get_result_draw_dice_expression_count(self):
+        """DRAW() with dice expression as count evaluates and draws correctly."""
+        import random
+        from unittest.mock import patch, MagicMock
+
+        item = DeckItem("DRAW(目标牌库, 1D4)")
+        loc = _make_loc_helper()
+        source_deck = Deck("来源", "/tmp")
+        target_deck = Deck("目标牌库", "/tmp")
+        target_deck.add_item(DeckItem("CardX"))
+
+        mock_result = MagicMock()
+        mock_result.get_val.return_value = 3
+        mock_result.get_complete_result.return_value = "1D4=3"
+
+        with (
+            patch("module.deck.deck_command.exec_roll_exp_unified", return_value=mock_result),
+            patch.object(random, "randint", return_value=1),
+        ):
+            result = item.get_result(source_deck, [target_deck], loc)
+
+        assert "CardX" in result
+
 
 # ────────────────────── ForceFinal ──────────────────────
 
@@ -128,6 +307,26 @@ class TestDeckDraw:
         with patch.object(random, "randint", return_value=1):
             result = deck.draw(2, [deck], loc)
         assert "提前结束内层" in result
+
+    def test_draw_exhausted_multi_items(self):
+        """所有条目不放回时抽完应触发空牌库提示."""
+        deck = Deck("空牌库测试", "/tmp")
+        deck.add_item(DeckItem("A", redraw=False))
+        deck.add_item(DeckItem("B", redraw=False))
+        loc = _make_loc_helper()
+        result = deck.draw(3, [deck], loc)
+        assert "A" in result
+        assert "B" in result
+        from module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
+        loc.format_loc_text.assert_any_call(LOC_DRAW_ERR_EMPTY_DECK)
+
+    def test_draw_empty_deck_no_items(self):
+        """空牌库直接抽立即返回空牌库提示."""
+        deck = Deck("空牌库", "/tmp")
+        loc = _make_loc_helper()
+        result = deck.draw(1, [deck], loc)
+        from module.deck.deck_command import LOC_DRAW_ERR_EMPTY_DECK
+        loc.format_loc_text.assert_any_call(LOC_DRAW_ERR_EMPTY_DECK)
 
     def test_weighted_draw_respects_weight(self):
         """固定 random.randint 返回值，验证权重抽卡逻辑"""

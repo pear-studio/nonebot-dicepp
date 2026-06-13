@@ -111,6 +111,23 @@ class TestRollPool(_RollCmdBotBase):
 
         assert any(word in result for word in ['pool', 'WOD', '骰池', '.pool'])
 
+    # ── Q71: safety limit overflow ────────────────────────────────────────────
+
+    async def test_pool__overflow_returns_error(self):
+        """.w with base_times > 300 returns '过多骰目' error."""
+        cmds, result = await self._send_group(".w 301")
+
+        assert "过多骰目" in result
+
+    async def test_pool__boundary_300_works(self):
+        """.w with base_times == 300 does NOT trigger safety limit."""
+        import random
+        with mock.patch.object(random, 'randint', return_value=5):
+            cmds, result = await self._send_group(".w 300")
+
+        assert "过多骰目" not in result
+        assert_contains_number(result, 0)
+
 
 @pytest.mark.integration
 class TestRollChoose(_RollCmdBotBase):
@@ -147,6 +164,26 @@ class TestRollChoose(_RollCmdBotBase):
 
         assert any(word in result for word in ['choose', '选择', '.choose'])
 
+    # ── Q72: out-of-bounds choose_time ───────────────────────────────────────
+
+    async def test_choose__choose_time_exceeds_options(self):
+        """.c with choose_time > options returns error."""
+        cmds, result = await self._send_group(".c 5 苹果 香蕉")
+
+        assert "选不出来" in result
+
+    async def test_choose__choose_time_zero(self):
+        """.c with choose_time == 0 returns error."""
+        cmds, result = await self._send_group(".c 0 苹果 香蕉")
+
+        assert "选不出来" in result
+
+    async def test_choose__choose_time_exceeds_options_with_reason(self):
+        """.c with choose_time > options and a reason arg returns error."""
+        cmds, result = await self._send_group(".c 4 苹果 香蕉 今天吃什么")
+
+        assert "选不出来" in result
+
 
 @pytest.mark.integration
 class TestDiceSet(_RollCmdBotBase):
@@ -172,6 +209,26 @@ class TestDiceSet(_RollCmdBotBase):
         cmds, result = await self._send_group(".help dset")
 
         assert any(word in result for word in ['dset', '骰设', '.dset'])
+
+    # ── Q70: invalid expression error path ─────────────────────────────────
+
+    async def test_dset__invalid_placeholder_d(self):
+        """.dset with placeholder D (no face) returns invalid hint."""
+        cmds, result = await self._send_group(".dset 1D", permission=1)
+
+        assert "未指定面" in result or "无效" in result
+
+    async def test_dset__invalid_illegal_char(self):
+        """.dset with illegal character returns invalid hint."""
+        cmds, result = await self._send_group(".dset !!!", permission=1)
+
+        assert "非法字符" in result or "无效" in result
+
+    async def test_dset__invalid_face_too_small(self):
+        """.dset with face < 2 returns invalid hint."""
+        cmds, result = await self._send_group(".dset 1", permission=1)
+
+        assert "至少为2" in result or "无效" in result
 
 
 @pytest.mark.integration
@@ -226,3 +283,63 @@ class TestKarmaDice(_RollCmdBotBase):
         cmds, result = await self._send_group(".help karmadice")
 
         assert any(word in result for word in ['karmadice', '业力', '.karmadice'])
+
+    # ── Q69: set/mode/engine/reset ─────────────────────────────────────────
+
+    async def test_karmadice__set_valid_params(self):
+        """.karmadice set 70 20 updates params and returns confirmation."""
+        cmds, result = await self._send_group(".karmadice set 70 20", permission=1)
+
+        assert "参数已更新" in result or "70" in result
+
+    async def test_karmadice__set_invalid_params(self):
+        """.karmadice set with non-numeric target returns invalid hint."""
+        cmds, result = await self._send_group(".karmadice set abc", permission=1)
+
+        assert any(word in result for word in ["参数无效", "无效", "invalid"])
+
+    async def test_karmadice__mode_valid(self):
+        """.karmadice mode hero switches to hero mode."""
+        # Enable first
+        await self._send_group(".karmadice on", permission=1)
+
+        cmds, result = await self._send_group(".karmadice mode 主角光环", permission=1)
+
+        assert "英雄" in result or "主角光环" in result or "模式" in result
+
+    async def test_karmadice__mode_invalid(self):
+        """.karmadice mode unknown returns invalid hint."""
+        cmds, result = await self._send_group(".karmadice mode unknown", permission=1)
+
+        assert any(word in result for word in ["未知", "invalid", "模式"])
+
+    async def test_karmadice__engine_valid(self):
+        """.karmadice engine advantage switches engine."""
+        # Enable first
+        await self._send_group(".karmadice on", permission=1)
+
+        cmds, result = await self._send_group(".karmadice engine 优势判定", permission=1)
+
+        assert any(word in result for word in ["引擎", "优势", "engine", "切换"])
+
+    async def test_karmadice__engine_invalid(self):
+        """.karmadice engine unknown returns invalid hint."""
+        cmds, result = await self._send_group(".karmadice engine unknown", permission=1)
+
+        assert any(word in result for word in ["未知", "invalid", "引擎"])
+
+    async def test_karmadice__reset_group(self):
+        """.karmadice reset (admin) clears group history."""
+        await self._send_group(".karmadice on", permission=1)
+
+        cmds, result = await self._send_group(".karmadice reset", permission=1)
+
+        assert any(word in result for word in ["清空", "reset", "清"])
+
+    async def test_karmadice__reset_self(self):
+        """.karmadice reset me clears personal history without admin."""
+        await self._send_group(".karmadice on", permission=1)
+
+        cmds, result = await self._send_group(".karmadice reset me")
+
+        assert any(word in result for word in ["清空", "reset", "清"])

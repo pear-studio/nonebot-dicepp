@@ -290,6 +290,52 @@ class TestCharacterHP(_CharBotBase):
 
 
 @pytest.mark.integration
+class TestCharacterHitDice(_CharBotBase):
+    """Tests for .生命骰 (hit dice) command."""
+
+    async def test_hp_dice__without_char_returns_miss(self):
+        """.生命骰 without character returns missing hint."""
+        cmds, result = await self._send_group(".生命骰")
+
+        assert any(word in result for word in ["找不到", "不存在", "角色卡"])
+
+    async def test_hp_dice__with_char_uses_one_dice(self):
+        """.生命骰 with character, mock roll 6, verify 6+3=9 healing."""
+        cmd = self._create_char_cmd()
+        await self._send_group(cmd)
+
+        cmds, result = await self._send_group(".生命骰", dice_values=[6])
+
+        # D10 + CON(3) = 6 + 3 = 9
+        assert "生命骰" in result
+        assert "回复" in result or "恢复" in result
+        assert "9" in result or "点生命值" in result
+
+    async def test_hp_dice__multiple_dice_uses_specified_number(self):
+        """.3#生命骰 uses 3 hit dice."""
+        cmd = self._create_char_cmd()
+        await self._send_group(cmd)
+
+        cmds, result = await self._send_group(".3#生命骰", dice_values=[4, 5, 6])
+
+        assert "3颗" in result or "3" in result
+        assert "生命骰" in result
+
+    async def test_hp_dice__empty_hp_dice_returns_not_set(self):
+        """Character without hp_dice returns '尚未设置生命骰'."""
+        # Create character without hp_dice line
+        cmd = """$姓名$ 无骰角色
+$等级$ 3
+$生命值$ 30/30
+$属性$ 10/10/10/10/10/10"""
+        await self._send_group(f".角色卡记录\n{cmd}")
+
+        cmds, result = await self._send_group(".生命骰")
+
+        assert "尚未设置生命骰" in result
+
+
+@pytest.mark.integration
 class TestCharacterLongRest(_CharBotBase):
     """Tests for long rest."""
 

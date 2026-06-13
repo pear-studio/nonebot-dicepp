@@ -3,6 +3,47 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
+# ── Q55: = 精确匹配前缀 ─────────────────────────────────────────────────────
+
+@pytest.mark.unit
+class TestGenerateSearchSqlRegexp:
+    """_generate_search_sql_regexp 精确匹配 = 前缀测试"""
+
+    def test_equal_prefix_generates_exact_match(self):
+        """=前缀应生成 ^xxx$ 精确匹配模式"""
+        from core.data.query_store import QueryStore
+        sql, params = QueryStore._generate_search_sql_regexp(["=火球术"])
+        assert sql == "名称 regexp ?"
+        assert params == ["^火球术$"]
+
+    def test_equal_prefix_with_regex_chars(self):
+        """=前缀应转义正则特殊字符"""
+        from core.data.query_store import QueryStore
+        sql, params = QueryStore._generate_search_sql_regexp(["=(力量)"])
+        assert params == ["^\\(力量\\)$"]
+
+    def test_equal_prefix_ignores_prefix_only(self):
+        """单独的 = 不应触发 exact match 逻辑"""
+        from core.data.query_store import QueryStore
+        sql, params = QueryStore._generate_search_sql_regexp(["="])
+        # len("=") == 1, 所以走普通文本路径，不生成 ^$ 包裹
+        assert params == ["="]
+
+    # ── Q56 辅助：OR 分隔在 regex 层面 ───────────────────────────────────
+
+    def test_multiple_commands_generate_or_pattern(self):
+        """多个关键词应生成 | 连接的 OR 正则"""
+        from core.data.query_store import QueryStore
+        sql, params = QueryStore._generate_search_sql_regexp(["火球术", "寒冰锥"])
+        assert params == ["火球术|寒冰锥"]
+
+    def test_combined_equal_and_normal_pattern(self):
+        """混合 =精确匹配与普通关键词"""
+        from core.data.query_store import QueryStore
+        sql, params = QueryStore._generate_search_sql_regexp(["=火球术", "寒冰锥"])
+        assert params == ["^火球术$|寒冰锥"]
+
+
 @pytest.mark.asyncio
 async def test_search_basic_keyword(fresh_bot, query_db):
     """QueryStore.search() — 基本关键词搜索"""
@@ -307,3 +348,135 @@ async def test_search_empty_databases(fresh_bot):
         query_tokens=["火球术"],
     )
     assert result == {"results": [], "total": 0}
+
+
+# ── Q56: / OR 分隔符 ───────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_search_or_separator_returns_both(fresh_bot, query_db):
+    """/ 分隔的两个关键词应命中各自匹配的条目"""
+    bot, _proxy = fresh_bot
+    db_name = await query_db("ORTEST")
+
+    await bot.db.query.execute(
+        db_name,
+        "INSERT INTO data VALUES(?,?,?,?,?,?)",
+        ("火球术", "Fireball", "PHB", "法术", "塑能", "火球术内容"),
+        commit=True,
+    )
+    await bot.db.query.execute(
+        db_name,
+        "INSERT INTO data VALUES(?,?,?,?,?,?)",
+        ("寒冰锥", "Ice", "PHB", "法术", "塑能", "寒冰锥内容"),
+        commit=True,
+    )
+
+    result = await bot.db.query.search(
+        databases=[db_name],
+        query_tokens=["火球术/寒冰锥"],
+    )
+    assert len(result["results"]) == 2
+    names = {r["name"] for r in result["results"]}
+    assert "火球术" in names
+    assert "寒冰锥" in names
+
+
+@pytest.mark.asyncio
+async def test_search_or_separator_single_matches_one(fresh_bot, query_db):
+    """/ 分隔后只命中一个关键词时仍返回正确"""
+    bot, _proxy = fresh_bot
+    db_name = await query_db("ORSINGLE")
+
+    await bot.db.query.execute(
+        db_name,
+        "INSERT INTO data VALUES(?,?,?,?,?,?)",
+        ("火球术", "Fireball", "PHB", "法术", "塑能", "内容"),
+        commit=True,
+    )
+    await bot.db.query.execute(
+        db_name,
+        "INSERT INTO data VALUES(?,?,?,?,?,?)",
+        ("长剑", "Longsword", "PHB", "武器", "军用", "内容"),
+        commit=True,
+    )
+
+    # 火球术/不存在 → 应只命中火球术
+    result = await bot.db.query.search(
+        databases=[db_name],
+        query_tokens=["火球术/不存在"],
+    )
+    assert len(result["results"]) == 1
+    assert result["results"][0]["name"] == "火球术"
+
+
+# ── Q57: limit/offset 分页 ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_search_limit_offset_first_page(fresh_bot, query_db):
+    """limit=2, offset=0 应返回前 2 条"""
+    bot, _proxy = fresh_bot
+    db_name = await query_db("PAGE1")
+
+    for i in range(5):
+        await bot.db.query.execute(
+            db_name,
+            "INSERT INTO data VALUES(?,?,?,?,?,?)",
+            (f"条目{i}", f"Entry{i}", "PHB", "法术", "通用", f"内容{i}"),
+            commit=True,
+        )
+
+    result = await bot.db.query.search(
+        databases=[db_name],
+        query_tokens=["条目"],
+        limit=2,
+        offset=0,
+    )
+    assert len(result["results"]) == 2
+    assert result["total"] == 5
+
+
+@pytest.mark.asyncio
+async def test_search_limit_offset_second_page(fresh_bot, query_db):
+    """limit=2, offset=2 应返回第 3-4 条"""
+    bot, _proxy = fresh_bot
+    db_name = await query_db("PAGE2")
+
+    for i in range(5):
+        await bot.db.query.execute(
+            db_name,
+            "INSERT INTO data VALUES(?,?,?,?,?,?)",
+            (f"条目{i}", f"Entry{i}", "PHB", "法术", "通用", f"内容{i}"),
+            commit=True,
+        )
+
+    result = await bot.db.query.search(
+        databases=[db_name],
+        query_tokens=["条目"],
+        limit=2,
+        offset=2,
+    )
+    assert len(result["results"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_limit_offset_beyond_total(fresh_bot, query_db):
+    """offset 超出总数应返回空列表"""
+    bot, _proxy = fresh_bot
+    db_name = await query_db("PAGE3")
+
+    for i in range(3):
+        await bot.db.query.execute(
+            db_name,
+            "INSERT INTO data VALUES(?,?,?,?,?,?)",
+            (f"条目{i}", f"Entry{i}", "PHB", "法术", "通用", f"内容{i}"),
+            commit=True,
+        )
+
+    result = await bot.db.query.search(
+        databases=[db_name],
+        query_tokens=["条目"],
+        limit=5,
+        offset=10,
+    )
+    assert len(result["results"]) == 0
+    assert result["total"] == 3

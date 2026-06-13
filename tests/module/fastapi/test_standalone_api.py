@@ -10,11 +10,19 @@ pytestmark = pytest.mark.unit
 
 
 class _FakeHubManager:
-    def __init__(self, registered: bool = False):
+    def __init__(self, registered: bool = False, heartbeat_ok: bool = True,
+                 heartbeat_exc: bool = False):
         self._registered = registered
+        self._heartbeat_ok = heartbeat_ok
+        self._heartbeat_exc = heartbeat_exc
 
     def is_registered(self) -> bool:
         return self._registered
+
+    async def heartbeat(self) -> bool:
+        if self._heartbeat_exc:
+            raise RuntimeError("heartbeat failed")
+        return self._heartbeat_ok
 
 
 class _FakeProxy:
@@ -28,8 +36,12 @@ class _FakeProxy:
 
 
 class _FakeBot:
-    def __init__(self, proxy: _FakeProxy, raise_exc: bool = False, delay: float = 0.0):
-        self.hub_manager = _FakeHubManager()
+    def __init__(self, proxy: _FakeProxy, raise_exc: bool = False, delay: float = 0.0,
+                 hub_registered: bool = False, heartbeat_ok: bool = True,
+                 heartbeat_exc: bool = False):
+        self.hub_manager = _FakeHubManager(registered=hub_registered,
+                                           heartbeat_ok=heartbeat_ok,
+                                           heartbeat_exc=heartbeat_exc)
         self._proxy = proxy
         self._raise_exc = raise_exc
         self._delay = delay
@@ -91,4 +103,49 @@ async def test_command_outputs_are_isolated_under_concurrency():
     msgs = [tuple(r1["messages"]), tuple(r2["messages"])]
     assert ("reply:.help",) in msgs
     assert ("reply:.bot",) in msgs
+
+
+def test_heartbeat_returns_422_when_not_registered():
+    """未注册时 POST /heartbeat 返回 422"""
+    proxy = _FakeProxy()
+    bind_runtime(_FakeBot(proxy, hub_registered=False), proxy)
+    client = TestClient(dpp_api)
+    resp = client.post("/heartbeat")
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["detail"]["code"] == "hub_not_registered"
+
+
+def test_heartbeat_returns_200_when_registered():
+    """已注册时 POST /heartbeat 返回 200"""
+    proxy = _FakeProxy()
+    bind_runtime(_FakeBot(proxy, hub_registered=True, heartbeat_ok=True), proxy)
+    client = TestClient(dpp_api)
+    resp = client.post("/heartbeat")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+
+
+def test_heartbeat_returns_422_when_rejected():
+    """心跳被拒绝时返回 422"""
+    proxy = _FakeProxy()
+    bind_runtime(_FakeBot(proxy, hub_registered=True, heartbeat_ok=False), proxy)
+    client = TestClient(dpp_api)
+    resp = client.post("/heartbeat")
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["detail"]["code"] == "heartbeat_rejected"
+
+
+def test_heartbeat_returns_500_on_exception():
+    """心跳抛出异常时返回 500"""
+    proxy = _FakeProxy()
+    bind_runtime(_FakeBot(proxy, hub_registered=True, heartbeat_ok=True,
+                          heartbeat_exc=True), proxy)
+    client = TestClient(dpp_api)
+    resp = client.post("/heartbeat")
+    assert resp.status_code == 500
+    body = resp.json()
+    assert body["detail"]["code"] == "heartbeat_error"
 

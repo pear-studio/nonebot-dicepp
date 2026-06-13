@@ -309,3 +309,44 @@ class TestBuildRollResult:
         """1D20+5 的 info 应为 '[10]+5'（常量不加方括号）。"""
         res = self._run("1D20+5", roller=lambda _: 10)
         assert res.info == "[10]+5"
+
+
+# ── Q66: build_roll_result empty eval_result ────────────────────────────────
+
+@pytest.mark.unit
+class TestBuildRollResultEmptyEval:
+    """验证 build_roll_result 在 eval_result 为空时的回退行为。"""
+
+    def test_eval_result_none_fallback_to_value(self):
+        """_eval_result 为 None 时 val_list 应回退为 [ast_result.value]。"""
+        from module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
+
+        ast_result = RollExpressionResult(value=42, expression="42", info="42", exp="42")
+        result = build_roll_result(ast_result)
+        assert result.val_list == [42]
+        assert result.info == "42"
+        assert result.float_state is False
+
+    def test_eval_result_empty_dice_results_fallback(self):
+        """_eval_result.dice_results 为空时 val_list 应回退为 [ast_result.value]。"""
+        from unittest.mock import MagicMock
+        from module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
+
+        mock_eval = MagicMock()
+        mock_eval.dice_results = []
+
+        ast_result = RollExpressionResult(
+            value=99, expression="99", info="99", exp="99",
+            _eval_result=mock_eval,
+        )
+        result = build_roll_result(ast_result)
+        assert result.val_list == [99]
+
+    def test_eval_result_none_float_value(self):
+        """_eval_result 为 None 时 float_state 应正确。"""
+        from module.roll.ast_engine.adapter import build_roll_result, RollExpressionResult
+
+        ast_result = RollExpressionResult(value=3.14, expression="3.14", info="3.14", exp="3.14")
+        result = build_roll_result(ast_result)
+        assert result.val_list == [3.14]
+        assert result.float_state is True

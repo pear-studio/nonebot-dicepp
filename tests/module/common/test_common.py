@@ -100,6 +100,13 @@ class TestNicknameCommandIntegration(_BotTestBase):
         result = "\n".join([str(c) for c in cmds])
         self.assertIn("已将您的昵称从临时昵称", result, "重置昵称应返回原昵称")
 
+    async def test_reset_nickname_when_not_set_returns_fail_message(self):
+        """验证未设置昵称时 .nn 重置走 LOC_NICKNAME_RESET_FAIL 分支"""
+        cmds = await self._send_group(".nn")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertIn("未设置过昵称", result,
+                      f"未设置昵称时重置应返回 LOC_NICKNAME_RESET_FAIL，实际输出：{result}")
+
 
 @pytest.mark.integration
 class TestHelpCommandIntegration(_BotTestBase):
@@ -129,6 +136,13 @@ class TestHelpCommandIntegration(_BotTestBase):
         result = "\n".join([str(c) for c in cmds])
         # 返回的帮助文本应包含 nn 相关内容
         self.assertIn("nn", result.lower(), ".help nn 应返回 nn 的帮助文本")
+
+    async def test_help_with_unknown_keyword_returns_not_found(self):
+        """验证未知关键字触发 get_help 全量遍历后返回 not found"""
+        cmds = await self._send_group(".help nonexistent_keyword_xyz")
+        result = "\n".join([str(c) for c in cmds])
+        self.assertIn("cannot find help info for", result.lower(),
+                      f"未知查询词应返回未找到提示，实际输出：{result}")
 
 
 @pytest.mark.integration
