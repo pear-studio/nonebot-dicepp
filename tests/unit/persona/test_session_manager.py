@@ -169,8 +169,8 @@ class TestCompactSession:
         assert text is None
 
     @pytest.mark.asyncio
-    async def test_few_messages_deletes_session(self, mgr, store):
-        """不足 6 条消息 → 直接删除 session"""
+    async def test_few_messages_skips_compression(self, mgr, store):
+        """不足 MIN_COMPRESS_MSGS 条消息 → 跳过压缩，不删除 session"""
         session = _make_session(session_id=1)
         store.get_session_by_id.return_value = session
         store.get_session_messages.return_value = [
@@ -182,7 +182,7 @@ class TestCompactSession:
 
         assert ok is False
         assert text is None
-        store.delete_session.assert_called_once_with(1)
+        store.delete_session.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_no_router_hard_truncation(self, mgr, store):

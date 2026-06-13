@@ -7,6 +7,7 @@ from utils.string import estimate_tokens
 
 
 KEEP_RECENT = 10
+MIN_COMPRESS_MSGS = 6  # 最少消息数（3 轮），不足时跳过压缩，等消息自然积累
 
 
 def _get_msg_attr(msg, attr: str, default=""):

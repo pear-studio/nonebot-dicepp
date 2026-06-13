@@ -226,7 +226,7 @@ class SessionManager:
         from ..data.models import PersonaSessionMessage
         from .compression import (
             ensure_tool_pairs, estimate_session_tokens, KEEP_RECENT,
-            _get_msg_attr,
+            MIN_COMPRESS_MSGS, _get_msg_attr,
         )
 
         t0 = time.monotonic()
@@ -241,13 +241,11 @@ class SessionManager:
             all_msgs = await self._store.get_session_messages(session_id)
             msg_count = len(all_msgs)
 
-            # 不足 3 轮（6 条）→ 直接删除
-            if msg_count < 6:
-                await self._store.delete_session(session_id)
-                self._clear_tracker(session.user_id)
+            # 不足 MIN_COMPRESS_MSGS 条 → 暂不压缩，等消息自然积累
+            if msg_count < MIN_COMPRESS_MSGS:
                 logger.info(
                     "[SessionCompress] session_id=%d user_id=%s "
-                    "reason=%s action=skip_delete msg_count=%d",
+                    "reason=%s action=skip_low_count msg_count=%d",
                     session_id, session.user_id, reason, msg_count,
                 )
                 return (False, None)
