@@ -275,5 +275,42 @@ class TestRelationLevel:
         assert DEFAULT_RELATION_LABELS == ["冷淡", "疏远", "友好", "默契", "亲密"]
 
 
+class TestCharacterState:
+    """测试 CharacterState 模型 -- extra='ignore' 配置"""
+
+    def test_extra_ignore(self):
+        """CharacterState 接受额外字段时不报错"""
+        from plugins.DicePP.module.persona.data.models import CharacterState
+
+        state = CharacterState(
+            text="状态文本",
+            energy=80,
+            unknown_field="should be ignored",
+            legacy_extra={"old_key": "old_value"},
+        )
+        assert state.text == "状态文本"
+        assert state.energy == 80
+
+    def test_default_values(self):
+        """默认值验证"""
+        from plugins.DicePP.module.persona.data.models import CharacterState
+
+        state = CharacterState()
+        assert state.text == ""
+        assert state.energy is None
+        assert state.mood is None
+        assert state.health is None
+        assert state.current_intention is None
+
+    def test_extra_ignore_does_not_store_unknown(self):
+        """extra 字段不会出现在 model_dump 中"""
+        from plugins.DicePP.module.persona.data.models import CharacterState
+
+        state = CharacterState(text="hello", extra_field="ignored")
+        dumped = state.model_dump()
+        assert "extra_field" not in dumped
+        assert dumped["text"] == "hello"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -48,3 +48,21 @@ async def test_single_flight_does_not_stack_tasks(method, task_attr, app_attr):
     release.set()
     await asyncio.wait_for(first, timeout=2.0)
     assert first.done()
+
+
+@pytest.mark.parametrize("method", ["tick", "tick_daily"])
+def test_disabled_returns_empty_list(method):
+    """disabled 时 tick/tick_daily 返回 []"""
+    cmd = _make_cmd()
+    cmd.enabled = False
+    result = getattr(cmd, method)()
+    assert result == []
+
+
+@pytest.mark.parametrize("method", ["tick", "tick_daily"])
+def test_no_app_returns_empty_list(method):
+    """app 为 None 时 tick/tick_daily 返回 []"""
+    cmd = _make_cmd()
+    cmd.app = None
+    result = getattr(cmd, method)()
+    assert result == []

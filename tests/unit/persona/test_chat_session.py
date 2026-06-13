@@ -1099,3 +1099,76 @@ class TestCrossCallStateIsolation:
             assert r3 == "reply_u1_b"
 
             # 去重 key 按 user_id:group_id 隔离，不同用户不互相影响
+
+
+# ── is_command=True 门控跳过 ──────────────────────────────────────────────
+
+
+class TestIsCommandGateBypass:
+    """is_command=True 时跳过睡眠门控、冷淡拒绝门控和评分"""
+
+    @pytest.mark.asyncio
+    async def test_is_command_bypasses_sleep_gate(self, mock_agent_runtime):
+        """is_command=True + 睡眠门控阻塞 → 仍正常回复"""
+        session = _make_session()
+        sleep_gate = MagicMock()
+        sleep_gate.is_awake = AsyncMock(return_value=False)
+        session._sleep_gate = sleep_gate
+        session.character.extensions.sleep_messages = ["角色正在休息..."]
+
+        result = await session.chat("u1", "", ".jrrp", is_command=True)
+        # 不被睡眠门控拦截，走 LLM 路径
+        assert result == "reply"
+
+    @pytest.mark.asyncio
+    async def test_is_command_bypasses_refuse_gate(self, mock_agent_runtime):
+        """is_command=True + 信誉<30+拒绝启用 → 仍正常回复"""
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+
+        rel = RelationshipState(user_id="u1", reputation=0.0)
+        session = _make_session(
+            refuse_enabled=True,
+            relationship=rel,
+            refuse_messages=["...（已读不回）"],
+        )
+        session.store.get_recent_messages = AsyncMock(return_value=[
+            MagicMock(role="user", content="prev"),
+        ])
+
+        result = await session.chat("u1", "", ".jrrp", is_command=True)
+        assert result == "reply"  # 不被拒绝门控拦截
+
+    @pytest.mark.asyncio
+    async def test_is_command_skips_scoring(self, mock_agent_runtime):
+        """is_command=True → _after_response（评分）不被调用"""
+        session = _make_session()
+        # sleep_gate 睡眠状态
+        sleep_gate = MagicMock()
+        sleep_gate.is_awake = AsyncMock(return_value=False)
+        session._sleep_gate = sleep_gate
+
+        await session.chat("u1", "", ".jrrp", is_command=True)
+        # ScoringTrigger.on_interaction 不应被调用
+        session._scoring_trigger.on_interaction.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_is_command_allows_when_asleep(self, mock_agent_runtime):
+        """is_command=True + 角色睡眠 → 既是绕过睡眠门控又绕过拒绝门控"""
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+
+        rel = RelationshipState(user_id="u1", reputation=0.0)
+        session = _make_session(
+            refuse_enabled=True,
+            relationship=rel,
+            refuse_messages=["...（已读不回）"],
+        )
+        session.store.get_recent_messages = AsyncMock(return_value=[
+            MagicMock(role="user", content="prev"),
+        ])
+        sleep_gate = MagicMock()
+        sleep_gate.is_awake = AsyncMock(return_value=False)
+        session._sleep_gate = sleep_gate
+
+        result = await session.chat("u1", "", ".jrrp", is_command=True)
+        assert result == "reply"
+        session._scoring_trigger.on_interaction.assert_not_called()

@@ -179,6 +179,37 @@ class TestMaxPerRun:
         assert contents == ["0", "1", "2", "3", "4"]
 
 
+class TestDrain:
+    """SegmentDispatcher.drain — 等待 worker 处理完已入队消息。"""
+
+    @pytest.mark.asyncio
+    async def test_drain_nonexistent_target_is_safe(self, dispatcher):
+        """drain 不存在的 target_key 是安全空操作。"""
+        await dispatcher.drain("nonexistent")
+        # 没有 worker 创建
+        assert "nonexistent" not in dispatcher._workers
+
+    @pytest.mark.asyncio
+    async def test_drain_sends_all_pending(self, dispatcher, mock_port):
+        """drain 发送所有已入队的 segment（不超过 max_per_run）。"""
+        for i in range(3):
+            dispatcher.notify("group:1", SegmentItem(str(i), 0, "u1", "g1"))
+        # 让出事件循环确保 worker task 启动（断言不依赖 drain-vs-worker 的精确时序）
+        await asyncio.sleep(0.1)
+        await dispatcher.drain("group:1")
+        # 所有 3 条都应已发送
+        assert len(mock_port.send.await_args_list) == 3
+
+    @pytest.mark.asyncio
+    async def test_drain_empty_worker_is_safe(self, dispatcher, mock_port):
+        """drain 在 worker 队列已空时安全返回（worker 空闲退出）。"""
+        dispatcher.notify("group:1", SegmentItem("a", 0, "u1", "g1"))
+        await _wait_sends(mock_port, 1)
+        # 队列为空，但 worker 还存在
+        await dispatcher.drain("group:1")
+        # 不报错即可
+
+
 class TestSendFailure:
     @pytest.mark.asyncio
     async def test_failure_does_not_kill_worker(self, dispatcher, mock_port):

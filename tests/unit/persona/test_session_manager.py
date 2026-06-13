@@ -1,4 +1,5 @@
 """SessionManager 单元测试 — get_or_create / compact_session / SessionDecision"""
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone as tz, timedelta
 
@@ -142,6 +143,69 @@ class TestGetOrCreate:
         assert decision.session.session_id == 1
 
 
+class TestShutdown:
+    """SessionManager.shutdown — 取消所有后台任务并等待完成。"""
+
+    @pytest.fixture
+    def store(self):
+        s = AsyncMock()
+        s.get_active_session = AsyncMock(return_value=None)
+        s.create_session = AsyncMock()
+        s.update_session = AsyncMock()
+        s.get_session_messages = AsyncMock(return_value=[])
+        s.add_session_messages = AsyncMock()
+        s.get_session_by_id = AsyncMock()
+        s.delete_session = AsyncMock()
+        return s
+
+    @pytest.fixture
+    def mgr(self, store):
+        config = ChatConfig()
+        return SessionManager(store=store, config=config)
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_background_tasks(self, mgr):
+        """shutdown 取消所有未完成的 background task。"""
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def slow_task():
+            started.set()
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+        task = asyncio.ensure_future(slow_task())
+        mgr._bg_tasks.add(task)
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+
+        await mgr.shutdown()
+
+        assert cancelled.is_set()
+        assert task.done()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_no_tasks_is_safe(self, mgr):
+        """shutdown 在没有 background task 时安全返回。"""
+        await mgr.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_completed_tasks_skipped(self, mgr):
+        """已完成的任务不被 shutdown 取消"""
+        async def quick_task():
+            pass
+
+        task = asyncio.ensure_future(quick_task())
+        await task
+        mgr._bg_tasks.add(task)
+
+        await mgr.shutdown()
+        # task 已完成，shutdown 后不变
+        assert task.done()
+
+
 class TestCompactSession:
     """mock store + router，覆盖 LLM 成功 / 失败 / 无 router 三条路径"""
 
@@ -282,3 +346,111 @@ class TestCompactSession:
         assert tracker_after["notified_event_ids"] == {1, 2, 3}
         assert tracker_after["last_context_update_at"] == ctx_time
         assert tracker_after["last_event_notification_date"] == "2026-06-01"
+
+
+# ── Q126: SessionManager lifecycle ─────────────────────────────────────────────
+
+
+class TestSessionLifecycle:
+    """SessionManager 生命周期方法：delete_session / add_bypass_message / on_chat_complete / update_token_estimate"""
+
+    @pytest.fixture
+    def store(self):
+        s = AsyncMock()
+        s.get_active_session = AsyncMock()
+        s.create_session = AsyncMock()
+        s.update_session = AsyncMock()
+        s.delete_session = AsyncMock()
+        s.get_session_by_id = AsyncMock()
+        s.get_session_messages = AsyncMock(return_value=[])
+        s.add_session_messages = AsyncMock()
+        return s
+
+    @pytest.fixture
+    def mgr(self, store):
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+        config = ChatConfig()
+        return SessionManager(store=store, config=config)
+
+    # ── delete_session ───────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_delete_session_deletes_and_clears_tracker(self, mgr, store):
+        """delete_session 调用 store.delete_session 并清理 tracker"""
+        active = _make_session(session_id=1)
+        store.get_active_session.return_value = active
+
+        # 填充 tracker
+        mgr._trackers["u1"] = {"test": "value"}
+
+        await mgr.delete_session("u1")
+
+        store.delete_session.assert_awaited_once_with(1)
+        # tracker 应被清除
+        assert "u1" not in mgr._trackers
+
+    @pytest.mark.asyncio
+    async def test_delete_session_no_active_is_noop(self, mgr, store):
+        """无活跃 session 时 delete_session 安全返回"""
+        store.get_active_session.return_value = None
+        await mgr.delete_session("u1")
+        store.delete_session.assert_not_called()
+
+    # ── add_bypass_message ───────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_add_bypass_message_appends_to_session(self, mgr, store):
+        """add_bypass_message 向 session 追加一条 user 消息"""
+        await mgr.add_bypass_message(1, "旁路消息")
+
+        store.add_session_messages.assert_awaited_once()
+        args, _ = store.add_session_messages.await_args
+        assert args[0] == 1  # session_id
+        assert len(args[1]) == 1  # one message
+        assert args[1][0].role == "user"
+        assert args[1][0].content == "旁路消息"
+
+    # ── update_token_estimate ────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_update_token_estimate(self, mgr, store):
+        """update_token_estimate 更新 session 的 token_estimate"""
+        await mgr.update_token_estimate(1, 5000)
+        store.update_session.assert_awaited_once_with(1, token_estimate=5000)
+
+    # ── on_chat_complete ────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_on_chat_complete_appends_and_updates(self, mgr, store):
+        """on_chat_complete 追加 assistant 回复并更新 token 估算"""
+        active = _make_session(session_id=1, token_budget=64000)
+        store.get_active_session.return_value = active
+        # 模拟 get_session_messages 返回少量消息
+        store.get_session_messages.return_value = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ]
+
+        await mgr.on_chat_complete("u1", "", "assistant reply", "user msg")
+
+        # assistant 消息被追加
+        store.add_session_messages.assert_awaited_once()
+        args, _ = store.add_session_messages.await_args
+        assert args[1][0].role == "assistant"
+        assert args[1][0].content == "assistant reply"
+
+        # token_estimate 被更新（update_session 至少被调用一次，证明流程走到该步骤）
+        assert store.update_session.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_on_chat_complete_empty_response(self, mgr, store):
+        """空 response 时 on_chat_complete 安全返回，不做任何操作"""
+        await mgr.on_chat_complete("u1", "", "", "user msg")
+        store.add_session_messages.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_on_chat_complete_no_active_session(self, mgr, store):
+        """无活跃 session 时 on_chat_complete 安全返回"""
+        store.get_active_session.return_value = None
+        await mgr.on_chat_complete("u1", "", "reply", "msg")
+        store.add_session_messages.assert_not_called()

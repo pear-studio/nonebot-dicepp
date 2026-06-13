@@ -5,7 +5,7 @@ DailyReportGenerator 单元测试
 """
 import pytest
 import json
-from unittest.mock import MagicMock, AsyncMock, PropertyMock
+from unittest.mock import MagicMock, AsyncMock, PropertyMock, patch
 from datetime import datetime, timedelta
 
 from core.statistics.user_stat import UserStatInfo
@@ -151,6 +151,83 @@ class TestDailyReportGenerator:
         seg1 = mock_bot.proxy.process_bot_command.await_args_list[0].args[0].msg
         assert "机器人" in seg1
 
+    # ── Q87: LLM voice path ─────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_voice_enabled_uses_llm_opening(self):
+        """voice_enabled=True 且 LLM 返回非空时使用 LLM 开场白"""
+        bot = _make_mock_bot()
+        bot.config.persona_ai.daily_report_voice_enabled = True
+        port, mock_bot = _make_mock_port()
+        gen = DailyReportGenerator(bot=bot, port=port)
+        gen._character = MagicMock()
+        gen._character.name = "测试角色"
+        gen._character.description = "一个测试角色"
+        gen._router = MagicMock()
+
+        mock_opening = "早上好，主人！今天机器人状态良好。"
+
+        target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        with patch(target, new_callable=AsyncMock, return_value=mock_opening):
+            opening = await gen._generate_opening("昨日日记测试", {"msg": "10", "cmd": "5", "roll": "3", "top_groups": []})
+
+        assert opening == mock_opening
+
+    @pytest.mark.asyncio
+    async def test_voice_llm_exception_falls_back_to_template(self):
+        """LLM 开场白抛异常时降级为纯模板"""
+        bot = _make_mock_bot()
+        bot.config.persona_ai.daily_report_voice_enabled = True
+        port, mock_bot = _make_mock_port()
+        gen = DailyReportGenerator(bot=bot, port=port)
+        gen._character = MagicMock()
+        gen._character.name = "测试角色"
+        gen._character.description = ""
+        gen._router = MagicMock()
+
+        target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        with patch(target, new_callable=AsyncMock, side_effect=RuntimeError("LLM down")):
+            opening = await gen._generate_opening("昨日日记测试", {"msg": "10", "cmd": "5", "roll": "3", "top_groups": []})
+
+        # 降级为模板
+        assert "早上好" in opening
+
+    @pytest.mark.asyncio
+    async def test_voice_llm_returns_none_falls_back_to_template(self):
+        """LLM 开场白返回 None 时降级为纯模板"""
+        bot = _make_mock_bot()
+        bot.config.persona_ai.daily_report_voice_enabled = True
+        port, mock_bot = _make_mock_port()
+        gen = DailyReportGenerator(bot=bot, port=port)
+        gen._character = MagicMock()
+        gen._character.name = "测试角色"
+        gen._character.description = ""
+        gen._router = MagicMock()
+
+        target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        with patch(target, new_callable=AsyncMock, return_value=None):
+            opening = await gen._generate_opening("昨日日记测试", {"msg": "10", "cmd": "5", "roll": "3", "top_groups": []})
+
+        # 降级为模板
+        assert "早上好" in opening
+
+    @pytest.mark.asyncio
+    async def test_voice_disabled_uses_template_directly(self):
+        """voice_enabled=False 时即使有 router 也直接使用模板"""
+        bot = _make_mock_bot()
+        bot.config.persona_ai.daily_report_voice_enabled = False
+        port, mock_bot = _make_mock_port()
+        gen = DailyReportGenerator(bot=bot, port=port)
+        gen._character = MagicMock()
+        gen._character.name = "测试角色"
+        gen._router = MagicMock()
+
+        opening = await gen._generate_opening("昨日日记测试", {"msg": "10", "cmd": "5", "roll": "3", "top_groups": []})
+
+        # 直接走模板
+        assert "测试角色" in opening
+        assert "每日报告" in opening
+
     # ── _collect_core_stats ─────────────────────────────────────
 
     @pytest.mark.asyncio
@@ -283,6 +360,86 @@ class TestDailyReportGenerator:
         # 段 2 应有核心统计数据（即使 Persona 数据不可用）
         seg2 = calls[1].args[0].msg
         assert "昨日消息: 3" in seg2
+
+    # ── Q88: 数据采集方法 ──────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_collect_llm_usage_happy_path(self):
+        """_collect_llm_usage 正常返回格式化后的 LLM 调用统计"""
+        bot = _make_mock_bot()
+        port, _mock_bot = _make_mock_port()
+
+        mock_store = MagicMock()
+        mock_store.get_daily_token_usage = AsyncMock(return_value=[
+            {"provider": "openai", "model": "gpt-4", "requests": 10,
+             "tokens_in": 5000, "tokens_out": 2000,
+             "cache_read": 0, "cache_creation": 0, "reasoning_tokens": 0},
+            {"provider": "claude", "model": "sonnet", "requests": 5,
+             "tokens_in": 3000, "tokens_out": 1500,
+             "cache_read": 0, "cache_creation": 0, "reasoning_tokens": 0},
+        ])
+
+        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        result = await gen._collect_llm_usage(use_cur_day=False)
+
+        assert len(result) == 2
+        assert "openai/gpt-4: 10 次" in result[0]
+        assert "输入 5.0K" in result[0]
+        assert "输出 2.0K" in result[0]
+        assert "claude/sonnet: 5 次" in result[1]
+
+    @pytest.mark.asyncio
+    async def test_collect_affinity_changes_happy_path(self):
+        """_collect_affinity_changes 正常返回好感度变化 Top 3"""
+        bot = _make_mock_bot()
+        port, _mock_bot = _make_mock_port()
+
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchall = AsyncMock(return_value=[
+            ("user1", 2.5, "日常互动"),
+            ("user2", -1.0, "拒绝请求"),
+            ("user3", 0.5, ""),
+        ])
+        mock_db = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_cursor)
+
+        mock_store = MagicMock()
+        mock_store.db = mock_db
+
+        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        result = await gen._collect_affinity_changes()
+
+        assert len(result) == 3
+        assert "user1: +2.50" in result[0]
+        assert "（日常互动）" in result[0]
+        assert "user2: -1.00" in result[1]
+        assert "（拒绝请求）" in result[1]
+        assert "user3: +0.50" in result[2]
+
+    @pytest.mark.asyncio
+    async def test_collect_character_state_happy_path(self):
+        """_collect_character_state 正常返回角色状态格式化文本"""
+        bot = _make_mock_bot()
+        port, _mock_bot = _make_mock_port()
+
+        from plugins.DicePP.module.persona.data.models import CharacterState
+        state = CharacterState(
+            energy=80, mood=65, health=90,
+            current_intention="sleeping",
+            text="",
+        )
+
+        mock_store = MagicMock()
+        mock_store.get_character_state = AsyncMock(return_value=state)
+
+        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        result = await gen._collect_character_state()
+
+        assert len(result) == 4
+        assert "体力: 80/100" in result[0]
+        assert "心情: 65/100" in result[1]
+        assert "健康: 90/100" in result[2]
+        assert "当前意向: sleeping" in result[3]
 
 
 class TestTickDailyIntegration:

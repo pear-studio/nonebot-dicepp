@@ -1330,3 +1330,559 @@ class TestPersonaScopeFilter:
         assert len(results) == 1
         assert results[0].content == "hello"
 
+
+# ═══════════════════════════════════════════════════════════════════
+# Q92: ScoringFailure / AgentRun / TokenUsage / TopRelations / Prune
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestScoringFailureCRUD:
+    """ScoringFailure 创建、查询、裁剪契约"""
+
+    @pytest.mark.asyncio
+    async def test_record_and_get_scoring_failure(self, temp_db):
+        from plugins.DicePP.module.persona.data.models import ScoringFailure
+        store = temp_db
+        failure = ScoringFailure(
+            user_id="u1",
+            group_id="g1",
+            messages_count=5,
+            error="LLM returned invalid JSON",
+            raw_response='{"bad": json}',
+            conversation_digest="u: hello",
+        )
+        await store.record_scoring_failure(failure)
+
+        results = await store.get_recent_scoring_failures("u1", limit=5)
+        assert len(results) == 1
+        assert results[0].error == "LLM returned invalid JSON"
+        assert results[0].raw_response == '{"bad": json}'
+        assert results[0].messages_count == 5
+
+    @pytest.mark.asyncio
+    async def test_get_scoring_failure_not_found(self, temp_db):
+        store = temp_db
+        results = await store.get_recent_scoring_failures("u_unknown", limit=5)
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_prune_scoring_failures(self, temp_db, monkeypatch):
+        from datetime import datetime
+        from plugins.DicePP.module.persona.data.models import ScoringFailure
+        store = temp_db
+        monkeypatch.setattr(store, "_wall_now", lambda: datetime(2026, 6, 10, 12, 0, 0))
+
+        failure = ScoringFailure(
+            user_id="u1",
+            error="old error",
+            created_at=datetime(2026, 5, 1, 0, 0, 0),
+        )
+        await store.record_scoring_failure(failure)
+
+        deleted = await store.prune_scoring_failures(max_age_days=30)
+        assert deleted == 1
+        results = await store.get_recent_scoring_failures("u1", limit=5)
+        assert results == []
+
+
+class TestAgentRunCRUD:
+    """AgentRun / AgentEvent CRUD"""
+
+    @pytest.mark.asyncio
+    async def test_insert_and_get_agent_run(self, temp_db):
+        store = temp_db
+        await store.insert_agent_run("run_1", "turn_1", "u1", "g1", "chat")
+
+        run = await store.get_agent_run("run_1")
+        assert run is not None
+        assert run["run_id"] == "run_1"
+        assert run["turn_id"] == "turn_1"
+        assert run["user_id"] == "u1"
+        assert run["group_id"] == "g1"
+        assert run["mode"] == "chat"
+
+    @pytest.mark.asyncio
+    async def test_get_agent_run_not_found(self, temp_db):
+        store = temp_db
+        assert await store.get_agent_run("nonexistent") is None
+
+    @pytest.mark.asyncio
+    async def test_update_agent_run(self, temp_db):
+        store = temp_db
+        await store.insert_agent_run("run_2", "turn_2", "u1", "g1", "chat")
+
+        await store.update_agent_run("run_2", status="completed", final_reason="success")
+        run = await store.get_agent_run("run_2")
+        assert run["status"] == "completed"
+        assert run["final_reason"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_insert_and_get_agent_events(self, temp_db):
+        store = temp_db
+        await store.insert_agent_run("run_3", "turn_3", "u2", "", "chat")
+        await store.insert_agent_event("run_3", 0, "tool_call", '{"tool":"search"}')
+        await store.insert_agent_event("run_3", 1, "tool_result", '{"result":"ok"}')
+
+        events = await store.get_agent_events("run_3")
+        assert len(events) == 2
+        assert events[0]["event_type"] == "tool_call"
+        assert events[1]["event_type"] == "tool_result"
+        assert events[0]["seq"] == 0
+        assert events[1]["seq"] == 1
+
+
+class TestTokenUsage:
+    """TokenUsage / get_today_token_usage / get_daily_token_usage"""
+
+    @pytest.mark.asyncio
+    async def test_get_today_token_usage_empty(self, temp_db):
+        store = temp_db
+        tin, tout = await store.get_today_token_usage()
+        # 空结果时返回 (None, None)
+        assert tin is None
+        assert tout is None
+
+    @pytest.mark.asyncio
+    async def test_get_daily_token_usage(self, temp_db, monkeypatch):
+        from datetime import datetime
+        store = temp_db
+        monkeypatch.setattr(store, "_wall_now", lambda: datetime(2026, 6, 10, 12, 0, 0))
+        from plugins.DicePP.module.persona.data.models import LLMTraceRecord
+
+        t1 = LLMTraceRecord(
+            session_id="s1", user_id="u1", model="gpt-4o", tier="primary",
+            messages="[]", response="r1", tokens_in=10, tokens_out=5,
+            status="ok",
+        )
+        t2 = LLMTraceRecord(
+            session_id="s2", user_id="u1", model="gpt-4o", tier="primary",
+            messages="[]", response="r2", tokens_in=20, tokens_out=10,
+            status="ok",
+        )
+        await store.add_llm_trace(t1)
+        await store.add_llm_trace(t2)
+
+        daily = await store.get_daily_token_usage("2026-06-10")
+        assert len(daily) == 1
+        row = daily[0]
+        assert row["requests"] == 2
+        assert row["tokens_in"] == 30
+        assert row["tokens_out"] == 15
+
+
+class TestTopRelationships:
+    """get_top_relationships"""
+
+    @pytest.mark.asyncio
+    async def test_top_relationships_empty(self, temp_db):
+        store = temp_db
+        top = await store.get_top_relationships(limit=5)
+        assert top == []
+
+    @pytest.mark.asyncio
+    async def test_top_relationships_returns_ordered(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+        rels = [
+            RelationshipState(user_id="u_a", familiarity=80, intimacy=80),
+            RelationshipState(user_id="u_b", familiarity=60, intimacy=60),
+            RelationshipState(user_id="u_c", familiarity=40, intimacy=40),
+        ]
+        for r in rels:
+            await store.update_relationship(r)
+
+        top = await store.get_top_relationships(limit=2)
+        assert len(top) == 2
+        assert top[0].user_id == "u_a"
+        assert top[1].user_id == "u_b"
+
+
+class TestPruneMethods:
+    """prune_daily_events / prune_score_history / prune_scoring_failures"""
+
+    @pytest.mark.asyncio
+    async def test_prune_daily_events(self, temp_db, monkeypatch):
+        from datetime import datetime
+        store = temp_db
+        monkeypatch.setattr(store, "_wall_now", lambda: datetime(2026, 6, 10, 12, 0, 0))
+
+        await store.add_daily_event("2026-05-01", "system", "old event")
+        await store.add_daily_event("2026-06-09", "system", "recent event")
+
+        deleted = await store.prune_daily_events(keep_days=7)
+        assert deleted == 1
+        remaining = await store.get_daily_events("2026-05-01")
+        assert len(remaining) == 0
+        remaining2 = await store.get_daily_events("2026-06-09")
+        assert len(remaining2) == 1
+
+    @pytest.mark.asyncio
+    async def test_prune_score_history(self, temp_db, monkeypatch):
+        from datetime import datetime
+        from plugins.DicePP.module.persona.data.models import ScoreEvent, ScoreDeltas
+        store = temp_db
+        monkeypatch.setattr(store, "_wall_now", lambda: datetime(2026, 6, 10, 12, 0, 0))
+
+        old = ScoreEvent(
+            user_id="u1", deltas=ScoreDeltas(intimacy=1.0),
+            composite_before=0, composite_after=1,
+            reason="old",
+            created_at=datetime(2026, 1, 1),
+        )
+        recent = ScoreEvent(
+            user_id="u1", deltas=ScoreDeltas(intimacy=1.0),
+            composite_before=1, composite_after=2,
+            reason="recent",
+            created_at=datetime(2026, 6, 9),
+        )
+        await store.add_score_event(old)
+        await store.add_score_event(recent)
+
+        deleted = await store.prune_score_history(max_age_days=30)
+        assert deleted == 1
+        events = await store.get_recent_score_events("u1", limit=5)
+        assert len(events) == 1
+        assert events[0].reason == "recent"
+
+
+# ── Q90: Session CRUD ──────────────────────────────────────────────────────────
+
+
+class TestSessionCRUD:
+    """测试 PersonaSession 的完整 CRUD 操作"""
+
+    @pytest.mark.asyncio
+    async def test_create_and_get_active_session(self, temp_db):
+        store = temp_db
+        from datetime import datetime
+
+        now = datetime(2026, 6, 1, 12, 0, 0)
+        session = await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="test prompt", static_hash="abc123",
+            token_budget=64000, status="active",
+            last_active_at=now,
+        )
+        assert session.session_id > 0
+        assert session.user_id == "u1"
+        assert session.character_id == "char1"
+        assert session.status == "active"
+        assert session.token_budget == 64000
+
+        active = await store.get_active_session("u1")
+        assert active is not None
+        assert active.session_id == session.session_id
+        assert active.static_prompt == "test prompt"
+
+    @pytest.mark.asyncio
+    async def test_get_active_session_returns_newest(self, temp_db):
+        """多 session 按 last_active_at 降序，返回第一条 active。"""
+        store = temp_db
+        from datetime import datetime
+
+        await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="old", static_hash="h1",
+            token_budget=64000, status="active",
+            last_active_at=datetime(2026, 6, 1, 10, 0, 0),
+        )
+        await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="new", static_hash="h2",
+            token_budget=64000, status="active",
+            last_active_at=datetime(2026, 6, 2, 10, 0, 0),
+        )
+
+        active = await store.get_active_session("u1")
+        assert active is not None
+        assert active.static_prompt == "new"
+
+    @pytest.mark.asyncio
+    async def test_get_active_session_returns_none_when_no_active(self, temp_db):
+        store = temp_db
+        assert await store.get_active_session("u_unknown") is None
+
+    @pytest.mark.asyncio
+    async def test_get_session_by_id(self, temp_db):
+        store = temp_db
+        from datetime import datetime
+
+        session = await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="test", static_hash="h1",
+            token_budget=32000, status="active",
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+        fetched = await store.get_session_by_id(session.session_id)
+        assert fetched is not None
+        assert fetched.user_id == "u1"
+        assert fetched.token_budget == 32000
+
+    @pytest.mark.asyncio
+    async def test_get_session_by_id_not_found(self, temp_db):
+        store = temp_db
+        assert await store.get_session_by_id(99999) is None
+
+    @pytest.mark.asyncio
+    async def test_update_session(self, temp_db):
+        store = temp_db
+        from datetime import datetime
+
+        session = await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="original", static_hash="h1",
+            token_budget=64000, status="active",
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+
+        await store.update_session(
+            session.session_id,
+            static_prompt="updated",
+            static_hash="h2",
+            token_budget=32000,
+            status="archived",
+        )
+
+        fetched = await store.get_session_by_id(session.session_id)
+        assert fetched.static_prompt == "updated"
+        assert fetched.static_hash == "h2"
+        assert fetched.token_budget == 32000
+        assert fetched.status == "archived"
+
+    @pytest.mark.asyncio
+    async def test_update_session_ignores_unknown_keys(self, temp_db):
+        store = temp_db
+        from datetime import datetime
+
+        session = await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="test", static_hash="h1",
+            token_budget=64000, status="active",
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+        # unknown key should be silently ignored
+        await store.update_session(session.session_id, unknown_field="value")
+        fetched = await store.get_session_by_id(session.session_id)
+        assert fetched is not None  # no crash
+
+    @pytest.mark.asyncio
+    async def test_delete_session(self, temp_db):
+        store = temp_db
+        from datetime import datetime
+
+        session = await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="test", static_hash="h1",
+            token_budget=64000, status="active",
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+        await store.delete_session(session.session_id)
+
+        fetched = await store.get_session_by_id(session.session_id)
+        assert fetched is None
+
+    @pytest.mark.asyncio
+    async def test_add_and_get_session_messages(self, temp_db):
+        store = temp_db
+        from datetime import datetime
+        from plugins.DicePP.module.persona.data.models import PersonaSessionMessage
+
+        session = await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="test", static_hash="h1",
+            token_budget=64000, status="active",
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+
+        msgs = [
+            PersonaSessionMessage(session_id=session.session_id, role="user", content="hello"),
+            PersonaSessionMessage(session_id=session.session_id, role="assistant", content="world"),
+        ]
+        await store.add_session_messages(session.session_id, msgs)
+
+        fetched = await store.get_session_messages(session.session_id)
+        assert len(fetched) == 2
+        assert fetched[0].role == "user"
+        assert fetched[0].content == "hello"
+        assert fetched[1].role == "assistant"
+        assert fetched[1].content == "world"
+        # sequence should be auto-incremented
+        assert fetched[0].sequence == 1
+        assert fetched[1].sequence == 2
+
+    @pytest.mark.asyncio
+    async def test_get_session_messages_empty(self, temp_db):
+        store = temp_db
+        from datetime import datetime
+
+        session = await store.create_session(
+            user_id="u1", character_id="char1",
+            static_prompt="test", static_hash="h1",
+            token_budget=64000, status="active",
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+        msgs = await store.get_session_messages(session.session_id)
+        assert msgs == []
+
+
+# ── Q91: Group Activity + Familiarity Daily + Reputation Recovery ────────────
+
+
+class TestGroupActivityCRUD:
+    """测试群活跃度 (update_group_activity / get_group_activity)"""
+
+    @pytest.mark.asyncio
+    async def test_update_group_activity_new(self, temp_db):
+        """新群首次更新创建默认记录 score=50"""
+        store = temp_db
+        result = await store.update_group_activity("g1")
+        assert result.group_id == "g1"
+        assert result.score > 50.0  # 50 baseline + delta
+
+    @pytest.mark.asyncio
+    async def test_update_group_activity_daily_cap(self, temp_db):
+        """每日累计不超过 max_daily_add (默认20)"""
+        store = temp_db
+        # 连续多次更新
+        for _ in range(5):
+            await store.update_group_activity("g1", score_delta=10.0, max_daily_add=20.0)
+
+        activity = await store.get_group_activity("g1")
+        # 即使 5 次 * 10，daily cap 限制在 20，初始 50 + 20 = 70（不超过 100）
+        assert 50.0 < activity.score <= 70.0
+
+    @pytest.mark.asyncio
+    async def test_update_group_activity_whitelist_floor(self, temp_db):
+        """白名单群有下限保护"""
+        store = temp_db
+        # 先创建记录，score_delta=0 不增加
+        await store.update_group_activity("g1", score_delta=0.0)
+
+        # 启用 whitelist floor
+        store._group_activity_floor_whitelist = 90.0
+        result = await store.update_group_activity("g1", score_delta=1.0, is_whitelisted=True)
+        # score 应提升到 floor=90.0
+        assert result.score >= 90.0
+
+    @pytest.mark.asyncio
+    async def test_get_group_activity_nonexistent(self, temp_db):
+        """不存在的群返回默认 score=50.0"""
+        store = temp_db
+        activity = await store.get_group_activity("nonexistent")
+        assert activity.group_id == "nonexistent"
+        assert activity.score == 50.0
+
+
+class TestFamiliarityDaily:
+    """测试 add_familiarity_daily / get_familiarity_daily"""
+
+    @pytest.mark.asyncio
+    async def test_add_familiarity_daily_basic(self, temp_db):
+        """基本累计和读取"""
+        store = temp_db
+        total = await store.add_familiarity_daily("u1", "2026-06-01", 2.0)
+        assert total == 2.0
+
+        total2 = await store.add_familiarity_daily("u1", "2026-06-01", 3.0)
+        assert total2 == 5.0
+
+        result = await store.get_familiarity_daily("u1", "2026-06-01")
+        assert result == 5.0
+
+    @pytest.mark.asyncio
+    async def test_add_familiarity_daily_cap(self, temp_db):
+        """累计不超过 cap (默认15.0)"""
+        store = temp_db
+        await store.add_familiarity_daily("u1", "2026-06-01", 10.0, cap=15.0)
+        total = await store.add_familiarity_daily("u1", "2026-06-01", 10.0, cap=15.0)
+        assert total == 15.0  # 截断到 cap
+
+    @pytest.mark.asyncio
+    async def test_get_familiarity_daily_nonexistent(self, temp_db):
+        """不存在的用户返回 0.0"""
+        store = temp_db
+        result = await store.get_familiarity_daily("no_such_user", "2026-06-01")
+        assert result == 0.0
+
+    @pytest.mark.asyncio
+    async def test_add_familiarity_daily_different_dates(self, temp_db):
+        """不同日期的累计相互独立"""
+        store = temp_db
+        await store.add_familiarity_daily("u1", "2026-06-01", 5.0)
+        await store.add_familiarity_daily("u1", "2026-06-02", 3.0)
+        assert await store.get_familiarity_daily("u1", "2026-06-01") == 5.0
+        assert await store.get_familiarity_daily("u1", "2026-06-02") == 3.0
+
+
+class TestReputationRecovery:
+    """测试 try_daily_reputation_recovery"""
+
+    @pytest.mark.asyncio
+    async def test_reputation_recovery_basic(self, temp_db):
+        """reputation 每日恢复 +2"""
+        store = temp_db
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+
+        # 先创建关系
+        rel = RelationshipState(user_id="u1", familiarity=10.0, intimacy=5.0, reputation=80.0)
+        await store.update_relationship(rel)
+
+        now = datetime(2026, 6, 2, 12, 0, 0)
+        recovered = await store.try_daily_reputation_recovery(rel, now)
+        assert recovered is True
+        assert rel.reputation == 82.0
+
+        # 从 DB 重新读取验证持久化
+        db_rel = await store.get_relationship("u1")
+        assert db_rel is not None
+        assert db_rel.reputation == 82.0
+
+    @pytest.mark.asyncio
+    async def test_reputation_recovery_already_full(self, temp_db):
+        """reputation 已达 100 不恢复"""
+        store = temp_db
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+
+        rel = RelationshipState(user_id="u1", reputation=100.0)
+        await store.update_relationship(rel)
+
+        now = datetime(2026, 6, 2, 12, 0, 0)
+        recovered = await store.try_daily_reputation_recovery(rel, now)
+        assert recovered is False
+        assert rel.reputation == 100.0
+
+    @pytest.mark.asyncio
+    async def test_reputation_recovery_same_day_skipped(self, temp_db):
+        """同一天已恢复过不再重复恢复"""
+        store = temp_db
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+
+        now = datetime(2026, 6, 2, 12, 0, 0)
+        rel = RelationshipState(user_id="u1", reputation=80.0)
+        rel.last_reputation_recovery_date = now
+        await store.update_relationship(rel)
+
+        recovered = await store.try_daily_reputation_recovery(rel, now)
+        assert recovered is False
+        assert rel.reputation == 80.0
+
+    @pytest.mark.asyncio
+    async def test_reputation_recovery_without_persist(self, temp_db):
+        """persist=False 时只改内存不写库"""
+        store = temp_db
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+
+        rel = RelationshipState(user_id="u1", reputation=80.0)
+        await store.update_relationship(rel)
+
+        # 从 DB 重新读取，让本地 rel 与 DB 断开
+        now = datetime(2026, 6, 2, 12, 0, 0)
+        recovered = await store.try_daily_reputation_recovery(rel, now, persist=False)
+        assert recovered is True
+        assert rel.reputation == 82.0
+
+        # DB 中仍是 80.0（未持久化）
+        db_rel = await store.get_relationship("u1")
+        assert db_rel is not None
+        assert db_rel.reputation == 80.0
+

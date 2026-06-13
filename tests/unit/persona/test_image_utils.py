@@ -4,6 +4,7 @@ import os
 import tempfile
 from unittest.mock import AsyncMock, patch, MagicMock
 
+import httpx
 import pytest
 
 from plugins.DicePP.module.persona.agent.runtime import _build_image_content_parts
@@ -280,3 +281,36 @@ class TestImageCache:
             await cache.download_and_cache(meta)
 
         assert meta[0].get("cache_hash") is None
+
+    @pytest.mark.asyncio
+    async def test_download_and_cache_http_500(self, cache):
+        """HTTP 500 错误时不会抛异常，cache_hash 保持 None。"""
+        fake_response = MagicMock()
+        fake_response.status_code = 500
+
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=fake_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+            meta = [{"url": "http://example.com/error.png", "sub_type": "0", "cache_hash": None}]
+            await cache.download_and_cache(meta)
+
+        assert meta[0].get("cache_hash") is None
+        assert meta[0].get("download_attempted_at") is not None
+
+    @pytest.mark.asyncio
+    async def test_download_and_cache_network_timeout(self, cache):
+        """网络超时时不会抛异常，cache_hash 保持 None。"""
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+            meta = [{"url": "http://example.com/timeout.png", "sub_type": "0", "cache_hash": None}]
+            await cache.download_and_cache(meta)
+
+        assert meta[0].get("cache_hash") is None
+        assert meta[0].get("download_attempted_at") is not None

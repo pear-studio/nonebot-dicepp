@@ -100,6 +100,21 @@ class TestPersonaExtensions:
         assert ext.generate_event_times() == []
         assert ext.generate_event_times(count=0) == []
 
+    @pytest.mark.parametrize("hour", [0, 1, 23, 24, 46, 47])
+    def test_check_hour_range_valid(self, hour):
+        ext = PersonaExtensions(event_day_start_hour=hour)
+        assert ext.event_day_start_hour == hour
+
+    @pytest.mark.parametrize("hour", [-1, 48, 100])
+    def test_check_hour_range_start_invalid(self, hour):
+        with pytest.raises(ValueError, match="event hour must be 0-47"):
+            PersonaExtensions(event_day_start_hour=hour)
+
+    @pytest.mark.parametrize("hour", [-1, 48, 100])
+    def test_check_hour_range_end_invalid(self, hour):
+        with pytest.raises(ValueError, match="event hour must be 0-47"):
+            PersonaExtensions(event_day_end_hour=hour)
+
 
 class TestCharacterBook:
     """测试世界书"""

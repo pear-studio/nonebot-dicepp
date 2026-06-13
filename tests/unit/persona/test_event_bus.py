@@ -68,6 +68,29 @@ class TestEventStore:
         assert len(events) == 1
         store.get_agent_events.assert_called_once_with("r1")
 
+    @pytest.mark.asyncio
+    async def test_data_store_none_write_run_safe(self):
+        es = EventStore(data_store=None)
+        # 不应该抛出异常
+        await es.write_run(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+
+    @pytest.mark.asyncio
+    async def test_data_store_none_update_run_safe(self):
+        es = EventStore(data_store=None)
+        await es.update_run("r1", status="completed")
+
+    @pytest.mark.asyncio
+    async def test_data_store_none_write_event_safe(self):
+        es = EventStore(data_store=None)
+        event = AgentEvent(run_id="r1", seq=0, event_type="test", payload={})
+        await es.write_event(event)
+
+    @pytest.mark.asyncio
+    async def test_data_store_none_get_events_safe(self):
+        es = EventStore(data_store=None)
+        events = await es.get_events("r1")
+        assert events == []
+
 
 class TestAgentEventBus:
     """AgentEventBus emit / sink 分发"""

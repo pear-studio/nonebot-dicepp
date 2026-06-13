@@ -178,6 +178,42 @@ class TestProactiveSchedulerMissYou:
         result = await scheduler._check_missed_users()
         assert result == []
 
+    @pytest.mark.asyncio
+    async def test_miss_last_interaction_at_none_skipped(self, scheduler, mock_data_store, monkeypatch):
+        """验证 last_interaction_at 为 None 时跳过该用户（视为首次互动）"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: fake_now,
+        )
+        rel = RelationshipState(
+            user_id="u1",
+            intimacy=80,
+            last_interaction_at=None,  # 无互动记录
+        )
+        mock_data_store.list_active_relationships.return_value = [rel]
+        result = await scheduler._check_missed_users()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_miss_today_events_empty_skipped(self, scheduler, mock_data_store, monkeypatch):
+        """验证今日事件列表为空时调度器不抛出异常，跳过该用户"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: fake_now,
+        )
+        rel = RelationshipState(
+            user_id="u1",
+            intimacy=80,
+            last_interaction_at=fake_now - timedelta(hours=100),
+        )
+        mock_data_store.list_active_relationships.return_value = [rel]
+        # get_daily_events 返回空列表
+        mock_data_store.get_daily_events = AsyncMock(return_value=[])
+        result = await scheduler._check_missed_users()
+        assert result == []
+
 
 class TestProactiveSchedulerMissProbability:
     """测试想念概率阶段固定表"""
@@ -276,6 +312,79 @@ class TestProactiveSchedulerMissProbability:
         result = await scheduler._check_missed_users()
         assert result == []
 
+    # ── Q116: 信誉门控 ──────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_miss_low_reputation_skipped(self, scheduler, mock_data_store, monkeypatch):
+        """信誉分低于 reputation_refuse_threshold 时跳过想念触发。"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: fake_now,
+        )
+        rel = RelationshipState(
+            user_id="u1",
+            intimacy=80,
+            reputation=15.0,  # 低于默认阈值 30
+            last_interaction_at=fake_now - timedelta(hours=100),
+        )
+        mock_data_store.list_active_relationships.return_value = [rel]
+        # 即使所有条件满足，低信誉也跳过
+        mock_data_store.get_daily_events.return_value = [self._make_event()]
+        scheduler.event_agent = AsyncMock()
+        scheduler.event_agent.generate_share_message = AsyncMock(return_value="msg")
+
+        result = await scheduler._check_missed_users()
+        assert result == []
+        # reputation recovery 应被调用
+        mock_data_store.try_daily_reputation_recovery.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_miss_adequate_reputation_passes_gate(self, scheduler, mock_data_store, monkeypatch):
+        """信誉分 >= threshold 时通过门控继续检查。"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: fake_now,
+        )
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.random.random",
+            lambda: 0.0,
+        )
+        rel = RelationshipState(
+            user_id="u1",
+            intimacy=80,
+            reputation=80.0,  # 高于默认阈值 30
+            last_interaction_at=fake_now - timedelta(hours=100),
+        )
+        mock_data_store.list_active_relationships.return_value = [rel]
+        mock_data_store.get_daily_events.return_value = [self._make_event()]
+
+        scheduler.event_agent = AsyncMock()
+        scheduler.event_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+
+        result = await scheduler._check_missed_users()
+        assert len(result) == 1  # 通过门控后正常触发
+
+    @pytest.mark.asyncio
+    async def test_miss_reputation_recovery_called_before_gate(self, scheduler, mock_data_store, monkeypatch):
+        """验证 _check_missed_users 在信誉门控前先调用 try_daily_reputation_recovery。"""
+        fake_now = datetime(2024, 1, 4, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
+            lambda tz: fake_now,
+        )
+        rel = RelationshipState(
+            user_id="u1",
+            intimacy=80,
+            reputation=15.0,
+            last_interaction_at=fake_now - timedelta(hours=100),
+        )
+        mock_data_store.list_active_relationships.return_value = [rel]
+
+        await scheduler._check_missed_users()
+        mock_data_store.try_daily_reputation_recovery.assert_awaited_with(rel, fake_now)
+
     @pytest.mark.asyncio
     async def test_miss_probability_intimate_always(self, scheduler, mock_data_store, monkeypatch):
         """亲密阶段(score=90)概率 100%，必然触发"""
@@ -317,6 +426,11 @@ class TestProactiveSchedulerMissProbability:
         mock_data_store.update_relationship.assert_called()
         updated_rel = mock_data_store.update_relationship.call_args[0][0]
         assert updated_rel.last_miss_sent_at == fake_now
+
+    def test_miss_probability_stage_zero_never_triggers(self):
+        """验证阶段 0（冷淡）的想念触发概率为 0，永不触发"""
+        from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
+        assert ProactiveScheduler._MISS_PROBABILITY[0] == 0.0
 
 
 class TestProactiveSchedulerMessageCreation:

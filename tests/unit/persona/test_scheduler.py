@@ -2,6 +2,7 @@
 单元测试: ProactiveScheduler 主动消息调度器
 """
 
+import asyncio
 import pytest
 import json
 from datetime import datetime, timedelta
@@ -61,6 +62,35 @@ class TestProactiveSchedulerBasics:
             target_selector=MagicMock(),
             coordinator=mock_coordinator,
         )
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_pending_tasks(self, scheduler):
+        """验证 shutdown 取消所有待处理任务并清理状态"""
+        # 创建一些模拟的 pending 任务
+        async def _dummy():
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                raise
+
+        t1 = asyncio.create_task(_dummy())
+        t2 = asyncio.create_task(_dummy())
+        scheduler._pending_shares.add(t1)
+        scheduler._pending_shares.add(t2)
+
+        await scheduler.shutdown()
+
+        # 所有任务应已被取消
+        assert t1.cancelled()
+        assert t2.cancelled()
+        # pending_shares 应已被清空
+        assert len(scheduler._pending_shares) == 0
+
+    @pytest.mark.asyncio
+    async def test_shutdown_empty_does_not_raise(self, scheduler):
+        """验证 shutdown 在没有 pending 任务时不会报错"""
+        scheduler._pending_shares.clear()
+        await scheduler.shutdown()  # 不应抛出异常
 
     @pytest.mark.asyncio
     async def test_tick_disabled_returns_empty(self, scheduler):
@@ -375,3 +405,117 @@ class TestCharacterActiveExtendedEnd:
             lambda tz: datetime(2024, 1, 1, 2, 0, 0),
         )
         assert scheduler._is_character_active() is False
+
+
+# ── Q114: schedule_share ──────────────────────────────────────────────────
+
+
+class TestScheduleShare:
+    """测试 schedule_share 方法"""
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.is_user_muted = AsyncMock(return_value=False)
+        store.get_top_relationships = AsyncMock(return_value=[])
+        store.get_all_group_activities = AsyncMock(return_value=[])
+        store.list_active_relationships = AsyncMock(return_value=[])
+        return store
+
+    @pytest.fixture
+    def config(self):
+        return ProactiveConfig(
+            enabled=True,
+            min_interval_hours=4,
+            max_shares_per_event=3,
+            share_threshold=0.4,
+            timezone="Asia/Shanghai",
+        )
+
+    @pytest.fixture
+    def scheduler(self, config, mock_data_store, mock_coordinator):
+        return ProactiveScheduler(
+            config=config,
+            data_store=mock_data_store,
+            character=_make_mock_character(),
+            target_selector=MagicMock(),
+            coordinator=mock_coordinator,
+        )
+
+    @pytest.fixture
+    def mock_event_agent(self):
+        agent = MagicMock()
+        agent.generate_share_message = AsyncMock(return_value="hello")
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_schedule_share_creates_task(self, scheduler, mock_event_agent):
+        """schedule_share 创建 task 并加入 _pending_shares"""
+        scheduler.event_agent = mock_event_agent
+        scheduler.share_event_to_targets = AsyncMock(return_value=[])
+
+        initial_count = len(scheduler._pending_shares)
+        scheduler.schedule_share("evt_1", "desc", "reac", 0.8, 0)  # delay=0 → 立即执行
+        assert len(scheduler._pending_shares) == initial_count + 1
+
+    @pytest.mark.asyncio
+    async def test_schedule_share_calls_share_event_to_targets(self, scheduler, mock_event_agent):
+        """delay 后实际调用 share_event_to_targets"""
+        scheduler.event_agent = mock_event_agent
+        mock_share = AsyncMock(return_value=[])
+        scheduler.share_event_to_targets = mock_share
+
+        # delay_minutes=0 → 立即执行
+        scheduler.schedule_share("evt_1", "event_desc", "positive", 0.8, 0)
+
+        # 等待 task 完成
+        await asyncio.sleep(0)
+        if scheduler._pending_shares:
+            await asyncio.gather(*scheduler._pending_shares, return_exceptions=True)
+
+        mock_share.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_schedule_share_low_desire_skips(self, scheduler):
+        """share_desire < share_threshold 时跳过分享"""
+        mock_share = AsyncMock(return_value=[])
+        scheduler.share_event_to_targets = mock_share
+        scheduler.config.share_threshold = 0.5
+
+        scheduler.schedule_share("evt_1", "desc", "reac", 0.3, 0)
+
+        if scheduler._pending_shares:
+            await asyncio.gather(*scheduler._pending_shares, return_exceptions=True)
+
+        mock_share.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_schedule_share_cleans_up_after_completion(self, scheduler):
+        """task 完成后从 _pending_shares 中移除"""
+        mock_share = AsyncMock(return_value=[])
+        scheduler.share_event_to_targets = mock_share
+
+        scheduler.schedule_share("evt_1", "desc", "reac", 0.8, 0)
+
+        # 等待所有 task 完成
+        while scheduler._pending_shares:
+            await asyncio.sleep(0)
+
+        assert len(scheduler._pending_shares) == 0
+
+    @pytest.mark.asyncio
+    async def test_schedule_share_passes_correct_args(self, scheduler, mock_event_agent):
+        """传递正确的参数到 share_event_to_targets"""
+        scheduler.event_agent = mock_event_agent
+        mock_share = AsyncMock(return_value=[])
+        scheduler.share_event_to_targets = mock_share
+        scheduler.config.max_shares_per_event = 5
+
+        scheduler.schedule_share("evt_1", "下雨了", "开心", 0.9, 0)
+
+        if scheduler._pending_shares:
+            await asyncio.gather(*scheduler._pending_shares, return_exceptions=True)
+
+        mock_share.assert_awaited_once_with("下雨了", "开心", 5)

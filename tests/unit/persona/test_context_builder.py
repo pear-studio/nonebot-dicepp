@@ -839,3 +839,75 @@ class TestMergeSameRunSegments:
         assert result == formatted
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Q86: _build_image_markers 图片标记构建
+# ═══════════════════════════════════════════════════════════════════
+
+class TestBuildImageMarkers:
+    """_build_image_markers 图片标记构建测试"""
+
+    def test_normal_image_marker(self):
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+
+        msg = {"image_meta": [{"image_hash": "abc123", "sub_type": "0"}]}
+        result = _build_image_markers(msg)
+        assert result == "[图片 abc123] "
+
+    def test_emoticon_marker(self):
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+
+        msg = {"image_meta": [{"image_hash": "def456", "sub_type": "1"}]}
+        result = _build_image_markers(msg)
+        assert result == "[表情 def456] "
+
+    def test_default_subtype_is_image(self):
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+
+        msg = {"image_meta": [{"image_hash": "xyz789"}]}
+        result = _build_image_markers(msg)
+        assert result == "[图片 xyz789] "
+
+    def test_empty_image_meta_returns_empty(self):
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+
+        assert _build_image_markers({}) == ""
+        assert _build_image_markers({"image_meta": None}) == ""
+        assert _build_image_markers({"image_meta": []}) == ""
+
+    def test_missing_hash_falls_back_to_compute_image_hash(self, monkeypatch):
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.image_cache import ImageCache
+
+        monkeypatch.setattr(
+            ImageCache, "compute_image_hash",
+            lambda entry: "computed_hash",
+        )
+        msg = {"image_meta": [{"url": "http://example.com/img.png"}]}
+        result = _build_image_markers(msg)
+        assert result == "[图片 computed_hash] "
+
+    def test_missing_hash_and_no_url_skips_entry(self, monkeypatch):
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+        from plugins.DicePP.module.persona.image_cache import ImageCache
+
+        monkeypatch.setattr(
+            ImageCache, "compute_image_hash",
+            lambda entry: None,
+        )
+        msg = {"image_meta": [{"unknown_field": "foo"}]}
+        result = _build_image_markers(msg)
+        # 空 markers 时返回 " "（空列表 join + 尾随空格）
+        assert result == " "
+
+    def test_multiple_image_markers(self):
+        from plugins.DicePP.module.persona.chat.context import _build_image_markers
+
+        msg = {
+            "image_meta": [
+                {"image_hash": "h1", "sub_type": "0"},
+                {"image_hash": "h2", "sub_type": "1"},
+            ]
+        }
+        result = _build_image_markers(msg)
+        # 标记之间无空格分隔，仅尾部有空格
+        assert result == "[图片 h1][表情 h2] "

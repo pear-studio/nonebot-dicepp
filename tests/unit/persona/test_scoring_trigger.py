@@ -164,3 +164,148 @@ class TestScoringRetry:
 
         pending_count = len(trigger._pending_messages.get(key, []))
         assert pending_count == 4  # 消息持续累积
+
+
+class TestScoringWarnPending:
+    """warn_pending 状态转换测试 (Q122)"""
+
+    @pytest.mark.asyncio
+    async def test_warning_issued_sets_warn_pending(self):
+        """warning_issued=True 且无扣分时设置 warn_pending"""
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
+
+        scoring_agent = MagicMock()
+        scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
+            deltas=ScoreDeltas(reputation_delta=0.0, warning_issued=True),
+            facts={}, parse_error="",
+        ))
+
+        trigger = _make_trigger(scoring_agent=scoring_agent, scoring_interval=1)
+        # 触发评分: 2 条消息达到 threshold
+        await trigger.on_interaction("u1", "g1", "msg1", "reply1")
+
+        assert trigger._warn_pending.get("u1", False) is True
+
+    @pytest.mark.asyncio
+    async def test_negative_reputation_clears_warn_pending(self):
+        """reputation_delta<0 时清除 warn_pending（即使 warning_issued 也为 True）"""
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
+
+        scoring_agent = MagicMock()
+        scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
+            deltas=ScoreDeltas(reputation_delta=-5.0, warning_issued=True),
+            facts={}, parse_error="",
+        ))
+
+        trigger = _make_trigger(scoring_agent=scoring_agent, scoring_interval=1)
+        trigger._warn_pending["u1"] = True  # 预设 warn_pending
+        await trigger.on_interaction("u1", "g1", "msg1", "reply1")
+
+        assert "u1" not in trigger._warn_pending
+
+    @pytest.mark.asyncio
+    async def test_normal_interaction_clears_warn_pending(self):
+        """正常互动（无 warning、无扣分）清除 warn_pending"""
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
+
+        scoring_agent = MagicMock()
+        scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
+            deltas=ScoreDeltas(reputation_delta=0.0, warning_issued=False),
+            facts={}, parse_error="",
+        ))
+
+        trigger = _make_trigger(scoring_agent=scoring_agent, scoring_interval=1)
+        trigger._warn_pending["u1"] = True  # 预设 warn_pending
+        await trigger.on_interaction("u1", "g1", "msg1", "reply1")
+
+        assert "u1" not in trigger._warn_pending
+
+    @pytest.mark.asyncio
+    async def test_warn_pending_passed_to_batch_analyze(self):
+        """warn_pending=True 时传入 batch_analyze 参数"""
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
+
+        scoring_agent = MagicMock()
+        scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
+            deltas=ScoreDeltas(reputation_delta=0.0, warning_issued=True),
+            facts={}, parse_error="",
+        ))
+
+        trigger = _make_trigger(scoring_agent=scoring_agent, scoring_interval=1)
+        trigger._warn_pending["u1"] = True  # 预设 warn_pending
+        await trigger.on_interaction("u1", "g1", "msg1", "reply1")
+
+        # 验证 batch_analyze 被调用且 warn_pending=True
+        call_kwargs = scoring_agent.batch_analyze.call_args.kwargs
+        assert call_kwargs.get("warn_pending") is True
+
+    @pytest.mark.asyncio
+    async def test_no_warn_pending_passed_as_false(self):
+        """warn_pending 不存在时传入 batch_analyze 为 False"""
+        from plugins.DicePP.module.persona.chat.scoring import ScoringAnalysisResult
+
+        scoring_agent = MagicMock()
+        scoring_agent.batch_analyze = AsyncMock(return_value=ScoringAnalysisResult(
+            deltas=ScoreDeltas(reputation_delta=0.0, warning_issued=False),
+            facts={}, parse_error="",
+        ))
+
+        trigger = _make_trigger(scoring_agent=scoring_agent, scoring_interval=1)
+        await trigger.on_interaction("u1", "g1", "msg1", "reply1")
+
+        call_kwargs = scoring_agent.batch_analyze.call_args.kwargs
+        assert call_kwargs.get("warn_pending") is False
+
+
+class TestBuildConversationDigest:
+    """_build_conversation_digest 格式与截断测试 (Q123)"""
+
+    def test_digest_mixes_roles(self):
+        """user/assistant 消息正确标记为 U/A 前缀"""
+        history = [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "world"},
+        ]
+        result = ScoringTrigger._build_conversation_digest(history)
+        assert result == "U: hello; A: world"
+
+    def test_digest_truncates_long_content(self):
+        """超过 DIGEST_MAX_CHARS(80) 的内容被截断并追加 ..."""
+        history = [
+            {"role": "user", "content": "X" * 100},
+        ]
+        result = ScoringTrigger._build_conversation_digest(history)
+        assert result == "U: " + "X" * 77 + "..."
+        assert len(result) == 3 + 80  # "U: " prefix + 80 chars
+
+    def test_digest_only_last_six_messages(self):
+        """超过 DIGEST_MAX_MESSAGES(6) 时只保留最后 6 条"""
+        history = [{"role": "user", "content": f"msg{i}"} for i in range(10)]
+        result = ScoringTrigger._build_conversation_digest(history)
+        # 只应出现 msg4..msg9（最后 6 条）
+        assert "msg0" not in result
+        assert "msg3" not in result
+        assert "msg4" in result
+        assert "msg9" in result
+        assert result.count("U:") == 6
+
+    def test_digest_unknown_role_uses_question_mark(self):
+        """未知 role 映射为 ? 前缀"""
+        history = [
+            {"role": "unknown_role", "content": "test"},
+        ]
+        result = ScoringTrigger._build_conversation_digest(history)
+        assert result == "?: test"
+
+    def test_digest_empty_history(self):
+        """空列表返回空字符串"""
+        assert ScoringTrigger._build_conversation_digest([]) == ""
+
+    def test_digest_tool_and_system_roles(self):
+        """tool=T system=S 前缀映射正确"""
+        history = [
+            {"role": "system", "content": "init"},
+            {"role": "tool", "content": "result"},
+        ]
+        result = ScoringTrigger._build_conversation_digest(history)
+        assert result == "S: init; T: result"

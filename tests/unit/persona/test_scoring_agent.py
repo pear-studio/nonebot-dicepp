@@ -104,3 +104,52 @@ class TestScoringAgentParsing:
         # intimacy 应限制在 [-5, 5]，reputation_delta 限制在 [-30, 0]
         assert deltas.intimacy == 5.0
         assert deltas.reputation_delta == -30.0
+
+
+class TestScoringAgentAnalysisPrompt:
+    """测试评分分析 prompt 构建"""
+
+    def test_build_analysis_prompt_contains_required_fields(self):
+        """验证评分分析 prompt 包含必要的上下文字段"""
+        from plugins.DicePP.module.persona.data.models import UserProfile, RelationshipState
+        agent = ScoringAgent(None, timezone="Asia/Shanghai")
+
+        messages = [
+            {"role": "user", "content": "你好呀", "created_at": None},
+            {"role": "assistant", "content": "你好！今天怎么样？", "created_at": None},
+        ]
+        profile = UserProfile(user_id="u1", facts={"name": "小明", "hobbies": ["读书", "游戏"]})
+        relationship = RelationshipState(user_id="u1", intimacy=50, familiarity=40)
+
+        prompt = agent._build_analysis_prompt(messages, profile, relationship)
+
+        # 验证包含关系信息
+        # composite = familiarity*0.6 + intimacy*0.4 = 40*0.6 + 50*0.4 = 44.0
+        assert "综合 44.0" in prompt
+        assert "熟悉度 40.0" in prompt
+        assert "亲密度 50.0" in prompt
+
+        # 验证包含对话记录
+        assert "你好呀" in prompt
+        assert "你好！今天怎么样？" in prompt
+
+        # 验证包含已知用户信息（facts）
+        assert "小明" in prompt
+        assert "读书" in prompt
+        assert "游戏" in prompt
+
+        # 验证包含工具调用说明
+        assert "record_score" in prompt
+
+    def test_build_analysis_prompt_with_warn_pending(self):
+        """验证 warn_pending 标记出现在 prompt 中"""
+        agent = ScoringAgent(None, timezone="Asia/Shanghai")
+        from plugins.DicePP.module.persona.data.models import UserProfile
+
+        messages = [{"role": "user", "content": "hello"}]
+        profile = UserProfile(user_id="u1", facts={})
+
+        prompt = agent._build_analysis_prompt(messages, profile, warn_pending=True)
+
+        assert "warn_pending" in prompt
+        assert "警告标记" in prompt

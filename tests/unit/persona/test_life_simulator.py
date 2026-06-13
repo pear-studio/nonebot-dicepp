@@ -153,6 +153,25 @@ async def test_tick_swallows_exceptions():
 
 
 @pytest.mark.asyncio
+async def test_tick_character_life_timeout_continues_scheduler():
+    """character_life.tick 超时时记录警告并跳过（不阻塞 scheduler）"""
+    import asyncio
+
+    sim = _make_simulator(
+        proactive_msgs=[{"user_id": "u1", "group_id": "", "content": "继续调度"}],
+    )
+    # character_life.tick 超时
+    sim.character_life.tick = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    # 不应抛出，且 scheduler 继续运行
+    await sim.tick()
+
+    # scheduler 仍被调用（proactive 消息正常调度）
+    sim.scheduler.tick.assert_awaited_once()
+    sim.port.send.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_tick_daily_runs_diary_generation():
     """tick_daily 触发日记生成并返回内容"""
     sim = _make_simulator(diary="今天充实")

@@ -40,6 +40,53 @@ def mock_data_store():
     return store
 
 
+@pytest.fixture
+def mock_event_agent():
+    """标准 mock event agent — 返回有效事件/反应/日记"""
+    from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+    agent = MagicMock()
+    agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(description="窗外下起了小雨", duration_minutes=60))
+    agent.generate_event_reaction = AsyncMock(return_value=EventReactionResult(reaction="喜欢听雨声", share_desire=0.6))
+    agent.generate_diary = AsyncMock(return_value="今天很充实")
+    return agent
+
+
+@pytest.fixture
+def character():
+    """标准测试角色 — 带 PersonaExtensions"""
+    ext = PersonaExtensions(
+        daily_events_count=3,
+        event_day_start_hour=8,
+        event_day_end_hour=22,
+        event_jitter_minutes=15,
+    )
+    return Character(name="测试角色", description="一个温柔的AI", extensions=ext)
+
+
+@pytest.fixture
+def config():
+    """标准 CharacterLifeConfig"""
+    return CharacterLifeConfig(
+        enabled=True,
+        slot_match_window_minutes=15,
+        timezone="Asia/Shanghai",
+        chain_force_extend_once_prob=0.0,
+    )
+
+
+@pytest.fixture
+def life(config, mock_event_agent, mock_data_store, character):
+    """标准 CharacterLife 实例"""
+    life = CharacterLife(
+        config=config,
+        event_agent=mock_event_agent,
+        data_store=mock_data_store,
+        character=character,
+    )
+    life.boundary_receiver = MagicMock()
+    return life
+
+
 class TestCharacterLifeBasics:
     """测试 CharacterLife 基础行为"""
 
@@ -507,6 +554,38 @@ class TestCharacterLifePhase1:
         # 22:00 ± 30min -> 21:30 ~ 22:30
         assert 21 * 60 + 30 <= end <= 22 * 60 + 30
         assert start < end
+
+    def test_compute_daily_boundaries_start_gte_end(self, life, monkeypatch):
+        """验证 start>=end 时 end_time 修正为 start+60 确保至少活跃 1 小时"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        # 设置 start_base < end_base，但 jitter 使 start_time >= end_time
+        life.character.extensions.event_day_start_hour = 9    # 540
+        life.character.extensions.event_day_end_hour = 10     # 600
+        # 不用 jitter，直接改为 set 精确值，用 monkeypatch 控制随机结果
+        life.character.extensions.event_day_start_jitter_minutes = 60
+        life.character.extensions.event_day_end_jitter_minutes = 60
+
+        # 控制 randint 返回极端值：start 取 +60, end 取 -60
+        # 使 start=540+60=600, end=600+(-60)=540 → start(600) >= end(540)
+        call_log = []
+
+        def controlled_randint(self_, a, b):
+            call_log.append((a, b))
+            if len(call_log) == 1:
+                return b    # start_jitter = +60 → start = 540+60 = 600
+            return a        # end_jitter = -60  → end   = 600-60 = 540
+
+        monkeypatch.setattr("random.Random.randint", controlled_randint)
+
+        start, end, rng = life._compute_daily_boundaries()
+        # start_base(540) < end_base(600), start_time(600) >= end_time(540) → 修正
+        assert end == start + 60  # 600 + 60 = 660
+        assert start == 600
+
 
     @pytest.mark.asyncio
     async def test_tick_skips_before_wake_up(self, life, monkeypatch):
@@ -1104,6 +1183,44 @@ class TestCharacterLifePhase2:
         for st in captured_slot_types:
             assert st == "system", f"expected 'system' but got {st!r}"
 
+    @pytest.mark.asyncio
+    async def test_inject_spontaneous_event_exception_returns_false(self, life, mock_event_agent, monkeypatch):
+        """验证 inject_spontaneous_event 捕获异常并返回 False"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+
+        # 让 _inject_spontaneous_event_impl 抛出异常，验证外层 try/except 捕获
+        async def broken_impl(action_description):
+            raise RuntimeError("模拟注入异常")
+
+        monkeypatch.setattr(life, "_inject_spontaneous_event_impl", broken_impl)
+
+        result = await life.inject_spontaneous_event("测试描述")
+        assert result is False
+
+    # ── drain_pending_shares ──────────────────────────────
+
+    def test_drain_pending_shares(self, life):
+        """验证 drain 返回全部待分享事件并清空内部列表"""
+        life._pending_shares.append(("事件1", "反应1", 0.5))
+        life._pending_shares.append(("事件2", "反应2", 0.8))
+
+        shares = life.drain_pending_shares()
+        assert len(shares) == 2
+        assert shares[0] == ("事件1", "反应1", 0.5)
+        assert shares[1] == ("事件2", "反应2", 0.8)
+        # 内部列表应已被清空
+        assert life._pending_shares == []
+
+    def test_drain_pending_shares_empty(self, life):
+        """验证 drain 在无待分享事件时返回空列表"""
+        life._pending_shares.clear()
+        shares = life.drain_pending_shares()
+        assert shares == []
+
     # ── 边界测试补充（R14-2 / R14-3） ─────────────
 
     def test_min_interval_too_large_generates_boundary_slots_only(self, life, monkeypatch):
@@ -1679,3 +1796,110 @@ class TestMidnightEndHourJitter:
         # 新槽位包含 wake_up
         types = [t for _, t in (life._slot_minutes_today or [])]
         assert "wake_up" in types
+
+
+# ── Q151: CharacterLife 确定性逻辑单元测试 ────────────────────────────────
+
+
+class TestGenerateDailyEventDirect:
+    """直接测试 generate_daily_event（不通过 tick）"""
+
+    @pytest.mark.asyncio
+    async def test_generate_daily_event_system_slot(self, life, monkeypatch):
+        """generate_daily_event(slot_type='system') 正常生成事件"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+
+        results = await life.generate_daily_event(slot_type="system")
+        assert len(results) >= 1
+        assert results[0]["description"] == "窗外下起了小雨"
+        assert results[0]["slot_type"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_generate_daily_event_wake_up(self, life, monkeypatch):
+        """generate_daily_event(slot_type='wake_up') 生成起床事件"""
+        fake_now = datetime(2024, 1, 1, 8, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+
+        results = await life.generate_daily_event(slot_type="wake_up")
+        assert len(results) >= 1
+        assert results[0]["slot_type"] == "wake_up"
+
+    @pytest.mark.asyncio
+    async def test_generate_daily_event_exception_returns_empty(self, life, monkeypatch):
+        """generate_daily_event 异常时返回空列表"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+
+        async def broken_impl(today, now, slot_type):
+            raise RuntimeError("模拟异常")
+
+        monkeypatch.setattr(life, "_generate_daily_event_impl", broken_impl)
+
+        results = await life.generate_daily_event(slot_type="system")
+        assert results == []
+
+
+class TestGenerateDailyEventExceptionFallback:
+    """generate_daily_event 异常回退路径测试 (Q162)"""
+
+    @pytest.fixture
+    def mock_event_agent(self):
+        """覆盖模块级 fixture — 抛出 RuntimeError 模拟 LLM 调用失败"""
+        agent = MagicMock()
+        agent.generate_event_result = AsyncMock(side_effect=RuntimeError("LLM 调用失败"))
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_agent_result_exception_returns_empty(self, life, monkeypatch):
+        """EventGenerationAgent.generate_event_result 抛出异常时返回空列表"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        results = await life.generate_daily_event(slot_type="system")
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_agent_reaction_exception_returns_empty(self, life, monkeypatch):
+        """EventGenerationAgent.generate_event_reaction 抛出异常时返回空列表"""
+        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult
+
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+        life.event_agent.generate_event_result = AsyncMock(return_value=EventGenerationResult(
+            description="测试事件", duration_minutes=0,
+        ))
+        life.event_agent.generate_event_reaction = AsyncMock(side_effect=RuntimeError("反应生成失败"))
+
+        results = await life.generate_daily_event(slot_type="system")
+        assert results == []
+
+
+class TestInjectSpontaneousEventDirect:
+    """直接测试 inject_spontaneous_event"""
+
+    @pytest.mark.asyncio
+    async def test_inject_spontaneous_event_success(self, life, mock_event_agent, monkeypatch):
+        """inject_spontaneous_event 正常注入成功返回 True"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.character_life.wall_now",
+            lambda tz: fake_now,
+        )
+
+        result = await life.inject_spontaneous_event("角色正在发呆")
+        assert result is True
