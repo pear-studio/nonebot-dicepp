@@ -1,7 +1,9 @@
+import os
 import sys
 import re
 import contextvars
 import traceback
+from pathlib import Path
 from typing import List
 
 from loguru import logger
@@ -14,6 +16,46 @@ LOG_FORMAT = (
     "<level>{message}</level>"
 )
 
+# 文件日志格式（无颜色代码）
+FILE_LOG_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+    "{level: <8} | "
+    "{name}:{line} | "
+    "{extra[request_id]} | "
+    "{message}"
+)
+
+
+def _get_logs_dir() -> str:
+    """获取持久化日志目录路径（data/logs/）。
+
+    通过 DICEPP_PROJECT_ROOT 环境变量定位项目根（Docker/打包环境均已设置），
+    确保日志文件写入挂载的 volume，容器重建后不丢失。
+    """
+    project_root = os.getenv("DICEPP_PROJECT_ROOT")
+    if project_root:
+        return os.path.join(project_root, "data", "logs")
+    # 兜底：从当前文件位置向上推算项目根
+    # utils/logger.py → utils/ → DicePP/ → plugins/ → src/ → project_root/
+    project_root = str(Path(__file__).resolve().parents[4])
+    return os.path.join(project_root, "data", "logs")
+
+
+# 确保日志目录存在
+_logs_dir = _get_logs_dir()
+os.makedirs(_logs_dir, exist_ok=True)
+
+
+def _patch_extra(record: dict) -> None:
+    """为每条 log record 补全缺失的 extra 字段。
+
+    NoneBot 框架自身 emit 的日志不携带 request_id，直接使用
+    {extra[request_id]} 格式化会导致 KeyError。此 patcher 确保
+    所有 handler 在格式化前都能拿到安全的默认值。
+    """
+    record["extra"].setdefault("request_id", "--------")
+
+
 # 移除默认 handler
 logger.remove()
 
@@ -22,14 +64,33 @@ _STDERR_HANDLER_ID = logger.add(
     sys.stderr, format=LOG_FORMAT, level="DEBUG", colorize=True,
 )
 
-# error.log 文件 handler（延迟创建，10MB 轮转）
+# 全级别持久化日志文件（按天轮转，保留 30 天，压缩归档）
+# 写入 data/logs/ 目录（挂载的 volume），容器重建后日志不丢失
 logger.add(
-    "error.log", rotation="10 MB", diagnose=False, level="ERROR",
-    format=LOG_FORMAT, delay=True,
+    os.path.join(_logs_dir, "dicepp.log"),
+    rotation="00:00",
+    retention="30 days",
+    compression="gz",
+    diagnose=False,
+    level="DEBUG",
+    format=FILE_LOG_FORMAT,
+    encoding="utf-8",
+    delay=True,
 )
 
-# 配置默认的 extra 值，避免未设置 request_id 时报 KeyError
-logger.configure(extra={"request_id": "--------"})
+# error 级别独立日志文件（10MB 轮转，方便快速定位错误）
+logger.add(
+    os.path.join(_logs_dir, "error.log"),
+    rotation="10 MB",
+    diagnose=False,
+    level="ERROR",
+    format=FILE_LOG_FORMAT,
+    encoding="utf-8",
+    delay=True,
+)
+
+# 配置默认 extra + 全局 patcher，确保所有 handler 都能安全格式化
+logger.configure(extra={"request_id": "--------"}, patcher=_patch_extra)
 
 
 def configure_log_level(level: str) -> None:

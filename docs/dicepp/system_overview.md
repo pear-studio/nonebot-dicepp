@@ -61,6 +61,20 @@ flowchart TD
     proxy --> outbound
 ```
 
+## 日志
+
+运行时的日志行为由 `utils/logger.py` 在模块导入时配置：
+
+| 输出目标 | 路径 | 轮转策略 | 保留 | 压缩 |
+|----------|------|----------|------|------|
+| stderr | — | — | — | — |
+| 全级别文件 | `data/logs/dicepp.log` | 每日 00:00 | 30 天 | gz |
+| 错误文件 | `data/logs/error.log` | 10 MB | — | — |
+
+日志目录通过 `DICEPP_PROJECT_ROOT` 环境变量定位（Docker/打包环境均已设置），确保日志写入挂载的 volume，容器重建后不丢失。文件 handler 使用 `delay=True`，首次写入时才打开文件句柄，避免导入即占用。
+
+stderr 输出级别可通过 `configure_log_level(level)` 运行时调整。
+
 ## 文档阅读路径
 
 - 命令运行机制：`command_runtime.md`
