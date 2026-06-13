@@ -78,6 +78,8 @@ DICE_CORPUS: List[CorpusEntry] = [
     CorpusEntry("1D20+1D6", description="Two dice types"),
     CorpusEntry("(1D20+5)*2", description="Dice in parentheses"),
     CorpusEntry("D20+D20", description="Same dice twice"),
+    CorpusEntry("1D6+5+1D4", description="Dice plus constant plus dice"),
+    CorpusEntry("1D20-1D6", description="Dice minus dice"),
 ]
 
 # Modifier expressions

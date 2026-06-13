@@ -17,6 +17,7 @@ class RollResult:
         self.d20_num: int = 0  # 表示表达式包含多少个D20
         self.d100_num: int = 0  # 表示表达式包含多少个D100
         self.average_list: List[int] = [] # 代表骰子平均出目
+        self.d20_list: List[int] = []  # D20骰子的原始出目值，与stat recording配合使用
         self.success: int = 0  # 大成功，不论是何种骰
         self.fail: int = 0  # 大失败，不论是何种骰
         self.float_state: bool = False  # 是否使用float的运算方式

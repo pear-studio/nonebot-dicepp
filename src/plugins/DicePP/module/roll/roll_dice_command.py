@@ -533,7 +533,7 @@ async def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollR
             pass
     user_stat.roll.times.inc(roll_times)
     for res in (res for res in res_list if res.d20_num == 1):
-        user_stat.roll.d20.record(int(res.val_list[0]))
+        user_stat.roll.d20.record(int(res.d20_list[0]))
     try:
         await bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=user_stat.serialize()))
     except Exception as _exc:
@@ -551,7 +551,7 @@ async def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollR
             pass
     group_stat.roll.times.inc(roll_times)
     for res in (res for res in res_list if res.d20_num == 1):
-        group_stat.roll.d20.record(int(res.val_list[0]))
+        group_stat.roll.d20.record(int(res.d20_list[0]))
     try:
         await bot.db.group_stat.upsert(GroupStat(group_id=meta.group_id, data=group_stat.serialize()))
     except Exception as _exc:

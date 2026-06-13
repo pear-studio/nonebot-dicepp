@@ -149,7 +149,11 @@ def build_roll_result(ast_result: RollExpressionResult) -> RollResult:
         multi_kept = []
         for dr in dice_results:
             multi_kept.extend(r.value for r in dr.rolls if r.kept)
-        result.val_list = multi_kept if multi_kept else [ast_result.value]
+        multi_sum = sum(multi_kept)
+        if isinstance(ast_result.value, int) and multi_sum == ast_result.value:
+            result.val_list = multi_kept if multi_kept else [ast_result.value]
+        else:
+            result.val_list = [ast_result.value]
     else:
         result.val_list = [ast_result.value]
 
@@ -163,6 +167,7 @@ def build_roll_result(ast_result: RollExpressionResult) -> RollResult:
         if sides == 20:
             result.d20_num += kept_count
             for r in kept_rolls:
+                result.d20_list.append(r.value)
                 if r.value == 20:
                     result.success += 1
                 elif r.value == 1:
