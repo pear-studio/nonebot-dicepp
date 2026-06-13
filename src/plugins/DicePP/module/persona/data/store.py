@@ -63,8 +63,8 @@ class PersonaDataStore:
     # 每个 user_id/group_id 保留的 AMBIENT 消息上限
     _AMBIENT_MAX_PER_SCOPE = 50
 
-    # Persona 面层查询过滤：排除系统日志和环境消息
-    _PERSONA_SCOPE = "type NOT IN ('system_log', 'ambient')"
+    # Persona 面层查询过滤：排除系统日志，包含 ambient 以提供完整上下文
+    _PERSONA_SCOPE = "type != 'system_log'"
 
     def __init__(
         self,

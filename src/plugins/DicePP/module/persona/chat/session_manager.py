@@ -27,6 +27,9 @@ COMPRESSION_SYSTEM_PROMPT = """\
 
 _INFINITE_GAP_SECONDS = 10 ** 6
 
+# 冷启动回填消息数量上限：提供足够上下文（~20 条群聊消息）但不超出窗口容量
+_BACKFILL_LIMIT = 20
+
 
 def _now() -> datetime:
     return datetime.now(tz.utc)
@@ -111,6 +114,48 @@ class SessionManager:
         import hashlib
         return hashlib.md5(static_prompt.encode()).hexdigest()[:16]
 
+    async def _backfill_context(
+        self, session_id: int, user_id: str, is_group: bool,
+    ) -> None:
+        """冷启动回填：从 message_stream 取最近消息追加到新 session。
+
+        群聊使用 get_group_messages（按 group_id），私聊使用 get_recent_messages（按 user_id + group_id=''）。
+        回填消息保留原始时间，role 统一为 user。
+        """
+        from ..chat.session import _format_group_message
+        from ..data.models import PersonaSessionMessage
+        from ..chat.compression import estimate_session_tokens
+
+        if is_group:
+            recent = await self._store.get_group_messages(user_id, limit=_BACKFILL_LIMIT)
+        else:
+            recent = await self._store.get_recent_messages(user_id, "", limit=_BACKFILL_LIMIT)
+
+        if not recent:
+            return
+
+        msgs = []
+        for m in recent:
+            ts = m.created_at.strftime("%H:%M") if m.created_at else ""
+            if is_group:
+                speaker = m.display_name or m.user_id
+                formatted = _format_group_message(
+                    {"speaker_name": speaker, "display_name": speaker},
+                    ts, "", m.content,
+                )
+            else:
+                formatted = f"[{ts}] {m.content}"
+            msgs.append(PersonaSessionMessage(
+                session_id=session_id,
+                role="user",
+                content=formatted,
+                created_at=m.created_at,
+            ))
+        await self.append_messages(session_id, msgs)
+        all_msgs = await self._store.get_session_messages(session_id)
+        est = estimate_session_tokens(all_msgs)
+        await self.update_token_estimate(session_id, est)
+
     async def get_or_create(
         self,
         user_id: str,
@@ -145,6 +190,7 @@ class SessionManager:
                 status="active",
                 last_active_at=now,
             )
+            await self._backfill_context(session.session_id, user_id, is_group)
             time_note = _make_time_notification(self._timezone)
             return SessionDecision(
                 session=session, is_new=True,
@@ -154,16 +200,20 @@ class SessionManager:
         # gap 超时 → 归档旧 + 建新
         gap = (now - active.last_active_at).total_seconds() if active.last_active_at else _INFINITE_GAP_SECONDS
         if gap > gap_seconds:
-            await self.compact_session(active.session_id, reason="gap_expired")
-            session = await self._store.create_session(
-                user_id=user_id,
-                character_id=character_id,
-                static_prompt=static_prompt,
-                static_hash=static_hash,
-                token_budget=token_budget,
-                status="active",
-                last_active_at=now,
-            )
+            _, _, compact_new_id = await self.compact_session(active.session_id, reason="gap_expired")
+            if compact_new_id is not None:
+                session = await self._store.get_session_by_id(compact_new_id)
+            else:
+                session = await self._store.create_session(
+                    user_id=user_id,
+                    character_id=character_id,
+                    static_prompt=static_prompt,
+                    static_hash=static_hash,
+                    token_budget=token_budget,
+                    status="active",
+                    last_active_at=now,
+                )
+            await self._backfill_context(session.session_id, user_id, is_group)
             time_note = _make_time_notification(self._timezone)
             return SessionDecision(
                 session=session, is_new=True,
@@ -236,7 +286,7 @@ class SessionManager:
         async with lock:
             session = await self._store.get_session_by_id(session_id)
             if session is None:
-                return (False, None)
+                return (False, None, None)
 
             all_msgs = await self._store.get_session_messages(session_id)
             msg_count = len(all_msgs)
@@ -248,7 +298,7 @@ class SessionManager:
                     "reason=%s action=skip_low_count msg_count=%d",
                     session_id, session.user_id, reason, msg_count,
                 )
-                return (False, None)
+                return (False, None, None)
 
             # 切分 old / recent
             old_msgs, recent_msgs = ensure_tool_pairs(all_msgs, KEEP_RECENT)
@@ -301,7 +351,7 @@ class SessionManager:
                     "reason=%s action=skip_concurrent session_already_handled",
                     session_id, _user_id, reason,
                 )
-                return (False, None)
+                return (False, None, None)
 
             # 创建新 session
             new_session = await self._store.create_session(
@@ -356,7 +406,7 @@ class SessionManager:
                 fallback,
             )
 
-            return (True, notification_text)
+            return (True, notification_text, new_session.session_id)
 
     async def add_bypass_message(self, session_id: int, content: str) -> None:
         """群聊旁路：封装 PersonaSessionMessage 构造并由锁保护写入。"""

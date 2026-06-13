@@ -12,7 +12,8 @@ from plugins.DicePP.module.persona.chat.session_manager import (
     _make_time_notification,
 )
 from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-from plugins.DicePP.module.persona.data.models import PersonaSession
+from plugins.DicePP.module.persona.data.models import PersonaSession, UnifiedMessage
+from plugins.DicePP.core.message_types import MessageType
 
 
 def _make_session(**overrides) -> PersonaSession:
@@ -143,6 +144,159 @@ class TestGetOrCreate:
         assert decision.session.session_id == 1
 
 
+class TestBackfillContext:
+    """冷启动回填 — 群聊用 get_group_messages，私聊用 get_recent_messages"""
+
+    @pytest.fixture
+    def store(self):
+        s = AsyncMock()
+        s.get_active_session = AsyncMock(return_value=None)
+        s.create_session = AsyncMock()
+        s.update_session = AsyncMock()
+        s.get_session_messages = AsyncMock(return_value=[])
+        s.add_session_messages = AsyncMock()
+        s.get_session_by_id = AsyncMock()
+        s.delete_session = AsyncMock()
+        s.get_group_messages = AsyncMock(return_value=[])
+        s.get_recent_messages = AsyncMock(return_value=[])
+        return s
+
+    @pytest.fixture
+    def mgr(self, store):
+        config = ChatConfig()
+        return SessionManager(store=store, config=config)
+
+    @pytest.mark.asyncio
+    async def test_group_cold_start_backfills_from_group_messages(self, mgr, store):
+        """群聊冷启动：回填 get_group_messages 的返回结果"""
+        now = datetime.now(tz.utc)
+        recent = [
+            UnifiedMessage(
+                user_id="u2", group_id="g1", role="user", type=MessageType.AMBIENT,
+                content="刚看演唱会回来", display_name="梨子", created_at=now - timedelta(minutes=5),
+            ),
+            UnifiedMessage(
+                user_id="u1", group_id="g1", role="user", type=MessageType.CHAT,
+                content="6", display_name="Emiya", created_at=now - timedelta(minutes=2),
+            ),
+        ]
+        store.get_group_messages.return_value = recent
+        new_session = _make_session(session_id=1)
+        store.create_session.return_value = new_session
+
+        decision = await mgr.get_or_create(
+            user_id="g1", character_id="char1",
+            static_prompt="prompt", static_hash="hash1",
+            is_group=True,
+        )
+
+        assert decision.is_new is True
+        store.get_group_messages.assert_called_once_with("g1", limit=20)
+        store.get_recent_messages.assert_not_called()
+        # 回填后 add_session_messages 被调用
+        add_call_args = store.add_session_messages.call_args
+        assert add_call_args is not None
+        msgs = add_call_args[0][1]
+        assert len(msgs) == 2
+        # 第一条是 ambient 消息，带时间戳
+        assert "刚看演唱会回来" in msgs[0].content
+        assert "[梨子]" in msgs[0].content
+        # 保留了原始 created_at
+        assert msgs[0].created_at == recent[0].created_at
+
+    @pytest.mark.asyncio
+    async def test_private_cold_start_backfills_from_recent_messages(self, mgr, store):
+        """私聊冷启动：回填 get_recent_messages 的返回结果"""
+        now = datetime.now(tz.utc)
+        recent = [
+            UnifiedMessage(
+                user_id="u1", group_id="", role="user", type=MessageType.CHAT,
+                content="你好", display_name="", created_at=now - timedelta(minutes=3),
+            ),
+        ]
+        store.get_recent_messages.return_value = recent
+        new_session = _make_session(session_id=1)
+        store.create_session.return_value = new_session
+
+        decision = await mgr.get_or_create(
+            user_id="u1", character_id="char1",
+            static_prompt="prompt", static_hash="hash1",
+            is_group=False,
+        )
+
+        assert decision.is_new is True
+        store.get_recent_messages.assert_called_once_with("u1", "", limit=20)
+        store.get_group_messages.assert_not_called()
+        add_call_args = store.add_session_messages.call_args
+        assert add_call_args is not None
+        msgs = add_call_args[0][1]
+        assert len(msgs) == 1
+        assert "你好" in msgs[0].content
+
+    @pytest.mark.asyncio
+    async def test_backfill_empty_skips(self, mgr, store):
+        """回填结果为空时不写入任何消息"""
+        new_session = _make_session(session_id=1)
+        store.create_session.return_value = new_session
+
+        await mgr.get_or_create(
+            user_id="g1", character_id="char1",
+            static_prompt="prompt", static_hash="hash1",
+            is_group=True,
+        )
+
+        # 回填为空时不应有任何消息写入
+        store.add_session_messages.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_gap_expired_also_backfills(self, mgr, store):
+        """gap 超时新建 session 也会回填"""
+        now = datetime.now(tz.utc)
+        old_session = _make_session(
+            session_id=1,
+            last_active_at=now - timedelta(days=2),
+        )
+        recent = [
+            UnifiedMessage(
+                user_id="u2", group_id="g1", role="user", type=MessageType.CHAT,
+                content="hello", display_name="Alice", created_at=now - timedelta(minutes=10),
+            ),
+        ]
+        store.get_active_session.return_value = old_session
+        store.get_group_messages.return_value = recent
+        new_session = _make_session(session_id=2)
+        store.create_session.return_value = new_session
+
+        decision = await mgr.get_or_create(
+            user_id="g1", character_id="char1",
+            static_prompt="prompt", static_hash="hash1",
+            is_group=True,
+        )
+
+        assert decision.is_new is True
+        assert decision.session.session_id == 2
+        store.get_group_messages.assert_called_once_with("g1", limit=20)
+
+    @pytest.mark.asyncio
+    async def test_normal_reuse_skips_backfill(self, mgr, store):
+        """正常复用 session 时不触发回填"""
+        now = datetime.now(tz.utc)
+        old_session = _make_session(
+            session_id=1, static_hash="hash1",
+            last_active_at=now - timedelta(minutes=5),
+        )
+        store.get_active_session.return_value = old_session
+
+        await mgr.get_or_create(
+            user_id="g1", character_id="char1",
+            static_prompt="prompt", static_hash="hash1",
+            is_group=True,
+        )
+
+        store.get_group_messages.assert_not_called()
+        store.get_recent_messages.assert_not_called()
+
+
 class TestShutdown:
     """SessionManager.shutdown — 取消所有后台任务并等待完成。"""
 
@@ -228,7 +382,7 @@ class TestCompactSession:
     @pytest.mark.asyncio
     async def test_nonexistent_session_returns_false(self, mgr, store):
         store.get_session_by_id.return_value = None
-        ok, text = await mgr.compact_session(999)
+        ok, text, new_id = await mgr.compact_session(999)
         assert ok is False
         assert text is None
 
@@ -242,7 +396,7 @@ class TestCompactSession:
             {"role": "assistant", "content": "hello"},
         ]
 
-        ok, text = await mgr.compact_session(1)
+        ok, text, new_id = await mgr.compact_session(1)
 
         assert ok is False
         assert text is None
@@ -262,7 +416,7 @@ class TestCompactSession:
         store.get_session_messages.return_value = msgs
         store.create_session.return_value = new_session
 
-        ok, text = await mgr.compact_session(1, router=None)
+        ok, text, new_id = await mgr.compact_session(1, router=None)
 
         assert ok is True
         assert "之前对话的摘要" in text or "部分历史已丢弃" in text
@@ -290,7 +444,7 @@ class TestCompactSession:
         provider.generate = AsyncMock(return_value=resp)
         router.get_model_provider = MagicMock(return_value=provider)
 
-        ok, text = await mgr.compact_session(1, router=router)
+        ok, text, new_id = await mgr.compact_session(1, router=router)
 
         assert ok is True
         assert "测试摘要" in text
@@ -313,7 +467,7 @@ class TestCompactSession:
         provider.generate = AsyncMock(side_effect=RuntimeError("LLM down"))
         router.get_model_provider = MagicMock(return_value=provider)
 
-        ok, text = await mgr.compact_session(1, router=router)
+        ok, text, new_id = await mgr.compact_session(1, router=router)
 
         assert ok is True
         assert "部分历史已丢弃" in text
@@ -338,7 +492,7 @@ class TestCompactSession:
         tracker["last_context_update_at"] = ctx_time
         tracker["last_event_notification_date"] = "2026-06-01"
 
-        ok, _ = await mgr.compact_session(1, router=None)
+        ok, _, _ = await mgr.compact_session(1, router=None)
 
         assert ok is True
         # 压缩后 tracker 状态应保持连续
