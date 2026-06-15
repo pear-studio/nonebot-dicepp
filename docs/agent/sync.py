@@ -633,6 +633,15 @@ def report_target(target: str, env_arg: str | None) -> None:
     print(f"env: {config.env}")
     print(f"state env: {state.get('env', '<none>') if state else '<none>'}")
     print(f"linkMode: {config.link_mode} ({effective_link_mode(config.link_mode)})")
+    peer = config.raw.get("peer", {})
+    if isinstance(peer, dict) and peer:
+        print("peer paths:")
+        for key in sorted(peer):
+            value = peer[key]
+            if isinstance(value, str) and value:
+                print(f"  - {key}: {value}")
+    else:
+        print("peer paths: <none>")
     print("rule files:")
     for rule in spec.rule_files:
         status = "exists" if rule.exists() else "missing"
@@ -678,13 +687,26 @@ Purpose:
 
 Environment:
   The local environment is read from {rel(agent_dir() / ENV_FILE)} unless --env is passed.
-  The file is local-only and should look like:
+  The file is local-only. A development checkout may look like:
 
     {{
       "env": "dev",
       "linkMode": "auto",
+      "peer": {{
+        "prodRoot": "/path/to/production/checkout"
+      }},
       "ignore": {{
         "skills": ["local-*"]
+      }}
+    }}
+
+  A production checkout may use peer.devRoot instead:
+
+    {{
+      "env": "prod",
+      "linkMode": "auto",
+      "peer": {{
+        "devRoot": "/path/to/development/checkout"
       }}
     }}
 
@@ -694,6 +716,11 @@ Directory convention:
   skills-common/       skills exposed in every environment
   skills-<env>/        skills exposed only in that environment
   platforms/           platform-specific extras; currently claude-linux settings/hooks
+
+Optional peer paths:
+  The peer block is local-only and optional. Handoff skills may use peer.devRoot
+  or peer.prodRoot for cross-environment handoff and read-only evidence checks.
+  sync.py records no peer state and does not write peer directories by itself.
 
 Targets:
   codex   -> .codex/AGENTS.md, .codex/CODEX.md, .codex/skills/
