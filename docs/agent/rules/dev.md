@@ -5,7 +5,7 @@
 ## Validation
 
 - 完成前运行与风险相称的验证，并报告结果。
-- 开发验证优先使用 `run-tests` 和 `dicepp-shell` 技能；命令细节以对应技能和项目配置为准。
+- 开发验证优先使用 `auto-test-run`；涉及机器人指令交互时配合 `dicepp-shell`。
 - 涉及外部 API、LLM 或付费服务调用时，先确认配置、成本和调用次数边界。
 
 ## Backlog

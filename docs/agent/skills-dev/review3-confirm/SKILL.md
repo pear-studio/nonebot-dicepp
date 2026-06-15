@@ -54,7 +54,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - Reviewer 可自行裁定时：
      - Defender 采纳/部分采纳 → `已共识·实施`
      - Defender 不采纳且理由成立，且该问题**永远不需要做** → `已共识·否决`（无需代码改动）
-     - Defender 不采纳且理由成立，但该问题**当前 scope 不做、将来要做** → `已共识·延后`（无需代码改动，归档到 backlog）
+     - Defender 不采纳且理由成立，但该问题**当前 scope 不做、将来要做** → `已共识·延后`（无需代码改动，后续询问用户是否归档到 backlog）
      - Defender 不采纳但理由不足 → 进入分支 B
    - Reviewer 无法自行裁定时 → 进入分支 B
 
@@ -103,23 +103,11 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - 用户确认后，再执行步骤 7 的 batch-update 写入 Confirm 块
    - 未经用户确认的延后条目不得归档
 
-7. 用户确认后，先执行 batch-update 写入 Confirm 块（命令格式同步骤 5），再自动归档 `已共识·延后` 条目到 backlog：
+7. 用户确认后，先执行 batch-update 写入 Confirm 块（命令格式同步骤 5），再通过 backlog skill 归档 `已共识·延后` 条目：
    - 扫描所有 `共识状态: 已共识·延后`（含 review0 产出的"用户明确·延后"）的 Rn
-   - 提取 module（从 review 文档名推断）、title、symptom、plan
-   - 在上下文中构造 payload，**一次**调用 `backlog.py batch-add`：
-     ```bash
-     python scripts/tools/backlog.py batch-add <<'EOF'
-     Module: persona
-     Title: <Rn 标题>
-     Symptom:
-       - 现象 / 数据 / 日志
-     Plan:
-       - 修复方向
-       - 影响面
-       - 风险点 / 何时拉起
-     <<<END>>>
-     EOF
-     ```
+   - 使用 `backlog-add` skill 决定如何写入 `docs/dev/backlog.md`，由 backlog skill 负责 `Priority`、`Type`、`Effort`、`Symptom`、`Plan` 等字段约束和写入方式
+   - 将 Rn 标题、问题表现、开发备忘、Review/Reply/Confirm 中的必要上下文提供给 `backlog-add`
+   - 不在本 skill 中手写 `backlog.py batch-add` payload，避免和 backlog 格式强耦合
    - 用返回的 ID 列表，**一次** `review_record.py batch-update` 把 `已归档: B-...` 写回每个对应 Rn 的 Confirm 块
 8. `batch-update` 写入完成后自动标记阶段 3 完成；若 Confirm 内容包含 `需补充回复`，自动回退阶段 2。无需手动更新 checklist
 9. 检查是否存在 `需补充回复` 条目：
@@ -148,7 +136,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 - `已共识·延后` 必须填写 `问题表现` 和 `开发备忘`，缺一不可
 - `需补充回复` 条目不得进入 review4-execute，必须通知用户让 Defender 先补充回复
 - 分歧仲裁必须当场闭环，不得遗留
-- `已共识·延后` 必须在本阶段自动归档到 backlog，不得遗留到 review5
+- `已共识·延后` 是否写入 backlog 必须经用户确认；确认写入后，交给 `backlog-add` skill 处理字段和落盘，不在本 skill 内维护 backlog 格式
 
 ## Worktree 路径规范
 

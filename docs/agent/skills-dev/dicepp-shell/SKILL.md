@@ -1,116 +1,59 @@
 ---
 name: dicepp-shell
-description: "使用 DicePP Shell 工具进行交互式机器人测试. 开发时可以用来快速确认指令工作是否正常, 新功能完成前必须调用该工具进行验收."
+description: 使用 DicePP Shell 工具进行交互式机器人指令验收。涉及用户可见指令、骰子结果、会话状态、多步骤流程、私聊/群聊差异或需要确认机器人实际回复时使用；开发验证时可由 auto-test-run 配合调用。
 license: MIT
 metadata:
   author: DicePP
   version: "1.0"
 ---
 
-## 前提条件
+# DicePP Shell
 
-1. 确保在项目根目录（包含 `src/plugins/DicePP/` 的目录）
-2. 确保依赖已安装：`uv sync --group dev`
+使用 `dicepp-shell` 做用户可见行为验收。它适合验证“用户发了什么，机器人回了什么”，不要用它替代单元测试覆盖纯内部逻辑。
 
-## 使用方法
+## 基本流程
 
-### 快速测试单个命令
-
-```bash
-# 创建会话
-uv run dicepp-shell start test
-
-# 发送命令（带确定性骰子结果）
-uv run dicepp-shell send test --user player1 --msg ".r 1d20 攻击" --dice 20
-
-# 清理
-uv run dicepp-shell rm test
-```
-
-### 多步骤场景测试
+在项目根目录运行：
 
 ```bash
-# 1. 创建专门用于此场景的会话
-uv run dicepp-shell start <scenario_name> --group <group_id>
-
-# 2. 按顺序执行测试步骤
-uv run dicepp-shell send <scenario_name> --user <user> --msg "<cmd>" [--dice <seq>]
-
-# 3. 查看结果，必要时使用 --json 获取结构化输出
-uv run dicepp-shell send <scenario_name> --user <user> --msg "<cmd>" --json
-
-# 4. 完成后清理
-uv run dicepp-shell rm <scenario_name>
+uv run dicepp-shell start <session> [--group <group_id>]
+uv run dicepp-shell send <session> --user <user_id> --msg "<message>" [--dice <seq>] [--json]
+uv run dicepp-shell rm <session>
 ```
 
-### 常用命令速查
+多步骤流程使用同一个 session 顺序发送消息。需要稳定骰子结果时使用 `--dice`，需要机器可读输出时使用 `--json`。
 
-| 命令 | 用途 |
-|------|------|
-| `.r 1d20+5 攻击` | 掷骰 |
-| `.init` | 先攻模式 |
-| `.init join <name>` | 加入先攻 |
-| `.init next` | 下一回合 |
-| `.init end` | 结束战斗 |
-| `.角色卡记录` | 创建角色卡 |
-| `.状态` | 查看角色状态 |
-| `.hp +/-<n>` | 修改 HP |
+## 常用选项
 
-## 选项说明
+- `--user <id>`：用户 ID，发送消息时必填
+- `--msg <text>`：消息内容，发送消息时必填
+- `--dice <seq>`：预设骰子序列，如 `20,18,15`
+- `--json`：输出结构化结果，便于检查回复内容
+- `--nick <name>`：设置用户昵称
+- `--private`：使用私聊模式
 
-- `--user <id>`: 用户ID（必需）
-- `--msg <text>`: 消息内容（必需）
-- `--dice <seq>`: 骰子序列，如 `20,18,15`（可选）
-- `--json`: JSON 格式输出（可选）
-- `--nick <name>`: 用户昵称（可选）
-- `--private`: 私聊模式（可选）
+## 验收原则
 
-## 示例场景
+- 使用能表达真实用户行为的消息，不要只验证内部函数路径。
+- 每个场景使用有意义的 session 名，完成后清理。
+- 指令行为发生变化时，至少覆盖一个成功路径；风险较高时补充边界、失败或多用户场景。
+- 验证掷骰、先攻、角色卡等受随机或状态影响的流程时，优先固定骰子结果和 session。
+- 涉及外部 API、真实 LLM、生产数据或高成本场景时，先和用户确认。
 
-### 测试战斗流程
+## 示例
 
 ```bash
-uv run dicepp-shell start combat
-uv run dicepp-shell send combat --user DM --msg ".init"
-uv run dicepp-shell send combat --user 战士 --msg ".ri" --dice 18
-uv run dicepp-shell send combat --user 法师 --msg ".ri" --dice 12
-uv run dicepp-shell send combat --user DM --msg ".init next"
-uv run dicepp-shell rm combat
+uv run dicepp-shell start roll-check
+uv run dicepp-shell send roll-check --user player1 --msg ".r 1d20 攻击" --dice 20 --json
+uv run dicepp-shell rm roll-check
 ```
 
-### 测试角色卡功能
-
-```bash
-uv run dicepp-shell start char
-uv run dicepp-shell send char --user player1 --msg ".角色卡记录
-$姓名$ 测试角色
-$等级$ 5
-$生命值$ 50/50
-$生命骰$ 5/5 D10
-$属性$ 16/14/13/10/12/8"
-uv run dicepp-shell send char --user player1 --msg ".状态"
-uv run dicepp-shell rm char
-```
-
-如需直接调用虚拟环境中的可执行文件：
+如需绕过 `uv run`，可直接调用虚拟环境可执行文件：
 
 ```powershell
 # Windows
-.venv\Scripts\dicepp-shell.exe start test
+.venv\Scripts\dicepp-shell.exe start <session>
 
 # Unix/macOS/Linux
-.venv/bin/dicepp-shell start test
+.venv/bin/dicepp-shell start <session>
 ```
-
-## 最佳实践
-
-1. **命名会话**: 使用有意义的名称，如 `combat_test_20240110`
-2. **使用 --json**: 当需要解析输出时使用 JSON 格式
-3. **控制骰子**: 使用 `--dice` 确保可重复测试结果
-4. **及时清理**: 测试完成后使用 `rm` 删除会话，释放磁盘空间
-
-## 故障排除
-
-- **会话已存在**: `start` 命令会加载已存在的会话
-- **找不到会话**: 先运行 `.venv/bin/dicepp-shell start <name>`
-- **输出乱码**: Windows 终端设置 `chcp 65001`
