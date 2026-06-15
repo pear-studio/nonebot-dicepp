@@ -107,8 +107,17 @@ class Bot:
         self.scheduler = TaskScheduler(error_handler=self.handle_exception)
         self._no_tick: bool = no_tick
 
+        # 健康监控
+        from module.bot_health.monitor import HealthMonitor
+        hc = self.config.health_monitor
+        self.health_monitor = HealthMonitor(
+            account=self.account,
+            heartbeat_timeout_seconds=hc.heartbeat_timeout_seconds,
+            consecutive_fail_threshold=hc.consecutive_fail_threshold,
+            failure_log_interval_seconds=hc.failure_log_interval_seconds,
+        )
+
         # Some packaged runs may receive events before on_bot_connect completes.
-        # Guard delay_init_command() so DB + per-command initialization always happen once.
         self._delay_init_lock = asyncio.Lock()
         self._delay_init_done: bool = False
 
@@ -231,6 +240,9 @@ class Bot:
                 logger.error(f"[TickLoop] 未预期异常 {_type}: {_ex}")
                 logger.error(traceback.format_exc())
                 bot_commands += self.handle_exception(f"Tick Loop: CODE113 ({_type})")
+
+            # 健康监控：周期性心跳超时检测
+            self.health_monitor.check_heartbeat()
 
             # 最多每秒执行一次循环
             free_time = max(loop_begin_time + 1 - loop.time(), 0)

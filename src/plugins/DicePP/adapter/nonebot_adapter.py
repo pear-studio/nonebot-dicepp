@@ -12,9 +12,11 @@ from nonebot.rule import Rule
 from nonebot.adapters.onebot.v11.event import MessageEvent, PrivateMessageEvent, GroupMessageEvent
 from nonebot.adapters.onebot.v11.event import NoticeEvent, GroupIncreaseNoticeEvent, FriendAddNoticeEvent, GroupRecallNoticeEvent
 from nonebot.adapters.onebot.v11.event import RequestEvent, FriendRequestEvent, GroupRequestEvent
+from nonebot.adapters.onebot.v11.event import HeartbeatMetaEvent
 from nonebot.adapters.onebot.v11.bot import Bot as NoneBot
 from nonebot.adapters.onebot.v11 import Message as CQMessage
 from nonebot.adapters.onebot.v11 import ActionFailed
+from nonebot.plugin import on_metaevent
 
 from core.bot import Bot as DicePPBot
 from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, GroupInfo
@@ -38,6 +40,7 @@ except ValueError:
 command_matcher = on_message(block=False)
 notice_matcher = on_notice()
 request_matcher = on_request()
+heartbeat_matcher = on_metaevent(priority=1, block=False)
 
 all_bots: Dict[str, DicePPBot] = {}
 _group_folder_cache: Dict[str, Dict[str, Optional[str]]] = {}
@@ -103,10 +106,18 @@ class NoneBotClientProxy(ClientProxy):
 
     async def process_bot_command(self, command: BotCommandBase) -> None:
         logger.debug(f"[OneBot] [BotCommand] {command}")
+        dice_bot = all_bots.get(self.bot.self_id)
         try:
             await super().process_bot_command(command)
+            # 发送成功：通知健康监控
+            if isinstance(command, BotSendMsgCommand) and dice_bot is not None:
+                dice_bot.health_monitor.on_send_success()
         except ActionFailed as e:
             logger.info(f"[OneBot] [ActionFailed] {e}")
+            # 转发给健康监控（仅消息发送，排除 BotLeaveGroupCommand 等非发送命令）
+            if isinstance(command, BotSendMsgCommand) and dice_bot is not None:
+                dice_bot.health_monitor.on_send_failure(e.info)
+                dice_bot.health_monitor.check_heartbeat()
         except Exception as e:
             logger.error(f"[OneBot] [UnknownException] {e}\n{traceback.format_exc()}")
 
@@ -390,6 +401,14 @@ async def handle_request(bot: NoneBot, event: RequestEvent):
         '''
 
 
+@heartbeat_matcher.handle()
+async def handle_heartbeat(bot: NoneBot, event: HeartbeatMetaEvent) -> None:
+    """转发 HeartbeatMetaEvent 给对应 bot 的 HealthMonitor。"""
+    dice_bot = all_bots.get(bot.self_id)
+    if dice_bot is not None:
+        dice_bot.health_monitor.on_heartbeat(event.status, event.interval)
+
+
  # 全局Driver
 try:
     driver = nonebot.get_driver()
@@ -416,6 +435,8 @@ else:
         all_bots[bot.self_id] = DicePPBot(bot.self_id)
         all_bots[bot.self_id].set_client_proxy(proxy)
         await all_bots[bot.self_id].delay_init_command()
+        # 通知健康监控：bot 已连接
+        all_bots[bot.self_id].health_monitor.on_bot_connect()
         # 设定Bot自己的昵称，供日志使用
         try:
             await all_bots[bot.self_id].update_nickname(bot.self_id, "origin", bot.self_id)
@@ -429,6 +450,7 @@ else:
         logger.info(f"[NB Adapter] Bot {bot.self_id} Disconnected!")
         instance = all_bots.pop(bot.self_id, None)
         if instance is not None:
+            instance.health_monitor.on_bot_disconnect()
             await instance.shutdown_async()
 
 # ================= Recall Sync Support ==================

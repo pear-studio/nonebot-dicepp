@@ -316,6 +316,14 @@ class MemoryMonitorConfig(BaseModel):
     restart_mb: int = 2048
 
 
+class HealthMonitorConfig(BaseModel):
+    """Bot 健康监控配置"""
+
+    heartbeat_timeout_seconds: int = Field(default=90, ge=1)
+    consecutive_fail_threshold: int = Field(default=5, ge=1)
+    failure_log_interval_seconds: int = Field(default=60, ge=0)
+
+
 class DiceHubConfig(BaseModel):
     api_url: str = ""
     api_key: str = ""
@@ -393,6 +401,7 @@ class BotConfig(BaseModel):
     # Subsystem configs
     persona_ai: PersonaConfig = Field(default_factory=PersonaConfig)
     memory_monitor: MemoryMonitorConfig = Field(default_factory=MemoryMonitorConfig)
+    health_monitor: HealthMonitorConfig = Field(default_factory=HealthMonitorConfig)
     dicehub: DiceHubConfig = Field(default_factory=DiceHubConfig)
     roll: RollConfig = Field(default_factory=RollConfig)
     deck: DeckConfig = Field(default_factory=DeckConfig)
