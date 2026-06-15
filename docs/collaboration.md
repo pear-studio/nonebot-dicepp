@@ -134,25 +134,22 @@ git push origin --delete feature/xxx
 
 ## 发版流程
 
-功能合并到 `master` 后，使用 `bump-version` skill 发版：
+功能合并到 `master` 后，使用 `version-release` skill 发版：
 
 ```
-/bump-version
+/version-release
 ```
 
 流程：
 1. 确认在 `master` 分支
 2. 确认工作区干净
 3. 选择递增级别：patch / minor / major
-4. 执行 `bump-my-version`，自动 commit + tag
-5. 自动 push `master` 和 tag 到远端
+4. 生成或确认 `docs/releases/vX.Y.Z.md` 生产更新风险摘要
+5. 执行 `bump-my-version`，自动 commit + tag
+6. 自动 push `master` 和 tag 到远端
+7. GitHub Actions 基于 tag 构建并发布 GHCR 镜像
 
-发版后更新生产环境：
-
-```bash
-cd prod/
-git pull origin master
-```
+发版后更新生产环境时，使用生产环境的 `version-deploy` skill 部署或回退指定 `vX.Y.Z`，不要用 `git pull origin master` 作为生产更新方式。
 
 ## 分支保护规则
 
@@ -173,7 +170,7 @@ git pull origin master
 | `start-worktree` | `/start-worktree` | 创建 feature worktree 并共享 .venv |
 | `pr-create` | `/pr-create` | 从当前 feature 分支创建 PR |
 | `pr-review` | `/pr-review <number>` | Review PR diff 并执行 approve/merge |
-| `bump-version` | `/bump-version` | 递增版本号、打 tag、推送 |
+| `version-release` | `/version-release` | 创建 release metadata、递增版本号、打 tag、推送 |
 
 ## 注意事项
 
@@ -181,5 +178,5 @@ git pull origin master
 2. **Reviewer 不应审核自己的 PR**。可开另一个 Claude 会话或找他人 review。
 3. **feature 分支命名要清晰**。让别人一眼知道这是做什么的。
 4. **合并前确保 CI 通过**。虽然保护规则未强制要求，但应作为自觉。
-5. **发版前跑测试**。`uv run pytest` 通过后再 bump version。
+5. **发版前跑测试**。`uv run pytest` 通过后再执行 `version-release`。
 6. **及时清理已合并的 worktree**。避免磁盘堆积。

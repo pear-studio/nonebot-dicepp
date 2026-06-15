@@ -1,0 +1,101 @@
+---
+name: deploy-docker
+description: 在 Linux 生产环境执行 DicePP 相关 Docker/Compose 运维动作。当用户要求查看服务状态、日志、pull/up/restart 容器、应用镜像或管理 DicePP/LLOneBot 相关容器时使用。
+license: MIT
+metadata:
+  author: DicePP
+  version: "1.0"
+---
+
+# Deploy Docker
+
+在 Linux 生产环境执行 DicePP 相关 Docker/Compose 运维动作。该技能处理执行层面的服务状态、日志、镜像拉取、容器更新和重启规则。
+
+## 适用场景
+
+- 用户要求查看 Docker/Compose 服务状态、容器日志或健康状态。
+- 用户要求 pull 镜像、up/restart/stop/start DicePP 服务。
+- 用户要求管理 LLOneBot 相关容器。
+- 'version-deploy' 已确认版本变更, 需要执行 Docker/Compose 更新。
+
+## 操作范围
+
+第一版只允许操作 DicePP 部署相关资源：
+
+- 当前项目 Docker Compose 中声明的服务, 目前包括 bot 服务。
+- DicePP 生产链路明确依赖的 LLOneBot 相关容器/服务。
+- 项目文档、Makefile 或 scripts/deploy/linux/llonebot/ 中明确提供的 LLOneBot 运维入口。
+
+默认禁止：
+
+- 操作无关容器或无关 compose project。
+- 执行 'docker system prune'。
+- 删除 volume、数据库、配置、content 或运行时数据。
+- 修改 Docker daemon、宿主机全局网络、防火墙或系统服务。
+- 在未确认影响范围时 stop/restart 生产服务。
+
+## Default Mode
+
+- 状态查看和日志读取默认允许, 但不得输出 secrets。
+- 会改变服务状态的操作必须先说明影响范围、具体命令、预期结果和回滚方式, 等待用户明确确认。
+- 当操作来自 'version-deploy' 时, 仍需遵守该技能的确认结果和目标版本。
+
+## Preferred Entrypoints
+
+优先使用项目已有入口, 不临场拼接自由 Docker 命令：
+
+- DicePP bot 服务优先使用当前项目的 'docker compose'。
+- LLOneBot 优先使用 Makefile 入口：
+  - 'make llbot-start'
+  - 'make llbot-stop'
+  - 'make llbot-restart'
+  - 'make llbot-logs'
+- 如果 Makefile 入口不可用, 再查看 'scripts/deploy/linux/llonebot/' 中的项目脚本。
+- 只有项目入口不可用或不足以完成任务时, 才展示 fallback Docker 命令并等待确认。
+
+## Read-only Checks
+
+常用只读检查包括：
+
+- 'docker compose ps'
+- 'docker compose logs --tail <N> bot'
+- 'docker ps' 仅用于识别 DicePP/LLOneBot 相关容器, 不对无关容器执行操作。
+- 'make llbot-logs' 查看 LLOneBot 日志。
+
+只读检查仍应避免输出 token、cookie、session、密钥、完整敏感配置或二维码敏感内容。
+
+## Confirmed Operations
+
+以下操作必须等待用户明确确认：
+
+- 'docker compose pull'
+- 'docker compose up -d'
+- 'docker compose restart'
+- 'docker compose stop' / 'docker compose start'
+- 'make llbot-start' / 'make llbot-stop' / 'make llbot-restart'
+- 任何会改变容器、镜像、网络或服务状态的命令
+
+确认前必须展示：
+
+- 将操作的服务名或容器名。
+- 完整命令。
+- 预期影响, 如短暂断连、服务重启、WebSocket 重连。
+- 基本回滚方式。
+
+## Version Deploy Integration
+
+当 'version-deploy' 要应用镜像版本时, 推荐执行序列为：
+
+1. 确认 '.env' 中 'DICEPP_IMAGE_TAG' 已更新为目标版本。
+2. 执行 'docker compose pull bot'。
+3. 执行 'docker compose up -d bot'。
+4. 执行 'docker compose ps'。
+5. 查看 'docker compose logs --tail 100 bot'。
+6. 如项目提供健康检查或机器人指令验收方式, 汇报可执行项或已执行结果。
+
+## Important Notes
+
+- 不把 Docker 运维操作和版本选择混在一起；版本选择由 'version-deploy' 处理。
+- 不自动执行 destructive cleanup。
+- 不修改持久化数据；备份与恢复需要用户明确授权和专门流程。
+- 如果命令需要 sudo, 先说明原因和范围。

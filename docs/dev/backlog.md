@@ -12,6 +12,23 @@
 
 ---
 
+## deploy
+
+### [B-260615-19b0fa] 生产备份与恢复策略
+- 创建: 2026-06-15
+- 优先级: P1
+- 类型: feature
+- 改动量: M
+- 问题表现:
+    - 当前版本发布/回退流程即将切到镜像 tag 部署，但缺少对应的生产备份与恢复机制。
+    - 镜像回退无法恢复已经变更的数据库、config、data、content 或运行时状态，容易让“可回退”产生误导。
+    - 生产更新前、定时备份、恢复验证、保留策略和敏感数据处理规则尚未固化。
+- 开发备忘:
+    - 梳理需要备份的范围：.env 白名单/敏感处理、config/、data/、content/、数据库文件、LLOneBot 相关持久化数据。
+    - 设计升级前备份、定时备份、恢复演练、保留周期和失败告警。
+    - 后续可与 version-deploy / deploy-docker 联动：当 release metadata 标记 backup_required: yes 时，生产更新前必须确认备份。
+    - 注意恢复流程不能只写文档，至少需要可验证的恢复步骤或脚本入口。
+
 ## persona
 
 ### [B-260602-4263c4] user_stat/group_stat 的 read-modify-write 写竞争
@@ -40,4 +57,20 @@
   - LLM 路由中优先使用用户自有 key（若已配置），回退到全局 provider
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
+
+## release
+
+### [B-260615-90ee20] GitHub Release 与多产物发布流程
+- 创建: 2026-06-15
+- 优先级: P2
+- 类型: feature
+- 改动量: L
+- 问题表现:
+    - 已决定 docs/releases/vX.Y.Z.md 作为 release metadata 源头，但未来 GitHub Release body、发布附件、镜像、可能的 Windows exe 产物如何统一发布尚未设计。
+    - 当前第一阶段只计划 GHCR Docker 镜像，尚未覆盖桌面/Windows exe、checksums、构建矩阵、手动/自动发布边界等常见发布产物问题。
+- 开发备忘:
+    - 调研并设计后续 release 流程：以 docs/releases/vX.Y.Z.md 生成或同步 GitHub Release body。
+    - 评估是否在 GitHub Release 附加构建产物，如 Windows exe、压缩包、checksums、SBOM 或签名文件。
+    - 保持第一版实现克制：先不承诺具体 exe 技术路线，未来可比较 PyInstaller、zipapp、独立 Python runtime、Docker-only 等方案。
+    - 需要决定哪些产物由 CI 自动生成，哪些必须人工确认后发布；避免 GitHub Actions 自动部署生产。
 
