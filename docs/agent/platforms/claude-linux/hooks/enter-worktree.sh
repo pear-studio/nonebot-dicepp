@@ -38,14 +38,23 @@ for wt in "$MAIN_ROOT/.claude/worktrees/"*/; do
         fi
     fi
 
-    # ── .claude/ 符号链接（skills/rules/agents/CLAUDE.md/settings.json）──
-    if [ -d "$wt/docs/agent/skills" ] && [ ! -e "$wt/.claude/skills" ]; then
-        mkdir -p "$wt/.claude"
-        ln -sf "$wt/docs/agent/rules" "$wt/.claude/rules"
-        ln -sf "$wt/docs/agent/skills" "$wt/.claude/skills"
-        ln -sf "$wt/docs/agent/agents" "$wt/.claude/agents"
-        ln -sf "$wt/docs/agent/rules/CLAUDE.md" "$wt/.claude/CLAUDE.md"
-        ln -sf "$wt/docs/agent/settings.json" "$wt/.claude/settings.json"
-        echo "[hook] .claude links created: $wt"
+    # ── .claude/ agent 配置同步 ──
+    if [ -f "$wt/docs/agent/sync.py" ]; then
+        if [ -f "$MAIN_ROOT/docs/agent/.agent-env.json" ] && [ ! -f "$wt/docs/agent/.agent-env.json" ]; then
+            cp "$MAIN_ROOT/docs/agent/.agent-env.json" "$wt/docs/agent/.agent-env.json"
+            echo "[hook] agent env copied: $wt"
+        fi
+
+        if command -v python3 >/dev/null 2>&1; then
+            PYTHON_BIN=python3
+        elif command -v python >/dev/null 2>&1; then
+            PYTHON_BIN=python
+        else
+            echo "[hook] python not found; skipped agent sync: $wt"
+            continue
+        fi
+
+        (cd "$wt" && "$PYTHON_BIN" docs/agent/sync.py apply claude --env dev)
+        echo "[hook] .claude synced: $wt"
     fi
 done

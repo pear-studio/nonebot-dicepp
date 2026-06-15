@@ -31,15 +31,14 @@ description: Read before every local git commit.
 | `module` | 其他功能模块（roll/deck/character/initiative/query/common） |
 | `test` | 测试基础设施（框架、fixture、配置、用例拆分等） |
 | `dev` | 开发环境/工具链（worktree/venv/Docker/shell/CI/配置） |
-| `agent` | Claude Code 技能文件（docs/agent/skills/、.claude/skills/） |
+| `agent` | Agent 配置与技能文件（docs/agent/rules/、docs/agent/skills-*/、docs/agent/sync.py） |
 | `docs` | 文档（架构、开发指南等） |
 
 不确定 scope 时，选影响最大的模块作为 scope。
 
 ## 规则
 
-- 注意 `docs/agent/link-to-cursor.bat`: `.cursor/rules/*.mdc` 与 `docs/agent/rules/*.md` 是硬链接, `.cursor/skills` 是到 `docs/agent/skills` 的目录符号链接; 任一侧修改会同步到另一侧.
-- 提交前避免把"链接同步产生的镜像改动"重复计入, 按真实源目录(建议 `docs/agent/*`)核对后再暂存.
+- Agent 工具目录由 `docs/agent/sync.py` 生成；提交前避免把同步产生的本地工作目录状态重复计入，按真实源目录 `docs/agent/*` 核对后再暂存.
 - **禁止把流程/过程性信息写进 commit message**. 这些元数据随时间贬值, 读者关心的是"代码到底改了什么", 不是"它走过哪几个开发流程节点":
   - 禁止 review 阶段标记: `review 闭环`、`review 反馈修复`、`R1/R2/R4`、`处理 review 反馈 N 项`
   - 禁止 backlog / 任务 ID 尾巴, 如 `(B-260507-d3cc8b)`

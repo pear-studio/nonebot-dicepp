@@ -1,11 +1,11 @@
-# DicePP 开发规范
+# DicePP Agent Common Rules
 
 ## 强制行为准则
 
 1. **写代码前先阅读现有文件。** 不了解上下文就不要动手改。
 2. **优先编辑，而非重写整个文件。** 最小化变更范围。
 3. **不确定先询问用户。** 不要猜测或假设。
-4. **在宣布完成前测试你的代码。** 验证通过是完成的必要条件。
+4. **在宣布完成前验证你的工作。** 未验证时必须明确说明。
 5. **不要有奉承的开场白或结束语。** 保持简洁直接。
 6. **真正解决根本问题。** 禁止用临时补丁、注释逻辑、防御性空检查来绕过问题。
 7. **用户指令始终覆盖此文件。**
@@ -19,7 +19,7 @@ DicePP 是基于 NoneBot2 的 QQ 骰子机器人插件，用于 TRPG（桌面角
 
 ### 目录结构
 
-```
+```text
 nonebot-dicepp/
 ├── src/plugins/DicePP/   # 主插件代码
 │   ├── core/             # 核心框架 (Bot, Command, Data)
@@ -43,44 +43,18 @@ nonebot-dicepp/
 | 数据层（SQLite） | `src/plugins/DicePP/core/data/database.py` |
 | 完整架构文档 | `docs/dicepp/README.md` |
 
-## Agent Team 协作规范
+## Agent 配置管理
 
-> **触发条件**：以下规范仅在**用户明确提到组建团队 / 使用 agent team / 多角色协作**时生效。普通单轮任务不强制走此流程。
-
-详见 `docs/agent/agents/leader.md`，该文件为 Agent Team 的单一事实来源。
-
----
-
-## 开发命令
-
-```bash
-# 初始化环境
-uv venv .venv && uv pip install ".[dev]"
-
-# 运行测试
-uv run pytest
-
-# 运行指定模块测试
-uv run pytest tests/module/roll/ -v
-
-# 启动机器人
-uv run python bot.py
-```
-
-## 测试与验收
-
-- **单元/集成测试**：优先使用 `run-tests` 技能，或直接运行 `uv run pytest`
-- **交互式验收**：新功能完成前，**必须**使用 `dicepp-shell` 技能进行交互式机器人测试，确认指令行为正确
-- **提交前**：必须跑通 `uv run pytest`，不自动 push
+Agent 规则与技能由 `docs/agent/sync.py` 管理。需要同步、检查、迁移或解释 `.codex`、`.claude` 中的 agent 配置时，运行该脚本的 help 并按脚本输出操作。
 
 ## 代码风格
 
-- **最小化变更**：只改必要的内容
-- **git comment 主要用中文**
-- **细致完成任务**：不赶时间，不跳步骤
-- **保持简单直接**：避免过度工程
-- **命名准确，函数职责单一**
-- **适当处理边界情况**，但不要添加无意义的防御性检查
+- **最小化变更**：只改必要的内容。
+- **git comment 主要用中文**。
+- **细致完成任务**：不赶时间，不跳步骤。
+- **保持简单直接**：避免过度工程。
+- **命名准确，函数职责单一**。
+- **适当处理边界情况**，但不要添加无意义的防御性检查。
 
 ## 配置文件
 
@@ -91,40 +65,16 @@ uv run python bot.py
 | 覆盖率配置 | `.coveragerc` |
 | 环境变量 | `.env` |
 
-## Persona AI 测试 key
-
-开发分支测试 persona 模块时，在 `config/secrets.json` 的 `persona_ai.providers.<name>.api_key` 字段填入测试 API Key。
-
-```json
-{
-  "persona_ai": {
-    "providers": {
-      "minimax": {
-        "api_key": "sk-test-xxx"
-      }
-    }
-  }
-}
-```
-
-**用量约束**：测试 key 按量计费，单次全量跑测建议控制在 10 次 LLM 调用以内。如当前环境未配置测试 key，可向用户索取。
-
----
-
-### 严禁行为（全员适用）
+## 严禁行为（全员适用）
 
 1. **禁止绕过问题**：不可用临时补丁、注释逻辑、防御性空检查、空 catch 块来回避根因。
 2. **禁止越界修改**：各角色只能操作自己边界内的文件。
-3. **禁止无验证的声称**：不可在未运行测试前声称"已完成"或"测试通过"。
+3. **禁止无验证的声称**：不可在未运行验证前声称"已完成"或"测试通过"。
 4. **禁止硬编码业务耦合的默认值**：配置项应走配置系统，不可埋 magic number/string。
 5. **禁止吞掉错误**：不可忽略返回值或无理由强转类型。
 
-## Agent skills
+## Backlog
 
-### Issue tracker
+本地 backlog 文件是 `docs/dev/backlog.md`，由 `scripts/tools/backlog.py` CLI 管理。需要新增、核实清理或实现 backlog 条目时，优先使用对应的 backlog 技能。
 
-本地 markdown 文件 `docs/dev/backlog.md`，由 `scripts/tools/backlog.py` CLI 管理（add/list/show/close/validate/sort）。详见 `docs/agents/issue-tracker.md`。
-
-### Domain docs
-
-Single-context 布局：`docs/CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。
+常用操作包括 `add`、`list`、`show`、`close`、`validate` 和 `sort`。

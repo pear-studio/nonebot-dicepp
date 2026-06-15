@@ -51,10 +51,10 @@ metadata:
 
    如果符号链接创建失败，汇报原因并**停止**。
 
-5. **验证 .claude/ 链接**
+5. **验证 .claude/ agent 配置**
 
    ```bash
-   test -L .claude/skills && echo ".claude links ok" || bash docs/agent/link-to-claude.sh
+   python docs/agent/sync.py apply claude --env dev
    ```
 
 6. **验证环境**
@@ -93,7 +93,7 @@ metadata:
 
 - worktree 提供独立工作区，`config/`、`data/` 等文件互不干扰
 - `.venv` 通过符号链接共享，所有 worktree 使用同一套 Python 环境
-- `.claude/{skills,rules,agents,CLAUDE.md,settings.json}` 通过符号链接指向 `docs/agent/`，使 worktree 可直接使用项目技能和规范
-- `EnterWorktree` 的 hook 配置位于 `docs/agent/settings.json`，脚本位于 `docs/agent/hooks/enter-worktree.sh`（.venv 和 .claude/ 链接均通过同一 hook 自动创建）
-- `docs/agent/link-to-claude.sh` 可一键创建所有符号链接（含 settings.json）
+- `.claude/CLAUDE.md` 与 `.claude/skills/` 由 `docs/agent/sync.py` 基于当前环境生成，使 worktree 可直接使用项目技能和规范
+- `EnterWorktree` 的 Claude/Linux 平台配置位于 `docs/agent/platforms/claude-linux/`
+- Agent 配置同步、检查与状态汇报统一使用 `docs/agent/sync.py`
 - 分支名建议用 `feature/简述` 或 `hotfix/简述` 格式
