@@ -69,20 +69,18 @@ metadata:
 
    必须展示：
 
-   - 当前 'DICEPP_IMAGE_TAG'
+   - 当前运行镜像
    - 目标版本
    - 目标镜像
-   - 'data_risk'
-   - 'config_risk'
-   - 'migration'
-   - 'backup_required'
-   - metadata 中的 Summary / Risk Notes / Verification 摘要
+   - '数据变更' (yes/no)
+   - '配置变更' (yes/no)
+   - metadata 中的 Risk Notes 摘要
 
 6. 备份判断
 
-   - 如果 'backup_required: yes', 更新前必须确认已完成升级前备份。
-   - 如果风险为 'unknown' 或 metadata 缺失, 必须要求用户明确确认备份状态或接受风险。
-   - 镜像回退不等于数据回退；涉及数据/配置/迁移时, 需要按备份/恢复流程处理。
+   - 如果 `数据变更: yes` 或 `配置变更: yes`, 更新前必须确认已完成升级前备份。
+   - 如果 metadata 缺失或无法解析, 必须要求用户明确确认备份状态或接受风险。
+   - 镜像回退不等于数据回退；涉及数据/配置变更时, 需要按备份/恢复流程处理。
 
 7. 展示计划
 

@@ -35,42 +35,40 @@ metadata:
 
 ## Release Metadata
 
-每个 release 必须包含 `docs/releases/vX.Y.Z.md`。该文件至少包含：
+每个 release 必须包含 `docs/releases/vX.Y.Z.md`。格式如下：
 
 ```markdown
 # vX.Y.Z
 
-- image: ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
-- data_risk: yes/no/unknown
-- config_risk: yes/no/unknown
-- migration: yes/no/unknown
-- backup_required: yes/no
+- 镜像: ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
+- 数据变更: yes/no
+- 配置变更: yes/no
 
-## Summary
+## Added
+- 新增的功能
 
-...
+## Changed
+- 行为调整
+
+## Fixed
+- Bug 修复
+
+## Deprecated
+- 废弃或移除的内容
 
 ## Risk Notes
-
-...
-
-## Verification
-
-...
+- 升级注意事项，如数据迁移步骤、配置变更细节、手动操作等
 ```
 
 字段含义：
 
-- `image`: 生产部署使用的 GHCR 镜像 tag。
-- `data_risk`: 是否可能影响 `data/`、数据库 schema、数据迁移或持久化数据结构。
-- `config_risk`: 是否可能影响 `.env`、`config/`、配置 schema 或配置加载行为。
-- `migration`: 是否包含数据库或持久化数据迁移。
-- `backup_required`: 生产更新前是否必须完成升级前备份。
-- `Summary`: 面向生产更新者的人类摘要。
-- `Risk Notes`: 风险依据, 尤其是数据/配置/迁移相关路径。
-- `Verification`: 已运行的验证项和未验证风险。
+- `镜像`: 生产部署使用的 GHCR 镜像 tag。
+- `数据变更`: 是否影响 `data/`、数据库 schema、持久化数据结构或需要执行迁移脚本。
+- `配置变更`: 是否影响 `.env`、`config/`、配置 schema 或配置加载行为。
+- `Added / Changed / Fixed / Deprecated`: 面向所有用户的 changelog。
+- `Risk Notes`: 面向部署者的详细风险说明。如包含数据迁移，在此写明迁移脚本路径和执行方式。
 
-如果无法确认数据/配置风险, 标记为 `unknown`, 并将 `backup_required` 设为 `yes`。
+当任一风险字段无法确认时，`version-deploy` 按最坏情况处理：要求备份 + 用户明确确认。
 
 ## Steps
 
@@ -138,7 +136,7 @@ metadata:
    docs/releases/v{new_version}.md
    ```
 
-   要求用户确认 `data_risk`、`config_risk`、`migration` 和 `backup_required`。可通过 diff 辅助判断, 但不能把不确定风险默认为安全。
+   要求用户确认 `数据变更` 和 `配置变更`。可通过 diff 辅助判断, 但不能把不确定风险默认为安全。
 
 7. **执行版本递增**
 
@@ -189,11 +187,9 @@ metadata:
    版本: X.Y.Z -> A.B.C
    Tag: vA.B.C
    Release metadata: docs/releases/vA.B.C.md
-   Image: ghcr.io/pear-studio/nonebot-dicepp:vA.B.C
-   数据风险: yes/no/unknown
-   配置风险: yes/no/unknown
-   迁移: yes/no/unknown
-   生产更新前备份: yes/no
+   镜像: ghcr.io/pear-studio/nonebot-dicepp:vA.B.C
+   数据变更: yes/no
+   配置变更: yes/no
    推送: 成功/失败
    GitHub Actions: <run URL>
    ```

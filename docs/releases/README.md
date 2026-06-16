@@ -21,7 +21,7 @@ version-release (skill)               version-deploy (skill)
 |------|------|
 | `pyproject.toml` `[project].version` | 版本号唯一真相源 |
 | `src/.../declare.py` `get_bot_version()` | 运行时版本读取（从 importlib.metadata） |
-| `docs/releases/vX.Y.Z.md` | 每个 release 的风险摘要（data_risk / config_risk / migration / backup_required） |
+| `docs/releases/vX.Y.Z.md` | 每个 release 的 changelog 与风险摘要（数据变更 / 配置变更 / Risk Notes） |
 | `docker-compose.yml` | 部署入口，同时支持 `image:`（镜像模式）和 `build:`（源码模式） |
 | `Dockerfile` | 多阶段构建，`uv sync --frozen` 可复现 |
 | `.github/workflows/release.yml` | tag push 触发 GHCR 镜像构建 + GitHub Release 创建 |

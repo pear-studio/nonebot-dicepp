@@ -26,7 +26,7 @@
 - 开发备忘:
     - 梳理需要备份的范围：.env 白名单/敏感处理、config/、data/、content/、数据库文件、LLOneBot 相关持久化数据。
     - 设计升级前备份、定时备份、恢复演练、保留周期和失败告警。
-    - 后续可与 version-deploy / deploy-docker 联动：当 release metadata 标记 backup_required: yes 时，生产更新前必须确认备份。
+    - 后续可与 version-deploy / deploy-docker 联动：当 release metadata 标记 数据变更/配置变更 为 yes 时，生产更新前必须确认备份。
     - 注意恢复流程不能只写文档，至少需要可验证的恢复步骤或脚本入口。
 
 ## persona
