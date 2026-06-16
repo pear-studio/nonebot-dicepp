@@ -16,9 +16,9 @@ src/plugins/DicePP/
 |------|------|
 | `core/` | Bot 生命周期、命令分发、配置、本地化、数据层 |
 | `module/` | 功能模块和命令实现 |
-| `adapter/` | NoneBot / Standalone 适配 |
+| `adapter/` | NoneBot、WebChat 等适配 |
 | `module/persona/` | Persona AI |
-| `module/fastapi/` | Standalone HTTP 接口 |
+| `module/fastapi/` | `/dpp` HTTP 接口 |
 | `tests/` | 测试 |
 | `docs/agent/` | agent 规则、技能和同步工具 |
 
@@ -70,11 +70,7 @@ uv run pytest tests/unit/persona/ -v
 uv run python bot.py
 ```
 
-维护者调试 Standalone HTTP / WebChat runtime：
-
-```bash
-uv run python standalone_bot.py --bot-id 123456 --port 8080
-```
+Standalone 无 QQ 服务入口暂未作为当前运行方式维护，旧实现仅归档为 [archive/standalone_bot_legacy.py](archive/standalone_bot_legacy.py)，后续按 [backlog](backlog.md) 重写。
 
 ## 新增命令
 

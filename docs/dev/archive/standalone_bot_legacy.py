@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-DicePP standalone runtime.
+Legacy DicePP standalone runtime snapshot.
+
+This archived file is kept only as implementation reference for the future
+no-QQ/no-NoneBot service entrypoint redesign. It is not a supported entrypoint,
+is not tested, and may not run from this archived location.
+
+See docs/dev/backlog.md: "重新设计 Standalone 无 QQ 服务入口".
 
 Configuration priority (high → low):
   1. CLI arguments  (--hub-url, --master-id, --nickname, --port)
