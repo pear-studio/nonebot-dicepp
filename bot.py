@@ -11,7 +11,7 @@ _INTERNAL_DIR = None
 
 if _IS_FROZEN:
     # PyInstaller 打包环境
-    # 1. 将工作目录切换到 EXE 所在位置，确保 .env 和 Data 目录可被正确访问
+    # 1. 将工作目录切换到 EXE 所在位置，确保用户数据目录可被正确访问
     exe_dir = os.path.dirname(sys.executable)
     os.chdir(exe_dir)
     # 2. 记录 _internal 目录路径（pyproject.toml 和 DicePP 插件在这里）
@@ -37,8 +37,14 @@ import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBot_V11_Adapter
 from utils.logger import logger
 
-# 初始化 NoneBot
-nonebot.init()
+# 初始化 NoneBot。DicePP 不依赖根目录 .env；这些是当前 OneBot 运行形态的默认值。
+nonebot.init(
+    _env_file=("config/nonebot.env",),
+    host="0.0.0.0",
+    port=8080,
+    command_start={""},
+    command_sep={""},
+)
 
 # 显示启动信息
 @nonebot.get_driver().on_startup

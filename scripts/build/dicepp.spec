@@ -127,8 +127,6 @@ hiddenimports += collect_submodules('lark')
 # Data Files - 需要打包的非 Python 文件
 # ============================================================
 datas = [
-    # NoneBot 配置文件（打包到根目录）
-    (os.path.join(PROJECT_ROOT, '.env'), '.'),
     (os.path.join(PROJECT_ROOT, 'pyproject.toml'), '.'),
     
     # DicePP 插件目录 - 保持与 pyproject.toml 中 plugin_dirs 一致的结构

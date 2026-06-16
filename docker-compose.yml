@@ -22,8 +22,6 @@ services:
       - "8080"
 
     # 环境变量
-    env_file:
-      - .env
     environment:
       - TZ=Asia/Shanghai
 

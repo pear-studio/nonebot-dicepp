@@ -46,15 +46,6 @@ cd ~/dicepp
 mkdir -p config/bots data content
 ```
 
-创建 `.env`：
-
-```text
-COMMAND_START=[""]
-COMMAND_SEP=[""]
-HOST=0.0.0.0
-PORT=8080
-```
-
 从 [DicePP 最新 Release](https://github.com/pear-studio/nonebot-dicepp/releases/latest) 下载 `docker-compose.yml`，放到 `~/dicepp/docker-compose.yml`。
 
 ## 配置账号

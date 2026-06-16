@@ -24,7 +24,7 @@
 
 - 生产发布/回退以 vX.Y.Z release 为单位，不默认部署分支 HEAD 或“最新代码”。
 - 目标 release 必须读取 docs/releases/vX.Y.Z.md 或 GitHub Release body 作为生产更新风险摘要；缺失时按未知风险处理。
-- DICEPP_IMAGE_TAG 通过环境变量传递, 不写入 .env 或配置文件。不得整段输出 .env。
+- DICEPP_IMAGE_TAG 通过命令环境变量传递, 不写入配置文件。不得输出 secrets。
 - 镜像回退不等于数据回退；涉及数据、配置、迁移或风险未知时，必须确认备份状态或明确接受风险。
 - 注入 DICEPP_IMAGE_TAG、pull 镜像、更新容器或重启服务前，必须展示计划并等待用户明确确认。
 

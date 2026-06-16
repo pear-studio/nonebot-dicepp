@@ -23,8 +23,8 @@ metadata:
 - 目标 release 必须由开发环境 'version-release' 创建。
 - 生产使用 GHCR 镜像: 'ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z'。
 - 生产更新风险摘要的唯一源头是 GitHub Release body, 由开发环境 'docs/releases/vX.Y.Z.md' 生成并同步。
-- 'DICEPP_IMAGE_TAG' 通过环境变量传递, 不写入 '.env' 或任何配置文件。
-- 默认只读。修改 '.env'、pull 镜像、重启/更新容器等写操作必须先展示影响、命令和回滚方式, 等待用户明确确认。
+- 'DICEPP_IMAGE_TAG' 通过命令环境变量传递, 不写入任何配置文件。
+- 默认只读。修改运行配置、pull 镜像、重启/更新容器等写操作必须先展示影响、命令和回滚方式, 等待用户明确确认。
 
 ## Preconditions
 
@@ -46,7 +46,7 @@ metadata:
 2. 读取当前生产目标镜像
 
    - 通过 'docker ps' 或 'docker inspect' 确认当前运行镜像。
-   - 不整段打印 '.env', 不输出 secrets。
+   - 不输出 secrets。
 
 3. 读取目标 release metadata
 
@@ -106,4 +106,4 @@ metadata:
 - 不执行 'git pull master' 作为生产部署方式。
 - 不基于模糊的“最新代码”更新生产；必须明确版本。
 - 不自动操作数据库、恢复备份或删除数据；这些必须由专门运维流程处理。
-- 不输出 secrets、token、完整 '.env' 或敏感配置。
+- 不输出 secrets、token 或敏感配置。

@@ -110,7 +110,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-# .env  # 注意：NoneBot 的 .env 配置文件需要追踪，所以不忽略
+.env
 .venv
 env/
 venv/
@@ -150,6 +150,7 @@ dmypy.json
 # DicePP
 config/secrets.json
 !config/secrets.json.example
+config/nonebot.env
 config/bots/*.json
 !config/bots/_template.json
 config/personas/*.local.json

@@ -61,12 +61,6 @@ REM 将用户需要访问的文件从 _internal 移动到 EXE 同级目录
 set "DIST_DIR=dist\DicePP"
 set "INTERNAL_DIR=%DIST_DIR%\_internal"
 
-REM 移动 .env（用户配置文件）
-if exist "%INTERNAL_DIR%\.env" (
-    move "%INTERNAL_DIR%\.env" "%DIST_DIR%\" >nul
-    echo [INFO] Moved .env to application root
-)
-
 REM 移动 Data 目录（用户数据）
 if exist "%INTERNAL_DIR%\Data" (
     move "%INTERNAL_DIR%\Data" "%DIST_DIR%\" >nul

@@ -64,7 +64,7 @@ metadata:
 
 - `镜像`: 生产部署使用的 GHCR 镜像 tag。
 - `数据变更`: 是否影响 `data/`、数据库 schema、持久化数据结构或需要执行迁移脚本。
-- `配置变更`: 是否影响 `.env`、`config/`、配置 schema 或配置加载行为。
+- `配置变更`: 是否影响运行环境变量、`config/`、配置 schema 或配置加载行为。
 - `Added / Changed / Fixed / Deprecated`: 面向所有用户的 changelog。
 - `Risk Notes`: 面向部署者的详细风险说明。如包含数据迁移，在此写明迁移脚本路径和执行方式。
 

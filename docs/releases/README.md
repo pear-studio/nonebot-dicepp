@@ -97,7 +97,7 @@ DICEPP_IMAGE_TAG=v3.1.0 docker compose pull && DICEPP_IMAGE_TAG=v3.1.0 docker co
 
 ## 约束
 
-- `.env` 仅存 nonebot 配置，不依赖它传递版本号
+- DicePP 不依赖根目录 `.env`；NoneBot 监听参数由 `bot.py` 默认值提供
 - Prod 由 agent skill 保证不执行 build 命令
 - 镜像构建使用官方源，国内开发者通过 compose build args 自动用清华源
 - Release metadata 不进 Docker 镜像
