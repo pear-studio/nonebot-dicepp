@@ -19,7 +19,7 @@ class TestClassifyError2013:
         assert MiniMaxImageProvider.classify_error(e) == ErrorClass.RETRYABLE
 
     def test_invalid_params_chat_setting_is_retryable(self):
-        """参数错误：chat setting — 来自 docs/deploy.md 真实案例"""
+        """参数错误：chat setting — 来自历史部署排障案例"""
         e = RuntimeError(
             "image gen API error [2013]: invalid params, invalid chat setting"
         )

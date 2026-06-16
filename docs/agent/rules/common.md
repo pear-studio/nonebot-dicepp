@@ -4,7 +4,7 @@
 
 DicePP 是基于 NoneBot2 的 QQ 骰子机器人插件，用于 TRPG 场景。
 
-了解项目结构、模块边界和开发入口时，阅读 `docs/dicepp/README.md`。
+了解项目结构、模块边界和开发入口时，阅读 `docs/dev/guide.md`。
 
 ## Agent Config
 

@@ -21,15 +21,15 @@ scripts\dev\run.bat
 - NoneBot 插件模式：作为 OneBot V11 生态插件运行（常见于 QQ 机器人接入）。
 - Standalone 模式：直接运行 `standalone_bot.py`，提供 `/dpp/*` HTTP 接口。
 
-详见 `docs/dicepp/standalone_runtime.md`。
-
 ## 文档入口
 
 根目录只保留总览，详细说明请查阅 `docs/`：
 
-- 文档总导航：`docs/README.md`
-- 部署文档：`docs/deploy.md`
-- DicePP 开发文档：`docs/dicepp/README.md`
+- 新手入口：`docs/start-here.md`
+- Windows 本地运行：`docs/windows.md`
+- Linux / Docker 部署：`docs/linux.md`
+- 配置说明：`docs/configuration.md`
+- 开发入口：`docs/dev/guide.md`
 
 ## 常用脚本
 
@@ -39,7 +39,7 @@ scripts\dev\run.bat
 - 集成测试：`scripts\test\run_integration_test.bat`
 - 构建验证：`scripts\test\run_build_test.bat`
 
-完整脚本说明见 `docs/README.md`。
+完整使用路径见 `docs/start-here.md`。
 
 ## 交流
 

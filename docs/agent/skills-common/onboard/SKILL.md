@@ -13,7 +13,7 @@ metadata:
 
 DicePP 是基于 NoneBot2 的 QQ 骰子机器人插件，用于 TRPG（桌面角色扮演游戏）。
 
-需要了解项目结构、模块边界、命令机制或开发配方时，优先阅读 `docs/dicepp/README.md`。
+需要了解项目结构、模块边界、命令机制或开发配方时，优先阅读 `docs/dev/guide.md`。
 
 ## 入口索引
 
@@ -25,6 +25,6 @@ DicePP 是基于 NoneBot2 的 QQ 骰子机器人插件，用于 TRPG（桌面角
 
 ## 使用原则
 
-- 不在本技能里复述架构文档；需要细节时直接读取 `docs/dicepp/README.md`。
+- 不在本技能里复述开发入口；需要细节时直接读取 `docs/dev/guide.md` 后再搜索代码。
 - 涉及测试、shell 验收、backlog、agent 同步时，改用对应技能。
 - 不确定当前是开发还是生产环境时，先查看同步状态或读取环境规则。
