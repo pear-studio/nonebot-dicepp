@@ -26,6 +26,21 @@ FILE_LOG_FORMAT = (
 )
 
 
+def _safe_format(format_template: str):
+    """Return a Loguru formatter that tolerates third-party logger.configure().
+
+    NoneBot calls logger.configure() during startup and replaces the global
+    patcher/extra defaults. Keep request_id safety at the handler level so
+    framework logs emitted after that reconfiguration still format correctly.
+    """
+
+    def formatter(record: dict) -> str:
+        _patch_extra(record)
+        return format_template + "\n{exception}"
+
+    return formatter
+
+
 def _get_logs_dir() -> str:
     """获取持久化日志目录路径（data/logs/）。
 
@@ -61,7 +76,7 @@ logger.remove()
 
 # stderr handler（默认 DEBUG 级别，运行时可通过 configure_log_level 调整）
 _STDERR_HANDLER_ID = logger.add(
-    sys.stderr, format=LOG_FORMAT, level="DEBUG", colorize=True,
+    sys.stderr, format=_safe_format(LOG_FORMAT), level="DEBUG", colorize=True,
 )
 
 # 全级别持久化日志文件（按天轮转，保留 30 天，压缩归档）
@@ -73,7 +88,7 @@ logger.add(
     compression="gz",
     diagnose=False,
     level="DEBUG",
-    format=FILE_LOG_FORMAT,
+    format=_safe_format(FILE_LOG_FORMAT),
     encoding="utf-8",
     delay=True,
 )
@@ -84,7 +99,7 @@ logger.add(
     rotation="10 MB",
     diagnose=False,
     level="ERROR",
-    format=FILE_LOG_FORMAT,
+    format=_safe_format(FILE_LOG_FORMAT),
     encoding="utf-8",
     delay=True,
 )
@@ -101,7 +116,7 @@ def configure_log_level(level: str) -> None:
     except ValueError:
         pass
     _STDERR_HANDLER_ID = logger.add(
-        sys.stderr, format=LOG_FORMAT, level=level.upper(), colorize=True,
+        sys.stderr, format=_safe_format(LOG_FORMAT), level=level.upper(), colorize=True,
     )
 
 
