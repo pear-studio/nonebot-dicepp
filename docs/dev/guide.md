@@ -70,7 +70,7 @@ uv run pytest tests/unit/persona/ -v
 uv run python bot.py
 ```
 
-Standalone：
+维护者调试 Standalone HTTP / WebChat runtime：
 
 ```bash
 uv run python standalone_bot.py --bot-id 123456 --port 8080

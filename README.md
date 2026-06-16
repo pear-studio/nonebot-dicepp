@@ -16,11 +16,6 @@ uv sync --group dev
 uv run python bot.py
 ```
 
-## 运行方式
-
-- NoneBot 插件模式：作为 OneBot V11 生态插件运行（常见于 QQ 机器人接入）。
-- Standalone 模式：直接运行 `standalone_bot.py`，提供 `/dpp/*` HTTP 接口。
-
 ## 文档入口
 
 根目录只保留总览，详细说明请查阅 `docs/`：

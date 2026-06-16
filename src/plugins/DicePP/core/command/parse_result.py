@@ -7,7 +7,7 @@ CommandParseResult — 统一命令解析输出结构 (Task 2.1)
   - 语义层：flags, kwargs, mentions, segments, args, tail_text
   - 错误层：issues
 
-权威字段定义见 openspec/changes/refactor-command-parsing-all-commands/design.md 决策2。
+字段约定以本数据结构和调用方测试为准；历史设计草案不作为运行时依赖。
 """
 from __future__ import annotations
 
