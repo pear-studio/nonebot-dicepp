@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-BACKLOG_PY = Path(__file__).resolve().parents[2] / "scripts" / "tools" / "backlog.py"
+BACKLOG_PY = Path(__file__).resolve().parents[2] / "docs" / "agent" / "tools" / "backlog.py"
 
 
 def run(*args, cwd=None, input_text="") -> tuple[int, str, str]:

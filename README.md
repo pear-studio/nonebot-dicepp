@@ -7,13 +7,13 @@ DicePP 是 TRPG 骰子机器人项目，支持掷骰、角色卡、先攻、日�
 ```bash
 git clone https://github.com/pear-studio/nonebot-dicepp.git
 cd nonebot-dicepp
-uv sync --dev
+uv sync --group dev
 ```
 
-本地开发运行（Windows）：
+本地开发运行：
 
-```bat
-scripts\dev\run.bat
+```bash
+uv run python bot.py
 ```
 
 ## 运行方式
@@ -31,13 +31,12 @@ scripts\dev\run.bat
 - 配置说明：`docs/configuration.md`
 - 开发入口：`docs/dev/guide.md`
 
-## 常用脚本
+## 常用命令
 
-- 开发启动：`scripts\dev\run.bat`
-- 安装依赖：`scripts\dev\install.bat`
-- 单元测试：`scripts\test\run_unit_test.bat`
-- 集成测试：`scripts\test\run_integration_test.bat`
-- 构建验证：`scripts\test\run_build_test.bat`
+- 安装开发依赖：`uv sync --group dev`
+- 运行测试：`uv run pytest`
+- 本地启动：`uv run python bot.py`
+- Windows 打包：`scripts\build\build.bat`
 
 完整使用路径见 `docs/start-here.md`。
 

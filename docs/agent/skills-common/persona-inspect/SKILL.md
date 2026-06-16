@@ -18,7 +18,7 @@ metadata:
 
 ## 前提条件
 
-1. 在项目根目录（包含 `scripts/dev/persona_inspect.py` 的目录）
+1. 在项目根目录（包含 `docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py` 的目录）
 2. 目标 SQLite 数据库可访问（`data/bots/<bot_id>/bot_data.db` 或通过 `--db` 指定）
 3. 单表查询推荐直接用 `sqlite3` CLI，本工具专注跨表聚合和格式化输出
 
@@ -54,46 +54,46 @@ metadata:
 ### 场景1：用户反馈角色状态异常
 
 ```bash
-python scripts/dev/persona_inspect.py state --bot-id <bot_id>
-python scripts/dev/persona_inspect.py user <user_id> --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py state --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py user <user_id> --bot-id <bot_id>
 ```
 
 ### 场景2：某用户好感度异常
 
 ```bash
-python scripts/dev/persona_inspect.py user <user_id> --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py user <user_id> --bot-id <bot_id>
 # 评分变化在输出末尾，按时间升序排列
 ```
 
 ### 场景3：LLM 调用问题 / 配额检查
 
 ```bash
-python scripts/dev/persona_inspect.py llm-health --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py llm-health --bot-id <bot_id>
 ```
 
 ### 场景4：群聊活跃度
 
 ```bash
-python scripts/dev/persona_inspect.py active --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py active --bot-id <bot_id>
 ```
 
 ### 场景5：排查 LLM 工具调用链路（某轮工具为什么失败 / LLM think 内容）
 
 ```bash
 # 查看某用户最近的 trace（自动展开最新一条的 round_messages）
-python scripts/dev/persona_inspect.py trace --user-id <user_id> --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py trace --user-id <user_id> --bot-id <bot_id>
 
 # 查看所有 trace 的完整轮次细节
-python scripts/dev/persona_inspect.py trace --user-id <user_id> --full --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py trace --user-id <user_id> --full --bot-id <bot_id>
 
 # 查看特定 trace
-python scripts/dev/persona_inspect.py trace --id 42 --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py trace --id 42 --bot-id <bot_id>
 ```
 
 ### 场景6：查看表结构
 
 ```bash
-python scripts/dev/persona_inspect.py tables --bot-id <bot_id>
+python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py tables --bot-id <bot_id>
 ```
 
 ## 单表查询

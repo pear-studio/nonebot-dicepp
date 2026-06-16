@@ -53,7 +53,7 @@ async def _startup_message():
     
     # 技术细节和测试信息只在 DEBUG 级别显示
     logger.debug("正在监听 OneBot V11 协议连接...")
-    logger.debug("测试模式: 可运行 scripts\\test\\test_bot.bat 进行验证")
+    logger.debug("测试模式: 可使用 uv run pytest 进行验证")
     logger.debug("测试时的 ApiNotAvailable 警告属于正常现象 (无真实客户端接收响应)")
 
 # 注册适配器

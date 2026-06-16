@@ -99,7 +99,7 @@ API Key 放在 `config/secrets.json`：
 Docker 部署：
 
 ```bash
-make restart
+docker compose restart
 ```
 
 管理员也可以尝试热重载：

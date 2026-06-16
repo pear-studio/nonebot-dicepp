@@ -5,10 +5,10 @@ Persona 数据库快速排查工具 — 集成多表关联的复合查询。
 定位：不做单表 CRUD 替代（sqlite3 CLI 更快），聚焦跨表画像 + 格式化输出。
 
 用法:
-  python scripts/dev/persona_inspect.py user <id> --bot-id <id> --character <name>
-  python scripts/dev/persona_inspect.py state --bot-id <id> --character <name>
-  python scripts/dev/persona_inspect.py llm-health --bot-id <id> --character <name>
-  python scripts/dev/persona_inspect.py active --bot-id <id> --character <name>
+  python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py user <id> --bot-id <id> --character <name>
+  python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py state --bot-id <id> --character <name>
+  python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py llm-health --bot-id <id> --character <name>
+  python docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py active --bot-id <id> --character <name>
 """
 
 import argparse
@@ -26,7 +26,11 @@ from typing import Any, Dict, List, Optional, Tuple
 # ═══════════════════════════════════════════════════════════
 
 def get_project_root() -> Path:
-    return Path(__file__).resolve().parent.parent.parent
+    for start in (Path.cwd().resolve(), Path(__file__).resolve().parent):
+        for candidate in (start, *start.parents):
+            if (candidate / "pyproject.toml").exists() and (candidate / "docs" / "agent").is_dir():
+                return candidate
+    sys.exit("无法定位项目根目录，请在 DicePP 仓库内运行")
 
 
 def _find_bot_dir(args) -> Path:

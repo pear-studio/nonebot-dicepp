@@ -34,11 +34,11 @@ description: "开始实现某一个 backlog 条目。独立诊断、重新思考
 1. **获取条目**：
    - 若用户提供了 ID：
      ```bash
-     python scripts/tools/backlog.py show <id>
+     python docs/agent/tools/backlog.py show <id>
      ```
    - 若无参数：
      ```bash
-     python scripts/tools/backlog.py list
+     python docs/agent/tools/backlog.py list
      ```
      展示列表，请用户选择一条（回复 ID 或序号）。
 
@@ -102,7 +102,7 @@ description: "开始实现某一个 backlog 条目。独立诊断、重新思考
    实现并测试通过后，向用户确认是否从 backlog 移除该条目。
    用户确认后：
    ```bash
-   python scripts/tools/backlog.py close <id>
+   python docs/agent/tools/backlog.py close <id>
    ```
    若实施中提议了「重写条目」，可一并更新 backlog 内容（用 `Edit` 工具修改对应条目段落）。
 

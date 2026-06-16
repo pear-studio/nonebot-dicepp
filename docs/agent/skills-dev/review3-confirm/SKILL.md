@@ -107,7 +107,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - 扫描所有 `共识状态: 已共识·延后`（含 review0 产出的"用户明确·延后"）的 Rn
    - 使用 `backlog-add` skill 决定如何写入 `docs/dev/backlog.md`，由 backlog skill 负责 `Priority`、`Type`、`Effort`、`Symptom`、`Plan` 等字段约束和写入方式
    - 将 Rn 标题、问题表现、开发备忘、Review/Reply/Confirm 中的必要上下文提供给 `backlog-add`
-   - 不在本 skill 中手写 `backlog.py batch-add` payload，避免和 backlog 格式强耦合
+   - 不在本 skill 中手写 `docs/agent/tools/backlog.py batch-add` payload，避免和 backlog 格式强耦合
    - 用返回的 ID 列表，**一次** `review_record.py batch-update` 把 `已归档: B-...` 写回每个对应 Rn 的 Confirm 块
 8. `batch-update` 写入完成后自动标记阶段 3 完成；若 Confirm 内容包含 `需补充回复`，自动回退阶段 2。无需手动更新 checklist
 9. 检查是否存在 `需补充回复` 条目：
@@ -144,7 +144,7 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 
 - **评审报告路径**：`.temp/review-*.md` 必须生成在目标 worktree 根目录下，与对应代码改动共存，随 worktree 一起清理/提交。
 - **backlog 修改路径**：`docs/dev/backlog.md` 必须修改目标 worktree 中的文件，与对应代码改动一起提交。
-- **脚本调用**：`review_record.py`、`backlog.py` 等脚本必须在目标 worktree 的目录下执行，确保相对路径解析正确。
+- **脚本调用**：`review_record.py`、`docs/agent/tools/backlog.py` 等脚本必须在目标 worktree 的目录下执行，确保相对路径解析正确。
 
 ## 输出
 

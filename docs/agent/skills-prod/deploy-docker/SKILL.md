@@ -24,7 +24,6 @@ metadata:
 
 - 当前项目 Docker Compose 中声明的服务, 目前包括 bot 服务。
 - DicePP 生产链路明确依赖的 LLOneBot 相关容器/服务。
-- 项目文档、Makefile 或 scripts/deploy/linux/llonebot/ 中明确提供的 LLOneBot 运维入口。
 
 默认禁止：
 
@@ -42,16 +41,12 @@ metadata:
 
 ## Preferred Entrypoints
 
-优先使用项目已有入口, 不临场拼接自由 Docker 命令：
+优先使用明确的 Docker Compose 命令，不调用项目 shell wrapper 或 Makefile 部署入口：
 
 - DicePP bot 服务优先使用当前项目的 'docker compose'。
-- LLOneBot 优先使用 Makefile 入口：
-  - 'make llbot-start'
-  - 'make llbot-stop'
-  - 'make llbot-restart'
-  - 'make llbot-logs'
-- 如果 Makefile 入口不可用, 再查看 'scripts/deploy/linux/llonebot/' 中的项目脚本。
-- 只有项目入口不可用或不足以完成任务时, 才展示 fallback Docker 命令并等待确认。
+- DicePP 版本更新只使用 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull/up`。
+- LLOneBot 操作前必须先识别其 compose 目录或容器名；无法确认时只做只读检查并要求用户提供路径。
+- 禁止使用 `git pull`、本地 build 或项目部署 wrapper 更新生产。
 
 ## Read-only Checks
 
@@ -60,7 +55,6 @@ metadata:
 - 'docker compose ps'
 - 'docker compose logs --tail <N> bot'
 - 'docker ps' 仅用于识别 DicePP/LLOneBot 相关容器, 不对无关容器执行操作。
-- 'make llbot-logs' 查看 LLOneBot 日志。
 
 只读检查仍应避免输出 token、cookie、session、密钥、完整敏感配置或二维码敏感内容。
 
@@ -72,7 +66,7 @@ metadata:
 - 'docker compose up -d'
 - 'docker compose restart'
 - 'docker compose stop' / 'docker compose start'
-- 'make llbot-start' / 'make llbot-stop' / 'make llbot-restart'
+- 对已确认 LLOneBot compose project 执行 'docker compose up/down/restart'
 - 任何会改变容器、镜像、网络或服务状态的命令
 
 确认前必须展示：
@@ -96,6 +90,7 @@ metadata:
 ## Important Notes
 
 - 不把 Docker 运维操作和版本选择混在一起；版本选择由 'version-deploy' 处理。
+- 不调用 Makefile 或 scripts/deploy wrapper 执行生产部署。
 - 不自动执行 destructive cleanup。
 - 不修改持久化数据；备份与恢复需要用户明确授权和专门流程。
 - 如果命令需要 sudo, 先说明原因和范围。

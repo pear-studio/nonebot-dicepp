@@ -33,7 +33,7 @@
 当用户要求查看或操作 Docker/Compose 服务、DicePP bot 容器、LLOneBot 容器、服务日志、pull/up/restart/stop/start 时，必须使用 deploy-docker。
 
 - 第一版只允许操作 DicePP 部署相关资源：当前项目 compose 服务、DicePP bot、LLOneBot 相关容器和项目文档明确关联的运维入口。
-- LLOneBot 操作优先使用项目已有 Makefile 或 scripts/deploy/linux/llonebot/ 入口，不临场自由拼接无边界 Docker 命令。
+- LLOneBot 操作只允许在识别到明确的 LLOneBot compose project 或容器后执行；不要依赖项目内安装脚本或 Makefile wrapper。
 - 默认禁止操作无关容器、执行 docker system prune、删除 volume、修改 Docker daemon 或宿主机全局网络/防火墙。
 - 改变服务状态的 Docker/Compose/LLOneBot 操作必须先说明影响范围、命令、预期结果和回滚方式，等待用户明确确认。
 

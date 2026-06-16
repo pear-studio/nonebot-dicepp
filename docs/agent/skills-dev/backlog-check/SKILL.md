@@ -22,13 +22,13 @@ description: "核实和清理所有 backlog 条目，删除过时项，按时间
 
 1. **一致性校验**：
    ```bash
-   python scripts/tools/backlog.py validate
+   python docs/agent/tools/backlog.py validate
    ```
    若校验失败（如缺少 `问题表现` / `开发备忘`），先向用户报告错误列表，停止清理，建议手动修复后再跑。
 
 2. **拉取全表**：
    ```bash
-   python scripts/tools/backlog.py list
+   python docs/agent/tools/backlog.py list
    ```
 
 3. **逐条评估过时性**：
@@ -53,18 +53,18 @@ description: "核实和清理所有 backlog 条目，删除过时项，按时间
 5. **执行清理（dry-run 先）**：
    用户确认后：
    ```bash
-   python scripts/tools/backlog.py prune <id1> <id2> ... --dry-run
+   python docs/agent/tools/backlog.py prune <id1> <id2> ... --dry-run
    ```
    展示将要删除的内容，再次请用户确认。
 
 6. **正式删除**：
    ```bash
-   python scripts/tools/backlog.py prune <id1> <id2> ...
+   python docs/agent/tools/backlog.py prune <id1> <id2> ...
    ```
 
 7. **重排序**：
    ```bash
-   python scripts/tools/backlog.py sort
+   python docs/agent/tools/backlog.py sort
    ```
    （按 模块→优先级→类型→改动量 自动排序，写入时已自动执行，此处为显式确认）
 

@@ -25,8 +25,6 @@ version-release (skill)               version-deploy (skill)
 | `docker-compose.yml` | 部署入口，同时支持 `image:`（镜像模式）和 `build:`（源码模式） |
 | `Dockerfile` | 多阶段构建，`uv sync --frozen` 可复现 |
 | `.github/workflows/release.yml` | tag push 触发 GHCR 镜像构建 + GitHub Release 创建 |
-| `scripts/deploy/linux/update.sh` | 更新脚本，自动检测镜像/源码模式 |
-| `Makefile` | `make update` (latest) / `make update-version VERSION=vX.Y.Z` |
 
 ## 版本号
 
@@ -52,8 +50,8 @@ version-release (skill)               version-deploy (skill)
 |------|-------------------|------|
 | 生产部署 | `v3.0.0` | `docker compose pull` → `up -d` |
 | 开发构建 | 不设（默认 `latest`） | `docker compose build` → `up -d` |
-| 更新到最新 | `latest` | `make update` |
-| 回退到指定版本 | `v3.0.0` | `make update-version VERSION=v3.0.0` |
+| 更新到最新 | `latest` | `DICEPP_IMAGE_TAG=latest docker compose pull` → `up -d` |
+| 回退到指定版本 | `v3.0.0` | `DICEPP_IMAGE_TAG=v3.0.0 docker compose pull` → `up -d` |
 
 ## Release 流程
 
@@ -85,13 +83,6 @@ version-release (skill)               version-deploy (skill)
 ## 用户操作速查
 
 ```bash
-# 开发环境
-make deploy              # 首次部署
-make update              # 更新到最新
-
-# 指定版本
-make update-version VERSION=v3.1.0
-
 # 生产环境（镜像部署）
 DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
 DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d

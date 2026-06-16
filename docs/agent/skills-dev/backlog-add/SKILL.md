@@ -66,7 +66,7 @@ description: "根据汇报文件或用户给出的信息，新增 backlog 条目
 
 3. 用户确认后执行：
    ```bash
-   python scripts/tools/backlog.py add \
+   python docs/agent/tools/backlog.py add \
      --module <M> --title <T> \
      --priority <P> --type <T> --effort <E> \
      --symptom "$(cat symptom.txt)" \
@@ -84,7 +84,7 @@ description: "根据汇报文件或用户给出的信息，新增 backlog 条目
 4. 逐条展示给用户确认（支持批量确认或逐条审）。
 5. 对确认的条目构造 batch-add payload（见下文格式），写入临时文件后执行：
    ```bash
-   python scripts/tools/backlog.py batch-add --payload-file <tmp>
+   python docs/agent/tools/backlog.py batch-add --payload-file <tmp>
    ```
 6. 输出所有新 ID。
 
