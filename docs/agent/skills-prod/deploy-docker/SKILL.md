@@ -86,9 +86,9 @@ metadata:
 
 当 'version-deploy' 要应用镜像版本时, 推荐执行序列为：
 
-1. 确认 '.env' 中 'DICEPP_IMAGE_TAG' 已更新为目标版本。
-2. 执行 'docker compose pull bot'。
-3. 执行 'docker compose up -d bot'。
+1. 确认环境变量 'DICEPP_IMAGE_TAG' 已设为目标版本。
+2. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull bot'。
+3. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d bot'。
 4. 执行 'docker compose ps'。
 5. 查看 'docker compose logs --tail 100 bot'。
 6. 如项目提供健康检查或机器人指令验收方式, 汇报可执行项或已执行结果。

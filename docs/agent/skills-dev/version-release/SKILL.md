@@ -164,37 +164,55 @@ metadata:
 
    如果 push 失败, 汇报错误和本地 commit/tag 状态, 提醒用户处理；仍执行切回原分支。
 
-9. **切回原分支**
+   push 成功后, GitHub Actions (release.yml) 将自动：
+   - 构建并推送 GHCR 镜像 (:vX.Y.Z + :latest)
+   - 创建 GitHub Release（body 为 docs/releases/vX.Y.Z.md 内容）
+   - 上传 docker-compose.yml 作为 release asset
+
+9. **验证镜像可用**
+
+   等待 GitHub Actions 完成后, 确认：
+
+   - `gh release view v{new_version}` 返回 release 信息。
+   - GHCR 镜像 tag 存在: `docker pull ghcr.io/pear-studio/nonebot-dicepp:v{new_version}` 不报错。
+   - 如镜像拉取失败, 查看对应 GHA run 的日志排查。
+
+10. **切回原分支**
 
    如果发布前不在 `master`, 切回原分支。
 
-10. **生成发版摘要**
+11. **生成发版摘要**
 
     汇报：
 
-    ```text
-    版本: X.Y.Z -> A.B.C
-    Tag: vA.B.C
-    Release metadata: docs/releases/vA.B.C.md
-    Image: ghcr.io/pear-studio/nonebot-dicepp:vA.B.C
-    数据风险: yes/no/unknown
-    配置风险: yes/no/unknown
-    迁移: yes/no/unknown
-    生产更新前备份: yes/no
-    推送: 成功/失败
-    ```
+   ```text
+   版本: X.Y.Z -> A.B.C
+   Tag: vA.B.C
+   Release metadata: docs/releases/vA.B.C.md
+   Image: ghcr.io/pear-studio/nonebot-dicepp:vA.B.C
+   数据风险: yes/no/unknown
+   配置风险: yes/no/unknown
+   迁移: yes/no/unknown
+   生产更新前备份: yes/no
+   推送: 成功/失败
+   GitHub Actions: <run URL>
+   ```
 
 ## Baseline / Repair Notes
 
-如果用户明确要求把当前 `pyproject.toml` 版本补建为发布基线, 不执行版本递增。此类操作不是日常路径, 需要手工确认：
+如果用户明确要求把当前 `pyproject.toml` 版本补建为发布基线, 不执行版本递增。执行以下步骤：
 
-- 当前版本号与目标 tag 一致。
-- `docs/releases/vX.Y.Z.md` 已存在且内容完整。
-- `.bot` 运行版本与包版本一致。
-- GHCR workflow 与 `.dockerignore` 已准备好。
-- 当前 commit 是想要固化的基线 commit。
-
-然后参考本技能的 tag/push 安全边界手工创建并推送 `vX.Y.Z`。
+1. 确认当前版本号与目标 tag 一致。
+2. 确认 `docs/releases/vX.Y.Z.md` 已存在且内容完整。
+3. 确认 `.bot` 运行版本与包版本一致。
+4. 确认 GHCR workflow (release.yml) 与 `.dockerignore` 已准备好。
+5. 确认工作区干净, 所有改动已提交到 master, 当前 commit 是想要固化的基线 commit。
+6. 手工创建并推送 tag:
+   ```bash
+   git tag vX.Y.Z
+   git push origin master --tags
+   ```
+7. 等待 GitHub Actions 完成, 验证镜像和 GitHub Release。参考本技能 step 9。
 
 ## Important Notes
 

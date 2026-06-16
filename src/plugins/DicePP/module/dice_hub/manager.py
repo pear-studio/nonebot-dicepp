@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Any
 import datetime
 
 from core.bot import Bot
-from core.config import BOT_VERSION
+from core.config import get_bot_version
 from utils.time import get_current_date_raw
 
 from module.dice_hub.api_client import HubAPIClient, HubAPIError
@@ -91,7 +91,7 @@ class HubManager:
             bot_id=self.bot.account,
             nickname=self.get_nickname(),
             master_id=self.get_master_id(),
-            version=BOT_VERSION,
+            version=get_bot_version(),
         )
 
         api_key = result.get("api_key")

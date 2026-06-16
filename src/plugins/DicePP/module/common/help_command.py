@@ -6,7 +6,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.command import CommandTextParser
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config import BOT_DESCRIBE, BOT_VERSION, BOT_GIT_LINK
+from core.config import get_bot_version, BOT_DESCRIBE, BOT_GIT_LINK
 
 _HELP_PARSER = CommandTextParser(command_prefix="help")
 
@@ -57,7 +57,7 @@ class HelpCommand(UserCommandBase):
         feedback: str
 
         if not arg_str:  # 显示机器人总览描述
-            feedback = f"{BOT_DESCRIBE} {BOT_VERSION}\n{self.format_loc(LOC_HELP_INFO)}"
+            feedback = f"{BOT_DESCRIBE} {get_bot_version()}\n{self.format_loc(LOC_HELP_INFO)}"
         else:  # 具体指令
             help_text = ""
             for command in self.bot.command_dict.values():

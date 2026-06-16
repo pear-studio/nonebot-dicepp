@@ -1,4 +1,10 @@
-BOT_VERSION = "v3.0.260421.1"
+from importlib.metadata import version as _get_pkg_version
+
+
+def get_bot_version() -> str:
+    """返回运行时版本号，格式 vX.Y.Z，从已安装包 metadata 读取。"""
+    return f"v{_get_pkg_version('dicepp')}"
+
 
 BOT_DESCRIBE = "DicePP by 梨子 & 调零 & 云朵松饼糖"
 

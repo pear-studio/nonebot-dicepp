@@ -11,7 +11,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand, BotLeaveGroupCommand
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_PERMISSION_DENIED_NOTICE
-from core.config import BOT_DESCRIBE, BOT_VERSION
+from core.config import get_bot_version, BOT_DESCRIBE
 from utils.time import get_current_date_str
 
 LOC_BOT_SHOW = "bot_show"
@@ -23,7 +23,7 @@ CFG_BOT_DEF_ENABLE = "bot_default_enable"
 
 DC_ACTIVATE = "activate"
 
-BOT_SHOW_APPEND = f"{BOT_DESCRIBE} {BOT_VERSION}"
+BOT_SHOW_APPEND = f"{BOT_DESCRIBE} {get_bot_version()}"
 
 
 def get_default_activate_data(default_enable: bool) -> List:

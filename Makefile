@@ -73,8 +73,16 @@ restart:  ## 重启 DicePP 容器
 logs:  ## 查看 DicePP 日志（实时）
 	@bash scripts/deploy/linux/logs.sh -f
 
-update:  ## 更新代码并重启 DicePP
+update:  ## 更新到最新镜像并重启（默认 latest，无需源码）
 	@bash scripts/deploy/linux/update.sh
+
+update-version:  ## 更新到指定版本（用法: make update-version VERSION=v3.1.0）
+	@if [ -z "$(VERSION)" ]; then \
+		echo "用法: make update-version VERSION=v3.1.0"; \
+		echo "可用版本: https://github.com/pear-studio/nonebot-dicepp/releases"; \
+		exit 1; \
+	fi
+	@DICEPP_IMAGE_TAG=$(VERSION) bash scripts/deploy/linux/update.sh
 
 status:  ## 查看服务状态
 	@bash scripts/deploy/linux/status.sh

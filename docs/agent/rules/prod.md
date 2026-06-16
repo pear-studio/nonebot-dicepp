@@ -23,10 +23,10 @@
 当用户要求部署、上线、更新代码、切换版本、回退、rollback、pull 新镜像或应用某个 release 时，必须使用 version-deploy。
 
 - 生产发布/回退以 vX.Y.Z release 为单位，不默认部署分支 HEAD 或“最新代码”。
-- 目标 release 必须读取 docs/releases/vX.Y.Z.md 作为生产更新风险摘要；缺失时按未知风险处理。
-- 生产 .env 中只允许按白名单读取/修改 DICEPP_IMAGE_TAG，不得整段输出 .env。
+- 目标 release 必须读取 docs/releases/vX.Y.Z.md 或 GitHub Release body 作为生产更新风险摘要；缺失时按未知风险处理。
+- DICEPP_IMAGE_TAG 通过环境变量传递, 不写入 .env 或配置文件。不得整段输出 .env。
 - 镜像回退不等于数据回退；涉及数据、配置、迁移或风险未知时，必须确认备份状态或明确接受风险。
-- 修改 DICEPP_IMAGE_TAG、pull 镜像、更新容器或重启服务前，必须展示计划并等待用户明确确认。
+- 注入 DICEPP_IMAGE_TAG、pull 镜像、更新容器或重启服务前，必须展示计划并等待用户明确确认。
 
 ## Docker Deployment Ops
 

@@ -1,5 +1,6 @@
 services:
   bot:
+    image: ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,22 +11,22 @@ services:
         UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: dicepp
     restart: unless-stopped
-    
+
     # 网络：使用外部 dice-net 网络与 LLOneBot 通信
     networks:
       - dice-net
-    
+
     # 端口：内部通信，无需暴露到宿主机
     # LLOneBot 通过 ws://dicepp:8080/onebot/v11/ws 连接
     expose:
       - "8080"
-    
+
     # 环境变量
     env_file:
       - .env
     environment:
       - TZ=Asia/Shanghai
-    
+
     # 数据持久化：
     # - config：配置目录（可写，运行时生成 bots/*.json）
     # - data：运行时数据（可写）
@@ -34,7 +35,7 @@ services:
       - ./config:/app/config
       - ./data:/app/data
       - ./content:/app/content
-    
+
     # 日志配置：自动轮转
     logging:
       driver: "json-file"

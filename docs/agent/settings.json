@@ -1,0 +1,17 @@
+{
+  "worktree.baseRef": "head",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "EnterWorktree",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash docs/agent/platforms/claude-linux/hooks/enter-worktree.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

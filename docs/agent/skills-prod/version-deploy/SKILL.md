@@ -22,8 +22,8 @@ metadata:
 - 生产部署/回退以 'vX.Y.Z' release 为单位。
 - 目标 release 必须由开发环境 'version-release' 创建。
 - 生产使用 GHCR 镜像: 'ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z'。
-- 生产更新风险摘要的唯一源头是 'docs/releases/vX.Y.Z.md'。
-- 生产 '.env' 只保存当前目标镜像变量 'DICEPP_IMAGE_TAG'；不保存所谓“上一个成功版本”。
+- 生产更新风险摘要的唯一源头是 GitHub Release body, 由开发环境 'docs/releases/vX.Y.Z.md' 生成并同步。
+- 'DICEPP_IMAGE_TAG' 通过环境变量传递, 不写入 '.env' 或任何配置文件。
 - 默认只读。修改 '.env'、pull 镜像、重启/更新容器等写操作必须先展示影响、命令和回滚方式, 等待用户明确确认。
 
 ## Preconditions
@@ -45,16 +45,17 @@ metadata:
 
 2. 读取当前生产目标镜像
 
-   - 只读取 '.env' 中白名单变量 'DICEPP_IMAGE_TAG'。
+   - 通过 'docker ps' 或 'docker inspect' 确认当前运行镜像。
    - 不整段打印 '.env', 不输出 secrets。
 
 3. 读取目标 release metadata
 
-   优先读取当前仓库或 fetched tag 中的：
+   按优先级尝试：
 
-       docs/releases/vX.Y.Z.md
+   a. 'gh release view vX.Y.Z --json body' (GitHub Releases API)
+   b. 'git show vX.Y.Z:docs/releases/vX.Y.Z.md' (如本地有仓库)
 
-   如果本地没有对应 tag 或文件, 可提示用户 fetch tags。metadata 缺失时不得默认为安全。
+   如果两种方式都不可用, 将风险视为 'unknown', 要求用户明确确认。
 
 4. 核对目标镜像
 
@@ -87,18 +88,15 @@ metadata:
 
    在用户确认前只展示将执行的改动, 包括：
 
-   - 将 '.env' 中 'DICEPP_IMAGE_TAG' 从当前值改为目标值。
-   - 将调用 'deploy-docker' 执行 pull/up/健康检查。
+   - 将注入环境变量 'DICEPP_IMAGE_TAG=vX.Y.Z' 并调用 'deploy-docker' 执行 pull/up/健康检查。
    - 如需回退, 回滚方式是重新执行本技能并指定另一个已发布的 'vX.Y.Z'。
 
 ## Confirmed Execution
 
 只有当用户明确确认部署或回退目标版本后, 才允许执行：
 
-1. 修改 '.env' 中的 'DICEPP_IMAGE_TAG'。
+1. 在命令中注入环境变量 'DICEPP_IMAGE_TAG=vX.Y.Z'。
 2. 按 'deploy-docker' 执行项目 Docker Compose 更新。
-3. 执行基本状态检查和日志检查。
-4. 汇报实际运行镜像、容器状态和未验证风险。
 
 确认语句应包含目标版本, 例如：
 
