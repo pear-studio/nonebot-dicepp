@@ -4,7 +4,7 @@ from pathlib import Path
 
 def test_runtime_paths_are_isolated():
     from core.config.basic import Paths
-    from utils.frozen import get_app_dir, get_project_root
+    from frozen import get_app_dir, get_project_root
 
     project_root = Path(os.environ["DICEPP_PROJECT_ROOT"]).resolve()
     app_dir = Path(os.environ["DICEPP_APP_DIR"]).resolve()

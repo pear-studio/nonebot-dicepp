@@ -33,6 +33,26 @@ else:
     _plugin_root = os.path.join(dir_path, "src", "plugins", "DicePP")
     sys.path.insert(0, _plugin_root)
 
+# ============================================================
+# Bootstrap CLI — 在 nonebot.init() 之前解析
+# ============================================================
+import argparse
+
+_bootstrap_parser = argparse.ArgumentParser(add_help=False)
+_bootstrap_parser.add_argument('--version', action='store_true')
+_bootstrap_parser.add_argument('--smoke-check', action='store_true')
+_bootstrap_args, _ = _bootstrap_parser.parse_known_args()
+
+if _bootstrap_args.version:
+    from importlib.metadata import version
+    print(f"DicePP v{version('dicepp')}")
+    sys.exit(0)
+
+if _bootstrap_args.smoke_check:
+    import _smoke_check
+    ok = _smoke_check.run_smoke_check()
+    sys.exit(0 if ok else 1)
+
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBot_V11_Adapter
 from utils.logger import logger

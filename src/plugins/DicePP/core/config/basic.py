@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 from utils.logger import logger
-from utils.frozen import get_project_root
+from frozen import get_project_root
 
 
 class Paths:

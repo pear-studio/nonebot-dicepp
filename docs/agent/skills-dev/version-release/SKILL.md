@@ -41,6 +41,7 @@ metadata:
 # vX.Y.Z
 
 - 镜像: ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
+- Windows: DicePP-vX.Y.Z-win64.zip
 - 数据变更: yes/no
 - 配置变更: yes/no
 
@@ -163,17 +164,22 @@ metadata:
    如果 push 失败, 汇报错误和本地 commit/tag 状态, 提醒用户处理；仍执行切回原分支。
 
    push 成功后, GitHub Actions (release.yml) 将自动：
-   - 构建并推送 GHCR 镜像 (:vX.Y.Z + :latest)
+   - 构建并推送 GHCR 镜像 (:vX.Y.Z + :latest)，运行冒烟测试
+   - 在 Windows 上构建 DicePP EXE，运行冒烟测试
+   - 将 EXE 打包为 DicePP-vX.Y.Z-win64.zip
    - 创建 GitHub Release（body 为 docs/releases/vX.Y.Z.md 内容）
-   - 上传 docker-compose.yml 作为 release asset
+   - 上传 docker-compose.yml 和 DicePP-vX.Y.Z-win64.zip 作为 release assets
 
-9. **验证镜像可用**
+9. **验证构建产物可用**
 
    等待 GitHub Actions 完成后, 确认：
 
    - `gh release view v{new_version}` 返回 release 信息。
+   - Release assets 包含:
+     - `docker-compose.yml`
+     - `DicePP-v{new_version}-win64.zip`
    - GHCR 镜像 tag 存在: `docker pull ghcr.io/pear-studio/nonebot-dicepp:v{new_version}` 不报错。
-   - 如镜像拉取失败, 查看对应 GHA run 的日志排查。
+   - 如任一产物缺失, 查看对应 GHA run 日志排查。
 
 10. **切回原分支**
 
@@ -188,6 +194,7 @@ metadata:
    Tag: vA.B.C
    Release metadata: docs/releases/vA.B.C.md
    镜像: ghcr.io/pear-studio/nonebot-dicepp:vA.B.C
+   Windows EXE: DicePP-vA.B.C-win64.zip
    数据变更: yes/no
    配置变更: yes/no
    推送: 成功/失败

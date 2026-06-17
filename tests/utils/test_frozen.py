@@ -18,7 +18,7 @@ from unittest.mock import patch
 pytestmark = pytest.mark.unit
 
 # 被测模块
-from utils.frozen import is_frozen, get_app_dir, get_runtime_info, get_project_root, PROJECT_ROOT_ENV_KEY
+from frozen import is_frozen, get_app_dir, get_runtime_info, get_project_root, PROJECT_ROOT_ENV_KEY
 
 
 class TestIsFrozen:

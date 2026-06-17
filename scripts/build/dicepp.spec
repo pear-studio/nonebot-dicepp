@@ -10,7 +10,7 @@ DicePP PyInstaller Spec 文件
 
 import os
 import sys
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, copy_metadata
 
 # ============================================================
 # 基础配置
@@ -152,6 +152,9 @@ datas += collect_data_files('zhconv')
 
 # lark 语法文件（.lark grammar files，运行时加载）
 datas += collect_data_files('lark')
+
+# dicepp 自身的 .dist-info，让 importlib.metadata.version('dicepp') 在 frozen 下可用
+datas += copy_metadata('dicepp')
 
 # ============================================================
 # Analysis

@@ -73,6 +73,16 @@ REM 清理 build 缓存目录
 echo [INFO] Cleaning build cache...
 if exist "build" rmdir /s /q "build"
 
+REM 冒烟测试
+echo.
+echo [INFO] Running smoke test...
+"%DIST_DIR%\DicePP.exe" --smoke-check
+if errorlevel 1 (
+    echo [ERROR] Smoke test failed! See output above.
+    exit /b 1
+)
+echo [INFO] Smoke test passed
+
 echo.
 echo ============================================================
 echo [SUCCESS] Build complete!
