@@ -122,6 +122,7 @@ hiddenimports = [
 hiddenimports += collect_submodules('nonebot')
 hiddenimports += collect_submodules('nonebot_adapter_onebot')
 hiddenimports += collect_submodules('lark')
+hiddenimports += collect_submodules('cryptography')
 
 # ============================================================
 # Data Files - 需要打包的非 Python 文件

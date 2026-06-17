@@ -7,11 +7,14 @@
 检查项：
   1. frozen 环境检测 — is_frozen / get_app_dir / get_runtime_info 是否正常
   2. 关键模块导入   — PyInstaller hiddenimports 覆盖的核心依赖能否 import
-  3. 版本号          — importlib.metadata 能否读到正确的 vX.Y.Z 格式版本号
+  3. DicePP 插件导入 — NoneBot 实际加载插件前的 import 链是否完整
+  4. 版本号          — importlib.metadata 能否读到正确的 vX.Y.Z 格式版本号
 """
 
 import sys
 import os
+import importlib
+from pathlib import Path
 
 
 def run_smoke_check() -> bool:
@@ -20,6 +23,7 @@ def run_smoke_check() -> bool:
 
     errors.extend(_check_frozen_env())
     errors.extend(_check_critical_modules())
+    errors.extend(_check_dicepp_plugin_import())
     errors.extend(_check_version())
 
     if errors:
@@ -76,12 +80,39 @@ def _check_critical_modules() -> list[str]:
         'uvicorn',
         'fastapi',
         'pydantic',
+        'cryptography.fernet',
+        'cryptography.hazmat.primitives.kdf.pbkdf2',
     ]
     for mod in CRITICAL_MODULES:
         try:
-            __import__(mod)
+            importlib.import_module(mod)
         except ImportError as e:
             errors.append(f"Module '{mod}' import failed: {e}")
+    return errors
+
+
+def _check_dicepp_plugin_import() -> list[str]:
+    """验证 DicePP 插件入口可导入，覆盖 NoneBot load_plugin 的核心导入链。"""
+    errors = []
+    plugin_root = Path(__file__).resolve().parent
+    plugins_base = str(plugin_root.parent)
+
+    inserted = False
+    if plugins_base not in sys.path:
+        sys.path.insert(0, plugins_base)
+        inserted = True
+
+    try:
+        importlib.import_module('DicePP')
+    except Exception as e:
+        errors.append(f"DicePP plugin import failed: {e.__class__.__name__}: {e}")
+    finally:
+        if inserted:
+            try:
+                sys.path.remove(plugins_base)
+            except ValueError:
+                pass
+
     return errors
 
 
