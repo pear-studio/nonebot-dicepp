@@ -1,6 +1,6 @@
 services:
   bot:
-    image: ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-latest}
+    image: "${DICEPP_IMAGE:-ghcr.io/pear-studio/nonebot-dicepp:${DICEPP_IMAGE_TAG:-latest}}"
     build:
       context: .
       dockerfile: Dockerfile

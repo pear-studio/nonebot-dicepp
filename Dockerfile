@@ -27,12 +27,19 @@ RUN pip install uv --index-url ${PIP_INDEX_URL} --no-cache-dir
 
 # 复制依赖文件（uv.lock 保证可复现构建）
 COPY pyproject.toml uv.lock ./
-COPY src/ src/
 
-# 创建虚拟环境并按锁文件安装依赖
+# 先只安装第三方依赖，不安装当前项目。
+# 这样普通源码变更不会让大体积的 .venv 依赖层失效。
 RUN uv venv /app/.venv && \
     . /app/.venv/bin/activate && \
-    uv sync --no-dev --frozen
+    uv sync --no-dev --frozen --no-install-project
+
+# 生成轻量项目元数据，保证 importlib.metadata.version('dicepp') 可用。
+# 该层只依赖 pyproject.toml，不随普通源码变更失效。
+RUN VERSION="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" && \
+    mkdir -p "/app/project-meta/dicepp-${VERSION}.dist-info" && \
+    printf "Metadata-Version: 2.1\nName: dicepp\nVersion: %s\n" "$VERSION" \
+        > "/app/project-meta/dicepp-${VERSION}.dist-info/METADATA"
 
 # ── 运行阶段 ──────────────────────────────────────────────────────
 FROM python:3.13-slim
@@ -48,12 +55,18 @@ LABEL org.opencontainers.image.source="https://github.com/pear-studio/nonebot-di
 
 # 从构建阶段复制虚拟环境
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/project-meta /app/project-meta
 
-# 复制项目代码
-COPY . .
+# 复制运行所需文件。避免 COPY . . 把非运行文件变动带进镜像层。
+COPY bot.py ./
+COPY pyproject.toml uv.lock ./
+COPY src/ src/
+COPY config/global.json config/global.json
+COPY config/bots/_template.json config/bots/_template.json
 
 # 设置环境变量
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/project-meta"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DICEPP_PROJECT_ROOT=/app
