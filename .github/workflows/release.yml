@@ -1,9 +1,10 @@
 # DicePP Release — tag push 触发镜像构建、GHCR 推送、Windows EXE 构建和 GitHub Release 创建
 #
-# 触发: push v*.*.* tag  或  workflow_dispatch（手动触发用于测试）
-# 产物: ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z + :latest
-#       DicePP-vX.Y.Z-win64.zip
-#       GitHub Release（body 来自 docs/releases/vX.Y.Z.md）
+# 触发: push v*.*.* tag
+# 支持: vX.Y.Z 正式版；vX.Y.ZrcN 预发布测试版
+# 产物: ghcr.io/pear-studio/nonebot-dicepp:<tag>；正式版额外推送 :latest
+#       DicePP-<tag>-win64.zip
+#       GitHub Release / Prerelease（body 来自 docs/releases/<tag>.md）
 #       docker-compose.yml 和 Windows zip 作为 release assets
 
 name: Release
@@ -11,12 +12,6 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: '版本号 (不含 v 前缀，如 3.0.1)'
-        required: true
-        type: string
 
 permissions:
   contents: write     # 创建 GitHub Release + 上传 assets
@@ -32,13 +27,16 @@ jobs:
       - name: Extract version info
         id: version
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            TAG="v${{ github.event.inputs.version }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build image (local only)
         uses: docker/build-push-action@v5
@@ -54,22 +52,13 @@ jobs:
 
       - name: Smoke test image
         run: |
-          docker run --rm ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
-            python bot.py --version
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push image
-        run: |
-          docker tag ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
-            ghcr.io/pear-studio/nonebot-dicepp:latest
-          docker push ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
-          docker push ghcr.io/pear-studio/nonebot-dicepp:latest
+          EXPECTED="DicePP v${{ steps.version.outputs.version }}"
+          ACTUAL="$(docker run --rm ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
+            python bot.py --version)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
+            exit 1
+          fi
 
   windows-build:
     name: Windows EXE
@@ -81,12 +70,15 @@ jobs:
         id: version
         shell: bash
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            TAG="v${{ github.event.inputs.version }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -105,7 +97,12 @@ jobs:
       - name: Smoke test
         shell: bash
         run: |
-          ./dist/DicePP/DicePP.exe --version
+          EXPECTED="DicePP v${{ steps.version.outputs.version }}"
+          ACTUAL="$(./dist/DicePP/DicePP.exe --version | tr -d '\r')"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
+            exit 1
+          fi
           ./dist/DicePP/DicePP.exe --smoke-check
 
       - name: Package artifact
@@ -131,25 +128,79 @@ jobs:
         with:
           name: dicepp-windows
 
+      - name: Extract version info
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build image for publishing
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: |
+            ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
+          build-args: |
+            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
+            GIT_SHA=${{ steps.version.outputs.sha }}
+
+      - name: Smoke test image for publishing
+        run: |
+          EXPECTED="DicePP v${{ steps.version.outputs.version }}"
+          ACTUAL="$(docker run --rm ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
+            python bot.py --version)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
+            exit 1
+          fi
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        run: |
+          docker push ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
+          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
+            docker tag ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
+              ghcr.io/pear-studio/nonebot-dicepp:latest
+            docker push ghcr.io/pear-studio/nonebot-dicepp:latest
+          else
+            echo "Prerelease tag detected; skipping latest tag"
+          fi
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            TAG="v${{ github.event.inputs.version }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
+          TAG="${{ steps.version.outputs.tag }}"
           RELEASE_MD="docs/releases/${TAG}.md"
           ZIP=$(ls DicePP-*-win64.zip 2>/dev/null || echo "")
+          RELEASE_FLAGS=""
+          if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
+            RELEASE_FLAGS="--prerelease"
+          fi
           if [ -f "$RELEASE_MD" ]; then
-            gh release create "$TAG" \
+            gh release create "$TAG" $RELEASE_FLAGS \
               --title "DicePP ${TAG}" \
               --notes-file "$RELEASE_MD" \
               docker-compose.yml $ZIP
           else
             echo "::warning::Release metadata 文件 $RELEASE_MD 不存在，使用默认 body"
-            gh release create "$TAG" \
+            gh release create "$TAG" $RELEASE_FLAGS \
               --title "DicePP ${TAG}" \
               --notes "DicePP ${TAG}" \
               docker-compose.yml $ZIP

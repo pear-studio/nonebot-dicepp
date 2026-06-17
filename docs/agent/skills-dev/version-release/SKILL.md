@@ -21,6 +21,7 @@ metadata:
 
 - `pyproject.toml` 的 `[project].version` 是唯一手工维护的项目版本源。
 - Git tag 使用 `vX.Y.Z`, 由 `bump-my-version` 根据新版本号创建。
+- 发版测试可使用 `vX.Y.ZrcN` 预发布 tag（如 `v3.0.1rc1`）；RC 会创建 GitHub Prerelease 并推送同名镜像 tag，但不会更新 `latest`。
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。未来 GitHub Release body 以该文件为准生成或同步。
 - 日常发布只处理版本递增。补建当前版本基线属于一次性迁移/修复操作, 需用户明确要求后参考本技能的检查边界手工处理。
@@ -216,6 +217,23 @@ metadata:
    git push origin master --tags
    ```
 7. 等待 GitHub Actions 完成, 验证镜像和 GitHub Release。参考本技能 step 9。
+
+## RC / Prerelease Test Notes
+
+当用户要求先验证发版链路时, 优先使用 RC 预发布版本：
+
+1. 选择目标正式版本作为基底；如果 `3.0.0` 尚未正式发布, 测试版从 `3.0.0rc1` 开始；已有正式版后再使用下一个版本的 RC。
+2. 将 `pyproject.toml` 版本更新为目标 RC 版本, 并准备对应的 `docs/releases/vX.Y.ZrcN.md`。
+3. 创建并推送 tag:
+   ```bash
+   git tag vX.Y.ZrcN
+   git push origin master --tags
+   ```
+4. GitHub Actions 会构建 Docker 镜像和 Windows EXE, 运行版本一致性检查和冒烟测试。
+5. RC 发布只推送 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.ZrcN`, 不更新 `:latest`。
+6. GitHub Release 会标记为 Prerelease。
+
+RC 测试通过后, 正式发布仍使用纯数字版本 `vX.Y.Z`。
 
 ## Important Notes
 
