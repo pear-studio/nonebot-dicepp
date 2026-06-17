@@ -18,9 +18,14 @@ permissions:
   packages: write     # 推送 GHCR 镜像
 
 jobs:
+  quality-gate:
+    name: Quality Gate
+    uses: ./.github/workflows/test-suite.yml
+
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
+    needs: quality-gate
     steps:
       - uses: actions/checkout@v4
 
@@ -63,6 +68,7 @@ jobs:
   windows-build:
     name: Windows EXE
     runs-on: windows-latest
+    needs: quality-gate
     steps:
       - uses: actions/checkout@v4
 

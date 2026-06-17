@@ -2,11 +2,12 @@
 Tests for core/config/declare.py
 
 覆盖:
-  - get_bot_version() 返回 vX.Y.Z 格式
+  - get_bot_version() 返回 vX.Y.Z 或 vX.Y.ZrcN 格式
   - get_bot_version() 与 pyproject.toml 中的版本一致
 """
 import sys
 import tomllib
+import re
 from pathlib import Path
 
 import pytest
@@ -29,15 +30,13 @@ class TestGetBotVersion:
     """验证 get_bot_version() 与包元数据 / pyproject.toml 一致。"""
 
     def test_returns_v_prefix_semver(self):
-        """get_bot_version() 返回 'vX.Y.Z' 格式。"""
+        """get_bot_version() 返回正式版或预发布版本格式。"""
         from core.config.declare import get_bot_version
 
         version_str = get_bot_version()
-        # 格式: v + 三段数字
-        parts = version_str[1:].split(".")
-        assert version_str.startswith("v"), f"版本号必须以 v 开头: {version_str}"
-        assert len(parts) == 3, f"版本号必须为三段式 semver: {version_str}"
-        assert all(p.isdigit() for p in parts), f"每段必须为数字: {version_str}"
+        assert re.match(r"^v\d+\.\d+\.\d+((a|b|rc)\d+)?$", version_str), (
+            f"版本号必须为 vX.Y.Z 或 vX.Y.ZrcN 格式: {version_str}"
+        )
 
     def test_matches_pyproject_version(self):
         """get_bot_version() 与 pyproject.toml 中的版本一致。"""

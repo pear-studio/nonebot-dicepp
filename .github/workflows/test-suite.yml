@@ -1,0 +1,136 @@
+# DicePP Test Suite — shared reusable workflow for CI and Release gates
+#
+# 测试分层 (pytest marker 体系):
+#   1. fast     — 主体单元/模块测试 (排除 slow/integration/e2e/real_llm)
+#   2. slow     — 统计采样、蒙特卡洛等耗时测试
+#   3. integration — 跨模块集成测试
+#   4. e2e      — 完整 bot 生命周期测试
+#   5. compatibility — AST 引擎兼容性语料 (必须 100% 通过)
+#   6. coverage — 非 real_llm 测试覆盖率门槛
+
+name: Test Suite
+
+on:
+  workflow_call:
+
+jobs:
+  fast:
+    name: Fast Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint — forbid datetime.now() in tests
+        run: |
+          if grep -rn 'datetime\.now()' tests/ --include="*.py" | grep -v '# allow: datetime.now'; then
+            echo "ERROR: datetime.now() found in tests. Use wall_now() or a fixed datetime instead."
+            echo "If this usage is legitimate, add a '# allow: datetime.now' comment on the same line."
+            exit 1
+          fi
+          echo "OK: no datetime.now() in tests"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --group dev
+      - name: Run fast tests
+        run: |
+          uv run pytest -m "not (slow or integration or e2e or real_llm)" --tb=short -q
+
+  slow:
+    name: Slow Tests
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --group dev
+      - name: Run slow tests
+        run: |
+          uv run pytest -m "slow and not integration and not e2e and not real_llm" --tb=short -q
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --group dev
+      - name: Run integration tests
+        run: |
+          uv run pytest -m "integration and not e2e and not real_llm" --tb=short -q
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --group dev
+      - name: Run e2e tests
+        run: |
+          uv run pytest -m "e2e and not real_llm" --tb=short -q
+
+  compatibility:
+    name: Compatibility Corpus
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --group dev
+      - name: Run compatibility corpus
+        run: |
+          uv run pytest -m compatibility -v --tb=long -x
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --group dev
+      - name: Run coverage
+        run: |
+          uv run pytest -m "not real_llm" --cov --cov-report=term-missing --cov-report=xml
