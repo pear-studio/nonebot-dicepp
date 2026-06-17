@@ -22,8 +22,8 @@ version-release (skill)               version-deploy (skill)
 | `pyproject.toml` `[project].version` | 版本号唯一真相源 |
 | `src/.../declare.py` `get_bot_version()` | 运行时版本读取（从 importlib.metadata） |
 | `docs/releases/vX.Y.Z.md` | 每个 release 的 changelog 与风险摘要（数据变更 / 配置变更 / Risk Notes） |
-| `docker-compose.yml` | 部署入口，同时支持 `image:`（镜像模式）和 `build:`（源码模式） |
-| `Dockerfile` | 多阶段构建，`uv sync --frozen` 可复现 |
+| `docker-compose.yml` | 部署入口；生产默认使用 `image:` 发布镜像，`build:` 仅作开发/应急构建 |
+| `Dockerfile` | 多阶段构建，第三方依赖层与源码层分离，`uv sync --frozen` 可复现 |
 | `.github/workflows/release.yml` | tag push 触发 GHCR 镜像构建 + GitHub Release 创建 |
 
 ## 版本号
@@ -37,21 +37,21 @@ version-release (skill)               version-deploy (skill)
 ## 镜像
 
 - **Registry**: `ghcr.io/pear-studio/nonebot-dicepp`
-- **Tags**: 每个 release 打 `:vX.Y.Z` 和 `:latest`
+- **Tags**: 正式版打 `:vX.Y.Z` 和 `:latest`；RC 只打同名 `:vX.Y.ZrcN`
 - **构建触发**: push `v*.*.*` tag
 - **构建方式**: `uv sync --no-dev --frozen`，依赖由 `uv.lock` 锁定
 - **分发**: `docker-compose.yml` 作为 GitHub Release asset 下载
 
 ## Docker Compose 模式
 
-同一份 `docker-compose.yml` 同时包含 `image:` 和 `build:`：
+同一份 `docker-compose.yml` 同时包含 `image:` 和 `build:`。生产部署只使用发布镜像；源码构建仅用于开发或 GHCR 长期无法拉取时的应急验证。
 
-| 场景 | `DICEPP_IMAGE_TAG` | 行为 |
-|------|-------------------|------|
-| 生产部署 | `v3.0.0` | `docker compose pull` → `up -d` |
-| 开发构建 | 不设（默认 `latest`） | `docker compose build` → `up -d` |
-| 更新到最新 | `latest` | `DICEPP_IMAGE_TAG=latest docker compose pull` → `up -d` |
-| 回退到指定版本 | `v3.0.0` | `DICEPP_IMAGE_TAG=v3.0.0 docker compose pull` → `up -d` |
+| 场景 | 变量 | 行为 |
+|------|------|------|
+| 生产部署 | `DICEPP_IMAGE_TAG=v3.0.0` | `docker compose pull` → `up -d` |
+| 回退到指定版本 | `DICEPP_IMAGE_TAG=v3.0.0` | `docker compose pull` → `up -d` |
+| 临时使用其他 registry | `DICEPP_IMAGE=registry.example.com/ns/nonebot-dicepp:v3.0.0` | `docker compose pull` → `up -d` |
+| 开发/应急源码构建 | 不设镜像变量 | `docker compose build` → `up -d` |
 
 ## Release 流程
 
@@ -99,5 +99,6 @@ DICEPP_IMAGE_TAG=v3.1.0 docker compose pull && DICEPP_IMAGE_TAG=v3.1.0 docker co
 
 - DicePP 不依赖根目录 `.env`；NoneBot 监听参数由 `bot.py` 默认值提供
 - Prod 由 agent skill 保证不执行 build 命令
-- 镜像构建使用官方源，国内开发者通过 compose build args 自动用清华源
+- 生产主路径是发布镜像；源码构建只作为开发/应急 fallback
+- 镜像构建使用官方源，国内开发者通过 compose build args 可覆盖为清华源
 - Release metadata 不进 Docker 镜像

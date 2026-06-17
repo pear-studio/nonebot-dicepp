@@ -2,7 +2,7 @@
 
 本页面向想在 Linux 服务器上部署 DicePP 的普通用户。
 
-这里采用 Docker 镜像部署，不讲源码开发。需要开发时请看 [dev/guide.md](./dev/guide.md)。
+这里推荐使用 GitHub Release 发布的 Docker 镜像部署。源码构建只作为无法拉取镜像时的备用方案，见本文末尾附录。需要开发时请看 [dev/guide.md](./dev/guide.md)。
 
 ## 准备
 
@@ -47,6 +47,19 @@ mkdir -p config/bots data content
 ```
 
 从 [DicePP 最新 Release](https://github.com/pear-studio/nonebot-dicepp/releases/latest) 下载 `docker-compose.yml`，放到 `~/dicepp/docker-compose.yml`。
+
+默认会拉取 GHCR 镜像：
+
+```text
+ghcr.io/pear-studio/nonebot-dicepp:latest
+```
+
+正式生产建议使用明确版本号，而不是长期使用 `latest`。例如：
+
+```bash
+DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
+DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
+```
 
 ## 配置账号
 
@@ -160,6 +173,19 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 
 版本风险说明见 [releases/](./releases/)。
 
+### 国内拉取镜像很慢
+
+DicePP 官方发布源目前是 GHCR。国内服务器首次拉取镜像可能较慢，但后续更新会复用 Docker 层缓存，普通代码更新通常只需要拉取变化层。
+
+如果你有自己的国内镜像仓库，可以通过完整镜像地址覆盖：
+
+```bash
+DICEPP_IMAGE=registry.example.com/your-namespace/nonebot-dicepp:v3.0.0 docker compose pull
+DICEPP_IMAGE=registry.example.com/your-namespace/nonebot-dicepp:v3.0.0 docker compose up -d
+```
+
+这个方式只替换镜像来源，不会改变 DicePP 配置目录、数据目录或网络配置。
+
 ## 常见问题
 
 ### docker compose 不存在
@@ -262,3 +288,37 @@ docker compose logs -f
 ### 想启用 Persona AI
 
 先让 `.help` 正常，再按 [persona.md](./persona.md) 配置 Persona。
+
+## 附录：无法拉取镜像时从源码构建
+
+普通用户不推荐源码构建。只有在 GHCR 长期无法拉取、且你能接受首次构建较慢时，再使用这一方式。
+
+源码构建会在服务器上下载 Python 依赖并生成镜像。即使用国内镜像源，首次构建也可能花较久；后续如果 `pyproject.toml` 和 `uv.lock` 没有变化，Docker 会复用 `.venv` 依赖层，普通源码更新会快很多。
+
+在部署目录外准备源码：
+
+```bash
+git clone https://github.com/pear-studio/nonebot-dicepp.git
+cd nonebot-dicepp
+```
+
+构建时可使用国内源：
+
+```bash
+APT_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+docker compose build
+```
+
+构建完成后再启动：
+
+```bash
+docker compose up -d
+```
+
+注意：
+
+- 不要在生产更新时默认执行 `git pull` + 本地构建；正式发布仍以 Release 镜像 tag 为准。
+- 源码构建更适合临时避开镜像拉取问题，或给开发者验证镜像构建。
+- 如果以后恢复镜像拉取，建议切回发布镜像部署。
