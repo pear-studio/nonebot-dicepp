@@ -35,12 +35,12 @@ async def test_runner_applies_v1_and_noop_on_second_run():
             runner = MigrationRunner(db=db, log_db=log_db, registry=default_registry())
             first = await runner.migrate_up()
             assert first.current_version == 0
-            assert first.target_version == 2
-            assert first.applied_versions == [1, 2]
+            assert first.target_version == 3
+            assert first.applied_versions == [1, 2, 3]
 
             second = await runner.migrate_up()
-            assert second.current_version == 2
-            assert second.target_version == 2
+            assert second.current_version == 3
+            assert second.target_version == 3
             assert second.applied_versions == []
 
             cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='karma'")
@@ -95,8 +95,8 @@ async def test_bot_database_connect_runs_full_baseline_schema():
     db = BotDatabase(bot_id)
     await db.connect()
     try:
-        assert await db.schema_version() == 2
-        assert await db.target_schema_version() == 2
+        assert await db.schema_version() == 3
+        assert await db.target_schema_version() == 3
         # Smoke check: repositories and log tables are queryable after migration.
         assert await db.karma.list_all() == []
         assert await db.log.get_records("__missing_session__") == []
@@ -116,6 +116,87 @@ async def test_temp_replay_check_success():
         )
         assert code == 0
         assert "migrate_check_success" in message
+
+
+@pytest.mark.asyncio
+async def test_hub_config_column_is_data_not_value_after_migration():
+    """Fresh install: after full migration, hub_config column must be 'data'."""
+    bot_id = "test_hub_col"
+    db = BotDatabase(bot_id)
+    await db.connect()
+    try:
+        cursor = await db._db.execute("PRAGMA table_info(hub_config)")
+        cols = {row[1] for row in await cursor.fetchall()}
+        assert "data" in cols
+        assert "value" not in cols
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_hub_config_set_get_roundtrip():
+    """hub_set → hub_get roundtrip works with the 'data' column."""
+    bot_id = "test_hub_rw"
+    db = BotDatabase(bot_id)
+    await db.connect()
+    try:
+        await db.hub_set("test_key", '{"name":"roundtrip"}')
+        result = await db.hub_get("test_key")
+        assert result is not None
+        assert "roundtrip" in result
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_hub_config_legacy_upgrade_renames_value_to_data():
+    """Upgrade path: simulate old v2 table (column 'value'), run v3, verify rename."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "bot_data.db")
+        log_db_path = os.path.join(tmpdir, "log.db")
+        db = await aiosqlite.connect(db_path)
+        log_db = await aiosqlite.connect(log_db_path)
+        try:
+            # Build a registry that only has v1 + a "old v2" and v3
+            from core.data.migrations.v3_cleanup_variable_favor import (
+                CleanupVariableFavorV3,
+            )
+
+            class FakeOldV2(Migration):
+                def __init__(self) -> None:
+                    super().__init__(
+                        version=2,
+                        name="v2_hub_config_old",
+                        description="Old v2 with 'value' column",
+                    )
+
+                async def up(self, ctx: MigrationContext) -> None:
+                    await ctx.db.execute(
+                        """CREATE TABLE IF NOT EXISTS hub_config (
+                            key TEXT PRIMARY KEY,
+                            value TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )"""
+                    )
+
+            registry = MigrationRegistry()
+            registry.register(BaselineMigrationV1())
+            registry.register(FakeOldV2())
+            registry.register(CleanupVariableFavorV3())
+
+            runner = MigrationRunner(db=db, log_db=log_db, registry=registry)
+            result = await runner.migrate_up()
+            assert result.target_version == 3
+
+            cursor = await db.execute("PRAGMA table_info(hub_config)")
+            cols = {row[1] for row in await cursor.fetchall()}
+            assert "data" in cols
+            assert "value" not in cols
+        finally:
+            await db.close()
+            await log_db.close()
 
 
 @pytest.mark.asyncio

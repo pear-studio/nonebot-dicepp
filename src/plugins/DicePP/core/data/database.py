@@ -22,8 +22,6 @@ from .models import (
     GroupStat,
     MetaStat,
     NPCHealth,
-    UserVariable,
-    UserFavor,
 )
 
 
@@ -51,8 +49,6 @@ class BotDatabase:
         self._group_stat: Optional[Repository[GroupStat]] = None
         self._meta_stat: Optional[Repository[MetaStat]] = None
         self._npc_health: Optional[Repository[NPCHealth]] = None
-        self._variable: Optional[Repository[UserVariable]] = None
-        self._favor: Optional[Repository[UserFavor]] = None
         self.query: QueryStore = QueryStore()
         self._migration_runner: Optional[MigrationRunner] = None
 
@@ -140,18 +136,6 @@ class BotDatabase:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._npc_health
 
-    @property
-    def variable(self) -> Repository[UserVariable]:
-        if self._variable is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return self._variable
-
-    @property
-    def favor(self) -> Repository[UserFavor]:
-        if self._favor is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return self._favor
-
     async def connect(self) -> None:
         # allow idempotent connect() (some packaged runs may receive events early)
         if self._db is not None and self._log_db is not None:
@@ -198,8 +182,6 @@ class BotDatabase:
         self._group_stat = None
         self._meta_stat = None
         self._npc_health = None
-        self._variable = None
-        self._favor = None
         self._migration_runner = None
 
         # 关闭 query 数据库连接
@@ -233,7 +215,7 @@ class BotDatabase:
         if self._db is None:
             raise RuntimeError("Database not connected. Call connect() first.")
         cursor = await self._db.execute(
-            "SELECT value FROM hub_config WHERE key = ?",
+            "SELECT data FROM hub_config WHERE key = ?",
             (key,),
         )
         row = await cursor.fetchone()
@@ -244,10 +226,10 @@ class BotDatabase:
             raise RuntimeError("Database not connected. Call connect() first.")
         await self._db.execute(
             """
-            INSERT INTO hub_config (key, value, updated_at)
+            INSERT INTO hub_config (key, data, updated_at)
             VALUES (?, ?, datetime('now'))
             ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
+                data = excluded.data,
                 updated_at = datetime('now')
             """,
             (key, value),
@@ -307,12 +289,4 @@ class BotDatabase:
 
         self._npc_health = Repository[NPCHealth](
             self._db, NPCHealth, "npc_health", ["group_id", "name"]
-        )
-
-        self._variable = Repository[UserVariable](
-            self._db, UserVariable, "variable", ["user_id", "group_id", "name"]
-        )
-
-        self._favor = Repository[UserFavor](
-            self._db, UserFavor, "favor", ["user_id", "group_id"]
         )

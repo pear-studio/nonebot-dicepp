@@ -27,8 +27,6 @@ from .extended import (
     GroupStat,
     MetaStat,
     NPCHealth,
-    UserVariable,
-    UserFavor,
 )
 from .hub_config import HubConfig
 

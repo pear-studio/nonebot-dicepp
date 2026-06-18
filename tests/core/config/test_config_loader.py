@@ -2,7 +2,7 @@
 Tests for core/config/loader.py
 
 Covers:
-  9.1  Hierarchical loading (global defaults < secrets < persona < account < env vars)
+  9.1  Hierarchical loading (global defaults < user overrides < account < env vars)
   9.2  Pydantic validation errors
   9.5  Atomic config update (reload keeps old config on failure)
 """
@@ -31,7 +31,7 @@ def _write(path: Path, data: dict) -> None:
 
 
 class _DataDir:
-    """Thin wrapper around a tmp directory mimicking Data/."""
+    """Thin wrapper around a tmp directory mimicking the config/ layout."""
 
     def __init__(self, tmp: Path):
         self.root = tmp
@@ -43,8 +43,8 @@ class _DataDir:
         return self.root / "global.json"
 
     @property
-    def global_secrets(self) -> Path:
-        return self.root / "secrets.json"
+    def user_config(self) -> Path:
+        return self.root / "user.json"
 
     def account_cfg(self, account: str) -> Path:
         return self.root / "bots" / f"{account}.json"
@@ -104,16 +104,16 @@ def test_global_config_overrides_pydantic_defaults(dd):
     assert cfg.mode.default == "COC7"
 
 
-def test_global_secrets_override_global_config(dd):
+def test_user_config_override_global_config(dd):
     _write(dd.global_cfg, {"chat_interval": 99})
-    _write(dd.global_secrets, {"nickname": "secret_nick"})
+    _write(dd.user_config, {"nickname": "user_nick"})
     cfg = dd.loader().load()
     assert cfg.chat_interval == 99
-    assert cfg.nickname == "secret_nick"
+    assert cfg.nickname == "user_nick"
 
 
-def test_account_config_overrides_global_secrets(dd):
-    _write(dd.global_secrets, {"master": ["global_master"]})
+def test_account_config_overrides_user_config(dd):
+    _write(dd.user_config, {"master": ["global_master"]})
     _write(dd.account_cfg("bot1"), {"master": ["account_master"]})
     cfg = dd.loader("bot1").load()
     assert cfg.master == ["account_master"]
@@ -155,9 +155,9 @@ def test_env_var_nested_persona_ai_model(dd):
 
 
 def test_priority_order_all_layers(dd):
-    """Full priority stack: env > account > secrets > global."""
+    """Full priority stack: env > account > user > global."""
     _write(dd.global_cfg, {"nickname": "global"})
-    _write(dd.global_secrets, {"nickname": "secret"})
+    _write(dd.user_config, {"nickname": "secret"})
     _write(dd.account_cfg("bot1"), {"nickname": "account"})
     with patch.dict(os.environ, {"DICE_NICKNAME": "env"}):
         cfg = dd.loader("bot1").load()
@@ -166,7 +166,7 @@ def test_priority_order_all_layers(dd):
 
 def test_priority_without_env(dd):
     _write(dd.global_cfg, {"nickname": "global"})
-    _write(dd.global_secrets, {"nickname": "secret"})
+    _write(dd.user_config, {"nickname": "secret"})
     _write(dd.account_cfg("bot1"), {"nickname": "account"})
     cfg = dd.loader("bot1").load()
     assert cfg.nickname == "account"
@@ -174,9 +174,9 @@ def test_priority_without_env(dd):
 
 def test_priority_without_account(dd):
     _write(dd.global_cfg, {"nickname": "global"})
-    _write(dd.global_secrets, {"nickname": "secret"})
+    _write(dd.user_config, {"nickname": "user_overridden"})
     cfg = dd.loader().load()
-    assert cfg.nickname == "secret"
+    assert cfg.nickname == "user_overridden"
 
 
 # ── account template auto-creation ───────────────────────────────────────────

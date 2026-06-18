@@ -12,7 +12,7 @@ Configuration priority (high → low):
   1. CLI arguments  (--hub-url, --master-id, --nickname, --port)
   2. Environment variables  (BOT_ID, HUB_URL, MASTER_ID, NICKNAME, PORT, DICE_*)
   3. config/bots/{bot_id}.json
-  4. config/secrets.json
+  4. config/user.json
   5. config/global.json
 
 bot_id MUST be provided via --bot-id or BOT_ID env var; it is not read from JSON.

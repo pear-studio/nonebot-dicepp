@@ -4,9 +4,9 @@
 ⚠️  本测试需要真实 API Key 才能运行。
 
 前置条件：
-- config/secrets.json 中配置有效的 persona_ai.primary_api_key
-- config/secrets.json 中配置 persona_ai.primary_base_url（如 https://api.minimaxi.com/v1）
-- config/secrets.json 中配置 persona_ai.primary_model（如 MiniMax-M3）
+- config/user.json 中配置有效的 persona_ai.primary_api_key
+- config/user.json 中配置 persona_ai.primary_base_url（如 https://api.minimaxi.com/v1）
+- config/user.json 中配置 persona_ai.primary_model（如 MiniMax-M3）
 
 运行方式：
     # 作为 pytest 测试运行（有 API key 时执行，无时自动跳过）
@@ -102,9 +102,9 @@ def _set_fake_time(hour: int, minute: int) -> None:
 
 # ── 加载 API 配置 ──
 def _load_api_config() -> dict:
-    """从 secrets.json 读取 API 配置，文件不存在或字段缺失时返回空 dict。"""
+    """从 user.json 读取 API 配置，文件不存在或字段缺失时返回空 dict。"""
     secrets_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", "config", "secrets.json"
+        os.path.dirname(__file__), "..", "..", "..", "config", "user.json"
     )
     if not os.path.exists(secrets_path):
         return {}
@@ -123,7 +123,7 @@ pytestmark = [
     pytest.mark.asyncio,
     pytest.mark.skipif(
         not _HAS_API_KEY,
-        reason="需要真实 API Key：config/secrets.json 中配置 persona_ai.primary_api_key",
+        reason="需要真实 API Key：config/user.json 中配置 persona_ai.primary_api_key",
     ),
 ]
 
@@ -324,7 +324,7 @@ class TestCharacterLifecycleRealLLM:
 # ── 独立运行入口 ──
 if __name__ == "__main__":
     if not _HAS_API_KEY:
-        print("ERROR: 未找到 API Key。请在 config/secrets.json 中配置 persona_ai.primary_api_key")
+        print("ERROR: 未找到 API Key。请在 config/user.json 中配置 persona_ai.primary_api_key")
         print("示例配置:")
         print('  {"persona_ai": {"primary_api_key": "sk-xxx", "primary_base_url": "https://api.minimaxi.com/v1", "primary_model": "MiniMax-M3"}}')
         sys.exit(1)

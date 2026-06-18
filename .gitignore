@@ -148,8 +148,8 @@ dmypy.json
 .vscode
 
 # DicePP
-config/secrets.json
-!config/secrets.json.example
+config/user.json
+!config/user.json.example
 config/nonebot.env
 config/bots/*.json
 !config/bots/_template.json
@@ -185,6 +185,9 @@ nul
 
 # DicePP Shell 会话数据
 .dicepp-shell/
+
+# Dashboard 运行时数据
+dashboard/data/
 
 # 本地 superpowers 文档
 docs/superpowers/

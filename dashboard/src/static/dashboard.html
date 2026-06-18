@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DicePP 管理面板</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body>
+<div x-data="app()" x-init="init()" class="flex h-screen bg-gray-100">
+  <!-- Loading screen -->
+  <div x-show="sessionState === 'loading'" class="flex items-center justify-center w-full">
+    <div class="text-center">
+      <svg class="animate-spin h-10 w-10 text-blue-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      <p class="text-gray-600">正在连接...</p>
+    </div>
+  </div>
+
+  <!-- Error banner -->
+  <div x-show="errorMessage" class="fixed top-0 left-0 right-0 z-50 bg-red-600 text-white text-center py-2 px-4 flex justify-between items-center" x-cloak>
+    <span x-text="errorMessage"></span>
+    <button @click="errorMessage = ''" class="ml-4 text-white font-bold hover:text-gray-200">&times;</button>
+  </div>
+
+  <!-- Setup page -->
+  <div x-show="sessionState === 'setup'" class="flex items-center justify-center w-full" x-cloak>
+    <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-md mx-4">
+      <h2 class="text-2xl font-bold text-center mb-2">初始化管理面板</h2>
+      <p class="text-gray-600 text-center mb-6">请设置管理员密码</p>
+      <form @submit.prevent="setupPassword">
+        <div class="mb-4">
+          <label class="block text-gray-700 text-sm font-bold mb-2" for="setup-password">密码</label>
+          <input id="setup-password" type="password" x-model="setupPwd" placeholder="输入密码" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div class="mb-6">
+          <label class="block text-gray-700 text-sm font-bold mb-2" for="setup-confirm">确认密码</label>
+          <input id="setup-confirm" type="password" x-model="setupConfirm" placeholder="再次输入密码" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <button type="submit" :disabled="apiLoading" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-bold">
+          <span x-show="!apiLoading">设置密码并初始化</span>
+          <span x-show="apiLoading">处理中...</span>
+        </button>
+      </form>
+      <p x-show="setupError" x-text="setupError" id="setup-error" class="mt-4 text-red-600 text-sm text-center"></p>
+    </div>
+  </div>
+
+  <!-- Login page -->
+  <div x-show="sessionState === 'login'" class="flex items-center justify-center w-full" x-cloak>
+    <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-md mx-4">
+      <h2 class="text-2xl font-bold text-center mb-6">DicePP 管理面板</h2>
+      <form @submit.prevent="login">
+        <div class="mb-6">
+          <label class="block text-gray-700 text-sm font-bold mb-2" for="login-password">密码</label>
+          <input id="login-password" type="password" x-model="loginPassword" placeholder="输入密码" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <button type="submit" :disabled="apiLoading" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 font-bold">
+          <span x-show="!apiLoading">登录</span>
+          <span x-show="apiLoading">登录中...</span>
+        </button>
+      </form>
+      <p x-show="loginError" x-text="loginError" class="mt-4 text-red-600 text-sm text-center"></p>
+    </div>
+  </div>
+
+  <!-- Main dashboard -->
+  <div x-show="sessionState === 'main'" class="flex w-full" x-cloak>
+    <!-- Sidebar -->
+    <aside class="w-64 bg-gray-900 text-white flex flex-col flex-shrink-0">
+      <div class="p-4 border-b border-gray-700">
+        <h1 class="text-lg font-bold">DicePP 管理面板</h1>
+      </div>
+
+      <!-- Bot selector -->
+      <div class="p-3 border-b border-gray-700">
+        <label class="block text-xs text-gray-400 mb-1">选择 Bot</label>
+        <select x-model="selectedBotId" @change="onBotChange" class="w-full bg-gray-800 text-white text-sm border border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+          <option value="">-- 选择 Bot --</option>
+          <template x-for="bot in bots" :key="bot">
+            <option x-text="bot" :value="bot"></option>
+          </template>
+        </select>
+      </div>
+
+      <!-- Navigation tabs -->
+      <nav class="flex-1 overflow-y-auto py-2">
+        <template x-for="tab in tabs" :key="tab.id">
+          <button @click="currentTab = tab.id; loadTabData(tab.id)" class="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-800 transition flex items-center" :class="currentTab === tab.id ? 'bg-gray-800 border-l-4 border-blue-500' : 'border-l-4 border-transparent'">
+            <span x-text="tab.label" class="ml-2"></span>
+          </button>
+        </template>
+      </nav>
+
+      <!-- Logout -->
+      <div class="p-3 border-t border-gray-700">
+        <button @click="logout" class="flex items-center text-sm text-gray-400 hover:text-white transition">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+          退出登录
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main content area -->
+    <main class="flex-1 overflow-y-auto p-6">
+      <!-- Loading overlay -->
+      <div x-show="apiLoading" class="fixed inset-0 bg-black bg-opacity-20 flex items-center justify-center z-40" x-cloak>
+        <svg class="animate-spin h-8 w-8 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+      </div>
+
+      <!-- Tab: 数据浏览 -->
+      <div x-show="currentTab === 'data'" x-cloak>
+        <h2 class="text-xl font-bold mb-4">数据浏览</h2>
+        <template x-if="!selectedBotId">
+          <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg">请先在左侧选择一个 Bot</div>
+        </template>
+        <template x-if="selectedBotId">
+          <div>
+            <div class="flex items-center gap-4 mb-4">
+              <select x-model="selectedTable" @change="loadTableData(1)" class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">-- 选择数据表 --</option>
+                <template x-for="tbl in tables" :key="tbl.name">
+                  <option x-text="tbl.name" :value="tbl.name"></option>
+                </template>
+              </select>
+              <input type="text" x-model="searchQuery" placeholder="搜索关键字..." @input.debounce.500ms="loadTableData(1)" class="border border-gray-300 rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div x-show="selectedTable && records.length === 0" class="text-gray-500 text-center py-8">暂无数据</div>
+            <div x-show="records.length > 0" class="bg-white rounded-lg shadow overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <template x-for="col in columns" :key="col">
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" x-text="col"></th>
+                    </template>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <template x-for="(row, idx) in records" :key="idx">
+                    <tr class="hover:bg-gray-50">
+                      <template x-for="col in columns" :key="col">
+                        <td class="px-4 py-2 text-sm text-gray-700">
+                          <pre x-text="formatCell(row[col])" class="whitespace-pre-wrap font-sans text-xs"></pre>
+                        </td>
+                      </template>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div x-show="totalPages > 1" class="flex items-center justify-between mt-4">
+              <button @click="loadTableData(currentPage - 1)" :disabled="currentPage <= 1" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 text-sm">上一页</button>
+              <span class="text-sm text-gray-600" x-text="`第 ${currentPage} / ${totalPages} 页`"></span>
+              <button @click="loadTableData(currentPage + 1)" :disabled="currentPage >= totalPages" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50 text-sm">下一页</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Tab: 配置编辑 -->
+      <div x-show="currentTab === 'config'" x-cloak>
+        <h2 class="text-xl font-bold mb-4">配置编辑</h2>
+        <template x-if="!selectedBotId">
+          <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg">请先在左侧选择一个 Bot</div>
+        </template>
+        <template x-if="selectedBotId">
+          <div>
+            <div class="flex gap-4 mb-4 border-b">
+              <button @click="configView = 'fields'" :class="configView === 'fields' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">字段视图</button>
+              <button @click="configView = 'json'; userConfigText = JSON.stringify(userConfig, null, 2)" :class="configView === 'json' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">JSON 视图</button>
+            </div>
+
+            <!-- Fields view -->
+            <div x-show="configView === 'fields'" x-cloak>
+              <div x-show="Object.keys(configFields).length === 0" class="text-gray-500 text-center py-4">加载中...</div>
+              <template x-for="(field, path) in configFields" :key="path">
+                <div class="mb-2 border rounded-lg bg-white">
+                  <div class="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50" @click="toggleField(path)">
+                    <div class="flex items-center gap-2">
+                      <svg :class="expandedFields.includes(path) ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                      <span class="font-medium text-sm" x-text="path" :title="field.description || ''"></span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full" x-text="sourceLabel(field.source)"></span>
+                      <template x-if="field.source === 'bot' || field.source === 'user'">
+                        <button @click.stop="resetField(path)" class="text-xs text-red-500 hover:text-red-700">重置</button>
+                      </template>
+                      <template x-if="field.editing">
+                        <button @click.stop="saveField(path)" class="text-xs text-green-600 hover:text-green-800">保存</button>
+                      </template>
+                      <template x-if="!field.editing">
+                        <button @click.stop="editField(path)" class="text-xs text-blue-600 hover:text-blue-800">编辑</button>
+                      </template>
+                    </div>
+                  </div>
+                  <div x-show="expandedFields.includes(path)" x-cloak class="px-3 pb-3 border-t">
+                    <template x-if="!field.editing">
+                      <div class="pt-2">
+                        <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
+                      </div>
+                    </template>
+                    <template x-if="field.editing">
+                      <div class="pt-2">
+                        <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                        <div class="flex gap-2 mt-1">
+                          <button @click="saveField(path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
+                          <button @click="cancelEditField(path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <!-- JSON view -->
+            <div x-show="configView === 'json'" x-cloak>
+              <p class="text-sm text-gray-600 mb-2">编辑 <code>user.json</code> 原始内容：</p>
+              <textarea x-model="userConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateJson"></textarea>
+              <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
+              <button @click="saveUserConfig" :disabled="!userConfigValid || apiLoading" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
+              <div x-show="reloadResult" class="mt-4">
+                <h4 class="font-medium mb-2">重载结果：</h4>
+                <template x-for="(status, bid) in reloadResult" :key="bid">
+                  <div class="text-sm mb-1" :class="status.ok ? 'text-green-600' : 'text-red-600'" x-text="`${bid}: ${status.ok ? '成功' : status.error}`"></div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Tab: Bot配置 -->
+      <div x-show="currentTab === 'botcfg'" x-cloak>
+        <h2 class="text-xl font-bold mb-4">Bot 配置</h2>
+        <template x-if="!selectedBotId">
+          <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg">请先在左侧选择一个 Bot</div>
+        </template>
+        <template x-if="selectedBotId">
+          <div class="bg-white rounded-lg shadow p-6 max-w-lg">
+            <div class="mb-4">
+              <label class="block text-gray-700 text-sm font-bold mb-1">Master</label>
+              <input type="text" x-model="botConfigFields.master" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <p class="text-xs text-gray-500 mt-1">骰主 ID 列表（逗号分隔）</p>
+            </div>
+            <div class="mb-4">
+              <label class="block text-gray-700 text-sm font-bold mb-1">Admin</label>
+              <input type="text" x-model="botConfigFields.admin" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <p class="text-xs text-gray-500 mt-1">管理员 ID 列表（逗号分隔）</p>
+            </div>
+            <div class="mb-4">
+              <label class="block text-gray-700 text-sm font-bold mb-1">Friend Token</label>
+              <input type="text" x-model="botConfigFields.friend_token" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <p class="text-xs text-gray-500 mt-1">好友添加 Token（逗号分隔）</p>
+            </div>
+            <div class="mb-4">
+              <label class="block text-gray-700 text-sm font-bold mb-1">Persona</label>
+              <input type="text" x-model="botConfigFields.persona" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <p class="text-xs text-gray-500 mt-1">角色名</p>
+            </div>
+            <div class="mb-4">
+              <label class="block text-gray-700 text-sm font-bold mb-1">Nickname</label>
+              <input type="text" x-model="botConfigFields.nickname" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <p class="text-xs text-gray-500 mt-1">昵称</p>
+            </div>
+            <button @click="saveBotConfig" :disabled="apiLoading" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
+            <div x-show="botConfigReloadResult" class="mt-4 text-sm" :class="botConfigReloadResult?.ok ? 'text-green-600' : 'text-red-600'" x-text="botConfigReloadResult?.ok ? '保存并重载成功' : (botConfigReloadResult?.error || '保存失败')"></div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Tab: 内容管理 -->
+      <div x-show="currentTab === 'content'" x-cloak>
+        <h2 class="text-xl font-bold mb-4">内容管理</h2>
+        <div class="flex gap-4 mb-4">
+          <template x-for="dir in contentDirs" :key="dir">
+            <button @click="contentSubdir = dir; loadContentFiles(dir)" :class="contentSubdir === dir ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-100'" class="px-4 py-2 rounded-lg border text-sm font-medium transition">
+              <span x-text="dirLabels[dir] || dir"></span>
+            </button>
+          </template>
+        </div>
+
+        <!-- Special: queries has DB listing first -->
+        <template x-if="contentSubdir === 'queries'">
+          <div>
+            <template x-if="queryDbs.length === 0">
+              <button @click="loadQueryDbs" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">加载数据库列表</button>
+            </template>
+            <template x-if="queryDbs.length > 0">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">选择数据库：</label>
+                <select x-model="selectedQueryDb" @change="loadQueryEntries(1)" class="border rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">-- 选择 --</option>
+                  <template x-for="db in queryDbs" :key="db">
+                    <option x-text="db" :value="db"></option>
+                  </template>
+                </select>
+                <template x-if="queryEntries.length > 0">
+                  <div>
+                    <div class="bg-white rounded-lg shadow overflow-x-auto">
+                      <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                          <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">ID</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">内容</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                          <template x-for="entry in queryEntries" :key="entry.id">
+                            <tr class="hover:bg-gray-50">
+                              <td class="px-4 py-2 text-sm" x-text="entry.id"></td>
+                              <td class="px-4 py-2 text-sm">
+                                <pre x-text="JSON.stringify(entry, null, 1).slice(0, 200)" class="text-xs"></pre>
+                              </td>
+                              <td class="px-4 py-2">
+                                <button @click="viewQueryEntry(entry)" class="text-blue-600 hover:text-blue-800 text-xs">查看</button>
+                              </td>
+                            </tr>
+                          </template>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div x-show="queryTotalPages > 1" class="flex items-center justify-between mt-2">
+                      <button @click="loadQueryEntries(queryPage - 1)" :disabled="queryPage <= 1" class="px-3 py-1 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">上一页</button>
+                      <span class="text-sm text-gray-600" x-text="`${queryPage} / ${queryTotalPages}`"></span>
+                      <button @click="loadQueryEntries(queryPage + 1)" :disabled="queryPage >= queryTotalPages" class="px-3 py-1 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">下一页</button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- File listing for non-queries subdirs -->
+        <template x-if="contentSubdir !== 'queries'">
+          <div>
+            <div x-show="contentFiles.length === 0" class="text-gray-500 text-center py-8">暂无文件</div>
+            <div x-show="contentFiles.length > 0" class="bg-white rounded-lg shadow overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">文件名</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">大小</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">修改时间</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <template x-for="file in contentFiles" :key="file.name">
+                    <tr class="hover:bg-gray-50">
+                      <td class="px-4 py-2 text-sm" x-text="file.name"></td>
+                      <td class="px-4 py-2 text-sm text-gray-600" x-text="file.size"></td>
+                      <td class="px-4 py-2 text-sm text-gray-600" x-text="file.modified"></td>
+                      <td class="px-4 py-2">
+                        <button @click="viewFile(file)" class="text-blue-600 hover:text-blue-800 text-xs">查看</button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+
+        <!-- File content modal -->
+        <div x-show="viewingFile" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak>
+          <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl max-h-[80vh] flex flex-col">
+            <div class="flex justify-between items-center p-4 border-b">
+              <h3 class="font-bold" x-text="viewingFileName"></h3>
+              <button @click="viewingFile = false" class="text-gray-500 hover:text-gray-700">&times;</button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-1">
+              <pre x-text="viewingFileContent" class="text-xs font-mono whitespace-pre-wrap"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: 运行监控 -->
+      <div x-show="currentTab === 'monitor'" x-cloak>
+        <h2 class="text-xl font-bold mb-4">运行监控</h2>
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Bot ID</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">版本</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">状态</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">最后心跳</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              <template x-for="bot in monitorBots" :key="bot.bot_id">
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-3 text-sm" x-text="bot.bot_id"></td>
+                  <td class="px-4 py-3 text-sm" x-text="bot.version || '-'"></td>
+                  <td class="px-4 py-3">
+                    <div class="flex items-center gap-1.5">
+                      <span class="w-2.5 h-2.5 rounded-full inline-block" :class="bot.online ? 'bg-green-500' : 'bg-red-500'"></span>
+                      <span class="text-sm" :class="bot.online ? 'text-green-700' : 'text-red-700'" x-text="bot.online ? '在线' : '离线'"></span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-sm text-gray-600" x-text="formatTimestamp(bot.last_heartbeat_ts)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="monitorBots.length === 0" class="text-center text-gray-500 py-8">暂无数据</div>
+        </div>
+      </div>
+
+      <!-- Tab: 审计日志 -->
+      <div x-show="currentTab === 'audit'" x-cloak>
+        <h2 class="text-xl font-bold mb-4">审计日志</h2>
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">时间</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">目标</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">详情</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">IP</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              <template x-for="log in auditLogs" :key="log.id || (log.ts + (log.action || ''))">
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-2 text-sm text-gray-600 whitespace-nowrap" x-text="formatTimestamp(log.ts)"></td>
+                  <td class="px-4 py-2 text-sm" x-text="log.action"></td>
+                  <td class="px-4 py-2 text-sm" x-text="log.target"></td>
+                  <td class="px-4 py-2 text-sm text-gray-600 max-w-xs truncate" x-text="log.detail"></td>
+                  <td class="px-4 py-2 text-sm text-gray-600" x-text="log.ip"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="auditLogs.length === 0" class="text-center text-gray-500 py-8">暂无日志</div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+function app() {
+  return {
+    // ── Auth state ──
+    sessionState: 'loading',
+    setupPwd: '',
+    setupConfirm: '',
+    setupError: '',
+    loginPassword: '',
+    loginError: '',
+
+    // ── Navigation ──
+    currentTab: 'data',
+    tabs: [
+      { id: 'data', label: '数据浏览' },
+      { id: 'config', label: '配置编辑' },
+      { id: 'botcfg', label: 'Bot配置' },
+      { id: 'content', label: '内容管理' },
+      { id: 'monitor', label: '运行监控' },
+      { id: 'audit', label: '审计日志' },
+    ],
+
+    // ── Bot selection ──
+    bots: [],
+    selectedBotId: '',
+
+    // ── Tab: Data Browse ──
+    tables: [],
+    selectedTable: '',
+    records: [],
+    columns: [],
+    currentPage: 1,
+    totalPages: 1,
+    searchQuery: '',
+
+    // ── Tab: Config Edit ──
+    configView: 'fields',
+    configFields: {},
+    expandedFields: [],
+    userConfig: {},
+    userConfigText: '',
+    userConfigValid: true,
+    reloadResult: null,
+
+    // ── Tab: Bot Config ──
+    botConfigFields: { master: '', admin: '', friend_token: '', persona: '', nickname: '' },
+    botConfigReloadResult: null,
+
+    // ── Tab: Content ──
+    contentDirs: ['decks', 'random', 'queries', 'characters', 'excel'],
+    dirLabels: { decks: '卡组', random: '随机生成', queries: '查询', characters: '角色', excel: 'Excel' },
+    contentSubdir: 'decks',
+    contentFiles: [],
+    viewingFile: false,
+    viewingFileName: '',
+    viewingFileContent: '',
+    queryDbs: [],
+    selectedQueryDb: '',
+    queryEntries: [],
+    queryPage: 1,
+    queryTotalPages: 1,
+
+    // ── Tab: Monitor ──
+    monitorBots: [],
+    monitorTimer: null,
+
+    // ── Tab: Audit ──
+    auditLogs: [],
+
+    // ── Global ──
+    apiLoading: false,
+    errorMessage: '',
+
+    // ── init ──
+    init() {
+      this.checkAuth();
+    },
+
+    // ── API helper (cookies-based auth, no Bearer token) ──
+    async api(path, options = {}) {
+      const headers = { ...options.headers };
+      try {
+        this.apiLoading = true;
+        this.errorMessage = '';
+        const resp = await fetch(path, { ...options, headers });
+        if (resp.status === 401) {
+          this.sessionState = 'login';
+          this.apiLoading = false;
+          throw new Error('未授权');
+        }
+        const data = await resp.json();
+        if (!data.ok) {
+          throw new Error(data.error || data.message || '请求失败');
+        }
+        return data;
+      } catch (err) {
+        if (err.message !== '未授权') {
+          if (err.message === 'Failed to fetch' || err.message.includes('NetworkError')) {
+            this.errorMessage = '无法连接到服务器';
+          } else if (!err.message.startsWith('请求失败')) {
+            this.errorMessage = err.message;
+          }
+        }
+        throw err;
+      } finally {
+        this.apiLoading = false;
+      }
+    },
+
+    // ── Auth ──
+    async checkAuth() {
+      try {
+        const data = await this.api('/api/auth/status');
+        if (!data.initialized) this.sessionState = 'setup';
+        else if (!data.authenticated) this.sessionState = 'login';
+        else this.sessionState = 'main';
+        if (this.sessionState === 'main') {
+          await this.loadBots();
+        }
+      } catch (err) {
+        if (err.message === '未授权') return;
+        console?.warn('[DicePP] Auth check failed:', err);
+        this.sessionState = 'login';
+      }
+    },
+
+    async setupPassword() {
+      if (this.setupPwd !== this.setupConfirm) {
+        this.setupError = '两次密码输入不一致';
+        return;
+      }
+      if (this.setupPwd.length < 6) {
+        this.setupError = '密码至少 6 个字符';
+        return;
+      }
+      this.setupError = '';
+      try {
+        await this.api('/api/auth/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: this.setupPwd }),
+        });
+        this.sessionState = 'main';
+        await this.loadBots();
+      } catch (err) {
+        this.setupError = err.message;
+      }
+    },
+
+    async login() {
+      this.loginError = '';
+      try {
+        await this.api('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: this.loginPassword }),
+        });
+        this.sessionState = 'main';
+        this.loginPassword = '';
+        await this.loadBots();
+      } catch (err) {
+        this.loginError = err.message || '登录失败';
+      }
+    },
+
+    async logout() {
+      try {
+        await this.api('/api/auth/logout', { method: 'POST' });
+      } catch (err) {
+        console?.warn('[DicePP] Logout error:', err);
+      }
+      this.sessionState = 'login';
+      this.bots = [];
+      this.selectedBotId = '';
+      this.monitorBots = [];
+      this.auditLogs = [];
+      if (this.monitorTimer) {
+        clearInterval(this.monitorTimer);
+        this.monitorTimer = null;
+      }
+    },
+
+    // ── Bots ──
+    async loadBots() {
+      try {
+        const data = await this.api('/api/bots');
+        this.bots = data.bots || [];
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load bots:', err);
+      }
+    },
+
+    onBotChange() {
+      if (!this.selectedBotId) return;
+      this.loadTabData(this.currentTab);
+    },
+
+    loadTabData(tabId) {
+      switch (tabId) {
+        case 'data': this.loadTables(); break;
+        case 'config': this.loadConfig(); break;
+        case 'botcfg': this.loadBotConfig(); break;
+        case 'monitor': this.loadMonitor(); break;
+        case 'audit': this.loadAudit(); break;
+      }
+    },
+
+    // ── Data Browse ──
+    async loadTables() {
+      if (!this.selectedBotId) return;
+      try {
+        const data = await this.api(`/api/data/${this.selectedBotId}/tables`);
+        this.tables = data.tables || [];
+        this.selectedTable = '';
+        this.records = [];
+        this.columns = [];
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load tables:', err);
+        this.tables = [];
+      }
+    },
+
+    async loadTableData(page) {
+      if (!this.selectedBotId || !this.selectedTable) return;
+      this.currentPage = page || 1;
+      try {
+        const limit = 100;
+        const offset = (this.currentPage - 1) * limit;
+        const params = new URLSearchParams({ offset: offset, limit: limit });
+        if (this.searchQuery) params.set('q', this.searchQuery);
+        const data = await this.api(`/api/data/${this.selectedBotId}/table/${this.selectedTable}?${params}`);
+        this.records = data.records || [];
+        this.columns = data.columns || (this.records.length > 0 ? Object.keys(this.records[0]) : []);
+        this.totalPages = Math.ceil((data.total || 0) / limit) || 1;
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load table data:', err);
+        this.records = [];
+        this.columns = [];
+      }
+    },
+
+    formatCell(val) {
+      if (val === null || val === undefined) return 'null';
+      if (typeof val === 'object') return JSON.stringify(val, null, 1);
+      return String(val);
+    },
+
+    // ── Config Edit ──
+    async loadConfig() {
+      if (!this.selectedBotId) return;
+      this.reloadResult = null;
+      try {
+        const [mergedData, userData] = await Promise.all([
+          this.api(`/api/config/merged?bot_id=${this.selectedBotId}`).catch(() => ({ config: {} })),
+          this.api('/api/config/user').catch(() => ({ config: {} })),
+        ]);
+        const merged = mergedData.config || {};
+        const user = userData.config || {};
+        this.userConfig = user;
+        this.userConfigText = JSON.stringify(user, null, 2);
+        this.configFields = this.buildConfigFields(merged);
+        this.expandedFields = Object.keys(this.configFields).slice(0, 5);
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load config:', err);
+        this.configFields = {};
+      }
+    },
+
+    // Flat dotted-key config from merged endpoint: {"key": {value, source, description}}
+    buildConfigFields(merged) {
+      const fields = {};
+      if (!merged || typeof merged !== 'object') return fields;
+      for (const [path, entry] of Object.entries(merged)) {
+        fields[path] = {
+          value: entry.value,
+          source: entry.source || 'default',
+          editing: false,
+          editValue: '',
+          description: entry.description || '',
+        };
+      }
+      return fields;
+    },
+
+    sourceBadgeClass(source) {
+      const map = { default: 'bg-gray-100 text-gray-600', user: 'bg-blue-100 text-blue-700', bot: 'bg-green-100 text-green-700' };
+      return map[source] || map.default;
+    },
+
+    sourceLabel(source) {
+      const map = { default: '默认值', user: '用户覆盖', bot: 'bot覆盖' };
+      return map[source] || source;
+    },
+
+    formatFieldValue(val) {
+      if (val === null || val === undefined) return 'null';
+      if (typeof val === 'object') return JSON.stringify(val, null, 2);
+      return String(val);
+    },
+
+    toggleField(path) {
+      const idx = this.expandedFields.indexOf(path);
+      if (idx === -1) this.expandedFields.push(path);
+      else this.expandedFields.splice(idx, 1);
+    },
+
+    editField(path) {
+      const field = this.configFields[path];
+      if (!field) return;
+      field.editing = true;
+      field.editValue = typeof field.value === 'object' ? JSON.stringify(field.value, null, 2) : String(field.value);
+    },
+
+    cancelEditField(path) {
+      const field = this.configFields[path];
+      if (!field) return;
+      field.editing = false;
+      field.editValue = '';
+    },
+
+    async saveField(path) {
+      const field = this.configFields[path];
+      if (!field) return;
+      try {
+        let newVal = field.editValue;
+        try { newVal = JSON.parse(newVal); } catch (_) { /* keep as string */ }
+        const data = await this.api('/api/config/set', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: path, value: newVal }),
+        });
+        this.reloadResult = data.reload || null;
+        await this.loadConfig();
+      } catch (err) {
+        this.errorMessage = '保存失败: ' + err.message;
+      }
+    },
+
+    async resetField(path) {
+      try {
+        const data = await this.api('/api/config/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: path }),
+        });
+        this.reloadResult = data.reload || null;
+        await this.loadConfig();
+      } catch (err) {
+        this.errorMessage = '重置失败: ' + err.message;
+      }
+    },
+
+    validateJson() {
+      try {
+        JSON.parse(this.userConfigText);
+        this.userConfigValid = true;
+      } catch (_) {
+        this.userConfigValid = false;
+      }
+    },
+
+    async saveUserConfig() {
+      if (!this.userConfigValid) return;
+      try {
+        const parsed = JSON.parse(this.userConfigText);
+        const data = await this.api('/api/config/user/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed),
+        });
+        this.reloadResult = data.reload || null;
+      } catch (err) {
+        this.errorMessage = '保存失败: ' + err.message;
+      }
+    },
+
+    // ── Bot Config ──
+    async loadBotConfig() {
+      if (!this.selectedBotId) return;
+      this.botConfigReloadResult = null;
+      try {
+        const data = await this.api(`/api/config/bots/${this.selectedBotId}`);
+        const cfg = data.config || data;
+        this.botConfigFields = {
+          master: Array.isArray(cfg.master) ? cfg.master.join(',') : (cfg.master || ''),
+          admin: Array.isArray(cfg.admin) ? cfg.admin.join(',') : (cfg.admin || ''),
+          friend_token: Array.isArray(cfg.friend_token) ? cfg.friend_token.join(',') : (cfg.friend_token || ''),
+          persona: cfg.persona || '',
+          nickname: cfg.nickname || '',
+        };
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load bot config:', err);
+      }
+    },
+
+    async saveBotConfig() {
+      if (!this.selectedBotId) return;
+      this.botConfigReloadResult = null;
+      const payload = {
+        master: this.botConfigFields.master ? this.botConfigFields.master.split(',').map(s => s.trim()).filter(Boolean) : [],
+        admin: this.botConfigFields.admin ? this.botConfigFields.admin.split(',').map(s => s.trim()).filter(Boolean) : [],
+        friend_token: this.botConfigFields.friend_token ? this.botConfigFields.friend_token.split(',').map(s => s.trim()).filter(Boolean) : [],
+        persona: this.botConfigFields.persona,
+        nickname: this.botConfigFields.nickname,
+      };
+      try {
+        const data = await this.api(`/api/config/bots/${this.selectedBotId}/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        this.botConfigReloadResult = data;
+      } catch (err) {
+        this.botConfigReloadResult = { ok: false, error: err.message };
+      }
+    },
+
+    // ── Content Management ──
+    async loadContentFiles(subdir) {
+      this.contentSubdir = subdir;
+      this.contentFiles = [];
+      this.queryDbs = [];
+      this.queryEntries = [];
+      if (subdir === 'queries') {
+        return;
+      }
+      try {
+        const data = await this.api(`/api/content/${subdir}`);
+        this.contentFiles = data.files || [];
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load content files:', err);
+      }
+    },
+
+    async loadQueryDbs() {
+      try {
+        const data = await this.api('/api/content/queries');
+        this.queryDbs = (data.files || []).map(f => f.name).filter(n => n.endsWith('.db'));
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load query databases:', err);
+        this.queryDbs = [];
+      }
+    },
+
+    async loadQueryEntries(page) {
+      if (!this.selectedQueryDb) return;
+      this.queryPage = page || 1;
+      try {
+        const limit = 100;
+        const offset = (this.queryPage - 1) * limit;
+        const data = await this.api(`/api/content/queries/${encodeURIComponent(this.selectedQueryDb)}/entries?offset=${offset}&limit=${limit}&table=data`);
+        this.queryEntries = data.records || [];
+        this.queryTotalPages = Math.ceil((data.total || 0) / limit) || 1;
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load query entries:', err);
+        this.queryEntries = [];
+        this.queryTotalPages = 1;
+      }
+    },
+
+    async viewFile(file) {
+      this.viewingFileName = file.name;
+      this.viewingFileContent = '';
+      this.viewingFile = true;
+      try {
+        const data = await this.api(`/api/content/${this.contentSubdir}/${encodeURIComponent(file.name)}`);
+        this.viewingFileContent = data.content || JSON.stringify(data, null, 2);
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load file content:', err);
+        this.viewingFileContent = '无法加载文件内容';
+      }
+    },
+
+    async viewQueryEntry(entry) {
+      this.viewingFileName = `Entry #${entry.id}`;
+      this.viewingFileContent = JSON.stringify(entry, null, 2);
+      this.viewingFile = true;
+    },
+
+    // ── Monitor ──
+    async loadMonitor() {
+      this.loadMonitorData();
+      if (this.monitorTimer) clearInterval(this.monitorTimer);
+      this.monitorTimer = setInterval(() => { this.loadMonitorData(); }, 10000);
+    },
+
+    async loadMonitorData() {
+      try {
+        const data = await this.api('/api/bots/status');
+        this.monitorBots = data.bots || [];
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load monitor data:', err);
+      }
+    },
+
+    // ── Audit ──
+    async loadAudit() {
+      try {
+        const data = await this.api('/api/audit?limit=200');
+        this.auditLogs = data.entries || [];
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load audit logs:', err);
+        this.auditLogs = [];
+      }
+    },
+
+    // ── Helpers ──
+    formatTimestamp(ts) {
+      if (!ts && ts !== 0) return '-';
+      try {
+        const d = new Date(ts * 1000);
+        return d.toLocaleString('zh-CN');
+      } catch (_) {
+        return String(ts);
+      }
+    },
+  };
+}
+</script>
+</body>
+</html>

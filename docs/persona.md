@@ -8,9 +8,9 @@ Persona AI 可以让 DicePP 扮演一个有角色设定、记忆和主动消息�
 
 先准备一个 LLM API Key。推荐先使用 MiniMax，也可以使用兼容 OpenAI 格式的接口。
 
-API Key 只写到 `config/secrets.json`，不要写进 `config/global.json`。
+API Key 只写到 `config/user.json`，不要写进 `config/global.json`。
 
-在 `config/secrets.json` 中加入：
+在 `config/user.json` 中加入：
 
 ```json
 {
@@ -152,7 +152,7 @@ content/characters/mychar/
 
 检查：
 
-- `api_key` 是否写在 `config/secrets.json`
+- `api_key` 是否写在 `config/user.json`
 - `base_url` 是否正确
 - 模型名是否写对
 

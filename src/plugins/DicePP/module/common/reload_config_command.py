@@ -51,15 +51,7 @@ class ReloadConfigCommand(UserCommandBase):
 
         try:
             # Atomically reload config (raises ConfigValidationError on failure)
-            new_config = self.bot._cfg_loader.reload()
-            self.bot.config = new_config
-
-            # Reload persona data
-            self.bot._persona_loader.reload()
-
-            # Re-apply persona overrides to localization
-            self.bot.loc_helper.reset_to_default()
-            self.bot.loc_helper.set_persona(new_config.persona)
+            new_config = self.bot.reload_config()
 
             logger.info(f"[Reload] Config reloaded successfully by {meta.user_id}")
             feedback = self.bot.loc_helper.format_loc_text(LOC_RELOAD_OK, timestamp=timestamp)

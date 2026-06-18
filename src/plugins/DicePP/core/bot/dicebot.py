@@ -121,6 +121,17 @@ class Bot:
         self._delay_init_lock = asyncio.Lock()
         self._delay_init_done: bool = False
 
+        # 仪表盘心跳（仅当显式配置了 dashboard 地址时才启用上报）
+        if os.environ.get("DPP_ADMIN_HOST"):
+            try:
+                from module.dashboard_reporter import DashboardReporter
+                self._dashboard_reporter = DashboardReporter(self.account)
+            except ImportError:
+                logger.warning("[Bot] Dashboard reporter unavailable, skipping heartbeat")
+                self._dashboard_reporter = None
+        else:
+            self._dashboard_reporter = None
+
         # 消息发送后跨模块通知 hook 列表
         # adapter 层发送消息后触发 hook，各模块通过注册 hook 实现日志记录等横切关注点。
         self._post_send_hooks: List[PostSendHook] = []
@@ -243,6 +254,10 @@ class Bot:
 
             # 健康监控：周期性心跳超时检测
             self.health_monitor.check_heartbeat()
+
+            # 仪表盘心跳
+            if self._dashboard_reporter is not None:
+                self._dashboard_reporter.tick()
 
             # 最多每秒执行一次循环
             free_time = max(loop_begin_time + 1 - loop.time(), 0)
@@ -416,6 +431,9 @@ class Bot:
             await asyncio.gather(self.tick_task, return_exceptions=True)
             self.tick_task = None
 
+        if self._dashboard_reporter is not None:
+            await self._dashboard_reporter.stop()
+
         await self.db.close()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
         # config is read-only at runtime; hot-reload is triggered via .reload command
@@ -465,6 +483,51 @@ class Bot:
             os.execl(python, python, *sys.argv)
         # self.start_up()
         # await self.delay_init_command()
+
+    async def send_immediate_heartbeat(self) -> None:
+        """向 dashboard 发送即时心跳（用于 bot 连接时）。"""
+        if self._dashboard_reporter is not None:
+            await self._dashboard_reporter.send_immediate()
+
+    def reload_config(self):
+        """Reload all configuration subsystems and return the new BotConfig.
+
+        Called by the dashboard /reload endpoint and the in-chat .reload
+        command.  Refreshes config, log level, persona data, localization
+        overrides, health monitor thresholds, and persona character path
+        in a single atomic operation.
+
+        Subsystems covered by hot-reload:
+          - BotConfig self.config
+          - log level       (configure_log_level)
+          - Persona data    (PersonaLoader, including character_path changes)
+          - Localization    (reset_to_default + set_persona)
+          - HealthMonitor   (heartbeat_timeout, fail_threshold, log_interval)
+
+        Subsystems NOT covered (require full restart):
+          - DashboardReporter address (sourced from env vars at startup)
+        """
+        new_cfg = self._cfg_loader.reload()
+        self.config = new_cfg
+        configure_log_level(self.config.log.level)
+
+        # Refresh subsystems that capture config at construction time
+        self._persona_loader.reload()
+        self.loc_helper.reset_to_default()
+        self.loc_helper.set_persona(new_cfg.persona)
+
+        # Health monitor thresholds
+        hc = new_cfg.health_monitor
+        self.health_monitor._heartbeat_timeout = hc.heartbeat_timeout_seconds
+        self.health_monitor._fail_threshold = hc.consecutive_fail_threshold
+        self.health_monitor._log_interval = hc.failure_log_interval_seconds
+
+        # Persona character directory (may change independently of persona name)
+        new_path = new_cfg.persona_ai.character_path
+        if hasattr(self._persona_loader, "set_character_path"):
+            self._persona_loader.set_character_path(new_path)
+
+        return new_cfg
 
     def register_command(self, registry=None):
         from core.command.user_cmd import CommandRegistry, DEFAULT_REGISTRY

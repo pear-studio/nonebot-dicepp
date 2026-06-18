@@ -62,7 +62,7 @@ def _snapshot_files(root: Path, pattern: str = "**/*") -> dict[str, str]:
 
 
 _PROTECTED_FILES = [
-    _real_project / "config" / "secrets.json",
+    _real_project / "config" / "user.json",
     _real_project / "config" / "global.json",
     _real_project / "config" / "bots" / "_template.json",
 ]

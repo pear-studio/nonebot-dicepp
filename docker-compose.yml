@@ -24,6 +24,11 @@ services:
     # 环境变量
     environment:
       - TZ=Asia/Shanghai
+      # Dashboard 管理后端地址（bot 上报心跳/注册用）
+      - DPP_ADMIN_HOST=dashboard
+      - DPP_ADMIN_PORT=4090
+      # Bot HTTP 服务地址（dashboard 调用 bot 内部 API 用）
+      - DPP_BOT_HTTP_URL=http://bot:8080
 
     # 数据持久化：
     # - config：配置目录（可写，运行时生成 bots/*.json）
@@ -35,6 +40,46 @@ services:
       - ./content:/app/content
 
     # 日志配置：自动轮转
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        compress: "true"
+
+  dashboard:
+    image: ghcr.io/pear-studio/dicepp-dashboard:${DASHBOARD_IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+      args:
+        APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        UV_INDEX_URL: ${UV_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    container_name: dicepp-dashboard
+    restart: unless-stopped
+
+    networks:
+      - dice-net
+
+    ports:
+      - "4090:4090"
+
+    environment:
+      - TZ=Asia/Shanghai
+      - DICEPP_PROJECT_ROOT=/app
+
+    volumes:
+      # 配置文件：整目录挂载，应用层控制读写权限
+      # global.json / schema.json 由 API 层做只读保护
+      - ./config:/app/config:rw
+      # 运行时数据：只读
+      - ./data:/app/data:ro
+      # 内容资源：只读
+      - ./content:/app/content:ro
+      # Dashboard 运行时数据（可写，例如 session key）
+      - ./dashboard/data:/app/dashboard/data
+
     logging:
       driver: "json-file"
       options:

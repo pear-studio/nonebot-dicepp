@@ -1,0 +1,6 @@
+{
+  "_comment": "用户敏感配置。复制此文件为 user.json 并填写。此文件被 .gitignore 忽略。",
+  "persona_ai": {
+    "providers": {}
+  }
+}
