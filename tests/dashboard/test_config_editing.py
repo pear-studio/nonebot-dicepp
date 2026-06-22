@@ -159,6 +159,31 @@ class TestBotConfig:
         assert resp.json()["config"] == {}
 
 
+class TestUserJsonSave:
+    def test_save_user_json(self, test_client: TestClient):
+        """``POST /api/config/user/save`` writes the body to user.json."""
+        setup_auth(test_client)
+        body = {"app": {"name": "modified", "version": "2.0.0"}}
+        resp = test_client.post("/api/config/user/save", json=body)
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+        from dashboard.src.config import DashboardPaths
+        saved = json.loads(DashboardPaths.CONFIG_USER.read_text())
+        assert saved == body
+
+    def test_save_user_json_non_dict_body_rejected(self, test_client: TestClient):
+        """``POST /api/config/user/save`` with a list body returns 400."""
+        setup_auth(test_client)
+        resp = test_client.post(
+            "/api/config/user/save",
+            json=[1, 2, 3],
+        )
+        assert resp.status_code == 400
+        data = resp.json()
+        assert data["ok"] is False
+
+
 class TestReloadNotification:
     def test_reload_notification_returned(self, test_client: TestClient):
         """After a config save, the response includes reload_results."""

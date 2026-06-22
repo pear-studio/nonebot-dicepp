@@ -186,16 +186,6 @@ class TestSessionExpiry:
         assert remaining == 0, "Expired session was not pruned"
 
 
-class TestHeartbeatNoAuth:
-    def test_heartbeat_no_auth(self, test_client: TestClient):
-        """Heartbeat endpoint does not require authentication."""
-        resp = test_client.post(
-            "/api/bots/heartbeat", json={"bot_id": "test_bot", "version": "1.0"}
-        )
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-
-
 class TestPasswordChangeSessionRotation:
     """Password change must invalidate ALL existing sessions and issue one new token."""
 

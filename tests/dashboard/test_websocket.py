@@ -24,6 +24,30 @@ def _db_path(client: TestClient) -> str:
     return client.app.state.dashboard_db
 
 
+def _wait_until(condition_func, timeout=2.0, interval=0.05):
+    """Poll *condition_func* every *interval* until it returns truthy, or *timeout* elapses."""
+    deadline = _time.time() + timeout
+    while _time.time() < deadline:
+        result = condition_func()
+        if result:
+            return result
+        _time.sleep(interval)
+    return condition_func()  # final attempt
+
+
+def _db_has_version(db_path: str, bot_id: str, expected_version: str) -> bool:
+    """Return True if *bot_id* has *expected_version* in bots_meta."""
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT version FROM bots_meta WHERE bot_id = ?",
+            (bot_id,),
+        ).fetchone()
+        return row is not None and row[0] == expected_version
+    finally:
+        conn.close()
+
+
 class TestWebSocketAuth:
     """Authentication phase of the WebSocket endpoint."""
 
@@ -120,19 +144,22 @@ class TestWebSocketControl:
             self._auth(ws, tmp_dashboard_paths)
             ws.send_text(encode(status("ws_bot", "2.0.0")))
 
-        # Give the async handler time to process
-        _time.sleep(0.3)
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT last_heartbeat, version FROM bots_meta WHERE bot_id = ?",
-            ("ws_bot",),
-        ).fetchone()
-        conn.close()
+        # Poll for the async handler to process the status update
+        def _check_status():
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute(
+                    "SELECT last_heartbeat, version FROM bots_meta WHERE bot_id = ?",
+                    ("ws_bot",),
+                ).fetchone()
+                if row is None or row["version"] != "2.0.0":
+                    return False
+                return float(row["last_heartbeat"]) > _time.time() - 10
+            finally:
+                conn.close()
 
-        assert row is not None
-        assert row["version"] == "2.0.0"
-        assert float(row["last_heartbeat"]) > _time.time() - 10
+        assert _wait_until(_check_status), "Status update not reflected in DB within 2s"
 
     def test_unknown_message_type_ignored(self, tmp_dashboard_paths: Path, test_client: TestClient):
         """Unknown message types are silently ignored (no crash)."""
@@ -169,12 +196,14 @@ class TestWebSocketControl:
             # Bot sends back reload_result
             ws.send_text(encode(reload_result("ws_bot", True, reply_to="req_001")))
 
-            _time.sleep(0.3)
-
-        # Check the reload result was stored on the dashboard side
+        # Poll for the reload result to be stored on the dashboard side
         pending = getattr(test_client.app.state, "pending_reload_results", {})
+        assert _wait_until(
+            lambda: pending.get("req_001") is not None
+        ), "reload_result was not stored within 2s"
+
         rr = pending.pop("req_001", None)
-        assert rr is not None, "reload_result was not stored"
+        assert rr is not None
         assert rr["bot_id"] == "ws_bot"
         assert rr["success"] is True
 
@@ -198,25 +227,20 @@ class TestWebSocketControl:
             self._auth(ws, tmp_dashboard_paths)
             ws.send_text(encode(status("ws_bot", "1.0.0")))
 
-        _time.sleep(0.3)
+        # Poll for v1 to be recorded before reconnecting
+        assert _wait_until(
+            lambda: _db_has_version(db_path, "ws_bot", "1.0.0")
+        ), "v1 status not recorded within 2s"
 
         # Reconnect: send status v2
         with test_client.websocket_connect("/ws/control") as ws:
             self._auth(ws, tmp_dashboard_paths)
             ws.send_text(encode(status("ws_bot", "2.0.0")))
 
-        _time.sleep(0.3)
-
-        # Verify the latest status was recorded
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT version FROM bots_meta WHERE bot_id = ?",
-            ("ws_bot",),
-        ).fetchone()
-        conn.close()
-        assert row is not None, "bot should exist in DB"
-        assert row["version"] == "2.0.0", "version should reflect latest status"
+        # Poll for v2 to be recorded
+        assert _wait_until(
+            lambda: _db_has_version(db_path, "ws_bot", "2.0.0")
+        ), "v2 status not recorded within 2s"
 
     def test_replacement_connection_survives_old_connection_cleanup(
         self, tmp_dashboard_paths: Path, test_client: TestClient
@@ -243,7 +267,7 @@ class TestWebSocketControl:
 
             first_context.__exit__(None, None, None)
             first_context = None
-            _time.sleep(0.1)
+            _wait_until(lambda: get_ws("same_bot") is not None)
 
             assert get_ws("same_bot") is not None
         finally:

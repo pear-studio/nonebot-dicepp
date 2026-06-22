@@ -1,5 +1,7 @@
 """Tests for the ``/api/content/**`` content-management endpoints."""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from tests.dashboard.conftest import setup_auth
@@ -108,5 +110,24 @@ class TestQueryDbEntries:
         """``db_name`` with ``.db`` suffix is rejected (API contract: no extension)."""
         setup_auth(test_client)
         resp = test_client.get("/api/content/queries/test_queries.db/entries")
+        assert resp.status_code == 400
+        assert resp.json()["ok"] is False
+
+
+class TestSymlinkTraversal:
+    """A symlink inside the content directory pointing outside is blocked."""
+
+    def test_symlink_traversal_blocked(self, test_client: TestClient, tmp_dashboard_paths: Path):
+        """Symlink to an outside file is rejected by the path traversal check."""
+        from dashboard.src.config import DashboardPaths
+
+        target_file = tmp_dashboard_paths / "outside_file.txt"
+        target_file.write_text("outside, should be blocked")
+
+        link_path = DashboardPaths.CONTENT_DIR / "decks" / "evil_link.txt"
+        link_path.symlink_to(target_file)
+
+        setup_auth(test_client)
+        resp = test_client.get("/api/content/decks/evil_link.txt")
         assert resp.status_code == 400
         assert resp.json()["ok"] is False

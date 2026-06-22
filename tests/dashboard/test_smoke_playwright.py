@@ -110,8 +110,8 @@ def dashboard_url(tmp_path: Path) -> str:
         ["uv", "run", "python", "-m", "dashboard"],
         cwd=str(PROJECT_ROOT),
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     try:
@@ -137,7 +137,7 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
             page.goto(f"{dashboard_url}/dashboard")
 
             # 2. Assert setup page is shown
-            page.wait_for_selector("text=初始化管理面板", timeout=10000)
+            page.wait_for_selector('[data-testid="setup-page"]', timeout=10000)
 
             # 3. Fill password fields
             page.locator("#setup-password").fill("test_pass")
@@ -147,14 +147,14 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
             page.get_by_role("button", name="设置密码并初始化").click()
 
             # After successful setup, user is auto-logged in -> main dashboard
-            page.wait_for_selector("text=数据浏览", timeout=10000)
+            page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
 
             # 5. Clear cookies and reload to see login page
             page.context.clear_cookies()
             page.goto(f"{dashboard_url}/dashboard")
 
             # 6. Assert login page is visible
-            page.wait_for_selector("text=DicePP 管理面板", timeout=10000)
+            page.wait_for_selector('[data-testid="login-page"]', timeout=10000)
 
             # 7. Fill login password
             page.locator("#login-password").fill("test_pass")
@@ -163,7 +163,7 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
             page.get_by_role("button", name="登录").click()
 
             # 9. Assert main dashboard is loaded
-            page.wait_for_selector("text=数据浏览", timeout=10000)
+            page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
         finally:
             browser.close()
 
@@ -176,7 +176,7 @@ def test_password_mismatch_shows_inline_error(dashboard_url: str) -> None:
 
         try:
             page.goto(f"{dashboard_url}/dashboard")
-            page.wait_for_selector("text=初始化管理面板", timeout=10000)
+            page.wait_for_selector("[data-testid='setup-page']", timeout=10000)
 
             page.locator("#setup-password").fill("test_pass")
             page.locator("#setup-confirm").fill("different_pass")
@@ -202,7 +202,7 @@ def test_password_too_short_shows_inline_error(dashboard_url: str) -> None:
 
         try:
             page.goto(f"{dashboard_url}/dashboard")
-            page.wait_for_selector("text=初始化管理面板", timeout=10000)
+            page.wait_for_selector("[data-testid='setup-page']", timeout=10000)
 
             page.locator("#setup-password").fill("12345")
             page.locator("#setup-confirm").fill("12345")
@@ -236,13 +236,13 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
         try:
             # 1. Setup + auto-login
             page.goto(f"{dashboard_url}/dashboard")
-            page.wait_for_selector("text=初始化管理面板", timeout=10000)
+            page.wait_for_selector("[data-testid='setup-page']", timeout=10000)
             page.locator("#setup-password").fill("test_pass")
             page.locator("#setup-confirm").fill("test_pass")
             page.get_by_role("button", name="设置密码并初始化").click()
 
             # Wait for main dashboard (indicates successful setup + auto-login)
-            page.wait_for_selector("text=数据浏览", timeout=10000)
+            page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
 
             # 2. Select a bot from the sidebar dropdown
             # Note: <option> elements are always "hidden" in Playwright's visibility check,
@@ -272,8 +272,8 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
             page.get_by_role("button", name="保存").click()
 
             # 7. Verify feedback — saved + reload result headings become visible
-            page.wait_for_selector("text=配置已保存到磁盘", timeout=10000)
-            assert page.locator("text=配置已保存到磁盘").first.is_visible()
+            page.wait_for_selector('[data-testid="config-save-feedback"]', timeout=10000)
+            assert page.locator('[data-testid="config-save-feedback"]').first.is_visible()
             assert page.locator("text=运行时重载：").first.is_visible()
         finally:
             browser.close()

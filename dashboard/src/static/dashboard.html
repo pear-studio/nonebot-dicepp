@@ -27,11 +27,11 @@
   </div>
 
   <!-- Setup page -->
-  <div x-show="sessionState === 'setup'" class="flex items-center justify-center w-full" x-cloak>
+  <div x-show="sessionState === 'setup'" data-testid="setup-page" class="flex items-center justify-center w-full" x-cloak>
     <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-md mx-4">
       <h2 class="text-2xl font-bold text-center mb-2">初始化管理面板</h2>
       <p class="text-gray-600 text-center mb-6">请设置管理员密码</p>
-      <form @submit.prevent="setupPassword">
+      <form @submit.prevent="setupPassword" data-testid="setup-form">
         <div class="mb-4">
           <label class="block text-gray-700 text-sm font-bold mb-2" for="setup-password">密码</label>
           <input id="setup-password" type="password" x-model="setupPwd" placeholder="输入密码" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -50,10 +50,10 @@
   </div>
 
   <!-- Login page -->
-  <div x-show="sessionState === 'login'" class="flex items-center justify-center w-full" x-cloak>
+  <div x-show="sessionState === 'login'" data-testid="login-page" class="flex items-center justify-center w-full" x-cloak>
     <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-md mx-4">
       <h2 class="text-2xl font-bold text-center mb-6">DicePP 管理面板</h2>
-      <form @submit.prevent="login">
+      <form @submit.prevent="login" data-testid="login-form">
         <div class="mb-6">
           <label class="block text-gray-700 text-sm font-bold mb-2" for="login-password">密码</label>
           <input id="login-password" type="password" x-model="loginPassword" placeholder="输入密码" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -68,7 +68,7 @@
   </div>
 
   <!-- Main dashboard -->
-  <div x-show="sessionState === 'main'" class="flex w-full" x-cloak>
+  <div x-show="sessionState === 'main'" data-testid="main-dashboard" class="flex w-full" x-cloak>
     <!-- Sidebar -->
     <aside class="w-64 bg-gray-900 text-white flex flex-col flex-shrink-0">
       <div class="p-4 border-b border-gray-700">
@@ -225,7 +225,7 @@
               <textarea x-model="userConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateJson"></textarea>
               <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
               <button @click="saveUserConfig" :disabled="!userConfigValid || apiLoading" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
-              <div x-show="reloadResult" class="mt-4">
+              <div x-show="reloadResult" data-testid="config-save-feedback" class="mt-4">
                 <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
                 <h4 class="font-medium mb-2 text-sm">运行时重载：</h4>
                 <template x-for="item in reloadResult" :key="item.bot_id">
@@ -272,7 +272,7 @@
               <p class="text-xs text-gray-500 mt-1">昵称</p>
             </div>
             <button @click="saveBotConfig" :disabled="apiLoading" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
-            <div x-show="botConfigReloadResult" class="mt-4">
+            <div x-show="botConfigReloadResult" data-testid="botcfg-save-feedback" class="mt-4">
               <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
               <template x-for="item in botConfigReloadResult" :key="item.bot_id">
                 <div class="text-sm mb-1" :class="item.status === 'ok' ? 'text-green-600' : 'text-red-600'" x-text="`${item.bot_id}: ${item.status === 'ok' ? '成功' : (item.error || '失败')}`"></div>
