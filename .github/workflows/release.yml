@@ -83,16 +83,24 @@ jobs:
         run: |
           docker run -d --name dicepp-dashboard-smoke -p 127.0.0.1:4090:4090 \
             ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          ready=false
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
-              docker rm -f dicepp-dashboard-smoke
-              exit 0
+              ready=true
+              break
             fi
             sleep 1
           done
-          docker logs dicepp-dashboard-smoke
+          if [ "$ready" != "true" ]; then
+            docker logs dicepp-dashboard-smoke
+            docker rm -f dicepp-dashboard-smoke
+            exit 1
+          fi
+          docker cp scripts/smoke_dashboard_control_channel.py \
+            dicepp-dashboard-smoke:/tmp/smoke_dashboard_control_channel.py
+          docker exec dicepp-dashboard-smoke \
+            python /tmp/smoke_dashboard_control_channel.py
           docker rm -f dicepp-dashboard-smoke
-          exit 1
 
   windows-build:
     name: Windows EXE
@@ -234,16 +242,24 @@ jobs:
         run: |
           docker run -d --name dicepp-dashboard-publish-smoke -p 127.0.0.1:4090:4090 \
             ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          ready=false
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
-              docker rm -f dicepp-dashboard-publish-smoke
-              exit 0
+              ready=true
+              break
             fi
             sleep 1
           done
-          docker logs dicepp-dashboard-publish-smoke
+          if [ "$ready" != "true" ]; then
+            docker logs dicepp-dashboard-publish-smoke
+            docker rm -f dicepp-dashboard-publish-smoke
+            exit 1
+          fi
+          docker cp scripts/smoke_dashboard_control_channel.py \
+            dicepp-dashboard-publish-smoke:/tmp/smoke_dashboard_control_channel.py
+          docker exec dicepp-dashboard-publish-smoke \
+            python /tmp/smoke_dashboard_control_channel.py
           docker rm -f dicepp-dashboard-publish-smoke
-          exit 1
 
       - name: Login to GHCR
         uses: docker/login-action@v3

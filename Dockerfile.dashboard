@@ -34,11 +34,15 @@ COPY pyproject.toml uv.lock ./
 # Create virtualenv and install dependencies (no dev, frozen)
 RUN uv venv /app/.venv && \
     . /app/.venv/bin/activate && \
-    uv sync --no-dev --frozen
+    uv sync --no-dev --frozen --no-install-project
 
 # Copy source code after dependencies are installed
 COPY src/ src/
 COPY dashboard/ dashboard/
+
+# Install the project only after its source exists. This keeps the dependency
+# layer cacheable while ensuring ``plugins.DicePP`` is available at runtime.
+RUN uv pip install --python /app/.venv/bin/python --no-deps .
 
 # ── Runtime stage ────────────────────────────────────────────────────
 FROM python:3.13-slim

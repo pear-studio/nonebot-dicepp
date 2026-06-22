@@ -158,14 +158,22 @@ jobs:
       - name: Smoke test Dashboard image
         run: |
           docker run -d --name dicepp-dashboard-smoke -p 127.0.0.1:4090:4090 dicepp-dashboard:ci
+          ready=false
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
-              exit 0
+              ready=true
+              break
             fi
             sleep 1
           done
-          docker logs dicepp-dashboard-smoke
-          exit 1
+          if [ "$ready" != "true" ]; then
+            docker logs dicepp-dashboard-smoke
+            exit 1
+          fi
+          docker cp scripts/smoke_dashboard_control_channel.py \
+            dicepp-dashboard-smoke:/tmp/smoke_dashboard_control_channel.py
+          docker exec dicepp-dashboard-smoke \
+            python /tmp/smoke_dashboard_control_channel.py
       - name: Clean up Dashboard container
         if: always()
         run: |
