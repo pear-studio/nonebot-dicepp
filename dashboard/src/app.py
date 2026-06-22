@@ -242,7 +242,7 @@ def _is_xlsx(path: Path) -> bool:
 async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dict]:
     """Notify bot(s) to reload config.  WebSocket first, HTTP fallback."""
     import uuid as _uuid
-    from .websocket import send_reload_to_bot, get_all_ws
+    from .websocket import send_reload_to_bot
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -258,7 +258,6 @@ async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dic
         return sorted({row["bot_id"] for row in cursor.fetchall()})
 
     try:
-        ws_pool = get_all_ws()
         bids = _bot_ids_from_db()
 
         for bid in bids:
@@ -266,10 +265,9 @@ async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dic
             request_id = _uuid.uuid4().hex
             if await send_reload_to_bot(bid, request_id):
                 # Wait up to 5 s for a reload_result
-                from .websocket import app as _app
                 for _ in range(50):
                     await asyncio.sleep(0.1)
-                    pending = getattr(_app.state, "pending_reload_results", {})
+                    pending = getattr(app.state, "pending_reload_results", {})
                     rr = pending.pop(request_id, None)
                     if rr is not None:
                         results.append({

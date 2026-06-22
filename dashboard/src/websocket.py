@@ -29,6 +29,7 @@ from plugins.DicePP.module.dashboard_reporter.protocol import (
 logger = logging.getLogger("dashboard.ws")
 
 _PING_INTERVAL = 30
+_AUTH_TIMEOUT = 10
 
 
 # ── connection pool helpers ──────────────────────────────────────────────────
@@ -79,7 +80,7 @@ async def control_endpoint(ws: WebSocket) -> None:
     try:
         # ── auth phase ────────────────────────────────────────────────
         try:
-            raw = await asyncio.wait_for(ws.receive_text(), timeout=10)
+            raw = await asyncio.wait_for(ws.receive_text(), timeout=_AUTH_TIMEOUT)
         except asyncio.TimeoutError:
             await ws.send_text(encode(auth_result(False, "auth timeout")))
             await ws.close(code=4001)
@@ -173,7 +174,9 @@ async def control_endpoint(ws: WebSocket) -> None:
     except Exception as exc:
         logger.warning(f"[ControlChannel] bot {bot_id} error: {exc}")
     finally:
-        if bot_id and bot_id in pool:
+        # A newer connection may already have replaced this one.  Only remove
+        # the entry when it still points at the connection being cleaned up.
+        if bot_id and pool.get(bot_id) is ws:
             del pool[bot_id]
 
 

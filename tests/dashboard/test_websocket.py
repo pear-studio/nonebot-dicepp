@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from plugins.DicePP.module.dashboard_reporter.control_token import ensure_token
 from plugins.DicePP.module.dashboard_reporter.protocol import (
@@ -66,14 +67,24 @@ class TestWebSocketAuth:
             assert reply["type"] == "auth_result"
             assert reply["payload"]["ok"] is False
 
-    @pytest.mark.slow
-    def test_auth_timeout(self, tmp_dashboard_paths: Path, test_client: TestClient):
-        """Without auth within 10 s, server closes the connection."""
+    def test_auth_timeout(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_dashboard_paths: Path,
+        test_client: TestClient,
+    ):
+        """An auth timeout reports the reason, then closes with code 4001."""
+        from dashboard.src import websocket as websocket_module
+
+        monkeypatch.setattr(websocket_module, "_AUTH_TIMEOUT", 0.01)
         ensure_token(tmp_dashboard_paths)
         with test_client.websocket_connect("/ws/control") as ws:
-            _time.sleep(11)
-            with pytest.raises(Exception):
+            reply = ws.receive_json()
+            assert reply["type"] == "auth_result"
+            assert reply["payload"] == {"ok": False, "reason": "auth timeout"}
+            with pytest.raises(WebSocketDisconnect) as exc_info:
                 ws.receive_text()
+            assert exc_info.value.code == 4001
 
 
 class TestWebSocketControl:
@@ -206,6 +217,83 @@ class TestWebSocketControl:
         conn.close()
         assert row is not None, "bot should exist in DB"
         assert row["version"] == "2.0.0", "version should reflect latest status"
+
+    def test_replacement_connection_survives_old_connection_cleanup(
+        self, tmp_dashboard_paths: Path, test_client: TestClient
+    ):
+        """Cleaning up a replaced connection must not evict its replacement."""
+        from dashboard.src.websocket import get_ws
+
+        token = ensure_token(tmp_dashboard_paths)
+        first_context = test_client.websocket_connect("/ws/control")
+        first = first_context.__enter__()
+        second_context = None
+        try:
+            first.send_text(encode(auth("same_bot", token)))
+            assert first.receive_json()["payload"]["ok"] is True
+
+            second_context = test_client.websocket_connect("/ws/control")
+            second = second_context.__enter__()
+            second.send_text(encode(auth("same_bot", token)))
+            assert second.receive_json()["payload"]["ok"] is True
+
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                first.receive_text()
+            assert exc_info.value.code == 4000
+
+            first_context.__exit__(None, None, None)
+            first_context = None
+            _time.sleep(0.1)
+
+            assert get_ws("same_bot") is not None
+        finally:
+            if second_context is not None:
+                second_context.__exit__(None, None, None)
+            if first_context is not None:
+                first_context.__exit__(None, None, None)
+
+    @pytest.mark.asyncio
+    async def test_notify_reload_returns_online_websocket_result(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        test_client: TestClient,
+    ):
+        """A received WebSocket reload result is returned to the API layer."""
+        from dashboard.src import websocket as websocket_module
+        from dashboard.src.app import _notify_reload, app
+
+        conn = sqlite3.connect(_db_path(test_client))
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO bots_meta (bot_id, version, last_heartbeat) "
+                "VALUES (?, ?, ?)",
+                ("ws_bot", "2.0.0", str(_time.time())),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        async def fake_send_reload(bot_id: str, request_id: str) -> bool:
+            assert bot_id == "ws_bot"
+            app.state.pending_reload_results = {
+                request_id: {
+                    "bot_id": bot_id,
+                    "success": True,
+                    "errors": [],
+                    "_ts": _time.time(),
+                }
+            }
+            return True
+
+        monkeypatch.setattr(
+            websocket_module, "send_reload_to_bot", fake_send_reload
+        )
+
+        results = await _notify_reload(_db_path(test_client), "ws_bot")
+
+        assert results == [
+            {"bot_id": "ws_bot", "status": "ok", "error": None}
+        ]
 
     def test_auth_missing_bot_id_rejected(self, tmp_dashboard_paths: Path, test_client: TestClient):
         """Missing bot_id in auth message is rejected."""
