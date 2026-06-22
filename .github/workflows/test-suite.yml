@@ -8,7 +8,8 @@
 #   5. compatibility — AST 引擎兼容性语料 (必须 100% 通过)
 #   6. playwright — Dashboard 浏览器流程（CI 强制安装 Chromium，不允许跳过）
 #   7. dashboard-image — Dashboard 容器构建与 HTTP 冒烟
-#   8. coverage — 非 real_llm 测试覆盖率门槛
+#   8. windows-package — Windows 双 EXE 构建、冒烟与 ZIP 组装
+#   9. coverage — 非 real_llm 测试覆盖率门槛
 
 name: Test Suite
 
@@ -148,6 +149,9 @@ jobs:
     needs: fast
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Docker Compose
+        run: |
+          docker compose config --quiet
       - name: Build Dashboard image
         run: |
           docker build -f Dockerfile.dashboard -t dicepp-dashboard:ci .
@@ -166,6 +170,59 @@ jobs:
         if: always()
         run: |
           docker rm -f dicepp-dashboard-smoke 2>/dev/null || true
+
+  windows-package:
+    name: Windows Package
+    runs-on: windows-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --group dev
+      - name: Build Bot and Dashboard
+        run: |
+          uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
+          uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
+      - name: Assemble and smoke test package
+        shell: pwsh
+        run: |
+          Copy-Item dist/DicePPDashboard.exe dist/DicePP/DicePPDashboard.exe
+          New-Item -ItemType Directory -Force dist/DicePP/config/bots | Out-Null
+          Copy-Item config/global.json dist/DicePP/config/global.json
+          Copy-Item config/schema.json dist/DicePP/config/schema.json
+          Copy-Item config/bots/_template.json dist/DicePP/config/bots/_template.json
+
+          $versionLine = (Get-Content pyproject.toml | Select-String '^version =').Line
+          $version = [regex]::Match($versionLine, '"([^"\r\n]+)"').Groups[1].Value
+          $expectedBot = "DicePP v$version"
+          $actualBot = (& dist/DicePP/DicePP.exe --version).Trim()
+          if ($actualBot -ne $expectedBot) {
+            throw "Bot version mismatch: expected '$expectedBot', got '$actualBot'"
+          }
+          & dist/DicePP/DicePP.exe --smoke-check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $expectedDashboard = $expectedBot.Replace("DicePP v", "DicePP Dashboard v")
+          $actualDashboard = (& dist/DicePP/DicePPDashboard.exe --version).Trim()
+          if ($actualDashboard -ne $expectedDashboard) {
+            throw "Dashboard version mismatch: expected '$expectedDashboard', got '$actualDashboard'"
+          }
+          & dist/DicePP/DicePPDashboard.exe --smoke-check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Compress-Archive -Path dist/DicePP -DestinationPath DicePP-ci-win64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dicepp-windows-ci
+          path: DicePP-ci-win64.zip
+          retention-days: 3
 
   coverage:
     name: Coverage
