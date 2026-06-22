@@ -89,6 +89,7 @@ class ControlChannelClient:
 
         # Status reporting
         self._version = _get_version()
+        self._connection_authenticated = False
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -142,12 +143,16 @@ class ControlChannelClient:
         """Main loop: connect → loop → reconnect."""
         attempt = 0
         while self._running:
+            self._connection_authenticated = False
             try:
                 await self._connect_and_loop()
-                # Reset exponential backoff after a successful connection lifecycle
-                attempt = 0
             except Exception as exc:
                 logger.warning(f"[ControlChannel] connection lost: {exc}")
+
+            # A connection that reached authenticated state was healthy enough
+            # to restart the retry sequence. Auth failures keep backing off.
+            if self._connection_authenticated:
+                attempt = 0
 
             if not self._running:
                 break
@@ -175,57 +180,67 @@ class ControlChannelClient:
                 raw = await asyncio.wait_for(ws.receive_str(), timeout=10)
                 reply = decode(raw)
                 if not is_valid(reply) or reply.get("type") != "auth_result":
-                    logger.warning("[ControlChannel] unexpected auth reply")
-                    return
+                    raise ConnectionError("unexpected auth reply")
                 if not (reply.get("payload") or {}).get("ok"):
                     reason = (reply.get("payload") or {}).get("reason", "unknown")
-                    logger.error(f"[ControlChannel] auth rejected: {reason}")
-                    return
+                    raise ConnectionError(f"auth rejected: {reason}")
 
+                self._connection_authenticated = True
                 logger.info("[ControlChannel] authenticated")
 
                 # ── send initial status ──────────────────────────
                 await ws.send_str(encode(status_msg(self._bot_id, self._version)))
 
                 # ── message loop ─────────────────────────────────
-                last_rx = asyncio.get_event_loop().time()
+                receive_task = asyncio.create_task(self._receive_loop(ws))
                 status_task = asyncio.create_task(self._status_sender(ws))
                 try:
-                    async for msg in ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            last_rx = asyncio.get_event_loop().time()
-                            try:
-                                self._handle(decode(msg.data))
-                            except Exception:
-                                logger.debug(
-                                    "[ControlChannel] unhandled message error",
-                                    exc_info=True,
-                                )
-                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            break
-                        elif msg.type == aiohttp.WSMsgType.PING:
-                            await ws.pong()
-
-                        # Keepalive check via incoming messages
-                        now = asyncio.get_event_loop().time()
-                        if now - last_rx > _PING_TIMEOUT:
-                            logger.warning("[ControlChannel] ping timeout")
-                            break
+                    done, _ = await asyncio.wait(
+                        {receive_task, status_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for task in done:
+                        task.result()
                 finally:
+                    receive_task.cancel()
                     status_task.cancel()
-                    try:
-                        await status_task
-                    except asyncio.CancelledError:
-                        pass
+                    await asyncio.gather(
+                        receive_task, status_task, return_exceptions=True
+                    )
+
+    async def _receive_loop(self, ws) -> None:
+        """Receive messages, waking periodically to detect half-open sockets."""
+        while True:
+            try:
+                msg = await asyncio.wait_for(ws.receive(), timeout=_PING_TIMEOUT)
+            except asyncio.TimeoutError as exc:
+                raise ConnectionError("control channel receive timeout") from exc
+
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                try:
+                    self._handle(decode(msg.data))
+                except Exception:
+                    logger.debug(
+                        "[ControlChannel] unhandled message error",
+                        exc_info=True,
+                    )
+            elif msg.type in (
+                aiohttp.WSMsgType.CLOSE,
+                aiohttp.WSMsgType.CLOSED,
+                aiohttp.WSMsgType.CLOSING,
+            ):
+                return
+            elif msg.type == aiohttp.WSMsgType.ERROR:
+                error = ws.exception()
+                raise ConnectionError("control channel websocket error") from error
+            elif msg.type == aiohttp.WSMsgType.PING:
+                await ws.pong()
 
     async def _status_sender(self, ws) -> None:
         """Periodically send status messages."""
         while True:
             await asyncio.sleep(_STATUS_INTERVAL)
-            try:
-                await ws.send_str(encode(status_msg(self._bot_id, self._version)))
-            except Exception:
-                break
+            await ws.send_str(encode(status_msg(self._bot_id, self._version)))
 
     def _handle(self, msg: dict) -> None:
         """Handle an incoming control message."""
