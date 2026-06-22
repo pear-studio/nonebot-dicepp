@@ -500,6 +500,7 @@ class CharacterLife:
             chain_depth = 0
             is_fallback = False
             event_chain: List[Dict[str, Any]] = []
+            prev_follow_up: Optional[str] = None
 
             # 根据槽位类型注入场景提示
             if slot_type == "wake_up":
@@ -529,11 +530,19 @@ class CharacterLife:
                 if ongoing_context:
                     state_context += "\n" + ongoing_context
 
+                # 链续写时以上一环 follow_up_action 为场景提示
+                if chain_depth == 0:
+                    chain_scenario = base_scenario
+                elif prev_follow_up:
+                    chain_scenario = f"{self.character.scenario}\n\n【当前场景：{prev_follow_up}】"
+                else:
+                    chain_scenario = self.character.scenario
+
                 context = EventContext(
                     character_name=self.character.name,
                     character_description=self.character.description,
                     world=self.character.extensions.world,
-                    scenario=base_scenario if chain_depth == 0 else self.character.scenario,
+                    scenario=chain_scenario,
                     recent_diaries=recent_diaries,
                     today_events=list(chain_events),
                     permanent_state=character_state.text + ("\n当前状态: " + state_context if state_context else ""),
@@ -543,7 +552,8 @@ class CharacterLife:
                     health=character_state.health,
                     current_intention=character_state.current_intention,
                     intention_created_at=character_state.intention_created_at,
-                    slot_type=slot_type,
+                    slot_type=slot_type if chain_depth == 0 else "system",
+                    chain_depth=chain_depth,
                 )
 
                 # 生成事件
@@ -590,6 +600,9 @@ class CharacterLife:
                     character_state.current_intention = pending_plan
                     character_state.intention_created_at = now
                     await self.data_store.update_character_state(character_state)
+
+                # 捕获本环 follow_up_action 供下一环场景提示
+                prev_follow_up = reaction_result.follow_up_action
 
                 combined_raw = CharacterLife._serialize_raw_parts(
                     event_result.raw_response, reaction_result.raw_response)

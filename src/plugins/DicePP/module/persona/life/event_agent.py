@@ -88,6 +88,7 @@ class EventContext:
         current_intention: Optional[str] = None,
         intention_created_at: Optional[datetime] = None,
         slot_type: str = "system",
+        chain_depth: int = 0,
     ):
         self.character_name = character_name
         self.character_description = character_description
@@ -103,6 +104,7 @@ class EventContext:
         self.current_intention = current_intention
         self.intention_created_at = intention_created_at
         self.slot_type = slot_type
+        self.chain_depth = chain_depth
 
 
 class EventGenerationAgent:
@@ -252,7 +254,7 @@ class EventGenerationAgent:
 4. 不使用"觉得""认为""感到"等主观动词
 5. description 自然叙事，不强制字数上限，但保持简洁
 6. context_summary 为事件摘要，30-60字，仅包含关键事实（谁、在哪、做了什么、结果）
-7. 符合世界观和场景设定，但场景中的具体动作是参考而非约束
+7. 符合世界观和场景设定{'，场景中的具体动作是参考而非约束' if context.chain_depth == 0 else '，场景中描述的当前动作是强制上下文，不要重复其中已经完成的事，只描述接下来新发生的事'}
 8. 避免与今天已发生事件在具体内容上高度重复，优先描述不同的事
 9. 同时给出该事件对角色体力/心情/健康的影响（delta，可选整数，范围-20~+20）
 
@@ -288,7 +290,11 @@ class EventGenerationAgent:
 
         now_str = format_timestamp(context.current_time, context.current_time) if context.current_time else "??:??"
         date_str = context.current_time.strftime("%Y年%m月%d日") if context.current_time else ""
-        user_prompt = f"当前日期: {date_str}\n当前时间: {now_str}{intention_text}{diary_context}{events_context}\n\n请生成一个符合世界观的生活事件，并通过 record_event 工具记录:"
+        if context.chain_depth == 0:
+            task_hint = "请生成一个符合世界观的生活事件"
+        else:
+            task_hint = "请描述角色在当前场景中接下来做了什么"
+        user_prompt = f"当前日期: {date_str}\n当前时间: {now_str}{intention_text}{diary_context}{events_context}\n\n{task_hint}，并通过 record_event 工具记录:"
 
         logger.debug("[prompt:system_event]\n{}", system_prompt)
         logger.debug("[prompt:user_event]\n{}", user_prompt)
