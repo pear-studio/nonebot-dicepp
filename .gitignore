@@ -148,6 +148,7 @@ dmypy.json
 .vscode
 
 # DicePP
+config/secrets.json
 config/user.json
 !config/user.json.example
 config/nonebot.env

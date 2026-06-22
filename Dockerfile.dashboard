@@ -28,15 +28,17 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
 # Install uv
 RUN pip install uv --index-url ${PIP_INDEX_URL} --no-cache-dir
 
-# Copy dependency files and source
+# Copy dependency files first (cache layer: only re-fetch when deps change)
 COPY pyproject.toml uv.lock ./
-COPY src/ src/
-COPY dashboard/ dashboard/
 
 # Create virtualenv and install dependencies (no dev, frozen)
 RUN uv venv /app/.venv && \
     . /app/.venv/bin/activate && \
     uv sync --no-dev --frozen
+
+# Copy source code after dependencies are installed
+COPY src/ src/
+COPY dashboard/ dashboard/
 
 # ── Runtime stage ────────────────────────────────────────────────────
 FROM python:3.13-slim
@@ -52,8 +54,11 @@ LABEL org.opencontainers.image.source="https://github.com/pear-studio/nonebot-di
 # Copy virtualenv from builder
 COPY --from=builder /app/.venv /app/.venv
 
-# Copy project code and dashboard assets
-COPY . .
+# Copy only needed files into the runtime image (omit docs, scripts, tests, etc.)
+COPY pyproject.toml ./
+COPY src/ src/
+COPY dashboard/ dashboard/
+COPY config/ config/
 
 # Runtime environment
 ENV PATH="/app/.venv/bin:$PATH"

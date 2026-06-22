@@ -49,7 +49,7 @@ dev = [
     "pytest-xdist>=3.5",
     "pyinstaller>=6.0",
     "bump-my-version>=0.28",
-    "playwright>=1.40",
+    "playwright>=1.40,<2.0",
 ]
 
 [tool.uv]

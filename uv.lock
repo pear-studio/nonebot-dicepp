@@ -740,7 +740,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "bump-my-version", specifier = ">=0.28" },
-    { name = "playwright", specifier = ">=1.40" },
+    { name = "playwright", specifier = ">=1.40,<2.0" },
     { name = "pyinstaller", specifier = ">=6.0" },
     { name = "pytest", specifier = ">=7.4" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
