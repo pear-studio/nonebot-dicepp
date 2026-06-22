@@ -140,6 +140,14 @@ def _write_json_atomic(path: Path, data: dict) -> None:
             status_code=403,
             detail={"ok": False, "message": f"对 {path.name} 的写入被拒绝：此文件由版本库管理，不可通过 Web 接口修改"},
         )
+    # Pre-validate serializability so we don't leave a half-written .tmp
+    try:
+        json.dumps(data, ensure_ascii=False)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"ok": False, "message": f"数据无法序列化为 JSON: {e}"},
+        )
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -210,45 +218,42 @@ async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dic
     """Notify bot(s) to reload config via WebSocket Control Channel."""
     from .websocket import send_reload_to_bot
 
+    # Fetch bot IDs and close the DB connection immediately — the async
+    # polling loop below may run for seconds per bot and must not hold
+    # the connection open.
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    results = []
-
-    def _bot_ids_from_db():
+    try:
         if bot_id:
             cursor = conn.execute(
                 "SELECT bot_id FROM bots_meta WHERE bot_id = ?", (bot_id,)
             )
         else:
             cursor = conn.execute("SELECT bot_id FROM bots_meta")
-        return sorted({row["bot_id"] for row in cursor.fetchall()})
-
-    try:
-        bids = _bot_ids_from_db()
-
-        for bid in bids:
-            # ── WebSocket path ──────────────────────────────────────
-            request_id = uuid.uuid4().hex
-            if await send_reload_to_bot(bid, request_id):
-                # Wait up to 5 s for a reload_result
-                for _ in range(50):
-                    await asyncio.sleep(0.1)
-                    pending = getattr(app.state, "pending_reload_results", {})
-                    rr = pending.pop(request_id, None)
-                    if rr is not None:
-                        results.append({
-                            "bot_id": bid,
-                            "status": "ok" if rr["success"] else "error",
-                            "error": "; ".join(rr.get("errors", [])) or None,
-                        })
-                        break
-                else:
-                    results.append({"bot_id": bid, "status": "error", "error": "reload timed out"})
-                continue
-            results.append({"bot_id": bid, "status": "error", "error": "Bot offline"})
-
+        bids = sorted({row["bot_id"] for row in cursor.fetchall()})
     finally:
         conn.close()
+
+    results = []
+    for bid in bids:
+        request_id = uuid.uuid4().hex
+        if await send_reload_to_bot(bid, request_id):
+            # Wait up to 5 s for a reload_result
+            for _ in range(50):
+                await asyncio.sleep(0.1)
+                pending = getattr(app.state, "pending_reload_results", {})
+                rr = pending.pop(request_id, None)
+                if rr is not None:
+                    results.append({
+                        "bot_id": bid,
+                        "status": "ok" if rr["success"] else "error",
+                        "error": "; ".join(rr.get("errors", [])) or None,
+                    })
+                    break
+            else:
+                results.append({"bot_id": bid, "status": "error", "error": "reload timed out"})
+            continue
+        results.append({"bot_id": bid, "status": "error", "error": "Bot offline"})
 
     return results
 
