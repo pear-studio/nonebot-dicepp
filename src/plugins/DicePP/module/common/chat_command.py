@@ -3,7 +3,7 @@ import datetime
 import json
 
 from core.bot import Bot
-from core.data.models import GroupConfig, UserStat
+from core.data.models import GroupConfig
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -32,11 +32,6 @@ def _get_data_dict(data) -> dict:
         except json.JSONDecodeError:
             return {}
     return {}
-
-
-def _get_data_as_json(data_dict: dict) -> str:
-    """Helper to convert dict to JSON string for storage"""
-    return json.dumps(data_dict, ensure_ascii=False)
 
 
 @custom_user_command(readable_name="自定义对话指令", priority=DPP_COMMAND_PRIORITY_TRIVIAL,
@@ -96,10 +91,10 @@ class ChatCommand(UserCommandBase):
                             config_dict["chat_time"] = new_time_str
                             await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
                         else:
-                            _row = await self.bot.db.user_stat.get(meta.user_id)
-                            data_dict = _get_data_dict(_row.data) if _row and _row.data else {}
-                            data_dict["chat_time"] = new_time_str
-                            await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=_get_data_as_json(data_dict)))
+                            await self.bot.stat_manager.update_user_stat_data(
+                                meta.user_id,
+                                lambda d: d.update({"chat_time": new_time_str}),
+                            )
                         parse_ok = True
                     except Exception:
                         pass
@@ -114,10 +109,10 @@ class ChatCommand(UserCommandBase):
                 config_dict["chat_time"] = new_time_str
                 await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
             else:
-                _row = await self.bot.db.user_stat.get(meta.user_id)
-                data_dict = _get_data_dict(_row.data) if _row and _row.data else {}
-                data_dict["chat_time"] = new_time_str
-                await self.bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=_get_data_as_json(data_dict)))
+                await self.bot.stat_manager.update_user_stat_data(
+                    meta.user_id,
+                    lambda d: d.update({"chat_time": new_time_str}),
+                )
         should_pass: bool = False
         return should_proc, should_pass, feedback
 

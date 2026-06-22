@@ -74,14 +74,6 @@
 
 ## persona
 
-### [B-260602-4263c4] user_stat/group_stat 的 read-modify-write 写竞争
-- 创建: 2026-06-02
-- 优先级: P1
-- 类型: bug
-- 改动量: M
-- 问题表现: 多路径对 user_stat/group_stat 做全量覆写，tick_daily 的 daily_update() 可能被 stale 数据覆盖，update_group_info_all 修改 meta 字段同理。涉及路径：process_message（dicebot.py:577-585,735）、tick_daily（line 282-310）、update_group_info_all（line 856-866）、record_roll_stat（roll_dice_command.py:527-556）。meta_stat 同类竞争已修复（单一写者），这些路径仍有窗口。
-- 开发备忘: 修复方向同 meta_stat 单写者模式或 Repository 原子更新：将 user_stat/group_stat 的读-改-写收敛到单一路径，或用原子 upsert 替代全量覆写。需先梳理各写路径的字段修改交集。
-
 ### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
 - 创建: 2026-06-22
 - 优先级: P1
@@ -144,6 +136,14 @@
 
   影响面：`tool_bridge.py`（`run_structured_collect` / `build_collecting_registry`）、`loop.py`（correction 计数需兼容内容校验触发的重试）、`collecting.py`（各工具的 Pydantic Field 定义）。
 
+### [B-260622-5ee332] chat_time 从 user_stat.data 迁移到独立 user_config 表
+- 创建: 2026-06-22
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现: chat_command 在私聊场景将 chat_time 存储在 user_stat 的 JSON blob 中，与统计数据混在同一行。UserStatInfo.serialize() 不保留未知键，导致 chat_time 被 process_message 静默丢弃，私聊冷却功能形同虚设。即使 B-260602-4263c4 加了锁，序列化不兼容问题依然存在。
+- 开发备忘: 新增 user_config 表（类似 group_config 但 key 为 user_id），将 chat_time 从 user_stat 迁移过去。移除 chat_command 对 user_stat 的依赖，改用独立表。移除 StatManager.update_user_stat_data()（不再需要）。
+
 ## release
 
 ### [B-260615-90ee20] GitHub Release 与多产物发布流程
@@ -177,4 +177,20 @@
 - 改动量: L
 - 问题表现: 当前 standalone_bot.py 是历史实验入口，混合了无 QQ 服务入口、DiceHub 注册、WebChat 启动和 /dpp runtime 绑定等职责。该模式目前不作为发布路径或新手路径使用，但未来网站可能需要单独部署 DicePP，绕过 QQ / NoneBot 直接提供服务。继续保留根目录入口和旧测试会让它看起来像现役能力，也会把未来重写约束在旧实现上。
 - 开发备忘: 近期先将旧 standalone 入口归档为 docs/dev/archive/standalone_bot_legacy.py，删除围绕旧行为的测试，避免维护半成品运行模式。后续实现时重新设计无 QQ / 无 NoneBot 服务入口：明确 CLI/配置入口、HTTP/WebChat 边界、与 DiceHub 的显式启用策略、与 bot.py/NoneBot 入口的职责分离，并考虑是否提供 dicepp-standalone console script 或包内 runtime 模块。
+
+## statistics
+
+### [B-260622-d85176] StatManager 规模化运维
+- 创建: 2026-06-22
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - (a) tick_daily 逐行 get+upsert 替代 batch upsert_many，O(1)→O(N) commit，万级用户时 daily tick DB 写入次数显著增加
+    - (b) StatManager._user_locks / _group_locks 字典无上限无清理，每个新 key 创建一个 asyncio.Lock 永不删除，百万级历史 ID 时内存持续增长
+- 开发备忘:
+    - 正确性优先于性能，R2 per-row 异常保护已减轻逐行失败影响
+    - 优化方向：(1) StatManager 增加批量更新方法（update_user_stat_batch / update_group_stat_batch），单次事务内顺序获取 per-key 锁但合并 commit，需注意多锁获取顺序避免死锁
+    - (2) 锁池增加 LRU 清理或 weakref 防护，需记录最后使用时间戳
+    - 触发条件：实测 daily tick 耗时超阈值，或锁池 dict 大小超过 100K keys
 

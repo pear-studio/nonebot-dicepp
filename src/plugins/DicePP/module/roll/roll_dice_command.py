@@ -2,7 +2,7 @@ from typing import List, Tuple, Any
 import asyncio
 
 from core.bot import Bot
-from core.statistics import UserStatInfo, GroupStatInfo
+from core.statistics import UserStatInfo
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -357,42 +357,26 @@ class RollDiceCommand(UserCommandBase):
         return ".r 掷骰"
 
     async def tick_daily(self) -> List[BotCommandBase]:
-        # 清除今日统计
-        from core.data.models import UserStat, GroupStat
+        # 清除今日掷骰统计 —— 通过 StatManager 原子更新
 
-        # 更新用户数据
         user_stat_list = await self.bot.db.user_stat.list_all()
         for user_stat_row in user_stat_list:
-            user_stat = UserStatInfo()
             try:
-                if user_stat_row.data:
-                    user_stat.deserialize(user_stat_row.data)
-            except Exception:
-                pass
-            # 重置掷骰统计
-            user_stat.roll.times.update(1)
-            user_stat.roll.d20.update()
-            # 保存回去
-            try:
-                await self.bot.db.user_stat.upsert(UserStat(user_id=user_stat_row.user_id, data=user_stat.serialize()))
+                await self.bot.stat_manager.update_user_stat(
+                    user_stat_row.user_id,
+                    lambda s: (s.roll.times.update(1), s.roll.d20.update()),
+                )
             except Exception:
                 pass
 
         # 更新群聊数据
         group_stat_list = await self.bot.db.group_stat.list_all()
         for group_stat_row in group_stat_list:
-            group_stat = GroupStatInfo()
             try:
-                if group_stat_row.data:
-                    group_stat.deserialize(group_stat_row.data)
-            except Exception:
-                pass
-            # 重置掷骰统计
-            group_stat.roll.times.update(1)
-            group_stat.roll.d20.update()
-            # 保存回去
-            try:
-                await self.bot.db.group_stat.upsert(GroupStat(group_id=group_stat_row.group_id, data=group_stat.serialize()))
+                await self.bot.stat_manager.update_group_stat(
+                    group_stat_row.group_id,
+                    lambda s: (s.roll.times.update(1), s.roll.d20.update()),
+                )
             except Exception:
                 pass
 
@@ -518,41 +502,25 @@ def get_roll_state_loc_text(bot: Bot, res_list: List[RollResult]):
 
 
 async def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollResult]):
-    """统计掷骰数据 —— 从 SQLite 读取后更新再写回"""
-    from core.data.models import UserStat, GroupStat
+    """统计掷骰数据 —— 通过 StatManager 原子更新"""
 
     roll_times = len(res_list)
+    d20_vals = [int(res.d20_list[0]) for res in res_list if res.d20_num == 1]
 
-    # 读取用户 stat
-    _row = await bot.db.user_stat.get(meta.user_id)
-    user_stat = UserStatInfo()
-    if _row and _row.data:
-        try:
-            user_stat.deserialize(_row.data)
-        except Exception:
-            pass
-    user_stat.roll.times.inc(roll_times)
-    for res in (res for res in res_list if res.d20_num == 1):
-        user_stat.roll.d20.record(int(res.d20_list[0]))
+    def _update_roll(stat):
+        stat.roll.times.inc(roll_times)
+        for v in d20_vals:
+            stat.roll.d20.record(v)
+
     try:
-        await bot.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=user_stat.serialize()))
+        await bot.stat_manager.update_user_stat(meta.user_id, _update_roll)
     except Exception as _exc:
         logger.warning(f"[RollStat] 写入用户统计 DB 失败: {_exc}")
 
     # 更新群数据
     if not meta.group_id:
         return
-    _grow = await bot.db.group_stat.get(meta.group_id)
-    group_stat = GroupStatInfo()
-    if _grow and _grow.data:
-        try:
-            group_stat.deserialize(_grow.data)
-        except Exception:
-            pass
-    group_stat.roll.times.inc(roll_times)
-    for res in (res for res in res_list if res.d20_num == 1):
-        group_stat.roll.d20.record(int(res.d20_list[0]))
     try:
-        await bot.db.group_stat.upsert(GroupStat(group_id=meta.group_id, data=group_stat.serialize()))
+        await bot.stat_manager.update_group_stat(meta.group_id, _update_roll)
     except Exception as _exc:
         logger.warning(f"[RollStat] 写入群统计 DB 失败: {_exc}")

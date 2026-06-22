@@ -2,3 +2,4 @@ from core.statistics.basic_stat import StatElementBase, UserCommandStatInfo, Rol
     MetaStatInfo
 from core.statistics.user_stat import UserMetaInfo, UserStatInfo
 from core.statistics.group_stat import GroupMetaInfo, GroupStatInfo
+from core.statistics.stat_manager import StatManager

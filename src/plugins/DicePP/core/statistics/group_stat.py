@@ -35,6 +35,11 @@ class GroupMetaInfo:
         self.max_member = max_member
         self.update_time = get_current_date_int()
 
+    def mark_offline(self):
+        """标记群组已离群，成员数设为 -1。"""
+        self.member_count = -1
+        self.max_member = -1
+
 
 @custom_json_object
 class GroupStatInfo(JsonObject):

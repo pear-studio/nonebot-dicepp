@@ -21,7 +21,7 @@ from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNot
 from core.communication import GroupInfo
 from core.data import BotDatabase
 from core.data.models import UserStat, GroupStat, MetaStat, BotControl, UserNickname
-from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo
+from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo, StatManager
 
 import shutil
 
@@ -90,6 +90,7 @@ class Bot:
         Paths.ensure_dirs()
         self.fix_data()
         self.db = BotDatabase(self.account)
+        self.stat_manager = StatManager(self.db)
         self.hub_manager = HubManager(self)
 
         # New config system: ConfigLoader + PersonaLoader
@@ -203,6 +204,20 @@ class Bot:
         self.register_command()
         # Apply persona overrides after commands have registered their loc keys
         self.loc_helper.set_persona(self.config.persona)
+
+    async def _safe_update_user_stat(self, user_id: str, updater) -> None:
+        """原子更新 user_stat，失败时仅记录日志不抛异常。"""
+        try:
+            await self.stat_manager.update_user_stat(user_id, updater)
+        except Exception as _exc:
+            logger.warning(f"[Stat] 用户 {user_id} stat 更新失败: {_exc}")
+
+    async def _safe_update_group_stat(self, group_id: str, updater) -> None:
+        """原子更新 group_stat，失败时仅记录日志不抛异常。"""
+        try:
+            await self.stat_manager.update_group_stat(group_id, updater)
+        except Exception as _exc:
+            logger.warning(f"[Stat] 群 {group_id} stat 更新失败: {_exc}")
 
     async def tick_loop(self):
         from core.command import BotCommandBase
@@ -326,36 +341,28 @@ class Bot:
             return None
 
     async def tick_daily(self, bot_commands):
-        # 更新用户统计
+        # 更新用户统计 —— 逐行原子 daily_update（per-row 异常保护）
         user_stat_rows = await self.db.user_stat.list_all()
-        user_updates = []
         for user_stat_row in user_stat_rows:
-            if user_stat_row.data:
-                user_stat = UserStatInfo()
-                try:
-                    user_stat.deserialize(user_stat_row.data)
-                except Exception:
-                    user_stat = UserStatInfo()
-                user_stat.daily_update()
-                user_updates.append(
-                    UserStat(user_id=user_stat_row.user_id, data=user_stat.serialize())
+            try:
+                await self.stat_manager.update_user_stat(
+                    user_stat_row.user_id, lambda s: s.daily_update()
                 )
-        await self.db.user_stat.upsert_many(user_updates)
-        # 更新群聊统计
+            except Exception as _exc:
+                logger.warning(
+                    f"[TickDaily] user {user_stat_row.user_id} daily_update 失败: {_exc}"
+                )
+        # 更新群聊统计 —— 逐行原子 daily_update（per-row 异常保护）
         group_stat_rows = await self.db.group_stat.list_all()
-        group_updates = []
         for group_stat_row in group_stat_rows:
-            if group_stat_row.data:
-                group_stat = GroupStatInfo()
-                try:
-                    group_stat.deserialize(group_stat_row.data)
-                except Exception:
-                    group_stat = GroupStatInfo()
-                group_stat.daily_update()
-                group_updates.append(
-                    GroupStat(group_id=group_stat_row.group_id, data=group_stat.serialize())
+            try:
+                await self.stat_manager.update_group_stat(
+                    group_stat_row.group_id, lambda s: s.daily_update()
                 )
-        await self.db.group_stat.upsert_many(group_updates)
+            except Exception as _exc:
+                logger.warning(
+                    f"[TickDaily] group {group_stat_row.group_id} daily_update 失败: {_exc}"
+                )
 
         # 尝试清理过期群聊和过期用户信息
         async def clear_expired_data():
@@ -661,16 +668,10 @@ class Bot:
 
         bot_commands: List[BotCommandBase] = []
 
-        # 统计信息 —— 从 SQLite 读取，失败则创建默认值
-        _user_stat_row = await self.db.user_stat.get(meta.user_id)
-        if _user_stat_row and _user_stat_row.data:
-            user_stat = UserStatInfo()
-            try:
-                user_stat.deserialize(_user_stat_row.data)
-            except Exception:
-                user_stat = UserStatInfo()
-        else:
-            user_stat = UserStatInfo()
+        # 统计收到的消息数量 —— 通过 StatManager 原子更新（写入失败不中断消息处理）
+        await self._safe_update_user_stat(meta.user_id, lambda s: s.msg.inc())
+        if meta.group_id:
+            await self._safe_update_group_stat(meta.group_id, lambda s: s.msg.inc())
 
         # 修改meta的permission参数
         # 4:骰主 3:骰管理 2:群主 1:群管理 0:普通人 -1:黑名单
@@ -686,22 +687,6 @@ class Bot:
                     meta.permission = 1
                 else: #elif meta.sender.role == "member": # 群员，或普通人
                     meta.permission = 0
-        # 群内资料同步 —— 从 SQLite 读取
-        if meta.group_id:
-            _group_stat_row = await self.db.group_stat.get(meta.group_id)
-            if _group_stat_row and _group_stat_row.data:
-                group_stat = GroupStatInfo()
-                try:
-                    group_stat.deserialize(_group_stat_row.data)
-                except Exception:
-                    group_stat = GroupStatInfo()
-            else:
-                group_stat = GroupStatInfo()
-        else:
-            group_stat = GroupStatInfo()
-        # 统计收到的消息数量
-        group_stat.msg.inc()
-        user_stat.msg.inc()
 
         # 处理分行指令
         command_split: str = self.config.command_split
@@ -778,10 +763,11 @@ class Bot:
                     logger.error(f"[Bot] 未处理异常上报 master: {type(e).__name__}: {e}")
                     bot_commands += self.handle_exception(f"来源:{info}\n用户:{meta.user_id} {group_info} CODE101")
 
-                # 统计处理的指令情况
+                # 统计处理的指令情况 —— 写入失败不中断消息处理
                 if command.flag and res_commands:
-                    user_stat.cmd.record(command)
-                    group_stat.cmd.record(command)
+                    await self._safe_update_user_stat(meta.user_id, lambda s: s.cmd.record(command))
+                    if meta.group_id:
+                        await self._safe_update_group_stat(meta.group_id, lambda s: s.cmd.record(command))
 
                 if not should_pass:  # 已经处理过, 不需要再传递给后面的指令
                     break
@@ -820,14 +806,6 @@ class Bot:
         if self.proxy and bot_commands:
             # 处理指令
             await self.proxy.process_bot_command_list(bot_commands)
-
-        # 将统计数据写回 SQLite
-        try:
-            await self.db.user_stat.upsert(UserStat(user_id=meta.user_id, data=user_stat.serialize()))
-            if meta.group_id:
-                await self.db.group_stat.upsert(GroupStat(group_id=meta.group_id, data=group_stat.serialize()))
-        except Exception as _exc:
-            logger.error(f"[Stat] 写入统计 DB 失败: {_exc}")
 
         return bot_commands
 
@@ -943,30 +921,17 @@ class Bot:
         all_group_id = set(row.group_id for row in group_stat_rows)
         valid_group_id = set((info.group_id for info in group_info_list))
         for info in group_info_list:
-            _row = await self.db.group_stat.get(info.group_id)
-            if _row and _row.data:
-                group_stat = GroupStatInfo()
-                try:
-                    group_stat.deserialize(_row.data)
-                except Exception:
-                    group_stat = GroupStatInfo()
-            else:
-                group_stat = GroupStatInfo()
-            group_stat.meta.update(info.group_name, info.member_count, info.max_member_count)
-            await self.db.group_stat.upsert(GroupStat(group_id=info.group_id, data=group_stat.serialize()))
+            await self.stat_manager.update_group_stat(
+                info.group_id,
+                lambda s, info=info: s.meta.update(
+                    info.group_name, info.member_count, info.max_member_count
+                ),
+            )
         for group_id in all_group_id.difference(valid_group_id):
-            _row = await self.db.group_stat.get(group_id)
-            if _row and _row.data:
-                group_stat = GroupStatInfo()
-                try:
-                    group_stat.deserialize(_row.data)
-                except Exception:
-                    group_stat = GroupStatInfo()
-            else:
-                group_stat = GroupStatInfo()
-            group_stat.meta.member_count = -1
-            group_stat.meta.max_member = -1
-            await self.db.group_stat.upsert(GroupStat(group_id=group_id, data=group_stat.serialize()))
+            await self.stat_manager.update_group_stat(
+                group_id,
+                lambda s: s.meta.mark_offline(),
+            )
 
         return group_info_list
 
@@ -999,16 +964,8 @@ class Bot:
             is_valid = False
             if user_id in white_list_user:
                 continue
-            _row = await self.db.user_stat.get(user_id)
-            if not _row or not _row.data:
-                invalid_user_id.append(user_id)
-                continue
-            user_stat = UserStatInfo()
-            try:
-                user_stat.deserialize(_row.data)
-            except Exception:
-                invalid_user_id.append(user_id)
-                continue
+            # 锁内读取最新 user_stat（消除直接 DB 读的 TOCTOU 窗口）
+            user_stat = await self.stat_manager.read_user_stat(user_id)
             if user_stat.roll.times.total_val > 200:
                 is_valid = True
             for flag in user_stat.cmd.flag_dict.keys():
@@ -1033,16 +990,8 @@ class Bot:
             is_valid = False
             if group_id in white_list_group:
                 continue
-            _row = await self.db.group_stat.get(group_id)
-            if not _row or not _row.data:
-                invalid_group_id.append(group_id)
-                continue
-            group_stat = GroupStatInfo()
-            try:
-                group_stat.deserialize(_row.data)
-            except Exception:
-                invalid_group_id.append(group_id)
-                continue
+            # 锁内读取最新 group_stat（消除直接 DB 读的 TOCTOU 窗口）
+            group_stat = await self.stat_manager.read_group_stat(group_id)
             for flag in group_stat.cmd.flag_dict.keys():
                 flag_date = int_to_datetime(group_stat.cmd.flag_dict[flag].update_time)
                 if cur_date - flag_date < datetime.timedelta(days=group_expire_day):
@@ -1050,12 +999,15 @@ class Bot:
                     break
             if not is_valid and group_stat.meta.warn_time < group_expire_time:
                 is_valid = True
-                group_stat.meta.warn_time += 1
+                # 原子递增 warn_time（锁内读取最新值再递增，防止覆盖并发写入）
+                await self.stat_manager.update_group_stat(
+                    group_id,
+                    lambda s: setattr(s.meta, "warn_time", s.meta.warn_time + 1),
+                )
                 if group_stat.meta.member_count > 0:
                     result_commands.append(BotDelayCommand(self.account, seconds=random.random() * 10 + 2))
                     result_commands.append(BotSendMsgCommand(self.account, group_expire_warn, [GroupMessagePort(group_id)]))
                     warning_group_id.append(group_id)
-                await self.db.group_stat.upsert(GroupStat(group_id=group_id, data=group_stat.serialize()))
             if not is_valid:
                 invalid_group_id.append(group_id)
             index += 1
