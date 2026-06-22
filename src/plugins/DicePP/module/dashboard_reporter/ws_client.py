@@ -8,11 +8,13 @@ reconnection.
 """
 import asyncio
 import logging
+import os
 import random
 from typing import Callable, Optional
 
 import aiohttp
 
+from frozen import is_frozen
 from module.dashboard_reporter.protocol import (
     auth as auth_msg,
     decode,
@@ -30,6 +32,23 @@ _PING_TIMEOUT = 60
 _RECONNECT_BASE = 1.0
 _RECONNECT_MAX = 60.0
 _RECONNECT_JITTER = 0.25
+
+
+def resolve_dashboard_url() -> Optional[str]:
+    """Resolve the local Dashboard URL for the current runtime.
+
+    Docker and source deployments opt in through ``DPP_ADMIN_HOST``.  The
+    Windows executable defaults to the Dashboard executable beside it so the
+    released ZIP works without manual environment configuration.
+    """
+    host = os.environ.get("DPP_ADMIN_HOST")
+    if not host:
+        if not is_frozen():
+            return None
+        host = "127.0.0.1"
+
+    port = os.environ.get("DPP_ADMIN_PORT", "4090")
+    return f"ws://{host}:{port}/ws/control"
 
 
 class ControlChannelClient:

@@ -48,7 +48,7 @@ services:
         compress: "true"
 
   dashboard:
-    image: ghcr.io/pear-studio/dicepp-dashboard:${DASHBOARD_IMAGE_TAG:-latest}
+    image: "${DASHBOARD_IMAGE:-ghcr.io/pear-studio/dicepp-dashboard:${DICEPP_IMAGE_TAG:-latest}}"
     build:
       context: .
       dockerfile: Dockerfile.dashboard

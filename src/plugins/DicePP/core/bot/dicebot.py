@@ -121,16 +121,17 @@ class Bot:
         self._delay_init_lock = asyncio.Lock()
         self._delay_init_done: bool = False
 
-        # 仪表盘控制通道（仅当显式配置了 dashboard 地址时才启用）
+        # 仪表盘控制通道（源码环境显式启用，Windows EXE 默认连接本机）
         self._control_channel = None
-        if os.environ.get("DPP_ADMIN_HOST"):
-            try:
-                from module.dashboard_reporter.control_token import ensure_token
-                from module.dashboard_reporter.ws_client import ControlChannelClient
+        try:
+            from module.dashboard_reporter.control_token import ensure_token
+            from module.dashboard_reporter.ws_client import (
+                ControlChannelClient,
+                resolve_dashboard_url,
+            )
 
-                host = os.environ["DPP_ADMIN_HOST"]
-                port = os.environ.get("DPP_ADMIN_PORT", "4090")
-                ws_url = f"ws://{host}:{port}/ws/control"
+            ws_url = resolve_dashboard_url()
+            if ws_url:
 
                 project_root = Paths.PROJECT_ROOT
                 token = ensure_token(project_root)
@@ -141,10 +142,10 @@ class Bot:
                     token=token,
                     on_reload=self.reload_config,
                 )
-            except ImportError:
-                logger.warning("[Bot] Control channel unavailable, skipping dashboard connection")
-            except Exception as exc:
-                logger.warning(f"[Bot] Control channel init failed: {exc}")
+        except ImportError:
+            logger.warning("[Bot] Control channel unavailable, skipping dashboard connection")
+        except Exception as exc:
+            logger.warning(f"[Bot] Control channel init failed: {exc}")
 
         # 消息发送后跨模块通知 hook 列表
         # adapter 层发送消息后触发 hook，各模块通过注册 hook 实现日志记录等横切关注点。

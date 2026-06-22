@@ -6,7 +6,9 @@
 #   3. integration — 跨模块集成测试
 #   4. e2e      — 完整 bot 生命周期测试
 #   5. compatibility — AST 引擎兼容性语料 (必须 100% 通过)
-#   6. coverage — 非 real_llm 测试覆盖率门槛
+#   6. playwright — Dashboard 浏览器流程（CI 强制安装 Chromium，不允许跳过）
+#   7. dashboard-image — Dashboard 容器构建与 HTTP 冒烟
+#   8. coverage — 非 real_llm 测试覆盖率门槛
 
 name: Test Suite
 
@@ -115,6 +117,55 @@ jobs:
       - name: Run compatibility corpus
         run: |
           uv run pytest -m compatibility -v --tb=long -x
+
+  playwright:
+    name: Dashboard Playwright
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: |
+          uv sync --frozen --group dev
+      - name: Install Playwright Chromium
+        run: |
+          uv run playwright install --with-deps chromium
+      - name: Run Dashboard browser tests
+        env:
+          DICEPP_REQUIRE_PLAYWRIGHT: "1"
+        run: |
+          uv run pytest tests/dashboard/test_smoke_playwright.py --tb=short -q
+
+  dashboard-image:
+    name: Dashboard Image
+    runs-on: ubuntu-latest
+    needs: fast
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Dashboard image
+        run: |
+          docker build -f Dockerfile.dashboard -t dicepp-dashboard:ci .
+      - name: Smoke test Dashboard image
+        run: |
+          docker run -d --name dicepp-dashboard-smoke -p 127.0.0.1:4090:4090 dicepp-dashboard:ci
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs dicepp-dashboard-smoke
+          exit 1
+      - name: Clean up Dashboard container
+        if: always()
+        run: |
+          docker rm -f dicepp-dashboard-smoke 2>/dev/null || true
 
   coverage:
     name: Coverage

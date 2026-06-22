@@ -16,25 +16,41 @@ playwright = pytest.importorskip("playwright", reason="playwright is not install
 from playwright.sync_api import sync_playwright
 
 
+def _launch_browser(chromium):
+    """Launch the CI-managed Chromium, with local system Chrome fallback."""
+    launch_options = {
+        "headless": True,
+        "args": ["--no-sandbox", "--disable-setuid-sandbox"],
+    }
+    try:
+        return chromium.launch(**launch_options)
+    except Exception:
+        if os.environ.get("DICEPP_REQUIRE_PLAYWRIGHT") == "1":
+            raise
+        return chromium.launch(channel="chrome", **launch_options)
+
+
 def _can_launch_browser() -> bool:
-    """Return True if Playwright can launch system Chrome."""
+    """Return True if the configured CI/local browser can be launched."""
     try:
         with sync_playwright() as _p:
-            browser = _p.chromium.launch(
-                channel="chrome",
-                headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox"],
-            )
+            browser = _launch_browser(_p.chromium)
             browser.close()
             return True
     except Exception:
         return False
 
 
-if not _can_launch_browser():
+_browser_available = _can_launch_browser()
+
+if not _browser_available and os.environ.get("DICEPP_REQUIRE_PLAYWRIGHT") == "1":
+    raise RuntimeError(
+        "Playwright Chromium is required but cannot be launched. "
+        "Run `playwright install chromium` before this test."
+    )
+elif not _browser_available:
     pytestmark = pytest.mark.skip(
-        reason="Google Chrome not available for Playwright "
-        "(install google-chrome-stable or chromium-browser)"
+        reason="Playwright Chromium is not installed"
     )
 
 
@@ -113,11 +129,7 @@ def dashboard_url(tmp_path: Path) -> str:
 def test_smoke_auth_flow(dashboard_url: str) -> None:
     """End-to-end auth flow: setup -> logout -> login -> main dashboard."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            channel="chrome",
-            headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
-        )
+        browser = _launch_browser(p.chromium)
         page = browser.new_page()
 
         try:
@@ -159,11 +171,7 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
 def test_password_mismatch_shows_inline_error(dashboard_url: str) -> None:
     """Setup page shows inline error when passwords do not match."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            channel="chrome",
-            headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
-        )
+        browser = _launch_browser(p.chromium)
         page = browser.new_page()
 
         try:
@@ -189,11 +197,7 @@ def test_password_mismatch_shows_inline_error(dashboard_url: str) -> None:
 def test_password_too_short_shows_inline_error(dashboard_url: str) -> None:
     """Setup page shows inline error when password is fewer than 6 characters."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            channel="chrome",
-            headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
-        )
+        browser = _launch_browser(p.chromium)
         page = browser.new_page()
 
         try:
@@ -226,11 +230,7 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
     )
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            channel="chrome",
-            headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
-        )
+        browser = _launch_browser(p.chromium)
         page = browser.new_page()
 
         try:
