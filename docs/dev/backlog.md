@@ -82,6 +82,31 @@
 - 问题表现: 多路径对 user_stat/group_stat 做全量覆写，tick_daily 的 daily_update() 可能被 stale 数据覆盖，update_group_info_all 修改 meta 字段同理。涉及路径：process_message（dicebot.py:577-585,735）、tick_daily（line 282-310）、update_group_info_all（line 856-866）、record_roll_stat（roll_dice_command.py:527-556）。meta_stat 同类竞争已修复（单一写者），这些路径仍有窗口。
 - 开发备忘: 修复方向同 meta_stat 单写者模式或 Repository 原子更新：将 user_stat/group_stat 的读-改-写收敛到单一路径，或用原子 upsert 替代全量覆写。需先梳理各写路径的字段修改交集。
 
+### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
+- 创建: 2026-06-22
+- 优先级: P1
+- 类型: refactor
+- 改动量: XL
+- 问题表现:
+  - 事件生成（`EventGenerationAgent.generate_event_result`）当前 prompt 自称"世界观设定专家"，但实际没有 DM 的裁决权和隐藏信息
+  - `Character.scenario` 字段默认为空字符串，事件生成 prompt 中场景 fallback 为硬编码 "日常生活"，所有事件共享同一场景上下文，缺乏叙事方向
+  - 角色反应中的 `follow_up_action` 直接注入下一环事件的 scenario，角色企图直接兑现为事件走向。中途没有不确定性——角色想去采药就一定能采到，不会遇到意外
+  - 缺少长线叙事记忆：DM 不知道当前有哪些线索在推进、进展到哪了。每次事件生成是独立的，产出趋于流水账和随机事件
+  - 没有从状态数值到叙事意义的转换——体力低是一个数字，DM 不据此调整事件走向
+  - `_slot_type_hint` 中 "wake_up 恢复规则：体力自然恢复，energy_delta 保底 +20" 导致 LLM 习惯性填满 delta 上限，数值区分度不足
+- 开发备忘:
+  DM 定位：世界观层，拥有裁决权，知道角色不知道的隐藏设定。角色只能产生"企图"（follow_up_action / pending_plan），DM 裁决企图的执行结果。
+
+  流程设计：tick → DM 读取角色状态 + DM 备忘（permanent_state DM 区）+ 角色企图 → DM 裁决：产出事件（可能产出一连串叙事链规划）→ 角色生成 reaction + 新的企图 → 循环。DM 产出的叙事链是柔性参考，非时间表——下次 tick 重新裁决。
+
+  DM 备忘：自由文本，存在 permanent_state 中。LLM 自行管理——创建线索、推进、合并重复线索、完结、归档。线索整体数量不限，但 focus 上限约 3 条，其余闲置。不结构化，让 LLM 自行把握。
+
+  scenario 清理：删除 "日常生活" fallback 和 `Character.scenario` 空字符串依赖。事件生成的场景上下文由 DM 动态产出。
+
+  与现有机制的衔接：`pending_plan`/`follow_up_action` 保留——角色仍产生企图，DM 裁决取代直接兑现。`slot_type` 的 wake_up/good_night 保留——起床和入睡是客观时间节点。`recovery_energy` floor 在 DM 架构下重新评估——DM 可依据睡眠质量叙事产出匹配的 delta。
+
+  影响面：`character_life.py`（DM 裁决循环）、`event_agent.py`（prompt 重写为 DM 视角，删除 scenario 相关 prompt）、`character/models.py`（`Character.scenario` 字段评估是否移除）、`collecting.py`（事件参数可能调整）、`permanent_state` 读写路径。
+
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01
 - 优先级: P2
@@ -100,6 +125,24 @@
   - LLM 路由中优先使用用户自有 key（若已配置），回退到全局 provider
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
+
+### [B-260622-7d8610] structured_collect 工具层通用输出校验与自动纠正
+- 创建: 2026-06-22
+- 优先级: P2
+- 类型: feature
+- 改动量: M
+- 问题表现:
+  - `run_structured_collect` 当前只校验 LLM 是否调用了目标工具、参数是否符合 JSON schema，不校验参数内容是否满足业务约束（如字数范围、必填语义有效性）
+  - 日记 `record_diary_entry.diary` 要求 100-200 字但仅凭 prompt 引导，LLM 可能超出范围，无代码层兜底
+  - 其他工具字段可能存在同类问题（`context_summary` 30-60 字等），缺少通用校验入口
+- 开发备忘:
+  方向：不是为单个字段加 ad-hoc 校验，而是实现工具层面的通用校验/报错/重试机制。可参考社区开源 agent 框架的 validation feedback loop 实现。
+
+  大致形态：工具 executor 返回结果时，增加一层 validate hook——可配置的校验规则（如 `Field.min_length`/`max_length`、自定义 validator、正则等）检查 LLM 输出 → 不符合时以 correction 形式返回错误信息给 LLM → LLM 修正后重新调用工具 → 复用现有 `max_corrections` 限制重试次数。
+
+  字符数校验作为首个应用：从 Pydantic Field 的 `min_length`/`max_length` 自动生成校验规则，无需手写。
+
+  影响面：`tool_bridge.py`（`run_structured_collect` / `build_collecting_registry`）、`loop.py`（correction 计数需兼容内容校验触发的重试）、`collecting.py`（各工具的 Pydantic Field 定义）。
 
 ## release
 
