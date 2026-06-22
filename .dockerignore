@@ -38,6 +38,7 @@ docker-compose*
 .env
 config/nonebot.env
 config/secrets.json
+config/user.json
 config/bots/*.json
 !config/bots/_template.json
 data/

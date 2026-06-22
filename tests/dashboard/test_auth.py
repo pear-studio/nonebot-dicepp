@@ -6,6 +6,7 @@ import time
 from fastapi.testclient import TestClient
 
 from dashboard.src.config import DashboardPaths
+from tests.dashboard.conftest import setup_auth
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -193,3 +194,118 @@ class TestHeartbeatNoAuth:
         )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
+
+
+class TestPasswordChangeSessionRotation:
+    """Password change must invalidate ALL existing sessions and issue one new token."""
+
+    def _dual_setup(self, c1, c2, password="old_password"):
+        """Setup c1 (init), then c2 logs in separately to get its own session."""
+        setup_auth(c1, password)
+        resp = c2.post("/api/auth/login", json={"password": password})
+        assert resp.status_code == 200
+
+    def test_change_password_keeps_current_client_logged_in(self, dual_clients):
+        """Client that changed password stays logged in via the new cookie."""
+        c1, c2 = dual_clients
+        self._dual_setup(c1, c2, "old_password")
+
+        # Verify both can access protected endpoint
+        assert c1.get("/api/bots").status_code == 200
+        assert c2.get("/api/bots").status_code == 200
+
+        # c1 changes password
+        resp = c1.post("/api/auth/change_password",
+                       json={"old_password": "old_password", "new_password": "new_password"})
+        assert resp.status_code == 200
+
+        # c1 must still be able to access protected endpoints (new cookie set)
+        assert c1.get("/api/bots").status_code == 200
+
+    def test_other_client_session_invalidated(self, dual_clients):
+        """Other device's session must be invalidated after password change."""
+        c1, c2 = dual_clients
+        self._dual_setup(c1, c2, "old_password")
+
+        # Both authenticated
+        assert c1.get("/api/bots").status_code == 200
+        assert c2.get("/api/bots").status_code == 200
+
+        # c1 changes password
+        c1.post("/api/auth/change_password",
+                json={"old_password": "old_password", "new_password": "new_password"})
+
+        # c2 must now get 401
+        assert c2.get("/api/bots").status_code == 401
+
+    def test_current_client_old_token_invalidated(self, dual_clients):
+        """Even the current client's old token is deleted (not just the other)."""
+        c1, c2 = dual_clients
+        setup_auth(c1, "old_password")
+
+        # Capture old session cookie before password change
+        old_cookie = c1.cookies.get("session")
+        assert old_cookie is not None
+
+        # Change password
+        c1.post("/api/auth/change_password",
+                json={"old_password": "old_password", "new_password": "new_password"})
+
+        # Clear cookies and set only the old token
+        c1.cookies.clear()
+        c1.cookies.set("session", old_cookie)
+
+        # Old token must be rejected
+        assert c1.get("/api/bots").status_code == 401
+
+    def test_new_password_works_old_password_fails(self, dual_clients):
+        """After change, new password logs in, old password does not."""
+        c1, c2 = dual_clients
+        setup_auth(c1, "old_password")
+
+        c1.post("/api/auth/change_password",
+                json={"old_password": "old_password", "new_password": "new_password"})
+
+        # Logout (clear cookie on c1)
+        c1.post("/api/auth/logout")
+
+        # Old password should fail
+        resp = c1.post("/api/auth/login", json={"password": "old_password"})
+        assert resp.status_code == 401
+
+        # New password should succeed
+        resp = c1.post("/api/auth/login", json={"password": "new_password"})
+        assert resp.status_code == 200
+
+    def test_wrong_old_password_does_not_revoke_sessions(self, dual_clients):
+        """Failed password change must not affect existing sessions."""
+        c1, c2 = dual_clients
+        self._dual_setup(c1, c2, "old_password")
+
+        assert c1.get("/api/bots").status_code == 200
+        assert c2.get("/api/bots").status_code == 200
+
+        # Attempt change with wrong old password
+        resp = c1.post("/api/auth/change_password",
+                       json={"old_password": "wrong", "new_password": "new_password"})
+        assert resp.status_code == 401
+
+        # Both sessions must still be valid
+        assert c1.get("/api/bots").status_code == 200
+        assert c2.get("/api/bots").status_code == 200
+
+    def test_invalid_new_password_does_not_revoke_sessions(self, dual_clients):
+        """New password too short must not affect existing sessions."""
+        c1, c2 = dual_clients
+        self._dual_setup(c1, c2, "old_password")
+
+        assert c1.get("/api/bots").status_code == 200
+
+        # Attempt change with short new password
+        resp = c1.post("/api/auth/change_password",
+                       json={"old_password": "old_password", "new_password": "ab"})
+        assert resp.status_code == 400
+
+        # Both sessions must still be valid
+        assert c1.get("/api/bots").status_code == 200
+        assert c2.get("/api/bots").status_code == 200

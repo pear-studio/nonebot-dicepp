@@ -1,5 +1,7 @@
+import asyncio
 import json
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -8,7 +10,7 @@ from typing import Optional
 import logging
 
 import aiohttp
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -147,10 +149,22 @@ def _write_json_atomic(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _is_path_traversal(path: str) -> bool:
-    """Check if path contains traversal sequences."""
-    normalized = os.path.normpath(path)
-    return ".." in normalized.split(os.sep) or path.startswith("/") or ".." in path
+def _is_path_traversal(path: str, base: Path) -> bool:
+    """Check if the resolved path escapes the given base directory."""
+    try:
+        resolved = (base / path).resolve()
+        return not resolved.is_relative_to(base.resolve())
+    except (ValueError, OSError):
+        return True
+
+
+_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+
+
+def _validate_identifier(value: str, name: str) -> None:
+    """Validate identifier: 1-64 chars, alphanumeric + underscore + hyphen."""
+    if not value or not _ID_PATTERN.match(value):
+        _err(f"{name} 格式无效：仅允许 1~64 位字母、数字、下划线或连字符", 400)
 
 
 def _deep_merge(base: dict, overlay: dict, source: str, result: dict = None, prefix: str = "") -> dict:
@@ -226,50 +240,68 @@ def _is_xlsx(path: Path) -> bool:
 
 
 async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dict]:
-    """Notify bot(s) to reload config.
+    """Notify bot(s) to reload config.  WebSocket first, HTTP fallback."""
+    import uuid as _uuid
+    from .websocket import send_reload_to_bot, get_all_ws
 
-    If bot_id specified: look up that bot's http_url from bots_meta.
-    If no bot_id: get all online bots' http_urls (heartbeat within 15s).
-    POST /dpp/reload to each, return status list.
-    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     results = []
 
-    try:
+    def _bot_ids_from_db():
         if bot_id:
             cursor = conn.execute(
-                "SELECT bot_id, http_url FROM bots_meta WHERE bot_id = ? AND http_url != ''",
-                (bot_id,),
+                "SELECT bot_id FROM bots_meta WHERE bot_id = ?", (bot_id,)
             )
-            rows = cursor.fetchall()
         else:
-            cutoff = time.time() - 15
-            cursor = conn.execute(
-                "SELECT bot_id, http_url FROM bots_meta WHERE CAST(last_heartbeat AS REAL) > ? AND http_url != ''",
-                (cutoff,),
+            cursor = conn.execute("SELECT bot_id FROM bots_meta")
+        return sorted({row["bot_id"] for row in cursor.fetchall()})
+
+    try:
+        ws_pool = get_all_ws()
+        bids = _bot_ids_from_db()
+
+        for bid in bids:
+            # ── WebSocket path ──────────────────────────────────────
+            request_id = _uuid.uuid4().hex
+            if await send_reload_to_bot(bid, request_id):
+                # Wait up to 5 s for a reload_result
+                from .websocket import app as _app
+                for _ in range(50):
+                    await asyncio.sleep(0.1)
+                    pending = getattr(_app.state, "pending_reload_results", {})
+                    rr = pending.pop(request_id, None)
+                    if rr is not None:
+                        results.append({
+                            "bot_id": bid,
+                            "status": "ok" if rr["success"] else "error",
+                            "error": "; ".join(rr.get("errors", [])) or None,
+                        })
+                        break
+                else:
+                    results.append({"bot_id": bid, "status": "error", "error": "reload timed out"})
+                continue
+
+            # ── HTTP fallback ──────────────────────────────────────
+            cursor2 = conn.execute(
+                "SELECT http_url FROM bots_meta WHERE bot_id = ? AND http_url != ''",
+                (bid,),
             )
-            rows = cursor.fetchall()
+            row = cursor2.fetchone()
+            if not row:
+                results.append({"bot_id": bid, "status": "error", "error": "Bot offline"})
+                continue
 
-        # Deduplicate by URL
-        seen_urls = set()
-        targets = []
-        for row in rows:
             url = row["http_url"].rstrip("/") + "/dpp/reload"
-            if url not in seen_urls:
-                seen_urls.add(url)
-                targets.append((row["bot_id"], url))
-
-        async with aiohttp.ClientSession() as session:
-            for bid, url in targets:
-                try:
+            try:
+                async with aiohttp.ClientSession() as session:
                     async with session.post(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                         if resp.status < 400:
-                            results.append({"bot_id": bid, "url": url, "status": "ok"})
+                            results.append({"bot_id": bid, "status": "ok"})
                         else:
-                            results.append({"bot_id": bid, "url": url, "status": "error", "error": f"HTTP {resp.status}"})
-                except Exception as e:
-                    results.append({"bot_id": bid, "url": url, "status": "error", "error": str(e)})
+                            results.append({"bot_id": bid, "status": "error", "error": f"HTTP {resp.status}"})
+            except Exception as e:
+                results.append({"bot_id": bid, "status": "error", "error": str(e)})
     finally:
         conn.close()
 
@@ -361,10 +393,12 @@ async def auth_change_password(request: Request):
     if err:
         raise HTTPException(status_code=400, detail={"ok": False, "message": err})
 
-    set_password_db(db_path, new_pwd)
+    new_token = set_password_db(db_path, new_pwd, rotate_session=True)
     audit_log(db_path, "auth.change_password", "auth", "Password changed", ip=request.client.host if request.client else "")
 
-    return _ok()
+    response = JSONResponse(_ok())
+    response.set_cookie(key="session", value=new_token, httponly=True, samesite="strict", max_age=7 * 86400)
+    return response
 
 
 @app.get("/api/auth/status")
@@ -403,6 +437,7 @@ async def list_bots(request: Request):
 @app.get("/api/data/{bot_id}/tables", dependencies=[Depends(require_auth)])
 async def data_tables(bot_id: str, request: Request):
     """Scan sqlite_master from bot_data.db (mode=ro), return [{name, count}]."""
+    _validate_identifier(bot_id, "bot_id")
     db_path = DashboardPaths.bot_data_db_path(bot_id)
     if not db_path.exists():
         _err(f"Bot data not found for {bot_id}", 404)
@@ -436,6 +471,7 @@ async def data_table(
     q: Optional[str] = Query(None),
 ):
     """Paginated records with optional search."""
+    _validate_identifier(bot_id, "bot_id")
     db_path = DashboardPaths.bot_data_db_path(bot_id)
     if not db_path.exists():
         _err(f"Bot data not found for {bot_id}", 404)
@@ -454,7 +490,7 @@ async def data_table(
             _err(f"Table '{table}' not found", 404)
 
         # Get column info
-        col_cursor = conn.execute(f"SELECT name FROM pragma_table_info('{table}')")
+        col_cursor = conn.execute("SELECT name FROM pragma_table_info(?)", (table,))
         all_columns = [row[0] for row in col_cursor.fetchall()]
 
         # Auto-detect key columns: columns that aren't 'data' or 'updated_at'
@@ -588,13 +624,14 @@ async def config_set(request: Request):
     _write_json_atomic(user_path, user_cfg)
 
     db_path = request.app.state.dashboard_db
-    audit_log(db_path, "config.set", path, json.dumps({"value": value}, ensure_ascii=False),
+    audit_detail = json.dumps({"value": "***"}, ensure_ascii=False) if re.search(r'\.api_key$', path) else json.dumps({"value": value}, ensure_ascii=False)
+    audit_log(db_path, "config.set", path, audit_detail,
               ip=request.client.host if request.client else "")
 
     # Notify all bots
     reload_results = await _notify_reload(db_path)
 
-    return _ok({"reload": reload_results})
+    return _ok({"saved": True, "reload": reload_results})
 
 
 @app.post("/api/config/reset", dependencies=[Depends(require_auth)])
@@ -624,6 +661,7 @@ async def config_reset(request: Request):
 @app.get("/api/config/bots/{bot_id}", dependencies=[Depends(require_auth)])
 async def config_bot_get(bot_id: str, request: Request):
     """Read bot config file content."""
+    _validate_identifier(bot_id, "bot_id")
     cfg_path = DashboardPaths.bot_config_path(bot_id)
     cfg = _read_json_safe(cfg_path)
     return _ok({"config": cfg})
@@ -632,6 +670,7 @@ async def config_bot_get(bot_id: str, request: Request):
 @app.post("/api/config/bots/{bot_id}/save", dependencies=[Depends(require_auth)])
 async def config_bot_save(bot_id: str, request: Request):
     """Validate JSON, atomically write bot config, audit, notify reload."""
+    _validate_identifier(bot_id, "bot_id")
     body = await request.json()
 
     cfg_path = DashboardPaths.bot_config_path(bot_id)
@@ -643,7 +682,7 @@ async def config_bot_save(bot_id: str, request: Request):
 
     reload_results = await _notify_reload(db_path, bot_id)
 
-    return _ok({"reload": reload_results})
+    return _ok({"saved": True, "reload": reload_results})
 
 
 @app.get("/api/config/user", dependencies=[Depends(require_auth)])
@@ -667,7 +706,7 @@ async def config_user_save(request: Request):
               ip=request.client.host if request.client else "")
 
     reload_results = await _notify_reload(db_path)
-    return _ok({"reload": reload_results})
+    return _ok({"saved": True, "reload": reload_results})
 
 
 # ── Heartbeat ─────────────────────────────────────────────────────────────────
@@ -792,7 +831,8 @@ async def content_queries_entries(
     limit: int = Query(100, ge=1, le=500),
 ):
     """Paginated entries from content/queries/{db_name}.db."""
-    if _is_path_traversal(db_name):
+    _validate_identifier(db_name, "db_name")
+    if _is_path_traversal(db_name, DashboardPaths.CONTENT_DIR / "queries"):
         _err("Path traversal detected", 400)
 
     db_path = DashboardPaths.CONTENT_DIR / "queries" / f"{db_name}.db"
@@ -838,18 +878,10 @@ async def content_read(subdir: str, name: str, request: Request):
     if subdir not in _CONTENT_SUBDIRS:
         _err(f"Invalid subdirectory: {subdir}", 404)
 
-    if _is_path_traversal(name):
+    if _is_path_traversal(name, DashboardPaths.CONTENT_DIR / subdir):
         _err("Path traversal detected", 400)
 
     file_path = DashboardPaths.CONTENT_DIR / subdir / name
-    # Ensure the resolved path is within the intended subdirectory
-    try:
-        resolved = file_path.resolve()
-        expected_base = (DashboardPaths.CONTENT_DIR / subdir).resolve()
-        if not str(resolved).startswith(str(expected_base)):
-            _err("Path traversal detected", 400)
-    except (ValueError, OSError):
-        _err("Invalid path", 400)
 
     if not file_path.exists() or not file_path.is_file():
         _err("File not found", 404)
@@ -898,6 +930,13 @@ async def dashboard_page():
     if static_file.exists():
         return FileResponse(str(static_file))
     return JSONResponse(_ok({"message": "Dashboard UI not found"}))
+
+
+@app.websocket("/ws/control")
+async def ws_control(ws: WebSocket):
+    """WebSocket endpoint for Bot Control Channel."""
+    from .websocket import control_endpoint
+    await control_endpoint(ws)
 
 
 @app.get("/")

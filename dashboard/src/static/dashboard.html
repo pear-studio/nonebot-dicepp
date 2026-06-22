@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DicePP 管理面板</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script src="/static/alpine.min.js" defer></script>
 </head>
 <body>
 <div x-data="app()" x-init="init()" class="flex h-screen bg-gray-100">
@@ -226,10 +226,12 @@
               <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
               <button @click="saveUserConfig" :disabled="!userConfigValid || apiLoading" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
               <div x-show="reloadResult" class="mt-4">
-                <h4 class="font-medium mb-2">重载结果：</h4>
-                <template x-for="(status, bid) in reloadResult" :key="bid">
-                  <div class="text-sm mb-1" :class="status.ok ? 'text-green-600' : 'text-red-600'" x-text="`${bid}: ${status.ok ? '成功' : status.error}`"></div>
+                <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
+                <h4 class="font-medium mb-2 text-sm">运行时重载：</h4>
+                <template x-for="item in reloadResult" :key="item.bot_id">
+                  <div class="text-sm mb-1" :class="item.status === 'ok' ? 'text-green-600' : 'text-red-600'" x-text="`${item.bot_id}: ${item.status === 'ok' ? '成功' : (item.error || '失败')}`"></div>
                 </template>
+                <div x-show="!reloadResult || reloadResult.length === 0" class="text-sm text-gray-500">Bot 离线，将在下次启动时加载</div>
               </div>
             </div>
           </div>
@@ -270,7 +272,13 @@
               <p class="text-xs text-gray-500 mt-1">昵称</p>
             </div>
             <button @click="saveBotConfig" :disabled="apiLoading" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
-            <div x-show="botConfigReloadResult" class="mt-4 text-sm" :class="botConfigReloadResult?.ok ? 'text-green-600' : 'text-red-600'" x-text="botConfigReloadResult?.ok ? '保存并重载成功' : (botConfigReloadResult?.error || '保存失败')"></div>
+            <div x-show="botConfigReloadResult" class="mt-4">
+              <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
+              <template x-for="item in botConfigReloadResult" :key="item.bot_id">
+                <div class="text-sm mb-1" :class="item.status === 'ok' ? 'text-green-600' : 'text-red-600'" x-text="`${item.bot_id}: ${item.status === 'ok' ? '成功' : (item.error || '失败')}`"></div>
+              </template>
+              <div x-show="!botConfigReloadResult || botConfigReloadResult.length === 0" class="text-sm text-gray-500">Bot 离线，将在下次启动时加载</div>
+            </div>
           </div>
         </template>
       </div>
@@ -861,9 +869,9 @@ function app() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        this.botConfigReloadResult = data;
+        this.botConfigReloadResult = data.reload || [];
       } catch (err) {
-        this.botConfigReloadResult = { ok: false, error: err.message };
+        this.botConfigReloadResult = [{bot_id: this.selectedBotId, status: 'error', error: err.message}];
       }
     },
 

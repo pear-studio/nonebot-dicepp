@@ -4,8 +4,12 @@ Dashboard heartbeat reporter for DicePP.
 Periodically reports bot status to the DicePP admin dashboard so it can
 display online/offline state and provide the bot HTTP URL for web-based
 configuration reloads.
+
+Deprecated: Use ``module.dashboard_reporter.ws_client.ControlChannelClient``
+(WebSocket Control Channel) instead of the HTTP-based ``DashboardReporter``.
 """
 import os
+import warnings
 import asyncio
 from typing import Optional
 
@@ -14,6 +18,13 @@ import aiohttp
 from importlib.metadata import version as _get_pkg_version
 
 from utils.logger import logger
+
+warnings.warn(
+    "DashboardReporter (HTTP heartbeat) is deprecated; use "
+    "module.dashboard_reporter.ws_client.ControlChannelClient instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 _DEFAULT_HOST = "127.0.0.1"
 _DEFAULT_PORT = "4090"
@@ -35,6 +46,10 @@ class DashboardReporter:
     """
 
     def __init__(self, bot_id: str) -> None:
+        logger.warning(
+            "[DashboardReporter] DEPRECATED: HTTP-based DashboardReporter is deprecated; "
+            "use ControlChannelClient (module.dashboard_reporter.ws_client) instead."
+        )
         self._bot_id = bot_id
 
         host = os.environ.get("DPP_ADMIN_HOST", _DEFAULT_HOST)

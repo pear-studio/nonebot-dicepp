@@ -172,6 +172,19 @@ def test_client(tmp_dashboard_paths: Path) -> TestClient:
 # ── Helper: authenticate a client ────────────────────────────────────────────
 
 
+@pytest.fixture
+def dual_clients(tmp_dashboard_paths: Path) -> tuple[TestClient, TestClient]:
+    """Two TestClients sharing the same dashboard.db for session-rotation tests."""
+    db_path = _init_test_db(tmp_dashboard_paths)
+
+    app1 = app  # share the same FastAPI app instance
+    app1.state.dashboard_db = db_path
+    app1.state.dashboard_paths = DashboardPaths
+
+    from fastapi.testclient import TestClient as TC
+    return TC(app1), TC(app1)
+
+
 def setup_auth(client: TestClient, password: str = "test_password") -> None:
     """Initialise auth on *client* and log in.
 

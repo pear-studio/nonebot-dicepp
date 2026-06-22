@@ -271,8 +271,9 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
             # 6. Click save
             page.get_by_role("button", name="保存").click()
 
-            # 7. Verify feedback — reload result heading becomes visible
-            page.wait_for_selector("text=重载结果：", timeout=10000)
-            assert page.locator("text=重载结果：").is_visible()
+            # 7. Verify feedback — saved + reload result headings become visible
+            page.wait_for_selector("text=配置已保存到磁盘", timeout=10000)
+            assert page.locator("text=配置已保存到磁盘").first.is_visible()
+            assert page.locator("text=运行时重载：").first.is_visible()
         finally:
             browser.close()

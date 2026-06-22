@@ -126,8 +126,14 @@ def is_initialized(db_path: str) -> bool:
         conn.close()
 
 
-def set_password_db(db_path: str, password: str) -> None:
-    """Hash and store password in auth table."""
+def set_password_db(db_path: str, password: str, *, rotate_session: bool = False) -> Optional[str]:
+    """Hash and store password in auth table.
+
+    When *rotate_session* is True (used for password change), the operation
+    is wrapped in a single transaction that also deletes ALL existing
+    sessions and inserts one fresh session.  Returns the new session token,
+    or None when rotate_session is False.
+    """
     pwd_hash, salt = hash_password(password)
     conn = sqlite3.connect(db_path)
     try:
@@ -138,11 +144,30 @@ def set_password_db(db_path: str, password: str) -> None:
                 salt TEXT NOT NULL
             )"""
         )
+        conn.execute("BEGIN")
         conn.execute(
             "INSERT OR REPLACE INTO auth (id, password_hash, salt) VALUES (1, ?, ?)",
             (pwd_hash, salt),
         )
+
+        new_token: Optional[str] = None
+        if rotate_session:
+            conn.execute("DELETE FROM sessions")
+            new_token = secrets.token_urlsafe(32)
+            expires_at = int(time.time()) + 7 * 86400
+            conn.execute(
+                "INSERT INTO sessions (token, expires_at) VALUES (?, ?)",
+                (new_token, str(expires_at)),
+            )
+
         conn.commit()
+        return new_token
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         conn.close()
 
