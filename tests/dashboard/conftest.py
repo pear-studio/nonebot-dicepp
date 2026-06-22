@@ -157,7 +157,7 @@ def tmp_dashboard_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path
 
 
 @pytest.fixture
-def test_client(tmp_dashboard_paths: Path) -> TestClient:
+def test_client(tmp_dashboard_paths: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """Return a FastAPI *TestClient* backed by the temp project root.
 
     The dashboard database is automatically created and the app's state
@@ -166,14 +166,22 @@ def test_client(tmp_dashboard_paths: Path) -> TestClient:
     db_path = _init_test_db(tmp_dashboard_paths)
     app.state.dashboard_db = db_path
     app.state.dashboard_paths = DashboardPaths
-    return TestClient(app)
+    # Existing endpoint tests model the supported Windows direct-LAN setup path.
+    monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
+    return TestClient(
+        app,
+        base_url="http://192.168.1.20:4090",
+        client=("192.168.1.30", 50000),
+    )
 
 
 # ── Helper: authenticate a client ────────────────────────────────────────────
 
 
 @pytest.fixture
-def dual_clients(tmp_dashboard_paths: Path) -> tuple[TestClient, TestClient]:
+def dual_clients(
+    tmp_dashboard_paths: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[TestClient, TestClient]:
     """Two TestClients sharing the same dashboard.db for session-rotation tests."""
     db_path = _init_test_db(tmp_dashboard_paths)
 
@@ -182,7 +190,12 @@ def dual_clients(tmp_dashboard_paths: Path) -> tuple[TestClient, TestClient]:
     app1.state.dashboard_paths = DashboardPaths
 
     from fastapi.testclient import TestClient as TC
-    return TC(app1), TC(app1)
+    monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
+    kwargs = {
+        "base_url": "http://192.168.1.20:4090",
+        "client": ("192.168.1.30", 50000),
+    }
+    return TC(app1, **kwargs), TC(app1, **kwargs)
 
 
 def setup_auth(client: TestClient, password: str = "test_password") -> None:

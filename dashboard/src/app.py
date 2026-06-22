@@ -1,8 +1,10 @@
 import asyncio
+import ipaddress
 import json
 import os
 import re
 import sqlite3
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -273,15 +275,63 @@ async def _startup():
 # ── Auth endpoints ────────────────────────────────────────────────────────────
 
 
+def _is_windows_runtime() -> bool:
+    return sys.platform == "win32"
+
+
+def _is_local_or_private_address(value: Optional[str]) -> bool:
+    """Return whether *value* is localhost or an actual LAN address."""
+    if not value:
+        return False
+    value = value.strip().strip("[]").lower()
+    if value == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    if address.is_loopback or address.is_link_local:
+        return True
+    if isinstance(address, ipaddress.IPv4Address):
+        private_v4 = (
+            ipaddress.ip_network("10.0.0.0/8"),
+            ipaddress.ip_network("172.16.0.0/12"),
+            ipaddress.ip_network("192.168.0.0/16"),
+        )
+        return any(address in network for network in private_v4)
+    return address in ipaddress.ip_network("fc00::/7")
+
+
+def _web_setup_allowed(request: Request) -> bool:
+    """Allow initial web setup only from a direct Windows local/LAN URL."""
+    if not _is_windows_runtime():
+        return False
+    client_host = request.client.host if request.client else None
+    return _is_local_or_private_address(
+        client_host
+    ) and _is_local_or_private_address(request.url.hostname)
+
+
+def _setup_denied_message() -> str:
+    if not _is_windows_runtime():
+        return "Linux 请先通过命令行执行 Dashboard 管理员初始化"
+    return "首次初始化请通过本机或局域网 IP 直接访问，不能通过公网域名或反向代理初始化"
+
+
 @app.post("/api/auth/setup")
 async def auth_setup(request: Request):
     """Set initial password. Returns 403 if already initialized."""
-    body = await request.json()
-    password = body.get("password", "")
-
     db_path = request.app.state.dashboard_db
     if is_initialized(db_path):
         raise HTTPException(status_code=403, detail={"ok": False, "message": "Already initialized"})
+    if not _web_setup_allowed(request):
+        raise HTTPException(
+            status_code=403,
+            detail={"ok": False, "message": _setup_denied_message()},
+        )
+
+    body = await request.json()
+    password = body.get("password", "")
 
     err = validate_password(password)
     if err:
@@ -362,7 +412,13 @@ async def auth_status(request: Request):
     if token:
         authenticated = get_session(db_path, token) is not None
 
-    return _ok({"initialized": initialized, "authenticated": authenticated})
+    setup_allowed = not initialized and _web_setup_allowed(request)
+    return _ok({
+        "initialized": initialized,
+        "authenticated": authenticated,
+        "setup_allowed": setup_allowed,
+        "setup_message": "" if setup_allowed else _setup_denied_message(),
+    })
 
 
 # ── Bot discovery ─────────────────────────────────────────────────────────────

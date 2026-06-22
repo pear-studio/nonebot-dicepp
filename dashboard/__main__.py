@@ -2,12 +2,14 @@
 
 Usage:
     python -m dashboard
+    python -m dashboard admin init
 
 Or:
     DASHBOARD_HOST=127.0.0.1 DASHBOARD_PORT=4090 python -m dashboard
 """
 
 import argparse
+import getpass
 import json
 import logging
 import os
@@ -19,6 +21,8 @@ from pathlib import Path
 import uvicorn
 
 from .src.app import app
+from .src.app import _init_db
+from .src.auth import is_initialized, set_password_db, validate_password
 from .src.config import DashboardPaths, DashboardSettings
 
 logger = logging.getLogger("dashboard")
@@ -83,12 +87,40 @@ def _write_user_config(path) -> None:
     logger.info("Created default user config: %s", path)
 
 
+def _admin_init() -> int:
+    """Interactively initialize the Dashboard administrator password."""
+    ensure_dirs()
+    db_path = str(DashboardPaths.DASHBOARD_DB)
+    _init_db(db_path)
+    if is_initialized(db_path):
+        print("Dashboard 管理员密码已经初始化。", file=sys.stderr)
+        return 1
+
+    password = getpass.getpass("请输入管理员密码: ")
+    confirmation = getpass.getpass("请再次输入管理员密码: ")
+    if password != confirmation:
+        print("两次输入的密码不一致。", file=sys.stderr)
+        return 1
+    error = validate_password(password)
+    if error:
+        print(error, file=sys.stderr)
+        return 1
+
+    set_password_db(db_path, password)
+    print("Dashboard 管理员密码初始化成功。")
+    return 0
+
+
 def main() -> None:
     """Main entry point: ensure dirs, run uvicorn."""
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--smoke-check", action="store_true")
-    args, _ = parser.parse_known_args()
+    commands = parser.add_subparsers(dest="command")
+    admin = commands.add_parser("admin", help="管理员操作")
+    admin_commands = admin.add_subparsers(dest="admin_command")
+    admin_commands.add_parser("init", help="初始化管理员密码")
+    args = parser.parse_args()
 
     if args.version:
         print(f"DicePP Dashboard v{version('dicepp')}")
@@ -97,6 +129,11 @@ def main() -> None:
         if not _run_smoke_check():
             raise SystemExit(1)
         return
+    if args.command == "admin":
+        if args.admin_command != "init":
+            admin.print_help()
+            raise SystemExit(2)
+        raise SystemExit(_admin_init())
 
     ensure_dirs()
 

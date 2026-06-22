@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from dashboard.src.app import _init_db
+from dashboard.src.auth import set_password_db
+
 # ── Module-level skip if playwright or browser not available ──
 
 playwright = pytest.importorskip("playwright", reason="playwright is not installed")
@@ -98,6 +101,13 @@ def dashboard_url(tmp_path: Path) -> str:
         json.dumps({"app": {"name": "dicepp-smoke", "version": "1.0.0"}})
     )
 
+    # Linux production deliberately has no web setup path. Seed the password
+    # through the same database operation used by ``dashboard admin init`` so
+    # this cross-platform browser test focuses on login and authenticated use.
+    db_path = tmp_path / "dashboard" / "data" / "dashboard.db"
+    _init_db(str(db_path))
+    set_password_db(str(db_path), "test_pass")
+
     port = _find_free_port()
     base_url = f"http://127.0.0.1:{port}"
 
@@ -127,7 +137,7 @@ def dashboard_url(tmp_path: Path) -> str:
 
 
 def test_smoke_auth_flow(dashboard_url: str) -> None:
-    """End-to-end auth flow: setup -> logout -> login -> main dashboard."""
+    """End-to-end auth flow: login -> main dashboard -> logout -> login."""
     with sync_playwright() as p:
         browser = _launch_browser(p.chromium)
         page = browser.new_page()
@@ -136,92 +146,33 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
             # 1. Navigate to /dashboard
             page.goto(f"{dashboard_url}/dashboard")
 
-            # 2. Assert setup page is shown
-            page.wait_for_selector('[data-testid="setup-page"]', timeout=10000)
-
-            # 3. Fill password fields
-            page.locator("#setup-password").fill("test_pass")
-            page.locator("#setup-confirm").fill("test_pass")
-
-            # 4. Click submit button (use role selector to avoid ambiguity)
-            page.get_by_role("button", name="设置密码并初始化").click()
-
-            # After successful setup, user is auto-logged in -> main dashboard
+            # 2. Login with the CLI-initialized password
+            page.wait_for_selector('[data-testid="login-page"]', timeout=10000)
+            page.locator("#login-password").fill("test_pass")
+            page.get_by_role("button", name="登录").click()
             page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
 
-            # 5. Clear cookies and reload to see login page
+            # 3. Clear cookies and reload to see login page
             page.context.clear_cookies()
             page.goto(f"{dashboard_url}/dashboard")
 
-            # 6. Assert login page is visible
+            # 4. Assert login page is visible
             page.wait_for_selector('[data-testid="login-page"]', timeout=10000)
 
-            # 7. Fill login password
+            # 5. Fill login password
             page.locator("#login-password").fill("test_pass")
 
-            # 8. Click login
+            # 6. Click login
             page.get_by_role("button", name="登录").click()
 
-            # 9. Assert main dashboard is loaded
+            # 7. Assert main dashboard is loaded
             page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
-        finally:
-            browser.close()
-
-
-def test_password_mismatch_shows_inline_error(dashboard_url: str) -> None:
-    """Setup page shows inline error when passwords do not match."""
-    with sync_playwright() as p:
-        browser = _launch_browser(p.chromium)
-        page = browser.new_page()
-
-        try:
-            page.goto(f"{dashboard_url}/dashboard")
-            page.wait_for_selector("[data-testid='setup-page']", timeout=10000)
-
-            page.locator("#setup-password").fill("test_pass")
-            page.locator("#setup-confirm").fill("different_pass")
-
-            page.get_by_role("button", name="设置密码并初始化").click()
-
-            # Wait for inline error to appear
-            error_el = page.locator("#setup-error")
-            error_el.wait_for(state="visible", timeout=5000)
-            assert "不一致" in error_el.text_content()
-
-            # Button should still be visible — no page transition occurred
-            assert page.get_by_role("button", name="设置密码并初始化").is_visible()
-        finally:
-            browser.close()
-
-
-def test_password_too_short_shows_inline_error(dashboard_url: str) -> None:
-    """Setup page shows inline error when password is fewer than 6 characters."""
-    with sync_playwright() as p:
-        browser = _launch_browser(p.chromium)
-        page = browser.new_page()
-
-        try:
-            page.goto(f"{dashboard_url}/dashboard")
-            page.wait_for_selector("[data-testid='setup-page']", timeout=10000)
-
-            page.locator("#setup-password").fill("12345")
-            page.locator("#setup-confirm").fill("12345")
-
-            page.get_by_role("button", name="设置密码并初始化").click()
-
-            # Wait for inline error to appear
-            error_el = page.locator("#setup-error")
-            error_el.wait_for(state="visible", timeout=5000)
-            assert "6" in error_el.text_content()
-
-            # Button should still be visible
-            assert page.get_by_role("button", name="设置密码并初始化").is_visible()
         finally:
             browser.close()
 
 
 def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None:
-    """Full flow: setup, login, open config tab, edit in JSON view, save, verify feedback."""
+    """Login, edit config in JSON view, save, and verify feedback."""
     # Create a dummy bot config so a bot is available in the sidebar
     bots_dir = tmp_path / "config" / "bots"
     bots_dir.mkdir(parents=True, exist_ok=True)
@@ -234,14 +185,11 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
         page = browser.new_page()
 
         try:
-            # 1. Setup + auto-login
+            # 1. Login with the CLI-initialized password
             page.goto(f"{dashboard_url}/dashboard")
-            page.wait_for_selector("[data-testid='setup-page']", timeout=10000)
-            page.locator("#setup-password").fill("test_pass")
-            page.locator("#setup-confirm").fill("test_pass")
-            page.get_by_role("button", name="设置密码并初始化").click()
-
-            # Wait for main dashboard (indicates successful setup + auto-login)
+            page.wait_for_selector("[data-testid='login-page']", timeout=10000)
+            page.locator("#login-password").fill("test_pass")
+            page.get_by_role("button", name="登录").click()
             page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
 
             # 2. Select a bot from the sidebar dropdown

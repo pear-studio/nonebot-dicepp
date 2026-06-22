@@ -45,7 +45,12 @@ class TestListBots:
         app.state.dashboard_db = db_path
         app.state.dashboard_paths = DashboardPaths
 
-        client = TestClient(app)
+        monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
+        client = TestClient(
+            app,
+            base_url="http://192.168.1.20:4090",
+            client=("192.168.1.30", 50000),
+        )
         setup_auth(client)
         resp = client.get("/api/bots")
         assert resp.status_code == 200

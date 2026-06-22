@@ -50,6 +50,43 @@ class TestPasswordSetup:
             assert resp.status_code == 400
             assert resp.json()["ok"] is False
 
+    def test_linux_rejects_web_setup(self, test_client: TestClient, monkeypatch):
+        """Linux deployment requires the administrator CLI initialization path."""
+        monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: False)
+
+        resp = test_client.post("/api/auth/setup", json={"password": "test_password"})
+
+        assert resp.status_code == 403
+        assert "命令行" in resp.json()["message"]
+
+    def test_windows_rejects_public_web_setup(self, test_client: TestClient, monkeypatch):
+        """A local reverse proxy cannot make a public domain look safe."""
+        monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
+        public_client = TestClient(
+            test_client.app,
+            base_url="http://dashboard.example.com",
+            client=("127.0.0.1", 50000),
+        )
+
+        resp = public_client.post("/api/auth/setup", json={"password": "test_password"})
+
+        assert resp.status_code == 403
+        assert "本机或局域网" in resp.json()["message"]
+
+    def test_windows_allows_private_ip_web_setup(self, test_client: TestClient, monkeypatch):
+        """A Windows user may initialize through a direct private LAN address."""
+        monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
+        lan_client = TestClient(
+            test_client.app,
+            base_url="http://192.168.1.20:4090",
+            client=("192.168.1.30", 50000),
+        )
+
+        resp = lan_client.post("/api/auth/setup", json={"password": "test_password"})
+
+        assert resp.status_code == 200
+        assert "session" in resp.cookies
+
 
 class TestLoginLogout:
     def test_login_logout(self, test_client: TestClient):

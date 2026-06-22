@@ -82,6 +82,23 @@ config/bots/{机器人QQ号}.json
 
 配置字段说明见 [configuration.md](./configuration.md)。
 
+## 初始化 Dashboard
+
+首次启动 `DicePPDashboard.exe` 后，通过以下任一地址设置管理员密码：
+
+- Dashboard 所在电脑：`http://127.0.0.1:4090/dashboard`
+- 同一局域网的其他电脑：`http://局域网IP:4090/dashboard`，例如 `http://192.168.1.20:4090/dashboard`
+
+首次网页初始化只接受本机或局域网 IP 的直接访问，不接受公网 IP、公网域名或反向代理访问。请先完成初始化，再开放公网入口。
+
+如果网页初始化不方便，也可以在 Dashboard 所在目录运行：
+
+```powershell
+.\DicePPDashboard.exe admin init
+```
+
+管理员密码设置完成后，可以正常通过公网域名访问。直接使用 HTTP 会暴露登录密码和会话信息，建议通过反向代理开启 HTTPS。
+
 ## 验证
 
 DicePP 和 LLOneBot 都启动后，给机器人发送：
