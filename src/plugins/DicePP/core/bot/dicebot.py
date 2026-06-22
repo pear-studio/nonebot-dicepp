@@ -497,12 +497,6 @@ class Bot:
         # self.start_up()
         # await self.delay_init_command()
 
-    async def send_immediate_heartbeat(self) -> None:
-        """向 dashboard 发送即时心跳（用于 bot 连接时）。
-
-        Control Channel 在 connect() 成功后自动发送 status，无需额外动作。
-        """
-
     def reload_config(self):
         """Reload all configuration subsystems and return the new BotConfig.
 

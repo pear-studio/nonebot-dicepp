@@ -210,12 +210,12 @@ def _update_bot_status(bot_id: str, payload: dict) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            """INSERT INTO bots_meta (bot_id, http_url, last_heartbeat, version)
-               VALUES (?, ?, ?, ?)
+            """INSERT INTO bots_meta (bot_id, last_heartbeat, version)
+               VALUES (?, ?, ?)
                ON CONFLICT(bot_id) DO UPDATE SET
                    last_heartbeat = excluded.last_heartbeat,
                    version = excluded.version""",
-            (bot_id, "", str(_time.time()), version),
+            (bot_id, str(_time.time()), version),
         )
         conn.commit()
     finally:

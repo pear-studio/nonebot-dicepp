@@ -197,7 +197,10 @@ class ControlChannelClient:
                             try:
                                 self._handle(decode(msg.data))
                             except Exception:
-                                pass
+                                logger.debug(
+                                    "[ControlChannel] unhandled message error",
+                                    exc_info=True,
+                                )
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                             break
                         elif msg.type == aiohttp.WSMsgType.PING:

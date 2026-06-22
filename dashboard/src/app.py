@@ -4,12 +4,12 @@ import os
 import re
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
 import logging
 
-import aiohttp
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -75,7 +75,6 @@ def _init_db(db_path: str) -> None:
         conn.execute(
             """CREATE TABLE IF NOT EXISTS bots_meta (
                 bot_id TEXT PRIMARY KEY,
-                http_url TEXT NOT NULL DEFAULT '',
                 last_heartbeat TEXT,
                 version TEXT DEFAULT ''
             )"""
@@ -167,38 +166,6 @@ def _validate_identifier(value: str, name: str) -> None:
         _err(f"{name} 格式无效：仅允许 1~64 位字母、数字、下划线或连字符", 400)
 
 
-def _deep_merge(base: dict, overlay: dict, source: str, result: dict = None, prefix: str = "") -> dict:
-    """Deep merge overlay into base, annotating leaf values with source.
-
-    Keys only in base get source "default".
-    Keys overridden by overlay get <source>.
-    Returns a dotted-key dict where each leaf is {"value": ..., "source": "default"|"user"|"bot"}.
-    """
-    if result is None:
-        result = {}
-
-    for key, value in base.items():
-        dotted = f"{prefix}.{key}" if prefix else key
-        if key in overlay:
-            if isinstance(value, dict) and isinstance(overlay[key], dict):
-                _deep_merge(value, overlay[key], source, result, dotted)
-            else:
-                result[dotted] = {"value": overlay[key], "source": source}
-        else:
-            if isinstance(value, dict):
-                _deep_merge(value, {}, "default", result, dotted)
-            else:
-                result[dotted] = {"value": value, "source": "default"}
-
-    # Add overlay keys that don't exist in base
-    for key, value in overlay.items():
-        dotted = f"{prefix}.{key}" if prefix else key
-        if key not in base:
-            result[dotted] = {"value": value, "source": source}
-
-    return result
-
-
 def _apply_deep(target: dict, path: str, value) -> None:
     """Set a value at a dotted path in a nested dict, creating intermediate keys."""
     parts = path.split(".")
@@ -240,8 +207,7 @@ def _is_xlsx(path: Path) -> bool:
 
 
 async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dict]:
-    """Notify bot(s) to reload config.  WebSocket first, HTTP fallback."""
-    import uuid as _uuid
+    """Notify bot(s) to reload config via WebSocket Control Channel."""
     from .websocket import send_reload_to_bot
 
     conn = sqlite3.connect(db_path)
@@ -262,7 +228,7 @@ async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dic
 
         for bid in bids:
             # ── WebSocket path ──────────────────────────────────────
-            request_id = _uuid.uuid4().hex
+            request_id = uuid.uuid4().hex
             if await send_reload_to_bot(bid, request_id):
                 # Wait up to 5 s for a reload_result
                 for _ in range(50):
@@ -279,27 +245,8 @@ async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dic
                 else:
                     results.append({"bot_id": bid, "status": "error", "error": "reload timed out"})
                 continue
+            results.append({"bot_id": bid, "status": "error", "error": "Bot offline"})
 
-            # ── HTTP fallback ──────────────────────────────────────
-            cursor2 = conn.execute(
-                "SELECT http_url FROM bots_meta WHERE bot_id = ? AND http_url != ''",
-                (bid,),
-            )
-            row = cursor2.fetchone()
-            if not row:
-                results.append({"bot_id": bid, "status": "error", "error": "Bot offline"})
-                continue
-
-            url = row["http_url"].rstrip("/") + "/dpp/reload"
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                        if resp.status < 400:
-                            results.append({"bot_id": bid, "status": "ok"})
-                        else:
-                            results.append({"bot_id": bid, "status": "error", "error": f"HTTP {resp.status}"})
-            except Exception as e:
-                results.append({"bot_id": bid, "status": "error", "error": str(e)})
     finally:
         conn.close()
 
@@ -497,9 +444,13 @@ async def data_table(
         # Build query
         select_cols = ", ".join(f'"{c}"' for c in all_columns)
         if q and key_columns:
-            where_clause = " OR ".join(f'"{c}" LIKE ?' for c in key_columns)
-            like_param = f"%{q}%"
+            # Escape SQL LIKE wildcards (% and _) so user input is matched literally
+            escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like_param = f"%{escaped}%"
             params = [like_param] * len(key_columns)
+
+            escape_sql = "ESCAPE '\\'"
+            where_clause = " OR ".join(f'"{c}" LIKE ? {escape_sql}' for c in key_columns)
 
             count_cursor = conn.execute(f"SELECT COUNT(*) FROM \"{table}\" WHERE {where_clause}", params)
             total = count_cursor.fetchone()[0]
@@ -707,36 +658,6 @@ async def config_user_save(request: Request):
     return _ok({"saved": True, "reload": reload_results})
 
 
-# ── Heartbeat ─────────────────────────────────────────────────────────────────
-
-
-@app.post("/api/bots/heartbeat")
-async def bot_heartbeat(request: Request):
-    """Receive heartbeat from bot. NO AUTH."""
-    body = await request.json()
-    bot_id = body.get("bot_id", "")
-    version = body.get("version", "")
-    http_url = body.get("http_url", "")
-
-    _validate_identifier(bot_id, "bot_id")
-
-    db_path = request.app.state.dashboard_db
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """INSERT INTO bots_meta (bot_id, http_url, last_heartbeat, version)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(bot_id) DO UPDATE SET
-                   http_url = excluded.http_url,
-                   last_heartbeat = excluded.last_heartbeat,
-                   version = excluded.version""",
-            (bot_id, http_url, str(time.time()), version),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    return _ok()
 
 
 @app.get("/api/bots/status", dependencies=[Depends(require_auth)])
@@ -749,13 +670,12 @@ async def bot_status(request: Request):
     conn.row_factory = sqlite3.Row
     meta_bots = {}
     try:
-        cursor = conn.execute("SELECT bot_id, version, last_heartbeat, http_url FROM bots_meta")
+        cursor = conn.execute("SELECT bot_id, version, last_heartbeat FROM bots_meta")
         for row in cursor.fetchall():
             meta_bots[row["bot_id"]] = {
                 "bot_id": row["bot_id"],
                 "version": row["version"] or "",
                 "last_heartbeat_ts": row["last_heartbeat"] or "",
-                "http_url": row["http_url"] or "",
             }
     finally:
         conn.close()
@@ -777,7 +697,6 @@ async def bot_status(request: Request):
             "bot_id": bid,
             "version": "",
             "last_heartbeat_ts": "",
-            "http_url": "",
         })
         # Determine online status
         last_hb = entry.get("last_heartbeat_ts", "")
@@ -891,6 +810,11 @@ async def content_read(subdir: str, name: str, request: Request):
             "modified": stat.st_mtime,
             "type": "xlsx",
         })
+
+    stat = file_path.stat()
+    max_size = 10 * 1024 * 1024  # 10 MB
+    if stat.st_size > max_size:
+        _err(f"File too large ({stat.st_size} bytes), max {max_size} bytes", 413)
 
     try:
         content = file_path.read_text(encoding="utf-8")

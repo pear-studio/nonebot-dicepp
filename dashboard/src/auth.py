@@ -200,5 +200,4 @@ async def require_auth(request: Request) -> None:
     if session is None:
         raise HTTPException(status_code=401, detail={"ok": False, "message": "Session expired or invalid"})
 
-    # Store operator info for audit logging
-    request.state.operator = "admin"
+    pass

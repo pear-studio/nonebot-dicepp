@@ -51,6 +51,14 @@ class DashboardPaths:
 
 @dataclass
 class DashboardSettings:
-    """Dashboard server settings from environment variables."""
-    host: str = os.environ.get("DASHBOARD_HOST", "0.0.0.0")
-    port: int = int(os.environ.get("DASHBOARD_PORT", "4090"))
+    """Dashboard server settings from environment variables.
+
+    Resolved lazily at instance creation time, not at import time.
+    """
+    host: str = "0.0.0.0"
+    port: int = 4090
+
+    def __post_init__(self) -> None:
+        """Override defaults from environment variables if set."""
+        self.host = os.environ.get("DASHBOARD_HOST", self.host)
+        self.port = int(os.environ.get("DASHBOARD_PORT", str(self.port)))

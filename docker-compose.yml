@@ -28,7 +28,6 @@ services:
       - DPP_ADMIN_HOST=dashboard
       - DPP_ADMIN_PORT=4090
       # Bot HTTP 服务地址（dashboard 调用 bot 内部 API 用）
-      - DPP_BOT_HTTP_URL=http://bot:8080
 
     # 数据持久化：
     # - config：配置目录（可写，运行时生成 bots/*.json）
