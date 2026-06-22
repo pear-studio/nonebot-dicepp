@@ -4,7 +4,7 @@ ConfigLoader: hierarchical JSON configuration loader for DicePP.
 Priority (high → low):
   1. Environment variables  (DICE_* prefix)
   2. Account config         config/bots/{account}.json
-  3. Global secrets         config/secrets.json
+  3. Global user overrides  config/user.json
   4. Global defaults        config/global.json
 """
 import json
@@ -21,7 +21,7 @@ from core.config.basic import Paths
 
 _BOTS_DIR = "bots"
 _GLOBAL_CONFIG = "global.json"
-_GLOBAL_SECRETS = "secrets.json"
+_GLOBAL_USER = "user.json"
 _ACCOUNT_TEMPLATE = "_template.json"
 
 
@@ -134,8 +134,8 @@ class ConfigLoader:
         # Layer 4 (lowest): global defaults
         raw = _load_json_file(self._data_path / _GLOBAL_CONFIG)
 
-        # Layer 3: global secrets
-        raw = _deep_merge(raw, _load_json_file(self._data_path / _GLOBAL_SECRETS))
+        # Layer 3: global user overrides (replaces old secrets.json)
+        raw = _deep_merge(raw, _load_json_file(self._data_path / _GLOBAL_USER))
 
         # Layer 2: account config
         account_cfg = self._ensure_account_config()

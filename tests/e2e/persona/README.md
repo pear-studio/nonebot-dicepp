@@ -6,11 +6,11 @@
 
 运行本目录下的测试需要：
 
-1. `config/secrets.json` 中配置有效的 `persona_ai.primary_api_key`
-2. `config/secrets.json` 中配置 `primary_base_url`（如 `https://api.minimaxi.com/v1`）
-3. `config/secrets.json` 中配置 `primary_model`（如 `MiniMax-M3`）
+1. `config/user.json` 中配置有效的 `persona_ai.primary_api_key`
+2. `config/user.json` 中配置 `primary_base_url`（如 `https://api.minimaxi.com/v1`）
+3. `config/user.json` 中配置 `primary_model`（如 `MiniMax-M3`）
 
-示例 `config/secrets.json`：
+示例 `config/user.json`：
 
 ```json
 {

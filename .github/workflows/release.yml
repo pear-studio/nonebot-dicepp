@@ -2,7 +2,8 @@
 #
 # 触发: push v*.*.* tag
 # 支持: vX.Y.Z 正式版；vX.Y.ZrcN 预发布测试版
-# 产物: ghcr.io/pear-studio/nonebot-dicepp:<tag>；正式版额外推送 :latest
+# 产物: ghcr.io/pear-studio/nonebot-dicepp:<tag>
+#       ghcr.io/pear-studio/dicepp-dashboard:<tag>；正式版额外推送 :latest
 #       DicePP-<tag>-win64.zip
 #       GitHub Release / Prerelease（body 来自 docs/releases/<tag>.md）
 #       docker-compose.yml 和 Windows zip 作为 release assets
@@ -65,6 +66,34 @@ jobs:
             exit 1
           fi
 
+      - name: Build Dashboard image (local only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          push: false
+          load: true
+          tags: |
+            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          build-args: |
+            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
+            GIT_SHA=${{ steps.version.outputs.sha }}
+
+      - name: Smoke test Dashboard image
+        run: |
+          docker run -d --name dicepp-dashboard-smoke -p 127.0.0.1:4090:4090 \
+            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
+              docker rm -f dicepp-dashboard-smoke
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs dicepp-dashboard-smoke
+          docker rm -f dicepp-dashboard-smoke
+          exit 1
+
   windows-build:
     name: Windows EXE
     runs-on: windows-latest
@@ -97,8 +126,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --group dev
 
-      - name: Build with PyInstaller
-        run: uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
+      - name: Build Bot and Dashboard with PyInstaller
+        run: |
+          uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
+          uv run pyinstaller scripts/build/dashboard.spec --clean --noconfirm
+
+      - name: Assemble Windows directory
+        shell: pwsh
+        run: |
+          Copy-Item dist/DicePPDashboard.exe dist/DicePP/DicePPDashboard.exe
+          New-Item -ItemType Directory -Force dist/DicePP/config/bots | Out-Null
+          Copy-Item config/global.json dist/DicePP/config/global.json
+          Copy-Item config/schema.json dist/DicePP/config/schema.json
+          Copy-Item config/bots/_template.json dist/DicePP/config/bots/_template.json
 
       - name: Smoke test
         shell: bash
@@ -110,6 +150,13 @@ jobs:
             exit 1
           fi
           ./dist/DicePP/DicePP.exe --smoke-check
+          DASHBOARD_ACTUAL="$(./dist/DicePP/DicePPDashboard.exe --version | tr -d '\r')"
+          DASHBOARD_EXPECTED="DicePP Dashboard v${{ steps.version.outputs.version }}"
+          if [ "$DASHBOARD_ACTUAL" != "$DASHBOARD_EXPECTED" ]; then
+            echo "Dashboard version mismatch: expected '$DASHBOARD_EXPECTED', got '$DASHBOARD_ACTUAL'"
+            exit 1
+          fi
+          ./dist/DicePP/DicePPDashboard.exe --smoke-check
 
       - name: Package artifact
         shell: pwsh
@@ -160,6 +207,19 @@ jobs:
             DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
             GIT_SHA=${{ steps.version.outputs.sha }}
 
+      - name: Build Dashboard image for publishing
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          push: false
+          load: true
+          tags: |
+            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          build-args: |
+            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
+            GIT_SHA=${{ steps.version.outputs.sha }}
+
       - name: Smoke test image for publishing
         run: |
           EXPECTED="DicePP v${{ steps.version.outputs.version }}"
@@ -169,6 +229,21 @@ jobs:
             echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
             exit 1
           fi
+
+      - name: Smoke test Dashboard image for publishing
+        run: |
+          docker run -d --name dicepp-dashboard-publish-smoke -p 127.0.0.1:4090:4090 \
+            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
+              docker rm -f dicepp-dashboard-publish-smoke
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs dicepp-dashboard-publish-smoke
+          docker rm -f dicepp-dashboard-publish-smoke
+          exit 1
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -180,10 +255,14 @@ jobs:
       - name: Push image
         run: |
           docker push ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
+          docker push ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
           if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
             docker tag ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
               ghcr.io/pear-studio/nonebot-dicepp:latest
             docker push ghcr.io/pear-studio/nonebot-dicepp:latest
+            docker tag ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }} \
+              ghcr.io/pear-studio/dicepp-dashboard:latest
+            docker push ghcr.io/pear-studio/dicepp-dashboard:latest
           else
             echo "Prerelease tag detected; skipping latest tag"
           fi

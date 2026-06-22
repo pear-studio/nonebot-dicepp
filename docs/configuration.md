@@ -4,14 +4,14 @@ DicePP 使用 JSON 配置。新手通常只需要改三个地方：
 
 - `config/bots/{QQ号}.json`
 - `config/global.json`
-- `config/secrets.json`
+- `config/user.json`
 
 ## 目录说明
 
 | 路径 | 用途 | 是否提交 |
 |------|------|----------|
 | `config/global.json` | 全局默认配置 | 可以 |
-| `config/secrets.json` | API Key、密钥等敏感信息 | 不提交 |
+| `config/user.json` | API Key、密钥等敏感信息 | 不提交 |
 | `config/bots/_template.json` | 账号配置模板 | 可以 |
 | `config/bots/{QQ号}.json` | 具体机器人账号配置 | 不提交 |
 | `content/characters/` | Persona 角色卡和皮肤 | 默认只提交示例 |
@@ -23,10 +23,10 @@ DicePP 使用 JSON 配置。新手通常只需要改三个地方：
 
 1. 环境变量，如 `DICE_MASTER`
 2. 账号配置：`config/bots/{QQ号}.json`
-3. 敏感配置：`config/secrets.json`
+3. 用户覆盖配置：`config/user.json`
 4. 全局配置：`config/global.json`
 
-配置会深度合并。比如 `secrets.json` 只写 API Key，不需要复制整段 `persona_ai`。
+配置会深度合并。比如 `user.json` 只写 API Key，不需要复制整段 `persona_ai`。
 
 ## 创建账号配置
 
@@ -66,7 +66,7 @@ Copy-Item config\bots\_template.json config\bots\你的QQ号.json
 
 ## 敏感信息放哪里
 
-API Key 放在 `config/secrets.json`：
+API Key 放在 `config/user.json`：
 
 ```json
 {
@@ -80,7 +80,7 @@ API Key 放在 `config/secrets.json`：
 }
 ```
 
-不要把 `secrets.json` 发给别人，也不要提交到 Git。
+不要把 `user.json` 发给别人，也不要提交到 Git。
 
 ## 常用环境变量
 
@@ -91,24 +91,20 @@ API Key 放在 `config/secrets.json`：
 | `DICE_NICKNAME` | 覆盖机器人昵称 |
 | `DICE_PERSONA` | 覆盖默认人设 |
 | `DICEPP_PROJECT_ROOT` | 覆盖项目根目录，一般不用 |
+| `DPP_ADMIN_HOST` | Dashboard 地址（bot 用于建立 WebSocket 控制通道） | `127.0.0.1` |
+| `DPP_ADMIN_PORT` | Dashboard 端口 | `4090` |
 
 ## 修改后如何生效
 
-本地运行：重启 DicePP。
+**Web 管理面板**（推荐）：在面板中修改配置后点击保存，自动写入磁盘并通知 Bot 热重载。
 
-Docker 部署：
+**手动编辑**：修改 JSON 文件后重启：
 
 ```bash
 docker compose restart
 ```
 
-管理员也可以尝试热重载：
-
-```text
-.reload
-```
-
-如果 JSON 写错，热重载会保留旧配置。
+或通过 QQ 发送 `.reload` 热重载。如果 JSON 写错，热重载会保留旧配置。
 
 ## 配置不生效时检查
 
@@ -121,7 +117,7 @@ Docker 中查看配置：
 
 ```bash
 docker exec dicepp cat /app/config/global.json
-docker exec dicepp cat /app/config/secrets.json
+docker exec dicepp cat /app/config/user.json
 ```
 
 ## 从旧版本迁移

@@ -10,7 +10,7 @@ class Paths:
 
     CONFIG_DIR:          Path = PROJECT_ROOT / "config"
     CONFIG_GLOBAL:       Path = CONFIG_DIR / "global.json"
-    CONFIG_SECRETS:      Path = CONFIG_DIR / "secrets.json"
+    CONFIG_USER:         Path = CONFIG_DIR / "user.json"
     CONFIG_BOTS_DIR:     Path = CONFIG_DIR / "bots"
 
     DATA_DIR:      Path = PROJECT_ROOT / "data"

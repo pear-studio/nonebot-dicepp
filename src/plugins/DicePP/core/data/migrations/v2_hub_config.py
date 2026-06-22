@@ -16,7 +16,7 @@ class HubConfigMigrationV2(Migration):
             """
             CREATE TABLE IF NOT EXISTS hub_config (
                 key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
+                data TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """

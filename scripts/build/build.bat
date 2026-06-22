@@ -55,11 +55,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
+echo [INFO] Building DicePP Dashboard...
+uv run pyinstaller scripts\build\dashboard.spec --clean --noconfirm
+if errorlevel 1 (
+    echo [ERROR] Dashboard build failed!
+    exit /b 1
+)
+
 echo.
 echo [INFO] Relocating user-accessible files...
 REM 将用户需要访问的文件从 _internal 移动到 EXE 同级目录
 set "DIST_DIR=dist\DicePP"
 set "INTERNAL_DIR=%DIST_DIR%\_internal"
+
+copy /y "dist\DicePPDashboard.exe" "%DIST_DIR%\DicePPDashboard.exe" >nul
+if not exist "%DIST_DIR%\config\bots" mkdir "%DIST_DIR%\config\bots"
+copy /y "config\global.json" "%DIST_DIR%\config\global.json" >nul
+copy /y "config\schema.json" "%DIST_DIR%\config\schema.json" >nul
+copy /y "config\bots\_template.json" "%DIST_DIR%\config\bots\_template.json" >nul
 
 REM 移动 Data 目录（用户数据）
 if exist "%INTERNAL_DIR%\Data" (
@@ -81,6 +94,11 @@ if errorlevel 1 (
     echo [ERROR] Smoke test failed! See output above.
     exit /b 1
 )
+"%DIST_DIR%\DicePPDashboard.exe" --smoke-check
+if errorlevel 1 (
+    echo [ERROR] Dashboard smoke test failed! See output above.
+    exit /b 1
+)
 echo [INFO] Smoke test passed
 
 echo.
@@ -94,6 +112,7 @@ echo Contents:
 dir /b "dist\DicePP\"
 echo.
 echo To run: dist\DicePP\DicePP.exe
+echo Dashboard: dist\DicePP\DicePPDashboard.exe
 echo ============================================================
 
 endlocal

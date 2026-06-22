@@ -12,23 +12,22 @@
 
 ---
 
-## config
+## data
 
-### [B-260616-afe771] 发布前提供网页配置管理入口
-- 创建: 2026-06-16
-- 优先级: P1
-- 类型: feature
+### [B-260618-56a0a3] 数据库迁移架构优化调研
+- 创建: 2026-06-18
+- 优先级: P2
+- 类型: refactor
 - 改动量: L
 - 问题表现:
-  - 当前部署文档已经不再鼓励小白直接编辑脚本或运行脚本，但配置仍主要依赖手写 JSON。
-  - 用户需要编辑账号配置、master/admin、好友口令、Persona AI、API Key、角色选择等内容，直接改 JSON 容易写错格式、泄露密钥或改错文件。
-  - Windows 未来会走 exe 部署，Linux 走 release + docker compose，小白不应再接触 scripts 或源码目录；缺少网页配置管理会让正式发布流程不闭环。
+    - 当前数据库迁移采用线性堆叠脚本（v1→v2→v3），缺少历史脚本清理策略
+    - 不知何时可删旧脚本、如何确认所有部署已越过某版本
+    - V3 迁移已出现职责混杂（同时做 DROP TABLE variable/favor 和 ALTER TABLE hub_config RENAME COLUMN）
+    - 长期线性堆叠会导致迁移链越来越长、维护成本递增
 - 开发备忘:
-  - 在正式发布前提供网页配置管理入口，覆盖账号配置、全局配置、secrets/API Key、Persona 开关、角色选择、基础校验和保存。
-  - 配置保存需要区分可提交配置与本地敏感配置，避免把 API Key 写到错误位置。
-  - 需要有 JSON/schema 校验、错误提示、重启/热重载提示，以及备份或回滚策略。
-  - Windows exe 和 Linux Docker 都应能使用同一套配置管理体验；注意配置文件路径和 volume 挂载差异。
-  - 可先做最小可用版本：读取当前配置、编辑常用字段、保存并提示重启；高级 Persona 参数后续再扩展。
+    - 调研方向：Alembic 式 delta 脚本 vs 声明式 schema + 自动 diff vs 其他轻量方案
+    - 历史脚本的清理判定策略（如何确认所有存量部署已跑过某版本）
+    - 产出调研文档后讨论方案，本次不做代码改动
 
 ## deploy
 
@@ -46,6 +45,32 @@
     - 设计升级前备份、定时备份、恢复演练、保留周期和失败告警。
     - 后续可与 version-deploy / deploy-docker 联动：当 release metadata 标记 数据变更/配置变更 为 yes 时，生产更新前必须确认备份。
     - 注意恢复流程不能只写文档，至少需要可验证的恢复步骤或脚本入口。
+
+## deployment
+
+### [B-260618-8fce87] 引入 DicePP Manager 统一管理 Bot 与 Dashboard 生命周期
+- 创建: 2026-06-18
+- 优先级: P1
+- 类型: feature
+- 改动量: XL
+- 问题表现:
+  - 用户完成首次部署后，仍缺少通过 Dashboard 完成 Bot 启停、重启、更新和回滚的能力。
+  - Dashboard 未来还需要更新自身；由 Dashboard 直接替换自身容器或持有 Bot 子进程，难以保证操作完成、失败恢复和职责边界。
+  - 直接向 Dashboard 挂载 Docker Socket 会把宿主机高权限暴露给复杂 Web 应用。
+  - Linux 以 Docker 容器运行，Windows 以打包进程运行；如果分别实现生命周期逻辑，容易形成两套状态机、错误语义和更新流程。
+- 开发备忘:
+  - 引入常驻的 DicePP Manager，作为 Dashboard 与运行时之间的最小权限管理层；Dashboard 不直接访问 Docker Socket，也不直接持有 Bot 生命周期。
+  - Manager Core 统一实现操作状态机、鉴权、审计、健康检查、并发控制、版本兼容、失败回滚和对 Dashboard 的 API。
+  - 平台差异收敛到 Runtime Backend：Linux 使用 DockerRuntime 管理容器，Windows 使用 ProcessRuntime 管理进程；禁止在业务代码中散落平台判断。
+  - Manager 仅提供受限的启停、重启、更新、状态、日志和回滚接口，禁止任意 Docker API、镜像名称和命令执行。
+  - Windows 最终发布一个用户入口 `DicePP.exe`；同一可执行文件以内部 manager/dashboard/bot/update 模式运行多个独立进程。采用 onedir 发行包，不强求单一物理文件。
+  - Windows 自更新采用 staging 新版本接管：校验下载、停止旧进程、替换程序、健康检查、失败恢复备份；运行状态放在 `data/manager/`，不能只保存在进程内存。
+  - Linux 保持 Manager、Dashboard、Bot 独立镜像；Windows 单一入口只是分发形式差异，两端共享 Manager API 和生命周期语义。
+  - 永久控制通道由受管理组件主动建立：Manager 通过出站 WSS 连接 DiceHub，DiceHub 在既有双向通道上下发生命周期命令；用户无需暴露 Manager/Bot 入站端口。
+  - DiceHub 的远程更新、重启、诊断和回滚必须发给 Manager，不允许 Bot 直接承担替换自身进程或容器的操作；Bot 现有 DiceHub 业务连接与运维控制通道保持职责分离。
+  - Manager 落地后接管安装级本地控制凭据的生成、轮换和恢复；凭据属于整个 DicePP 安装，不属于 Dashboard 私有数据。DiceHub 等远程控制端使用独立的 device-code/网页授权凭据，不复用本地安装凭据。
+  - 当前 Dashboard PR 不实现 Manager，只补齐独立 Dashboard 镜像发布、Windows 双 EXE 打包和测试门禁。
+  - 后续还需细化部署形态、Manager 自身升级边界、鉴权协议、发布清单、镜像/文件签名以及 Runtime Backend contract tests。
 
 ## persona
 

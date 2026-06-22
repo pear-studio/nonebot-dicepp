@@ -6,6 +6,7 @@ from .registry import MigrationRegistry, MigrationRegistryError, build_registry
 from .runner import MigrationExecutionError, MigrationRunResult, MigrationRunner
 from .v1_baseline import BaselineMigrationV1
 from .v2_hub_config import HubConfigMigrationV2
+from .v3_cleanup_variable_favor import CleanupVariableFavorV3
 
 
 def default_registry() -> MigrationRegistry:
@@ -13,6 +14,7 @@ def default_registry() -> MigrationRegistry:
         [
             BaselineMigrationV1(),
             HubConfigMigrationV2(),
+            CleanupVariableFavorV3(),
         ]
     )
 

@@ -1,0 +1,73 @@
+# ── DicePP Dashboard ──────────────────────────────────────────────────
+# Standalone web UI for DicePP administration.
+# Serves the single-file SPA at dashboard/src/static/dashboard.html
+# and provides REST API endpoints that proxy/interface with the bot.
+#
+# Build:
+#   docker build -t dicepp-dashboard -f Dockerfile.dashboard .
+# ─────────────────────────────────────────────────────────────────────
+
+# ── Build stage ──────────────────────────────────────────────────────
+FROM python:3.13-slim AS builder
+
+ARG APT_MIRROR=deb.debian.org
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG UV_INDEX_URL=https://pypi.org/simple
+
+WORKDIR /app
+
+# Configure apt mirror
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources && \
+        sed -i "s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list && \
+        sed -i "s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list; \
+    fi
+
+# Install uv
+RUN pip install uv --index-url ${PIP_INDEX_URL} --no-cache-dir
+
+# Copy dependency files first (cache layer: only re-fetch when deps change)
+COPY pyproject.toml uv.lock ./
+
+# Create virtualenv and install dependencies (no dev, frozen)
+RUN uv venv /app/.venv && \
+    . /app/.venv/bin/activate && \
+    uv sync --no-dev --frozen
+
+# Copy source code after dependencies are installed
+COPY src/ src/
+COPY dashboard/ dashboard/
+
+# ── Runtime stage ────────────────────────────────────────────────────
+FROM python:3.13-slim
+
+WORKDIR /app
+
+ARG DICEPP_IMAGE_TAG=unknown
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.version="${DICEPP_IMAGE_TAG}"
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+LABEL org.opencontainers.image.source="https://github.com/pear-studio/nonebot-dicepp"
+
+# Copy virtualenv from builder
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy only needed files into the runtime image (omit docs, scripts, tests, etc.)
+COPY pyproject.toml ./
+COPY src/ src/
+COPY dashboard/ dashboard/
+COPY config/ config/
+
+# Runtime environment
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV DICEPP_PROJECT_ROOT=/app
+
+# Dashboard listens on 4090
+EXPOSE 4090
+
+# Start dashboard module (serves static SPA + REST API)
+CMD ["python", "-m", "dashboard"]

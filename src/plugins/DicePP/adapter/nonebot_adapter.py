@@ -432,15 +432,17 @@ else:
                 )
 
         proxy = NoneBotClientProxy(bot)
-        all_bots[bot.self_id] = DicePPBot(bot.self_id)
-        all_bots[bot.self_id].set_client_proxy(proxy)
-        await all_bots[bot.self_id].delay_init_command()
+        bot_instance = DicePPBot(bot.self_id)
+        all_bots[bot.self_id] = bot_instance
+        bot_instance.set_client_proxy(proxy)
+        await bot_instance.delay_init_command()
+        # 控制通道在 delay_init_command 完成后自动发送 status，无需额外心跳
         # 通知健康监控：bot 已连接
-        all_bots[bot.self_id].health_monitor.on_bot_connect()
+        bot_instance.health_monitor.on_bot_connect()
         # 设定Bot自己的昵称，供日志使用
         try:
-            await all_bots[bot.self_id].update_nickname(bot.self_id, "origin", bot.self_id)
-            await all_bots[bot.self_id].update_nickname(bot.self_id, "default", "骰娘")
+            await bot_instance.update_nickname(bot.self_id, "origin", bot.self_id)
+            await bot_instance.update_nickname(bot.self_id, "default", "骰娘")
         except Exception:
             pass
         logger.info(f"[NB Adapter] Bot {bot.self_id} Connected!")

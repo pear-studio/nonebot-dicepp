@@ -55,6 +55,19 @@ def _make_bot(reload_raises=None):
     loc_helper.format_loc_text.side_effect = lambda key, **kw: f"[{key}]"
     bot.loc_helper = loc_helper
 
+    # reload_config() now delegates all reload work; mock it to mimic the real
+    # method but still funnel through the mock objects above.
+    def _reload_config():
+        if reload_raises:
+            raise reload_raises
+        new_cfg_ = cfg_loader.reload()
+        bot.config = new_cfg_
+        persona_loader.reload()
+        loc_helper.reset_to_default()
+        loc_helper.set_persona(new_cfg_.persona)
+        return new_cfg_
+    bot.reload_config = _reload_config
+
     return bot, new_config
 
 

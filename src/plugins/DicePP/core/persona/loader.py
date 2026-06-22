@@ -49,6 +49,14 @@ class PersonaLoader:
         self._load_all()
         logger.info(f"[Persona] Reloaded {len(self._cache)} persona(s)")
 
+    def set_character_path(self, path: str) -> None:
+        """Update the character directory and reload all personas.
+
+        Called from reload_config() when persona_ai.character_path changes.
+        """
+        self._dir = Path(path)
+        self.reload()
+
     def available_names(self) -> list[str]:
         return list(self._cache.keys())
 
