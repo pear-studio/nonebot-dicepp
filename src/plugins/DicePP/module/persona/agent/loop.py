@@ -188,13 +188,12 @@ class AgentLoop:
             )
 
             # ── L1 纠正：要求工具输出时，不能直接输出文本或空响应 ──
-            if (round_index < self._limits.max_corrections
+            if (state.correction_count < self._limits.max_corrections
                     and not tool_calls
                     and tools
                     and (not content.strip() or required_tool_output)):
                 state.messages.append(dict(_L1_CORRECTION_MSG))
                 state.correction_count += 1
-                round_index += 1
                 await self._event_bus.emit(
                     "CorrectionInjected",
                     CorrectionInjectedPayload(
@@ -251,7 +250,6 @@ class AgentLoop:
                     }
                     state.messages.append(dict(correction_msg))
                     state.correction_count += 1
-                    round_index += 1
                     await self._event_bus.emit(
                         "CorrectionInjected",
                         CorrectionInjectedPayload(
@@ -480,6 +478,11 @@ class AgentLoop:
 
             # ── 达到最大轮次 ──
             if round_index >= self._limits.max_tool_rounds:
+                if state.correction_count > 0:
+                    logger.warning(
+                        "max_tool_rounds(%d) 耗尽，已注入 %d 次纠正但未收集到工具调用",
+                        self._limits.max_tool_rounds, state.correction_count,
+                    )
                 return await self._finish(state, "max_rounds", "max_tool_rounds",
                                           total_tokens_in, total_tokens_out, provider, model)
 
