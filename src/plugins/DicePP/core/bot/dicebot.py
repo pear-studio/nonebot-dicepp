@@ -121,16 +121,30 @@ class Bot:
         self._delay_init_lock = asyncio.Lock()
         self._delay_init_done: bool = False
 
-        # 仪表盘心跳（仅当显式配置了 dashboard 地址时才启用上报）
+        # 仪表盘控制通道（仅当显式配置了 dashboard 地址时才启用）
+        self._control_channel = None
         if os.environ.get("DPP_ADMIN_HOST"):
             try:
-                from module.dashboard_reporter import DashboardReporter
-                self._dashboard_reporter = DashboardReporter(self.account)
+                from module.dashboard_reporter.control_token import ensure_token
+                from module.dashboard_reporter.ws_client import ControlChannelClient
+
+                host = os.environ["DPP_ADMIN_HOST"]
+                port = os.environ.get("DPP_ADMIN_PORT", "4090")
+                ws_url = f"ws://{host}:{port}/ws/control"
+
+                project_root = Paths.PROJECT_ROOT
+                token = ensure_token(project_root)
+
+                self._control_channel = ControlChannelClient(
+                    bot_id=self.account,
+                    dashboard_url=ws_url,
+                    token=token,
+                    on_reload=self.reload_config,
+                )
             except ImportError:
-                logger.warning("[Bot] Dashboard reporter unavailable, skipping heartbeat")
-                self._dashboard_reporter = None
-        else:
-            self._dashboard_reporter = None
+                logger.warning("[Bot] Control channel unavailable, skipping dashboard connection")
+            except Exception as exc:
+                logger.warning(f"[Bot] Control channel init failed: {exc}")
 
         # 消息发送后跨模块通知 hook 列表
         # adapter 层发送消息后触发 hook，各模块通过注册 hook 实现日志记录等横切关注点。
@@ -255,9 +269,7 @@ class Bot:
             # 健康监控：周期性心跳超时检测
             self.health_monitor.check_heartbeat()
 
-            # 仪表盘心跳
-            if self._dashboard_reporter is not None:
-                self._dashboard_reporter.tick()
+            # 控制通道由 ControlChannelClient 内部定时发送 status，不需 tick 驱动
 
             # 最多每秒执行一次循环
             free_time = max(loop_begin_time + 1 - loop.time(), 0)
@@ -431,8 +443,8 @@ class Bot:
             await asyncio.gather(self.tick_task, return_exceptions=True)
             self.tick_task = None
 
-        if self._dashboard_reporter is not None:
-            await self._dashboard_reporter.stop()
+        if self._control_channel is not None:
+            await self._control_channel.stop()
 
         await self.db.close()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
@@ -485,9 +497,10 @@ class Bot:
         # await self.delay_init_command()
 
     async def send_immediate_heartbeat(self) -> None:
-        """向 dashboard 发送即时心跳（用于 bot 连接时）。"""
-        if self._dashboard_reporter is not None:
-            await self._dashboard_reporter.send_immediate()
+        """向 dashboard 发送即时心跳（用于 bot 连接时）。
+
+        Control Channel 在 connect() 成功后自动发送 status，无需额外动作。
+        """
 
     def reload_config(self):
         """Reload all configuration subsystems and return the new BotConfig.
@@ -632,6 +645,10 @@ class Bot:
                     pass
 
             self._delay_init_done = True
+
+        # Connect dashboard control channel after init is fully done
+        if self._control_channel is not None:
+            await self._control_channel.connect()
 
     # noinspection PyBroadException
     async def process_message(self, msg: str, meta: MessageMetaData) -> List:
