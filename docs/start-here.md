@@ -11,6 +11,7 @@ DicePP 是一个 TRPG 骰娘机器人，可以接入 QQ，也可以启用 Person
 | 在 Windows 上部署 | [windows.md](./windows.md) |
 | 在 Linux 服务器上用 Docker 部署 | [linux.md](./linux.md) |
 | 配置账号、主人、API Key、常用开关 | [configuration.md](./configuration.md) |
+| 通过 Web 管理面板操作 | 部署后访问 `http://服务器IP:4090/dashboard` |
 | 启用 Persona AI 对话 | [persona.md](./persona.md) |
 | 编写 Persona 角色卡 | [persona-character-card.md](./persona-character-card.md) |
 | 参与开发或让 agent 熟悉项目 | [dev/guide.md](./dev/guide.md) |

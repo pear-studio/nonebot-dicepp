@@ -14,9 +14,9 @@ TODO：等待 Windows exe 发布后补充完整步骤。
 
 1. 下载 DicePP Windows 发布包。
 2. 解压到固定目录。
-3. 启动 DicePP。
+3. 启动 DicePP 和 Dashboard（`DicePP.exe` + `DicePPDashboard.exe`）。
 4. 等 LLOneBot 连接后生成账号配置。
-5. 填写 master、昵称、好友口令等配置。
+5. 通过浏览器访问 `http://127.0.0.1:4090/dashboard` 或手动编辑 JSON 填写 master、昵称等。
 6. 发送 `.help` 验证。
 
 ## 准备

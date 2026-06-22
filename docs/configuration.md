@@ -91,27 +91,20 @@ API Key 放在 `config/user.json`：
 | `DICE_NICKNAME` | 覆盖机器人昵称 |
 | `DICE_PERSONA` | 覆盖默认人设 |
 | `DICEPP_PROJECT_ROOT` | 覆盖项目根目录，一般不用 |
-| `DPP_ADMIN_HOST` | Dashboard 管理后端地址（bot 上报心跳用） | `127.0.0.1` |
-| `DPP_ADMIN_PORT` | Dashboard HTTP 端口 | `4090` |
-| `DPP_BOT_HTTP_URL` | Bot HTTP 服务地址（dashboard 调用 bot 内部 API 用） | `http://127.0.0.1:8080` |
+| `DPP_ADMIN_HOST` | Dashboard 地址（bot 用于建立 WebSocket 控制通道） | `127.0.0.1` |
+| `DPP_ADMIN_PORT` | Dashboard 端口 | `4090` |
 
 ## 修改后如何生效
 
-本地运行：重启 DicePP。
+**Web 管理面板**（推荐）：在面板中修改配置后点击保存，自动写入磁盘并通知 Bot 热重载。
 
-Docker 部署：
+**手动编辑**：修改 JSON 文件后重启：
 
 ```bash
 docker compose restart
 ```
 
-管理员也可以尝试热重载：
-
-```text
-.reload
-```
-
-如果 JSON 写错，热重载会保留旧配置。
+或通过 QQ 发送 `.reload` 热重载。如果 JSON 写错，热重载会保留旧配置。
 
 ## 配置不生效时检查
 
