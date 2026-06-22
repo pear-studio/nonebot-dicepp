@@ -276,7 +276,7 @@ class PersonaDataStore:
             FROM message_stream
             WHERE user_id = ? AND group_id = ?
               AND {PersonaDataStore._PERSONA_SCOPE}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT ?
             """,
             (user_id, group_id, limit),
@@ -302,7 +302,7 @@ class PersonaDataStore:
             WHERE user_id = ? AND group_id = ?
               AND image_meta IS NOT NULL AND image_meta != ''
               AND {PersonaDataStore._PERSONA_SCOPE}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT {PersonaDataStore._IMAGE_HASH_SCAN_LIMIT}
             """,
             (user_id, group_id),
@@ -429,7 +429,7 @@ class PersonaDataStore:
                    agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT ? OFFSET ?
         """
         params.extend([limit, offset])

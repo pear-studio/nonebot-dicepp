@@ -6,6 +6,7 @@ Phase 7c: PersonaDataStore CRUD 单元测试 — 核心 CRUD
 
 import pytest
 from datetime import datetime, timedelta
+from pathlib import Path
 from plugins.DicePP.utils.time import wall_now
 
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
@@ -1107,7 +1108,7 @@ class TestSwitchPersonaDb:
             await store.switch_persona_db("new")
 
             # 新库应该能正常工作
-            assert store._persona_db_path == new_path
+            assert Path(store._persona_db_path) == Path(new_path)
             await store.set_setting("new_key", "new_value")
             new_val = await store.get_setting("new_key")
             assert new_val == "new_value"
