@@ -178,11 +178,13 @@ class TestHandleJrrp:
                 result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
-        # event_msg 以 user 角色写入 message_stream
+        # event_msg 以 user 角色写入 message_stream，包含 display_name
         user_calls = [c for c in data_store.add_message_stream.await_args_list
                       if c.kwargs.get("role") == "user"]
         assert len(user_calls) == 1, \
             f"event_msg 应在 chat() 前以 user 角色写入，实际调用: {data_store.add_message_stream.await_args_list}"
+        assert user_calls[0].kwargs.get("display_name") == "test_user", \
+            f"event_msg 应携带 display_name=test_user，实际: {user_calls[0].kwargs.get('display_name')}"
         # 只发了 LLM 评语，没有模板数值行
         assert cmd._send.await_count == 1
         cmd._send.assert_any_call("U123", "", "运气不错呢！")

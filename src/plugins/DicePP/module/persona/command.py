@@ -599,6 +599,7 @@ class PersonaCommand(UserCommandBase):
                     role="user",
                     type=MessageType.COMMAND,
                     content=event_msg,
+                    display_name=user_name,
                 )
                 event_persisted = True
             except Exception as e:
