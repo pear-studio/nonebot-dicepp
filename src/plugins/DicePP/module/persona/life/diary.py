@@ -81,6 +81,7 @@ class DiaryGenerator:
                 evt_time = e.created_at.strftime("%H:%M") if e.created_at else "??:??"
                 events_dict.append({
                     "description": e.description,
+                    "context_summary": e.context_summary,
                     "reaction": e.reaction,
                     "time": evt_time,
                 })

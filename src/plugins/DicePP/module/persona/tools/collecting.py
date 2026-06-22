@@ -64,7 +64,7 @@ class RecordReactionArgs(BaseModel):
 
 class RecordDiaryEntryArgs(BaseModel):
     """记录日记内容"""
-    diary: str = Field(..., description="日记内容，100-300字，第一人称")
+    diary: str = Field(..., description="日记内容，100-200字，第一人称")
 
 
 class RecordShareMessageArgs(BaseModel):

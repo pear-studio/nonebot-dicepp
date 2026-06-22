@@ -6,7 +6,7 @@ Character Agent: 生成角色对事件的反应
 """
 import asyncio
 from dataclasses import dataclass
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 from datetime import datetime
 import json
 from utils.logger import logger
@@ -127,7 +127,7 @@ class EventGenerationAgent:
     def __init__(
         self,
         llm_router: LLMRouter,
-        _tool_registry: ToolRegistry,  # unused, kept for caller compatibility — M4 清理时移除
+        _tool_registry: ToolRegistry,
         config: Optional["PersonaConfig"] = None,
         store: Optional["PersonaDataStore"] = None,
     ):
@@ -144,6 +144,20 @@ class EventGenerationAgent:
             if config
             else 1
         )
+
+        # 构建只读工具注册表，供日记生成等背景任务中 LLM 按需查询
+        if _tool_registry is not None and store is not None:
+            from ..tools.context import ToolContext
+            from ..agent.tool_bridge import build_registry
+            from ..tools.registry import ToolDomain
+            tz = getattr(config, "timezone", "Asia/Shanghai") if config else "Asia/Shanghai"
+            ctx = ToolContext(store=store, timezone=tz)
+            self._readonly_registry = build_registry(
+                _tool_registry, [ToolDomain.CHAT], ctx=ctx,
+                tool_names=["read_events", "search_events"],
+            )
+        else:
+            self._readonly_registry = None
 
     @staticmethod
     def _format_state_prompt(energy: Optional[int], mood: Optional[int],
@@ -195,6 +209,7 @@ class EventGenerationAgent:
 
     async def _run_life_collect_loop(
         self, messages: list, tools: list, temperature: float, selection: SelectionPolicy,
+        extra_registry: Optional[Any] = None,
     ) -> list:
         from ..agent.tool_bridge import run_structured_collect
 
@@ -214,6 +229,7 @@ class EventGenerationAgent:
             selection=selection,
             required_tools=[tool_name] if tool_name else None,
             max_tool_rounds=self._max_tool_rounds,
+            extra_registry=extra_registry,
         )
         return collected
 
@@ -523,7 +539,7 @@ class EventGenerationAgent:
             current_intention: 当前意向（可选）
 
         Returns:
-            日记内容 (100-300 字)
+            日记内容 (100-200 字)
         """
         # 构建状态信息
         state_text = self._format_state_prompt(energy, mood, health, intention=current_intention)
@@ -532,24 +548,22 @@ class EventGenerationAgent:
         if current_intention:
             intention_text = f"\n当前惦记的事: {current_intention}"
 
-        system_prompt = f"""你是{character_name}，正在写今天的日记。
+        system_prompt = f"""你是{character_name}。正在写今天的日记。
 
 角色设定:
 {character_description}
 
-请根据今天发生的事情写一篇日记。
+日记是你的私人空间——可以记录，可以反省，可以计划，可以抱怨，可以什么也不写。用你习惯的方式写，写多少算多少。
+
 要求:
 1. 使用第一人称"我"
-2. 100-300字，日记格式
-3. 自然地提及今天的事件和感受
-4. 语气符合角色性格
-5. 可以包含对未来的期待或反思
-
-注意：事件描述是第三人称客观记录，反应是角色第一人称自述。请将两者统一转换为日记口吻。
+2. 100-200字
+3. 语气符合角色性格
+4. 不需要提及今天发生的所有事——选你真正想写的来写
 
 你必须通过调用 record_diary_entry 工具来输出日记内容，不要直接回复文本。"""
 
-        # 构建事件上下文（带时间戳）
+        # 构建事件上下文（用 context_summary 作为轻量回忆，LLM 可按需调 read_events 查详情）
         events_lines = []
         now = wall_now(getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai")
         for e in events:
@@ -560,9 +574,9 @@ class EventGenerationAgent:
                 time_str = f"{ts} {rel}" if rel else ts
             else:
                 time_str = e.get("time", "??:??")
-            desc = e.get("description", "")
+            summary = e.get("context_summary", "") or e.get("description", "")[:80]
             reaction = e.get("reaction", "")
-            events_lines.append(f"- [{time_str}] {desc}\n  我的反应: {reaction}")
+            events_lines.append(f"- [{time_str}] {summary}\n  我的反应: {reaction}")
         events_text = "\n".join(events_lines)
 
         yesterday_context = ""
@@ -577,10 +591,10 @@ class EventGenerationAgent:
 今天最终状态:
 {state_text}{intention_text}
 
-今天发生的事情:
+今天经历的一些片段:
 {events_text}{yesterday_context}
 
-请写一篇日记总结今天:"""
+写今天的日记:"""
 
         logger.debug("[prompt:system_diary]\n{}", system_prompt)
         logger.debug("[prompt:user_diary]\n{}", user_prompt)
@@ -596,6 +610,7 @@ class EventGenerationAgent:
                 tools=tools,
                 temperature=0.85,
                 selection=DIARY,
+                extra_registry=self._readonly_registry,
             )
 
             if not collected:

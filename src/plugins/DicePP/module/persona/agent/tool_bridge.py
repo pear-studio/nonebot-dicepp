@@ -218,12 +218,16 @@ def build_registry(
     old_registry: OldToolRegistry,
     domains: List[str],
     ctx: Optional[ToolContext] = None,
+    tool_names: Optional[List[str]] = None,
 ) -> ToolRegistry:
     """从旧 ToolRegistry 构建新 ToolRegistry。
 
     PURE/STATE_WRITE 工具：包装旧 executor 闭包。
     EXTERNAL_ACTION 工具（send_reply_segment, generate_image）：
       只返回参数 JSON，由 AgentLoop 路由到对应 sink。
+
+    Args:
+        tool_names: 可选，限定只注册指定名称的工具；None 表示注册全部。
     """
     reg = ToolRegistry()
     old_schemas = old_registry.get_definitions_for(*domains)
@@ -232,6 +236,8 @@ def build_registry(
     for schema in old_schemas:
         func = schema.get("function", schema)
         name = func.get("name", "")
+        if tool_names is not None and name not in tool_names:
+            continue
         desc = func.get("description", "")
         params = func.get("parameters", {})
         args_schema = _ARGS_SCHEMA_MAP.get(name, _dynamic_model(name, params))
@@ -316,8 +322,14 @@ async def run_structured_collect(
     timeout: int | None = None,
     selection=None,
     max_tool_rounds: int = 1,
+    extra_registry: Optional[ToolRegistry] = None,
 ) -> tuple[list, Any]:
-    """运行 structured_collect 模式，返回 (collected_args, runtime_result)。"""
+    """运行 structured_collect 模式，返回 (collected_args, runtime_result)。
+
+    Args:
+        extra_registry: 可选，附加的工具注册表（如只读查询工具），
+            其工具不与 required_tools 冲突，作为可选工具提供给 LLM。
+    """
     from .runtime import AgentRuntime
     from .request import AgentRunLimits
 
@@ -333,6 +345,12 @@ async def run_structured_collect(
         limits=AgentRunLimits(max_tool_rounds=max_tool_rounds),
     )
     tool_registry = build_collecting_registry(_collect, tool_names=required_tools)
+
+    if extra_registry is not None:
+        for name, spec in extra_registry._specs.items():
+            if required_tools and name in required_tools:
+                continue
+            tool_registry.register(spec)
 
     result = await runtime.run(
         messages=messages,
