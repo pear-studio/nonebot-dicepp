@@ -895,7 +895,7 @@ function app() {
     async loadQueryDbs() {
       try {
         const data = await this.api('/api/content/queries');
-        this.queryDbs = (data.files || []).map(f => f.name).filter(n => n.endsWith('.db'));
+        this.queryDbs = (data.files || []).map(f => f.name).filter(n => n.endsWith('.db')).map(n => n.slice(0, -3));
       } catch (err) {
         console?.warn('[DicePP] Failed to load query databases:', err);
         this.queryDbs = [];

@@ -103,3 +103,10 @@ class TestQueryDbEntries:
         setup_auth(test_client)
         resp = test_client.get("/api/content/queries/nonexistent/entries")
         assert resp.status_code == 404
+
+    def test_query_db_entries_with_db_suffix_rejected(self, test_client: TestClient):
+        """``db_name`` with ``.db`` suffix is rejected (API contract: no extension)."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/content/queries/test_queries.db/entries")
+        assert resp.status_code == 400
+        assert resp.json()["ok"] is False

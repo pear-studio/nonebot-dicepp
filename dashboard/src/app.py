@@ -718,8 +718,7 @@ async def bot_heartbeat(request: Request):
     version = body.get("version", "")
     http_url = body.get("http_url", "")
 
-    if not bot_id:
-        _err("bot_id is required")
+    _validate_identifier(bot_id, "bot_id")
 
     db_path = request.app.state.dashboard_db
     conn = sqlite3.connect(db_path)

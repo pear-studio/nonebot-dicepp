@@ -519,7 +519,7 @@ class Bot:
           - HealthMonitor   (heartbeat_timeout, fail_threshold, log_interval)
 
         Subsystems NOT covered (require full restart):
-          - DashboardReporter address (sourced from env vars at startup)
+          - ControlChannelClient address (sourced from env vars at startup)
         """
         new_cfg = self._cfg_loader.reload()
         self.config = new_cfg
