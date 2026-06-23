@@ -76,6 +76,11 @@ metadata:
 
 `docs/releases/vX.Y.Z.md` 是用户和部署者会看到的公开 release notes，不是开发流水账。编写时必须先从 diff/commit 中提炼“用户可见变化”和“部署风险”，再决定是否写入。
 
+#### Comparison base
+
+- RC release notes 默认以同目标版本的前一个 RC 为 comparison base；如果不存在前一个 RC，则以当前发布周期的前一个正式版本为 comparison base。
+- 正式版 release notes 必须以前一个正式版本为 comparison base。生成时可参考期间的 RC release notes 和 commit log，但最终内容仍按用户/部署者可见变化重新整理，不机械复制 RC 内容。
+
 必须写入：
 
 - 新增或明显改变用户可操作能力，例如 Dashboard、Windows EXE、Linux Docker 部署、配置管理、Bot 行为、命令行为、数据迁移、权限/初始化流程。
@@ -97,7 +102,7 @@ metadata:
 - 好：`Linux Dashboard 首次初始化需通过命令行设置管理员密码。`
 - 坏：`测试通过 route mock 覆盖 setup 表单校验。`
 
-测试、CI、技能或内部流程内容若需要记录，应写在最终汇报的“验证/内部处理”部分，或写入开发文档/backlog，不写入 release metadata。
+测试、CI、技能或内部流程内容若需要记录，应写在发版完成后给维护者的对话汇报中，作为“验证与内部处理”小节；也可在必要时写入开发文档/backlog，但不要写入 release metadata。
 
 ## Steps
 
@@ -174,7 +179,7 @@ metadata:
    - 哪些 bug 是用户实际可能遇到的，修复后现象如何变化？
    - 哪些只是测试、CI/CD、agent skill、review/backlog 或内部重构，应该从公开 release notes 中过滤掉？
 
-   如果一项改动只能表述为“新增测试/CI/Skill/内部工具”，通常不要写入 `Added / Changed / Fixed`。把它保留给最终验证汇报。
+   如果一项改动只能表述为“新增测试/CI/Skill/内部工具”，通常不要写入 `Added / Changed / Fixed`。把它保留给发版完成后的维护者汇报。
 
 7. **执行版本递增**
 
