@@ -13,7 +13,7 @@ from typing import Optional
 import logging
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .auth import (
@@ -276,6 +276,10 @@ async def _startup():
     app.state.dashboard_db = db_path
     app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
+    # SSE 订阅者列表是进程内结构。
+    # 多 worker 部署 (uvicorn --workers > 1) 时，
+    # broadcast_status 仅推送给同一 worker 上的 SSE 客户端。
+    app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
@@ -786,12 +790,14 @@ async def config_user_save(request: Request):
 
 
 
-@app.get("/api/bots/status", dependencies=[Depends(require_auth)])
-async def bot_status(request: Request):
-    """Return bot status: union of bots_meta and discovered bots."""
-    db_path = request.app.state.dashboard_db
+# ── Shared bot status computation ──────────────────────────────────────────────
 
-    # Get from meta table
+
+def _compute_bot_statuses(db_path: str) -> list[dict]:
+    """Read bots_meta + discovered bots, compute online status.
+
+    Used by both the REST endpoint and the SSE broadcast path.
+    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     meta_bots = {}
@@ -806,7 +812,6 @@ async def bot_status(request: Request):
     finally:
         conn.close()
 
-    # Get discovered bots from config
     discovered = set()
     bots_dir = DashboardPaths.CONFIG_BOTS_DIR
     if bots_dir.exists():
@@ -815,7 +820,6 @@ async def bot_status(request: Request):
                 discovered.add(f.stem)
 
     all_ids = set(meta_bots.keys()) | discovered
-
     now = time.time()
     result = []
     for bid in sorted(all_ids):
@@ -824,18 +828,54 @@ async def bot_status(request: Request):
             "version": "",
             "last_heartbeat_ts": "",
         })
-        # Determine online status
         last_hb = entry.get("last_heartbeat_ts", "")
         online = False
         if last_hb:
             try:
                 online = (now - float(last_hb)) <= 15
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
         entry["online"] = online
         result.append(entry)
+    return result
 
-    return _ok({"bots": result})
+
+@app.get("/api/bots/status", dependencies=[Depends(require_auth)])
+async def bot_status(request: Request):
+    """Return bot status: union of bots_meta and discovered bots."""
+    return _ok({"bots": _compute_bot_statuses(request.app.state.dashboard_db)})
+
+
+# ── SSE endpoint ────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/events", dependencies=[Depends(require_auth)])
+async def events_stream(request: Request):
+    """SSE endpoint: pushes bot status updates to connected dashboard clients."""
+    queue: asyncio.Queue = asyncio.Queue()
+    subscribers: list = request.app.state.status_subscribers
+    subscribers.append(queue)
+
+    async def _generate():
+        try:
+            db_path = request.app.state.dashboard_db
+            try:
+                bots = _compute_bot_statuses(db_path)
+            except Exception:
+                bots = []
+            yield f"data: {json.dumps({'bots': bots})}\n\n"
+            while True:
+                payload = await queue.get()
+                yield f"data: {payload}\n\n"
+        except (asyncio.CancelledError, GeneratorExit):
+            pass
+        finally:
+            try:
+                subscribers.remove(queue)
+            except ValueError:
+                pass
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
 # ── Content management ────────────────────────────────────────────────────────

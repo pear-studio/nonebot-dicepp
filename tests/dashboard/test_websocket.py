@@ -327,3 +327,42 @@ class TestWebSocketControl:
             reply = ws.receive_json()
             assert reply["type"] == "auth_result"
             assert reply["payload"]["ok"] is False
+
+    @pytest.mark.asyncio
+    async def test_status_update_triggers_broadcast(
+        self, tmp_dashboard_paths: Path, test_client: TestClient
+    ):
+        """A status message via WebSocket triggers broadcast to SSE subscribers."""
+        import asyncio as _asyncio
+
+        # Pre-insert bot with stale heartbeat so broadcast picks it up
+        conn = sqlite3.connect(_db_path(test_client))
+        conn.execute(
+            "INSERT OR REPLACE INTO bots_meta (bot_id, version, last_heartbeat) VALUES (?,?,?)",
+            ("ws_bot", "", str(_time.time() - 60)),
+        )
+        conn.commit()
+        conn.close()
+
+        queue: _asyncio.Queue = _asyncio.Queue()
+        test_client.app.state.status_subscribers.append(queue)
+
+        token = ensure_token(tmp_dashboard_paths)
+        try:
+            with test_client.websocket_connect("/ws/control") as ws:
+                ws.send_text(encode(auth("ws_bot", token)))
+                reply = ws.receive_json()
+                assert reply["type"] == "auth_result"
+                assert reply["payload"]["ok"] is True
+
+                ws.send_text(encode(status("ws_bot", "3.0.0")))
+
+            # After WS context closes, status was written and broadcast
+            data = await _asyncio.wait_for(queue.get(), timeout=3.0)
+            payload = json.loads(data)
+            bots = {b["bot_id"]: b for b in payload["bots"]}
+            assert "ws_bot" in bots
+            assert bots["ws_bot"]["version"] == "3.0.0"
+        finally:
+            if queue in test_client.app.state.status_subscribers:
+                test_client.app.state.status_subscribers.remove(queue)

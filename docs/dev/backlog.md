@@ -14,25 +14,6 @@
 
 ## dashboard
 
-### [B-260623-76a47a] 页面闪烁 — 全局 loading overlay 被 monitor 轮询触发
-- 创建: 2026-06-23
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - 切换页面后（尤其在数据浏览界面）每隔几秒整个页面闪烁一次
-    - 根因：loadMonitor() 中 setInterval 每 10s 调用 loadMonitorData()
-    - loadMonitorData() 走 api() helper，每次调用设置 apiLoading = true
-    - apiLoading 绑定全局 loading overlay（全屏半透明 spinner），导致所有 tab 都闪
-    - monitorTimer 在切换 tab 时未清除，且重复进入 monitor tab 会创建重复 timer
-    - 代码位置：dashboard.html:552 (apiLoading=true)、:957 (setInterval)
-- 开发备忘:
-    - 方案A：loadMonitorData() 绕过全局 apiLoading，直接用 fetch 或传 skipLoading 参数
-    - 方案B：setInterval 在切换 tab 时清除（在 loadTabData 中对非 monitor tab 执行 clearInterval）
-    - 建议两个方案同时做：静默轮询 + tab 离开时停 timer
-    - 影响面：dashboard.html 前端单文件，api() helper + loadMonitor/loadMonitorData + loadTabData
-    - 风险：极低，纯前端改动
-
 ### [B-260623-aeaea8] Bot配置 tab 默认可编辑，缺少编辑/查看模式切换
 - 创建: 2026-06-23
 - 优先级: P1
@@ -175,6 +156,14 @@
     - 后端可能需要新增 /api/overview 聚合 endpoint，或前端组合现有 API 调用
     - 影响面：dashboard.html（新 tab UI + 数据获取逻辑）、可能新增 app.py endpoint
     - 风险：低，纯增量功能；注意 API 调用数量和性能
+
+### [B-260623-84b827] SSE 端点缺少流式集成测试
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现: tests/dashboard/test_sse.py 缺少对 /api/events 端点的端到端流式测试（连接→接收初始状态→断开清理），当前仅测试 auth 和 broadcast 机制
+- 开发备忘: 使用 httpx.AsyncClient + ASGITransport 编写异步流式测试。低优先级，broadcast 机制已通过 TestBroadcast 测试验证
 
 ## data
 

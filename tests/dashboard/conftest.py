@@ -167,6 +167,7 @@ def test_client(tmp_dashboard_paths: Path, monkeypatch: pytest.MonkeyPatch) -> T
     app.state.dashboard_db = db_path
     app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
+    app.state.status_subscribers = []
     # Existing endpoint tests model the supported Windows direct-LAN setup path.
     monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
     return TestClient(
@@ -190,6 +191,7 @@ def dual_clients(
     app1.state.dashboard_db = db_path
     app1.state.dashboard_paths = DashboardPaths
     app1.state.login_failures = {}
+    app1.state.status_subscribers = []
 
     from fastapi.testclient import TestClient as TC
     monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)

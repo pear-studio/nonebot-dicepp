@@ -11,6 +11,7 @@ functions below so other modules don't need to touch app.state directly.
 """
 import asyncio
 import hmac
+import json
 import logging
 from typing import Optional
 
@@ -156,6 +157,7 @@ async def control_endpoint(ws: WebSocket) -> None:
                     # Update heartbeat timestamp
                     payload = msg.get("payload", {})
                     _update_bot_status(bot_id, payload)
+                    asyncio.create_task(_broadcast_status())
 
                 elif mtype == "reload_result":
                     # Store the latest reload result
@@ -220,6 +222,41 @@ def _update_bot_status(bot_id: str, payload: dict) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+async def _broadcast_status() -> None:
+    """Read current bot status from DB and push to all SSE subscribers.
+
+    Called from control_endpoint after each _update_bot_status() write.
+    Uses ``list(subscribers)`` copy to avoid RuntimeError from concurrent
+    subscriber removal during iteration.
+    """
+    from .app import app, _compute_bot_statuses
+
+    subscribers = getattr(app.state, "status_subscribers", None)
+    if not subscribers:
+        return
+    db_path = getattr(app.state, "dashboard_db", None)
+    if not db_path:
+        return
+
+    try:
+        bots = _compute_bot_statuses(db_path)
+    except Exception:
+        return
+    payload = json.dumps({"bots": bots})
+
+    dead = []
+    for queue in list(subscribers):
+        try:
+            queue.put_nowait(payload)
+        except Exception:
+            dead.append(queue)
+    for q in dead:
+        try:
+            subscribers.remove(q)
+        except ValueError:
+            pass
 
 
 def _store_reload_result(reply_to: Optional[str], bot_id: str, payload: dict) -> None:
