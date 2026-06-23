@@ -93,22 +93,6 @@
     - 风险：中，schema.json 格式变更影响面较大，需要向后兼容设计
     - 建议先独立完成分组梳理文档，确认分组方案后再实现
 
-### [B-260623-638226] 内容管理中 .gitkeep 文件应被过滤
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - content 目录下有 4 个 .gitkeep：decks/.gitkeep, queries/.gitkeep, random/.gitkeep, excel/.gitkeep
-    - 内容管理的文件列表会展示这些 0 字节的 .gitkeep 文件
-    - 这些是 git 占位文件，对用户无意义
-    - 代码位置：app.py:844 content_list 的 iterdir() 无过滤
-- 开发备忘:
-    - content_list 中在 iterdir 后过滤掉 name == '.gitkeep' 的文件
-    - 或使用更通用的规则：过滤 '.' 开头的隐藏文件
-    - 影响面：app.py content_list 一行过滤条件
-    - 风险：极低，.gitkeep 是标准 git 占位约定，过滤安全
-
 ### [B-260623-6f9e85] 缺少总览/概览 tab 聚合核心数据指标
 - 创建: 2026-06-23
 - 优先级: P2
@@ -239,6 +223,20 @@
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
 
+### [B-260623-7412ec] MiniMaxImageProvider.probe() 适配错误分类，避免配额/鉴权类无意义重试
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现:
+    - MiniMaxImageProvider.probe() 仍吞掉所有异常返回 False
+    - 若遭遇配额/鉴权类永久错误会进入无意义重试
+    - OpenAIProvider（及子类 MiniMaxProvider）已更新为 raise 模式，该 provider 使用 httpx 直连未同步
+- 开发备忘:
+    - 方向：将 MiniMaxImageProvider.probe() 改为对预期内异常（httpx.TimeoutException）返回 False，其余 raise
+    - 影响面：仅限 MiniMax 图生模型的探针路径
+    - 风险点：httpx 异常类型与 OpenAI SDK 不同，需确认分类兼容性后再动手
+
 ### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
 - 创建: 2026-06-23
 - 优先级: P2
@@ -253,20 +251,6 @@
     - 也可给 probe 使用 `max_retries=0` 的独立 client，让 SDK 不重试直接抛出原始异常（带 body）
     - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
     - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
-
-### [B-260623-7412ec] MiniMaxImageProvider.probe() 适配错误分类，避免配额/鉴权类无意义重试
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现:
-    - MiniMaxImageProvider.probe() 仍吞掉所有异常返回 False
-    - 若遭遇配额/鉴权类永久错误会进入无意义重试
-    - OpenAIProvider（及子类 MiniMaxProvider）已更新为 raise 模式，该 provider 使用 httpx 直连未同步
-- 开发备忘:
-    - 方向：将 MiniMaxImageProvider.probe() 改为对预期内异常（httpx.TimeoutException）返回 False，其余 raise
-    - 影响面：仅限 MiniMax 图生模型的探针路径
-    - 风险点：httpx 异常类型与 OpenAI SDK 不同，需确认分类兼容性后再动手
 
 ## release
 
