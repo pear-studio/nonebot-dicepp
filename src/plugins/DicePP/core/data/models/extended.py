@@ -22,6 +22,11 @@ class GroupConfig(BaseModel):
     data: dict = Field(default_factory=dict)
 
 
+class UserConfig(BaseModel):
+    user_id: str
+    data: dict = Field(default_factory=dict)
+
+
 class GroupActivate(BaseModel):
     group_id: str
     active: bool = True

@@ -35,12 +35,12 @@ async def test_runner_applies_v1_and_noop_on_second_run():
             runner = MigrationRunner(db=db, log_db=log_db, registry=default_registry())
             first = await runner.migrate_up()
             assert first.current_version == 0
-            assert first.target_version == 3
-            assert first.applied_versions == [1, 2, 3]
+            assert first.target_version == 4
+            assert first.applied_versions == [1, 2, 3, 4]
 
             second = await runner.migrate_up()
-            assert second.current_version == 3
-            assert second.target_version == 3
+            assert second.current_version == 4
+            assert second.target_version == 4
             assert second.applied_versions == []
 
             cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='karma'")
@@ -95,11 +95,13 @@ async def test_bot_database_connect_runs_full_baseline_schema():
     db = BotDatabase(bot_id)
     await db.connect()
     try:
-        assert await db.schema_version() == 3
-        assert await db.target_schema_version() == 3
+        assert await db.schema_version() == 4
+        assert await db.target_schema_version() == 4
         # Smoke check: repositories and log tables are queryable after migration.
         assert await db.karma.list_all() == []
         assert await db.log.get_records("__missing_session__") == []
+        # user_config table is functional (V4)
+        assert await db.user_config.list_all() == []
     finally:
         await db.close()
 

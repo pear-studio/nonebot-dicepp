@@ -5,7 +5,6 @@ read-modify-write 串行化，消除多写路径间的丢失更新。
 """
 
 import asyncio
-import json
 from typing import Callable, Dict
 
 from core.data.models import UserStat, GroupStat
@@ -125,32 +124,3 @@ class StatManager:
                     stat = GroupStatInfo()
             return stat
 
-    # ------------------------------------------------------------------
-    # raw dict 更新（chat_command 临时方案 —— 避免未知键被序列化丢弃）
-    # ------------------------------------------------------------------
-
-    async def update_user_stat_data(
-        self, user_id: str, updater: Callable[[dict], None]
-    ) -> None:
-        """在锁内对 user_stat 的 raw JSON dict 执行原子更新。
-
-        与 update_user_stat 不同，此方法保留 JSON 中所有未知键
-        （当前用于 chat_command 在 user_stat 中存储 chat_time）。
-        长期方案应将 chat_time 迁移到独立的 user_config 表。
-        """
-        lock = await self._get_lock(self._user_locks, user_id)
-        async with lock:
-            row = await self._db.user_stat.get(user_id)
-            data_dict: dict = {}
-            if row is not None and row.data:
-                try:
-                    data_dict = json.loads(row.data)
-                except (json.JSONDecodeError, TypeError):
-                    data_dict = {}
-            updater(data_dict)
-            await self._db.user_stat.upsert(
-                UserStat(
-                    user_id=user_id,
-                    data=json.dumps(data_dict, ensure_ascii=False),
-                )
-            )

@@ -3,7 +3,7 @@ import datetime
 import json
 
 from core.bot import Bot
-from core.data.models import GroupConfig
+from core.data.models import GroupConfig, UserConfig
 from core.command.const import *
 from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
@@ -63,8 +63,8 @@ class ChatCommand(UserCommandBase):
             data_dict = _get_data_dict(_row.data) if _row and _row.data else {}
             time_str = data_dict.get("chat_time")
         else:
-            _row = await self.bot.db.user_stat.get(meta.user_id)
-            data_dict = _get_data_dict(_row.data) if _row and _row.data else {}
+            _row = await self.bot.db.user_config.get(meta.user_id)
+            data_dict = _row.data if _row and _row.data else {}
             time_str = data_dict.get("chat_time")
         if time_str is None:
             default_time = get_default_chat_time(self.get_interval())
@@ -91,10 +91,10 @@ class ChatCommand(UserCommandBase):
                             config_dict["chat_time"] = new_time_str
                             await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
                         else:
-                            await self.bot.stat_manager.update_user_stat_data(
-                                meta.user_id,
-                                lambda d: d.update({"chat_time": new_time_str}),
-                            )
+                            _row = await self.bot.db.user_config.get(meta.user_id)
+                            config_dict = _row.data if _row and _row.data else {}
+                            config_dict["chat_time"] = new_time_str
+                            await self.bot.db.user_config.upsert(UserConfig(user_id=meta.user_id, data=config_dict))
                         parse_ok = True
                     except Exception:
                         pass
@@ -109,10 +109,10 @@ class ChatCommand(UserCommandBase):
                 config_dict["chat_time"] = new_time_str
                 await self.bot.db.group_config.upsert(GroupConfig(group_id=meta.group_id, data=config_dict))
             else:
-                await self.bot.stat_manager.update_user_stat_data(
-                    meta.user_id,
-                    lambda d: d.update({"chat_time": new_time_str}),
-                )
+                _row = await self.bot.db.user_config.get(meta.user_id)
+                config_dict = _row.data if _row and _row.data else {}
+                config_dict["chat_time"] = new_time_str
+                await self.bot.db.user_config.upsert(UserConfig(user_id=meta.user_id, data=config_dict))
         should_pass: bool = False
         return should_proc, should_pass, feedback
 

@@ -5,7 +5,6 @@
 """
 
 import asyncio
-import json
 import os
 import tempfile
 from unittest.mock import MagicMock
@@ -217,60 +216,6 @@ async def test_daily_update_concurrent_with_inc(stat_manager):
     assert stat.msg.cur_day_val in (0, 1)
 
 
-# ══════════════════════════════════════════════════════════════════════
-# update_user_stat_data（chat_command 临时路径）
-# ══════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_update_user_stat_data_preserves_unknown_keys(stat_manager):
-    """update_user_stat_data 保留 JSON 中的所有未知键（如 chat_time）。"""
-    # 先通过普通 update 创建一条记录
-    await stat_manager.update_user_stat("u1", lambda s: s.msg.inc())
-
-    # 再用 update_user_stat_data 追加 chat_time
-    await stat_manager.update_user_stat_data(
-        "u1", lambda d: d.update({"chat_time": "2024/01/01 12:00:00"})
-    )
-
-    row = await stat_manager._db.user_stat.get("u1")
-    data = json.loads(row.data)
-    # msg 依然存在（stat_info 正常序列化）
-    assert "msg" in data
-    # chat_time 也被保留
-    assert data["chat_time"] == "2024/01/01 12:00:00"
-
-
-@pytest.mark.asyncio
-async def test_update_user_stat_data_concurrent_safe(stat_manager):
-    """update_user_stat_data 和 update_user_stat 在同一个 key 上串行化。
-
-    注意：UserStatInfo.serialize() 不保留未知键（如 chat_time），
-    因此当 update_user_stat 最后执行时 chat_time 会丢失。
-    这是已知限制，锁保证了 msg 计数不丢失，chat_time 长期方案是独立存储。
-    """
-    async def write_msg():
-        for _ in range(20):
-            await stat_manager.update_user_stat("u1", lambda s: s.msg.inc())
-
-    async def write_chat_time():
-        for i in range(10):
-            await stat_manager.update_user_stat_data(
-                "u1", lambda d: d.update({"chat_time": f"t{i}"})
-            )
-
-    await asyncio.gather(write_msg(), write_chat_time())
-
-    row = await stat_manager._db.user_stat.get("u1")
-    stat = UserStatInfo()
-    stat.deserialize(row.data)
-    # msg 计数完整 —— 锁保证了无丢失更新
-    assert stat.msg.cur_day_val == 20
-    # chat_time 可能被 UserStatInfo.serialize() 丢弃（已知限制，待 Step 2 修复）
-    data = json.loads(row.data)
-    if "chat_time" not in data:
-        # 这是已知行为：serialize() 不保留未知键
-        pass
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -311,23 +256,6 @@ async def test_corrupt_data_in_group_stat_is_recovered(stat_manager):
     stat = GroupStatInfo()
     stat.deserialize(row.data)
     assert stat.msg.cur_day_val == 1
-
-
-@pytest.mark.asyncio
-async def test_update_user_stat_data_corrupt_json_recovered(stat_manager):
-    """update_user_stat_data 面对非 JSON 数据时降级为空 dict。"""
-    from core.data.models import UserStat as UserStatModel
-
-    bad_row = UserStatModel(user_id="u1", data="bad json")
-    await stat_manager._db.user_stat.upsert(bad_row)
-
-    await stat_manager.update_user_stat_data(
-        "u1", lambda d: d.update({"chat_time": "t0"})
-    )
-
-    row = await stat_manager._db.user_stat.get("u1")
-    data = json.loads(row.data)
-    assert data["chat_time"] == "t0"
 
 
 # ══════════════════════════════════════════════════════════════════════

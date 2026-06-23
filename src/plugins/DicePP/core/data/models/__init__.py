@@ -27,6 +27,7 @@ from .extended import (
     GroupStat,
     MetaStat,
     NPCHealth,
+    UserConfig,
 )
 from .hub_config import HubConfig
 
@@ -54,6 +55,7 @@ __all__ = [
     "GroupStat",
     "MetaStat",
     "NPCHealth",
+    "UserConfig",
     "HubConfig",
     # 角色常量
     "CHAR_INFO_KEY_HP",

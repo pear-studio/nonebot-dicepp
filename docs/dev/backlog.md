@@ -136,14 +136,6 @@
 
   影响面：`tool_bridge.py`（`run_structured_collect` / `build_collecting_registry`）、`loop.py`（correction 计数需兼容内容校验触发的重试）、`collecting.py`（各工具的 Pydantic Field 定义）。
 
-### [B-260622-5ee332] chat_time 从 user_stat.data 迁移到独立 user_config 表
-- 创建: 2026-06-22
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现: chat_command 在私聊场景将 chat_time 存储在 user_stat 的 JSON blob 中，与统计数据混在同一行。UserStatInfo.serialize() 不保留未知键，导致 chat_time 被 process_message 静默丢弃，私聊冷却功能形同虚设。即使 B-260602-4263c4 加了锁，序列化不兼容问题依然存在。
-- 开发备忘: 新增 user_config 表（类似 group_config 但 key 为 user_id），将 chat_time 从 user_stat 迁移过去。移除 chat_command 对 user_stat 的依赖，改用独立表。移除 StatManager.update_user_stat_data()（不再需要）。
-
 ## release
 
 ### [B-260615-90ee20] GitHub Release 与多产物发布流程

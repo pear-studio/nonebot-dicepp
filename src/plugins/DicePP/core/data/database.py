@@ -22,6 +22,7 @@ from .models import (
     GroupStat,
     MetaStat,
     NPCHealth,
+    UserConfig,
 )
 
 
@@ -49,6 +50,7 @@ class BotDatabase:
         self._group_stat: Optional[Repository[GroupStat]] = None
         self._meta_stat: Optional[Repository[MetaStat]] = None
         self._npc_health: Optional[Repository[NPCHealth]] = None
+        self._user_config: Optional[Repository[UserConfig]] = None
         self.query: QueryStore = QueryStore()
         self._migration_runner: Optional[MigrationRunner] = None
 
@@ -87,6 +89,12 @@ class BotDatabase:
         if self._group_config is None:
             raise RuntimeError("Database not connected. Call connect() first.")
         return self._group_config
+
+    @property
+    def user_config(self) -> Repository[UserConfig]:
+        if self._user_config is None:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        return self._user_config
 
     @property
     def group_activate(self) -> Repository[GroupActivate]:
@@ -174,6 +182,7 @@ class BotDatabase:
         self._log = None
         self._nickname = None
         self._group_config = None
+        self._user_config = None
         self._group_activate = None
         self._group_welcome = None
         self._chat_record = None
@@ -257,6 +266,10 @@ class BotDatabase:
 
         self._group_config = Repository[GroupConfig](
             self._db, GroupConfig, "group_config", ["group_id"]
+        )
+
+        self._user_config = Repository[UserConfig](
+            self._db, UserConfig, "user_config", ["user_id"]
         )
 
         self._group_activate = Repository[GroupActivate](
