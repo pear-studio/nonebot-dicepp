@@ -254,6 +254,20 @@
     - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
     - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
 
+### [B-260623-7412ec] MiniMaxImageProvider.probe() 适配错误分类，避免配额/鉴权类无意义重试
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现:
+    - MiniMaxImageProvider.probe() 仍吞掉所有异常返回 False
+    - 若遭遇配额/鉴权类永久错误会进入无意义重试
+    - OpenAIProvider（及子类 MiniMaxProvider）已更新为 raise 模式，该 provider 使用 httpx 直连未同步
+- 开发备忘:
+    - 方向：将 MiniMaxImageProvider.probe() 改为对预期内异常（httpx.TimeoutException）返回 False，其余 raise
+    - 影响面：仅限 MiniMax 图生模型的探针路径
+    - 风险点：httpx 异常类型与 OpenAI SDK 不同，需确认分类兼容性后再动手
+
 ## release
 
 ### [B-260615-90ee20] GitHub Release 与多产物发布流程

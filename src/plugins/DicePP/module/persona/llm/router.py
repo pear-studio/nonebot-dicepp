@@ -305,14 +305,26 @@ class LLMRouter:
                         if provider and hasattr(provider, 'probe'):
                             cb.on_probe_start()
                             _probe_error = None
+                            _marked_dead = False
                             try:
                                 success = await provider.probe()
                             except Exception as e:
                                 success = False
                                 _probe_error = f"{type(e).__name__}: {str(e)[:200]}"
+                                # 分类错误：配额/鉴权等永久错误直接 mark_dead，避免无意义重试
+                                error_kind = classify_from_provider(e, provider)
+                                if not error_kind.is_retryable:
+                                    cb.mark_dead(
+                                        f"probe: {error_kind.value}: {str(e)[:200]}"
+                                    )
+                                    _marked_dead = True
+                                    logger.warning(
+                                        f"probe permanent failure for {key[0]}/{key[1]}: "
+                                        f"{error_kind.value}: {str(e)[:200]}"
+                                    )
                             if success:
                                 cb.record_success()
-                            else:
+                            elif not _marked_dead:
                                 cb.on_probe_failure()
                                 err_detail = f", {_probe_error}" if _probe_error else ""
                                 logger.warning(
@@ -356,15 +368,15 @@ class LLMRouter:
         async def _probe_one(key):
             provider = self._model_providers.get(key)
             if not (provider and hasattr(provider, 'probe')):
-                return key, False
+                return key, False, None
             try:
-                return key, await asyncio.wait_for(provider.probe(), timeout=10)
+                return key, await asyncio.wait_for(provider.probe(), timeout=10), None
             except Exception as e:
                 logger.warning(
                     f"startup probe failed for {key[0]}/{key[1]}: "
                     f"{type(e).__name__}: {str(e)[:200]}"
                 )
-                return key, False
+                return key, False, e
 
         async def _probe_group(group_keys):
             results = []
@@ -387,7 +399,7 @@ class LLMRouter:
                     exc_info=r,
                 )
                 continue
-            for key, success in r:
+            for key, success, exc in r:
                 outcome[key] = success
                 cb = self.circuit_breakers.get(key[0], key[1])
                 if not cb:
@@ -395,6 +407,19 @@ class LLMRouter:
                 if success:
                     cb.record_success()
                 else:
+                    # 分类错误：配额/鉴权等永久错误直接 mark_dead，不进入探针循环
+                    if exc is not None:
+                        provider = self._model_providers.get(key)
+                        error_kind = classify_from_provider(exc, provider)
+                        if not error_kind.is_retryable:
+                            cb.mark_dead(
+                                f"startup probe: {error_kind.value}: {str(exc)[:200]}"
+                            )
+                            logger.warning(
+                                f"startup probe permanent failure for {key[0]}/{key[1]}: "
+                                f"{error_kind.value}: {str(exc)[:200]}"
+                            )
+                            continue
                     cb.mark_disabled("startup probe failed")
                     cb.on_probe_start()
 

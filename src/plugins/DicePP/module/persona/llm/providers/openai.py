@@ -305,7 +305,7 @@ class OpenAIProvider:
             return False
         except Exception as e:
             _log_probe_error(self.model, e)
-            return False
+            raise  # 重新抛出，让调用方用 classify_from_provider 分类后做路由决策
 
     @staticmethod
     def classify_error(exception: Exception) -> ErrorClass:
