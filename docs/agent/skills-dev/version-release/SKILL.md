@@ -72,6 +72,33 @@ metadata:
 
 当任一风险字段无法确认时，`version-deploy` 按最坏情况处理：要求备份 + 用户明确确认。
 
+### Release notes 受众与筛选规则
+
+`docs/releases/vX.Y.Z.md` 是用户和部署者会看到的公开 release notes，不是开发流水账。编写时必须先从 diff/commit 中提炼“用户可见变化”和“部署风险”，再决定是否写入。
+
+必须写入：
+
+- 新增或明显改变用户可操作能力，例如 Dashboard、Windows EXE、Linux Docker 部署、配置管理、Bot 行为、命令行为、数据迁移、权限/初始化流程。
+- 影响部署、升级、回滚、备份、安全边界或兼容性的变化。
+- 修复用户可能实际遇到的故障；描述故障现象和影响，不描述测试名或实现过程。
+
+默认不要写入：
+
+- 测试、mock、fixture、覆盖率、Playwright smoke、CI/CD job、构建缓存、workflow 重排等开发门禁细节。
+- Agent / AI Skill / review 流程 / backlog / handoff / 内部协作工具变更。
+- 仅为让 CI 通过的测试同步、测试夹具修正、内部重构、私有 API 清理。
+
+例外：如果开发基础设施变化会直接改变用户获取产物或部署产物的方式，可以把“结果”写入 release notes，但不要写实现细节。例如：
+
+- 好：`Windows 发布包现在包含 Dashboard 可执行文件。`
+- 坏：`新增 Windows Playwright smoke 测试。`
+- 好：`Dashboard 现在支持独立 Docker 镜像部署。`
+- 坏：`新增 Dashboard 镜像控制通道 smoke test。`
+- 好：`Linux Dashboard 首次初始化需通过命令行设置管理员密码。`
+- 坏：`测试通过 route mock 覆盖 setup 表单校验。`
+
+测试、CI、技能或内部流程内容若需要记录，应写在最终汇报的“验证/内部处理”部分，或写入开发文档/backlog，不写入 release metadata。
+
 ## Steps
 
 1. **检查工作区状态**
@@ -139,6 +166,15 @@ metadata:
    ```
 
    要求用户确认 `数据变更` 和 `配置变更`。可通过 diff 辅助判断, 但不能把不确定风险默认为安全。
+
+   编写 metadata 前必须先列出本次 release 的用户可见主题，至少回答：
+
+   - 用户现在能做什么以前不能做的事？
+   - 现有部署/初始化/配置/运行方式有什么变化？
+   - 哪些 bug 是用户实际可能遇到的，修复后现象如何变化？
+   - 哪些只是测试、CI/CD、agent skill、review/backlog 或内部重构，应该从公开 release notes 中过滤掉？
+
+   如果一项改动只能表述为“新增测试/CI/Skill/内部工具”，通常不要写入 `Added / Changed / Fixed`。把它保留给最终验证汇报。
 
 7. **执行版本递增**
 
