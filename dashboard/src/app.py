@@ -893,6 +893,8 @@ async def content_list(subdir: str, request: Request):
 
     files = []
     for f in sorted(content_dir.iterdir()):
+        if f.name.startswith('.'):
+            continue
         if f.is_file():
             stat = f.stat()
             files.append({

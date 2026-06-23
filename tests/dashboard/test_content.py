@@ -32,6 +32,22 @@ class TestListDecks:
         resp = test_client.get("/api/content/invalid_dir")
         assert resp.status_code == 404
 
+    def test_filters_hidden_files(self, test_client: TestClient):
+        """Hidden files (``.gitkeep``, ``.DS_Store``, etc.) are excluded."""
+        from dashboard.src.config import DashboardPaths
+
+        # Create hidden files that the API must NOT return.
+        (DashboardPaths.CONTENT_DIR / "decks" / ".gitkeep").touch()
+        (DashboardPaths.CONTENT_DIR / "decks" / ".DS_Store").touch()
+
+        setup_auth(test_client)
+        resp = test_client.get("/api/content/decks")
+        assert resp.status_code == 200
+        names = [f["name"] for f in resp.json()["files"]]
+        assert ".gitkeep" not in names
+        assert ".DS_Store" not in names
+        assert "test_deck.txt" in names
+
     def test_empty_subdir(self, test_client: TestClient):
         """An empty but valid subdirectory returns an empty list."""
         setup_auth(test_client)
