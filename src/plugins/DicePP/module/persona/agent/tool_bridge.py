@@ -347,8 +347,8 @@ async def run_structured_collect(
     tool_registry = build_collecting_registry(_collect, tool_names=required_tools)
 
     if extra_registry is not None:
-        for name, spec in extra_registry._specs.items():
-            if required_tools and name in required_tools:
+        for spec in extra_registry.list_tools():
+            if required_tools and spec.name in required_tools:
                 continue
             tool_registry.register(spec)
 

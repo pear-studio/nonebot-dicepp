@@ -384,7 +384,7 @@ class PersonaDataStore:
                    agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._PERSONA_SCOPE}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             """
             params = (group_id,)
         else:
@@ -393,7 +393,7 @@ class PersonaDataStore:
                    agent_run_id, turn_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._PERSONA_SCOPE}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT ?
             """
             params = (group_id, limit)

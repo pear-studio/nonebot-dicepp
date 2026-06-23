@@ -362,15 +362,21 @@ class TestCharacterLifeDiary:
 
     @pytest.fixture
     def mock_data_store(self):
-        from types import SimpleNamespace
         store = MagicMock()
         store.get_setting = AsyncMock(return_value=None)
         store.set_setting = AsyncMock()
-        from plugins.DicePP.module.persona.data.models import CharacterState
+        from plugins.DicePP.module.persona.data.models import CharacterState, DailyEvent
         store.get_character_state = AsyncMock(return_value=CharacterState())
         store.update_character_state = AsyncMock()
         store.get_daily_events = AsyncMock(return_value=[
-            SimpleNamespace(description="早上喝咖啡", reaction="很香", created_at=datetime(2024, 1, 1, 9, 0)),
+            DailyEvent(
+                date="2024-01-01",
+                event_type="scheduled",
+                description="早上喝咖啡",
+                context_summary="早上喝咖啡",
+                reaction="很香",
+                created_at=datetime(2024, 1, 1, 9, 0),
+            ),
         ])
         store.get_diary = AsyncMock(return_value="昨天去了公园")
         store.save_diary = AsyncMock()
