@@ -84,11 +84,27 @@ class TestMiniMaxProvider:
         msg = Mock()
         assert provider._extract_reasoning(msg) is None
 
-    def test_classify_error(self, provider):
-        """验证继承父类的 classify_error 行为"""
+    def test_classify_error_auth(self, provider):
+        """鉴权错误 → NON_RETRYABLE"""
         assert MiniMaxProvider.classify_error(Exception("authentication failed")) == ErrorClass.NON_RETRYABLE
+        assert MiniMaxProvider.classify_error(Exception("unauthorized (401)")) == ErrorClass.NON_RETRYABLE
+
+    def test_classify_error_content_filter(self, provider):
+        """内容过滤 → NON_RETRYABLE"""
         assert MiniMaxProvider.classify_error(Exception("content_filter triggered")) == ErrorClass.NON_RETRYABLE
+        assert MiniMaxProvider.classify_error(Exception("input_sensitive content")) == ErrorClass.NON_RETRYABLE
+
+    def test_classify_error_quota(self, provider):
+        """用量超限 / 配额耗尽 → NON_RETRYABLE"""
+        assert MiniMaxProvider.classify_error(Exception("error [2056] quota")) == ErrorClass.NON_RETRYABLE
+        assert MiniMaxProvider.classify_error(Exception("用量上限")) == ErrorClass.NON_RETRYABLE
+        assert MiniMaxProvider.classify_error(Exception("rate_limit_error occurred")) == ErrorClass.NON_RETRYABLE
+        assert MiniMaxProvider.classify_error(Exception("quota exceeded")) == ErrorClass.NON_RETRYABLE
+
+    def test_classify_error_retryable(self, provider):
+        """普通临时错误 → RETRYABLE"""
         assert MiniMaxProvider.classify_error(Exception("rate limit exceeded")) == ErrorClass.RETRYABLE
+        assert MiniMaxProvider.classify_error(Exception("timeout connection")) == ErrorClass.RETRYABLE
 
 
 class TestClassifyErrorKind:
@@ -128,3 +144,65 @@ class TestClassifyErrorKind:
         e = Exception("some error")
         e.body = {"error": {"code": 10260, "message": "some other error"}}
         assert MiniMaxProvider.classify_error_kind(e) is None
+
+    # ── 2056 / rate_limit_error ────────────────────────────────
+
+    def test_code_2056_in_body_error(self):
+        """body.error.code=2056 → QUOTA_EXCEEDED"""
+        e = Exception("error")
+        e.body = {"error": {"code": 2056, "message": "用量超限"}}
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.QUOTA_EXCEEDED
+
+    def test_code_2056_in_base_resp(self):
+        """body.base_resp.status_code=2056 → QUOTA_EXCEEDED"""
+        e = Exception("error")
+        e.body = {"base_resp": {"status_code": 2056, "status_msg": "用量超限"}}
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.QUOTA_EXCEEDED
+
+    def test_rate_limit_error_type_with_quota_msg(self):
+        """body.error.type=rate_limit_error + 用量消息 → QUOTA_EXCEEDED"""
+        e = Exception("error")
+        e.body = {"error": {
+            "type": "rate_limit_error",
+            "message": "已达到 Token Plan 用量上限：请升级。(2056)",
+            "http_code": "429",
+        }}
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.QUOTA_EXCEEDED
+
+    def test_rate_limit_error_type_pure_rate_limit(self):
+        """body.error.type=rate_limit_error + 无用量关键词 → RATE_LIMITED"""
+        e = Exception("error")
+        e.body = {"error": {
+            "type": "rate_limit_error",
+            "message": "Too many requests, try again later",
+        }}
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.RATE_LIMITED
+
+    def test_2056_in_message_no_code_field(self):
+        """2056 嵌入 message，无 code 字段 → QUOTA_EXCEEDED"""
+        e = Exception("error")
+        e.body = {"error": {
+            "type": "rate_limit_error",
+            "message": "用量超限 (2056)",
+        }}
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.QUOTA_EXCEEDED
+
+    def test_2056_keyword_no_body(self):
+        """无 body 时消息含 (2056) → QUOTA_EXCEEDED"""
+        e = Exception("API error: (2056) 用量超限")
+        assert MiniMaxProvider.classify_error_kind(e) == ErrorKind.QUOTA_EXCEEDED
+
+    def test_unknown_code_not_matched(self):
+        """未知错误码不误命中"""
+        e = Exception("error")
+        e.body = {"error": {"code": 9999, "message": "some unknown error"}}
+        assert MiniMaxProvider.classify_error_kind(e) is None
+
+    def test_classify_error_2056_substring_no_false_positive(self):
+        """消息含 120560 / 205600 不误触发 2056"""
+        # classify_error_kind — 无 body，仅消息级
+        assert MiniMaxProvider.classify_error_kind(Exception("error code 120560")) is None
+        assert MiniMaxProvider.classify_error_kind(Exception("error code 205600")) is None
+        # classify_error — 委托 classify_error_kind 后也应不误触发
+        assert MiniMaxProvider.classify_error(Exception("error code 120560")) == ErrorClass.RETRYABLE
+        assert MiniMaxProvider.classify_error(Exception("error code 205600")) == ErrorClass.RETRYABLE

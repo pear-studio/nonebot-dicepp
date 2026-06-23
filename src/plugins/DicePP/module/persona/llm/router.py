@@ -301,17 +301,24 @@ class LLMRouter:
                 for key in disabled_keys:
                     cb = self.circuit_breakers.get(key[0], key[1])
                     if cb and cb.should_probe():
-                        cb.on_probe_start()
                         provider = self._model_providers.get(key)
                         if provider and hasattr(provider, 'probe'):
+                            cb.on_probe_start()
+                            _probe_error = None
                             try:
                                 success = await provider.probe()
-                            except Exception:
+                            except Exception as e:
                                 success = False
+                                _probe_error = f"{type(e).__name__}: {str(e)[:200]}"
                             if success:
                                 cb.record_success()
                             else:
                                 cb.on_probe_failure()
+                                err_detail = f", {_probe_error}" if _probe_error else ""
+                                logger.warning(
+                                    f"probe failed for {key[0]}/{key[1]}: "
+                                    f"consecutive_failures={cb.consecutive_probe_failures}{err_detail}"
+                                )
                                 if cb.state == "exhausted":
                                     logger.error(
                                         f"模型 {key[0]}/{key[1]} 连续 probe 失败已达上限，已进入 exhausted 状态，"
@@ -353,9 +360,9 @@ class LLMRouter:
             try:
                 return key, await asyncio.wait_for(provider.probe(), timeout=10)
             except Exception as e:
-                logger.debug(
-                    f"probe failed for {key[0]}/{key[1]}: {type(e).__name__}: {e}",
-                    exc_info=True,
+                logger.warning(
+                    f"startup probe failed for {key[0]}/{key[1]}: "
+                    f"{type(e).__name__}: {str(e)[:200]}"
                 )
                 return key, False
 

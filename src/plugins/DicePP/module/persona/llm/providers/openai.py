@@ -22,6 +22,32 @@ _NON_RETRYABLE_AUTH_KEYWORDS = ("authentication", "unauthorized", "401", "403")
 _NON_RETRYABLE_CONTENT_KEYWORDS = ("content_filter", "moderation", "content policy")
 
 
+def _log_probe_error(model: str, exception: Exception) -> None:
+    """提取并记录 probe 失败异常的详细信息，用于区分超时/A/B两类错误。"""
+    err_type = type(exception).__name__
+    err_msg = str(exception)[:300]
+
+    # 尝试从 OpenAI SDK 异常中提取 HTTP 状态码和 body
+    http_status = getattr(exception, 'status_code', None)
+    body = getattr(exception, 'body', None)
+    body_info = ""
+    if isinstance(body, dict):
+        error = body.get('error', body)
+        if isinstance(error, dict):
+            code = error.get('code', '')
+            err_type_name = error.get('type', '')
+            msg = str(error.get('message', ''))[:120]
+            body_info = f" error_code={code} error_type={err_type_name} error_msg={msg}"
+        else:
+            body_info = f" body_keys={list(body.keys())}"
+
+    logger.warning(
+        f"probe failed: model={model} exception={err_type} "
+        f"http_status={http_status}{body_info} "
+        f"message={err_msg[:200]}"
+    )
+
+
 class OpenAIProvider:
     """基于 AsyncOpenAI 的 LLM 供应商实现"""
 
@@ -274,8 +300,11 @@ class OpenAIProvider:
                 timeout=10,
             )
             return True
+        except asyncio.TimeoutError:
+            logger.warning(f"probe timeout: model={self.model}")
+            return False
         except Exception as e:
-            logger.debug(f"probe failed for {self.model}: {type(e).__name__}: {e}", exc_info=True)
+            _log_probe_error(self.model, e)
             return False
 
     @staticmethod

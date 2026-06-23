@@ -74,6 +74,21 @@
 
 ## persona
 
+### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - 当前 `probe()` 返回 `bool`，调用方 `_probe_loop` 只看 True/False，不区分"网络瞬断"和"永久配额耗尽"
+    - minimax 429 配额耗尽时 probe 会重试 10 次才进入 exhausted，期间每次无意义重试约 25 分钟
+    - `classify_error_kind` 已能正确识别 2056 / rate_limit_error，但 probe 路径不调用它
+- 开发备忘:
+    - 方向：probe 返回类型从 `bool` 扩展为携带 ErrorKind，或 probe 内部直接调用 `circuit_breaker.mark_dead()` 跳过重试
+    - 也可给 probe 使用 `max_retries=0` 的独立 client，让 SDK 不重试直接抛出原始异常（带 body）
+    - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
+    - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
+
 ### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
 - 创建: 2026-06-22
 - 优先级: P1

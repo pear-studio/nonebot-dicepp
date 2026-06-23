@@ -130,9 +130,21 @@ class MiniMaxImageProvider:
                         "max_tokens": 1,
                     },
                 )
-                return resp.status_code in (200, 400, 401, 403, 404, 422)
+                success = resp.status_code in (200, 400, 401, 403, 404, 422)
+                if not success:
+                    logger.warning(
+                        f"image gen probe unexpected status: model={self.model} "
+                        f"status={resp.status_code} body={resp.text[:300]}"
+                    )
+                return success
+        except httpx.TimeoutException:
+            logger.warning(f"image gen probe timeout: model={self.model}")
+            return False
         except Exception as e:
-            logger.debug(f"image gen probe failed for {self.model}: {type(e).__name__}: {e}", exc_info=True)
+            logger.warning(
+                f"image gen probe failed: model={self.model} "
+                f"exception={type(e).__name__} message={str(e)[:200]}"
+            )
             return False
 
     @staticmethod
