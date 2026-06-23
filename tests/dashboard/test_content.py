@@ -129,6 +129,51 @@ class TestQueryDbEntries:
         assert resp.status_code == 400
         assert resp.json()["ok"] is False
 
+    def test_entries_includes_columns(self, test_client: TestClient):
+        """Response includes ``columns`` derived from the table schema."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/content/queries/test_queries/entries")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "columns" in data
+        assert "rowid" in data["columns"]
+        assert "id" in data["columns"]
+        assert "text" in data["columns"]
+
+
+class TestQueryDbTables:
+    """Tests for ``GET /api/content/queries/{db_name}/tables``."""
+
+    def test_list_tables(self, test_client: TestClient):
+        """Returns a list of table names in the query database."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/content/queries/test_queries/tables")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "tables" in data
+        assert "data" in data["tables"]
+
+    def test_db_not_found(self, test_client: TestClient):
+        """Non-existent database returns 404."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/content/queries/nonexistent/tables")
+        assert resp.status_code == 404
+
+    def test_db_suffix_rejected(self, test_client: TestClient):
+        """``db_name`` with ``.db`` suffix is rejected."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/content/queries/test_queries.db/tables")
+        assert resp.status_code == 400
+        assert resp.json()["ok"] is False
+
+    def test_path_traversal_blocked(self, test_client: TestClient):
+        """Path traversal in db_name returns 400."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/content/queries/..%2Fconfig%2Fglobal/tables")
+        assert resp.status_code == 400
+        assert resp.json()["ok"] is False
+
 
 class TestSymlinkTraversal:
     """A symlink inside the content directory pointing outside is blocked."""

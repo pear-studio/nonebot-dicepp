@@ -378,30 +378,41 @@
             <template x-if="queryDbs.length > 0">
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">选择数据库：</label>
-                <select x-model="selectedQueryDb" @change="loadQueryEntries(1)" class="border rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select x-model="selectedQueryDb" @change="loadQueryTables(); loadQueryEntries(1)" class="border rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="">-- 选择 --</option>
                   <template x-for="db in queryDbs" :key="db">
                     <option x-text="db" :value="db"></option>
                   </template>
                 </select>
+                <!-- Table selector (only when >1 table) -->
+                <template x-if="queryTables.length > 1">
+                  <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">选择表：</label>
+                    <select x-model="selectedQueryTable" @change="loadQueryEntries(1)" class="border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                      <template x-for="t in queryTables" :key="t">
+                        <option x-text="t" :value="t"></option>
+                      </template>
+                    </select>
+                  </div>
+                </template>
                 <template x-if="queryEntries.length > 0">
                   <div>
                     <div class="bg-white rounded-lg shadow overflow-x-auto">
                       <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
                           <tr>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">ID</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">内容</th>
+                            <template x-for="col in queryColumns" :key="col">
+                              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap" x-text="col"></th>
+                            </template>
                             <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">操作</th>
                           </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200">
-                          <template x-for="entry in queryEntries" :key="entry.id">
+                          <template x-for="entry in queryEntries" :key="entry.rowid">
                             <tr class="hover:bg-gray-50">
-                              <td class="px-4 py-2 text-sm" x-text="entry.id"></td>
-                              <td class="px-4 py-2 text-sm">
-                                <pre x-text="JSON.stringify(entry, null, 1).slice(0, 200)" class="text-xs"></pre>
-                              </td>
+                              <template x-for="col in queryColumns" :key="col">
+                                <td class="px-4 py-2 text-sm max-w-xs truncate" x-text="formatCell(entry[col])"></td>
+                              </template>
                               <td class="px-4 py-2">
                                 <button @click="viewQueryEntry(entry)" class="text-blue-600 hover:text-blue-800 text-xs">查看</button>
                               </td>
@@ -416,6 +427,9 @@
                       <button @click="loadQueryEntries(queryPage + 1)" :disabled="queryPage >= queryTotalPages" class="px-3 py-1 border rounded text-sm hover:bg-gray-100 disabled:opacity-50">下一页</button>
                     </div>
                   </div>
+                </template>
+                <template x-if="selectedQueryDb && queryEntries.length === 0 && !contentLoading">
+                  <div class="text-gray-500 text-center py-8">暂无数据</div>
                 </template>
               </div>
             </template>
@@ -627,6 +641,9 @@ function app() {
     viewingFileContent: '',
     queryDbs: [],
     selectedQueryDb: '',
+    queryTables: [],
+    selectedQueryTable: 'data',
+    queryColumns: [],
     queryEntries: [],
     queryPage: 1,
     queryTotalPages: 1,
@@ -1102,8 +1119,12 @@ function app() {
       this.contentSubdir = subdir;
       this.contentFiles = [];
       this.queryDbs = [];
+      this.queryTables = [];
+      this.selectedQueryTable = 'data';
+      this.queryColumns = [];
       this.queryEntries = [];
       if (subdir === 'queries') {
+        await this.loadQueryDbs();
         return;
       }
       this.contentLoading = true;
@@ -1130,6 +1151,19 @@ function app() {
       }
     },
 
+    async loadQueryTables() {
+      if (!this.selectedQueryDb) return;
+      try {
+        const data = await this.api(`/api/content/queries/${encodeURIComponent(this.selectedQueryDb)}/tables`);
+        this.queryTables = data.tables || [];
+        this.selectedQueryTable = this.queryTables.includes('data') ? 'data' : (this.queryTables[0] || 'data');
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load query tables:', err);
+        this.queryTables = [];
+        this.selectedQueryTable = 'data';
+      }
+    },
+
     async loadQueryEntries(page) {
       if (!this.selectedQueryDb) return;
       this.queryPage = page || 1;
@@ -1137,11 +1171,13 @@ function app() {
       try {
         const limit = 100;
         const offset = (this.queryPage - 1) * limit;
-        const data = await this.api(`/api/content/queries/${encodeURIComponent(this.selectedQueryDb)}/entries?offset=${offset}&limit=${limit}&table=data`);
+        const data = await this.api(`/api/content/queries/${encodeURIComponent(this.selectedQueryDb)}/entries?offset=${offset}&limit=${limit}&table=${encodeURIComponent(this.selectedQueryTable)}`);
+        this.queryColumns = data.columns || [];
         this.queryEntries = data.records || [];
         this.queryTotalPages = Math.ceil((data.total || 0) / limit) || 1;
       } catch (err) {
         console?.warn('[DicePP] Failed to load query entries:', err);
+        this.queryColumns = [];
         this.queryEntries = [];
         this.queryTotalPages = 1;
       } finally {

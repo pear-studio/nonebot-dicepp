@@ -906,6 +906,29 @@ async def content_list(subdir: str, request: Request):
     return _ok({"files": files})
 
 
+@app.get("/api/content/queries/{db_name}/tables", dependencies=[Depends(require_auth)])
+async def content_queries_tables(db_name: str, request: Request):
+    """List tables in a query database."""
+    if not db_name or len(db_name) > 128 or db_name.endswith(".db"):
+        _err("db_name 无效", 400)
+    if _is_path_traversal(db_name, DashboardPaths.CONTENT_DIR / "queries"):
+        _err("Path traversal detected", 400)
+
+    db_path = DashboardPaths.CONTENT_DIR / "queries" / f"{db_name}.db"
+    if not db_path.exists():
+        _err(f"Query database not found: {db_name}", 404)
+
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            tables = [
+                row[0] for row in
+                conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+            ]
+        return _ok({"tables": tables})
+    except sqlite3.OperationalError as e:
+        _err(f"Database error: {e}", 500)
+
+
 @app.get("/api/content/queries/{db_name}/entries", dependencies=[Depends(require_auth)])
 async def content_queries_entries(
     db_name: str,
@@ -915,7 +938,8 @@ async def content_queries_entries(
     limit: int = Query(100, ge=1, le=500),
 ):
     """Paginated entries from content/queries/{db_name}.db."""
-    _validate_identifier(db_name, "db_name")
+    if not db_name or len(db_name) > 128 or db_name.endswith(".db"):
+        _err("db_name 无效", 400)
     if _is_path_traversal(db_name, DashboardPaths.CONTENT_DIR / "queries"):
         _err("Path traversal detected", 400)
 
@@ -936,17 +960,20 @@ async def content_queries_entries(
             conn.close()
             _err(f"Table '{table}' not found", 404)
 
-        count_cursor = conn.execute(f"SELECT COUNT(*) FROM \"{table}\"")
+        safe_table = table.replace('"', '""')
+        count_cursor = conn.execute(f'SELECT COUNT(*) FROM "{safe_table}"')
         total = count_cursor.fetchone()[0]
 
         cursor = conn.execute(
-            f"SELECT * FROM \"{table}\" ORDER BY rowid LIMIT ? OFFSET ?",
+            f'SELECT rowid, * FROM "{safe_table}" ORDER BY rowid LIMIT ? OFFSET ?',
             (limit, offset),
         )
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
         records = [dict(row) for row in cursor.fetchall()]
         conn.close()
 
         return _ok({
+            "columns": columns,
             "records": records,
             "total": total,
             "offset": offset,

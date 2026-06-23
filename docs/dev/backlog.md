@@ -33,28 +33,6 @@
     - 影响面：app.py _annotate_deep、dashboard.html buildConfigFields
     - 风险：极低，注意用 endswith 或正则精确匹配，避免误杀正常配置键
 
-### [B-260623-7f3f82] 内容管理查询 tab 存在多个问题（手动加载按钮、中文 DB 名报错、表格无数据/表头错误）
-- 创建: 2026-06-23
-- 优先级: P1
-- 类型: bug
-- 改动量: M
-- 问题表现:
-    - 9a: 切到 queries tab 时不自动加载数据库列表，需手动点"加载数据库列表"按钮；其他 tab（如 decks）切过去自动加载
-    - 9b: 选择 DND5E混合 报错 "db_name 格式无效" — _validate_identifier() 使用 ^[a-zA-Z0-9_-]{1,64}$ 正则，中文不通过
-      实际文件 content/queries/DND5E混合.db 是合法存在的
-    - 9c: 选择数据库后表格只有表头没有数据 — query DB 实际有 data 表（2000行）和 redirect 表（736行），
-      列名是 名称/英文/来源/分类/标签/内容，但前端硬编码表头为 ID/内容/操作，与真实列不匹配导致显示空
-    - 代码位置：app.py:178 _validate_identifier、:867 content_queries_entries（默认 table='data'）、
-      dashboard.html:305-354（queries UI）、:323-328（硬编码表头）
-- 开发备忘:
-    - 9a: loadTabData 中 content tab 时若 contentSubdir === 'queries' 自动调用 loadQueryDbs()
-    - 9b: _validate_identifier 对 db_name 放宽限制，或 query DB 走独立校验（允许中文文件名）
-      注意 path traversal 检查已独立做了 _is_path_traversal，放宽 _validate_identifier 不影响安全
-    - 9c: 查询结果使用动态表头（从 records 解析 columns，类似数据浏览的做法），去掉硬编码 ID/内容/操作
-      默认 table 参数也可能是 'redirect' 而非 'data'，需要支持表选择或自动检测
-    - 影响面：app.py _validate_identifier/content_queries_entries、dashboard.html queries 渲染
-    - 风险：低-中，放宽校验需确保 path traversal 保护仍然有效（已有独立检查）
-
 ### [B-260623-7d7d93] 配置编辑与数据浏览缺少中文标签和解释
 - 创建: 2026-06-23
 - 优先级: P1
