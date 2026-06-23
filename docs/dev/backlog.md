@@ -30,22 +30,6 @@
     - 影响面：dashboard.html botcfg tab 模板 + botConfigFields 状态管理
     - 风险：极低，纯前端改动
 
-### [B-260623-b15e43] 登录后默认不选择已开启的 bot
-- 创建: 2026-06-23
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - 登录后 left sidebar 的 bot selector 显示 "-- 选择 Bot --"，未自动选中任何 bot
-    - 数据浏览、配置编辑等 tab 都需要先手动选 bot 才能看到内容，多了一步无意义操作
-    - 代码位置：loadBots() 只填充 this.bots 数组，selectedBotId 保持 ''
-    - 无任何 auto-select 逻辑
-- 开发备忘:
-    - loadBots() 完成后，若 bots 非空且 selectedBotId 为空，自动选 bots[0]
-    - 或 checkAuth() → loadBots() 成功后自动调用 onBotChange 选中第一个
-    - 影响面：dashboard.html init/checkAuth/loadBots/onBotChange
-    - 风险：极低，注意处理 bots 为空的情况（当前已处理 selectedBotId 为空时的提示）
-
 ### [B-260623-f6b322] 配置编辑中 _comment / _llm_comment 键不应出现
 - 创建: 2026-06-23
 - 优先级: P1

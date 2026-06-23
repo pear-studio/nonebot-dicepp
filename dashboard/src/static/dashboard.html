@@ -131,7 +131,7 @@
               <div class="animate-pulse bg-gray-200 rounded h-4 w-3/5"></div>
             </div>
             <div class="flex items-center gap-4 mb-4">
-              <select x-model="selectedTable" @change="loadTableData(1)" class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <select x-model="selectedTable" @change="loadTableData(1)" data-testid="table-select" class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">-- 选择数据表 --</option>
                 <template x-for="tbl in tables" :key="tbl.name">
                   <option x-text="tbl.name" :value="tbl.name"></option>
@@ -773,6 +773,14 @@ function app() {
       try {
         const data = await this.api('/api/bots');
         this.bots = data.bots || [];
+        // Auto-select first bot if none selected.
+        // Alpine x-model does not fire @change on programmatic assignment,
+        // so call loadTabData directly instead of onBotChange().
+        // Keep in sync with onBotChange() logic.
+        if (!this.selectedBotId && this.bots.length > 0) {
+          this.selectedBotId = this.bots[0];
+          this.loadTabData(this.currentTab);
+        }
       } catch (err) {
         console?.warn('[DicePP] Failed to load bots:', err);
       }

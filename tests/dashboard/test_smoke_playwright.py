@@ -39,6 +39,17 @@ elif not _browser_available:
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
+# ── Module-level helpers ──
+
+def _login(page, base_url: str, password: str = "test_pass") -> None:
+    """Navigate to dashboard and log in with the given password."""
+    page.goto(f"{base_url}/dashboard")
+    page.wait_for_selector("[data-testid='login-page']", timeout=10000)
+    page.locator("#login-password").fill(password)
+    page.get_by_role("button", name="登录").click()
+    page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
+
+
 @pytest.fixture
 def dashboard_url(tmp_path: Path) -> str:
     """Start the dashboard server on a random free port.
@@ -153,15 +164,12 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
         page = browser.new_page()
 
         try:
-            # 1. Login with the CLI-initialized password
-            page.goto(f"{dashboard_url}/dashboard")
-            page.wait_for_selector("[data-testid='login-page']", timeout=10000)
-            page.locator("#login-password").fill("test_pass")
-            page.get_by_role("button", name="登录").click()
-            page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
+            _login(page, dashboard_url)
 
-            # 2. Select a bot from the sidebar dropdown
-            # Note: <option> elements are always "hidden" in Playwright's visibility check,
+            # Select a bot from the sidebar dropdown
+            # Note: auto-select already picked the first bot; manual selection is a no-op
+            # that keeps this test working regardless of auto-select behavior.
+            # <option> elements are always "hidden" in Playwright's visibility check,
             # so we must use state="attached" instead of the default "visible".
             page.wait_for_selector(
                 "aside select option[value='test_bot']",
@@ -191,5 +199,70 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
             page.wait_for_selector('[data-testid="config-save-feedback"]', timeout=10000)
             assert page.locator('[data-testid="config-save-feedback"]').first.is_visible()
             assert page.locator("text=运行时重载：").first.is_visible()
+        finally:
+            browser.close()
+
+
+def test_auto_select_first_bot_after_login(dashboard_url: str, tmp_path: Path) -> None:
+    """After login, the first bot is auto-selected and data tab loads without manual selection."""
+    bots_dir = tmp_path / "config" / "bots"
+    bots_dir.mkdir(parents=True, exist_ok=True)
+    (bots_dir / "alpha_bot.json").write_text(
+        json.dumps({"app": {"name": "alpha-bot", "version": "1.0.0"}})
+    )
+    (bots_dir / "zebra_bot.json").write_text(
+        json.dumps({"app": {"name": "zebra-bot", "version": "2.0.0"}})
+    )
+
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+
+        try:
+            _login(page, dashboard_url)
+
+            # Bot selector should have a non-empty value (auto-selected first bot alphabetically).
+            # Backend sorts bots alphabetically via sorted(), so "alpha_bot" is always first.
+            select = page.locator("aside select")
+            value = select.input_value()
+            assert value != "", "Expected a bot to be auto-selected, but selector is empty"
+            assert value == "alpha_bot", (
+                f"Expected first bot alphabetically (alpha_bot), got {value}"
+            )
+
+            # "Please select a bot" message must be absent from DOM entirely.
+            # The <template x-if="!selectedBotId"> wrapper removes it when a bot is selected.
+            assert page.locator("text=请先在左侧选择一个 Bot").count() == 0, (
+                "Bot auto-select failed: empty-state prompt is still in DOM"
+            )
+
+            # Table selector appears in the data tab (confirms loadTabData was called)
+            page.wait_for_selector('[data-testid="table-select"]', timeout=5000)
+        finally:
+            browser.close()
+
+
+def test_no_auto_select_when_no_bots(dashboard_url: str) -> None:
+    """When no bot configs exist, empty state is shown instead of auto-selecting."""
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+
+        try:
+            _login(page, dashboard_url)
+
+            # Bot selector should remain empty
+            select = page.locator("aside select")
+            value = select.input_value()
+            assert value == "", (
+                f"Expected no bot selected when none exist, but got '{value}'"
+            )
+
+            # Empty-state prompt must be visible on the active (data) tab.
+            # Multiple tabs have this element (one per tab template), but only
+            # the data tab is active; .first targets the first DOM match.
+            assert page.locator("text=请先在左侧选择一个 Bot").first.is_visible(), (
+                "Expected empty-state prompt when no bots exist"
+            )
         finally:
             browser.close()
