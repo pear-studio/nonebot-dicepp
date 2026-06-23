@@ -1,4 +1,10 @@
-"""Smoke-test the Dashboard image's WebSocket Control Channel."""
+"""Smoke-test the Dashboard image's WebSocket Control Channel.
+
+This script is intended to run inside the built Dashboard image, after the
+project has been installed into the image environment. The direct
+``plugins.DicePP`` import is deliberate: if it fails, the image does not expose
+the bot-side dashboard reporter package required by the control channel.
+"""
 
 import asyncio
 import os

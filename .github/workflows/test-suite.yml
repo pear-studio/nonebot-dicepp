@@ -194,6 +194,9 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --frozen --group dev
+      - name: Install Playwright Chromium
+        run: |
+          uv run playwright install chromium
       - name: Build Bot and Dashboard
         run: |
           uv run pyinstaller scripts/build/dicepp.spec --clean --noconfirm
@@ -224,7 +227,16 @@ jobs:
           }
           & dist/DicePP/DicePPDashboard.exe --smoke-check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
+      - name: Run Windows Dashboard UI smoke
+        env:
+          DICEPP_REQUIRE_PLAYWRIGHT: "1"
+          DICEPP_WINDOWS_PACKAGE_SMOKE: "1"
+          DICEPP_DASHBOARD_EXE: dist/DicePP/DicePPDashboard.exe
+        run: |
+          uv run pytest tests/dashboard/test_windows_package_playwright.py --tb=short -q
+      - name: Package artifact
+        shell: pwsh
+        run: |
           Compress-Archive -Path dist/DicePP -DestinationPath DicePP-ci-win64.zip
       - uses: actions/upload-artifact@v4
         with:

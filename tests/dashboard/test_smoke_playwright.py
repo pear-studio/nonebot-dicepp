@@ -2,16 +2,21 @@
 
 import json
 import os
-import socket
 import subprocess
-import time
-import urllib.request
 from pathlib import Path
 
 import pytest
 
 from dashboard.src.app import _init_db
 from dashboard.src.auth import set_password_db
+from tests.dashboard.playwright_support import (
+    assert_setup_form_validation,
+    can_launch_browser,
+    find_free_port,
+    launch_browser,
+    route_setup_allowed_status,
+    wait_for_server,
+)
 
 # ── Module-level skip if playwright or browser not available ──
 
@@ -19,32 +24,7 @@ playwright = pytest.importorskip("playwright", reason="playwright is not install
 from playwright.sync_api import sync_playwright
 
 
-def _launch_browser(chromium):
-    """Launch the CI-managed Chromium, with local system Chrome fallback."""
-    launch_options = {
-        "headless": True,
-        "args": ["--no-sandbox", "--disable-setuid-sandbox"],
-    }
-    try:
-        return chromium.launch(**launch_options)
-    except Exception:
-        if os.environ.get("DICEPP_REQUIRE_PLAYWRIGHT") == "1":
-            raise
-        return chromium.launch(channel="chrome", **launch_options)
-
-
-def _can_launch_browser() -> bool:
-    """Return True if the configured CI/local browser can be launched."""
-    try:
-        with sync_playwright() as _p:
-            browser = _launch_browser(_p.chromium)
-            browser.close()
-            return True
-    except Exception:
-        return False
-
-
-_browser_available = _can_launch_browser()
+_browser_available = can_launch_browser(sync_playwright)
 
 if not _browser_available and os.environ.get("DICEPP_REQUIRE_PLAYWRIGHT") == "1":
     raise RuntimeError(
@@ -55,31 +35,6 @@ elif not _browser_available:
     pytestmark = pytest.mark.skip(
         reason="Playwright Chromium is not installed"
     )
-
-
-def _find_free_port() -> int:
-    """Return a free TCP port on 127.0.0.1."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-def _wait_for_server(url: str, timeout: float = 15) -> None:
-    """Poll *url* until it returns HTTP 200, or raise TimeoutError."""
-    deadline = time.time() + timeout
-    last_err = None
-    while time.time() < deadline:
-        try:
-            resp = urllib.request.urlopen(url, timeout=2)
-            if resp.status == 200:
-                return
-        except Exception as e:
-            last_err = e
-            time.sleep(0.3)
-    raise TimeoutError(
-        f"Server at {url} not ready within {timeout}s: {last_err}"
-    )
-
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -108,7 +63,7 @@ def dashboard_url(tmp_path: Path) -> str:
     _init_db(str(db_path))
     set_password_db(str(db_path), "test_pass")
 
-    port = _find_free_port()
+    port = find_free_port()
     base_url = f"http://127.0.0.1:{port}"
 
     env = os.environ.copy()
@@ -125,7 +80,7 @@ def dashboard_url(tmp_path: Path) -> str:
     )
 
     try:
-        _wait_for_server(f"{base_url}/api/auth/status")
+        wait_for_server(f"{base_url}/api/auth/status")
         yield base_url
     finally:
         proc.terminate()
@@ -139,7 +94,7 @@ def dashboard_url(tmp_path: Path) -> str:
 def test_smoke_auth_flow(dashboard_url: str) -> None:
     """End-to-end auth flow: login -> main dashboard -> logout -> login."""
     with sync_playwright() as p:
-        browser = _launch_browser(p.chromium)
+        browser = launch_browser(p.chromium)
         page = browser.new_page()
 
         try:
@@ -171,6 +126,19 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
             browser.close()
 
 
+def test_setup_form_inline_validation(dashboard_url: str) -> None:
+    """Setup form blocks mismatched and too-short passwords before API calls."""
+    with sync_playwright() as p:
+        browser = launch_browser(p.chromium)
+        page = browser.new_page()
+
+        try:
+            route_setup_allowed_status(page)
+            assert_setup_form_validation(page, dashboard_url)
+        finally:
+            browser.close()
+
+
 def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None:
     """Login, edit config in JSON view, save, and verify feedback."""
     # Create a dummy bot config so a bot is available in the sidebar
@@ -181,7 +149,7 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
     )
 
     with sync_playwright() as p:
-        browser = _launch_browser(p.chromium)
+        browser = launch_browser(p.chromium)
         page = browser.new_page()
 
         try:
