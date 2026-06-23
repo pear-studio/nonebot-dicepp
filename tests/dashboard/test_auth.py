@@ -5,6 +5,7 @@ import time
 
 from fastapi.testclient import TestClient
 
+from dashboard.src.app import _LOGIN_FAILURE_LIMIT
 from dashboard.src.config import DashboardPaths
 from tests.dashboard.conftest import setup_auth
 
@@ -107,6 +108,37 @@ class TestLoginLogout:
         resp = test_client.post("/api/auth/login", json={"password": "wrong_password"})
         assert resp.status_code == 401
         assert resp.json()["ok"] is False
+
+    def test_login_rate_limit_blocks_repeated_failures(self, test_client: TestClient):
+        """Repeated wrong passwords enter a short cooldown for that client IP."""
+        test_client.post("/api/auth/setup", json={"password": "test_password"})
+
+        for _ in range(_LOGIN_FAILURE_LIMIT):
+            resp = test_client.post("/api/auth/login", json={"password": "wrong_password"})
+            assert resp.status_code == 401
+
+        resp = test_client.post("/api/auth/login", json={"password": "wrong_password"})
+
+        assert resp.status_code == 429
+        assert resp.json()["ok"] is False
+        assert "登录失败次数过多" in resp.json()["message"]
+        assert int(resp.headers["Retry-After"]) > 0
+
+    def test_successful_login_clears_previous_failures(self, test_client: TestClient):
+        """A correct password resets earlier failures instead of surprising the user later."""
+        test_client.post("/api/auth/setup", json={"password": "test_password"})
+        test_client.post("/api/auth/logout")
+
+        for _ in range(_LOGIN_FAILURE_LIMIT - 1):
+            resp = test_client.post("/api/auth/login", json={"password": "wrong_password"})
+            assert resp.status_code == 401
+
+        resp = test_client.post("/api/auth/login", json={"password": "test_password"})
+        assert resp.status_code == 200
+
+        test_client.post("/api/auth/logout")
+        resp = test_client.post("/api/auth/login", json={"password": "wrong_password"})
+        assert resp.status_code == 401
 
 
 class TestChangePassword:

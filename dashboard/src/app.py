@@ -36,6 +36,10 @@ logger = logging.getLogger("dashboard")
 
 app = FastAPI(title="DicePP Dashboard", version="1.0.0")
 
+_LOGIN_FAILURE_LIMIT = 5
+_LOGIN_FAILURE_COOLDOWN_SECONDS = 30
+_LOGIN_FAILURE_STALE_SECONDS = 10 * 60
+
 
 # ── Exception handler ─────────────────────────────────────────────────────────
 
@@ -47,6 +51,7 @@ async def _http_exception_handler(request: Request, exc: HTTPException):
         status_code=exc.status_code,
         content=exc.detail if isinstance(exc.detail, dict) and "ok" in exc.detail
                else {"ok": False, "message": str(exc.detail)},
+        headers=exc.headers,
     )
 
 
@@ -270,6 +275,7 @@ async def _startup():
     _init_db(db_path)
     app.state.dashboard_db = db_path
     app.state.dashboard_paths = DashboardPaths
+    app.state.login_failures = {}
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
@@ -318,6 +324,61 @@ def _setup_denied_message() -> str:
     return "首次初始化请通过本机或局域网 IP 直接访问，不能通过公网域名或反向代理初始化"
 
 
+def _login_failure_key(request: Request) -> str:
+    return request.client.host if request.client and request.client.host else "unknown"
+
+
+def _login_failure_entries(request: Request) -> dict[str, dict[str, float]]:
+    entries = getattr(request.app.state, "login_failures", None)
+    if entries is None:
+        entries = {}
+        request.app.state.login_failures = entries
+    return entries
+
+
+def _raise_if_login_rate_limited(request: Request) -> None:
+    entries = _login_failure_entries(request)
+    key = _login_failure_key(request)
+    entry = entries.get(key)
+    if not entry:
+        return
+
+    now = time.monotonic()
+    if now - entry.get("last_failed_at", 0) > _LOGIN_FAILURE_STALE_SECONDS:
+        entries.pop(key, None)
+        return
+
+    blocked_until = entry.get("blocked_until", 0)
+    if blocked_until > now:
+        retry_after = max(1, int(blocked_until - now))
+        raise HTTPException(
+            status_code=429,
+            detail={"ok": False, "message": f"登录失败次数过多，请 {retry_after} 秒后再试"},
+            headers={"Retry-After": str(retry_after)},
+        )
+    if blocked_until:
+        entries.pop(key, None)
+
+
+def _record_login_failure(request: Request) -> None:
+    entries = _login_failure_entries(request)
+    key = _login_failure_key(request)
+    now = time.monotonic()
+    entry = entries.get(key)
+    if not entry or now - entry.get("last_failed_at", 0) > _LOGIN_FAILURE_STALE_SECONDS:
+        entry = {"count": 0, "blocked_until": 0}
+
+    entry["count"] = entry.get("count", 0) + 1
+    entry["last_failed_at"] = now
+    if entry["count"] >= _LOGIN_FAILURE_LIMIT:
+        entry["blocked_until"] = now + _LOGIN_FAILURE_COOLDOWN_SECONDS
+    entries[key] = entry
+
+
+def _clear_login_failures(request: Request) -> None:
+    _login_failure_entries(request).pop(_login_failure_key(request), None)
+
+
 @app.post("/api/auth/setup")
 async def auth_setup(request: Request):
     """Set initial password. Returns 403 if already initialized."""
@@ -350,13 +411,17 @@ async def auth_setup(request: Request):
 @app.post("/api/auth/login")
 async def auth_login(request: Request):
     """Login with password, set session cookie."""
+    _raise_if_login_rate_limited(request)
+
     body = await request.json()
     password = body.get("password", "")
 
     db_path = request.app.state.dashboard_db
     if not verify_password_db(db_path, password):
+        _record_login_failure(request)
         raise HTTPException(status_code=401, detail={"ok": False, "message": "Invalid password"})
 
+    _clear_login_failures(request)
     token = create_session(db_path)
     audit_log(db_path, "auth.login", "auth", "Login", ip=request.client.host if request.client else "")
 
