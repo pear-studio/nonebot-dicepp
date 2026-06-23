@@ -44,7 +44,7 @@ docker compose version
 ```bash
 mkdir -p ~/dicepp
 cd ~/dicepp
-mkdir -p config/bots data content
+mkdir -p config/bots data content dashboard/data
 ```
 
 从 [DicePP 最新 Release](https://github.com/pear-studio/nonebot-dicepp/releases/latest) 下载 `docker-compose.yml`，放到 `~/dicepp/docker-compose.yml`。
@@ -53,6 +53,7 @@ mkdir -p config/bots data content
 
 ```text
 ghcr.io/pear-studio/nonebot-dicepp:latest
+ghcr.io/pear-studio/dicepp-dashboard:latest
 ```
 
 正式生产建议使用明确版本号，而不是长期使用 `latest`。例如：
@@ -167,6 +168,36 @@ http://服务器IP:4090/dashboard
 
 如果从外网访问，直接使用 HTTP 会暴露登录密码和会话信息，建议配置反向代理并开启 HTTPS。
 
+### 确认 Dashboard 部署形态
+
+Linux Docker 部署推荐使用 Release 附带的 `docker-compose.yml`。这份 compose 会把 DicePP 拆成两个服务：
+
+- `bot` service 的 `DPP_ADMIN_HOST=dashboard` 和 `DPP_ADMIN_PORT=4090` 环境变量；
+- 独立 `dashboard` service；
+- `dashboard/data` 持久化目录；
+- Dashboard 对外端口 `4090:4090`。
+
+如果你的 `docker-compose.yml` 来自当前 Release，通常不需要手动调整。若你使用的是自己维护过的 compose，或 Dashboard 容器没有启动，可以先对照上面的部署形态检查。
+
+如果当前 compose 没有本地改动，推荐直接使用目标 Release 附带的 `docker-compose.yml`。替换前可以先备份：
+
+```bash
+cp docker-compose.yml docker-compose.yml.bak
+```
+
+如果当前 compose 有自定义网络、端口或镜像源，不要盲目覆盖；只按目标 Release compose 合并必要的标准块。
+
+确认 compose 后执行：
+
+```bash
+mkdir -p dashboard/data
+DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
+DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
+docker compose exec dashboard python -m dashboard admin init
+```
+
+这里的初始化命令必须在 `dashboard` service 内执行，不是在 `dicepp` / `bot` 容器内执行。
+
 ## 日常操作
 
 在 `~/dicepp` 目录下：
@@ -191,6 +222,8 @@ docker compose up -d
 DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
 DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 ```
+
+如果目标版本的 Release 说明提到部署结构变化，先同步该版本附带的 `docker-compose.yml`，再执行 `pull` 和 `up -d`。
 
 版本风险说明见 [releases/](./releases/)。
 

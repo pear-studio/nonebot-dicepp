@@ -10,9 +10,10 @@ version-release (skill)               version-deploy (skill)
   ├─ bump version + tag vX.Y.Z          ├─ gh release view vX.Y.Z
   ├─ write docs/releases/vX.Y.Z.md        → 读取风险元数据
   ├─ create GitHub Release               → 展示给用户确认
-  └─ tag triggers GHA → build image      └─ deploy-docker → pull + up
-       → ghcr.io:...:vX.Y.Z
-       → ghcr.io:...:latest
+  └─ tag triggers GHA → build images     └─ deploy-docker → compose sync + pull + up
+       → nonebot-dicepp:vX.Y.Z
+       → dicepp-dashboard:vX.Y.Z
+       → latest（正式版）
 ```
 
 ## 关键文件
@@ -22,7 +23,8 @@ version-release (skill)               version-deploy (skill)
 | `pyproject.toml` `[project].version` | 版本号唯一真相源 |
 | `src/.../declare.py` `get_bot_version()` | 运行时版本读取（从 importlib.metadata） |
 | `docs/releases/vX.Y.Z.md` | 每个 release 的 changelog 与风险摘要（数据变更 / 配置变更 / Risk Notes） |
-| `docker-compose.yml` | 部署入口；生产默认使用 `image:` 发布镜像，`build:` 仅作开发/应急构建 |
+| `docker-compose.yml` | 部署入口；包含 bot 与独立 Dashboard service；生产默认使用 `image:` 发布镜像，`build:` 仅作开发/应急构建 |
+| `docs/linux.md` | Linux Docker 部署说明；作为 GitHub Release asset 提供给生产部署者 |
 | `Dockerfile` | 多阶段构建，第三方依赖层与源码层分离，`uv sync --frozen` 可复现 |
 | `.github/workflows/release.yml` | tag push 触发 GHCR 镜像构建 + GitHub Release 创建 |
 
@@ -36,11 +38,13 @@ version-release (skill)               version-deploy (skill)
 
 ## 镜像
 
-- **Registry**: `ghcr.io/pear-studio/nonebot-dicepp`
+- **Registry**:
+  - `ghcr.io/pear-studio/nonebot-dicepp`
+  - `ghcr.io/pear-studio/dicepp-dashboard`
 - **Tags**: 正式版打 `:vX.Y.Z` 和 `:latest`；RC 只打同名 `:vX.Y.ZrcN`
 - **构建触发**: push `v*.*.*` tag
 - **构建方式**: `uv sync --no-dev --frozen`，依赖由 `uv.lock` 锁定
-- **分发**: `docker-compose.yml` 作为 GitHub Release asset 下载
+- **分发**: `docker-compose.yml` 和 `docs/linux.md` 作为 GitHub Release asset 下载
 
 ## Docker Compose 模式
 
@@ -51,7 +55,10 @@ version-release (skill)               version-deploy (skill)
 | 生产部署 | `DICEPP_IMAGE_TAG=v3.0.0` | `docker compose pull` → `up -d` |
 | 回退到指定版本 | `DICEPP_IMAGE_TAG=v3.0.0` | `docker compose pull` → `up -d` |
 | 临时使用其他 registry | `DICEPP_IMAGE=registry.example.com/ns/nonebot-dicepp:v3.0.0` | `docker compose pull` → `up -d` |
+| 临时替换 Dashboard registry | `DASHBOARD_IMAGE=registry.example.com/ns/dicepp-dashboard:v3.0.0` | `docker compose pull` → `up -d` |
 | 开发/应急源码构建 | 不设镜像变量 | `docker compose build` → `up -d` |
+
+生产更新前应先确认当前 `docker-compose.yml` 是否与目标 Release 的部署拓扑一致。新增 service、环境变量、volume 或端口映射时，必须先同步 Release 附带的 `docker-compose.yml` 或按 `docs/linux.md` 的部署说明合并标准块，再执行 `pull` / `up -d`。
 
 ## Release 流程
 
@@ -77,8 +84,10 @@ version-release (skill)               version-deploy (skill)
 
 1. 读取目标版本 `vX.Y.Z`
 2. 通过 `gh release view vX.Y.Z --json body` 或 `git show` 读取风险元数据
-3. 展示影响范围，等待用户确认
-4. 注入 `DICEPP_IMAGE_TAG=vX.Y.Z`，调用 deploy-docker 执行 pull + up
+3. 读取目标版本的 `docs/linux.md` / Release asset 部署说明
+4. 对比生产 `docker-compose.yml` 与目标 Release 的 compose 拓扑，必要时先计划同步 compose
+5. 展示影响范围，等待用户确认
+6. 注入 `DICEPP_IMAGE_TAG=vX.Y.Z`，调用 deploy-docker 执行 compose sync + pull + up
 
 ## 用户操作速查
 
@@ -90,7 +99,7 @@ DICEPP_IMAGE_TAG=v3.1.0 docker compose pull && DICEPP_IMAGE_TAG=v3.1.0 docker co
 
 # 小白部署（从零开始）
 # 1. 浏览器打开 https://github.com/pear-studio/nonebot-dicepp/releases/latest
-# 2. 下载 docker-compose.yml
+# 2. 下载 docker-compose.yml 和 Linux 部署说明
 # 3. docker network create dice-net
 # 4. docker compose up -d
 ```

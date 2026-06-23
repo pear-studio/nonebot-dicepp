@@ -22,7 +22,7 @@ metadata:
 
 第一版只允许操作 DicePP 部署相关资源：
 
-- 当前项目 Docker Compose 中声明的服务, 目前包括 bot 服务。
+- 当前项目 Docker Compose 中声明的 DicePP 服务, 包括 `bot` 和独立 `dashboard` service。
 - DicePP 生产链路明确依赖的 LLOneBot 相关容器/服务。
 
 默认禁止：
@@ -44,7 +44,7 @@ metadata:
 优先使用明确的 Docker Compose 命令，不调用项目 shell wrapper 或 Makefile 部署入口：
 
 - DicePP bot 服务优先使用当前项目的 'docker compose'。
-- DicePP 版本更新只使用 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull/up`。
+- DicePP 版本更新只使用 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull/up`，并默认作用于当前 compose project 的 DicePP 服务整体，而不是只更新单个 `bot` service。
 - LLOneBot 操作前必须先识别其 compose 目录或容器名；无法确认时只做只读检查并要求用户提供路径。
 - 禁止使用 `git pull`、本地 build 或项目部署 wrapper 更新生产。
 
@@ -53,7 +53,9 @@ metadata:
 常用只读检查包括：
 
 - 'docker compose ps'
+- 'docker compose config --services'
 - 'docker compose logs --tail <N> bot'
+- 'docker compose logs --tail <N> dashboard'
 - 'docker ps' 仅用于识别 DicePP/LLOneBot 相关容器, 不对无关容器执行操作。
 
 只读检查仍应避免输出 token、cookie、session、密钥、完整敏感配置或二维码敏感内容。
@@ -81,11 +83,12 @@ metadata:
 当 'version-deploy' 要应用镜像版本时, 推荐执行序列为：
 
 1. 确认环境变量 'DICEPP_IMAGE_TAG' 已设为目标版本。
-2. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull bot'。
-3. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d bot'。
-4. 执行 'docker compose ps'。
-5. 查看 'docker compose logs --tail 100 bot'。
-6. 如项目提供健康检查或机器人指令验收方式, 汇报可执行项或已执行结果。
+2. 执行 'docker compose config --services', 确认目标 compose 包含预期 DicePP 服务；v3.0.0 起通常应包含 `bot` 和 `dashboard`。
+3. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull'。
+4. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d'。
+5. 执行 'docker compose ps'。
+6. 查看 'docker compose logs --tail 100 bot'；如果存在 `dashboard` service, 同时查看 'docker compose logs --tail 100 dashboard'。
+7. 如项目提供健康检查或机器人指令验收方式, 汇报可执行项或已执行结果。
 
 ## Important Notes
 

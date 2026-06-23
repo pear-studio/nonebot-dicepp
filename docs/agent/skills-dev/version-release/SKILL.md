@@ -220,6 +220,7 @@ metadata:
    - Release assets 包含:
      - `docker-compose.yml`
      - `DicePP-v{new_version}-win64.zip`
+   - 目标 tag 下部署文档可读: `git show v{new_version}:docs/linux.md` 不报错。
    - GHCR 镜像 tag 存在: `docker pull ghcr.io/pear-studio/nonebot-dicepp:v{new_version}` 不报错。
    - 如任一产物缺失, 查看对应 GHA run 日志排查。
 

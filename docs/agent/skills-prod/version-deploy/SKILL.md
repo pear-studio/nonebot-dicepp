@@ -21,7 +21,7 @@ metadata:
 
 - 生产部署/回退以 'vX.Y.Z' release 为单位。
 - 目标 release 必须由开发环境 'version-release' 创建。
-- 生产使用 GHCR 镜像: 'ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z'。
+- 生产使用 GHCR 镜像: 'ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z'；包含 Dashboard 的版本还会使用 'ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z'。
 - 生产更新风险摘要的唯一源头是 GitHub Release body, 由开发环境 'docs/releases/vX.Y.Z.md' 生成并同步。
 - 'DICEPP_IMAGE_TAG' 通过命令环境变量传递, 不写入任何配置文件。
 - 默认只读。修改运行配置、pull 镜像、重启/更新容器等写操作必须先展示影响、命令和回滚方式, 等待用户明确确认。
@@ -57,44 +57,78 @@ metadata:
 
    如果两种方式都不可用, 将风险视为 'unknown', 要求用户明确确认。
 
-4. 核对目标镜像
+4. 读取目标部署说明与 compose
+
+   目标版本可能改变 Docker Compose 拓扑（新增 service、环境变量、volume 或端口）。在展示部署计划前, 必须尽量读取目标版本的部署说明和 compose：
+
+   a. 如生产目录包含本仓库 checkout, 可先执行只用于读取 release 文件的 `git fetch --tags --prune origin`；这不是生产部署方式, 不允许据此部署分支 HEAD。
+   b. 优先读取 `git show vX.Y.Z:docs/linux.md` 和 `git show vX.Y.Z:docker-compose.yml`。
+   c. 如果本地没有仓库, 通过 GitHub Release asset 或远端 tag 内容读取 `docker-compose.yml`；能读取 `docs/linux.md` 时也必须读取。
+   d. 读取失败时, 在风险摘要中明确标记“部署说明/compose 未确认”, 并要求用户确认是否继续。
+
+5. 核对目标镜像
 
    从 metadata 读取 image, 应为：
 
        ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
 
-   若 metadata 与目标版本不一致, 停止并要求澄清。
+   如果目标 compose 包含 Dashboard, 还应核对 Dashboard 镜像为：
 
-5. 汇总生产更新风险
+       ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z
+
+   若 metadata、目标 compose 与目标版本不一致, 停止并要求澄清。
+
+6. 对比生产 compose
+
+   读取当前生产 `docker-compose.yml` 与目标版本 compose 的服务拓扑。若目标版本新增或改变标准部署块, 必须在计划中说明如何同步, 例如：
+
+   - 新增独立 `dashboard` service；
+   - 给 `bot` 增加 `DPP_ADMIN_HOST` / `DPP_ADMIN_PORT`；
+   - 新增 `dashboard/data` 持久化目录；
+   - 新增或改变端口映射、volume、环境变量。
+
+   原则：
+
+   - 不手工发明部署架构；以目标 release 的 `docker-compose.yml` 和 `docs/linux.md` 为准。
+   - 如果生产 compose 没有本地定制, 可计划用目标 release 的 `docker-compose.yml` 替换。
+   - 如果生产 compose 有本地定制, 只计划合并目标 release 的标准块；无法安全合并时停止并让用户裁决。
+
+7. 汇总生产更新风险
 
    必须展示：
 
    - 当前运行镜像
    - 目标版本
-   - 目标镜像
+   - 目标镜像（bot；如适用也包括 dashboard）
+   - 当前 compose 服务列表
+   - 目标 compose 服务列表
+   - 是否需要同步 `docker-compose.yml`
    - '数据变更' (yes/no)
    - '配置变更' (yes/no)
    - metadata 中的 Risk Notes 摘要
 
-6. 备份判断
+8. 备份判断
 
    - 如果 `数据变更: yes` 或 `配置变更: yes`, 更新前必须确认已完成升级前备份。
    - 如果 metadata 缺失或无法解析, 必须要求用户明确确认备份状态或接受风险。
    - 镜像回退不等于数据回退；涉及数据/配置变更时, 需要按备份/恢复流程处理。
 
-7. 展示计划
+9. 展示计划
 
    在用户确认前只展示将执行的改动, 包括：
 
+   - 如需同步 compose, 展示 compose 更新来源、影响的 service 和回滚方式。
    - 将注入环境变量 'DICEPP_IMAGE_TAG=vX.Y.Z' 并调用 'deploy-docker' 执行 pull/up/健康检查。
+   - 如目标部署说明要求首次初始化 Dashboard, 展示需在 `dashboard` service 内执行的初始化命令, 但只有用户确认后才可执行。
    - 如需回退, 回滚方式是重新执行本技能并指定另一个已发布的 'vX.Y.Z'。
 
 ## Confirmed Execution
 
 只有当用户明确确认部署或回退目标版本后, 才允许执行：
 
-1. 在命令中注入环境变量 'DICEPP_IMAGE_TAG=vX.Y.Z'。
-2. 按 'deploy-docker' 执行项目 Docker Compose 更新。
+1. 如计划包含 compose 同步, 先按用户确认的方式同步 `docker-compose.yml`，并保留回滚路径。
+2. 在命令中注入环境变量 'DICEPP_IMAGE_TAG=vX.Y.Z'。
+3. 按 'deploy-docker' 执行项目 Docker Compose 更新。
 
 确认语句应包含目标版本, 例如：
 
@@ -105,5 +139,6 @@ metadata:
 
 - 不执行 'git pull master' 作为生产部署方式。
 - 不基于模糊的“最新代码”更新生产；必须明确版本。
+- 允许为了读取目标 release 文档执行 `git fetch --tags`, 但不得把本地分支 HEAD 当作部署依据。
 - 不自动操作数据库、恢复备份或删除数据；这些必须由专门运维流程处理。
 - 不输出 secrets、token 或敏感配置。
