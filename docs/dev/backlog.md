@@ -14,22 +14,6 @@
 
 ## dashboard
 
-### [B-260623-aeaea8] Bot配置 tab 默认可编辑，缺少编辑/查看模式切换
-- 创建: 2026-06-23
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - Bot配置 tab 中 master/admin/friend_token/persona/nickname 的 input 字段直接可编辑
-    - "保存"按钮始终可见，误触即覆盖线上 bot 配置
-    - 而配置编辑 tab 有明确的 "编辑→编辑框→保存/取消" 状态机，两者设计不一致
-    - 代码位置：dashboard.html:248-291（Bot配置），对比 :186-226（配置编辑字段视图）
-- 开发备忘:
-    - 给 Bot配置 tab 增加编辑模式开关：默认只读展示，点击"编辑"按钮后才可修改
-    - 与配置编辑 tab 的交互模式保持一致
-    - 影响面：dashboard.html botcfg tab 模板 + botConfigFields 状态管理
-    - 风险：极低，纯前端改动
-
 ### [B-260623-f6b322] 配置编辑中 _comment / _llm_comment 键不应出现
 - 创建: 2026-06-23
 - 优先级: P1

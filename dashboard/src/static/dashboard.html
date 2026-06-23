@@ -96,7 +96,7 @@
       <!-- Navigation tabs -->
       <nav class="flex-1 overflow-y-auto py-2">
         <template x-for="tab in tabs" :key="tab.id">
-          <button @click="currentTab = tab.id; loadTabData(tab.id)" class="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-800 transition flex items-center" :class="currentTab === tab.id ? 'bg-gray-800 border-l-4 border-blue-500' : 'border-l-4 border-transparent'">
+          <button @click="guardNavigate(() => { currentTab = tab.id; loadTabData(tab.id) })" class="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-800 transition flex items-center" :class="currentTab === tab.id ? 'bg-gray-800 border-l-4 border-blue-500' : 'border-l-4 border-transparent'">
             <span x-text="tab.label" class="ml-2"></span>
           </button>
         </template>
@@ -104,7 +104,7 @@
 
       <!-- Logout -->
       <div class="p-3 border-t border-gray-700">
-        <button @click="logout" class="flex items-center text-sm text-gray-400 hover:text-white transition">
+        <button @click="guardNavigate(() => logout())" class="flex items-center text-sm text-gray-400 hover:text-white transition">
           <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
           退出登录
         </button>
@@ -272,39 +272,79 @@
               <div class="animate-pulse bg-gray-200 rounded h-10 w-full"></div>
             </div>
             <div x-show="!botcfgLoading" class="bg-white rounded-lg shadow p-6">
-            <div class="mb-4">
-              <label class="block text-gray-700 text-sm font-bold mb-1">Master</label>
-              <input type="text" x-model="botConfigFields.master" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <p class="text-xs text-gray-500 mt-1">骰主 ID 列表（逗号分隔）</p>
-            </div>
-            <div class="mb-4">
-              <label class="block text-gray-700 text-sm font-bold mb-1">Admin</label>
-              <input type="text" x-model="botConfigFields.admin" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <p class="text-xs text-gray-500 mt-1">管理员 ID 列表（逗号分隔）</p>
-            </div>
-            <div class="mb-4">
-              <label class="block text-gray-700 text-sm font-bold mb-1">Friend Token</label>
-              <input type="text" x-model="botConfigFields.friend_token" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <p class="text-xs text-gray-500 mt-1">好友添加 Token（逗号分隔）</p>
-            </div>
-            <div class="mb-4">
-              <label class="block text-gray-700 text-sm font-bold mb-1">Persona</label>
-              <input type="text" x-model="botConfigFields.persona" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <p class="text-xs text-gray-500 mt-1">角色名</p>
-            </div>
-            <div class="mb-4">
-              <label class="block text-gray-700 text-sm font-bold mb-1">Nickname</label>
-              <input type="text" x-model="botConfigFields.nickname" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <p class="text-xs text-gray-500 mt-1">昵称</p>
-            </div>
-            <button @click="saveBotConfig" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
-            <div x-show="botConfigReloadResult" data-testid="botcfg-save-feedback" class="mt-4">
-              <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
-              <template x-for="item in botConfigReloadResult" :key="item.bot_id">
-                <div class="text-sm mb-1" :class="item.status === 'ok' ? 'text-green-600' : 'text-red-600'" x-text="`${item.bot_id}: ${item.status === 'ok' ? '成功' : (item.error || '失败')}`"></div>
+              <!-- Read-only view -->
+              <template x-if="!botcfgEditing">
+                <div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Master</label>
+                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.master || '—'"></pre>
+                    <p class="text-xs text-gray-500 mt-1">骰主 ID 列表（逗号分隔）</p>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Admin</label>
+                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.admin || '—'"></pre>
+                    <p class="text-xs text-gray-500 mt-1">管理员 ID 列表（逗号分隔）</p>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Friend Token</label>
+                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.friend_token || '—'"></pre>
+                    <p class="text-xs text-gray-500 mt-1">好友添加 Token（逗号分隔）</p>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Persona</label>
+                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.persona || '—'"></pre>
+                    <p class="text-xs text-gray-500 mt-1">角色名</p>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Nickname</label>
+                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.nickname || '—'"></pre>
+                    <p class="text-xs text-gray-500 mt-1">昵称</p>
+                  </div>
+                  <button @click="startEditBotConfig" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">编辑</button>
+                </div>
               </template>
-              <div x-show="!botConfigReloadResult || botConfigReloadResult.length === 0" class="text-sm text-gray-500">Bot 离线，将在下次启动时加载</div>
-            </div>
+              <!-- Edit view -->
+              <template x-if="botcfgEditing">
+                <div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Master</label>
+                    <input type="text" x-model="botConfigFields.master" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">骰主 ID 列表（逗号分隔）</p>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Admin</label>
+                    <input type="text" x-model="botConfigFields.admin" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">管理员 ID 列表（逗号分隔）</p>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Friend Token</label>
+                    <input type="text" x-model="botConfigFields.friend_token" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">好友添加 Token（逗号分隔）</p>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Persona</label>
+                    <input type="text" x-model="botConfigFields.persona" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">角色名</p>
+                  </div>
+                  <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-1">Nickname</label>
+                    <input type="text" x-model="botConfigFields.nickname" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">昵称</p>
+                  </div>
+                  <div class="flex gap-2">
+                    <button @click="saveBotConfig" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
+                    <button @click="cancelEditBotConfig" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium">取消</button>
+                  </div>
+                </div>
+              </template>
+              <!-- Save feedback (visible after save completes or on error) -->
+              <div x-show="botConfigReloadResult" data-testid="botcfg-save-feedback" class="mt-4">
+                <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
+                <template x-for="item in botConfigReloadResult" :key="item.bot_id">
+                  <div class="text-sm mb-1" :class="item.status === 'ok' ? 'text-green-600' : 'text-red-600'" x-text="`${item.bot_id}: ${item.status === 'ok' ? '成功' : (item.error || '失败')}`"></div>
+                </template>
+                <div x-show="!botConfigReloadResult || botConfigReloadResult.length === 0" class="text-sm text-gray-500">Bot 离线，将在下次启动时加载</div>
+              </div>
             </div>
           </div>
         </template>
@@ -573,6 +613,8 @@ function app() {
 
     // ── Tab: Bot Config ──
     botConfigFields: { master: '', admin: '', friend_token: '', persona: '', nickname: '' },
+    botcfgEditing: false,
+    botcfgFieldsBackup: {},
     botConfigReloadResult: null,
 
     // ── Tab: Content ──
@@ -786,9 +828,19 @@ function app() {
       }
     },
 
+    hasUnsavedEdits() {
+      if (this.currentTab === 'botcfg' && this.botcfgEditing) return true;
+      return false;
+    },
+
+    guardNavigate(action) {
+      if (this.hasUnsavedEdits() && !confirm('有未保存的修改，确定要离开吗？')) return;
+      action();
+    },
+
     onBotChange() {
       if (!this.selectedBotId) return;
-      this.loadTabData(this.currentTab);
+      this.guardNavigate(() => this.loadTabData(this.currentTab));
     },
 
     loadTabData(tabId) {
@@ -987,6 +1039,7 @@ function app() {
       if (!this.selectedBotId) return;
       this.botConfigReloadResult = null;
       this.botcfgLoading = true;
+      this.botcfgEditing = false;
       try {
         const data = await this.api(`/api/config/bots/${this.selectedBotId}`);
         const cfg = data.config || data;
@@ -999,9 +1052,23 @@ function app() {
         };
       } catch (err) {
         console?.warn('[DicePP] Failed to load bot config:', err);
+        this.botConfigFields = { master: '', admin: '', friend_token: '', persona: '', nickname: '' };
+        this.errorMessage = '加载 Bot 配置失败: ' + err.message;
       } finally {
         this.botcfgLoading = false;
       }
+    },
+
+    startEditBotConfig() {
+      this.botConfigReloadResult = null;
+      this.botcfgFieldsBackup = { ...this.botConfigFields };
+      this.botcfgEditing = true;
+    },
+
+    cancelEditBotConfig() {
+      this.botConfigReloadResult = null;
+      this.botConfigFields = { ...this.botcfgFieldsBackup };
+      this.botcfgEditing = false;
     },
 
     async saveBotConfig() {
@@ -1021,6 +1088,7 @@ function app() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+        this.botcfgEditing = false;
         this.botConfigReloadResult = data.reload || [];
       } catch (err) {
         this.botConfigReloadResult = [{bot_id: this.selectedBotId, status: 'error', error: err.message}];
