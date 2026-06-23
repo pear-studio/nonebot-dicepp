@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type
 
 from utils.logger import logger
@@ -41,6 +41,10 @@ class ToolSpec:
     args_schema: Type[BaseModel]
     effect: EffectKind
     executor: Callable[..., Awaitable[Any]]
+    content_validators: list[Callable] = field(default_factory=list)
+    """内容校验器列表，每个签名为 (args: dict) -> str | None。
+    None 表示通过；返回非空字符串表示校验失败，字符串为错误描述。
+    在 Pydantic schema 校验通过后、executor 执行前运行。"""
 
 
 class ToolRegistry:
@@ -131,7 +135,7 @@ class ToolExecutor:
                 ),
                 state,
             )
-            return {"tool_call_id": tc_id, "content": err_msg}
+            return {"tool_call_id": tc_id, "content": err_msg, "status": "error"}
 
         # 参数校验
         try:
@@ -144,7 +148,7 @@ class ToolExecutor:
                 ),
                 state,
             )
-            return {"tool_call_id": tc_id, "content": f"参数解析失败: {e}"}
+            return {"tool_call_id": tc_id, "content": f"参数解析失败: {e}", "status": "error"}
 
         try:
             parsed = spec.args_schema.model_validate(raw)
@@ -156,13 +160,28 @@ class ToolExecutor:
                 ),
                 state,
             )
-            return {"tool_call_id": tc_id, "content": f"参数校验失败: {e}"}
+            return {"tool_call_id": tc_id, "content": f"参数校验失败: {e}", "status": "error"}
 
         await self._event_bus.emit(
             "ToolArgumentsValidated",
             ToolArgumentsValidatedPayload(tool_call_id=tc_id, tool_name=tc_name),
             state,
         )
+
+        # 内容校验（Pydantic schema 之外的业务约束）
+        if spec.content_validators:
+            args_dict = parsed.model_dump()
+            for validator in spec.content_validators:
+                err = validator(args_dict)
+                if err is not None:
+                    await self._event_bus.emit(
+                        "ToolArgumentsInvalid",
+                        ToolArgumentsInvalidPayload(
+                            tool_call_id=tc_id, tool_name=tc_name, error=err,
+                        ),
+                        state,
+                    )
+                    return {"tool_call_id": tc_id, "content": f"内容校验失败: {err}", "status": "error"}
 
         # EXTERNAL_ACTION 特殊处理
         if spec.effect == EffectKind.EXTERNAL_ACTION:
@@ -179,7 +198,7 @@ class ToolExecutor:
                 state,
             )
             # EXTERNAL_ACTION 返回非空 content 供 observation 回填
-            return {"tool_call_id": tc_id, "content": str(result), "_action_id": action_id}
+            return {"tool_call_id": tc_id, "content": str(result), "_action_id": action_id, "status": "success"}
 
         # PURE / STATE_WRITE 直接执行
         await self._event_bus.emit(
@@ -199,7 +218,7 @@ class ToolExecutor:
                 ),
                 state,
             )
-            return {"tool_call_id": tc_id, "content": f"工具执行失败: {e}"}
+            return {"tool_call_id": tc_id, "content": f"工具执行失败: {e}", "status": "error"}
 
         await self._event_bus.emit(
             "ToolExecutionCompleted",
@@ -221,7 +240,7 @@ class ToolExecutor:
                 state,
             )
 
-        return {"tool_call_id": tc_id, "content": str(content)}
+        return {"tool_call_id": tc_id, "content": str(content), "status": "success"}
 
 
 def _action_type(tool_name: str) -> str:

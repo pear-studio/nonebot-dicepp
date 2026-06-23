@@ -98,6 +98,7 @@ class TestToolExecutor:
         assert len(results) == 1
         assert results[0]["tool_call_id"] == "tc_1"
         assert results[0]["content"] == "search result"
+        assert results[0]["status"] == "success"
 
     @pytest.mark.asyncio
     async def test_execute_unknown_tool(self, executor, registry):
@@ -107,6 +108,7 @@ class TestToolExecutor:
         results = await executor.execute_many([tc], state)
 
         assert "未注册" in results[0]["content"]
+        assert results[0]["status"] == "error"
 
     @pytest.mark.asyncio
     async def test_execute_invalid_json(self, executor, registry):
@@ -116,6 +118,7 @@ class TestToolExecutor:
         results = await executor.execute_many([tc], state)
 
         assert "解析失败" in results[0]["content"]
+        assert results[0]["status"] == "error"
 
     @pytest.mark.asyncio
     async def test_execute_validation_error(self, executor, registry):
@@ -126,6 +129,7 @@ class TestToolExecutor:
         results = await executor.execute_many([tc], state)
 
         assert "校验失败" in results[0]["content"]
+        assert results[0]["status"] == "error"
 
     @pytest.mark.asyncio
     async def test_execute_multiple(self, executor, registry):
@@ -155,6 +159,62 @@ class TestToolExecutor:
 
         assert "执行失败" in results[0]["content"]
         assert "executor crash" in results[0]["content"]
+        assert results[0]["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_content_validator_blocks_on_failure(self, executor, registry, event_store):
+        """content_validators 返回错误消息 → 工具不执行，返回 error status"""
+        def reject_short_query(args: dict) -> str | None:
+            query = args.get("query", "")
+            if len(query) < 5:
+                return f"query 至少需要 5 个字符，当前 {len(query)} 个"
+            return None
+
+        search_exec = AsyncMock(return_value="result")
+        registry.register(ToolSpec(
+            name="search",
+            description="search",
+            args_schema=SearchArgs,
+            effect=EffectKind.PURE,
+            executor=search_exec,
+            content_validators=[reject_short_query],
+        ))
+
+        state = _make_state()
+        tc = {"id": "tc_1", "name": "search", "arguments": json.dumps({"query": "ab"})}
+
+        results = await executor.execute_many([tc], state)
+
+        assert "内容校验失败" in results[0]["content"]
+        assert "至少需要 5" in results[0]["content"]
+        assert results[0]["status"] == "error"
+        # executor 不应该被调用
+        search_exec.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_content_validator_passes_then_executes(self, executor, registry, event_store):
+        """content_validators 全部返回 None → 正常执行，返回 success"""
+        def check_length(args: dict) -> str | None:
+            return None  # always pass
+
+        search_exec = AsyncMock(return_value="result")
+        registry.register(ToolSpec(
+            name="search",
+            description="search",
+            args_schema=SearchArgs,
+            effect=EffectKind.PURE,
+            executor=search_exec,
+            content_validators=[check_length],
+        ))
+
+        state = _make_state()
+        tc = {"id": "tc_1", "name": "search", "arguments": json.dumps({"query": "test"})}
+
+        results = await executor.execute_many([tc], state)
+
+        assert results[0]["status"] == "success"
+        assert results[0]["content"] == "result"
+        search_exec.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_external_action_has_action_id(self, executor, registry, event_store):
@@ -169,6 +229,7 @@ class TestToolExecutor:
 
         assert "_action_id" in results[0]
         assert results[0]["_action_id"] != ""
+        assert results[0]["status"] == "success"
         # EXTERNAL_ACTION 的内容就是 executor 返回值
         assert '{"phase": "final", "content": "hello"}' in results[0]["content"]
 

@@ -16,7 +16,7 @@ class RecordEventArgs(BaseModel):
     """记录生成的生活事件及其对角色状态的影响"""
     description: str = Field(..., description="事件描述，自然叙事，不强制字数上限但保持简洁")
     context_summary: str = Field(
-        ..., min_length=1,
+        ..., min_length=30, max_length=60,
         description="事件摘要，30-60字，仅包含关键事实（谁、在哪、做了什么、结果），用于聊天上下文注入",
     )
     duration_minutes: int = Field(
@@ -39,7 +39,7 @@ class RecordEventArgs(BaseModel):
 
 class RecordReactionArgs(BaseModel):
     """记录角色对事件的内心反应、分享欲望、行动倾向和意向更新"""
-    reaction: str = Field(..., description="30-80 字的内心反应，仅用于日记和上下文")
+    reaction: str = Field(..., min_length=30, max_length=80, description="30-80 字的内心反应，仅用于日记和上下文")
     share_desire: float = Field(
         ..., ge=0.0, le=1.0,
         description=(
@@ -64,13 +64,13 @@ class RecordReactionArgs(BaseModel):
 
 class RecordDiaryEntryArgs(BaseModel):
     """记录日记内容"""
-    diary: str = Field(..., description="日记内容，100-200字，第一人称")
+    diary: str = Field(..., min_length=100, max_length=200, description="日记内容，100-200字，第一人称")
 
 
 class RecordShareMessageArgs(BaseModel):
     """调用此工具输出你要发给对方的分享消息。20-60字的第一人称口语消息，禁止出现角色名和第三人称描写。不要直接回复文本，必须通过此工具输出。"""
     message: str = Field(
-        ...,
+        ..., min_length=20, max_length=60,
         description="20-60字的分享消息",
     )
 

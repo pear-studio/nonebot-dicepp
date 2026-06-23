@@ -275,6 +275,19 @@ def _model_to_tool_name(model: Type[BaseModel]) -> str:
     return re.sub(r'(?<=[a-z])([A-Z])', r'_\1', name).lower()
 
 
+def _derive_content_validators(model: Type[BaseModel]) -> list:
+    """从 Pydantic model 的 Field 元数据自动派生内容校验器。
+
+    Pydantic 内建的 min_length/max_length/pattern 等约束由 model_validate
+    在校验阶段直接处理，无需在此重复。此函数扫描 json_schema_extra 等
+    Pydantic 不校验的元数据，生成对应的 content validator，用于覆盖
+    字符数以外的业务约束（正则、语义规则、跨字段校验等）。
+
+    当前返回空列表；未来可按需扩展扫描逻辑。
+    """
+    return []
+
+
 def build_collecting_registry(
     executor_fn: Callable[[Dict[str, Any]], Awaitable[str]],
     tool_names: list[str] | None = None,
@@ -304,6 +317,7 @@ def build_collecting_registry(
             args_schema=model,
             effect=EffectKind.STATE_WRITE,
             executor=_exec,
+            content_validators=_derive_content_validators(model),
         )
         reg.register(spec)
 

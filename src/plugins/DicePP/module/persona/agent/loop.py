@@ -468,10 +468,14 @@ class AgentLoop:
                                               provider, model)
 
 
-            # ── structured_collect：本轮命中 required STATE_WRITE → 完成 ──
+            # ── structured_collect：required 工具执行成功 → 完成 ──
             if (state.mode == "structured_collect"
                     and required_tools
-                    and any(tc["name"] in required_tools for tc in tool_calls)):
+                    and any(
+                        tr.get("status") == "success"
+                        for tc, tr in zip(tool_calls, tool_results)
+                        if tc["name"] in required_tools
+                    )):
                 state.final_reason = "structured_collect_completed"
                 return await self._finish(state, "completed", "structured_collect_completed",
                                           total_tokens_in, total_tokens_out, provider, model)

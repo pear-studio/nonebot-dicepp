@@ -35,7 +35,7 @@ def _make_tool_call(name: str, args: str, tc_id: str = "tc_1") -> dict:
 
 
 def _make_tool_result(tc_id: str, content: str, **kwargs) -> dict:
-    result = {"tool_call_id": tc_id, "content": content}
+    result = {"tool_call_id": tc_id, "content": content, "status": "success"}
     result.update(kwargs)
     return result
 
@@ -561,3 +561,62 @@ class TestStructuredCollectCompletion:
         )
 
         assert result.status == "max_rounds"
+
+    @pytest.mark.asyncio
+    async def test_error_status_does_not_complete_collect(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """structured_collect: tool result status=error → 不终止，LLM 重试 → 成功 → 完成"""
+        loop._limits = AgentRunLimits(max_tool_rounds=5, max_corrections=3)
+        mock_llm.complete.side_effect = [
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("record_diary_entry", json.dumps({"diary": "太短"}))],
+            ),
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("record_diary_entry", json.dumps({"diary": "符合字数要求的日记内容" * 6}))],
+            ),
+        ]
+        mock_executor.execute_many.side_effect = [
+            [_make_tool_result("tc_1", "参数校验失败: diary 长度不足", status="error")],
+            [_make_tool_result("tc_2", "ok", status="success")],
+        ]
+        state = _make_state(mode="structured_collect")
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "write diary"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "record_diary_entry"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["record_diary_entry"],
+        )
+
+        assert result.status == "completed"
+        assert result.final_reason == "structured_collect_completed"
+        assert mock_llm.complete.call_count == 2
+        assert mock_executor.execute_many.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_all_errors_hit_max_rounds(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """structured_collect: 所有 tool call 都 status=error → 永不完成 → max_rounds"""
+        loop._limits = AgentRunLimits(max_tool_rounds=2, max_corrections=0)
+        mock_llm.complete.return_value = _make_gateway_result(
+            content="",
+            tool_calls=[_make_tool_call("record_diary_entry", json.dumps({"diary": "太短"}))],
+        )
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", "参数校验失败: 长度不足", status="error"),
+        ]
+        state = _make_state(mode="structured_collect")
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "diary"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "record_diary_entry"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["record_diary_entry"],
+        )
+
+        assert result.status == "max_rounds"
+        assert result.final_reason == "max_tool_rounds"
+        # 每次 LLM 都返回 error → loop 继续 → 直到 max_rounds
+        assert mock_llm.complete.call_count == 2

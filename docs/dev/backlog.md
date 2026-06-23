@@ -282,24 +282,6 @@
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
 
-### [B-260622-7d8610] structured_collect 工具层通用输出校验与自动纠正
-- 创建: 2026-06-22
-- 优先级: P2
-- 类型: feature
-- 改动量: M
-- 问题表现:
-  - `run_structured_collect` 当前只校验 LLM 是否调用了目标工具、参数是否符合 JSON schema，不校验参数内容是否满足业务约束（如字数范围、必填语义有效性）
-  - 日记 `record_diary_entry.diary` 要求 100-200 字但仅凭 prompt 引导，LLM 可能超出范围，无代码层兜底
-  - 其他工具字段可能存在同类问题（`context_summary` 30-60 字等），缺少通用校验入口
-- 开发备忘:
-  方向：不是为单个字段加 ad-hoc 校验，而是实现工具层面的通用校验/报错/重试机制。可参考社区开源 agent 框架的 validation feedback loop 实现。
-
-  大致形态：工具 executor 返回结果时，增加一层 validate hook——可配置的校验规则（如 `Field.min_length`/`max_length`、自定义 validator、正则等）检查 LLM 输出 → 不符合时以 correction 形式返回错误信息给 LLM → LLM 修正后重新调用工具 → 复用现有 `max_corrections` 限制重试次数。
-
-  字符数校验作为首个应用：从 Pydantic Field 的 `min_length`/`max_length` 自动生成校验规则，无需手写。
-
-  影响面：`tool_bridge.py`（`run_structured_collect` / `build_collecting_registry`）、`loop.py`（correction 计数需兼容内容校验触发的重试）、`collecting.py`（各工具的 Pydantic Field 定义）。
-
 ### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
 - 创建: 2026-06-23
 - 优先级: P2
