@@ -12,6 +12,170 @@
 
 ---
 
+## dashboard
+
+### [B-260623-76a47a] 页面闪烁 — 全局 loading overlay 被 monitor 轮询触发
+- 创建: 2026-06-23
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - 切换页面后（尤其在数据浏览界面）每隔几秒整个页面闪烁一次
+    - 根因：loadMonitor() 中 setInterval 每 10s 调用 loadMonitorData()
+    - loadMonitorData() 走 api() helper，每次调用设置 apiLoading = true
+    - apiLoading 绑定全局 loading overlay（全屏半透明 spinner），导致所有 tab 都闪
+    - monitorTimer 在切换 tab 时未清除，且重复进入 monitor tab 会创建重复 timer
+    - 代码位置：dashboard.html:552 (apiLoading=true)、:957 (setInterval)
+- 开发备忘:
+    - 方案A：loadMonitorData() 绕过全局 apiLoading，直接用 fetch 或传 skipLoading 参数
+    - 方案B：setInterval 在切换 tab 时清除（在 loadTabData 中对非 monitor tab 执行 clearInterval）
+    - 建议两个方案同时做：静默轮询 + tab 离开时停 timer
+    - 影响面：dashboard.html 前端单文件，api() helper + loadMonitor/loadMonitorData + loadTabData
+    - 风险：极低，纯前端改动
+
+### [B-260623-aeaea8] Bot配置 tab 默认可编辑，缺少编辑/查看模式切换
+- 创建: 2026-06-23
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - Bot配置 tab 中 master/admin/friend_token/persona/nickname 的 input 字段直接可编辑
+    - "保存"按钮始终可见，误触即覆盖线上 bot 配置
+    - 而配置编辑 tab 有明确的 "编辑→编辑框→保存/取消" 状态机，两者设计不一致
+    - 代码位置：dashboard.html:248-291（Bot配置），对比 :186-226（配置编辑字段视图）
+- 开发备忘:
+    - 给 Bot配置 tab 增加编辑模式开关：默认只读展示，点击"编辑"按钮后才可修改
+    - 与配置编辑 tab 的交互模式保持一致
+    - 影响面：dashboard.html botcfg tab 模板 + botConfigFields 状态管理
+    - 风险：极低，纯前端改动
+
+### [B-260623-b15e43] 登录后默认不选择已开启的 bot
+- 创建: 2026-06-23
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - 登录后 left sidebar 的 bot selector 显示 "-- 选择 Bot --"，未自动选中任何 bot
+    - 数据浏览、配置编辑等 tab 都需要先手动选 bot 才能看到内容，多了一步无意义操作
+    - 代码位置：loadBots() 只填充 this.bots 数组，selectedBotId 保持 ''
+    - 无任何 auto-select 逻辑
+- 开发备忘:
+    - loadBots() 完成后，若 bots 非空且 selectedBotId 为空，自动选 bots[0]
+    - 或 checkAuth() → loadBots() 成功后自动调用 onBotChange 选中第一个
+    - 影响面：dashboard.html init/checkAuth/loadBots/onBotChange
+    - 风险：极低，注意处理 bots 为空的情况（当前已处理 selectedBotId 为空时的提示）
+
+### [B-260623-f6b322] 配置编辑中 _comment / _llm_comment 键不应出现
+- 创建: 2026-06-23
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - global.json 包含多个 comment 键被展示在配置编辑字段列表中：
+      _comment、persona_ai._comment_character、persona_ai._comment_persona、
+      persona_ai._comment_tables、persona_ai._comment_timezone
+    - 这些键是给开发者看的注释，不应暴露在 Web UI
+    - 根因：config_merged API 的 _annotate_deep 递归遍历所有键，无过滤逻辑
+    - 代码位置：app.py:623-643 (_annotate_deep)、dashboard.html:743 (buildConfigFields)
+- 开发备忘:
+    - 方案A（推荐）：后端 config_merged 遍历时跳过 key 以 '_comment' 或 '_llm_comment' 结尾的路径
+    - 方案B：前端 buildConfigFields 过滤
+    - 建议后端过滤（源头解决），同时前端加防御性过滤
+    - 影响面：app.py _annotate_deep、dashboard.html buildConfigFields
+    - 风险：极低，注意用 endswith 或正则精确匹配，避免误杀正常配置键
+
+### [B-260623-7f3f82] 内容管理查询 tab 存在多个问题（手动加载按钮、中文 DB 名报错、表格无数据/表头错误）
+- 创建: 2026-06-23
+- 优先级: P1
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - 9a: 切到 queries tab 时不自动加载数据库列表，需手动点"加载数据库列表"按钮；其他 tab（如 decks）切过去自动加载
+    - 9b: 选择 DND5E混合 报错 "db_name 格式无效" — _validate_identifier() 使用 ^[a-zA-Z0-9_-]{1,64}$ 正则，中文不通过
+      实际文件 content/queries/DND5E混合.db 是合法存在的
+    - 9c: 选择数据库后表格只有表头没有数据 — query DB 实际有 data 表（2000行）和 redirect 表（736行），
+      列名是 名称/英文/来源/分类/标签/内容，但前端硬编码表头为 ID/内容/操作，与真实列不匹配导致显示空
+    - 代码位置：app.py:178 _validate_identifier、:867 content_queries_entries（默认 table='data'）、
+      dashboard.html:305-354（queries UI）、:323-328（硬编码表头）
+- 开发备忘:
+    - 9a: loadTabData 中 content tab 时若 contentSubdir === 'queries' 自动调用 loadQueryDbs()
+    - 9b: _validate_identifier 对 db_name 放宽限制，或 query DB 走独立校验（允许中文文件名）
+      注意 path traversal 检查已独立做了 _is_path_traversal，放宽 _validate_identifier 不影响安全
+    - 9c: 查询结果使用动态表头（从 records 解析 columns，类似数据浏览的做法），去掉硬编码 ID/内容/操作
+      默认 table 参数也可能是 'redirect' 而非 'data'，需要支持表选择或自动检测
+    - 影响面：app.py _validate_identifier/content_queries_entries、dashboard.html queries 渲染
+    - 风险：低-中，放宽校验需确保 path traversal 保护仍然有效（已有独立检查）
+
+### [B-260623-7d7d93] 配置编辑与数据浏览缺少中文标签和解释
+- 创建: 2026-06-23
+- 优先级: P1
+- 类型: feature
+- 改动量: M
+- 问题表现:
+    - 配置编辑：字段以 dotted key 展示（如 persona_ai.segment_max_chars），schema.json 的中文描述仅作为 :title tooltip（鼠标悬停才可见），无可读的中文名
+    - 数据浏览：表名来自 SQLite sqlite_master（如 user_stat, group_config），纯英文无中文映射
+    - 小白用户无法理解这些技术字段名
+    - 当前 schema.json 有 137 条描述，但描述本身就是 "默认值: xxx" 格式，不够友好
+- 开发备忘:
+    - 方案：在 schema.json 中扩展描述格式或新增 label 字段，支持中文短标签 + 详细描述
+    - 数据表名映射：维护一个 table_name → 中文名 的映射（前端或后端均可）
+    - 配置编辑字段视图展示中文标签为主，dotted key 为辅（灰色小字）
+    - 影响面：schema.json 格式（需向后兼容）、dashboard.html 配置渲染、app.py config_merged 返回格式
+    - 风险：低-中，schema.json 格式变更需谨慎，确保不破坏已有描述
+
+### [B-260623-6754e2] 配置编辑缺少分组功能和隐藏低优先级配置
+- 创建: 2026-06-23
+- 优先级: P1
+- 类型: feature
+- 改动量: L
+- 问题表现:
+    - 137 个配置键 flat 展开为长列表，无分组无折叠
+    - persona_ai.* 有 60+ 个键混在核心配置中，严重干扰普通用户
+    - command_split、log.*、health_monitor.* 等低优先级配置与核心配置同级展示
+    - 用户需要反复滚动才能找到需要的配置项
+    - 代码位置：dashboard.html:189-226（配置字段视图）、schema.json（无分组元数据）
+- 开发备忘:
+    - 需要梳理所有配置项，划分分组（如：基础设置、Bot行为、Persona AI、Log/监控、高级/杂项）
+    - 方案A：在 schema.json 中增加 group/priority 元数据
+    - 方案B：在 global.json 的 key 前缀隐式分组（但已有 flat key 如 command_split 不好办）
+    - 建议方案A：schema.json 扩展为结构化描述，每条包含 label/group/priority/description
+    - 前端按 group 分组渲染，默认折叠低优先级组，提供"展开全部"开关
+    - 影响面：schema.json 格式、app.py config_merged、dashboard.html 配置渲染
+    - 风险：中，schema.json 格式变更影响面较大，需要向后兼容设计
+    - 建议先独立完成分组梳理文档，确认分组方案后再实现
+
+### [B-260623-638226] 内容管理中 .gitkeep 文件应被过滤
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - content 目录下有 4 个 .gitkeep：decks/.gitkeep, queries/.gitkeep, random/.gitkeep, excel/.gitkeep
+    - 内容管理的文件列表会展示这些 0 字节的 .gitkeep 文件
+    - 这些是 git 占位文件，对用户无意义
+    - 代码位置：app.py:844 content_list 的 iterdir() 无过滤
+- 开发备忘:
+    - content_list 中在 iterdir 后过滤掉 name == '.gitkeep' 的文件
+    - 或使用更通用的规则：过滤 '.' 开头的隐藏文件
+    - 影响面：app.py content_list 一行过滤条件
+    - 风险：极低，.gitkeep 是标准 git 占位约定，过滤安全
+
+### [B-260623-6f9e85] 缺少总览/概览 tab 聚合核心数据指标
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: feature
+- 改动量: M
+- 问题表现:
+    - 当前 6 个 tab 各自独立，没有一个 overview/dashboard 页面
+    - 无法一眼看到核心指标（在线 bot 数、最近错误、配额使用、配置变更等）
+    - 需要逐个 tab 点开查看，体验分散
+- 开发备忘:
+    - 新增 overview tab（放在 tabs 数组第一位）
+    - 聚合展示：bot 在线状态卡片、最近审计日志摘要、配置覆盖统计、最近错误计数等
+    - 后端可能需要新增 /api/overview 聚合 endpoint，或前端组合现有 API 调用
+    - 影响面：dashboard.html（新 tab UI + 数据获取逻辑）、可能新增 app.py endpoint
+    - 风险：低，纯增量功能；注意 API 调用数量和性能
+
 ## data
 
 ### [B-260618-56a0a3] 数据库迁移架构优化调研
@@ -74,21 +238,6 @@
 
 ## persona
 
-### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-    - 当前 `probe()` 返回 `bool`，调用方 `_probe_loop` 只看 True/False，不区分"网络瞬断"和"永久配额耗尽"
-    - minimax 429 配额耗尽时 probe 会重试 10 次才进入 exhausted，期间每次无意义重试约 25 分钟
-    - `classify_error_kind` 已能正确识别 2056 / rate_limit_error，但 probe 路径不调用它
-- 开发备忘:
-    - 方向：probe 返回类型从 `bool` 扩展为携带 ErrorKind，或 probe 内部直接调用 `circuit_breaker.mark_dead()` 跳过重试
-    - 也可给 probe 使用 `max_retries=0` 的独立 client，让 SDK 不重试直接抛出原始异常（带 body）
-    - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
-    - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
-
 ### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
 - 创建: 2026-06-22
 - 优先级: P1
@@ -150,6 +299,21 @@
   字符数校验作为首个应用：从 Pydantic Field 的 `min_length`/`max_length` 自动生成校验规则，无需手写。
 
   影响面：`tool_bridge.py`（`run_structured_collect` / `build_collecting_registry`）、`loop.py`（correction 计数需兼容内容校验触发的重试）、`collecting.py`（各工具的 Pydantic Field 定义）。
+
+### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - 当前 `probe()` 返回 `bool`，调用方 `_probe_loop` 只看 True/False，不区分"网络瞬断"和"永久配额耗尽"
+    - minimax 429 配额耗尽时 probe 会重试 10 次才进入 exhausted，期间每次无意义重试约 25 分钟
+    - `classify_error_kind` 已能正确识别 2056 / rate_limit_error，但 probe 路径不调用它
+- 开发备忘:
+    - 方向：probe 返回类型从 `bool` 扩展为携带 ErrorKind，或 probe 内部直接调用 `circuit_breaker.mark_dead()` 跳过重试
+    - 也可给 probe 使用 `max_retries=0` 的独立 client，让 SDK 不重试直接抛出原始异常（带 body）
+    - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
+    - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
 
 ## release
 
