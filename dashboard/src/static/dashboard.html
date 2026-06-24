@@ -96,7 +96,7 @@
       <!-- Navigation tabs -->
       <nav class="flex-1 overflow-y-auto py-2">
         <template x-for="tab in tabs" :key="tab.id">
-          <button @click="guardNavigate(() => { currentTab = tab.id; loadTabData(tab.id) })" class="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-800 transition flex items-center" :class="currentTab === tab.id ? 'bg-gray-800 border-l-4 border-blue-500' : 'border-l-4 border-transparent'">
+          <button @click="switchTab(tab.id)" class="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-800 transition flex items-center" :class="currentTab === tab.id ? 'bg-gray-800 border-l-4 border-blue-500' : 'border-l-4 border-transparent'">
             <span x-text="tab.label" class="ml-2"></span>
           </button>
         </template>
@@ -104,7 +104,7 @@
 
       <!-- Logout -->
       <div class="p-3 border-t border-gray-700">
-        <button @click="guardNavigate(() => logout())" class="flex items-center text-sm text-gray-400 hover:text-white transition">
+        <button @click="logout" class="flex items-center text-sm text-gray-400 hover:text-white transition">
           <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
           退出登录
         </button>
@@ -194,40 +194,61 @@
                 <div class="animate-pulse bg-gray-200 rounded h-4 w-5/6"></div>
                 <div class="animate-pulse bg-gray-200 rounded h-4 w-2/3"></div>
               </div>
-              <div x-show="!configLoading && Object.keys(configFields).length === 0" class="text-gray-500 text-center py-4">暂无配置</div>
-              <template x-for="(field, path) in configFields" :key="path">
-                <div class="mb-2 border rounded-lg bg-white">
-                  <div class="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50" @click="toggleField(path)">
-                    <div class="flex items-center gap-2">
-                      <svg :class="expandedFields.includes(path) ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                      <span class="font-medium text-sm" x-text="field.label || path" :title="field.description || ''"></span>
-                      <span class="text-xs text-gray-400 ml-1" x-text="field.label ? path : ''"></span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full" x-text="sourceLabel(field.source)"></span>
-                      <template x-if="field.source === 'bot' || field.source === 'user'">
-                        <button @click.stop="resetField(path)" class="text-xs text-red-500 hover:text-red-700">重置</button>
-                      </template>
-                      <template x-if="field.editing">
-                        <button @click.stop="saveField(path)" class="text-xs text-green-600 hover:text-green-800">保存</button>
-                      </template>
-                      <template x-if="!field.editing">
-                        <button @click.stop="editField(path)" class="text-xs text-blue-600 hover:text-blue-800">编辑</button>
-                      </template>
-                    </div>
+              <!-- Toolbar -->
+              <div x-show="!configLoading" class="flex items-center gap-3 mb-4">
+                <button @click="expandAllSections('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">展开全部</button>
+                <button @click="collapseAllSections('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">折叠全部</button>
+                <label class="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
+                  <input type="checkbox" x-model="showAdvanced" @change="saveUiPrefs()">
+                  显示高级设置
+                </label>
+              </div>
+              <div x-show="!configLoading && configSections.length === 0" class="text-gray-500 text-center py-4">暂无配置</div>
+              <!-- Grouped sections -->
+              <template x-for="sec in configSections" :key="sec.key">
+                <div x-show="sec.priority !== 'low' || showAdvanced" class="mb-4">
+                  <div @click="toggleSection('config', sec.key)" class="flex items-center gap-2 p-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 border">
+                    <svg :class="isSectionExpanded('config', sec.key) ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    <span class="font-semibold text-sm" x-text="sec.label"></span>
+                    <span class="text-xs text-gray-400" x-text="'(' + sec.fields.length + ')'"></span>
                   </div>
-                  <div x-show="expandedFields.includes(path)" x-cloak class="px-3 pb-3 border-t">
-                    <template x-if="!field.editing">
-                      <div class="pt-2">
-                        <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
-                      </div>
-                    </template>
-                    <template x-if="field.editing">
-                      <div class="pt-2">
-                        <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
-                        <div class="flex gap-2 mt-1">
-                          <button @click="saveField(path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
-                          <button @click="cancelEditField(path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
+                  <div x-show="isSectionExpanded('config', sec.key)" class="mt-1 space-y-1">
+                    <template x-for="field in sec.fields" :key="field.path">
+                      <div class="border rounded-lg bg-white">
+                        <div class="flex items-center justify-between p-2 cursor-pointer hover:bg-gray-50" @click="field.expanded = !field.expanded">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <svg :class="field.expanded ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <span class="font-medium text-sm truncate" x-text="field.label || field.path" :title="field.description || ''"></span>
+                            <span class="text-xs text-gray-400 flex-shrink-0 hidden sm:inline" x-text="field.label ? field.path : ''"></span>
+                          </div>
+                          <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                            <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full" x-text="sourceLabel(field.source)"></span>
+                            <template x-if="field.source === 'bot' || field.source === 'user'">
+                              <button @click.stop="resetField(field.path)" class="text-xs text-red-500 hover:text-red-700">重置</button>
+                            </template>
+                            <template x-if="field.editing">
+                              <button @click.stop="saveField(field.path)" class="text-xs text-green-600 hover:text-green-800">保存</button>
+                            </template>
+                            <template x-if="!field.editing">
+                              <button @click.stop="editField(field.path)" class="text-xs text-blue-600 hover:text-blue-800">编辑</button>
+                            </template>
+                          </div>
+                        </div>
+                        <div x-show="field.expanded" x-cloak class="px-3 pb-2 border-t">
+                          <template x-if="!field.editing">
+                            <div class="pt-2">
+                              <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
+                            </div>
+                          </template>
+                          <template x-if="field.editing">
+                            <div class="pt-2">
+                              <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                              <div class="flex gap-2 mt-1">
+                                <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
+                                <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
+                              </div>
+                            </div>
+                          </template>
                         </div>
                       </div>
                     </template>
@@ -255,96 +276,135 @@
         </template>
       </div>
 
-      <!-- Tab: Bot配置 -->
-      <div x-show="currentTab === 'botcfg'" x-cloak>
-        <h2 class="text-xl font-bold mb-4">Bot 配置</h2>
+      <!-- Tab: Persona -->
+      <div x-show="currentTab === 'persona'" x-cloak>
+        <h2 class="text-xl font-bold mb-4">Persona</h2>
         <template x-if="!selectedBotId">
           <div class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg">请先在左侧选择一个 Bot</div>
         </template>
         <template x-if="selectedBotId">
-          <div class="max-w-lg">
-            <!-- Botcfg skeleton -->
-            <div x-show="botcfgLoading" class="bg-white rounded-lg shadow p-6 space-y-4">
-              <div class="animate-pulse bg-gray-200 rounded h-4 w-1/4"></div>
-              <div class="animate-pulse bg-gray-200 rounded h-10 w-full"></div>
-              <div class="animate-pulse bg-gray-200 rounded h-4 w-1/4"></div>
-              <div class="animate-pulse bg-gray-200 rounded h-10 w-full"></div>
-              <div class="animate-pulse bg-gray-200 rounded h-4 w-1/3"></div>
-              <div class="animate-pulse bg-gray-200 rounded h-10 w-full"></div>
+          <div>
+            <!-- Persona sub-tabs -->
+            <div class="flex gap-3 mb-4 border-b">
+              <button @click="personaView = 'ai_config'" :class="personaView === 'ai_config' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">AI 配置</button>
+              <button @click="personaView = 'characters'; loadCharacters()" :class="personaView === 'characters' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">角色卡</button>
             </div>
-            <div x-show="!botcfgLoading" class="bg-white rounded-lg shadow p-6">
-              <!-- Read-only view -->
-              <template x-if="!botcfgEditing">
-                <div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Master</label>
-                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.master || '—'"></pre>
-                    <p class="text-xs text-gray-500 mt-1">骰主 ID 列表（逗号分隔）</p>
-                  </div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Admin</label>
-                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.admin || '—'"></pre>
-                    <p class="text-xs text-gray-500 mt-1">管理员 ID 列表（逗号分隔）</p>
-                  </div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Friend Token</label>
-                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.friend_token || '—'"></pre>
-                    <p class="text-xs text-gray-500 mt-1">好友添加 Token（逗号分隔）</p>
-                  </div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Persona</label>
-                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.persona || '—'"></pre>
-                    <p class="text-xs text-gray-500 mt-1">角色名</p>
-                  </div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Nickname</label>
-                    <pre class="bg-gray-50 p-2 rounded text-sm" x-text="botConfigFields.nickname || '—'"></pre>
-                    <p class="text-xs text-gray-500 mt-1">昵称</p>
-                  </div>
-                  <button @click="startEditBotConfig" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">编辑</button>
-                </div>
-              </template>
-              <!-- Edit view -->
-              <template x-if="botcfgEditing">
-                <div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Master</label>
-                    <input type="text" x-model="botConfigFields.master" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">骰主 ID 列表（逗号分隔）</p>
-                  </div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Admin</label>
-                    <input type="text" x-model="botConfigFields.admin" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">管理员 ID 列表（逗号分隔）</p>
-                  </div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Friend Token</label>
-                    <input type="text" x-model="botConfigFields.friend_token" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">好友添加 Token（逗号分隔）</p>
-                  </div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Persona</label>
-                    <input type="text" x-model="botConfigFields.persona" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">角色名</p>
-                  </div>
-                  <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-1">Nickname</label>
-                    <input type="text" x-model="botConfigFields.nickname" class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <p class="text-xs text-gray-500 mt-1">昵称</p>
-                  </div>
-                  <div class="flex gap-2">
-                    <button @click="saveBotConfig" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
-                    <button @click="cancelEditBotConfig" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium">取消</button>
-                  </div>
-                </div>
-              </template>
-              <!-- Save feedback (visible after save completes or on error) -->
-              <div x-show="botConfigReloadResult" data-testid="botcfg-save-feedback" class="mt-4">
-                <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
-                <template x-for="item in botConfigReloadResult" :key="item.bot_id">
-                  <div class="text-sm mb-1" :class="item.status === 'ok' ? 'text-green-600' : 'text-red-600'" x-text="`${item.bot_id}: ${item.status === 'ok' ? '成功' : (item.error || '失败')}`"></div>
+
+            <!-- AI 配置 sub-tab -->
+            <div x-show="personaView === 'ai_config'" x-cloak>
+              <!-- Persona config skeleton -->
+              <div x-show="personaConfigLoading" class="space-y-3 p-4">
+                <div class="animate-pulse bg-gray-200 rounded h-6 w-1/3"></div>
+                <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
+                <div class="animate-pulse bg-gray-200 rounded h-4 w-1/2"></div>
+                <div class="animate-pulse bg-gray-200 rounded h-4 w-5/6"></div>
+              </div>
+              <!-- Section sub-nav -->
+              <div x-show="!personaConfigLoading" class="flex flex-wrap gap-1 mb-4">
+                <template x-for="sec in personaLayoutSections" :key="sec.key">
+                  <button @click="personaSection = sec.key" :class="personaSection === sec.key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100'" class="px-3 py-1.5 rounded text-xs font-medium border transition">
+                    <span x-text="sec.label"></span>
+                  </button>
                 </template>
-                <div x-show="!botConfigReloadResult || botConfigReloadResult.length === 0" class="text-sm text-gray-500">Bot 离线，将在下次启动时加载</div>
+              </div>
+              <div x-show="!personaConfigLoading" class="flex items-center gap-3 mb-3">
+                <button @click="expandAllFields('persona')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">展开字段</button>
+                <button @click="collapseAllFields('persona')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">折叠字段</button>
+              </div>
+              <!-- Persona section fields -->
+              <template x-for="sec in personaConfigSections" :key="sec.key">
+                <div x-show="personaSection === sec.key" class="space-y-1">
+                  <div x-show="sec.fields.length === 0" class="text-gray-400 text-sm text-center py-4">此分组暂无配置字段</div>
+                  <template x-for="field in sec.fields" :key="field.path">
+                    <div class="border rounded-lg bg-white">
+                      <div class="flex items-center justify-between p-2 cursor-pointer hover:bg-gray-50" @click="field.expanded = !field.expanded">
+                        <div class="flex items-center gap-2 min-w-0">
+                          <svg :class="field.expanded ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                          <span class="font-medium text-sm truncate" x-text="field.label || field.path" :title="field.description || ''"></span>
+                          <span class="text-xs text-gray-400 flex-shrink-0 hidden sm:inline" x-text="field.label ? field.path : ''"></span>
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                          <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full" x-text="sourceLabel(field.source)"></span>
+                          <template x-if="field.source === 'bot' || field.source === 'user'">
+                            <button @click.stop="resetField(field.path)" class="text-xs text-red-500 hover:text-red-700">重置</button>
+                          </template>
+                          <template x-if="field.editing">
+                            <button @click.stop="saveField(field.path)" class="text-xs text-green-600 hover:text-green-800">保存</button>
+                          </template>
+                          <template x-if="!field.editing">
+                            <button @click.stop="editField(field.path)" class="text-xs text-blue-600 hover:text-blue-800">编辑</button>
+                          </template>
+                        </div>
+                      </div>
+                      <div x-show="field.expanded" x-cloak class="px-3 pb-2 border-t">
+                        <template x-if="!field.editing">
+                          <div class="pt-2">
+                            <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
+                          </div>
+                        </template>
+                        <template x-if="field.editing">
+                          <div class="pt-2">
+                            <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                            <div class="flex gap-2 mt-1">
+                              <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
+                              <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <!-- 角色卡 sub-tab -->
+            <div x-show="personaView === 'characters'" x-cloak>
+              <div x-show="charactersLoading" class="space-y-3 p-4">
+                <div class="animate-pulse bg-gray-200 rounded h-5 w-1/4"></div>
+                <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
+              </div>
+              <div x-show="!charactersLoading && characters.length === 0" class="text-gray-500 text-center py-8">暂无角色卡</div>
+              <div x-show="characters.length > 0" class="bg-white rounded-lg shadow overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="bg-gray-50">
+                    <tr>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">角色名</th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">配置文件</th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-200">
+                    <template x-for="ch in characters" :key="ch.name">
+                      <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-2 text-sm font-medium" x-text="ch.name"></td>
+                        <td class="px-4 py-2 text-sm text-gray-500">
+                          <span x-show="ch.has_config" class="text-green-600">character.yaml</span>
+                          <span x-show="!ch.has_config" class="text-gray-400">无</span>
+                        </td>
+                        <td class="px-4 py-2">
+                          <button @click="viewCharacter(ch.name)" class="text-blue-600 hover:text-blue-800 text-xs mr-2">查看</button>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <!-- Character YAML editor modal -->
+              <div x-show="editingCharacter" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak>
+                <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl max-h-[85vh] flex flex-col">
+                  <div class="flex justify-between items-center p-4 border-b">
+                    <h3 class="font-bold" x-text="'角色卡: ' + editingCharacter"></h3>
+                    <button @click="editingCharacter = ''" class="text-gray-500 hover:text-gray-700">&times;</button>
+                  </div>
+                  <div class="p-4 overflow-y-auto flex-1">
+                    <textarea x-model="characterYamlText" class="w-full h-96 border rounded p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                  </div>
+                  <div class="flex justify-end gap-2 p-4 border-t">
+                    <button @click="editingCharacter = ''" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
+                    <button @click="saveCharacter" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm">保存</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -598,7 +658,7 @@ function app() {
     tabs: [
       { id: 'data', label: '数据浏览' },
       { id: 'config', label: '配置编辑' },
-      { id: 'botcfg', label: 'Bot配置' },
+      { id: 'persona', label: 'Persona' },
       { id: 'content', label: '内容管理' },
       { id: 'monitor', label: '运行监控' },
       { id: 'audit', label: '审计日志' },
@@ -619,18 +679,23 @@ function app() {
 
     // ── Tab: Config Edit ──
     configView: 'fields',
-    configFields: {},
-    expandedFields: [],
+    configSections: [],           // [{key, label, priority, fields: [{path, value, source, ...}]}]
+    showAdvanced: false,
+    collapsedSections: {},        // {sectionKey: true|false} — true = collapsed
     userConfig: {},
     userConfigText: '',
     userConfigValid: true,
     reloadResult: null,
 
-    // ── Tab: Bot Config ──
-    botConfigFields: { master: '', admin: '', friend_token: '', persona: '', nickname: '' },
-    botcfgEditing: false,
-    botcfgFieldsBackup: {},
-    botConfigReloadResult: null,
+    // ── Tab: Persona ──
+    personaView: 'ai_config',     // 'ai_config' | 'characters'
+    personaSection: 'basic',      // current AI config section
+    personaConfigSections: [],    // same shape as configSections
+    personaLayoutSections: [],    // persona sections from layout
+    // Character cards
+    characters: [],
+    editingCharacter: '',
+    characterYamlText: '',
 
     // ── Tab: Content ──
     contentDirs: ['decks', 'random', 'queries', 'characters', 'excel'],
@@ -658,7 +723,8 @@ function app() {
     // ── Per-tab loading states ──
     dataLoading: false,
     configLoading: false,
-    botcfgLoading: false,
+    personaConfigLoading: false,
+    charactersLoading: false,
     contentLoading: false,
     monitorLoading: false,
     auditLoading: false,
@@ -671,6 +737,11 @@ function app() {
     // ── Global ──
     apiLoading: false,
     errorMessage: '',
+
+    // ── Internal cache ──
+    _mergedCache: null,
+    _lastBotId: '',
+    _layout: {},
 
     // ── init ──
     init() {
@@ -794,6 +865,8 @@ function app() {
       this.selectedBotId = '';
       this.monitorBots = [];
       this.auditLogs = [];
+      this._mergedCache = null;
+      this._lastBotId = '';
       if (this.eventSource) {
         this.eventSource.close();
         this.eventSource = null;
@@ -833,10 +906,6 @@ function app() {
       try {
         const data = await this.api('/api/bots');
         this.bots = data.bots || [];
-        // Auto-select first bot if none selected.
-        // Alpine x-model does not fire @change on programmatic assignment,
-        // so call loadTabData directly instead of onBotChange().
-        // Keep in sync with onBotChange() logic.
         if (!this.selectedBotId && this.bots.length > 0) {
           this.selectedBotId = this.bots[0];
           this.loadTabData(this.currentTab);
@@ -846,26 +915,34 @@ function app() {
       }
     },
 
-    hasUnsavedEdits() {
-      if (this.currentTab === 'botcfg' && this.botcfgEditing) return true;
+    _hasEditingFields() {
+      for (const sec of [...this.configSections, ...this.personaConfigSections]) {
+        for (const f of sec.fields) {
+          if (f.editing) return true;
+        }
+      }
       return false;
     },
 
-    guardNavigate(action) {
-      if (this.hasUnsavedEdits() && !confirm('有未保存的修改，确定要离开吗？')) return;
-      action();
+    switchTab(tabId) {
+      if (this._hasEditingFields() && !confirm('有未保存的修改，确定要离开吗？')) return;
+      this.currentTab = tabId;
+      this.loadTabData(tabId);
     },
 
     onBotChange() {
       if (!this.selectedBotId) return;
-      this.guardNavigate(() => this.loadTabData(this.currentTab));
+      if (this._hasEditingFields() && !confirm('有未保存的修改，确定要切换 Bot 吗？')) return;
+      this._mergedCache = null;
+      this._lastBotId = '';
+      this.loadTabData(this.currentTab);
     },
 
     loadTabData(tabId) {
       switch (tabId) {
         case 'data': this.loadTables(); break;
         case 'config': this.loadConfig(); break;
-        case 'botcfg': this.loadBotConfig(); break;
+        case 'persona': this.loadPersonaConfig(); break;
         case 'monitor': this.loadMonitor(); break;
         case 'audit': this.loadAudit(); break;
       }
@@ -917,46 +994,138 @@ function app() {
       return String(val);
     },
 
-    // ── Config Edit ──
-    async loadConfig() {
-      if (!this.selectedBotId) return;
-      this.reloadResult = null;
-      this.configLoading = true;
-      try {
-        const [mergedData, userData] = await Promise.all([
-          this.api(`/api/config/merged?bot_id=${this.selectedBotId}`).catch(() => ({ config: {} })),
-          this.api('/api/config/user').catch(() => ({ config: {} })),
-        ]);
-        const merged = mergedData.config || {};
-        const user = userData.config || {};
-        this.userConfig = user;
-        this.userConfigText = JSON.stringify(user, null, 2);
-        this.configFields = this.buildConfigFields(merged);
-        this.expandedFields = Object.keys(this.configFields).slice(0, 5);
-      } catch (err) {
-        console?.warn('[DicePP] Failed to load config:', err);
-        this.configFields = {};
-      } finally {
-        this.configLoading = false;
-      }
+    // ── Shared config loading ──
+    async ensureConfigLoaded() {
+      if (this._mergedCache && this._lastBotId === this.selectedBotId) return;
+      this._mergedCache = null;
+      const [mergedData, userData] = await Promise.all([
+        this.api(`/api/config/merged?bot_id=${this.selectedBotId}`).catch(() => ({ config: {}, layout: {} })),
+        this.api('/api/config/user').catch(() => ({ config: {} })),
+      ]);
+      this._mergedCache = mergedData.config || {};
+      this._layout = mergedData.layout || {};
+      this._lastBotId = this.selectedBotId;
+      this.userConfig = userData.config || {};
+      this.userConfigText = JSON.stringify(this.userConfig, null, 2);
     },
 
-    // Flat dotted-key config from merged endpoint: {"key": {value, source, description}}
-    buildConfigFields(merged) {
+    // Build field objects from merged config, filtered by tab
+    buildFieldsForTab(tabFilter) {
       const fields = {};
-      if (!merged || typeof merged !== 'object') return fields;
+      const merged = this._mergedCache || {};
       for (const [path, entry] of Object.entries(merged)) {
         if (path.split('.').pop().startsWith('_comment')) continue;
+        if (tabFilter && entry.tab !== tabFilter) continue;
         fields[path] = {
+          path: path,
           value: entry.value,
           source: entry.source || 'default',
           editing: false,
           editValue: '',
           label: entry.label || '',
           description: entry.description || '',
+          tab: entry.tab || 'config',
+          section: entry.section || 'runtime',
+          expanded: false,
         };
       }
       return fields;
+    },
+
+    // Group flat fields by section, ordered by layout
+    groupFieldsBySection(fieldsMap, sectionsLayout) {
+      const groups = {};
+      for (const [path, field] of Object.entries(fieldsMap)) {
+        const sec = field.section || 'runtime';
+        if (!groups[sec]) groups[sec] = [];
+        groups[sec].push(field);
+      }
+      // Sort sections by layout order, fallback to key sort
+      const orderMap = {};
+      if (sectionsLayout) {
+        for (const [k, v] of Object.entries(sectionsLayout)) {
+          orderMap[k] = v.order != null ? v.order : 999;
+        }
+      }
+      const sorted = Object.entries(groups).sort((a, b) => {
+        const oa = orderMap[a[0]] != null ? orderMap[a[0]] : 999;
+        const ob = orderMap[b[0]] != null ? orderMap[b[0]] : 999;
+        return oa - ob || a[0].localeCompare(b[0]);
+      });
+      return sorted.map(([key, fields]) => ({
+        key: key,
+        label: (sectionsLayout && sectionsLayout[key] && sectionsLayout[key].label) || key,
+        priority: (sectionsLayout && sectionsLayout[key] && sectionsLayout[key].priority) || 'normal',
+        fields: fields,
+      }));
+    },
+
+    // ── Config Edit Tab ──
+    async loadConfig() {
+      if (!this.selectedBotId) return;
+      this.reloadResult = null;
+      this.configLoading = true;
+      try {
+        await this.ensureConfigLoaded();
+        const fields = this.buildFieldsForTab('config');
+        const sectionsLayout = this._layout && this._layout.sections ? this._layout.sections : {};
+        this.configSections = this.groupFieldsBySection(fields, sectionsLayout);
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load config:', err);
+        this.configSections = [];
+      } finally {
+        this.configLoading = false;
+      }
+    },
+
+    isSectionExpanded(which, secKey) {
+      // Sections are expanded by default, collapsed = true means user clicked to collapse
+      const key = which + '/' + secKey;
+      return this.collapsedSections[key] !== true;
+    },
+
+    toggleSection(which, secKey) {
+      const key = which + '/' + secKey;
+      if (this.collapsedSections[key]) {
+        delete this.collapsedSections[key];
+      } else {
+        this.collapsedSections[key] = true;
+      }
+      this.saveUiPrefs();
+    },
+
+    expandAllSections(which) {
+      const prefix = which + '/';
+      for (const k of Object.keys(this.collapsedSections)) {
+        if (k.startsWith(prefix)) delete this.collapsedSections[k];
+      }
+      this.saveUiPrefs();
+    },
+
+    collapseAllSections(which) {
+      const sections = which === 'config' ? this.configSections : this.personaConfigSections;
+      for (const sec of sections) {
+        this.collapsedSections[which + '/' + sec.key] = true;
+      }
+      this.saveUiPrefs();
+    },
+
+    expandAllFields(which) {
+      const sections = which === 'persona' ? this.personaConfigSections : this.configSections;
+      for (const sec of sections) {
+        for (const f of sec.fields) {
+          f.expanded = true;
+        }
+      }
+    },
+
+    collapseAllFields(which) {
+      const sections = which === 'persona' ? this.personaConfigSections : this.configSections;
+      for (const sec of sections) {
+        for (const f of sec.fields) {
+          f.expanded = false;
+        }
+      }
     },
 
     sourceBadgeClass(source) {
@@ -975,28 +1144,32 @@ function app() {
       return String(val);
     },
 
-    toggleField(path) {
-      const idx = this.expandedFields.indexOf(path);
-      if (idx === -1) this.expandedFields.push(path);
-      else this.expandedFields.splice(idx, 1);
+    // Look up a field across ALL sections
+    _findField(sections, path) {
+      for (const sec of sections) {
+        for (const f of sec.fields) {
+          if (f.path === path) return f;
+        }
+      }
+      return null;
     },
 
     editField(path) {
-      const field = this.configFields[path];
+      const field = this._findField(this.configSections, path) || this._findField(this.personaConfigSections, path);
       if (!field) return;
       field.editing = true;
       field.editValue = typeof field.value === 'object' ? JSON.stringify(field.value, null, 2) : String(field.value);
     },
 
     cancelEditField(path) {
-      const field = this.configFields[path];
+      const field = this._findField(this.configSections, path) || this._findField(this.personaConfigSections, path);
       if (!field) return;
       field.editing = false;
       field.editValue = '';
     },
 
     async saveField(path) {
-      const field = this.configFields[path];
+      const field = this._findField(this.configSections, path) || this._findField(this.personaConfigSections, path);
       if (!field) return;
       try {
         let newVal = field.editValue;
@@ -1007,7 +1180,11 @@ function app() {
           body: JSON.stringify({ path: path, value: newVal }),
         });
         this.reloadResult = data.reload || null;
-        await this.loadConfig();
+        // Reload
+        this._mergedCache = null;
+        this._lastBotId = '';
+        if (this.currentTab === 'config') await this.loadConfig();
+        if (this.currentTab === 'persona') await this.loadPersonaConfig();
       } catch (err) {
         this.errorMessage = '保存失败: ' + err.message;
       }
@@ -1021,7 +1198,10 @@ function app() {
           body: JSON.stringify({ path: path }),
         });
         this.reloadResult = data.reload || null;
-        await this.loadConfig();
+        this._mergedCache = null;
+        this._lastBotId = '';
+        if (this.currentTab === 'config') await this.loadConfig();
+        if (this.currentTab === 'persona') await this.loadPersonaConfig();
       } catch (err) {
         this.errorMessage = '重置失败: ' + err.message;
       }
@@ -1054,64 +1234,77 @@ function app() {
       }
     },
 
-    // ── Bot Config ──
-    async loadBotConfig() {
+    // ── Persona Tab ──
+    async loadPersonaConfig() {
       if (!this.selectedBotId) return;
-      this.botConfigReloadResult = null;
-      this.botcfgLoading = true;
-      this.botcfgEditing = false;
+      this.personaConfigLoading = true;
       try {
-        const data = await this.api(`/api/config/bots/${this.selectedBotId}`);
-        const cfg = data.config || data;
-        this.botConfigFields = {
-          master: Array.isArray(cfg.master) ? cfg.master.join(',') : (cfg.master || ''),
-          admin: Array.isArray(cfg.admin) ? cfg.admin.join(',') : (cfg.admin || ''),
-          friend_token: Array.isArray(cfg.friend_token) ? cfg.friend_token.join(',') : (cfg.friend_token || ''),
-          persona: cfg.persona || '',
-          nickname: cfg.nickname || '',
-        };
+        await this.ensureConfigLoaded();
+        const fields = this.buildFieldsForTab('persona');
+        const sectionsLayout = this._layout && this._layout.sections ? this._layout.sections : {};
+        this.personaConfigSections = this.groupFieldsBySection(fields, sectionsLayout);
+        // Build persona section nav from layout
+        const personaSections = [];
+        if (sectionsLayout) {
+          for (const [k, v] of Object.entries(sectionsLayout)) {
+            // Filter persona sections by tab (from DASHBOARD_LAYOUT in pydantic_models.py)
+            if (v.tab === 'persona') {
+              personaSections.push({ key: k, label: v.label, order: v.order != null ? v.order : 99 });
+            }
+          }
+        }
+        personaSections.sort((a, b) => a.order - b.order);
+        this.personaLayoutSections = personaSections;
+        if (personaSections.length > 0 && !personaSections.find(s => s.key === this.personaSection)) {
+          this.personaSection = personaSections[0].key;
+        }
       } catch (err) {
-        console?.warn('[DicePP] Failed to load bot config:', err);
-        this.botConfigFields = { master: '', admin: '', friend_token: '', persona: '', nickname: '' };
-        this.errorMessage = '加载 Bot 配置失败: ' + err.message;
+        console?.warn('[DicePP] Failed to load persona config:', err);
+        this.personaConfigSections = [];
+        this.personaLayoutSections = [];
       } finally {
-        this.botcfgLoading = false;
+        this.personaConfigLoading = false;
       }
     },
 
-    startEditBotConfig() {
-      this.botConfigReloadResult = null;
-      this.botcfgFieldsBackup = { ...this.botConfigFields };
-      this.botcfgEditing = true;
-    },
-
-    cancelEditBotConfig() {
-      this.botConfigReloadResult = null;
-      this.botConfigFields = { ...this.botcfgFieldsBackup };
-      this.botcfgEditing = false;
-    },
-
-    async saveBotConfig() {
-      if (!this.selectedBotId) return;
-      this.botConfigReloadResult = null;
-      this.saving = true;
-      const payload = {
-        master: this.botConfigFields.master ? this.botConfigFields.master.split(',').map(s => s.trim()).filter(Boolean) : [],
-        admin: this.botConfigFields.admin ? this.botConfigFields.admin.split(',').map(s => s.trim()).filter(Boolean) : [],
-        friend_token: this.botConfigFields.friend_token ? this.botConfigFields.friend_token.split(',').map(s => s.trim()).filter(Boolean) : [],
-        persona: this.botConfigFields.persona,
-        nickname: this.botConfigFields.nickname,
-      };
+    // ── Character cards ──
+    async loadCharacters() {
+      this.charactersLoading = true;
       try {
-        const data = await this.api(`/api/config/bots/${this.selectedBotId}/save`, {
+        const data = await this.api('/api/persona/characters');
+        this.characters = data.characters || [];
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load characters:', err);
+        this.characters = [];
+      } finally {
+        this.charactersLoading = false;
+      }
+    },
+
+    async viewCharacter(name) {
+      try {
+        const data = await this.api(`/api/persona/characters/${encodeURIComponent(name)}`);
+        this.editingCharacter = name;
+        this.characterYamlText = data.content || '';
+      } catch (err) {
+        this.errorMessage = '加载角色卡失败: ' + err.message;
+      }
+    },
+
+    async saveCharacter() {
+      if (!this.editingCharacter) return;
+      this.saving = true;
+      try {
+        await this.api(`/api/persona/characters/${encodeURIComponent(this.editingCharacter)}/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ content: this.characterYamlText }),
         });
-        this.botcfgEditing = false;
-        this.botConfigReloadResult = data.reload || [];
+        this.editingCharacter = '';
+        this.characterYamlText = '';
+        await this.loadCharacters();
       } catch (err) {
-        this.botConfigReloadResult = [{bot_id: this.selectedBotId, status: 'error', error: err.message}];
+        this.errorMessage = '保存角色卡失败: ' + err.message;
       } finally {
         this.saving = false;
       }
@@ -1158,7 +1351,6 @@ function app() {
       if (!this.selectedQueryDb) return;
       try {
         const data = await this.api(`/api/content/queries/${encodeURIComponent(this.selectedQueryDb)}/tables`);
-        // tables may be [{name, label}] (new) or [string] (legacy)
         const raw = data.tables || [];
         this.queryTables = raw.map(t => typeof t === 'string' ? {name: t, label: t} : t);
         const names = this.queryTables.map(t => t.name);
@@ -1227,6 +1419,19 @@ function app() {
       } finally {
         this.auditLoading = false;
       }
+    },
+
+    // ── UI prefs (localStorage) ──
+    saveUiPrefs() {
+      try {
+        localStorage.setItem('dicepp_showAdvanced', this.showAdvanced ? '1' : '0');
+      } catch (_) {}
+    },
+
+    loadUiPrefs() {
+      try {
+        this.showAdvanced = localStorage.getItem('dicepp_showAdvanced') === '1';
+      } catch (_) { this.showAdvanced = false; }
     },
 
     // ── Helpers ──

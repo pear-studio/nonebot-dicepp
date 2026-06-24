@@ -22,7 +22,6 @@ class DashboardPaths:
     CONFIG_GLOBAL = CONFIG_DIR / "global.json"
     CONFIG_USER = CONFIG_DIR / "user.json"
     CONFIG_BOTS_DIR = CONFIG_DIR / "bots"
-    CONFIG_SCHEMA = CONFIG_DIR / "schema.json"
 
     # Bot data directory (respects DICEPP_DATA_DIR override)
     _data_dir_override = os.environ.get("DICEPP_DATA_DIR")

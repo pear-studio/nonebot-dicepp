@@ -42,7 +42,6 @@ def _patch_paths(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> None:
     monkeypatch.setattr(DashboardPaths, "CONFIG_GLOBAL", project_root / "config" / "global.json")
     monkeypatch.setattr(DashboardPaths, "CONFIG_USER", project_root / "config" / "user.json")
     monkeypatch.setattr(DashboardPaths, "CONFIG_BOTS_DIR", project_root / "config" / "bots")
-    monkeypatch.setattr(DashboardPaths, "CONFIG_SCHEMA", project_root / "config" / "schema.json")
     monkeypatch.setattr(DashboardPaths, "DATA_BOTS_DIR", project_root / "data" / "bots")
     monkeypatch.setattr(DashboardPaths, "CONTENT_DIR", project_root / "content")
     monkeypatch.setenv("DICEPP_PROJECT_ROOT", str(project_root))

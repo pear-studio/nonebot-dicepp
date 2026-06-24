@@ -207,7 +207,6 @@ jobs:
           Copy-Item dist/DicePPDashboard.exe dist/DicePP/DicePPDashboard.exe
           New-Item -ItemType Directory -Force dist/DicePP/config/bots | Out-Null
           Copy-Item config/global.json dist/DicePP/config/global.json
-          Copy-Item config/schema.json dist/DicePP/config/schema.json
           Copy-Item config/bots/_template.json dist/DicePP/config/bots/_template.json
 
           $versionLine = (Get-Content pyproject.toml | Select-String '^version =').Line

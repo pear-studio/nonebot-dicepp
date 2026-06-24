@@ -14,27 +14,6 @@
 
 ## dashboard
 
-### [B-260623-6754e2] 配置编辑缺少分组功能和隐藏低优先级配置
-- 创建: 2026-06-23
-- 优先级: P1
-- 类型: feature
-- 改动量: L
-- 问题表现:
-    - 137 个配置键 flat 展开为长列表，无分组无折叠
-    - persona_ai.* 有 60+ 个键混在核心配置中，严重干扰普通用户
-    - command_split、log.*、health_monitor.* 等低优先级配置与核心配置同级展示
-    - 用户需要反复滚动才能找到需要的配置项
-    - 代码位置：dashboard.html:189-226（配置字段视图）、schema.json（无分组元数据）
-- 开发备忘:
-    - 需要梳理所有配置项，划分分组（如：基础设置、Bot行为、Persona AI、Log/监控、高级/杂项）
-    - 方案A：在 schema.json 中增加 group/priority 元数据
-    - 方案B：在 global.json 的 key 前缀隐式分组（但已有 flat key 如 command_split 不好办）
-    - 建议方案A：schema.json 扩展为结构化描述，每条包含 label/group/priority/description
-    - 前端按 group 分组渲染，默认折叠低优先级组，提供"展开全部"开关
-    - 影响面：schema.json 格式、app.py config_merged、dashboard.html 配置渲染
-    - 风险：中，schema.json 格式变更影响面较大，需要向后兼容设计
-    - 建议先独立完成分组梳理文档，确认分组方案后再实现
-
 ### [B-260623-6f9e85] 缺少总览/概览 tab 聚合核心数据指标
 - 创建: 2026-06-23
 - 优先级: P2

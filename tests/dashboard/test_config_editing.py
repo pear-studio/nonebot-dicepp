@@ -39,23 +39,36 @@ class TestMergedView:
         assert config["app.name"]["value"] == "user_override"
         assert config["app.name"]["source"] == "user"
 
-    def test_merged_with_schema(self, test_client: TestClient, tmp_dashboard_paths):
-        """When schema.json exists, descriptions are included."""
-        # Create user override so the nested object gets flattened to
-        # dotted keys, enabling the schema description lookup.
-        user_cfg = {"app": {"name": "user_override"}}
-        DashboardPaths.CONFIG_USER.write_text(json.dumps(user_cfg))
-
-        # Write a minimal schema
-        schema = {"app.name": "Application name", "app.version": "Application version"}
-        DashboardPaths.CONFIG_SCHEMA.write_text(json.dumps(schema))
-
+    def test_merged_includes_tab_and_section(self, test_client: TestClient, tmp_dashboard_paths):
+        """Each config field in merged output includes tab and section keys."""
         setup_auth(test_client)
         resp = test_client.get("/api/config/merged")
         config = resp.json()["config"]
 
-        assert config["app.name"]["description"] == "Application name"
-        assert config["app.version"]["description"] == "Application version"
+        for dotted, entry in config.items():
+            assert "tab" in entry, f"missing tab for {dotted}"
+            assert "section" in entry, f"missing section for {dotted}"
+            assert isinstance(entry["tab"], str) and entry["tab"], \
+                f"empty tab for {dotted}"
+            assert isinstance(entry["section"], str) and entry["section"], \
+                f"empty section for {dotted}"
+
+    def test_merged_includes_layout(self, test_client: TestClient, tmp_dashboard_paths):
+        """Response includes layout metadata key (may be empty if Pydantic unavailable)."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/config/merged")
+        data = resp.json()
+        assert "layout" in data
+        # Layout from Pydantic module may be empty in test env (no pydantic installed)
+        layout = data["layout"]
+        if layout:
+            assert "tabs" in layout
+            assert "sections" in layout
+            assert "config" in layout["tabs"]
+            assert "persona" in layout["tabs"]
+            assert "account" in layout["sections"]
+            assert "advanced" in layout["sections"]
+            assert "basic" in layout["sections"]
 
     def test_merged_excludes_comment_keys(self, test_client: TestClient, tmp_dashboard_paths):
         """``_comment`` keys (write-only dev notes) must not appear in merged output."""
@@ -198,6 +211,110 @@ class TestUserJsonSave:
         assert resp.status_code == 400
         data = resp.json()
         assert data["ok"] is False
+
+
+class TestFieldMetadata:
+    """Unit tests for _flatten_json_schema — verify Pydantic v2 schema parsing."""
+
+    @staticmethod
+    def _make_mock_defs():
+        """Return $defs and root schema simulating Pydantic v2 model_json_schema().
+
+        In Pydantic v2, Field(json_schema_extra={"dashboard_section": "chat_reply"})
+        merges keys DIRECTLY into the property schema (not nested under json_schema_extra).
+        """
+        defs = {
+            "PersonaConfig": {
+                "dashboard_tab": "persona",
+                "dashboard_section": "basic",
+                "properties": {
+                    "enabled": {
+                        "title": "启用 Persona",
+                        "type": "boolean",
+                    },
+                    "max_messages": {
+                        "title": "最大消息数",
+                        "type": "integer",
+                        "dashboard_section": "chat_reply",
+                    },
+                },
+            },
+            "ProviderConfig": {
+                "dashboard_tab": "persona",
+                "dashboard_section": "providers",
+                "properties": {
+                    "api_key": {
+                        "title": "API Key",
+                        "type": "string",
+                    },
+                },
+            },
+        }
+        schema = {
+            "dashboard_tab": "config",
+            "dashboard_section": "account",
+            "properties": {
+                "agreement": {
+                    "title": "用户协议",
+                    "type": "string",
+                    "dashboard_section": "runtime",
+                },
+                "persona_ai": {
+                    "title": "Persona AI",
+                    "$ref": "#/$defs/PersonaConfig",
+                },
+                "persona_ai_providers": {
+                    "title": "模型提供商",
+                    "type": "object",
+                    "additionalProperties": {"$ref": "#/$defs/ProviderConfig"},
+                },
+            },
+            "$defs": defs,
+        }
+        return schema
+
+    def test_field_section_override(self):
+        """Field-level dashboard_section in property schema overrides model-level default."""
+        from dashboard.src.app import _flatten_json_schema
+        schema = self._make_mock_defs()
+        defs = schema.get("$defs", {})
+        result = _flatten_json_schema(schema, defs)
+
+        # Field with override: agreement has dashboard_section="runtime" (not "account")
+        assert result["agreement"]["section"] == "runtime", \
+            f"agreement section should be 'runtime', got {result.get('agreement', {}).get('section')}"
+        assert result["agreement"]["tab"] == "config"
+
+        # Field with override: persona_ai.max_messages has section="chat_reply" (not "basic")
+        assert result["persona_ai.max_messages"]["section"] == "chat_reply", \
+            f"max_messages section should be 'chat_reply', got {result.get('persona_ai.max_messages', {}).get('section')}"
+        assert result["persona_ai.max_messages"]["tab"] == "persona"
+
+    def test_field_inherits_model_section(self):
+        """Field WITHOUT override inherits model-level dashboard_section."""
+        from dashboard.src.app import _flatten_json_schema
+        schema = self._make_mock_defs()
+        defs = schema.get("$defs", {})
+        result = _flatten_json_schema(schema, defs)
+
+        # persona_ai.enabled has NO field-level override → inherits "basic" from model
+        assert result["persona_ai.enabled"]["section"] == "basic", \
+            f"enabled section should be 'basic', got {result.get('persona_ai.enabled', {}).get('section')}"
+        assert result["persona_ai.enabled"]["tab"] == "persona"
+
+    def test_provider_additional_properties_handled(self):
+        """additionalProperties.$ref is resolved, child fields inherit model tab/section."""
+        from dashboard.src.app import _flatten_json_schema
+        schema = self._make_mock_defs()
+        defs = schema.get("$defs", {})
+        result = _flatten_json_schema(schema, defs)
+
+        # persona_ai_providers.api_key should inherit ProviderConfig's "providers" section
+        assert "persona_ai_providers.api_key" in result, \
+            "additionalProperties.$ref child fields not enumerated"
+        assert result["persona_ai_providers.api_key"]["section"] == "providers", \
+            f"api_key section should be 'providers', got {result.get('persona_ai_providers.api_key', {}).get('section')}"
+        assert result["persona_ai_providers.api_key"]["tab"] == "persona"
 
 
 class TestReloadNotification:

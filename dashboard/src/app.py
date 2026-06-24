@@ -133,14 +133,14 @@ def _read_json_safe(path: Path) -> dict:
 
 
 # Config files that the dashboard must never overwrite (git-managed).
-_READONLY_CONFIG_NAMES: set[str] = {"global.json", "schema.json"}
+_READONLY_CONFIG_NAMES: set[str] = {"global.json"}
 
 
 def _write_json_atomic(path: Path, data: dict) -> None:
     """Atomically write a dict to a JSON file using .tmp + os.replace.
 
-    Refuses to write to protected files (global.json, schema.json) which
-    are git-managed and should only be changed via code review.
+    Refuses to write to protected files (global.json) which
+    is git-managed and should only be changed via code review.
     """
     if path.name in _READONLY_CONFIG_NAMES:
         raise HTTPException(
@@ -658,72 +658,131 @@ async def data_table(
 # ── Config editing ────────────────────────────────────────────────────────────
 
 
-def _get_config_field_metadata() -> dict:
-    """Extract field titles and descriptions from BotConfig Pydantic model.
+# Module-level cache for the loaded pydantic_models module
+_pydantic_module_cache = None
 
-    Returns a flat dict mapping dotted keys to {title, description}.
-    Loads the pydantic_models module directly (not via the DicePP package)
-    to avoid pulling in the full nonebot2 dependency chain.
-    Returns an empty dict if the Pydantic import is not available.
+
+def _load_pydantic_models_module():
+    """Import pydantic_models.py via importlib (avoids pulling in nonebot2).
+
+    Returns the module on success, or None.
+    Module reference is cached so _cached_config_field_metadata() and
+    _cached_config_layout() share a single import.
     """
+    global _pydantic_module_cache
+    if _pydantic_module_cache is not None:
+        return _pydantic_module_cache
+
     import importlib.util
 
     _pydantic_path = DashboardPaths.PROJECT_ROOT / "src" / "plugins" / "DicePP" / "core" / "config" / "pydantic_models.py"
     if not _pydantic_path.exists():
-        return {}
+        return None
 
     try:
         spec = importlib.util.spec_from_file_location("dicepp_pydantic_models", str(_pydantic_path))
+        if spec is None:
+            return None
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        BotConfig = mod.BotConfig
-        schema = BotConfig.model_json_schema()
-
-        def _flatten_schema(s: dict, defs: dict, prefix: str = "") -> dict:
-            # Known limitation: does not handle anyOf (Optional[BaseModel]),
-            # items.$ref (List[BaseModel]), or additionalProperties.$ref
-            # (Dict[str, BaseModel]). These patterns exist for fields like
-            # persona_ai.providers.<name>.models[*].circuit_breaker, but
-            # their dotted keys contain dynamic segments that the flat
-            # config_merged output cannot match statically.
-            result = {}
-            for key, prop in s.get("properties", {}).items():
-                full = f"{prefix}.{key}" if prefix else key
-                title = prop.get("title", key)
-                desc = prop.get("description", "") or ""
-                result[full] = {"title": title, "description": desc}
-
-                # Resolve $ref for nested models
-                if "$ref" in prop:
-                    ref_name = prop["$ref"].split("/")[-1]
-                    ref_schema = defs.get(ref_name, {})
-                    result.update(_flatten_schema(ref_schema, defs, full))
-                elif "properties" in prop:
-                    result.update(_flatten_schema(prop, defs, full))
-                # Handle allOf (e.g., for Optional with $ref)
-                elif "allOf" in prop:
-                    for item in prop["allOf"]:
-                        if "$ref" in item:
-                            ref_name = item["$ref"].split("/")[-1]
-                            ref_schema = defs.get(ref_name, {})
-                            result.update(_flatten_schema(ref_schema, defs, full))
-
-            return result
-
-        defs = schema.get("$defs", {})
-        return _flatten_schema(schema, defs)
+        _pydantic_module_cache = mod
+        return mod
     except (FileNotFoundError, ModuleNotFoundError):
-        return {}
+        return None
     except Exception:
         import logging
         logging.getLogger("dashboard").exception(
             "Unexpected error loading config field metadata from %s", _pydantic_path
         )
+        return None
+
+
+def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
+                         inherited_tab: str = "", inherited_section: str = "") -> dict:
+    """Flatten a Pydantic v2 JSON schema to dotted-key → {title, description, tab, section}.
+
+    Model-level json_schema_extra (ConfigDict) keys are merged directly into the
+    model schema by Pydantic v2.  Likewise, Field(json_schema_extra={...}) keys
+    are merged directly into each property schema — *not* nested under a
+    ``json_schema_extra`` sub-key.  This function reads ``dashboard_tab`` and
+    ``dashboard_section`` directly from schema nodes.
+
+    Known limitation: does not handle anyOf (Optional[BaseModel]) or
+    items.$ref (List[BaseModel]).  These patterns exist for fields like
+    persona_ai.providers.<name>.models[*].circuit_breaker, but their dotted
+    keys contain dynamic segments the flat config_merged output cannot match.
+    """
+    # Model-level json_schema_extra keys are merged at the model schema top level
+    tab = s.get("dashboard_tab", inherited_tab)
+    section = s.get("dashboard_section", inherited_section)
+
+    result = {}
+    for key, prop in s.get("properties", {}).items():
+        full = f"{prefix}.{key}" if prefix else key
+        title = prop.get("title", key)
+        desc = prop.get("description", "") or ""
+
+        # Field-level json_schema_extra keys are merged directly into the
+        # property schema by Pydantic v2 (not nested under json_schema_extra).
+        field_tab = prop.get("dashboard_tab", tab)
+        field_section = prop.get("dashboard_section", section)
+
+        result[full] = {
+            "title": title,
+            "description": desc,
+            "tab": field_tab,
+            "section": field_section,
+        }
+
+        # Resolve $ref for nested models
+        if "$ref" in prop:
+            ref_name = prop["$ref"].split("/")[-1]
+            ref_schema = defs.get(ref_name, {})
+            result.update(_flatten_json_schema(ref_schema, defs, full,
+                                               field_tab, field_section))
+        elif "properties" in prop:
+            result.update(_flatten_json_schema(prop, defs, full,
+                                               field_tab, field_section))
+        # Handle allOf (e.g., for Optional with $ref)
+        elif "allOf" in prop:
+            for item in prop["allOf"]:
+                if "$ref" in item:
+                    ref_name = item["$ref"].split("/")[-1]
+                    ref_schema = defs.get(ref_name, {})
+                    result.update(_flatten_json_schema(ref_schema, defs, full,
+                                                       field_tab, field_section))
+        # Handle additionalProperties.$ref (Dict[str, BaseModel], e.g. providers)
+        elif "additionalProperties" in prop and isinstance(prop["additionalProperties"], dict):
+            ap = prop["additionalProperties"]
+            if "$ref" in ap:
+                ref_name = ap["$ref"].split("/")[-1]
+                ref_schema = defs.get(ref_name, {})
+                result.update(_flatten_json_schema(ref_schema, defs, full,
+                                                   field_tab, field_section))
+
+    return result
+
+
+def _get_config_field_metadata() -> dict:
+    """Extract field titles, descriptions, tab and section from BotConfig Pydantic model.
+
+    Returns a flat dict mapping dotted keys to {title, description, tab, section}.
+    Model-level json_schema_extra (ConfigDict) provides default tab/section;
+    field-level json_schema_extra (Field) can override section per-field.
+    """
+    mod = _load_pydantic_models_module()
+    if mod is None:
         return {}
+
+    BotConfig = mod.BotConfig
+    schema = BotConfig.model_json_schema()
+    defs = schema.get("$defs", {})
+    return _flatten_json_schema(schema, defs)
 
 
 # Cache metadata at module level (computed once on first use)
 _config_field_metadata_cache: Optional[dict] = None
+_config_layout_cache: Optional[dict] = None
 
 
 def _cached_config_field_metadata() -> dict:
@@ -734,6 +793,15 @@ def _cached_config_field_metadata() -> dict:
             _config_field_metadata_cache = result
         return result
     return _config_field_metadata_cache
+
+
+def _cached_config_layout() -> dict:
+    """Return DASHBOARD_LAYOUT from pydantic_models or empty dict."""
+    global _config_layout_cache
+    if _config_layout_cache is None:
+        mod = _load_pydantic_models_module()
+        _config_layout_cache = getattr(mod, "DASHBOARD_LAYOUT", {}) if mod else {}
+    return _config_layout_cache
 
 
 @app.get("/api/config/merged", dependencies=[Depends(require_auth)])
@@ -796,13 +864,10 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
         for dotted, value in bot_flat.items():
             result_annotated[dotted] = {"value": value, "source": "bot"}
 
-    # Load field metadata from Pydantic models (title=label, description=tooltip)
+    # Load field metadata from Pydantic models (title=label, description=tooltip, tab, section)
     field_meta = _cached_config_field_metadata()
 
-    # Fallback: also read schema.json for any legacy descriptions not yet in Pydantic
-    schema = _read_json_safe(DashboardPaths.CONFIG_SCHEMA) if DashboardPaths.CONFIG_SCHEMA.exists() else {}
-
-    # Build output with labels and descriptions
+    # Build output with labels, descriptions, tab and section
     output = {}
     for dotted, entry in result_annotated.items():
         meta = field_meta.get(dotted, {})
@@ -811,14 +876,12 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
             "source": entry["source"],
             "label": meta.get("title", dotted),
             "description": meta.get("description", ""),
+            "tab": meta.get("tab", "config"),
+            "section": meta.get("section", "runtime"),
         }
-        # Fallback: if Pydantic has no description but schema.json does, use it
-        if not output[dotted]["description"]:
-            desc = schema.get(dotted) if isinstance(schema, dict) else None
-            if desc:
-                output[dotted]["description"] = desc
 
-    return _ok({"config": output})
+    layout = _cached_config_layout()
+    return _ok({"config": output, "layout": layout})
 
 
 @app.post("/api/config/set", dependencies=[Depends(require_auth)])
@@ -872,6 +935,8 @@ async def config_reset(request: Request):
     return _ok({"removed": removed, "reload": reload_results})
 
 
+# NOTE: Not consumed by Dashboard frontend; retained for external API consumers
+# (e.g., bot runtime config sync via dashboard_client.py).
 @app.get("/api/config/bots/{bot_id}", dependencies=[Depends(require_auth)])
 async def config_bot_get(bot_id: str, request: Request):
     """Read bot config file content."""
@@ -921,6 +986,68 @@ async def config_user_save(request: Request):
 
     reload_results = await _notify_reload(db_path)
     return _ok({"saved": True, "reload": reload_results})
+
+
+# ── Persona character cards ──────────────────────────────────────────────────
+
+
+@app.get("/api/persona/characters", dependencies=[Depends(require_auth)])
+async def persona_characters(request: Request):
+    """List character directories under content/characters/."""
+    chars_dir = DashboardPaths.CONTENT_DIR / "characters"
+    characters = []
+    if chars_dir.exists():
+        for d in sorted(chars_dir.iterdir()):
+            if d.is_dir() and not d.name.startswith('.'):
+                char_yaml = d / "character.yaml"
+                characters.append({
+                    "name": d.name,
+                    "has_config": char_yaml.exists(),
+                })
+    return _ok({"characters": characters})
+
+
+@app.get("/api/persona/characters/{name}", dependencies=[Depends(require_auth)])
+async def persona_character_get(name: str, request: Request):
+    """Read character.yaml for a character."""
+    if _is_path_traversal(name, DashboardPaths.CONTENT_DIR / "characters"):
+        _err("Path traversal detected", 400)
+
+    yaml_path = DashboardPaths.CONTENT_DIR / "characters" / name / "character.yaml"
+    if not yaml_path.exists():
+        _err(f"Character not found: {name}", 404)
+
+    try:
+        content = yaml_path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        _err("Cannot read character.yaml as text", 400)
+
+    return _ok({"name": name, "content": content})
+
+
+@app.post("/api/persona/characters/{name}/save", dependencies=[Depends(require_auth)])
+async def persona_character_save(name: str, request: Request):
+    """Save character.yaml for a character (creates directory if needed)."""
+    if _is_path_traversal(name, DashboardPaths.CONTENT_DIR / "characters"):
+        _err("Path traversal detected", 400)
+
+    body = await request.json()
+    content = body.get("content", "")
+    if not isinstance(content, str):
+        _err("content must be a string")
+
+    yaml_path = DashboardPaths.CONTENT_DIR / "characters" / name / "character.yaml"
+    yaml_path.parent.mkdir(parents=True, exist_ok=True)
+    # Atomic write: .tmp + os.replace to avoid leaving a partial file on crash
+    tmp_path = yaml_path.with_suffix(".yaml.tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    os.replace(tmp_path, yaml_path)
+
+    db_path = request.app.state.dashboard_db
+    audit_log(db_path, "persona.character.save", name, "",
+              ip=request.client.host if request.client else "")
+
+    return _ok({"saved": True})
 
 
 
