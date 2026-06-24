@@ -30,14 +30,6 @@
     - 影响面：dashboard.html（新 tab UI + 数据获取逻辑）、可能新增 app.py endpoint
     - 风险：低，纯增量功能；注意 API 调用数量和性能
 
-### [B-260623-84b827] SSE 端点缺少流式集成测试
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现: tests/dashboard/test_sse.py 缺少对 /api/events 端点的端到端流式测试（连接→接收初始状态→断开清理），当前仅测试 auth 和 broadcast 机制
-- 开发备忘: 使用 httpx.AsyncClient + ASGITransport 编写异步流式测试。低优先级，broadcast 机制已通过 TestBroadcast 测试验证
-
 ## data
 
 ### [B-260618-56a0a3] 3.0.0 Data Foundation：数据状态架构与迁移基础
@@ -178,36 +170,7 @@
     - 影响面：仅限 MiniMax 图生模型的探针路径
     - 风险点：httpx 异常类型与 OpenAI SDK 不同，需确认分类兼容性后再动手
 
-### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-    - 当前 `probe()` 返回 `bool`，调用方 `_probe_loop` 只看 True/False，不区分"网络瞬断"和"永久配额耗尽"
-    - minimax 429 配额耗尽时 probe 会重试 10 次才进入 exhausted，期间每次无意义重试约 25 分钟
-    - `classify_error_kind` 已能正确识别 2056 / rate_limit_error，但 probe 路径不调用它
-- 开发备忘:
-    - 方向：probe 返回类型从 `bool` 扩展为携带 ErrorKind，或 probe 内部直接调用 `circuit_breaker.mark_dead()` 跳过重试
-    - 也可给 probe 使用 `max_retries=0` 的独立 client，让 SDK 不重试直接抛出原始异常（带 body）
-    - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
-    - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
-
 ## release
-
-### [B-260615-90ee20] GitHub Release 与多产物发布流程
-- 创建: 2026-06-15
-- 优先级: P2
-- 类型: feature
-- 改动量: L
-- 问题表现:
-    - 已决定 docs/releases/vX.Y.Z.md 作为 release metadata 源头，但未来 GitHub Release body、发布附件、镜像、可能的 Windows exe 产物如何统一发布尚未设计。
-    - 当前第一阶段只计划 GHCR Docker 镜像，尚未覆盖桌面/Windows exe、checksums、构建矩阵、手动/自动发布边界等常见发布产物问题。
-- 开发备忘:
-    - 调研并设计后续 release 流程：以 docs/releases/vX.Y.Z.md 生成或同步 GitHub Release body。
-    - 评估是否在 GitHub Release 附加构建产物，如 Windows exe、压缩包、checksums、SBOM 或签名文件。
-    - 保持第一版实现克制：先不承诺具体 exe 技术路线，未来可比较 PyInstaller、zipapp、独立 Python runtime、Docker-only 等方案。
-    - 需要决定哪些产物由 CI 自动生成，哪些必须人工确认后发布；避免 GitHub Actions 自动部署生产。
 
 ### [B-260617-1cc4a4] 改进 PyInstaller 打包结构以减少 hiddenimports 补丁
 - 创建: 2026-06-17
