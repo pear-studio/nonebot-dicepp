@@ -10,6 +10,7 @@ from core.command import CommandTextParser
 from core.command.parse_result import CommandParseResult
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
 from core.localization import LOC_FUNC_DISABLE
+from utils.time import get_current_date_int
 
 # roll 命令统一解析器实例（私有 flags 在命令适配层声明）
 _ROLL_PARSER = CommandTextParser(
@@ -357,29 +358,10 @@ class RollDiceCommand(UserCommandBase):
         return ".r 掷骰"
 
     async def tick_daily(self) -> List[BotCommandBase]:
-        # 清除今日掷骰统计 —— 通过 StatManager 原子更新
-
-        user_stat_list = await self.bot.db.user_stat.list_all()
-        for user_stat_row in user_stat_list:
-            try:
-                await self.bot.stat_manager.update_user_stat(
-                    user_stat_row.user_id,
-                    lambda s: (s.roll.times.update(1), s.roll.d20.update()),
-                )
-            except Exception:
-                pass
-
-        # 更新群聊数据
-        group_stat_list = await self.bot.db.group_stat.list_all()
-        for group_stat_row in group_stat_list:
-            try:
-                await self.bot.stat_manager.update_group_stat(
-                    group_stat_row.group_id,
-                    lambda s: (s.roll.times.update(1), s.roll.d20.update()),
-                )
-            except Exception:
-                pass
-
+        # 掷骰统计的每日轮转由 dicebot.tick_daily() 的
+        # UserStatInfo.daily_update() / GroupStatInfo.daily_update() 统一处理，
+        # 此处不再额外调用 roll.times.update() / roll.d20.update()，
+        # 否则会重复执行 update(1) 将 last_day_val 覆盖为 0。
         return []
 
 
@@ -507,13 +489,26 @@ async def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollR
     roll_times = len(res_list)
     d20_vals = [int(res.d20_list[0]) for res in res_list if res.d20_num == 1]
 
-    def _update_roll(stat):
+    def _update_user_roll(stat):
+        if stat.created_at == 0:
+            stat.created_at = get_current_date_int()
+        stat.roll.times.inc(roll_times)
+        for v in d20_vals:
+            stat.roll.d20.record(v)
+        if meta.group_id:
+            stat.roll_group.inc(roll_times)
+        else:
+            stat.roll_private.inc(roll_times)
+
+    def _update_group_roll(stat):
+        if stat.created_at == 0:
+            stat.created_at = get_current_date_int()
         stat.roll.times.inc(roll_times)
         for v in d20_vals:
             stat.roll.d20.record(v)
 
     try:
-        await bot.stat_manager.update_user_stat(meta.user_id, _update_roll)
+        await bot.stat_manager.update_user_stat(meta.user_id, _update_user_roll)
     except Exception as _exc:
         logger.warning(f"[RollStat] 写入用户统计 DB 失败: {_exc}")
 
@@ -521,6 +516,6 @@ async def record_roll_data(bot: Bot, meta: MessageMetaData, res_list: List[RollR
     if not meta.group_id:
         return
     try:
-        await bot.stat_manager.update_group_stat(meta.group_id, _update_roll)
+        await bot.stat_manager.update_group_stat(meta.group_id, _update_group_roll)
     except Exception as _exc:
         logger.warning(f"[RollStat] 写入群统计 DB 失败: {_exc}")

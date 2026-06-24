@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Callable, Set, Awaitable, Protocol, run
 from random import choice
 
 from utils.logger import logger, get_exception_info, configure_log_level
-from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
+from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime, get_current_date_int
 from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from core.config import Paths
 from core.config.loader import ConfigLoader, ConfigValidationError
@@ -669,9 +669,22 @@ class Bot:
         bot_commands: List[BotCommandBase] = []
 
         # 统计收到的消息数量 —— 通过 StatManager 原子更新（写入失败不中断消息处理）
-        await self._safe_update_user_stat(meta.user_id, lambda s: s.msg.inc())
+        def _record_msg(s):
+            if s.created_at == 0:
+                s.created_at = get_current_date_int()
+            s.msg.inc()
+            if meta.group_id:
+                s.msg_group.inc()
+            else:
+                s.msg_private.inc()
+
+        await self._safe_update_user_stat(meta.user_id, _record_msg)
         if meta.group_id:
-            await self._safe_update_group_stat(meta.group_id, lambda s: s.msg.inc())
+            def _record_group_msg(s):
+                if s.created_at == 0:
+                    s.created_at = get_current_date_int()
+                s.msg.inc()
+            await self._safe_update_group_stat(meta.group_id, _record_group_msg)
 
         # 修改meta的permission参数
         # 4:骰主 3:骰管理 2:群主 1:群管理 0:普通人 -1:黑名单
@@ -765,9 +778,22 @@ class Bot:
 
                 # 统计处理的指令情况 —— 写入失败不中断消息处理
                 if command.flag and res_commands:
-                    await self._safe_update_user_stat(meta.user_id, lambda s: s.cmd.record(command))
+                    def _record_cmd(s):
+                        if s.created_at == 0:
+                            s.created_at = get_current_date_int()
+                        s.cmd.record(command)
+                        if meta.group_id:
+                            s.cmd_group.inc()
+                        else:
+                            s.cmd_private.inc()
+
+                    await self._safe_update_user_stat(meta.user_id, _record_cmd)
                     if meta.group_id:
-                        await self._safe_update_group_stat(meta.group_id, lambda s: s.cmd.record(command))
+                        def _record_group_cmd(s):
+                            if s.created_at == 0:
+                                s.created_at = get_current_date_int()
+                            s.cmd.record(command)
+                        await self._safe_update_group_stat(meta.group_id, _record_group_cmd)
 
                 if not should_pass:  # 已经处理过, 不需要再传递给后面的指令
                     break

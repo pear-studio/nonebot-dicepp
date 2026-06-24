@@ -12,10 +12,10 @@ from core.statistics.user_stat import UserStatInfo
 from core.statistics.group_stat import GroupStatInfo
 from core.statistics.basic_stat import StatElementBase
 from plugins.DicePP.module.persona.report.daily_report import (
-    DailyReportGenerator, _DATA_UNAVAILABLE, _DIARY_UNAVAILABLE,
+    DailyReportGenerator, _DIARY_UNAVAILABLE,
 )
 from plugins.DicePP.module.persona.gateway.port import MessagePort
-from plugins.DicePP.utils.time import wall_now
+from plugins.DicePP.utils.time import wall_now, get_current_date_int
 from plugins.DicePP.core.message_types import MessageType
 
 
@@ -29,7 +29,6 @@ def _make_mock_bot(with_master=True):
     bot.config.persona_ai.timezone = "Asia/Shanghai"
 
     # 模拟 db 访问
-
     bot.db.user_stat.list_all = AsyncMock(return_value=[])
     bot.db.group_stat.list_all = AsyncMock(return_value=[])
 
@@ -63,8 +62,8 @@ class TestDailyReportGenerator:
         mock_bot.proxy.process_bot_command.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_generate_and_send_produces_three_segments(self):
-        """正常路径发送 3 段消息且使用 SYSTEM_LOG 类型"""
+    async def test_generate_and_send_produces_two_segments(self):
+        """正常路径发送 2 段消息且使用 SYSTEM_LOG 类型"""
         bot = _make_mock_bot()
         port, mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port)
@@ -72,23 +71,20 @@ class TestDailyReportGenerator:
         await gen.generate_and_send("今天是美好的一天。")
 
         calls = mock_bot.proxy.process_bot_command.await_args_list
-        assert len(calls) == 3
+        assert len(calls) == 2
         seg1_cmd = calls[0].args[0]
         seg2_cmd = calls[1].args[0]
-        seg3_cmd = calls[2].args[0]
 
         assert seg1_cmd.message_type == MessageType.SYSTEM_LOG
         assert seg2_cmd.message_type == MessageType.SYSTEM_LOG
-        assert seg3_cmd.message_type == MessageType.SYSTEM_LOG
 
-        # 段 1 含日记
+        # 段 1 含日记和角色状态标签（角色状态可能不存在）
         assert "今天是美好的一天" in seg1_cmd.msg
+        assert "—— 日记 ——" in seg1_cmd.msg
 
-        # 段 2 含核心统计标题
-        assert "机器人运营统计" in seg2_cmd.msg
-
-        # 段 3 含 Persona 标题
-        assert "Persona 运营数据" in seg3_cmd.msg
+        # 段 2 含运营统计（新格式）
+        assert "活跃用户" in seg2_cmd.msg
+        assert "指令分布" in seg2_cmd.msg
 
     # ── diary=None 降级 ─────────────────────────────────────────
 
@@ -120,10 +116,11 @@ class TestDailyReportGenerator:
         seg1 = mock_bot.proxy.process_bot_command.await_args_list[0].args[0].msg
         assert "机器人" in seg1
         assert diary in seg1
+        assert "—— 日记 ——" in seg1
 
     @pytest.mark.asyncio
-    async def test_segment_2_contains_core_stats_sections(self):
-        """段 2 包含必要的数据标题"""
+    async def test_segment_2_contains_new_format_sections(self):
+        """段 2 按新格式包含活跃用户、指令分布、LLM 用量"""
         bot = _make_mock_bot()
         port, mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port)
@@ -131,9 +128,26 @@ class TestDailyReportGenerator:
         await gen.generate_and_send("diary")
 
         seg2 = mock_bot.proxy.process_bot_command.await_args_list[1].args[0].msg
-        assert "昨日消息" in seg2
-        assert "昨日命令" in seg2
-        assert "昨日掷骰" in seg2
+        assert "活跃用户" in seg2
+        assert "新用户" in seg2
+        assert "用户消息" in seg2
+        assert "指令合计" in seg2
+        assert "指令分布" in seg2
+        assert "LLM" in seg2
+
+    @pytest.mark.asyncio
+    async def test_segment_2_empty_flag_displays_zero(self):
+        """指令分布中无数据的 flag 显示 0"""
+        bot = _make_mock_bot()
+        port, mock_bot = _make_mock_port()
+        gen = DailyReportGenerator(bot=bot, port=port)
+
+        await gen.generate_and_send("diary")
+
+        seg2 = mock_bot.proxy.process_bot_command.await_args_list[1].args[0].msg
+        # 空数据时所有 flag 都应该显示 0
+        assert "帮助 0" in seg2
+        assert "战斗 0" in seg2
 
     # ── _generate_opening ──────────────────────────────────────
 
@@ -168,8 +182,9 @@ class TestDailyReportGenerator:
         mock_opening = "早上好，主人！今天机器人状态良好。"
 
         target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        core_stats = gen._empty_core_stats()
         with patch(target, new_callable=AsyncMock, return_value=mock_opening):
-            opening = await gen._generate_opening("昨日日记测试", {"msg": "10", "cmd": "5", "roll": "3", "top_groups": []})
+            opening = await gen._generate_opening("昨日日记测试", core_stats)
 
         assert opening == mock_opening
 
@@ -186,8 +201,9 @@ class TestDailyReportGenerator:
         gen._router = MagicMock()
 
         target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        core_stats = gen._empty_core_stats()
         with patch(target, new_callable=AsyncMock, side_effect=RuntimeError("LLM down")):
-            opening = await gen._generate_opening("昨日日记测试", {"msg": "10", "cmd": "5", "roll": "3", "top_groups": []})
+            opening = await gen._generate_opening("昨日日记测试", core_stats)
 
         # 降级为模板
         assert "早上好" in opening
@@ -205,8 +221,9 @@ class TestDailyReportGenerator:
         gen._router = MagicMock()
 
         target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        core_stats = gen._empty_core_stats()
         with patch(target, new_callable=AsyncMock, return_value=None):
-            opening = await gen._generate_opening("昨日日记测试", {"msg": "10", "cmd": "5", "roll": "3", "top_groups": []})
+            opening = await gen._generate_opening("昨日日记测试", core_stats)
 
         # 降级为模板
         assert "早上好" in opening
@@ -222,7 +239,8 @@ class TestDailyReportGenerator:
         gen._character.name = "测试角色"
         gen._router = MagicMock()
 
-        opening = await gen._generate_opening("昨日日记测试", {"msg": "10", "cmd": "5", "roll": "3", "top_groups": []})
+        core_stats = gen._empty_core_stats()
+        opening = await gen._generate_opening("昨日日记测试", core_stats)
 
         # 直接走模板
         assert "测试角色" in opening
@@ -231,20 +249,23 @@ class TestDailyReportGenerator:
     # ── _collect_core_stats ─────────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_core_stats_aggregates_user_stat_correctly(self):
-        """核心统计正确聚合 user_stat 列表"""
+    async def test_core_stats_aggregates_with_dimension_split(self):
+        """核心统计正确聚合群聊/私聊维度拆分"""
         bot = _make_mock_bot()
+
+        # 用户 1：群聊活跃
         info1 = UserStatInfo()
         info1.msg.inc(10)
         info1.msg.update()  # last_day=10
-        info1.roll.times.inc(5)
-        info1.roll.times.update()  # last_day=5
+        info1.msg_group.inc(10)
+        info1.msg_group.update()  # last_day=10
 
+        # 用户 2：私聊活跃
         info2 = UserStatInfo()
         info2.msg.inc(7)
         info2.msg.update()  # last_day=7
-        info2.roll.times.inc(2)
-        info2.roll.times.update()  # last_day=2
+        info2.msg_private.inc(7)
+        info2.msg_private.update()  # last_day=7
 
         mock_users = [
             MagicMock(user_id="u1", data=info1.serialize()),
@@ -256,12 +277,101 @@ class TestDailyReportGenerator:
         gen = DailyReportGenerator(bot=bot, port=port)
 
         stats = await gen._collect_core_stats()
-        assert stats["msg"] == str(17)  # 10 + 7 last_day_val
-        assert stats["roll"] == str(7)  # 5 + 2 last_day_val
+
+        assert stats["msg"]["total"] == 17  # 10 + 7
+        assert stats["msg"]["group"] == 10
+        assert stats["msg"]["private"] == 7
+        assert stats["active_users"]["total"] == 2
+        assert stats["active_users"]["group"] == 1
+        assert stats["active_users"]["private"] == 1
 
     @pytest.mark.asyncio
-    async def test_core_stats_broken_data_returns_unavailable(self):
-        """反序列化失败时返回 _DATA_UNAVAILABLE"""
+    async def test_core_stats_per_flag_user_count(self):
+        """per-flag 用户计数正确去重"""
+        bot = _make_mock_bot()
+        from core.command.const import DPP_COMMAND_FLAG_ROLL, DPP_COMMAND_FLAG_FUN
+
+        # 用户 1：用过掷骰
+        info1 = UserStatInfo()
+        info1.msg.inc(1)
+        info1.msg.update()
+        info1.cmd.flag_dict[DPP_COMMAND_FLAG_ROLL] = StatElementBase()
+        info1.cmd.flag_dict[DPP_COMMAND_FLAG_ROLL].inc(3)
+        info1.cmd.flag_dict[DPP_COMMAND_FLAG_ROLL].update()  # last_day=3
+
+        # 用户 2：用过掷骰和娱乐
+        info2 = UserStatInfo()
+        info2.msg.inc(1)
+        info2.msg.update()
+        info2.cmd.flag_dict[DPP_COMMAND_FLAG_ROLL] = StatElementBase()
+        info2.cmd.flag_dict[DPP_COMMAND_FLAG_ROLL].inc(2)
+        info2.cmd.flag_dict[DPP_COMMAND_FLAG_ROLL].update()  # last_day=2
+        info2.cmd.flag_dict[DPP_COMMAND_FLAG_FUN] = StatElementBase()
+        info2.cmd.flag_dict[DPP_COMMAND_FLAG_FUN].inc(1)
+        info2.cmd.flag_dict[DPP_COMMAND_FLAG_FUN].update()  # last_day=1
+        # cmd_group/private for dimension split
+        info2.cmd_group.inc(1)
+        info2.cmd_group.update()
+
+        mock_users = [
+            MagicMock(user_id="u1", data=info1.serialize()),
+            MagicMock(user_id="u2", data=info2.serialize()),
+        ]
+        bot.db.user_stat.list_all = AsyncMock(return_value=mock_users)
+
+        port, _mock_bot = _make_mock_port()
+        gen = DailyReportGenerator(bot=bot, port=port)
+
+        stats = await gen._collect_core_stats()
+
+        # 掷骰 count = 3 (u1) + 2 (u2) = 5, users = {u1, u2} = 2
+        assert stats["flag_breakdown"][DPP_COMMAND_FLAG_ROLL]["count"] == 5
+        assert stats["flag_breakdown"][DPP_COMMAND_FLAG_ROLL]["users"] == 2
+        # 娱乐 count = 1, users = {u2} = 1
+        assert stats["flag_breakdown"][DPP_COMMAND_FLAG_FUN]["count"] == 1
+        assert stats["flag_breakdown"][DPP_COMMAND_FLAG_FUN]["users"] == 1
+
+        # cmd_group 维度拆分
+        assert stats["cmd"]["group"] > 0
+
+    @pytest.mark.asyncio
+    async def test_core_stats_new_user_detection(self):
+        """新用户检测基于 created_at 日期范围判断"""
+        bot = _make_mock_bot()
+        from utils.time import int_to_datetime, wall_now
+
+        tz = "Asia/Shanghai"
+        yesterday = (wall_now(tz) - timedelta(days=1))
+        yesterday_int = int(yesterday.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+        # 昨天创建的 user
+        info_new = UserStatInfo()
+        info_new.msg.inc(1)
+        info_new.msg.update()
+        info_new.created_at = yesterday_int
+
+        # 更早创建的 user（created_at = 0）
+        info_old = UserStatInfo()
+        info_old.msg.inc(1)
+        info_old.msg.update()
+        info_old.created_at = 0
+
+        mock_users = [
+            MagicMock(user_id="new_user", data=info_new.serialize()),
+            MagicMock(user_id="old_user", data=info_old.serialize()),
+        ]
+        bot.db.user_stat.list_all = AsyncMock(return_value=mock_users)
+
+        port, _mock_bot = _make_mock_port()
+        gen = DailyReportGenerator(bot=bot, port=port)
+
+        stats = await gen._collect_core_stats()
+        # 只有 created_at 在昨天范围内的才计数
+        assert stats["new_users"] == 1
+
+    @pytest.mark.asyncio
+    async def test_core_stats_broken_data_returns_empty_structure(self):
+        """反序列化失败时返回空统计结构（不是 _DATA_UNAVAILABLE 字符串）"""
         bot = _make_mock_bot()
         bot.db.user_stat.list_all = AsyncMock(side_effect=Exception("DB down"))
         bot.db.group_stat.list_all = AsyncMock(return_value=[])
@@ -270,32 +380,116 @@ class TestDailyReportGenerator:
         gen = DailyReportGenerator(bot=bot, port=port)
 
         stats = await gen._collect_core_stats()
-        assert stats["msg"] == _DATA_UNAVAILABLE
-        assert stats["cmd"] == _DATA_UNAVAILABLE
-
-    # ── _collect_llm_usage ──────────────────────────────────────
+        # 现在返回空结构而非 _DATA_UNAVAILABLE
+        assert stats["active_users"]["total"] == 0
+        assert stats["active_groups"] == 0
+        assert stats["new_users"] == 0
 
     @pytest.mark.asyncio
-    async def test_llm_usage_no_store_returns_unavailable(self):
-        """store 为 None 时 LLM 调用返回 _DATA_UNAVAILABLE"""
+    async def test_core_stats_partial_row_failure_tolerated(self):
+        """个别行反序列化失败不应阻塞其他行的聚合"""
+        bot = _make_mock_bot()
+
+        info = UserStatInfo()
+        info.msg.inc(5)
+        info.msg.update()
+
+        mock_users = [
+            MagicMock(user_id="good", data=info.serialize()),
+            MagicMock(user_id="bad", data="invalid json {{{"),
+        ]
+        bot.db.user_stat.list_all = AsyncMock(return_value=mock_users)
+
+        port, _mock_bot = _make_mock_port()
+        gen = DailyReportGenerator(bot=bot, port=port)
+
+        stats = await gen._collect_core_stats()
+        # good row 的 5 条消息被聚合
+        assert stats["msg"]["total"] == 5
+        assert stats["active_users"]["total"] == 1
+
+    # ── LLM usage summary ────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_llm_summary_no_store_returns_empty(self):
+        """store 为 None 时 LLM 汇总返回空结构"""
         bot = _make_mock_bot()
         port, _mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port, store=None)
 
-        result = await gen._collect_llm_usage(use_cur_day=False)
-        assert result == [_DATA_UNAVAILABLE]
-
-    # ── _collect_character_state ────────────────────────────────
+        result = await gen._collect_llm_summary(use_cur_day=False)
+        assert result["total_calls"] == 0
+        assert result["total_tokens"] == 0
+        assert result["errors"] == 0
+        assert result["models"] == []
 
     @pytest.mark.asyncio
-    async def test_character_state_no_store_returns_unavailable(self):
-        """store 为 None 时角色状态返回 _DATA_UNAVAILABLE"""
+    async def test_llm_summary_happy_path(self):
+        """_collect_llm_summary 正常返回精简后的 LLM 汇总"""
         bot = _make_mock_bot()
         port, _mock_bot = _make_mock_port()
-        gen = DailyReportGenerator(bot=bot, port=port, store=None)
 
-        result = await gen._collect_character_state()
-        assert result == [_DATA_UNAVAILABLE]
+        mock_store = MagicMock()
+        mock_store.get_daily_token_usage = AsyncMock(return_value=[
+            {"provider": "openai", "model": "gpt-4", "requests": 10,
+             "tokens_in": 5000, "tokens_out": 2000, "status": "ok"},
+            {"provider": "claude", "model": "sonnet", "requests": 5,
+             "tokens_in": 3000, "tokens_out": 1500, "status": "ok"},
+        ])
+
+        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        result = await gen._collect_llm_summary(use_cur_day=False)
+
+        assert result["total_calls"] == 15
+        assert result["total_tokens"] == 11500  # 7000 + 4500, 统一为 int
+        assert result["errors"] == 0
+        assert len(result["models"]) == 2
+        assert "openai/gpt-4: 10次" in result["models"][0]
+        assert "claude/sonnet: 5次" in result["models"][1]
+
+    # ── 角色状态 ────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_character_state_in_segment_1(self):
+        """有角色状态时段 1 包含角色状态标签"""
+        bot = _make_mock_bot()
+        port, mock_bot = _make_mock_port()
+
+        from plugins.DicePP.module.persona.data.models import CharacterState
+        state = CharacterState(
+            energy=80, mood=65, health=90,
+            current_intention="sleeping",
+            text="",
+        )
+
+        mock_store = MagicMock()
+        mock_store.get_character_state = AsyncMock(return_value=state)
+
+        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+
+        await gen.generate_and_send("diary")
+
+        seg1 = mock_bot.proxy.process_bot_command.await_args_list[0].args[0].msg
+        assert "—— 角色状态 ——" in seg1
+        assert "活力 80" in seg1
+        assert "心情 65" in seg1
+        assert "健康 90" in seg1
+
+    @pytest.mark.asyncio
+    async def test_character_state_none_omitted(self):
+        """无角色状态时段 1 不显示角色状态标签"""
+        bot = _make_mock_bot()
+        port, mock_bot = _make_mock_port()
+
+        mock_store = MagicMock()
+        mock_store.get_character_state = AsyncMock(return_value=None)
+
+        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+
+        await gen.generate_and_send("diary")
+
+        seg1 = mock_bot.proxy.process_bot_command.await_args_list[0].args[0].msg
+        assert "—— 角色状态 ——" not in seg1
 
     # ── generate_snapshot ───────────────────────────────────────
 
@@ -313,7 +507,7 @@ class TestDailyReportGenerator:
 
         result = await gen.generate_snapshot()
         assert "即时快照" in result
-        assert "消息: 5" in result  # cur_day_val
+        assert "活跃用户" in result
 
     # ── set_app ─────────────────────────────────────────────────
 
@@ -352,94 +546,15 @@ class TestDailyReportGenerator:
         port, mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port)
 
-        # 即使 store 为 None（Persona 数据源全部不可用），日报仍发送 3 段
+        # 即使 store 为 None（Persona 数据源全部不可用），日报仍发送 2 段
         await gen.generate_and_send("diary")
 
         calls = mock_bot.proxy.process_bot_command.await_args_list
-        assert len(calls) == 3
-        # 段 2 应有核心统计数据（即使 Persona 数据不可用）
+        assert len(calls) == 2
+        # 段 2 应有核心统计数据
         seg2 = calls[1].args[0].msg
-        assert "昨日消息: 3" in seg2
-
-    # ── Q88: 数据采集方法 ──────────────────────────────────────
-
-    @pytest.mark.asyncio
-    async def test_collect_llm_usage_happy_path(self):
-        """_collect_llm_usage 正常返回格式化后的 LLM 调用统计"""
-        bot = _make_mock_bot()
-        port, _mock_bot = _make_mock_port()
-
-        mock_store = MagicMock()
-        mock_store.get_daily_token_usage = AsyncMock(return_value=[
-            {"provider": "openai", "model": "gpt-4", "requests": 10,
-             "tokens_in": 5000, "tokens_out": 2000,
-             "cache_read": 0, "cache_creation": 0, "reasoning_tokens": 0},
-            {"provider": "claude", "model": "sonnet", "requests": 5,
-             "tokens_in": 3000, "tokens_out": 1500,
-             "cache_read": 0, "cache_creation": 0, "reasoning_tokens": 0},
-        ])
-
-        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
-        result = await gen._collect_llm_usage(use_cur_day=False)
-
-        assert len(result) == 2
-        assert "openai/gpt-4: 10 次" in result[0]
-        assert "输入 5.0K" in result[0]
-        assert "输出 2.0K" in result[0]
-        assert "claude/sonnet: 5 次" in result[1]
-
-    @pytest.mark.asyncio
-    async def test_collect_affinity_changes_happy_path(self):
-        """_collect_affinity_changes 正常返回好感度变化 Top 3"""
-        bot = _make_mock_bot()
-        port, _mock_bot = _make_mock_port()
-
-        mock_cursor = AsyncMock()
-        mock_cursor.fetchall = AsyncMock(return_value=[
-            ("user1", 2.5, "日常互动"),
-            ("user2", -1.0, "拒绝请求"),
-            ("user3", 0.5, ""),
-        ])
-        mock_db = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_cursor)
-
-        mock_store = MagicMock()
-        mock_store.db = mock_db
-
-        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
-        result = await gen._collect_affinity_changes()
-
-        assert len(result) == 3
-        assert "user1: +2.50" in result[0]
-        assert "（日常互动）" in result[0]
-        assert "user2: -1.00" in result[1]
-        assert "（拒绝请求）" in result[1]
-        assert "user3: +0.50" in result[2]
-
-    @pytest.mark.asyncio
-    async def test_collect_character_state_happy_path(self):
-        """_collect_character_state 正常返回角色状态格式化文本"""
-        bot = _make_mock_bot()
-        port, _mock_bot = _make_mock_port()
-
-        from plugins.DicePP.module.persona.data.models import CharacterState
-        state = CharacterState(
-            energy=80, mood=65, health=90,
-            current_intention="sleeping",
-            text="",
-        )
-
-        mock_store = MagicMock()
-        mock_store.get_character_state = AsyncMock(return_value=state)
-
-        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
-        result = await gen._collect_character_state()
-
-        assert len(result) == 4
-        assert "体力: 80/100" in result[0]
-        assert "心情: 65/100" in result[1]
-        assert "健康: 90/100" in result[2]
-        assert "当前意向: sleeping" in result[3]
+        assert "活跃用户" in seg2
+        assert "用户消息" in seg2
 
 
 class TestTickDailyIntegration:
@@ -470,7 +585,7 @@ class TestTickDailyIntegration:
         await gen.generate_and_send(diary) if cmd.config.daily_report_enabled else None
 
         calls = _mock_bot.proxy.process_bot_command.await_args_list
-        assert len(calls) == 3
+        assert len(calls) == 2
         assert "diary content" in calls[0].args[0].msg
 
     @pytest.mark.asyncio
@@ -496,130 +611,17 @@ class TestTickDailyIntegration:
         gen.generate_and_send.assert_not_awaited()
 
 
+class TestFlagDisplayOrder:
+    """校验 _FLAG_DISPLAY_ORDER 与 DPP_COMMAND_FLAG_DICT 键集一致"""
+
+    def test_display_order_matches_flag_dict(self):
+        """_FLAG_DISPLAY_ORDER 的集合与 DPP_COMMAND_FLAG_DICT 的键集合一致"""
+        from plugins.DicePP.module.persona.report.daily_report import _FLAG_DISPLAY_ORDER
+        from core.command.const import DPP_COMMAND_FLAG_DICT
+        assert set(_FLAG_DISPLAY_ORDER) == set(DPP_COMMAND_FLAG_DICT.keys()), \
+            "_FLAG_DISPLAY_ORDER 与 DPP_COMMAND_FLAG_DICT 键集不一致，请同步更新"
+
+
 class MockConfig:
     timezone = "Asia/Shanghai"
-
-
-def _yesterday() -> str:
-    return (wall_now() - timedelta(days=1)).strftime("%Y-%m-%d")
-
-
-class TestCollectChatOverview:
-
-    @pytest.mark.asyncio
-    async def test_full_output_format(self, temp_db):
-        """正常数据 → 完整格式化输出"""
-        from plugins.DicePP.core.message_types import MessageType
-
-        y = _yesterday()
-        timestamp = f"{y}T10:00:00"
-
-        await temp_db.add_message_stream("u1", "g1", "assistant", MessageType.CHAT, "hi", "Bot")
-        await temp_db.add_message_stream("u2", "g1", "user", MessageType.CHAT, "hello", "Alice")
-        await temp_db.add_message_stream("u2", "g1", "user", MessageType.CHAT, "world", "Alice")
-        await temp_db.add_message_stream("u3", "g2", "user", MessageType.CHAT, "hey", "Bob")
-        # 修正所有消息的 created_at 到 yesterday
-        await temp_db.db.execute("UPDATE message_stream SET created_at = ?", (timestamp,))
-        await temp_db.db.commit()
-
-        gen = DailyReportGenerator(
-            bot=MagicMock(),
-            port=MagicMock(),
-            store=temp_db,
-            config=MockConfig(),
-        )
-        lines = await gen._collect_chat_overview()
-
-        assert len(lines) == 8
-        assert lines[0] == "聊天消息: 4 条（Bot 回复 1 / 用户发言 3）"
-        assert "参与: 3 人" in lines[1]
-        assert "新增 3" in lines[1]
-        assert "覆盖 2 个群" in lines[1]
-        assert lines[2] == "活跃用户 Top 3:"
-        assert "Alice" in lines[3]
-        assert "Bob" in lines[4]
-        assert lines[5] == "活跃群 Top 3:"
-
-    @pytest.mark.asyncio
-    async def test_no_new_users_omitted_from_participation_line(self, temp_db):
-        """new_users=0 时 '新增 N' 不出现"""
-        from plugins.DicePP.core.message_types import MessageType
-
-        y = _yesterday()
-        # 两天前的日期，确保在 yesterday 之前
-        two_days_ago = (wall_now() - timedelta(days=2)).strftime("%Y-%m-%d")
-
-        # u1 在两天前聊过 → 不算新增
-        await temp_db.add_message_stream("u1", "g1", "user", MessageType.CHAT, "old")
-        await temp_db.db.execute(
-            "UPDATE message_stream SET created_at = ?", (f"{two_days_ago}T10:00:00",),
-        )
-        await temp_db.db.commit()
-        # u1 昨天又聊了
-        await temp_db.add_message_stream("u1", "g1", "user", MessageType.CHAT, "hello")
-        await temp_db.db.execute(
-            "UPDATE message_stream SET created_at = ? WHERE content = ?",
-            (f"{y}T10:00:00", "hello"),
-        )
-        await temp_db.db.commit()
-
-        gen = DailyReportGenerator(
-            bot=MagicMock(),
-            port=MagicMock(),
-            store=temp_db,
-            config=MockConfig(),
-        )
-        lines = await gen._collect_chat_overview()
-
-        assert "新增" not in lines[1]
-
-    @pytest.mark.asyncio
-    async def test_no_top_lists_when_empty(self, temp_db):
-        """无聊天消息时 Top 3 标题不出现"""
-        gen = DailyReportGenerator(
-            bot=MagicMock(),
-            port=MagicMock(),
-            store=temp_db,
-            config=MockConfig(),
-        )
-        lines = await gen._collect_chat_overview()
-
-        assert len(lines) == 2
-        assert lines[0] == "聊天消息: 0 条（Bot 回复 0 / 用户发言 0）"
-        assert "参与: 0 人" in lines[1]
-        assert not any("Top 3" in l for l in lines)
-
-    @pytest.mark.asyncio
-    async def test_store_none_returns_unavailable(self):
-        gen = DailyReportGenerator(
-            bot=MagicMock(),
-            port=MagicMock(),
-            store=None,
-            config=MockConfig(),
-        )
-        lines = await gen._collect_chat_overview()
-        assert lines == ["数据暂不可用"]
-
-    @pytest.mark.asyncio
-    async def test_user_label_format_with_and_without_display_name(self, temp_db):
-        """display_name 有值时格式为 'name(id)'，无时仅为 'id'"""
-        from plugins.DicePP.core.message_types import MessageType
-
-        y = _yesterday()
-        timestamp = f"{y}T10:00:00"
-
-        await temp_db.add_message_stream("u1", "g1", "user", MessageType.CHAT, "a", "Alice")
-        await temp_db.add_message_stream("u2", "g1", "user", MessageType.CHAT, "b", "")
-        await temp_db.db.execute("UPDATE message_stream SET created_at = ?", (timestamp,))
-        await temp_db.db.commit()
-
-        gen = DailyReportGenerator(
-            bot=MagicMock(),
-            port=MagicMock(),
-            store=temp_db,
-            config=MockConfig(),
-        )
-        lines = await gen._collect_chat_overview()
-
-        assert "Alice(u1)" in lines[3]
-        assert "u2:" in lines[4] or "u2 " in lines[4]
+    daily_report_voice_enabled = False

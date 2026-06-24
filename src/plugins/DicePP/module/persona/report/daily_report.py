@@ -8,14 +8,42 @@ from typing import Optional, List, Dict, Any
 from datetime import timedelta
 
 from core.bot import Bot
+from core.command.const import DPP_COMMAND_FLAG_DICT, DPP_COMMAND_FLAG_ROLL, DPP_COMMAND_FLAG_CHAR, \
+    DPP_COMMAND_FLAG_QUERY, DPP_COMMAND_FLAG_FUN, DPP_COMMAND_FLAG_CHAT, DPP_COMMAND_FLAG_MANAGE, \
+    DPP_COMMAND_FLAG_DRAW, DPP_COMMAND_FLAG_DND, DPP_COMMAND_FLAG_HELP, DPP_COMMAND_FLAG_INFO, \
+    DPP_COMMAND_FLAG_HUB, DPP_COMMAND_FLAG_BATTLE
 from core.statistics import UserStatInfo, GroupStatInfo
-from ..data.models import MessageType, CharacterState
+from ..data.models import MessageType
 from ..gateway.port import MessagePort
-from utils.time import wall_now
+from utils.time import wall_now, int_to_datetime
 from utils.logger import logger
 
-_DATA_UNAVAILABLE = "数据暂不可用"
 _DIARY_UNAVAILABLE = "今日日记未生成"
+
+# 指令分布展示顺序
+_FLAG_DISPLAY_ORDER = [
+    DPP_COMMAND_FLAG_ROLL,
+    DPP_COMMAND_FLAG_CHAR,
+    DPP_COMMAND_FLAG_QUERY,
+    DPP_COMMAND_FLAG_FUN,
+    DPP_COMMAND_FLAG_CHAT,
+    DPP_COMMAND_FLAG_MANAGE,
+    DPP_COMMAND_FLAG_DRAW,
+    DPP_COMMAND_FLAG_DND,
+    DPP_COMMAND_FLAG_HELP,
+    DPP_COMMAND_FLAG_INFO,
+    DPP_COMMAND_FLAG_HUB,
+    DPP_COMMAND_FLAG_BATTLE,
+]
+
+
+def _fmt_tokens(v: int) -> str:
+    """格式化 token 数量为可读字符串"""
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.1f}M"
+    if v >= 1_000:
+        return f"{v / 1_000:.1f}K"
+    return str(v)
 
 
 class DailyReportGenerator:
@@ -46,57 +74,43 @@ class DailyReportGenerator:
     # ── 入口 ───────────────────────────────────────────────────
 
     async def generate_and_send(self, diary: Optional[str]) -> None:
-        """收集数据、生成 3 段、分段发送"""
+        """收集数据、生成 2 段、分段发送"""
         master_id = self._get_master_id()
         if not master_id:
             return
 
         core_stats = await self._collect_core_stats()
+        character_state = await self._fetch_character_state()
         opening = await self._generate_opening(diary, core_stats)
 
-        # 段 1：开场白 + 日记
-        seg1 = self._build_segment_1(opening, diary)
+        # 段 1：开场白 + 日记 + 角色状态
+        seg1 = self._build_segment_1(opening, diary, character_state)
         await self._port.send(
             master_id, "", seg1, message_type=MessageType.SYSTEM_LOG,
         )
 
-        # 段 2：核心统计
-        seg2 = self._build_segment_2(core_stats)
+        # 段 2：运营统计
+        seg2 = await self._build_segment_2(core_stats)
         await self._port.send(
             master_id, "", seg2, message_type=MessageType.SYSTEM_LOG,
-        )
-
-        # 段 3：Persona 运营数据
-        seg3 = await self._build_segment_3()
-        await self._port.send(
-            master_id, "", seg3, message_type=MessageType.SYSTEM_LOG,
         )
 
     async def generate_snapshot(self) -> str:
         """手动快照 — 使用 cur_day_val，直接返回文本"""
         core_stats = await self._collect_core_stats(use_cur_day=True)
-        lines = ["=== 即时快照（今天到目前为止） ==="]
-        lines.append("")
-        lines.append("【核心统计】")
-        lines.append(f"  消息: {core_stats['msg']}")
-        lines.append(f"  命令: {core_stats['cmd']}")
-        lines.append(f"  掷骰: {core_stats['roll']}")
-        if core_stats["top_groups"]:
-            lines.append("  活跃群 Top 3:")
-            for g in core_stats["top_groups"]:
-                lines.append(f"    {g}")
-        else:
-            lines.append(f"  活跃群: {_DATA_UNAVAILABLE}")
+        lines = ["=== 即时快照（今天到目前为止） ===", ""]
 
-        persona_lines = await self._collect_persona_lines(use_cur_day=True)
-        if persona_lines:
-            lines.append("")
-            lines.append("【Persona 运营】")
-            lines.extend(persona_lines)
-        else:
-            lines.append("")
-            lines.append("【Persona 运营】")
-            lines.append("  Persona 模块未初始化")
+        au = core_stats["active_users"]
+        lines.append(f"活跃用户 {au['total']} 人 (群聊 {au['group']} / 私聊 {au['private']}) · "
+                     f"活跃于 {core_stats['active_groups']} 个群")
+        lines.append("")
+        lines.append(f"新用户 +{core_stats['new_users']} · 新群 +{core_stats['new_groups']}")
+        lines.append("")
+
+        msg = core_stats["msg"]
+        cmd = core_stats["cmd"]
+        lines.append(f"用户消息 {msg['total']} 条 (群聊 {msg['group']} / 私聊 {msg['private']})")
+        lines.append(f"指令合计 {cmd['total']} 次 (群聊 {cmd['group']} / 私聊 {cmd['private']})")
 
         return "\n".join(lines)
 
@@ -109,263 +123,261 @@ class DailyReportGenerator:
             logger.exception("send_snapshot_to 失败")
             return False
 
-    def _build_segment_1(self, opening: str, diary: Optional[str]) -> str:
+    # ── 角色状态 ───────────────────────────────────────────────
+
+    async def _fetch_character_state(self):
+        """容错获取角色状态，失败返回 None"""
+        try:
+            if self._store:
+                return await self._store.get_character_state()
+        except Exception:
+            pass
+        return None
+
+    # ── 段构建 ─────────────────────────────────────────────────
+
+    def _build_segment_1(self, opening: str, diary: Optional[str], character_state) -> str:
         diary_text = diary if diary else _DIARY_UNAVAILABLE
-        return f"{opening}\n\n{diary_text}"
+        parts = [opening, "—— 日记 ——", diary_text]
 
-    def _build_segment_2(self, stats: Dict[str, Any]) -> str:
-        lines = ["—— 机器人运营统计 ——", ""]
-        lines.append(f"昨日消息: {stats['msg']}")
-        lines.append(f"昨日命令: {stats['cmd']}")
-        lines.append(f"昨日掷骰: {stats['roll']}")
-        if stats["top_groups"]:
-            lines.append("")
-            lines.append("活跃群 Top 3:")
-            for g in stats["top_groups"]:
-                lines.append(f"  {g}")
-        else:
-            lines.append("")
-            lines.append(f"活跃群: {_DATA_UNAVAILABLE}")
+        if character_state:
+            state_parts = []
+            if character_state.energy is not None:
+                state_parts.append(f"活力 {character_state.energy}")
+            if character_state.mood is not None:
+                state_parts.append(f"心情 {character_state.mood}")
+            if character_state.health is not None:
+                state_parts.append(f"健康 {character_state.health}")
+            if state_parts:
+                parts.append("—— 角色状态 ——")
+                parts.append("  ".join(state_parts))
+
+        return "\n\n".join(parts)
+
+    async def _build_segment_2(self, stats: Dict[str, Any]) -> str:
+        lines = ["—" * 30, ""]
+
+        # 活跃用户与群
+        au = stats["active_users"]
+        lines.append(
+            f"活跃用户 {au['total']} 人 (群聊 {au['group']} / 私聊 {au['private']})"
+            f" · 活跃于 {stats['active_groups']} 个群"
+        )
+        lines.append("")
+
+        # 新用户与新群
+        lines.append(f"新用户 +{stats['new_users']} · 新群 +{stats['new_groups']}")
+        lines.append("")
+
+        # 消息与命令总数
+        msg = stats["msg"]
+        cmd = stats["cmd"]
+        lines.append(
+            f"用户消息 {msg['total']} 条 (群聊 {msg['group']} / 私聊 {msg['private']})"
+        )
+        lines.append(
+            f"指令合计 {cmd['total']} 次 (群聊 {cmd['group']} / 私聊 {cmd['private']})"
+        )
+        lines.append("")
+
+        # 指令分布（每行 3 个）
+        lines.append("指令分布")
+        flag_data = stats["flag_breakdown"]
+        for i in range(0, len(_FLAG_DISPLAY_ORDER), 3):
+            row_parts = []
+            for flag in _FLAG_DISPLAY_ORDER[i:i + 3]:
+                fd = flag_data.get(flag, {"count": 0, "users": 0})
+                name = DPP_COMMAND_FLAG_DICT.get(flag, "未知")
+                row_parts.append(f"{name} {fd['count']} ({fd['users']}人)")
+            lines.append("  ".join(row_parts))
+        lines.append("")
+
+        # LLM 用量
+        llm = stats["llm"]
+        lines.append(
+            f"LLM · {llm['total_calls']} 调用 · "
+            f"{_fmt_tokens(llm['total_tokens'])} tokens · "
+            f"{llm['errors']} 异常"
+        )
+        for model_line in llm["models"]:
+            lines.append(f"  {model_line}")
+
         return "\n".join(lines)
 
-    async def _build_segment_3(self) -> str:
-        lines = ["—— Persona 运营数据 ——", ""]
-        persona_lines = await self._collect_persona_lines(use_cur_day=False)
-        if persona_lines:
-            lines.extend(persona_lines)
-        else:
-            lines.append("Persona 模块未初始化")
-        return "\n".join(lines)
-
-    async def _collect_persona_lines(self, *, use_cur_day: bool) -> List[str]:
-        """收集 Persona 数据行（段 3 与 snapshot 共用）。返回空列表表示模块未初始化。"""
-        if not self._store:
-            return []
-
-        lines: List[str] = []
-
-        # LLM 调用
-        lines.append("LLM 调用:")
-        for item in await self._collect_llm_usage(use_cur_day):
-            lines.append(f"  {item}")
-
-        # 好感度变化 Top 3
-        lines.append("")
-        lines.append("好感度变化 Top 3:")
-        for item in await self._collect_affinity_changes():
-            lines.append(f"  {item}")
-
-        # 角色状态
-        lines.append("")
-        lines.append("角色状态:")
-        for item in await self._collect_character_state():
-            lines.append(f"  {item}")
-
-        # 对话概览
-        lines.append("")
-        lines.append("对话概览:")
-        for item in await self._collect_chat_overview():
-            lines.append(f"  {item}")
-
-        return lines
-
-    # ── 6 个 per-table 独立容错方法 ────────────────────────────
+    # ── 核心统计收集 ───────────────────────────────────────────
 
     async def _collect_core_stats(self, *, use_cur_day: bool = False) -> Dict[str, Any]:
-        """收集核心统计（消息/命令/掷骰/活跃群 Top 3）"""
+        """收集核心统计 — 单次遍历聚合所有维度"""
         try:
             all_users = await self._bot.db.user_stat.list_all()
             all_groups = await self._bot.db.group_stat.list_all()
+            tz = self._config.timezone if self._config else "Asia/Shanghai"
 
-            total_msg = 0
-            total_cmd = 0
-            total_roll = 0
+            val = "cur_day_val" if use_cur_day else "last_day_val"
+
+            # 计算新用户检测的日期范围
+            if use_cur_day:
+                target_date = wall_now(tz).date()
+            else:
+                target_date = (wall_now(tz) - timedelta(days=1)).date()
+
+            # 用户维度聚合
+            total_msg = group_msg = private_msg = 0
+            total_cmd = group_cmd = private_cmd = 0
+            active_users_total = active_users_group = active_users_private = 0
+            new_users = 0
+
+            flag_counts: Dict[int, int] = {}
+            flag_users: Dict[int, set] = {}
+            for flag in DPP_COMMAND_FLAG_DICT:
+                flag_counts[flag] = 0
+                flag_users[flag] = set()
+
             for row in all_users:
                 info = UserStatInfo()
                 try:
                     info.deserialize(row.data)
                 except Exception:
                     continue
-                val = info.msg.cur_day_val if use_cur_day else info.msg.last_day_val
-                total_msg += max(0, val)
-                for elem in info.cmd.flag_dict.values():
-                    val = elem.cur_day_val if use_cur_day else elem.last_day_val
-                    total_cmd += max(0, val)
-                val = info.roll.times.cur_day_val if use_cur_day else info.roll.times.last_day_val
-                total_roll += max(0, val)
 
-            group_msg: Dict[str, int] = {}
-            group_name_map: Dict[str, str] = {}
+                u_msg = max(0, getattr(info.msg, val))
+                u_msg_g = max(0, getattr(info.msg_group, val))
+                u_msg_p = max(0, getattr(info.msg_private, val))
+
+                if u_msg > 0:
+                    active_users_total += 1
+                    if u_msg_g > 0:
+                        active_users_group += 1
+                    if u_msg_p > 0:
+                        active_users_private += 1
+
+                total_msg += u_msg
+                group_msg += u_msg_g
+                private_msg += u_msg_p
+
+                # 命令统计（per-flag + 维度拆分）
+                for flag in DPP_COMMAND_FLAG_DICT:
+                    elem = info.cmd.flag_dict.get(flag)
+                    if elem:
+                        c_val = getattr(elem, val)
+                        if c_val > 0:
+                            flag_counts[flag] += c_val
+                            flag_users[flag].add(row.user_id)
+
+                u_cmd_g = max(0, getattr(info.cmd_group, val))
+                u_cmd_p = max(0, getattr(info.cmd_private, val))
+                group_cmd += u_cmd_g
+                private_cmd += u_cmd_p
+                total_cmd += u_cmd_g + u_cmd_p
+
+                # 新用户检测
+                if info.created_at and info.created_at != 0:
+                    dt = int_to_datetime(info.created_at)
+                    if dt.date() == target_date:
+                        new_users += 1
+
+            # 群维度聚合
+            active_groups = 0
+            new_groups = 0
             for row in all_groups:
                 info = GroupStatInfo()
                 try:
                     info.deserialize(row.data)
                 except Exception:
                     continue
-                name = getattr(row, "display_name", "") or ""
-                group_name_map[row.group_id] = name if name else row.group_id
-                val = info.msg.cur_day_val if use_cur_day else info.msg.last_day_val
-                if val > 0:
-                    group_msg[row.group_id] = max(0, val)
+                g_msg = max(0, getattr(info.msg, val))
+                if g_msg > 0:
+                    active_groups += 1
+                if info.created_at and info.created_at != 0:
+                    dt = int_to_datetime(info.created_at)
+                    if dt.date() == target_date:
+                        new_groups += 1
 
-            sorted_groups = sorted(group_msg.items(), key=lambda x: x[1], reverse=True)
-            top_groups = []
-            for gid, count in sorted_groups[:3]:
-                group_name = self._get_group_name(gid, group_name_map)
-                top_groups.append(f"{group_name}({gid}): {count} 条消息")
+            # 构建 flag_breakdown
+            flag_breakdown = {}
+            for flag in DPP_COMMAND_FLAG_DICT:
+                flag_breakdown[flag] = {
+                    "count": flag_counts.get(flag, 0),
+                    "users": len(flag_users.get(flag, set())),
+                }
+
+            # LLM 用量
+            llm = await self._collect_llm_summary(use_cur_day)
 
             return {
-                "msg": str(total_msg),
-                "cmd": str(total_cmd),
-                "roll": str(total_roll),
-                "top_groups": top_groups,
+                "active_users": {
+                    "total": active_users_total,
+                    "group": active_users_group,
+                    "private": active_users_private,
+                },
+                "active_groups": active_groups,
+                "new_users": new_users,
+                "new_groups": new_groups,
+                "msg": {"total": total_msg, "group": group_msg, "private": private_msg},
+                "cmd": {"total": total_cmd, "group": group_cmd, "private": private_cmd},
+                "flag_breakdown": flag_breakdown,
+                "llm": llm,
             }
         except Exception:
-            return {
-                "msg": _DATA_UNAVAILABLE,
-                "cmd": _DATA_UNAVAILABLE,
-                "roll": _DATA_UNAVAILABLE,
-                "top_groups": [],
-            }
+            return self._empty_core_stats()
 
-    def _get_group_name(self, group_id: str, group_name_map: Optional[Dict[str, str]] = None) -> str:
-        """从 group_name_map 查询群名，失败返回 ID"""
-        if group_name_map:
-            name = group_name_map.get(group_id, "")
-            if name and name != group_id:
-                return name
-        return group_id
+    def _empty_core_stats(self) -> Dict[str, Any]:
+        """返回空统计结构"""
+        flag_breakdown = {}
+        for flag in DPP_COMMAND_FLAG_DICT:
+            flag_breakdown[flag] = {"count": 0, "users": 0}
+        return {
+            "active_users": {"total": 0, "group": 0, "private": 0},
+            "active_groups": 0,
+            "new_users": 0,
+            "new_groups": 0,
+            "msg": {"total": 0, "group": 0, "private": 0},
+            "cmd": {"total": 0, "group": 0, "private": 0},
+            "flag_breakdown": flag_breakdown,
+            "llm": {"total_calls": 0, "total_tokens": 0, "errors": 0, "models": []},
+        }
 
-    async def _collect_llm_usage(self, use_cur_day: bool) -> Any:
-        """收集昨日/今日各模型 LLM 调用统计（次数 + token 消耗）"""
+    # ── LLM 用量精简版 ─────────────────────────────────────────
+
+    async def _collect_llm_summary(self, use_cur_day: bool) -> Dict[str, Any]:
+        """收集昨日/今日 LLM 调用汇总（精简：只保留次数/token/错误/按模型分组）"""
         try:
             if not self._store:
-                return [_DATA_UNAVAILABLE]
+                return {"total_calls": 0, "total_tokens": 0, "errors": 0, "models": []}
+
             tz = self._config.timezone if self._config else "Asia/Shanghai"
             if use_cur_day:
                 date = wall_now(tz).strftime("%Y-%m-%d")
             else:
                 date = (wall_now(tz) - timedelta(days=1)).strftime("%Y-%m-%d")
+
             rows = await self._store.get_daily_token_usage(date)
             if not rows:
-                return [_DATA_UNAVAILABLE]
+                return {"total_calls": 0, "total_tokens": 0, "errors": 0, "models": []}
 
-            def _fmt(v: int) -> str:
-                if v >= 1_000_000:
-                    return f"{v / 1_000_000:.1f}M"
-                if v >= 1_000:
-                    return f"{v / 1_000:.1f}K"
-                return str(v)
+            total_calls = 0
+            total_tokens = 0
+            errors = 0
+            model_lines = []
 
-            lines = []
             for r in rows:
-                label = f"{r['provider']}/{r['model']}" if r["provider"] else r["model"]
-                token_parts = []
-                for key, name in [
-                    ("tokens_in", "输入"),
-                    ("tokens_out", "输出"),
-                    ("cache_read", "缓存读"),
-                    ("cache_creation", "缓存写"),
-                    ("reasoning_tokens", "推理"),
-                ]:
-                    v = r.get(key, 0)
-                    if v:
-                        token_parts.append(f"{name} {_fmt(v)}")
-                line = f"{label}: {r['requests']} 次"
-                if token_parts:
-                    line += f"\n    {' / '.join(token_parts)}"
-                lines.append(line)
-            return lines
+                label = f"{r['provider']}/{r['model']}" if r.get("provider") else r["model"]
+                calls = r.get("requests", 0)
+                tokens = r.get("tokens_in", 0) + r.get("tokens_out", 0)
+                total_calls += calls
+                total_tokens += tokens
+                if r.get("status") and r["status"] != "ok":
+                    errors += 1
+                model_lines.append(f"{label}: {calls}次 / {_fmt_tokens(tokens)}")
+
+            return {
+                "total_calls": total_calls,
+                "total_tokens": total_tokens,
+                "errors": errors,
+                "models": model_lines if model_lines else [],
+            }
         except Exception:
-            return [_DATA_UNAVAILABLE]
-
-    async def _collect_affinity_changes(self) -> Any:
-        """收集好感度变化 Top 3"""
-        try:
-            if not self._store:
-                return [_DATA_UNAVAILABLE]
-            yesterday = (wall_now(self._config.timezone) - timedelta(days=1)).strftime("%Y-%m-%d")
-            db = self._store.db
-            cursor = await db.execute(
-                """
-                SELECT user_id, composite_after - composite_before as delta, reason
-                FROM persona_score_history
-                WHERE date(created_at) = ?
-                ORDER BY ABS(composite_after - composite_before) DESC
-                LIMIT 3
-                """,
-                (yesterday,),
-            )
-            rows = await cursor.fetchall()
-            if not rows:
-                return []
-            lines = []
-            for row in rows:
-                user_id = row[0]
-                delta = row[1]
-                reason = row[2] or ""
-                sign = "+" if delta >= 0 else ""
-                reason_text = f"（{reason[:30]}）" if reason else ""
-                lines.append(f"  {user_id}: {sign}{delta:.2f} {reason_text}")
-            return lines
-        except Exception:
-            return [_DATA_UNAVAILABLE]
-
-    async def _collect_character_state(self) -> Any:
-        """收集角色状态（体力/心情/健康）"""
-        try:
-            if not self._store:
-                return [_DATA_UNAVAILABLE]
-            state = await self._store.get_character_state()
-            if state is None:
-                return [_DATA_UNAVAILABLE]
-            lines = []
-            if state.energy is not None:
-                lines.append(f"体力: {state.energy}/100")
-            if state.mood is not None:
-                lines.append(f"心情: {state.mood}/100")
-            if state.health is not None:
-                lines.append(f"健康: {state.health}/100")
-            if state.current_intention:
-                lines.append(f"当前意向: {state.current_intention}")
-            if not lines:
-                lines.append(state.text[:80] if state.text else _DATA_UNAVAILABLE)
-            return lines
-        except Exception:
-            return [_DATA_UNAVAILABLE]
-
-    async def _collect_chat_overview(self) -> Any:
-        """收集 persona 聊天概览（仅 type='chat'）"""
-        try:
-            if not self._store:
-                return [_DATA_UNAVAILABLE]
-            yesterday = (wall_now(self._config.timezone) - timedelta(days=1)).strftime("%Y-%m-%d")
-            stats = await self._store.get_daily_chat_stats(yesterday)
-
-            lines = []
-            total = stats["bot"] + stats["user"]
-            lines.append(f"聊天消息: {total} 条（Bot 回复 {stats['bot']} / 用户发言 {stats['user']}）")
-
-            parts = [f"{stats['users']} 人"]
-            if stats["new_users"]:
-                parts.append(f"新增 {stats['new_users']}")
-            parts.append(f"覆盖 {stats['groups']} 个群")
-            lines.append(f"参与: {'，'.join(parts)}")
-
-            if stats["top_users"]:
-                lines.append("活跃用户 Top 3:")
-                for u in stats["top_users"]:
-                    label = f"{u['display_name']}({u['user_id']})" if u["display_name"] else u["user_id"]
-                    lines.append(f"  {label}: {u['cnt']} 条")
-
-            if stats["top_groups"]:
-                lines.append("活跃群 Top 3:")
-                for g in stats["top_groups"]:
-                    lines.append(f"  {g['group_id']}: {g['cnt']} 条")
-
-            return lines
-        except Exception:
-            return [_DATA_UNAVAILABLE]
+            return {"total_calls": 0, "total_tokens": 0, "errors": 0, "models": []}
 
     # ── 开场白生成 ─────────────────────────────────────────────
 
@@ -396,10 +408,15 @@ class DailyReportGenerator:
             parts.append(f"昨日日记已生成（{len(diary)}字）。")
         else:
             parts.append("昨日日记未生成。")
+
+        au = core_stats["active_users"]
+        msg = core_stats["msg"]
+        cmd = core_stats["cmd"]
         parts.append(
-            f"昨日消息 {core_stats.get('msg', '?')} 条，"
-            f"命令 {core_stats.get('cmd', '?')} 次，"
-            f"掷骰 {core_stats.get('roll', '?')} 次。"
+            f"活跃用户 {au['total']} 人（群聊 {au['group']} / 私聊 {au['private']}），"
+            f"活跃于 {core_stats['active_groups']} 个群，"
+            f"新用户 +{core_stats['new_users']}，"
+            f"用户消息 {msg['total']} 条，指令 {cmd['total']} 次。"
         )
         return " ".join(parts)
 

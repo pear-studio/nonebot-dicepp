@@ -48,21 +48,24 @@ class GroupStatInfo(JsonObject):
                      "cmd": self.cmd.serialize(),
                      "roll": self.roll.serialize(),
                      "meta": self.meta.serialize(),
+                     "created_at": self.created_at,
                      }
         return json.dumps(json_dict)
 
     def deserialize(self, json_str: str) -> None:
         json_dict: dict = json.loads(json_str)
-        self.msg.deserialize(json_dict["msg"])
-        self.cmd.deserialize(json_dict["cmd"])
-        self.roll.deserialize(json_dict["roll"])
-        self.meta.deserialize(json_dict["meta"])
+        self.msg.deserialize(json_dict.get("msg", ""))
+        self.cmd.deserialize(json_dict.get("cmd", ""))
+        self.roll.deserialize(json_dict.get("roll", ""))
+        self.meta.deserialize(json_dict.get("meta", ""))
+        self.created_at = json_dict.get("created_at", 0)
 
     def __init__(self):
         self.msg: StatElementBase = StatElementBase()
         self.cmd: UserCommandStatInfo = UserCommandStatInfo()
         self.roll: RollStatInfo = RollStatInfo()
         self.meta: GroupMetaInfo = GroupMetaInfo()
+        self.created_at: int = 0
 
     def stat_msg(self, time: int = 1):
         self.msg.inc(time)
