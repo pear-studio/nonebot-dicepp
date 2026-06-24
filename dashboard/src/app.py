@@ -165,6 +165,8 @@ def _write_json_atomic(path: Path, data: dict) -> None:
 
 def _is_path_traversal(path: str, base: Path) -> bool:
     """Check if the resolved path escapes the given base directory."""
+    if not path:
+        return True
     try:
         resolved = (base / path).resolve()
         return not resolved.is_relative_to(base.resolve())
@@ -774,10 +776,17 @@ def _get_config_field_metadata() -> dict:
     if mod is None:
         return {}
 
-    BotConfig = mod.BotConfig
-    schema = BotConfig.model_json_schema()
-    defs = schema.get("$defs", {})
-    return _flatten_json_schema(schema, defs)
+    try:
+        BotConfig = mod.BotConfig
+        schema = BotConfig.model_json_schema()
+        defs = schema.get("$defs", {})
+        return _flatten_json_schema(schema, defs)
+    except Exception:
+        import logging
+        logging.getLogger("dashboard").exception(
+            "Failed to extract field metadata from BotConfig"
+        )
+        return {}
 
 
 # Cache metadata at module level (computed once on first use)
@@ -802,6 +811,30 @@ def _cached_config_layout() -> dict:
         mod = _load_pydantic_models_module()
         _config_layout_cache = getattr(mod, "DASHBOARD_LAYOUT", {}) if mod else {}
     return _config_layout_cache
+
+
+def _find_meta(dotted: str, meta: dict) -> dict:
+    """Match a dotted data key against static schema metadata keys.
+
+    Three-level fallback for dynamic keys (e.g. providers.<name>.api_key):
+    1. Exact match
+    2. Remove one segment at a time (skip the dynamic key segment)
+    3. Prefix truncation from right (parent node fallback for tab/section)
+    """
+    if dotted in meta:
+        return meta[dotted]
+    parts = dotted.split(".")
+    # Level 2: try removing each segment (skip dynamic key)
+    for i in range(len(parts)):
+        candidate = ".".join(parts[:i] + parts[i+1:])
+        if candidate in meta:
+            return meta[candidate]
+    # Level 3: prefix fallback (get tab/section from parent, label less precise)
+    for i in range(len(parts) - 1, 0, -1):
+        prefix = ".".join(parts[:i])
+        if prefix in meta:
+            return meta[prefix]
+    return {}
 
 
 @app.get("/api/config/merged", dependencies=[Depends(require_auth)])
@@ -870,7 +903,7 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
     # Build output with labels, descriptions, tab and section
     output = {}
     for dotted, entry in result_annotated.items():
-        meta = field_meta.get(dotted, {})
+        meta = _find_meta(dotted, field_meta)
         output[dotted] = {
             "value": entry["value"],
             "source": entry["source"],
@@ -990,6 +1023,14 @@ async def config_user_save(request: Request):
 
 # ── Persona character cards ──────────────────────────────────────────────────
 
+_CHAR_NAME_PATTERN = re.compile(r'^[^\x00/\\]{1,128}$')
+
+
+def _validate_character_name(name: str) -> None:
+    """Validate character name: 1-128 chars, no path separators or null bytes."""
+    if not name or not _CHAR_NAME_PATTERN.match(name):
+        _err(f"角色名格式无效：1~128 位非空字符，禁止路径分隔符和空字节", 400)
+
 
 @app.get("/api/persona/characters", dependencies=[Depends(require_auth)])
 async def persona_characters(request: Request):
@@ -1010,6 +1051,7 @@ async def persona_characters(request: Request):
 @app.get("/api/persona/characters/{name}", dependencies=[Depends(require_auth)])
 async def persona_character_get(name: str, request: Request):
     """Read character.yaml for a character."""
+    _validate_character_name(name)
     if _is_path_traversal(name, DashboardPaths.CONTENT_DIR / "characters"):
         _err("Path traversal detected", 400)
 
@@ -1028,6 +1070,7 @@ async def persona_character_get(name: str, request: Request):
 @app.post("/api/persona/characters/{name}/save", dependencies=[Depends(require_auth)])
 async def persona_character_save(name: str, request: Request):
     """Save character.yaml for a character (creates directory if needed)."""
+    _validate_character_name(name)
     if _is_path_traversal(name, DashboardPaths.CONTENT_DIR / "characters"):
         _err("Path traversal detected", 400)
 
@@ -1038,9 +1081,12 @@ async def persona_character_save(name: str, request: Request):
 
     yaml_path = DashboardPaths.CONTENT_DIR / "characters" / name / "character.yaml"
     yaml_path.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic write: .tmp + os.replace to avoid leaving a partial file on crash
+    # Atomic write: .tmp + fsync + os.replace (consistent with _write_json_atomic)
     tmp_path = yaml_path.with_suffix(".yaml.tmp")
     tmp_path.write_text(content, encoding="utf-8")
+    fd = os.open(str(tmp_path), os.O_RDONLY)
+    os.fsync(fd)
+    os.close(fd)
     os.replace(tmp_path, yaml_path)
 
     db_path = request.app.state.dashboard_db

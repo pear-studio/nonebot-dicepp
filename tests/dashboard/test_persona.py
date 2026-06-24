@@ -85,6 +85,7 @@ def test_path_traversal_detection(tmp_dashboard_paths):
     assert _is_path_traversal("../global", base) is True
     assert _is_path_traversal("../../etc/passwd", base) is True
     assert _is_path_traversal("alice", base) is False
+    assert _is_path_traversal("", base) is True  # empty path treated as traversal
 
 
 class TestSaveCharacter:
@@ -125,3 +126,38 @@ class TestSaveCharacter:
         )
         assert resp.status_code == 400
         assert resp.json()["ok"] is False
+
+    def test_save_character_invalid_name_empty(self, test_client: TestClient, tmp_dashboard_paths):
+        """_validate_character_name rejects empty or invalid names."""
+        from dashboard.src.app import _validate_character_name
+        import pytest as pt
+
+        # Empty / whitespace-only
+        with pt.raises(Exception) as exc_info:
+            _validate_character_name("")
+        assert exc_info.value.status_code == 400
+
+        # Path separator
+        with pt.raises(Exception) as exc_info:
+            _validate_character_name("bad/name")
+        assert exc_info.value.status_code == 400
+
+        # Backslash
+        with pt.raises(Exception) as exc_info:
+            _validate_character_name("bad\\name")
+        assert exc_info.value.status_code == 400
+
+        # Null byte
+        with pt.raises(Exception) as exc_info:
+            _validate_character_name("bad\x00name")
+        assert exc_info.value.status_code == 400
+
+        # Over-length
+        with pt.raises(Exception) as exc_info:
+            _validate_character_name("x" * 129)
+        assert exc_info.value.status_code == 400
+
+        # Valid names pass without exception
+        _validate_character_name("alice")
+        _validate_character_name("苏晓")
+        _validate_character_name("test_bot-01")

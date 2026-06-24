@@ -2,10 +2,18 @@
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from dashboard.src.config import DashboardPaths
 from tests.dashboard.conftest import setup_auth
+
+# Check if Pydantic is importable (for integration tests using real models)
+try:
+    import pydantic  # noqa: F401
+    _HAVE_PYDANTIC = True
+except ImportError:
+    _HAVE_PYDANTIC = False
 
 
 class TestMergedView:
@@ -315,6 +323,89 @@ class TestFieldMetadata:
         assert result["persona_ai_providers.api_key"]["section"] == "providers", \
             f"api_key section should be 'providers', got {result.get('persona_ai_providers.api_key', {}).get('section')}"
         assert result["persona_ai_providers.api_key"]["tab"] == "persona"
+
+    def test_dynamic_key_metadata_match(self):
+        """_find_meta matches data keys with dynamic segments against static schema keys.
+
+        persona_ai.providers.minimax.api_key (data) should match
+        persona_ai.providers.api_key (metadata) by skipping the dynamic 'minimax' segment.
+        """
+        from dashboard.src.app import _find_meta
+
+        field_meta = {
+            "persona_ai.providers": {
+                "title": "模型提供商", "description": "", "tab": "persona", "section": "providers",
+            },
+            "persona_ai.providers.api_key": {
+                "title": "API Key", "description": "", "tab": "persona", "section": "providers",
+            },
+            "persona_ai.enabled": {
+                "title": "启用 Persona", "description": "", "tab": "persona", "section": "basic",
+            },
+        }
+
+        # Exact match still works
+        m = _find_meta("persona_ai.enabled", field_meta)
+        assert m["title"] == "启用 Persona"
+        assert m["section"] == "basic"
+
+        # Dynamic key skip: persona_ai.providers.minimax.api_key → persona_ai.providers.api_key
+        m = _find_meta("persona_ai.providers.minimax.api_key", field_meta)
+        assert m["title"] == "API Key", f"expected 'API Key', got {m.get('title')!r}"
+        assert m["tab"] == "persona"
+        assert m["section"] == "providers"
+
+        # Dynamic key skip (different provider name)
+        m = _find_meta("persona_ai.providers.anthropic.api_key", field_meta)
+        assert m["title"] == "API Key"
+
+        # Parent fallback: no leaf match, falls back to intermediate node
+        m = _find_meta("persona_ai.providers.openai.unknown_field", field_meta)
+        assert m["tab"] == "persona"
+        assert m["section"] == "providers"
+
+        # Completely unknown key returns empty
+        m = _find_meta("nonexistent.field.path", field_meta)
+        assert m == {}
+
+    @pytest.mark.skipif(not _HAVE_PYDANTIC, reason="Pydantic not installed")
+    def test_metadata_from_real_pydantic_models(self, monkeypatch, tmp_dashboard_paths):
+        """End-to-end: _get_config_field_metadata uses real BotConfig.model_json_schema().
+
+        Monkeypatch PROJECT_ROOT to the real project so pydantic_models.py is found.
+        """
+        from pathlib import Path
+        from dashboard.src.app import _get_config_field_metadata, _cached_config_layout
+
+        # Point to real project root where pydantic_models.py lives
+        real_root = Path(__file__).resolve().parent.parent.parent
+        monkeypatch.setattr("dashboard.src.config.DashboardPaths.PROJECT_ROOT", real_root)
+
+        # Invalidate caches so they reload with the corrected PROJECT_ROOT
+        import dashboard.src.app as app_mod
+        app_mod._pydantic_module_cache = None
+        app_mod._config_field_metadata_cache = None
+        app_mod._config_layout_cache = None
+
+        meta = _get_config_field_metadata()
+        layout = _cached_config_layout()
+
+        # Must have real metadata (not the {} fallback)
+        assert len(meta) > 50, f"expected >50 fields from real model, got {len(meta)}"
+
+        # Verify known fields have correct metadata
+        assert meta["persona_ai.enabled"]["title"] == "启用 Persona"
+        assert meta["persona_ai.enabled"]["tab"] == "persona"
+        assert meta["persona_ai.enabled"]["section"] == "basic"
+
+        assert meta["agreement"]["tab"] == "config"
+        assert meta["agreement"]["section"] == "runtime"
+
+        # Layout must contain expected tabs and sections
+        assert "config" in layout.get("tabs", {})
+        assert "persona" in layout.get("tabs", {})
+        assert "account" in layout.get("sections", {})
+        assert "basic" in layout.get("sections", {})
 
 
 class TestReloadNotification:

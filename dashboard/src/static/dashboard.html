@@ -286,8 +286,8 @@
           <div>
             <!-- Persona sub-tabs -->
             <div class="flex gap-3 mb-4 border-b">
-              <button @click="personaView = 'ai_config'" :class="personaView === 'ai_config' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">AI 配置</button>
-              <button @click="personaView = 'characters'; loadCharacters()" :class="personaView === 'characters' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">角色卡</button>
+              <button @click="switchPersonaView('ai_config')" :class="personaView === 'ai_config' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">AI 配置</button>
+              <button @click="switchPersonaView('characters')" :class="personaView === 'characters' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'" class="pb-2 px-1 font-medium">角色卡</button>
             </div>
 
             <!-- AI 配置 sub-tab -->
@@ -746,6 +746,7 @@ function app() {
     // ── init ──
     init() {
       this.checkAuth();
+      this.loadUiPrefs();
     },
 
     // ── API helper (cookies-based auth, no Bearer token) ──
@@ -1002,9 +1003,13 @@ function app() {
         this.api(`/api/config/merged?bot_id=${this.selectedBotId}`).catch(() => ({ config: {}, layout: {} })),
         this.api('/api/config/user').catch(() => ({ config: {} })),
       ]);
-      this._mergedCache = mergedData.config || {};
+      const configData = mergedData.config || {};
+      this._mergedCache = configData;
       this._layout = mergedData.layout || {};
-      this._lastBotId = this.selectedBotId;
+      // Only cache botId when we got real data (avoid caching empty {} from errors)
+      if (Object.keys(configData).length > 0) {
+        this._lastBotId = this.selectedBotId;
+      }
       this.userConfig = userData.config || {};
       this.userConfigText = JSON.stringify(this.userConfig, null, 2);
     },
@@ -1235,6 +1240,12 @@ function app() {
     },
 
     // ── Persona Tab ──
+    switchPersonaView(view) {
+      if (this._hasEditingFields() && !confirm('有未保存的修改，确定要切换吗？')) return;
+      this.personaView = view;
+      if (view === 'characters') this.loadCharacters();
+    },
+
     async loadPersonaConfig() {
       if (!this.selectedBotId) return;
       this.personaConfigLoading = true;
