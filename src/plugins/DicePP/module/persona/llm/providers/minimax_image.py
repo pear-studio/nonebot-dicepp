@@ -140,12 +140,6 @@ class MiniMaxImageProvider:
         except httpx.TimeoutException:
             logger.warning(f"image gen probe timeout: model={self.model}")
             return False
-        except Exception as e:
-            logger.warning(
-                f"image gen probe failed: model={self.model} "
-                f"exception={type(e).__name__} message={str(e)[:200]}"
-            )
-            return False
 
     @staticmethod
     def classify_error(exception: Exception) -> ErrorClass:

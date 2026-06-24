@@ -1,5 +1,6 @@
 """MiniMaxImageProvider 单元测试 — classify_error 错误码 2013 细分"""
 import asyncio
+import httpx
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
@@ -246,12 +247,27 @@ class TestProbe:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_probe_returns_false_on_exception(self, provider):
-        """probe 在网络异常时返回 False（不抛异常）"""
+    async def test_probe_returns_false_on_timeout(self, provider):
+        """probe 在超时时返回 False"""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client_cls.return_value.__aenter__.return_value = mock_client
-            mock_client.post = AsyncMock(side_effect=RuntimeError("network error"))
+            mock_client.post = AsyncMock(
+                side_effect=httpx.TimeoutException("timeout")
+            )
 
             result = await provider.probe()
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_probe_raises_on_non_timeout_exception(self, provider):
+        """probe 在非超时异常时 propagate（交由 router 分类决策）"""
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client_cls.return_value.__aenter__.return_value = mock_client
+            mock_client.post = AsyncMock(
+                side_effect=httpx.ConnectError("connection refused")
+            )
+
+            with pytest.raises(httpx.ConnectError, match="connection refused"):
+                await provider.probe()
