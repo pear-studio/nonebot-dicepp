@@ -626,6 +626,8 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 
     def _annotate_deep(base: dict, overlay: dict, source: str, prefix: str = ""):
         for key, value in base.items():
+            if key.startswith("_comment"):
+                continue
             dotted = f"{prefix}.{key}" if prefix else key
             if isinstance(value, dict):
                 # Recurse into nested dicts — if overlay has a dict for this key, pass it
@@ -639,6 +641,8 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 
         # Extra keys from overlay not in base
         for key, value in overlay.items():
+            if key.startswith("_comment"):
+                continue
             dotted = f"{prefix}.{key}" if prefix else key
             if key not in base:
                 if isinstance(value, dict):
@@ -658,6 +662,8 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
             """Flatten dict to dotted keys, return {dotted: value}."""
             items = {}
             for key, value in d.items():
+                if key.startswith("_comment"):
+                    continue
                 dotted = f"{prefix}.{key}" if prefix else key
                 if isinstance(value, dict):
                     items.update(_flatten_and_annotate(value, dotted))

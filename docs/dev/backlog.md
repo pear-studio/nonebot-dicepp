@@ -14,25 +14,6 @@
 
 ## dashboard
 
-### [B-260623-f6b322] 配置编辑中 _comment / _llm_comment 键不应出现
-- 创建: 2026-06-23
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - global.json 包含多个 comment 键被展示在配置编辑字段列表中：
-      _comment、persona_ai._comment_character、persona_ai._comment_persona、
-      persona_ai._comment_tables、persona_ai._comment_timezone
-    - 这些键是给开发者看的注释，不应暴露在 Web UI
-    - 根因：config_merged API 的 _annotate_deep 递归遍历所有键，无过滤逻辑
-    - 代码位置：app.py:623-643 (_annotate_deep)、dashboard.html:743 (buildConfigFields)
-- 开发备忘:
-    - 方案A（推荐）：后端 config_merged 遍历时跳过 key 以 '_comment' 或 '_llm_comment' 结尾的路径
-    - 方案B：前端 buildConfigFields 过滤
-    - 建议后端过滤（源头解决），同时前端加防御性过滤
-    - 影响面：app.py _annotate_deep、dashboard.html buildConfigFields
-    - 风险：极低，注意用 endswith 或正则精确匹配，避免误杀正常配置键
-
 ### [B-260623-7d7d93] 配置编辑与数据浏览缺少中文标签和解释
 - 创建: 2026-06-23
 - 优先级: P1

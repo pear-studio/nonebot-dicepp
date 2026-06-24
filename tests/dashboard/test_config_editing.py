@@ -57,6 +57,22 @@ class TestMergedView:
         assert config["app.name"]["description"] == "Application name"
         assert config["app.version"]["description"] == "Application version"
 
+    def test_merged_excludes_comment_keys(self, test_client: TestClient, tmp_dashboard_paths):
+        """``_comment`` keys (write-only dev notes) must not appear in merged output."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/config/merged")
+        config = resp.json()["config"]
+
+        # Should include normal keys
+        assert config["app.name"]["value"] == "test_dicepp"
+        assert config["persona_ai.enabled"]["value"] is False
+
+        # Should NOT include comment keys at any level
+        for path in config:
+            leaf = path.split(".")[-1]
+            assert not leaf.startswith("_comment"), \
+                f"comment key leaked into merged config: {path}"
+
 
 class TestSetField:
     def test_set_field(self, test_client: TestClient, tmp_dashboard_paths):

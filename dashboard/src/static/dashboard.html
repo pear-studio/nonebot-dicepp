@@ -945,6 +945,7 @@ function app() {
       const fields = {};
       if (!merged || typeof merged !== 'object') return fields;
       for (const [path, entry] of Object.entries(merged)) {
+        if (path.split('.').pop().startsWith('_comment')) continue;
         fields[path] = {
           value: entry.value,
           source: entry.source || 'default',
