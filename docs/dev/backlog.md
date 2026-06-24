@@ -12,24 +12,6 @@
 
 ---
 
-## dashboard
-
-### [B-260623-6f9e85] 缺少总览/概览 tab 聚合核心数据指标
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: feature
-- 改动量: M
-- 问题表现:
-    - 当前 6 个 tab 各自独立，没有一个 overview/dashboard 页面
-    - 无法一眼看到核心指标（在线 bot 数、最近错误、配额使用、配置变更等）
-    - 需要逐个 tab 点开查看，体验分散
-- 开发备忘:
-    - 新增 overview tab（放在 tabs 数组第一位）
-    - 聚合展示：bot 在线状态卡片、最近审计日志摘要、配置覆盖统计、最近错误计数等
-    - 后端可能需要新增 /api/overview 聚合 endpoint，或前端组合现有 API 调用
-    - 影响面：dashboard.html（新 tab UI + 数据获取逻辑）、可能新增 app.py endpoint
-    - 风险：低，纯增量功能；注意 API 调用数量和性能
-
 ## data
 
 ### [B-260618-56a0a3] 3.0.0 Data Foundation：数据状态架构与迁移基础

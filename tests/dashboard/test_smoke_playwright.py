@@ -204,7 +204,7 @@ def test_config_edit_and_reload_flow(dashboard_url: str, tmp_path: Path) -> None
 
 
 def test_auto_select_first_bot_after_login(dashboard_url: str, tmp_path: Path) -> None:
-    """After login, the first bot is auto-selected and data tab loads without manual selection."""
+    """After login, the first bot is auto-selected and overview tab loads without manual selection."""
     bots_dir = tmp_path / "config" / "bots"
     bots_dir.mkdir(parents=True, exist_ok=True)
     (bots_dir / "alpha_bot.json").write_text(
@@ -236,8 +236,10 @@ def test_auto_select_first_bot_after_login(dashboard_url: str, tmp_path: Path) -
                 "Bot auto-select failed: empty-state prompt is still in DOM"
             )
 
-            # Table selector appears in the data tab (confirms loadTabData was called)
-            page.wait_for_selector('[data-testid="table-select"]', timeout=5000)
+            # Overview tab heading appears (confirms loadTabData was called for overview)
+            page.wait_for_selector("text=概览", timeout=5000)
+            # Bot status section is visible
+            page.wait_for_selector("text=Bot 运行状态", timeout=5000)
         finally:
             browser.close()
 
@@ -258,11 +260,7 @@ def test_no_auto_select_when_no_bots(dashboard_url: str) -> None:
                 f"Expected no bot selected when none exist, but got '{value}'"
             )
 
-            # Empty-state prompt must be visible on the active (data) tab.
-            # Multiple tabs have this element (one per tab template), but only
-            # the data tab is active; .first targets the first DOM match.
-            assert page.locator("text=请先在左侧选择一个 Bot").first.is_visible(), (
-                "Expected empty-state prompt when no bots exist"
-            )
+            # Overview tab shows "暂无 Bot 数据" when no bots exist
+            page.wait_for_selector("text=暂无 Bot 数据", timeout=5000)
         finally:
             browser.close()

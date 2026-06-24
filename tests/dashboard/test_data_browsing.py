@@ -107,3 +107,29 @@ class TestInvalidTable:
             params={"q": "test"},
         )
         assert resp.status_code == 404
+
+
+class TestOverviewBotIdValidation:
+    def test_rejects_invalid_bot_id_path_traversal(self, test_client: TestClient):
+        """GET /api/overview?bot_id=../etc → 400 with 格式无效 message."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/overview", params={"bot_id": "../etc"})
+        assert resp.status_code == 400
+        data = resp.json()
+        assert "bot_id 格式无效" in data.get("message", "")
+
+    def test_rejects_invalid_chars_in_bot_id(self, test_client: TestClient):
+        """GET /api/overview?bot_id=bad!id → 400 with 格式无效."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/overview", params={"bot_id": "bad!id"})
+        assert resp.status_code == 400
+        data = resp.json()
+        assert "bot_id 格式无效" in data.get("message", "")
+
+    def test_accepts_valid_bot_id(self, test_client: TestClient):
+        """GET /api/overview?bot_id=test_bot → 200."""
+        setup_auth(test_client)
+        resp = test_client.get("/api/overview", params={"bot_id": "test_bot"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
