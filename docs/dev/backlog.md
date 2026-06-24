@@ -40,41 +40,49 @@
 
 ## data
 
-### [B-260618-56a0a3] 数据库迁移架构优化调研
+### [B-260618-56a0a3] 3.0.0 Data Foundation：数据状态架构与迁移基础
 - 创建: 2026-06-18
-- 优先级: P2
+- 优先级: P1
 - 类型: refactor
-- 改动量: L
+- 改动量: XL
 - 问题表现:
-    - 当前数据库迁移采用线性堆叠脚本（v1→v2→v3），缺少历史脚本清理策略
-    - 不知何时可删旧脚本、如何确认所有部署已越过某版本
-    - V3 迁移已出现职责混杂（同时做 DROP TABLE variable/favor 和 ALTER TABLE hub_config RENAME COLUMN）
-    - 长期线性堆叠会导致迁移链越来越长、维护成本递增
+    - 3.0.0 将面向更多自托管用户，当前 config/data/dashboard/content 的状态边界尚未固化。
+    - 现有 `BotDatabase` 同时管理 bot_data/log 两个 DB，迁移 registry 仍是单一线性链，新 DB 也会经过历史迁移路径。
+    - Persona 仍使用 `ensure_tables()` + SQL 列表 + `ALTER TABLE` try/except，未纳入统一 schema lifecycle。
+    - 本地控制 token 仍以 `data/runtime/local-control.token` 文件形式存在，跨 Bot/Dashboard 共享状态缺少实例级数据库承载。
+    - 配置 JSON 过时字段、新增字段和字段级错误缺少统一 canonical rewrite 策略。
 - 开发备忘:
-    - 调研方向：Alembic 式 delta 脚本 vs 声明式 schema + 自动 diff vs 其他轻量方案
-    - 历史脚本的清理判定策略（如何确认所有存量部署已跑过某版本）
-    - 产出调研文档后讨论方案，本次不做代码改动
+    - 设计详见 `docs/dev/data-architecture-3.0.md` 的 Data Foundation 部分。
+    - 新增 `data/dicepp.db` 与 `DicePPDatabase`，local control token 入库；旧 token 文件只作为一次性迁移输入，导入成功后删除。
+    - 引入 SchemaTarget：fresh DB 直接 create latest schema，existing DB forward-only migration；每个 DB 自持 `schema_metadata` / `schema_migrations`。
+    - targets 覆盖 `instance`、`bot_core`、`bot_log`、`persona`，由数据 owner 维护 target 定义。
+    - 配置 JSON 引入 canonical rewrite：普通未知/过时/错误字段可丢弃或默认，关键字段必须迁移、告警或禁用相关功能。
+    - 测试治理：schema equivalence、migration import whitelist、legacy fixture 生命周期注释、retry-safe migration。
 
 ## deploy
 
-### [B-260615-19b0fa] 生产备份与恢复策略
+### [B-260615-19b0fa] 3.0.0 Dashboard Save Archives：存档与恢复
 - 创建: 2026-06-15
 - 优先级: P1
 - 类型: feature
-- 改动量: M
+- 改动量: XL
 - 问题表现:
-    - 当前版本发布/回退流程即将切到镜像 tag 部署，但缺少对应的生产备份与恢复机制。
-    - 镜像回退无法恢复已经变更的数据库、config、data、content 或运行时状态，容易让“可回退”产生误导。
-    - 生产更新前、定时备份、恢复验证、保留策略和敏感数据处理规则尚未固化。
+    - 3.0.0 自托管用户需要像游戏存档一样，在 Dashboard 中创建和恢复 DicePP 状态存档。
+    - 镜像/程序版本回退无法恢复已经变更的 config、data、SQLite DB 或运行时状态，容易让“可回退”产生误导。
+    - 升级前存档、恢复前存档、manifest/checksum、恢复失败处理和 release 风险门禁尚未落地。
+    - Dashboard 自身 DB、content、LLOneBot 数据等边界尚未在存档 UI 中明确告知。
 - 开发备忘:
-    - 梳理需要备份的范围：config/、data/、content/、数据库文件、LLOneBot 相关持久化数据，以及生产环境中额外存在的本地环境变量文件。
-    - 设计升级前备份、定时备份、恢复演练、保留周期和失败告警。
-    - 后续可与 version-deploy / deploy-docker 联动：当 release metadata 标记 数据变更/配置变更 为 yes 时，生产更新前必须确认备份。
-    - 注意恢复流程不能只写文档，至少需要可验证的恢复步骤或脚本入口。
+    - 设计详见 `docs/dev/data-architecture-3.0.md` 的存档与恢复、阶段 D 部分。
+    - Dashboard 提供独立存档能力：创建、查看、删除、恢复；升级流程仅复用该能力。
+    - 存档为 `data/backups/*.zip`，包含 manifest 和 sha256 checksum。
+    - 包含 `config/`、`data/dicepp.db`、`data/bots/**/{bot_data.db,log.db,personas_data_*.db}`、`data/local_images/`。
+    - 不包含 `dashboard/data/dashboard.db`、`content/`、`data/backups/`、`data/runtime/`、`data/bots/*/logs/`、LLOneBot 数据。
+    - 创建存档时允许短暂停写；恢复由 Manager 编排，恢复前自动创建 pre-restore 存档，失败时保留 pre-restore 并提供恢复入口。
+    - release metadata 标记数据/配置风险时，升级前必须强提示或门禁创建存档。
 
 ## deployment
 
-### [B-260618-8fce87] 引入 DicePP Manager 统一管理 Bot 与 Dashboard 生命周期
+### [B-260618-8fce87] 3.0.0 Manager Foundation：本地 Manager 与 Runtime Backend
 - 创建: 2026-06-18
 - 优先级: P1
 - 类型: feature
@@ -84,19 +92,31 @@
   - Dashboard 未来还需要更新自身；由 Dashboard 直接替换自身容器或持有 Bot 子进程，难以保证操作完成、失败恢复和职责边界。
   - 直接向 Dashboard 挂载 Docker Socket 会把宿主机高权限暴露给复杂 Web 应用。
   - Linux 以 Docker 容器运行，Windows 以打包进程运行；如果分别实现生命周期逻辑，容易形成两套状态机、错误语义和更新流程。
+  - 3.0.0 Dashboard 存档恢复需要可靠停止 Bot、替换 config/data、重启 Bot，不能由 Dashboard 直接覆盖运行中的 DB 文件。
 - 开发备忘:
-  - 引入常驻的 DicePP Manager，作为 Dashboard 与运行时之间的最小权限管理层；Dashboard 不直接访问 Docker Socket，也不直接持有 Bot 生命周期。
-  - Manager Core 统一实现操作状态机、鉴权、审计、健康检查、并发控制、版本兼容、失败回滚和对 Dashboard 的 API。
-  - 平台差异收敛到 Runtime Backend：Linux 使用 DockerRuntime 管理容器，Windows 使用 ProcessRuntime 管理进程；禁止在业务代码中散落平台判断。
-  - Manager 仅提供受限的启停、重启、更新、状态、日志和回滚接口，禁止任意 Docker API、镜像名称和命令执行。
-  - Windows 最终发布一个用户入口 `DicePP.exe`；同一可执行文件以内部 manager/dashboard/bot/update 模式运行多个独立进程。采用 onedir 发行包，不强求单一物理文件。
-  - Windows 自更新采用 staging 新版本接管：校验下载、停止旧进程、替换程序、健康检查、失败恢复备份；运行状态放在 `data/manager/`，不能只保存在进程内存。
-  - Linux 保持 Manager、Dashboard、Bot 独立镜像；Windows 单一入口只是分发形式差异，两端共享 Manager API 和生命周期语义。
-  - 永久控制通道由受管理组件主动建立：Manager 通过出站 WSS 连接 DiceHub，DiceHub 在既有双向通道上下发生命周期命令；用户无需暴露 Manager/Bot 入站端口。
-  - DiceHub 的远程更新、重启、诊断和回滚必须发给 Manager，不允许 Bot 直接承担替换自身进程或容器的操作；Bot 现有 DiceHub 业务连接与运维控制通道保持职责分离。
-  - Manager 落地后接管安装级本地控制凭据的生成、轮换和恢复；凭据属于整个 DicePP 安装，不属于 Dashboard 私有数据。DiceHub 等远程控制端使用独立的 device-code/网页授权凭据，不复用本地安装凭据。
-  - 当前 Dashboard PR 不实现 Manager，只补齐独立 Dashboard 镜像发布、Windows 双 EXE 打包和测试门禁。
-  - 后续还需细化部署形态、Manager 自身升级边界、鉴权协议、发布清单、镜像/文件签名以及 Runtime Backend contract tests。
+  - 设计详见 `docs/dev/data-architecture-3.0.md` 的 Manager 3.0 范围、阶段 B 部分。
+  - 引入本地 Manager 常驻层，作为 Dashboard 与运行时之间的最小权限管理层；Dashboard 不直接访问 Docker Socket，不直接持有 Bot 生命周期，不直接替换运行中的文件。
+  - Manager Core 统一实现操作状态机、鉴权、审计、健康检查、并发控制、版本兼容、失败恢复和对 Dashboard 的 API。
+  - 平台差异收敛到 Runtime Backend：Linux 使用 DockerRuntime，Windows 使用 ProcessRuntime；两端共享 contract tests。
+  - 3.0.0 纳入本地 Manager 完整能力；DiceHub 远程 WSS 控制、云端更新/回滚/诊断、device-code 授权闭环保留 TODO。
+  - Manager 需为阶段 C 更新/回滚和阶段 D 存档恢复提供停写、停启、状态、日志等基础能力。
+
+### [B-260624-a91b7e] 3.0.0 Local Update And Rollback：本地更新、版本切换与失败恢复
+- 创建: 2026-06-24
+- 优先级: P1
+- 类型: feature
+- 改动量: XL
+- 问题表现:
+  - 3.0.0 前需要 Dashboard 通过 Manager 完成本地启停、重启、更新、版本切换和失败恢复，否则存档恢复和升级门禁无法闭环。
+  - Windows 打包进程与 Linux Docker 部署形态不同，如果更新/回滚逻辑分散实现，会形成两套状态机和错误语义。
+  - 镜像 tag 或程序文件切换必须和数据迁移、存档、健康检查协作，否则失败后用户无法判断当前处于哪个版本/状态。
+- 开发备忘:
+  - 设计详见 `docs/dev/data-architecture-3.0.md` 的阶段 C 部分。
+  - Dashboard 只调用 Manager API；Manager 负责执行启停、重启、日志、状态、版本切换和失败恢复。
+  - Windows 采用 staging 新版本接管：校验下载、停止旧进程、替换程序、健康检查、失败恢复；采用 onedir 发行包，不强求单一物理文件。
+  - Linux 通过受限 DockerRuntime 管理 DicePP 相关容器/compose 服务，禁止 Dashboard 直接暴露 Docker Socket。
+  - 更新前复用阶段 D 存档能力；恢复/回滚后由目标版本按 forward-only migration contract 处理数据。
+  - 不纳入 DiceHub 远程控制闭环；只要求本地 Dashboard + Manager 路径可用。
 
 ## persona
 
