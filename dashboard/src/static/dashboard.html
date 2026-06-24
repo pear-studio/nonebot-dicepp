@@ -134,7 +134,7 @@
               <select x-model="selectedTable" @change="loadTableData(1)" data-testid="table-select" class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">-- 选择数据表 --</option>
                 <template x-for="tbl in tables" :key="tbl.name">
-                  <option x-text="tbl.name" :value="tbl.name"></option>
+                  <option :value="tbl.name" x-text="(tbl.label && tbl.label !== tbl.name) ? tbl.label + ' (' + tbl.name + ')' : tbl.name"></option>
                 </template>
               </select>
               <input type="text" x-model="searchQuery" placeholder="搜索关键字..." @input.debounce.500ms="loadTableData(1)" class="border border-gray-300 rounded-lg px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -200,7 +200,8 @@
                   <div class="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50" @click="toggleField(path)">
                     <div class="flex items-center gap-2">
                       <svg :class="expandedFields.includes(path) ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                      <span class="font-medium text-sm" x-text="path" :title="field.description || ''"></span>
+                      <span class="font-medium text-sm" x-text="field.label || path" :title="field.description || ''"></span>
+                      <span class="text-xs text-gray-400 ml-1" x-text="field.label ? path : ''"></span>
                     </div>
                     <div class="flex items-center gap-2">
                       <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full" x-text="sourceLabel(field.source)"></span>
@@ -389,8 +390,8 @@
                   <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">选择表：</label>
                     <select x-model="selectedQueryTable" @change="loadQueryEntries(1)" class="border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <template x-for="t in queryTables" :key="t">
-                        <option x-text="t" :value="t"></option>
+                      <template x-for="t in queryTables" :key="t.name">
+                        <option :value="t.name" x-text="(t.label && t.label !== t.name) ? t.label + ' (' + t.name + ')' : t.name"></option>
                       </template>
                     </select>
                   </div>
@@ -951,6 +952,7 @@ function app() {
           source: entry.source || 'default',
           editing: false,
           editValue: '',
+          label: entry.label || '',
           description: entry.description || '',
         };
       }
@@ -1156,8 +1158,11 @@ function app() {
       if (!this.selectedQueryDb) return;
       try {
         const data = await this.api(`/api/content/queries/${encodeURIComponent(this.selectedQueryDb)}/tables`);
-        this.queryTables = data.tables || [];
-        this.selectedQueryTable = this.queryTables.includes('data') ? 'data' : (this.queryTables[0] || 'data');
+        // tables may be [{name, label}] (new) or [string] (legacy)
+        const raw = data.tables || [];
+        this.queryTables = raw.map(t => typeof t === 'string' ? {name: t, label: t} : t);
+        const names = this.queryTables.map(t => t.name);
+        this.selectedQueryTable = names.includes('data') ? 'data' : (names[0] || 'data');
       } catch (err) {
         console?.warn('[DicePP] Failed to load query tables:', err);
         this.queryTables = [];

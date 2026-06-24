@@ -152,7 +152,8 @@ class TestQueryDbTables:
         data = resp.json()
         assert data["ok"] is True
         assert "tables" in data
-        assert "data" in data["tables"]
+        table_names = [t["name"] for t in data["tables"]]
+        assert "data" in table_names
 
     def test_db_not_found(self, test_client: TestClient):
         """Non-existent database returns 404."""

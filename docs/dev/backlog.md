@@ -14,23 +14,6 @@
 
 ## dashboard
 
-### [B-260623-7d7d93] 配置编辑与数据浏览缺少中文标签和解释
-- 创建: 2026-06-23
-- 优先级: P1
-- 类型: feature
-- 改动量: M
-- 问题表现:
-    - 配置编辑：字段以 dotted key 展示（如 persona_ai.segment_max_chars），schema.json 的中文描述仅作为 :title tooltip（鼠标悬停才可见），无可读的中文名
-    - 数据浏览：表名来自 SQLite sqlite_master（如 user_stat, group_config），纯英文无中文映射
-    - 小白用户无法理解这些技术字段名
-    - 当前 schema.json 有 137 条描述，但描述本身就是 "默认值: xxx" 格式，不够友好
-- 开发备忘:
-    - 方案：在 schema.json 中扩展描述格式或新增 label 字段，支持中文短标签 + 详细描述
-    - 数据表名映射：维护一个 table_name → 中文名 的映射（前端或后端均可）
-    - 配置编辑字段视图展示中文标签为主，dotted key 为辅（灰色小字）
-    - 影响面：schema.json 格式（需向后兼容）、dashboard.html 配置渲染、app.py config_merged 返回格式
-    - 风险：低-中，schema.json 格式变更需谨慎，确保不破坏已有描述
-
 ### [B-260623-6754e2] 配置编辑缺少分组功能和隐藏低优先级配置
 - 创建: 2026-06-23
 - 优先级: P1

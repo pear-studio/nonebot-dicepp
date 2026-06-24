@@ -11,21 +11,21 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class CircuitBreakerConfig(BaseModel):
-    failure_threshold: int = Field(default=3, ge=1, description="连续失败 N 次后 disabled")
-    probe_interval_seconds: int = Field(default=300, ge=10, description="disabled 模型放行探测的间隔（秒）")
+    failure_threshold: int = Field(default=3, ge=1, title="失败阈值", description="连续失败 N 次后 disabled")
+    probe_interval_seconds: int = Field(default=300, ge=10, title="探测间隔", description="disabled 模型放行探测的间隔（秒）")
 
 
 class ModelConfig(BaseModel):
-    name: str
-    api_model: Optional[str] = Field(default=None, description="实际 API 模型名，默认使用 name")
-    category: Literal["llm", "gen"]
-    capabilities: List[str]
-    quality: float = Field(default=0.5, ge=0.0, le=1.0)
-    cost: float = Field(default=0.5, ge=0.0, le=1.0)
-    thinking: bool = False
-    enabled: bool = True
-    circuit_breaker: Optional[CircuitBreakerConfig] = None
-    max_prompt_chars: Optional[int] = Field(default=None, ge=1)
+    name: str = Field(title="模型名")
+    api_model: Optional[str] = Field(default=None, title="API 模型名", description="实际 API 模型名，默认使用 name")
+    category: Literal["llm", "gen"] = Field(title="模型类别")
+    capabilities: List[str] = Field(title="能力列表")
+    quality: float = Field(default=0.5, ge=0.0, le=1.0, title="质量权重")
+    cost: float = Field(default=0.5, ge=0.0, le=1.0, title="成本权重")
+    thinking: bool = Field(default=False, title="思考模式")
+    enabled: bool = Field(default=True, title="启用")
+    circuit_breaker: Optional[CircuitBreakerConfig] = Field(default=None, title="熔断器")
+    max_prompt_chars: Optional[int] = Field(default=None, ge=1, title="最大提示字符数")
 
     @model_validator(mode="after")
     def _validate_category_capabilities(self) -> "ModelConfig":
@@ -47,113 +47,105 @@ class ModelConfig(BaseModel):
 
 
 class ProviderConfig(BaseModel):
-    api_key: str
-    base_url: str
-    models: List[ModelConfig]
-    max_concurrent: Optional[int] = Field(default=None, ge=1)
-    enabled: bool = True
+    api_key: str = Field(title="API Key")
+    base_url: str = Field(title="接口地址")
+    models: List[ModelConfig] = Field(title="模型列表")
+    max_concurrent: Optional[int] = Field(default=None, ge=1, title="最大并发")
+    enabled: bool = Field(default=True, title="启用")
 
 
 class PersonaConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    enabled: bool = False
-    daily_report_enabled: bool = True
-    daily_report_voice_enabled: bool = True
-    character_name: str = "default"
-    character_path: str = "./content/characters"
+    enabled: bool = Field(default=False, title="启用 Persona")
+    daily_report_enabled: bool = Field(default=True, title="日报")
+    daily_report_voice_enabled: bool = Field(default=True, title="日报语音")
+    character_name: str = Field(default="default", title="角色名")
+    character_path: str = Field(default="./content/characters", title="角色路径")
 
-    whitelist_enabled: bool = True
+    whitelist_enabled: bool = Field(default=True, title="白名单")
 
     # ── JRRP 集成
     jrrp_persona_enabled: bool = Field(
         default=True,
+        title="JRRP 接管",
         description="Persona 是否接管 .jrrp 回复。为 False 时回退到 JrrpCommand 模板渲染",
     )
 
-    providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
+    providers: Dict[str, ProviderConfig] = Field(default_factory=dict, title="模型提供商")
 
-    max_concurrent_requests: int = 2
+    max_concurrent_requests: int = Field(default=2, title="最大并发请求")
     chat_llm_timeout_seconds: int = Field(
-        default=30,
-        ge=5,
+        default=30, ge=5, title="聊天 LLM 超时",
         description="用户对话触发的 LLM 调用超时（秒）",
     )
     background_llm_timeout_seconds: int = Field(
-        default=90,
-        ge=5,
+        default=90, ge=5, title="后台 LLM 超时",
         description="后台角色模拟（事件/反应/日记/分享/观察）LLM 调用超时（秒）",
     )
-    timezone: str = "Asia/Shanghai"
+    timezone: str = Field(default="Asia/Shanghai", title="时区")
 
     # ── Phase 3: 短期记忆限制
-    # - max_messages: 数据库中保留的消息条数上限（user + assistant 各算一条）
-    # - max_history_turns: 注入上下文的对话轮次上限（user/assistant 消息对）
-    # - max_history_tokens: 注入上下文的历史 token 估算上限（基于字符统计，兜底截断）
-    max_messages: int = 15
-    max_history_turns: int = 10
-    max_history_tokens: int = 4000
-    # 群聊使用 token 估算（与 LLM 上下文窗口对齐），私聊使用轮次 + token 估算双重兜底（max_history_turns + max_history_tokens）。
-    # 两者计量单位不同，token 估算基于字符统计，为性能考虑不引入真实 tokenizer。
-    group_max_messages: int = 40  # 群聊数据库保留条数上限
-    group_max_age_minutes: int = 10  # 群聊时间窗口上限（分钟）
+    max_messages: int = Field(default=15, title="最大消息数")
+    max_history_turns: int = Field(default=10, title="最大历史轮次")
+    max_history_tokens: int = Field(default=4000, title="最大历史 Token")
+    group_max_messages: int = Field(default=40, title="群聊最大消息数")
+    group_max_age_minutes: int = Field(default=10, title="群聊时间窗口")
     group_context_budget_tokens: int = Field(
-        default=1600,
+        default=1600, title="群聊上下文 Token 预算",
         description="群聊上下文 token 总预算（基于字符统计的估算值，不引入真实 tokenizer，建议按实际需求的 70% 配置）",
     )
     group_single_message_max_tokens: int = Field(
-        default=180,
+        default=180, title="群聊单消息 Token 上限",
         description="单条消息 token 上限（基于字符统计的估算值，超长先截断）",
     )
     search_max_chars: int = Field(
-        default=180,
+        default=180, title="搜索结果最大字符数",
         validation_alias="search_chat_history_max_chars",
         serialization_alias="search_chat_history_max_chars",
         description="搜索结果中每条消息的最大字符数",
     )
     message_stream_max_per_group: int = Field(
-        default=1000,
-        ge=10,
+        default=1000, ge=10, title="消息流每组上限",
         description="消息流表每组/用户保留上限（写入后按限频触发清理）",
     )
 
     # ── Phase 3: 工具调用
-    tools_max_rounds: int = 5  # 聊天工具调用最大轮次
-    background_llm_max_tool_rounds: int = 1  # 后台单工具场景最大轮次（首轮收集即终止）
+    tools_max_rounds: int = Field(default=5, title="工具最大轮次")
+    background_llm_max_tool_rounds: int = Field(default=1, title="后台工具最大轮次")
 
     # ── Phase 3: 日记上下文长度限制
-    max_diary_context_chars: int = 500  # 日记注入上下文的最大字符数
+    max_diary_context_chars: int = Field(default=500, title="日记上下文最大字符数")
 
-    # ── Phase 5a: 世界书 Token 预算（当前为字符估算值，非精确 token）
-    lore_token_budget: int = 300  # 每次对话注入世界书的最大估算 token 数
+    # ── Phase 5a: 世界书 Token 预算
+    lore_token_budget: int = Field(default=300, title="世界书 Token 预算")
 
     # ── 分段回复（Segmented Reply）
-    # LLM 通过 send_reply_segment 工具按段输出，由 SegmentDispatcher 按 delay_before 调度发送
-    segment_enabled: bool = True
+    segment_enabled: bool = Field(default=True, title="分段回复")
     segment_target_chars: int = Field(
-        default=30, ge=1, description="单段建议字数（写入 system prompt 引导 LLM）"
+        default=30, ge=1, title="分段建议字数", description="单段建议字数（写入 system prompt 引导 LLM）"
     )
     segment_max_chars: int = Field(
-        default=80, ge=1, description="单段字符上限，超出由 send_reply_segment executor 拒绝"
+        default=80, ge=1, title="分段最大字符数", description="单段字符上限，超出由 send_reply_segment executor 拒绝"
     )
     segment_soft_limit: int = Field(
-        default=100, ge=1, description="单次回复总字数软上限，超出返回 warning"
+        default=100, ge=1, title="总分软上限", description="单次回复总字数软上限，超出返回 warning"
     )
     segment_hard_limit: int = Field(
-        default=120, ge=1, description="单次回复总字数硬上限，超出返回 error 并拒绝该段"
+        default=120, ge=1, title="总分硬上限", description="单次回复总字数硬上限，超出返回 error 并拒绝该段"
     )
     segment_count_max: int = Field(
-        default=10, ge=1, description="单次回复最大段数，超出由 executor 拒绝"
+        default=10, ge=1, title="最大段数", description="单次回复最大段数，超出由 executor 拒绝"
     )
     segment_max_delay: float = Field(
-        default=10.0, gt=0, description="单段 delay_before 上限（秒）"
+        default=10.0, gt=0, title="分段最大延迟", description="单段 delay_before 上限（秒）"
     )
     segment_round_callbacks_max: int = Field(
-        default=3, ge=0, description="LLM 不调用 send_reply_segment 时最大纠正注入次数"
+        default=3, ge=0, title="最大纠正注入次数", description="LLM 不调用 send_reply_segment 时最大纠正注入次数"
     )
 
     image_gen_style: str = Field(
-        default="anime style, high quality, clean lines",
+        default="anime style, high quality, clean lines", title="画风描述",
         description="全局默认画风描述，注入到 generate_image prompt 前缀。角色卡配置 image_gen_style 时优先使用角色卡的。",
     )
 
@@ -171,241 +163,228 @@ class PersonaConfig(BaseModel):
     # group_activity_decay_values: List[int] = [10, 30, 50]
     # group_activity_min: int = 10
     
-    game_enabled: bool = True
-    scoring_interval: int = 5
+    game_enabled: bool = Field(default=True, title="游戏系统")
+    scoring_interval: int = Field(default=5, title="计分间隔")
     # ── Phase 2: 好感度时间衰减
-    decay_enabled: bool = True
-    decay_grace_period_hours: int = 8
-    decay_familiarity_half_life_days: int = 35   # 熟悉度半衰期（天）
-    decay_intimacy_half_life_days: int = 21      # 亲密度半衰期（天）
-    decay_floor_ratio: float = 0.5               # 衰减软下限 = peak × floor_ratio
+    decay_enabled: bool = Field(default=True, title="衰减系统")
+    decay_grace_period_hours: int = Field(default=8, title="衰减宽限期")
+    decay_familiarity_half_life_days: int = Field(default=35, title="熟悉度半衰期")
+    decay_intimacy_half_life_days: int = Field(default=21, title="亲密度半衰期")
+    decay_floor_ratio: float = Field(default=0.5, title="衰减下限比例")
     # ── Phase 2: 角色生活模拟
-    character_life_enabled: bool = True
-    # 生活事件时刻由角色卡 extensions.persona（generate_event_times）决定；此处仅控制触发容差
-    character_life_jitter_minutes: int = 15
-    character_life_diary_time: str = "23:30"
-    # 事件-反应链配置
-    character_life_chain_max_depth: int = 3
+    character_life_enabled: bool = Field(default=True, title="角色生活模拟")
+    character_life_jitter_minutes: int = Field(default=15, title="生活事件抖动")
+    character_life_diary_time: str = Field(default="23:30", title="日记时间")
+    character_life_chain_max_depth: int = Field(default=3, title="事件链最大深度")
     character_life_chain_force_extend_once_prob: float = Field(
-        default=0.0,
+        default=0.0, title="保底续写概率",
         description="仅在当天首次事件后、action_tendency 为空时触发一次保底续写的概率，保证链深度至少为 2",
     )
-    character_life_min_event_interval_minutes: int = 5
-    # wake_up 体力恢复固定值
-    character_life_recovery_energy: int = 20
-    # 旧版纯文本状态迁移默认值
-    character_life_default_energy: int = 50
-    character_life_default_mood: int = 50
-    character_life_default_health: int = 50
+    character_life_min_event_interval_minutes: int = Field(default=5, title="事件最小间隔")
+    character_life_recovery_energy: int = Field(default=20, title="恢复体力值")
+    character_life_default_energy: int = Field(default=50, title="默认体力")
+    character_life_default_mood: int = Field(default=50, title="默认心情")
+    character_life_default_health: int = Field(default=50, title="默认健康")
 
     # ── Phase 2: 主动消息
-    proactive_enabled: bool = True
-    proactive_min_interval_hours: int = 4
-    proactive_max_shares: int = 10
-    # 生活事件加入分享队列后，仅在此时间窗口内继续选取并发送（与 implementation.md 一致）
-    proactive_share_time_window_minutes: int = 15
-    proactive_event_share_delay_min: int = 1
-    proactive_event_share_delay_max: int = 5
+    proactive_enabled: bool = Field(default=True, title="主动消息")
+    proactive_min_interval_hours: int = Field(default=4, title="主动消息最小间隔")
+    proactive_max_shares: int = Field(default=10, title="最大分享数")
+    proactive_share_time_window_minutes: int = Field(default=15, title="分享时间窗口")
+    proactive_event_share_delay_min: int = Field(default=1, title="分享延迟下限")
+    proactive_event_share_delay_max: int = Field(default=5, title="分享延迟上限")
     proactive_event_share_threshold: float = Field(
-        default=0.4,
+        default=0.4, title="分享欲望阈值",
         description="事件分享欲望阈值。基于 2026-04/05 线上 251 个事件的 share_desire 分布校准：avg≈0.305，≥0.4 占 36.7%，≥0.5 仅占 16.7%",
     )
-    proactive_miss_enabled: bool = True
-    proactive_miss_min_hours: int = 72
-    proactive_miss_min_score: float = 20.0
+    proactive_miss_enabled: bool = Field(default=True, title="思念消息")
+    proactive_miss_min_hours: int = Field(default=72, title="思念最小间隔")
+    proactive_miss_min_score: float = Field(default=20.0, title="思念最低分数")
     proactive_always_send_users: List[str] = Field(
-        default_factory=list,
+        default_factory=list, title="强制推送用户",
         description="必定接收主动消息的私聊用户 ID 列表（绕过 min_interval 与好感度阈值）",
     )
     proactive_always_send_groups: List[str] = Field(
-        default_factory=list,
+        default_factory=list, title="强制推送群聊",
         description="必定接收主动消息的群聊 ID 列表（绕过 min_interval 与活跃度阈值）",
     )
     proactive_share_message_concurrent: int = Field(
-        default=3, ge=1, description="并发生成分享消息的最大 LLM 调用数"
+        default=3, ge=1, title="分享消息并发数", description="并发生成分享消息的最大 LLM 调用数"
     )
     proactive_share_max_chars: int = Field(
-        default=200, ge=10, description="分享消息硬截断上限（包含省略号）"
+        default=200, ge=10, title="分享消息最大字符", description="分享消息硬截断上限（包含省略号）"
     )
     proactive_share_context_history_limit: int = Field(
-        default=5, ge=0, description="分享消息构建时读取的最近对话轮数"
+        default=5, ge=0, title="分享上下文轮数", description="分享消息构建时读取的最近对话轮数"
     )
     proactive_share_max_retries: int = Field(
-        default=2, ge=0, description="分享消息生成失败后的最大重试次数"
+        default=2, ge=0, title="分享最大重试", description="分享消息生成失败后的最大重试次数"
     )
     proactive_share_backoff_base_seconds: int = Field(
-        default=2, ge=1, description="分享消息重试的指数退避基数（秒）"
+        default=2, ge=1, title="分享退避基数", description="分享消息重试的指数退避基数（秒）"
     )
 
     # ── LLM 调用协调器配置
-    proactive_coordinator_max_failures: int = Field(default=3, ge=0, description="coordinator 连续失败上限")
-    proactive_coordinator_max_iterations: int = Field(default=5, ge=1, description="coordinator 单次 submit 最大迭代次数（防刷屏）")
+    proactive_coordinator_max_failures: int = Field(default=3, ge=0, title="协调器最大失败", description="coordinator 连续失败上限")
+    proactive_coordinator_max_iterations: int = Field(default=5, ge=1, title="协调器最大迭代", description="coordinator 单次 submit 最大迭代次数（防刷屏）")
 
     # ── chat → life 行动建议
     suggest_action_min_relationship: int = Field(
-        default=40, ge=0, le=100,
+        default=40, ge=0, le=100, title="建议最低关系分数",
         description="suggest_action 工具的最低关系分数阈值，低于此值的用户调用不会被评估",
     )
     suggest_action_evaluation_timeout: int = Field(
-        default=30, ge=5, le=120,
+        default=30, ge=5, le=120, title="建议评估超时",
         description="suggest_action 评估 LLM 的超时时间（秒）",
     )
 
-    # 已移除: scheduled_events 功能由 CharacterLife 边界事件和槽位系统覆盖
-
     # ── Phase 2: 群活跃度
-    group_activity_enabled: bool = True
-    group_activity_decay_per_day: float = 10.0           # 每日衰减量
-    group_activity_add_per_interaction: float = 2.0
-    group_activity_max_daily_add: float = 20.0
-    group_activity_min_threshold: float = 60.0  # 低于此值不发送主动消息
-    group_activity_floor_whitelist: float = 50.0  # 白名单群下限
-    
-    group_chat_enabled: bool = True
-    group_simple_scoring: bool = True
-    daily_limit: int = 20
-    quota_check_enabled: bool = True
-    quota_exceeded_message: str = "今日配额已用完（{limit}次），请使用 `.ai key config` 配置自己的 API Key"
-    allow_user_key: bool = True
+    group_activity_enabled: bool = Field(default=True, title="群活跃度")
+    group_activity_decay_per_day: float = Field(default=10.0, title="活跃度日衰减")
+    group_activity_add_per_interaction: float = Field(default=2.0, title="活跃度单次增加")
+    group_activity_max_daily_add: float = Field(default=20.0, title="活跃度日增上限")
+    group_activity_min_threshold: float = Field(default=60.0, title="活跃度最低阈值")
+    group_activity_floor_whitelist: float = Field(default=50.0, title="白名单活跃度下限")
+
+    group_chat_enabled: bool = Field(default=True, title="群聊")
+    group_simple_scoring: bool = Field(default=True, title="群聊简易计分")
+    daily_limit: int = Field(default=20, title="每日限额")
+    quota_check_enabled: bool = Field(default=True, title="配额检查")
+    quota_exceeded_message: str = Field(default="今日配额已用完（{limit}次），请使用 `.ai key config` 配置自己的 API Key", title="超配额消息")
+    allow_user_key: bool = Field(default=True, title="允许用户 Key")
 
     # ── Phase 7a: LLM Trace & Observability
-    trace_enabled: bool = False
-    trace_max_age_days: int = 7
+    trace_enabled: bool = Field(default=False, title="LLM 追踪")
+    trace_max_age_days: int = Field(default=7, title="追踪保留天数")
 
     # ── 数据清理 TTL
-    score_history_max_age_days: int = 90
-    scoring_failures_max_age_days: int = 30
-    daily_events_keep_days: int = 30
-    diary_keep_days: int = 30
+    score_history_max_age_days: int = Field(default=90, title="评分历史保留天数")
+    scoring_failures_max_age_days: int = Field(default=30, title="评分失败保留天数")
+    daily_events_keep_days: int = Field(default=30, title="每日事件保留天数")
+    diary_keep_days: int = Field(default=30, title="日记保留天数")
 
     # ── Session 上下文持久化
     private_session_gap_seconds: int = Field(
-        default=86400, ge=60,
+        default=86400, ge=60, title="私聊会话间隔",
         description="私聊 session gap 超时秒数（默认 1 天）",
     )
     group_session_gap_seconds: int = Field(
-        default=1800, ge=60,
+        default=1800, ge=60, title="群聊会话间隔",
         description="群聊 session gap 超时秒数（默认 30 分钟）",
     )
     private_session_token_budget: int = Field(
-        default=64000, ge=1000,
+        default=64000, ge=1000, title="私聊会话 Token 预算",
         description="私聊 session token 预算上限",
     )
     group_session_token_budget: int = Field(
-        default=64000, ge=1000,
+        default=64000, ge=1000, title="群聊会话 Token 预算",
         description="群聊 session token 预算上限",
     )
 
-    observation_store_raw_digest: bool = False
+    observation_store_raw_digest: bool = Field(default=False, title="存储原始摘要")
 
     # ── Phase 2: 信誉拒绝机制配置
-    relationship_refuse_enabled: bool = True      # 是否开启低信誉时的拒绝回复
-    reputation_refuse_threshold: float = 30.0     # 信誉低于此值时触发拒绝回复
-
-    # ── Phase 4+: 主动消息（暂未启用）
-    # proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
-    
-    # ── Phase 4+: 生活模拟事件（暂未启用；事件分布参数在角色卡 extensions.persona 中配置）
-    # daily_events_count: int = 5
+    relationship_refuse_enabled: bool = Field(default=True, title="信誉拒绝")
+    reputation_refuse_threshold: float = Field(default=30.0, title="信誉拒绝阈值")
 
 
 class MemoryMonitorConfig(BaseModel):
-    enable: bool = False
-    warn_percent: int = 80
-    restart_percent: int = 90
-    restart_mb: int = 2048
+    enable: bool = Field(default=False, title="启用内存监控")
+    warn_percent: int = Field(default=80, title="警告百分比")
+    restart_percent: int = Field(default=90, title="重启百分比")
+    restart_mb: int = Field(default=2048, title="重启阈值（MB）")
 
 
 class HealthMonitorConfig(BaseModel):
     """Bot 健康监控配置"""
 
-    heartbeat_timeout_seconds: int = Field(default=90, ge=1)
-    consecutive_fail_threshold: int = Field(default=5, ge=1)
-    failure_log_interval_seconds: int = Field(default=60, ge=0)
+    heartbeat_timeout_seconds: int = Field(default=90, ge=1, title="心跳超时")
+    consecutive_fail_threshold: int = Field(default=5, ge=1, title="连续失败阈值")
+    failure_log_interval_seconds: int = Field(default=60, ge=0, title="失败日志间隔")
 
 
 class DiceHubConfig(BaseModel):
-    api_url: str = ""
-    api_key: str = ""
-    webchat_url: str = ""
-    name: str = "未命名"
+    api_url: str = Field(default="", title="API 地址")
+    api_key: str = Field(default="", title="API Key")
+    webchat_url: str = Field(default="", title="WebChat 地址")
+    name: str = Field(default="未命名", title="Hub 名称")
 
 
 class RollConfig(BaseModel):
-    enable: bool = True
-    hide_enable: bool = True
-    dnd_enable: bool = True
-    coc_enable: bool = True
+    enable: bool = Field(default=True, title="掷骰")
+    hide_enable: bool = Field(default=True, title="暗骰")
+    dnd_enable: bool = Field(default=True, title="D&D 掷骰")
+    coc_enable: bool = Field(default=True, title="CoC 掷骰")
 
 
 class DeckConfig(BaseModel):
-    enable: bool = True
-    data_path: str = "./decks"
+    enable: bool = Field(default=True, title="卡组")
+    data_path: str = Field(default="./decks", title="卡组路径")
 
 
 class RandomGenConfig(BaseModel):
-    enable: bool = True
-    data_path: str = "./random"
+    enable: bool = Field(default=True, title="随机生成")
+    data_path: str = Field(default="./random", title="随机生成路径")
 
 
 class QueryConfig(BaseModel):
-    enable: bool = True
-    data_path: str = "./queries"
-    private_database: str = "DND5E2014"
+    enable: bool = Field(default=True, title="查询")
+    data_path: str = Field(default="./queries", title="查询路径")
+    private_database: str = Field(default="DND5E2014", title="默认查询库")
 
 
 class LogConfig(BaseModel):
-    level: str = "DEBUG"
-    upload_enable: bool = True
-    upload_endpoint: str = "https://dice.weizaima.com/dice/api/log"
-    upload_token: str = ""
-    max_records: int = 5000
+    level: str = Field(default="DEBUG", title="日志级别")
+    upload_enable: bool = Field(default=True, title="日志上传")
+    upload_endpoint: str = Field(default="https://dice.weizaima.com/dice/api/log", title="上传地址")
+    upload_token: str = Field(default="", title="上传 Token")
+    max_records: int = Field(default=5000, title="最大记录数")
 
 
 class ModeConfig(BaseModel):
-    enable: bool = True
-    default: str = "DND5E2024"
+    enable: bool = Field(default=True, title="模式系统")
+    default: str = Field(default="DND5E2024", title="默认模式")
 
 
 class BotConfig(BaseModel):
     """Top-level configuration model for a single Bot instance."""
 
     # Account/permissions
-    master: List[str] = Field(default_factory=list)
-    admin: List[str] = Field(default_factory=list)
-    friend_token: List[str] = Field(default_factory=list)
-    group_invite: bool = True
-    nickname: str = ""
-    persona: str = "default"
+    master: List[str] = Field(default_factory=list, title="Master 账号")
+    admin: List[str] = Field(default_factory=list, title="管理员账号")
+    friend_token: List[str] = Field(default_factory=list, title="好友令牌")
+    group_invite: bool = Field(default=True, title="群邀请")
+    nickname: str = Field(default="", title="Bot 昵称")
+    persona: str = Field(default="default", title="当前角色")
 
-    # Agreement text (long, kept as str for direct use)
-    agreement: str = ""
+    # Agreement text
+    agreement: str = Field(default="", title="用户协议")
 
     # Command parsing
-    command_split: str = "\\\\"
+    command_split: str = Field(default="\\\\", title="指令分隔符")
 
     # Data expiry
-    data_expire: bool = False
-    user_expire_day: int = 60
-    group_expire_day: int = 14
-    group_expire_warning_time: int = 1
-    white_list_group: List[str] = Field(default_factory=list)
-    white_list_user: List[str] = Field(default_factory=list)
+    data_expire: bool = Field(default=False, title="数据过期")
+    user_expire_day: int = Field(default=60, title="用户过期天数")
+    group_expire_day: int = Field(default=14, title="群过期天数")
+    group_expire_warning_time: int = Field(default=1, title="过期预警天数")
+    white_list_group: List[str] = Field(default_factory=list, title="群白名单")
+    white_list_user: List[str] = Field(default_factory=list, title="用户白名单")
 
     # Chat command
-    chat_interval: int = 20
+    chat_interval: int = Field(default=20, title="聊天间隔")
 
     # Bot activation
-    bot_default_enable: bool = True
+    bot_default_enable: bool = Field(default=True, title="默认启用")
 
     # Subsystem configs
-    persona_ai: PersonaConfig = Field(default_factory=PersonaConfig)
-    memory_monitor: MemoryMonitorConfig = Field(default_factory=MemoryMonitorConfig)
-    health_monitor: HealthMonitorConfig = Field(default_factory=HealthMonitorConfig)
-    dicehub: DiceHubConfig = Field(default_factory=DiceHubConfig)
-    roll: RollConfig = Field(default_factory=RollConfig)
-    deck: DeckConfig = Field(default_factory=DeckConfig)
-    random_gen: RandomGenConfig = Field(default_factory=RandomGenConfig)
-    query: QueryConfig = Field(default_factory=QueryConfig)
-    log: LogConfig = Field(default_factory=LogConfig)
-    mode: ModeConfig = Field(default_factory=ModeConfig)
+    persona_ai: PersonaConfig = Field(default_factory=PersonaConfig, title="Persona AI")
+    memory_monitor: MemoryMonitorConfig = Field(default_factory=MemoryMonitorConfig, title="内存监控")
+    health_monitor: HealthMonitorConfig = Field(default_factory=HealthMonitorConfig, title="健康监控")
+    dicehub: DiceHubConfig = Field(default_factory=DiceHubConfig, title="DiceHub")
+    roll: RollConfig = Field(default_factory=RollConfig, title="掷骰模块")
+    deck: DeckConfig = Field(default_factory=DeckConfig, title="卡组模块")
+    random_gen: RandomGenConfig = Field(default_factory=RandomGenConfig, title="随机生成模块")
+    query: QueryConfig = Field(default_factory=QueryConfig, title="查询模块")
+    log: LogConfig = Field(default_factory=LogConfig, title="日志模块")
+    mode: ModeConfig = Field(default_factory=ModeConfig, title="模式模块")

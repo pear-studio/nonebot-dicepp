@@ -508,10 +508,53 @@ async def list_bots(request: Request):
 
 # ── Data browsing ─────────────────────────────────────────────────────────────
 
+# Table name → Chinese label mapping
+TABLE_LABELS: dict = {
+    "karma": "用户 Karma",
+    "initiative": "先攻列表",
+    "characters_dnd": "D&D 角色卡",
+    "nickname": "用户昵称",
+    "group_config": "群组配置",
+    "user_config": "用户配置",
+    "group_activate": "群组激活状态",
+    "group_welcome": "群组欢迎语",
+    "chat_record": "聊天记录",
+    "bot_control": "Bot 控制",
+    "user_stat": "用户统计",
+    "group_stat": "群组统计",
+    "meta_stat": "元统计",
+    "npc_health": "NPC 生命值",
+    "hub_config": "Hub 配置",
+    "persona_whitelist": "Persona 白名单",
+    "persona_user_mute": "用户禁言",
+    "persona_user_llm_config": "用户 LLM 配置",
+    "persona_global_settings": "Persona 全局设置",
+    "persona_session": "Persona 会话",
+    "persona_session_message": "Persona 会话消息",
+    "message_stream": "消息流",
+    "persona_settings": "Persona 设置",
+    "persona_score_history": "评分历史",
+    "persona_usage": "每日用量",
+    "persona_diary": "日记",
+    "persona_daily_events": "每日事件",
+    "persona_character_state": "角色状态",
+    "persona_user_profiles": "用户画像",
+    "persona_user_relationships": "用户关系",
+    "persona_scoring_failures": "评分失败记录",
+    "persona_group_activity": "群活跃度",
+    "persona_familiarity_daily": "每日熟悉度",
+    "persona_llm_traces": "LLM 追踪",
+    "persona_agent_runs": "Agent 运行",
+    "persona_agent_events": "Agent 事件",
+    # Content query DB tables
+    "data": "词条数据",
+    "redirect": "重定向",
+}
+
 
 @app.get("/api/data/{bot_id}/tables", dependencies=[Depends(require_auth)])
 async def data_tables(bot_id: str, request: Request):
-    """Scan sqlite_master from bot_data.db (mode=ro), return [{name, count}]."""
+    """Scan sqlite_master from bot_data.db (mode=ro), return [{name, count, label}]."""
     _validate_identifier(bot_id, "bot_id")
     db_path = DashboardPaths.bot_data_db_path(bot_id)
     if not db_path.exists():
@@ -528,7 +571,7 @@ async def data_tables(bot_id: str, request: Request):
         for t in tables:
             count_cursor = conn.execute(f"SELECT COUNT(*) FROM \"{t}\"")
             count = count_cursor.fetchone()[0]
-            result.append({"name": t, "count": count})
+            result.append({"name": t, "count": count, "label": TABLE_LABELS.get(t, t)})
 
         conn.close()
         return _ok({"tables": result})
@@ -615,6 +658,84 @@ async def data_table(
 # ── Config editing ────────────────────────────────────────────────────────────
 
 
+def _get_config_field_metadata() -> dict:
+    """Extract field titles and descriptions from BotConfig Pydantic model.
+
+    Returns a flat dict mapping dotted keys to {title, description}.
+    Loads the pydantic_models module directly (not via the DicePP package)
+    to avoid pulling in the full nonebot2 dependency chain.
+    Returns an empty dict if the Pydantic import is not available.
+    """
+    import importlib.util
+
+    _pydantic_path = DashboardPaths.PROJECT_ROOT / "src" / "plugins" / "DicePP" / "core" / "config" / "pydantic_models.py"
+    if not _pydantic_path.exists():
+        return {}
+
+    try:
+        spec = importlib.util.spec_from_file_location("dicepp_pydantic_models", str(_pydantic_path))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        BotConfig = mod.BotConfig
+        schema = BotConfig.model_json_schema()
+
+        def _flatten_schema(s: dict, defs: dict, prefix: str = "") -> dict:
+            # Known limitation: does not handle anyOf (Optional[BaseModel]),
+            # items.$ref (List[BaseModel]), or additionalProperties.$ref
+            # (Dict[str, BaseModel]). These patterns exist for fields like
+            # persona_ai.providers.<name>.models[*].circuit_breaker, but
+            # their dotted keys contain dynamic segments that the flat
+            # config_merged output cannot match statically.
+            result = {}
+            for key, prop in s.get("properties", {}).items():
+                full = f"{prefix}.{key}" if prefix else key
+                title = prop.get("title", key)
+                desc = prop.get("description", "") or ""
+                result[full] = {"title": title, "description": desc}
+
+                # Resolve $ref for nested models
+                if "$ref" in prop:
+                    ref_name = prop["$ref"].split("/")[-1]
+                    ref_schema = defs.get(ref_name, {})
+                    result.update(_flatten_schema(ref_schema, defs, full))
+                elif "properties" in prop:
+                    result.update(_flatten_schema(prop, defs, full))
+                # Handle allOf (e.g., for Optional with $ref)
+                elif "allOf" in prop:
+                    for item in prop["allOf"]:
+                        if "$ref" in item:
+                            ref_name = item["$ref"].split("/")[-1]
+                            ref_schema = defs.get(ref_name, {})
+                            result.update(_flatten_schema(ref_schema, defs, full))
+
+            return result
+
+        defs = schema.get("$defs", {})
+        return _flatten_schema(schema, defs)
+    except (FileNotFoundError, ModuleNotFoundError):
+        return {}
+    except Exception:
+        import logging
+        logging.getLogger("dashboard").exception(
+            "Unexpected error loading config field metadata from %s", _pydantic_path
+        )
+        return {}
+
+
+# Cache metadata at module level (computed once on first use)
+_config_field_metadata_cache: Optional[dict] = None
+
+
+def _cached_config_field_metadata() -> dict:
+    global _config_field_metadata_cache
+    if _config_field_metadata_cache is None:
+        result = _get_config_field_metadata()
+        if result:
+            _config_field_metadata_cache = result
+        return result
+    return _config_field_metadata_cache
+
+
 @app.get("/api/config/merged", dependencies=[Depends(require_auth)])
 async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
     """Merge global.json + user.json + bots/{bot_id}.json with source annotation."""
@@ -675,19 +796,27 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
         for dotted, value in bot_flat.items():
             result_annotated[dotted] = {"value": value, "source": "bot"}
 
-    # Load schema for descriptions
+    # Load field metadata from Pydantic models (title=label, description=tooltip)
+    field_meta = _cached_config_field_metadata()
+
+    # Fallback: also read schema.json for any legacy descriptions not yet in Pydantic
     schema = _read_json_safe(DashboardPaths.CONFIG_SCHEMA) if DashboardPaths.CONFIG_SCHEMA.exists() else {}
 
-    # Build output with descriptions
+    # Build output with labels and descriptions
     output = {}
     for dotted, entry in result_annotated.items():
+        meta = field_meta.get(dotted, {})
         output[dotted] = {
             "value": entry["value"],
             "source": entry["source"],
+            "label": meta.get("title", dotted),
+            "description": meta.get("description", ""),
         }
-        desc = schema.get(dotted) if isinstance(schema, dict) else None
-        if desc:
-            output[dotted]["description"] = desc
+        # Fallback: if Pydantic has no description but schema.json does, use it
+        if not output[dotted]["description"]:
+            desc = schema.get(dotted) if isinstance(schema, dict) else None
+            if desc:
+                output[dotted]["description"] = desc
 
     return _ok({"config": output})
 
@@ -926,10 +1055,11 @@ async def content_queries_tables(db_name: str, request: Request):
 
     try:
         with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
-            tables = [
+            table_names = [
                 row[0] for row in
                 conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
             ]
+        tables = [{"name": t, "label": TABLE_LABELS.get(t, t)} for t in table_names]
         return _ok({"tables": tables})
     except sqlite3.OperationalError as e:
         _err(f"Database error: {e}", 500)
