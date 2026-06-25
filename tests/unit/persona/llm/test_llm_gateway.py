@@ -1,4 +1,5 @@
 """LLMGateway 单元测试 — 包装 LLMRouter，mock 事件"""
+import json
 import pytest
 from unittest.mock import Mock, AsyncMock, MagicMock
 
@@ -297,3 +298,66 @@ class TestLLMGateway:
         result = await gateway.complete(req, state)
 
         assert result.reasoning_content == "let me think..."
+
+    @pytest.mark.asyncio
+    async def test_failed_trace_written_on_error(self, mock_router, mock_event_store):
+        """LLM 调用失败时应写入 status='failed' 的 trace"""
+        mock_data_store = Mock()
+        mock_data_store.add_llm_trace = AsyncMock()
+        mock_router.data_store = mock_data_store
+        mock_router.trace_enabled = True
+
+        provider = Mock()
+        provider.generate = AsyncMock(side_effect=RuntimeError("connection refused"))
+        mock_router.build_candidates.return_value = [("p1", "m1")]
+        mock_router._model_providers = {("p1", "m1"): provider}
+        mock_router.acquire_semaphore.return_value = Mock()
+        mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
+
+        bus = AgentEventBus(event_store=mock_event_store)
+        gateway = LLMGateway(router=mock_router, event_bus=bus)
+        state = _make_state()
+        req = _make_request()
+
+        with pytest.raises(ServiceUnavailableError):
+            await gateway.complete(req, state, run_id="run-fail")
+
+        # 应写入一条 failed trace
+        mock_data_store.add_llm_trace.assert_called_once()
+        trace = mock_data_store.add_llm_trace.call_args[0][0]
+        assert trace.status == "failed"
+        assert trace.error == "network_error: connection refused"
+        assert trace.run_id == "run-fail"
+        assert trace.user_id == "u1"
+        assert trace.group_id == "g1"
+        assert trace.tokens_in == 0
+        assert trace.tokens_out == 0
+        assert trace.tier is not None
+        assert trace.model == "m1"
+        assert trace.selected_provider == "p1"
+        assert len(json.loads(trace.messages)) == 1
+
+    @pytest.mark.asyncio
+    async def test_failed_trace_not_written_when_disabled(self, mock_router, mock_event_store):
+        """trace_enabled=False 时不应写入 failed trace"""
+        mock_data_store = Mock()
+        mock_data_store.add_llm_trace = AsyncMock()
+        mock_router.data_store = mock_data_store
+        mock_router.trace_enabled = False
+
+        provider = Mock()
+        provider.generate = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_router.build_candidates.return_value = [("p1", "m1")]
+        mock_router._model_providers = {("p1", "m1"): provider}
+        mock_router.acquire_semaphore.return_value = Mock()
+        mock_router.stats = {"p1": {"requests": 0, "errors": 0}}
+
+        bus = AgentEventBus(event_store=mock_event_store)
+        gateway = LLMGateway(router=mock_router, event_bus=bus)
+        state = _make_state()
+        req = _make_request()
+
+        with pytest.raises(ServiceUnavailableError):
+            await gateway.complete(req, state, run_id="run-disabled")
+
+        mock_data_store.add_llm_trace.assert_not_called()

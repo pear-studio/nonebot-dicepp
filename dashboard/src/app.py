@@ -1272,7 +1272,7 @@ def _compute_llm_usage(persona_db_path: Path, today: str) -> Optional[dict]:
         row = conn.execute(
             "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) as total_tokens,"
             " COUNT(*) as requests,"
-            " COUNT(CASE WHEN status != 'ok' THEN 1 END) as errors"
+            " COUNT(CASE WHEN status = 'failed' THEN 1 END) as errors"
             " FROM persona_llm_traces WHERE date(created_at) = ?",
             (today,),
         ).fetchone()

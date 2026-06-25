@@ -366,9 +366,15 @@ class DailyReportGenerator:
                 tokens = r.get("tokens_in", 0) + r.get("tokens_out", 0)
                 total_calls += calls
                 total_tokens += tokens
-                if r.get("status") and r["status"] != "ok":
-                    errors += 1
                 model_lines.append(f"{label}: {calls}次 / {_fmt_tokens(tokens)}")
+
+            # 单独查询当日错误次数（get_daily_token_usage 不返回 status 列）
+            if use_cur_day:
+                cutoff = wall_now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                cutoff = (wall_now(tz) - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            error_rows = await self._store.get_error_summary_since(cutoff.isoformat())
+            errors = sum(count for _, count in error_rows)
 
             return {
                 "total_calls": total_calls,

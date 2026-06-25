@@ -819,7 +819,7 @@ class TestLLMTraceCRUD:
             latency_ms=100,
             tokens_in=10,
             tokens_out=5,
-            status="ok",
+            status="success",
         )
         await store.add_llm_trace(trace)
 
@@ -839,7 +839,7 @@ class TestLLMTraceCRUD:
             tier="primary",
             messages="[]",
             response="old",
-            status="ok",
+            status="success",
             created_at=wall_now() - timedelta(days=10),
         )
         await store.add_llm_trace(old_trace)
@@ -859,7 +859,7 @@ class TestLLMTraceCRUD:
             response="r",
             tokens_in=10,
             tokens_out=5,
-            status="ok",
+            status="success",
             created_at=wall_now(),
         )
         t2 = LLMTraceRecord(
@@ -871,7 +871,7 @@ class TestLLMTraceCRUD:
             response="r",
             tokens_in=3,
             tokens_out=1,
-            status="ok",
+            status="success",
             created_at=wall_now(),
         )
         await store.add_llm_trace(t1)
@@ -893,7 +893,7 @@ class TestLLMTraceCRUD:
             response="r",
             tokens_in=1,
             tokens_out=1,
-            status="timeout",
+            status="failed",
             created_at=wall_now(),
         )
         t2 = LLMTraceRecord(
@@ -905,7 +905,7 @@ class TestLLMTraceCRUD:
             response="r",
             tokens_in=1,
             tokens_out=1,
-            status="rate_limit",
+            status="failed",
             created_at=wall_now(),
         )
         await store.add_llm_trace(t1)
@@ -913,10 +913,8 @@ class TestLLMTraceCRUD:
 
         since = (wall_now() - timedelta(hours=24)).isoformat()
         errors = await store.get_error_summary_since(since)
-        assert len(errors) == 2
-        counts = {status: cnt for status, cnt in errors}
-        assert counts["timeout"] == 1
-        assert counts["rate_limit"] == 1
+        assert len(errors) == 1
+        assert errors[0] == ("failed", 2)
 
 
 class TestUserLLMConfigCRUD:
@@ -1453,12 +1451,12 @@ class TestTokenUsage:
         t1 = LLMTraceRecord(
             session_id="s1", user_id="u1", model="gpt-4o", tier="primary",
             messages="[]", response="r1", tokens_in=10, tokens_out=5,
-            status="ok",
+            status="success",
         )
         t2 = LLMTraceRecord(
             session_id="s2", user_id="u1", model="gpt-4o", tier="primary",
             messages="[]", response="r2", tokens_in=20, tokens_out=10,
-            status="ok",
+            status="success",
         )
         await store.add_llm_trace(t1)
         await store.add_llm_trace(t2)

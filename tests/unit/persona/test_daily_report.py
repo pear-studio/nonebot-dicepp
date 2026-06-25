@@ -436,6 +436,7 @@ class TestDailyReportGenerator:
             {"provider": "claude", "model": "sonnet", "requests": 5,
              "tokens_in": 3000, "tokens_out": 1500, "status": "ok"},
         ])
+        mock_store.get_error_summary_since = AsyncMock(return_value=[])
 
         gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
         result = await gen._collect_llm_summary(use_cur_day=False)
@@ -446,6 +447,56 @@ class TestDailyReportGenerator:
         assert len(result["models"]) == 2
         assert "openai/gpt-4: 10次" in result["models"][0]
         assert "claude/sonnet: 5次" in result["models"][1]
+
+    @pytest.mark.asyncio
+    async def test_llm_error_count_use_cur_day_true(self, monkeypatch):
+        """use_cur_day=True 时错误统计使用今天午夜的 cutoff"""
+        fixed_now = datetime(2026, 6, 25, 14, 30, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.report.daily_report.wall_now",
+            lambda tz: fixed_now,
+        )
+
+        bot = _make_mock_bot()
+        port, _mock_bot = _make_mock_port()
+
+        mock_store = MagicMock()
+        mock_store.get_daily_token_usage = AsyncMock(return_value=[
+            {"provider": "openai", "model": "gpt-4", "requests": 10,
+             "tokens_in": 5000, "tokens_out": 2000},
+        ])
+        mock_store.get_error_summary_since = AsyncMock(return_value=[("failed", 5)])
+
+        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        result = await gen._collect_llm_summary(use_cur_day=True)
+
+        assert result["errors"] == 5
+        mock_store.get_error_summary_since.assert_called_once_with("2026-06-25T00:00:00")
+
+    @pytest.mark.asyncio
+    async def test_llm_error_count_use_cur_day_false(self, monkeypatch):
+        """use_cur_day=False 时错误统计使用昨天午夜的 cutoff"""
+        fixed_now = datetime(2026, 6, 25, 2, 30, 0)
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.report.daily_report.wall_now",
+            lambda tz: fixed_now,
+        )
+
+        bot = _make_mock_bot()
+        port, _mock_bot = _make_mock_port()
+
+        mock_store = MagicMock()
+        mock_store.get_daily_token_usage = AsyncMock(return_value=[
+            {"provider": "openai", "model": "gpt-4", "requests": 5,
+             "tokens_in": 2000, "tokens_out": 1000},
+        ])
+        mock_store.get_error_summary_since = AsyncMock(return_value=[("failed", 3)])
+
+        gen = DailyReportGenerator(bot=bot, port=port, store=mock_store, config=MockConfig())
+        result = await gen._collect_llm_summary(use_cur_day=False)
+
+        assert result["errors"] == 3
+        mock_store.get_error_summary_since.assert_called_once_with("2026-06-24T00:00:00")
 
     # ── 角色状态 ────────────────────────────────────────────────
 

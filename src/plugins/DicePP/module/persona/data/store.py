@@ -918,7 +918,7 @@ class PersonaDataStore:
     async def get_error_summary_since(self, since_iso: str) -> list[tuple[str, int]]:
         """返回自 since_iso 以来的错误统计 [(status, count), ...]"""
         async with self.db.execute(
-            "SELECT status, COUNT(*) as count FROM persona_llm_traces WHERE datetime(created_at) > datetime(?) AND status != 'ok' GROUP BY status",
+            "SELECT status, COUNT(*) as count FROM persona_llm_traces WHERE datetime(created_at) >= datetime(?) AND status = 'failed' GROUP BY status",
             (since_iso,),
         ) as cursor:
             rows = await cursor.fetchall()

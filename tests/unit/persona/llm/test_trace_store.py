@@ -37,7 +37,7 @@ async def test_llm_trace_add_get_and_prune(temp_db):
         latency_ms=120,
         tokens_in=10,
         tokens_out=5,
-        status="ok",
+        status="success",
         created_at=wall_now() - timedelta(days=2),
     )
     await store.add_llm_trace(trace)
@@ -80,7 +80,7 @@ async def test_round_messages_field_survives_db_round_trip(temp_db):
         messages=json.dumps([{"role": "user", "content": "hi"}]),
         response="reply",
         round_messages=json.dumps(rr, ensure_ascii=False),
-        status="ok",
+        status="success",
     )
     await store.add_llm_trace(trace)
 
@@ -109,7 +109,7 @@ async def test_get_today_token_usage_and_error_summary(temp_db):
         response="ok",
         tokens_in=10,
         tokens_out=5,
-        status="ok",
+        status="success",
         created_at=wall_now(),
     )
     t2 = LLMTraceRecord(
@@ -121,7 +121,7 @@ async def test_get_today_token_usage_and_error_summary(temp_db):
         response="err",
         tokens_in=3,
         tokens_out=1,
-        status="timeout",
+        status="failed",
         created_at=wall_now(),
     )
     await store.add_llm_trace(t1)
@@ -134,7 +134,7 @@ async def test_get_today_token_usage_and_error_summary(temp_db):
     since = (wall_now() - timedelta(hours=24)).isoformat()
     errors = await store.get_error_summary_since(since)
     assert len(errors) == 1
-    assert errors[0] == ("timeout", 1)
+    assert errors[0] == ("failed", 1)
 
     old_since = (wall_now() - timedelta(days=2)).isoformat()
     errors_old = await store.get_error_summary_since(old_since)

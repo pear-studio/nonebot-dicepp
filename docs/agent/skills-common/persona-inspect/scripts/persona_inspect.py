@@ -317,11 +317,11 @@ def cmd_llm_health(persona_conn: sqlite3.Connection, core_conn: sqlite3.Connecti
     # ── max_rounds 统计 ──
     _section("max_rounds 次数")
     mr_total = persona_conn.execute(
-        "SELECT COUNT(*) FROM persona_llm_traces WHERE status='max_rounds'"
+        "SELECT COUNT(*) FROM persona_agent_runs WHERE status='max_rounds'"
     ).fetchone()[0]
     mr_24h = persona_conn.execute(
-        "SELECT COUNT(*) FROM persona_llm_traces "
-        "WHERE status='max_rounds' AND created_at > ?",
+        "SELECT COUNT(*) FROM persona_agent_runs "
+        "WHERE status='max_rounds' AND finished_at > ?",
         (since_24h,)
     ).fetchone()[0]
     print(f"  总计={mr_total}  最近24h={mr_24h}")

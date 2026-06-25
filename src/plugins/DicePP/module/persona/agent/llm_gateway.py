@@ -166,6 +166,16 @@ class LLMGateway:
                         )
                         last_error = str(e)
                         continue
+                    await self._write_trace(
+                        status="failed",
+                        run_id=run_id,
+                        state=state,
+                        request=request,
+                        provider_name=provider_name,
+                        model_name=model_name,
+                        total_candidates=total_candidates,
+                        error=f"{kind.value}: {e}",
+                    )
                     raise ServiceUnavailableError(
                         f"模型 {provider_name}/{model_name} 失败 [{kind.value}]: {e}"
                     ) from e
@@ -213,39 +223,24 @@ class LLMGateway:
                 )
 
                 # 写入 trace
-                if self._router.data_store and self._router.trace_enabled:
-                    trace = LLMTraceRecord(
-                        session_id=run_id,
-                        user_id=state.user_id,
-                        group_id=state.group_id,
-                        run_id=run_id,
-                        model=model_name,
-                        tier=request.selection.category,
-                        messages=json.dumps(request.messages, ensure_ascii=False),
-                        response=resp.content or "",
-                        tool_calls=json.dumps(
-                            [{"id": tc["id"], "name": tc["name"], "arguments": tc["arguments"]}
-                             for tc in tool_calls],
-                            ensure_ascii=False,
-                        ),
-                        selected_provider=provider_name,
-                        selected_model=model_name,
-                        selection_policy=str(request.selection),
-                        candidate_count=total_candidates,
-                        latency_ms=int(resp.latency_ms) if resp.latency_ms is not None else None,
-                        tokens_in=resp.usage.input,
-                        tokens_out=resp.usage.output,
-                        temperature=request.temperature,
-                        status="success",
-                        reasoning_content=resp.reasoning_content,
-                        cache_read=resp.usage.cache_read,
-                        cache_creation=resp.usage.cache_creation,
-                        reasoning_tokens=resp.usage.reasoning,
-                    )
-                    try:
-                        await self._router.data_store.add_llm_trace(trace)
-                    except Exception as e:
-                        logger.warning(f"写入 LLM trace 失败: {e}")
+                await self._write_trace(
+                    status="success",
+                    run_id=run_id,
+                    state=state,
+                    request=request,
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    total_candidates=total_candidates,
+                    response=resp.content or "",
+                    tool_calls=tool_calls,
+                    latency_ms=int(resp.latency_ms) if resp.latency_ms is not None else None,
+                    tokens_in=resp.usage.input,
+                    tokens_out=resp.usage.output,
+                    reasoning_content=resp.reasoning_content,
+                    cache_read=resp.usage.cache_read,
+                    cache_creation=resp.usage.cache_creation,
+                    reasoning_tokens=resp.usage.reasoning,
+                )
 
                 return LLMGatewayResult(
                     content=content,
@@ -256,9 +251,66 @@ class LLMGateway:
                     reasoning_content=resp.reasoning_content,
                 )
 
-        raise ServiceUnavailableError(
-            f"所有候选模型均已不可用: {last_error or ''}"
-        )
+        # 注：for 循环必然通过 return（成功）或 raise（失败）退出，
+        # 末位候选不可 continue，故此后的代码不可达。
+
+    async def _write_trace(
+        self,
+        *,
+        status: str,
+        run_id: str,
+        state: AgentRunState,
+        request: LLMRequest,
+        provider_name: str,
+        model_name: str,
+        total_candidates: int,
+        response: str = "",
+        tool_calls: Optional[List[dict]] = None,
+        latency_ms: Optional[int] = None,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        reasoning_content: Optional[str] = None,
+        cache_read: int = 0,
+        cache_creation: int = 0,
+        reasoning_tokens: int = 0,
+        error: str = "",
+    ) -> None:
+        """写入 persona_llm_traces 记录（成功/失败统一入口）。"""
+        if not self._router.data_store or not self._router.trace_enabled:
+            return
+        try:
+            trace = LLMTraceRecord(
+                session_id=run_id,
+                user_id=state.user_id,
+                group_id=state.group_id,
+                run_id=run_id,
+                model=model_name,
+                tier=request.selection.category,
+                messages=json.dumps(request.messages, ensure_ascii=False),
+                response=response,
+                tool_calls=json.dumps(
+                    [{"id": tc["id"], "name": tc["name"], "arguments": tc.get("arguments", "")}
+                     for tc in (tool_calls or [])],
+                    ensure_ascii=False,
+                ),
+                selected_provider=provider_name,
+                selected_model=model_name,
+                selection_policy=str(request.selection),
+                candidate_count=total_candidates,
+                latency_ms=latency_ms,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                temperature=request.temperature,
+                status=status,
+                error=error,
+                reasoning_content=reasoning_content or "",
+                cache_read=cache_read,
+                cache_creation=cache_creation,
+                reasoning_tokens=reasoning_tokens,
+            )
+            await self._router.data_store.add_llm_trace(trace)
+        except Exception as e:
+            logger.warning(f"写入 LLM trace 失败: {e}")
 
     async def increment_usage(self, user_id: str) -> None:
         """增加用量计数（由 UsageSink 调用）。"""
