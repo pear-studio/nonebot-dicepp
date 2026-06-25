@@ -105,8 +105,9 @@ class TestAgentRunLimits:
     def test_default_structure(self):
         limits = AgentRunLimits()
         assert dataclasses.asdict(limits) == {
-            "max_tool_rounds": 10,
-            "max_corrections": 3,
+            "max_rounds": 10,
+            "max_output_corrections": 3,
+            "max_tool_corrections": 3,
             "max_interim_segments": 2,
             "max_tools_per_round": 10,
             "timeout_seconds": 60,
@@ -116,21 +117,23 @@ class TestAgentRunLimits:
         ("kwargs", "expected"),
         [
             pytest.param(
-                {"max_tool_rounds": 0},
+                {"max_rounds": 0},
                 {
-                    "max_tool_rounds": 0,
-                    "max_corrections": 3,
+                    "max_rounds": 0,
+                    "max_output_corrections": 3,
+                    "max_tool_corrections": 3,
                     "max_interim_segments": 2,
                     "max_tools_per_round": 10,
                     "timeout_seconds": 60,
                 },
-                id="zero_max_tool_rounds",
+                id="zero_max_rounds",
             ),
             pytest.param(
-                {"max_corrections": 1, "timeout_seconds": 30},
+                {"max_output_corrections": 1, "timeout_seconds": 30},
                 {
-                    "max_tool_rounds": 10,
-                    "max_corrections": 1,
+                    "max_rounds": 10,
+                    "max_output_corrections": 1,
+                    "max_tool_corrections": 3,
                     "max_interim_segments": 2,
                     "max_tools_per_round": 10,
                     "timeout_seconds": 30,
@@ -138,10 +141,11 @@ class TestAgentRunLimits:
                 id="partial_override",
             ),
             pytest.param(
-                {"max_tool_rounds": 5, "max_interim_segments": 0, "max_tools_per_round": 20},
+                {"max_rounds": 5, "max_interim_segments": 0, "max_tools_per_round": 20},
                 {
-                    "max_tool_rounds": 5,
-                    "max_corrections": 3,
+                    "max_rounds": 5,
+                    "max_output_corrections": 3,
+                    "max_tool_corrections": 3,
                     "max_interim_segments": 0,
                     "max_tools_per_round": 20,
                     "timeout_seconds": 60,
@@ -179,7 +183,7 @@ class TestAgentRunStateInitialSnapshot:
             "status": "running",
             "messages": [],
             "tool_rounds": 0,
-            "correction_count": 0,
+            "output_correction_count": 0,
             "warning_count": 0,
             "interim_segment_count": 0,
             "sink_failures": [],
@@ -204,7 +208,7 @@ class TestAgentRunStateRoundtrip:
         )
         # 在默认值基础上施加变更，覆盖所有可选字段
         state.tool_rounds = 3
-        state.correction_count = 1
+        state.output_correction_count = 1
         state.warning_count = 2
         state.interim_segment_count = 1
         state.sink_failures.append("delivery_failed")

@@ -129,13 +129,17 @@ class AgentLoop:
             AgentRunResult
         """
         state.messages = list(messages)
-        round_index = 0
+        round_idx = 0
         total_tokens_in = 0
         total_tokens_out = 0
         provider = ""
         model = ""
+        # 跟踪本轮 run 中哪些 required 工具执行成功过（用于出口软检查）
+        _required_succeeded: set = set()
+        # 工具错误计数: {(tool_name, round): count}
+        _tool_err: dict = {}
 
-        while round_index < self._limits.max_tool_rounds:
+        while round_idx < self._limits.max_rounds:
             effective_selection = selection
 
             # ── 构造 LLM 请求 ──
@@ -151,7 +155,7 @@ class AgentLoop:
             await self._event_bus.emit(
                 "ModelRequestPrepared",
                 ModelRequestPreparedPayload(
-                    round_index=round_index,
+                    round_index=round_idx,
                     tool_use_mode=tool_use_mode.value,
                     required_tools=required_tools or [],
                     message_count=req.message_count,
@@ -188,17 +192,17 @@ class AgentLoop:
             )
 
             # ── L1 纠正：要求工具输出时，不能直接输出文本或空响应 ──
-            if (state.correction_count < self._limits.max_corrections
+            if (state.output_correction_count < self._limits.max_output_corrections
                     and not tool_calls
                     and tools
                     and (not content.strip() or required_tool_output)):
                 state.messages.append(dict(_L1_CORRECTION_MSG))
-                state.correction_count += 1
+                state.output_correction_count += 1
                 await self._event_bus.emit(
                     "CorrectionInjected",
                     CorrectionInjectedPayload(
                         reason="tool_required",
-                        round_index=round_index,
+                        round_index=round_idx,
                         message=_L1_CORRECTION_MSG["content"],
                     ),
                     state,
@@ -212,11 +216,11 @@ class AgentLoop:
                     AgentWarningPayload(
                         code="required_tool_missing",
                         message="模型在强制工具输出模式下未调用工具",
-                        round_index=round_index,
+                        round_index=round_idx,
                     ),
                     state,
                 )
-                return await self._finish(state, "max_corrections",
+                return await self._finish(state, "max_output_corrections",
                                           "required_tool_missing",
                                           total_tokens_in, total_tokens_out,
                                           provider, model)
@@ -234,47 +238,6 @@ class AgentLoop:
             if not tool_calls and not content.strip():
                 return await self._finish(state, "completed", "empty_response",
                                           total_tokens_in, total_tokens_out, provider, model)
-
-            # ── REQUIRED_ONE_OF 校验：本轮 tool_calls 必须命中 required_tools ──
-            if (tool_use_mode == ToolUseMode.REQUIRED_ONE_OF
-                    and required_tools
-                    and not any(tc["name"] in required_tools for tc in tool_calls)):
-                if state.correction_count < self._limits.max_corrections:
-                    missing_list = ", ".join(required_tools)
-                    correction_msg = {
-                        "role": "user",
-                        "content": (
-                            f"[系统指令] 你必须调用以下工具之一: {missing_list}。"
-                            f"必须通过工具调用完成任务，不要直接输出文本。"
-                        ),
-                    }
-                    state.messages.append(dict(correction_msg))
-                    state.correction_count += 1
-                    await self._event_bus.emit(
-                        "CorrectionInjected",
-                        CorrectionInjectedPayload(
-                            reason="required_tool_mismatch",
-                            round_index=round_index,
-                            message=correction_msg["content"],
-                        ),
-                        state,
-                    )
-                    continue
-                else:
-                    state.warning_count += 1
-                    await self._event_bus.emit(
-                        "AgentWarning",
-                        AgentWarningPayload(
-                            code="required_tool_mismatch",
-                            message="模型连续调用非必需工具，correction 已耗尽",
-                            round_index=round_index,
-                        ),
-                        state,
-                    )
-                    return await self._finish(state, "max_corrections",
-                                              "required_tool_mismatch",
-                                              total_tokens_in, total_tokens_out,
-                                              provider, model)
 
             # ── structured_collect：只执行 required_tools 中的工具，防止同轮混入非目标工具数据 ──
             if state.mode == "structured_collect" and required_tools:
@@ -309,7 +272,35 @@ class AgentLoop:
             tool_results = await self._executor.execute_many(tool_calls, state)
 
             state.tool_rounds += 1
-            round_index += 1
+            round_idx += 1
+
+            # ── 追踪 required 工具成功、工具错误计数 ──
+            tool_errors_this_round: list = []
+            for tc, tr in zip(tool_calls, tool_results):
+                if tr.get("status") == "success":
+                    if required_tools and tc["name"] in required_tools:
+                        _required_succeeded.add(tc["name"])
+                else:
+                    tool_errors_this_round.append((tc, tr))
+
+            # ── 工具错误纠正 ──
+            if tool_errors_this_round:
+                exceeded = False
+                for tc, tr in tool_errors_this_round:
+                    key = tc["name"]
+                    _tool_err[key] = _tool_err.get(key, 0) + 1
+                    if _tool_err[key] > self._limits.max_tool_corrections:
+                        exceeded = True
+                        logger.warning(
+                            f"工具 {tc['name']} 在第 {round_idx} 轮连续错误超过 "
+                            f"{self._limits.max_tool_corrections} 次: {tr['content']}"
+                        )
+                if exceeded:
+                    state.error = "tool_corrections_exhausted"
+                    return await self._finish(state, "max_tool_corrections",
+                                              "tool_corrections_exhausted",
+                                              total_tokens_in, total_tokens_out,
+                                              provider, model)
 
             # ── 按调用顺序处理 EXTERNAL_ACTION 结果 ──
             delivery_performed_this_round = False
@@ -434,17 +425,17 @@ class AgentLoop:
 
             if interim_found:
                 # 只有 interim 没有 observation 和 final：注入 correction
-                if state.correction_count < self._limits.max_corrections:
+                if state.output_correction_count < self._limits.max_output_corrections:
                     state.messages.append({
                         "role": "user",
                         "content": _CORRECTION_INTERIM_MSG,
                     })
-                    state.correction_count += 1
+                    state.output_correction_count += 1
                     await self._event_bus.emit(
                         "CorrectionInjected",
                         CorrectionInjectedPayload(
                             reason=_CORRECTION_INTERIM_REASON,
-                            round_index=round_index,
+                            round_index=round_idx,
                             message=_CORRECTION_INTERIM_MSG,
                         ),
                         state,
@@ -458,15 +449,14 @@ class AgentLoop:
                         AgentWarningPayload(
                             code="interim_limit_exceeded",
                             message="interim 后 correction 已耗尽",
-                            round_index=round_index,
+                            round_index=round_idx,
                         ),
                         state,
                     )
-                    return await self._finish(state, "max_corrections",
+                    return await self._finish(state, "max_output_corrections",
                                               "interim_corrections_exhausted",
                                               total_tokens_in, total_tokens_out,
                                               provider, model)
-
 
             # ── structured_collect：required 工具执行成功 → 完成 ──
             if (state.mode == "structured_collect"
@@ -480,21 +470,49 @@ class AgentLoop:
                 return await self._finish(state, "completed", "structured_collect_completed",
                                           total_tokens_in, total_tokens_out, provider, model)
 
+            # ── 出口软检查：REQUIRED_ONE_OF 不再在每轮拦截非 required 工具。
+            # LLM 可以自由调用可选工具探索，仅在接近 max_rounds（最后 2 轮）
+            # 且 required 工具从未成功时注入一次性纠正提示。 ──
+            if (required_tools
+                    and round_idx >= max(1, self._limits.max_rounds - 2)
+                    and not _required_succeeded
+                    and state.output_correction_count < self._limits.max_output_corrections):
+                missing = [t for t in required_tools if t not in _required_succeeded]
+                hint = {
+                    "role": "user",
+                    "content": (
+                        f"[系统指令] 你还没有调用以下必需工具: {', '.join(missing)}。"
+                        f"请调用这些工具来完成任务。"
+                    ),
+                }
+                state.messages.append(dict(hint))
+                state.output_correction_count += 1
+                await self._event_bus.emit(
+                    "CorrectionInjected",
+                    CorrectionInjectedPayload(
+                        reason="required_tool_not_called",
+                        round_index=round_idx,
+                        message=hint["content"],
+                    ),
+                    state,
+                )
+                continue
+
             # ── 达到最大轮次 ──
-            if round_index >= self._limits.max_tool_rounds:
-                if state.correction_count > 0:
+            if round_idx >= self._limits.max_rounds:
+                if state.output_correction_count > 0:
                     logger.warning(
-                        "max_tool_rounds(%d) 耗尽，已注入 %d 次纠正但未收集到工具调用",
-                        self._limits.max_tool_rounds, state.correction_count,
+                        "max_rounds(%d) 耗尽，已注入 %d 次输出纠正",
+                        self._limits.max_rounds, state.output_correction_count,
                     )
-                return await self._finish(state, "max_rounds", "max_tool_rounds",
+                return await self._finish(state, "max_rounds", "max_rounds",
                                           total_tokens_in, total_tokens_out, provider, model)
 
             # 一般继续
             continue
 
-        # ── 循环结束（max_tool_rounds 耗尽） ──
-        return await self._finish(state, "max_rounds", "max_tool_rounds",
+        # ── 循环结束（max_rounds 耗尽） ──
+        return await self._finish(state, "max_rounds", "max_rounds",
                                   total_tokens_in, total_tokens_out, provider, model)
 
     # ── 终止路径 ────────────────────────────────────────────────

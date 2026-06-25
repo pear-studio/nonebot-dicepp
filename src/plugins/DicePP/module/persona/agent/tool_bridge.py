@@ -335,7 +335,7 @@ async def run_structured_collect(
     temperature: float = 0.7,
     timeout: int | None = None,
     selection=None,
-    max_tool_rounds: int = 1,
+    max_rounds: int = 1,
     extra_registry: Optional[ToolRegistry] = None,
 ) -> tuple[list, Any]:
     """运行 structured_collect 模式，返回 (collected_args, runtime_result)。
@@ -356,7 +356,7 @@ async def run_structured_collect(
     runtime = AgentRuntime(
         router=router,
         store=store,
-        limits=AgentRunLimits(max_tool_rounds=max_tool_rounds),
+        limits=AgentRunLimits(max_rounds=max_rounds),
     )
     tool_registry = build_collecting_registry(_collect, tool_names=required_tools)
 

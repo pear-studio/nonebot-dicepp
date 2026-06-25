@@ -199,8 +199,8 @@ class PersonaConfig(BaseModel):
         default=5, title="工具最大轮次",
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
-    background_llm_max_tool_rounds: int = Field(
-        default=1, title="后台工具最大轮次",
+    background_llm_max_rounds: int = Field(
+        default=10, title="后台 LLM 最大轮次",
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
 

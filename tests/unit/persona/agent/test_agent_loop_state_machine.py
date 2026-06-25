@@ -85,7 +85,7 @@ def loop(mock_llm, mock_executor, mock_event_bus, mock_delivery, mock_image):
         event_bus=mock_event_bus,
         delivery_sink=mock_delivery,
         image_sink=mock_image,
-        limits=AgentRunLimits(max_tool_rounds=10, max_corrections=3),
+        limits=AgentRunLimits(max_rounds=10, max_output_corrections=3),
     )
 
 
@@ -139,9 +139,9 @@ class TestAgentLoopToolCalls:
         assert result.final_text == "工具执行后的最终回复"
 
     @pytest.mark.asyncio
-    async def test_max_tool_rounds_returns_max_rounds(self, loop, mock_llm, mock_executor, mock_event_bus):
-        """工具循环达到 max_tool_rounds 上限"""
-        loop._limits = AgentRunLimits(max_tool_rounds=1, max_corrections=0)
+    async def test_max_rounds_returns_max_rounds(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """工具循环达到 max_rounds 上限"""
+        loop._limits = AgentRunLimits(max_rounds=1, max_output_corrections=0)
         mock_llm.complete.return_value = _make_gateway_result(
             content="", tool_calls=[_make_tool_call("search", '{"query":"x"}')],
         )
@@ -254,7 +254,7 @@ class TestAgentLoopInterimRequiresFinal:
     async def test_interim_corrections_exhausted(self, loop, mock_llm, mock_executor, mock_delivery, mock_event_bus):
         """interim 后 correction 耗尽 → max_corrections 状态返回"""
         # 只给 0 次 correction，所以 interim 后会立即耗尽
-        loop._limits = AgentRunLimits(max_tool_rounds=10, max_corrections=0)
+        loop._limits = AgentRunLimits(max_rounds=10, max_output_corrections=0)
 
         mock_llm.complete.side_effect = [
             _make_gateway_result(
@@ -375,7 +375,7 @@ class TestAgentLoopCorrections:
 
         assert result.final_text == "final"
         assert result.status == "completed"
-        assert state.correction_count >= 1
+        assert state.output_correction_count >= 1
 
     @pytest.mark.asyncio
     async def test_required_one_of_plain_content_triggers_correction(self, loop, mock_llm, mock_executor, mock_delivery, mock_event_bus):
@@ -406,7 +406,7 @@ class TestAgentLoopCorrections:
 
         assert result.final_reason == "terminal_final_segment"
         assert result.final_text == "工具回复"
-        assert state.correction_count == 1
+        assert state.output_correction_count == 1
         mock_delivery.handle_send.assert_awaited_once()
         send_action = mock_delivery.handle_send.await_args.args[0]
         assert send_action.content == "工具回复"
@@ -457,9 +457,11 @@ class TestRequiredOneOfValidation:
     """REQUIRED_ONE_OF 下调用非 required 工具 → 纠正"""
 
     @pytest.mark.asyncio
-    async def test_wrong_tool_injects_correction_and_skips_execution(self, loop, mock_llm, mock_executor, mock_event_bus):
-        """REQUIRED_ONE_OF + required_tools=["correct"] → 调 "wrong" → correction + 不执行"""
-        loop._limits = AgentRunLimits(max_tool_rounds=10, max_corrections=2)
+    async def test_wrong_tool_executed_soft_check_near_end(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """REQUIRED_ONE_OF 不再在每轮拦截非 required 工具。
+        非 required 工具正常执行；仅在接近 max_rounds 时注入出口软检查。"""
+        loop._limits = AgentRunLimits(max_rounds=3, max_output_corrections=1)
+        # 持续调 non-required 工具；第 1 轮执行后 round=1>=4-2 → 软检查注入 hint
         mock_llm.complete.side_effect = [
             _make_gateway_result(
                 content="",
@@ -474,6 +476,9 @@ class TestRequiredOneOfValidation:
                 tool_calls=[_make_tool_call("wrong_tool", '{}')],
             ),
         ]
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", "wrong executed"),
+        ]
         state = _make_state()
 
         result = await loop.run(
@@ -484,8 +489,12 @@ class TestRequiredOneOfValidation:
             required_tools=["correct_tool"],
         )
 
-        assert result.final_reason == "required_tool_mismatch"
-        mock_executor.execute_many.assert_not_called()
+        # 工具正常执行（不再被 REQUIRED_ONE_OF 拦截）
+        assert mock_executor.execute_many.call_count >= 1
+        # 软检查在出口处注入了纠正
+        assert state.output_correction_count >= 1
+        # 最终因 max_rounds 耗尽退出
+        assert result.status == "max_rounds"
 
     @pytest.mark.asyncio
     async def test_correct_tool_passes_validation(self, loop, mock_llm, mock_executor, mock_event_bus):
@@ -545,7 +554,7 @@ class TestStructuredCollectCompletion:
     @pytest.mark.asyncio
     async def test_non_collect_mode_still_uses_max_rounds(self, loop, mock_llm, mock_executor, mock_event_bus):
         """非 structured_collect 模式：工具执行后继续 → max_rounds"""
-        loop._limits = AgentRunLimits(max_tool_rounds=1, max_corrections=0)
+        loop._limits = AgentRunLimits(max_rounds=1, max_output_corrections=0)
         mock_llm.complete.return_value = _make_gateway_result(
             content="",
             tool_calls=[_make_tool_call("search", '{"query":"x"}')],
@@ -565,7 +574,7 @@ class TestStructuredCollectCompletion:
     @pytest.mark.asyncio
     async def test_error_status_does_not_complete_collect(self, loop, mock_llm, mock_executor, mock_event_bus):
         """structured_collect: tool result status=error → 不终止，LLM 重试 → 成功 → 完成"""
-        loop._limits = AgentRunLimits(max_tool_rounds=5, max_corrections=3)
+        loop._limits = AgentRunLimits(max_rounds=5, max_output_corrections=3)
         mock_llm.complete.side_effect = [
             _make_gateway_result(
                 content="",
@@ -598,7 +607,7 @@ class TestStructuredCollectCompletion:
     @pytest.mark.asyncio
     async def test_all_errors_hit_max_rounds(self, loop, mock_llm, mock_executor, mock_event_bus):
         """structured_collect: 所有 tool call 都 status=error → 永不完成 → max_rounds"""
-        loop._limits = AgentRunLimits(max_tool_rounds=2, max_corrections=0)
+        loop._limits = AgentRunLimits(max_rounds=2, max_output_corrections=0)
         mock_llm.complete.return_value = _make_gateway_result(
             content="",
             tool_calls=[_make_tool_call("record_diary_entry", json.dumps({"diary": "太短"}))],
@@ -617,6 +626,131 @@ class TestStructuredCollectCompletion:
         )
 
         assert result.status == "max_rounds"
-        assert result.final_reason == "max_tool_rounds"
+        assert result.final_reason == "max_rounds"
         # 每次 LLM 都返回 error → loop 继续 → 直到 max_rounds
         assert mock_llm.complete.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_consecutive_tool_errors_trigger_max_tool_corrections(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """跨轮同一工具连续 error → 计数器累积 → max_tool_corrections 耗尽退出"""
+        loop._limits = AgentRunLimits(max_rounds=10, max_output_corrections=0,
+                                       max_tool_corrections=3)
+        mock_llm.complete.return_value = _make_gateway_result(
+            content="",
+            tool_calls=[_make_tool_call("record_diary_entry", json.dumps({"diary": "太短"}))],
+        )
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", "参数校验失败: 长度不足", status="error"),
+        ]
+        state = _make_state(mode="structured_collect")
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "diary"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "record_diary_entry"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["record_diary_entry"],
+        )
+
+        assert result.status == "max_tool_corrections"
+        assert result.final_reason == "tool_corrections_exhausted"
+        # 4 轮: 前 3 轮 error(计数器 1→2→3), 第 4 轮 error(计数器 4 > 3 → 退出)
+        assert mock_llm.complete.call_count == 4
+        assert mock_executor.execute_many.call_count == 4
+
+    @pytest.mark.asyncio
+    async def test_tool_error_count_accumulates_across_rounds(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """纯工具名键语义：跨轮 error 计数器正确累积。
+        structured_collect 下同一工具 error 2 次 → 第 3 次 success → 完成。
+        验证计数器在前 2 轮正确累积到 2（未触发断路）。"""
+        loop._limits = AgentRunLimits(max_rounds=10, max_output_corrections=0,
+                                       max_tool_corrections=3)
+        call_count = 0
+        mock_llm.complete.side_effect = [
+            # 第 1-2 轮: error
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("record_diary_entry", json.dumps({"diary": "x"}))],
+            ),
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("record_diary_entry", json.dumps({"diary": "x"}))],
+            ),
+            # 第 3 轮: success → structured_collect 完成
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("record_diary_entry", json.dumps({"diary": "足够长度的日记内容" * 5}))],
+            ),
+        ]
+        mock_executor.execute_many.side_effect = [
+            [_make_tool_result("tc_1", "error1", status="error")],
+            [_make_tool_result("tc_2", "error2", status="error")],
+            [_make_tool_result("tc_3", "ok", status="success")],
+        ]
+        state = _make_state(mode="structured_collect")
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "diary"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "record_diary_entry"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["record_diary_entry"],
+        )
+
+        # 前 2 轮 error 累积但未超 max_tool_corrections(3)，第 3 轮 success → 完成
+        assert result.status == "completed"
+        assert result.final_reason == "structured_collect_completed"
+        assert mock_llm.complete.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_tool_error_diff_tools_independent_counters(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """不同工具的 error 计数器独立；tool_A 耗尽不影响 tool_B 计数"""
+        loop._limits = AgentRunLimits(max_rounds=10, max_output_corrections=0,
+                                       max_tool_corrections=3)
+        mock_llm.complete.side_effect = [
+            # tool_A error ×3
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("tool_a", json.dumps({"val": 1}))],
+            ),
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("tool_a", json.dumps({"val": 2}))],
+            ),
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("tool_a", json.dumps({"val": 3}))],
+            ),
+            # tool_B error ×1 (独立计数: 1)
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("tool_b", json.dumps({"val": 4}))],
+            ),
+            # tool_A error ×1 → 4 > 3 → 耗尽
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("tool_a", json.dumps({"val": 5}))],
+            ),
+        ]
+        mock_executor.execute_many.side_effect = [
+            [_make_tool_result("a1", "err", status="error")],
+            [_make_tool_result("a2", "err", status="error")],
+            [_make_tool_result("a3", "err", status="error")],
+            [_make_tool_result("b1", "err", status="error")],
+            [_make_tool_result("a4", "err", status="error")],
+        ]
+        state = _make_state(mode="structured_collect")
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "test"}],
+            state=state,
+            tools=[{"type": "function", "function": {"name": "tool_a"}},
+                   {"type": "function", "function": {"name": "tool_b"}}],
+            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
+            required_tools=["tool_a", "tool_b"],
+        )
+
+        # tool_A 在第 4 次 error 时耗尽 max_tool_corrections
+        assert result.status == "max_tool_corrections"
+        assert result.final_reason == "tool_corrections_exhausted"
+        assert mock_llm.complete.call_count == 5

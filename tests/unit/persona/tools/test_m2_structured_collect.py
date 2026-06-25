@@ -168,7 +168,7 @@ class TestStructuredCollectSuccess:
             llm_gateway=gateway,
             tool_executor=executor,
             event_bus=bus,
-            limits=AgentRunLimits(max_tool_rounds=5, max_corrections=2),
+            limits=AgentRunLimits(max_rounds=5, max_output_corrections=2),
         )
 
         result = await loop.run(
@@ -209,7 +209,7 @@ class TestStructuredCollectSuccess:
 
         gateway = _CountedGateway(first_tool_calls=[tool_call])
         executor = ToolExecutor(reg, bus)
-        loop = AgentLoop(gateway, executor, bus, limits=AgentRunLimits(max_tool_rounds=5))
+        loop = AgentLoop(gateway, executor, bus, limits=AgentRunLimits(max_rounds=5))
 
         result = await loop.run(
             messages=[{"role": "user", "content": "分析以下对话并评分"}],
@@ -247,7 +247,7 @@ class TestMissingToolCorrection:
         executor = ToolExecutor(reg, bus)
         loop = AgentLoop(
             gateway, executor, bus,
-            limits=AgentRunLimits(max_tool_rounds=5, max_corrections=2),
+            limits=AgentRunLimits(max_rounds=5, max_output_corrections=2),
         )
 
         result = await loop.run(
@@ -259,16 +259,16 @@ class TestMissingToolCorrection:
         )
 
         # correction 耗尽后应 fail
-        assert result.status == "max_corrections", f"expected max_corrections, got {result.status}"
+        assert result.status == "max_output_corrections", f"expected max_output_corrections, got {result.status}"
         assert result.final_reason == "required_tool_missing"
-        assert state.correction_count >= 1
+        assert state.output_correction_count >= 1
 
     @pytest.mark.asyncio
     async def test_structured_collect_missing_tool_one_correction(self):
         """一次 correction 后 LLM 调用工具 → 成功收集
 
-        注：当前 AgentLoop REQUIRED_ONE_OF 要求每轮都调工具，
-        因此工具执行后循环会因 max_tool_rounds 终止。
+        注：当前 AgentLoop REQUIRED_ONE_OF 不再每轮强制拦截，
+        改为出口软检查，工具执行后循环可能因 max_rounds 终止。
         核心验证点是 correction 被注入且工具最终被调用。
         """
         bus, _ = _make_event_bus()
@@ -310,8 +310,8 @@ class TestMissingToolCorrection:
         loop = AgentLoop(
             llm_gateway=_TwoPhaseGateway(),
             tool_executor=executor, event_bus=bus,
-            # max_tool_rounds=2: round 0→correction, round 1→tool execute, exit
-            limits=AgentRunLimits(max_tool_rounds=2, max_corrections=3),
+            # max_rounds=2: round 0→correction, round 1→tool execute, exit
+            limits=AgentRunLimits(max_rounds=2, max_output_corrections=3),
         )
 
         result = await loop.run(
@@ -323,12 +323,12 @@ class TestMissingToolCorrection:
         )
 
         # correction 被注入
-        assert state.correction_count >= 1
+        assert state.output_correction_count >= 1
         # 工具最终被调用
         assert len(collected) == 1
         assert collected[0]["description"] == "最终生成的事件"
         # 循环正常终止
-        assert result.final_reason in ("max_tool_rounds", "completed", "structured_collect_completed"), (
+        assert result.final_reason in ("max_rounds", "completed", "structured_collect_completed"), (
             f"unexpected: {result.status}/{result.final_reason}"
         )
 

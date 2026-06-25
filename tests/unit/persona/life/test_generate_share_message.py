@@ -13,7 +13,7 @@ from conftest import _make_tool_registry, make_mock_runtime
 class MockConfig:
     proactive_share_max_chars = 200
     background_llm_timeout_seconds = 10
-    background_llm_max_tool_rounds = 3
+    background_llm_max_rounds = 3
 
 
 @pytest.fixture

@@ -25,7 +25,7 @@ class AgentRunState:
     messages: List[dict] = field(default_factory=list)
 
     tool_rounds: int = 0
-    correction_count: int = 0
+    output_correction_count: int = 0
     warning_count: int = 0
     interim_segment_count: int = 0
 

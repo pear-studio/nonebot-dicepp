@@ -27,7 +27,7 @@ def mock_router():
 @pytest.fixture
 def agent(mock_router, monkeypatch):
     make_mock_runtime(monkeypatch)
-    return ScoringAgent(mock_router, timezone="Asia/Shanghai", max_tool_rounds=3)
+    return ScoringAgent(mock_router, timezone="Asia/Shanghai", max_rounds=3)
 
 
 class TestScoringToolPath:

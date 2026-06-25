@@ -139,10 +139,10 @@ class EventGenerationAgent:
             if config
             else _DEFAULT_BG_TIMEOUT
         )
-        self._max_tool_rounds = (
-            getattr(config, "background_llm_max_tool_rounds", 1)
+        self._max_rounds = (
+            getattr(config, "background_llm_max_rounds", 10)
             if config
-            else 1
+            else 10
         )
 
         # 构建只读工具注册表，供日记生成等背景任务中 LLM 按需查询
@@ -228,7 +228,7 @@ class EventGenerationAgent:
             timeout=self._bg_timeout,
             selection=selection,
             required_tools=[tool_name] if tool_name else None,
-            max_tool_rounds=self._max_tool_rounds,
+            max_rounds=self._max_rounds,
             extra_registry=extra_registry,
         )
         return collected
@@ -840,7 +840,7 @@ class EventGenerationAgent:
             runtime = AgentRuntime(
                 router=llm_router,
                 store=store,
-                limits=AgentRunLimits(max_tool_rounds=1),
+                limits=AgentRunLimits(max_rounds=1),
             )
 
             result = await runtime.run(

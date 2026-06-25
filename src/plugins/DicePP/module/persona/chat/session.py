@@ -411,7 +411,7 @@ class ChatSession:
         from ..agent.request import AgentRunLimits
 
         limits = AgentRunLimits(
-            max_tool_rounds=self.config.tools_max_rounds,
+            max_rounds=self.config.tools_max_rounds,
         )
 
         runtime = AgentRuntime(

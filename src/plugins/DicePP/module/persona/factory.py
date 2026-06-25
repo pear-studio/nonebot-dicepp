@@ -470,7 +470,7 @@ def _make_resolve_query_db(bot: Bot):
 def _build_chat(deps: ChatDeps) -> ChatSession:
     """组装 ChatSession"""
     scoring_agent = ScoringAgent(deps.router, timezone=deps.config.timezone,
-                                 max_tool_rounds=deps.config.background_llm_max_tool_rounds,
+                                 max_rounds=deps.config.background_llm_max_rounds,
                                  store=deps.store)
     from .chat.context import SegmentGuide
 

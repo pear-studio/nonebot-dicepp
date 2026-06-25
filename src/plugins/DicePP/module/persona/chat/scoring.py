@@ -27,11 +27,11 @@ class ScoringAgent:
     """评分 Agent - 批量分析对话提取用户档案和好感度变化"""
 
     def __init__(self, llm_router: LLMRouter, timezone: str = "Asia/Shanghai",
-                 max_tool_rounds: int = 3,
+                 max_rounds: int = 3,
                  store: Optional[PersonaDataStore] = None):
         self.llm_router = llm_router
         self.timezone = timezone
-        self.max_tool_rounds = max_tool_rounds
+        self.max_rounds = max_rounds
         self._store = store
 
     async def batch_analyze(
@@ -67,7 +67,7 @@ class ScoringAgent:
                 temperature=0.7,
                 timeout=60,
                 selection=SCORING,
-                max_tool_rounds=self.max_tool_rounds,
+                max_rounds=self.max_rounds,
             )
             content = runtime_result.final_text or ""
 

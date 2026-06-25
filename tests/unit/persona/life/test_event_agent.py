@@ -36,7 +36,7 @@ class TestGenerateDiary:
         make_mock_runtime(monkeypatch)
         config = MagicMock()
         config.background_llm_timeout_seconds = 90
-        config.background_llm_max_tool_rounds = 3
+        config.background_llm_max_rounds = 3
         return EventGenerationAgent(mock_router, _make_tool_registry(), config=config, store=mock_router.data_store)
 
     @pytest.mark.asyncio
@@ -196,7 +196,7 @@ class TestGenerateEventResult:
         make_mock_runtime(monkeypatch)
         config = MagicMock()
         config.background_llm_timeout_seconds = 90
-        config.background_llm_max_tool_rounds = 3
+        config.background_llm_max_rounds = 3
         return EventGenerationAgent(mock_router, _make_tool_registry(), config=config, store=mock_router.data_store)
 
     @pytest.mark.asyncio
@@ -366,7 +366,7 @@ class TestGenerateEventReaction:
         make_mock_runtime(monkeypatch)
         config = MagicMock()
         config.background_llm_timeout_seconds = 90
-        config.background_llm_max_tool_rounds = 3
+        config.background_llm_max_rounds = 3
         return EventGenerationAgent(mock_router, _make_tool_registry(), config=config, store=mock_router.data_store)
 
     @pytest.mark.asyncio

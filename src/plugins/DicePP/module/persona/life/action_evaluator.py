@@ -146,7 +146,7 @@ class ActionEvaluator:
                 temperature=0.3,
                 timeout=self._timeout,
                 selection=SCORING,
-                max_tool_rounds=1,
+                max_rounds=1,
             )
         except ServiceUnavailableError:
             logger.warning("[ActionEvaluator] 无可用 LLM provider")
