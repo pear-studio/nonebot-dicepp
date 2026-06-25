@@ -14,6 +14,14 @@
 
 ## data
 
+### [B-260625-cdbbd9] DND5eDatabase — 基于 5etools-cn 结构化 JSON 重建 D&D 5e 查询数据库
+- 创建: 2026-06-25
+- 优先级: P1
+- 类型: feature
+- 改动量: XL
+- 问题表现: 当前 content/queries/DND5E*.db 为纯文本 6 字段模型：data(名称,英文,来源,分类,标签,内容)，所有结构化信息混在内容字段中，无法按环位/CR/伤害类型等字段精确筛选。5etools-cn 提供 502 个 JSON 文件、13000+ 条目的深度结构化数据（法术 936 条、怪物 4528 条、物品 2428 条），翻译率法术 99%/专长 100%/技能 100%，数据覆盖远超现有 DB。现有 REGEXP 搜索逐行调 Python re 性能差，随机生成依赖 xlsx 手工维护。
+- 开发备忘: 设计详见 docs/dev/dnd5e-database-design.md。分 5 Phase：(1) 法术表 + 通用 entries 渲染器 + 搜索索引；(2) 怪物表 + Python port of _copy 解析器；(3) 物品/专长表 + 通用 dnd5e_entries 表 + 配置驱动渲染器；(4) 其余 30+ 类别 + 随机生成接入；(5) edition 版本列 + v2024 查询参数。单文件 DND5E.db，LIKE 替代 REGEXP，查询时解析 _copy 继承链，实时 entries 渲染。
+
 ### [B-260618-56a0a3] 3.0.0 Data Foundation：数据状态架构与迁移基础
 - 创建: 2026-06-18
 - 优先级: P1
