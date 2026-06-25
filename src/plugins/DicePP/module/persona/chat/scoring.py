@@ -69,6 +69,7 @@ class ScoringAgent:
                 selection=SCORING,
                 max_rounds=self.max_rounds,
             )
+            runtime_result.log_if_failed("scoring")
             content = runtime_result.final_text or ""
 
         except ServiceUnavailableError as e:

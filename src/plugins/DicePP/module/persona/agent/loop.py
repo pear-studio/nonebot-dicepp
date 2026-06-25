@@ -83,6 +83,17 @@ class AgentRunResult:
     provider: str = ""
     model: str = ""
 
+    def log_if_failed(self, component: str) -> None:
+        """若非正常完成，打一条自包含的 warning 日志。"""
+        if self.status == "completed":
+            return
+        logger.warning(
+            f"[{component}] AgentLoop 未正常完成: status={self.status}, "
+            f"reason={self.final_reason}, error={self.error}, "
+            f"tokens=({self.tokens_input}/{self.tokens_output}), "
+            f"rounds={self.tool_rounds}, warnings={self.warning_count}"
+        )
+
 
 class AgentLoop:
     """Agent 状态机 — LLM 调用 → 工具分派 → 继续/终止"""
@@ -211,6 +222,10 @@ class AgentLoop:
 
             if required_tool_output and not tool_calls:
                 state.warning_count += 1
+                logger.warning(
+                    f"AgentLoop L1 纠正耗尽: 模型在 REQUIRED_ONE_OF 模式下"
+                    f" 连续 {state.output_correction_count} 次未调用工具"
+                )
                 await self._event_bus.emit(
                     "AgentWarning",
                     AgentWarningPayload(
@@ -296,7 +311,23 @@ class AgentLoop:
                             f"{self._limits.max_tool_corrections} 次: {tr['content']}"
                         )
                 if exceeded:
+                    state.warning_count += 1
                     state.error = "tool_corrections_exhausted"
+                    err_tool_names = ", ".join(
+                        sorted(set(tc["name"] for tc, _ in tool_errors_this_round))
+                    )
+                    await self._event_bus.emit(
+                        "AgentWarning",
+                        AgentWarningPayload(
+                            code="tool_corrections_exhausted",
+                            message=(
+                                f"工具 {err_tool_names} 执行错误超过 "
+                                f"{self._limits.max_tool_corrections} 次，已退出"
+                            ),
+                            round_index=round_idx,
+                        ),
+                        state,
+                    )
                     return await self._finish(state, "max_tool_corrections",
                                               "tool_corrections_exhausted",
                                               total_tokens_in, total_tokens_out,
@@ -500,11 +531,14 @@ class AgentLoop:
 
             # ── 达到最大轮次 ──
             if round_idx >= self._limits.max_rounds:
-                if state.output_correction_count > 0:
-                    logger.warning(
-                        "max_rounds(%d) 耗尽，已注入 %d 次输出纠正",
-                        self._limits.max_rounds, state.output_correction_count,
-                    )
+                logger.warning(
+                    "max_rounds(%d) 耗尽: model=%s, output_corrections=%d, "
+                    "required_succeeded=%s, mode=%s",
+                    self._limits.max_rounds, model or "?",
+                    state.output_correction_count,
+                    sorted(_required_succeeded) if _required_succeeded else [],
+                    state.mode,
+                )
                 return await self._finish(state, "max_rounds", "max_rounds",
                                           total_tokens_in, total_tokens_out, provider, model)
 

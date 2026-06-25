@@ -220,7 +220,7 @@ class EventGenerationAgent:
                 func = first.get("function", first)
                 tool_name = func.get("name", "")
 
-        collected, _result = await run_structured_collect(
+        collected, run_result = await run_structured_collect(
             router=self.llm_router,
             store=self._store,
             messages=messages,
@@ -231,6 +231,7 @@ class EventGenerationAgent:
             max_rounds=self._max_rounds,
             extra_registry=extra_registry,
         )
+        run_result.log_if_failed(str(tool_name))
         return collected
 
     async def generate_event_result(self, context: EventContext) -> EventGenerationResult:

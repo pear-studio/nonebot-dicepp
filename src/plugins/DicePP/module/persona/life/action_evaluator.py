@@ -134,7 +134,7 @@ class ActionEvaluator:
         from ..agent.tool_bridge import run_structured_collect
 
         try:
-            collected_args, _result = await run_structured_collect(
+            collected_args, runtime_result = await run_structured_collect(
                 router=self._router,
                 store=self._store,
                 messages=[
@@ -148,6 +148,9 @@ class ActionEvaluator:
                 selection=SCORING,
                 max_rounds=1,
             )
+            runtime_result.log_if_failed("ActionEvaluator")
+            if runtime_result.status != "completed":
+                return ("rejected", "LLM 协议错误")
         except ServiceUnavailableError:
             logger.warning("[ActionEvaluator] 无可用 LLM provider")
             return ("rejected", "无可用 LLM 服务")
@@ -156,7 +159,6 @@ class ActionEvaluator:
             return ("rejected", "LLM 调用失败")
 
         if not collected_args:
-            logger.warning("[ActionEvaluator] LLM 未调用 record_evaluation 工具")
             return ("rejected", "LLM 未生成评估结果")
 
         args = collected_args[0]
