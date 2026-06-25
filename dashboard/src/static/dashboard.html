@@ -374,75 +374,166 @@
                 <div class="animate-pulse bg-gray-200 rounded h-4 w-5/6"></div>
                 <div class="animate-pulse bg-gray-200 rounded h-4 w-2/3"></div>
               </div>
-              <!-- Toolbar -->
-              <div x-show="!configLoading" class="flex items-center gap-3 mb-4">
-                <button @click="expandAllSections('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">展开全部</button>
-                <button @click="collapseAllSections('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">折叠全部</button>
-                <label class="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
-                  <input type="checkbox" x-model="showAdvanced" @change="saveUiPrefs()">
-                  显示高级设置
-                </label>
+              <!-- Section sub-tab navigation -->
+              <div x-show="!configLoading" class="flex flex-wrap gap-1 mb-4">
+                <template x-for="sec in configSections" :key="sec.key">
+                  <button @click="configSection = sec.key"
+                    :class="configSection === sec.key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100'"
+                    class="px-3 py-1.5 rounded text-xs font-medium border transition">
+                    <span x-text="sec.label"></span>
+                    <span class="ml-1 opacity-70" x-text="'(' + sec.fields.length + ')'"></span>
+                  </button>
+                </template>
+              </div>
+              <!-- Field expand/collapse toolbar -->
+              <div x-show="!configLoading" class="flex items-center gap-3 mb-3">
+                <button @click="expandAllFields('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">展开字段</button>
+                <button @click="collapseAllFields('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">折叠字段</button>
               </div>
               <div x-show="!configLoading && configSections.length === 0" class="text-gray-500 text-center py-4">暂无配置</div>
-              <!-- Grouped sections -->
+              <!-- Section content (one section visible at a time) -->
               <template x-for="sec in configSections" :key="sec.key">
-                <div x-show="sec.priority !== 'low' || showAdvanced" class="mb-4">
-                  <div @click="toggleSection('config', sec.key)" class="flex items-center gap-2 p-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 border">
-                    <svg :class="isSectionExpanded('config', sec.key) ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                    <span class="font-semibold text-sm" x-text="sec.label"></span>
-                    <span class="text-xs text-gray-400" x-text="'(' + sec.fields.length + ')'"></span>
-                  </div>
-                  <div x-show="isSectionExpanded('config', sec.key)" class="mt-1 space-y-1">
-                    <template x-for="field in sec.fields" :key="field.path">
-                      <div class="border rounded-lg bg-white">
-                        <div class="flex items-center justify-between p-2 cursor-pointer hover:bg-gray-50" @click="field.expanded = !field.expanded">
-                          <div class="flex items-center gap-2 min-w-0">
-                            <svg :class="field.expanded ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                            <span class="font-medium text-sm truncate" x-text="field.label || field.path" :title="field.description || ''"></span>
-                            <span class="text-xs text-gray-400 flex-shrink-0 hidden sm:inline" x-text="field.label ? field.path : ''"></span>
-                          </div>
-                          <div class="flex items-center gap-2 flex-shrink-0 ml-2">
-                            <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full" x-text="sourceLabel(field.source)"></span>
-                            <template x-if="field.source === 'bot' || field.source === 'user'">
-                              <button @click.stop="resetField(field.path)" class="text-xs text-red-500 hover:text-red-700">重置</button>
-                            </template>
-                            <template x-if="field.editing">
-                              <button @click.stop="saveField(field.path)" class="text-xs text-green-600 hover:text-green-800">保存</button>
-                            </template>
-                            <template x-if="!field.editing">
-                              <button @click.stop="editField(field.path)" class="text-xs text-blue-600 hover:text-blue-800">编辑</button>
-                            </template>
-                          </div>
+                <div x-show="configSection === sec.key" class="space-y-1">
+                  <div x-show="sec.fields.length === 0" class="text-gray-400 text-sm text-center py-4">此分组暂无配置字段</div>
+                  <template x-for="field in sec.fields" :key="field.path">
+                    <div class="border rounded-lg bg-white p-2">
+                      <div class="flex items-center justify-between gap-2">
+                        <!-- Label area -->
+                        <div class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer" @click="field.expanded = !field.expanded" :title="field.description || ''">
+                          <span class="font-medium text-sm truncate" x-text="field.label || field.path"></span>
+                          <span class="text-xs text-gray-400 flex-shrink-0 hidden sm:inline" x-text="field.label ? field.path : ''"></span>
                         </div>
-                        <div x-show="field.expanded" x-cloak class="px-3 pb-2 border-t">
-                          <template x-if="!field.editing">
-                            <div class="pt-2">
-                              <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
+                        <!-- Value area with type-aware controls -->
+                        <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                          <!-- boolean: toggle switch -->
+                          <template x-if="field.type === 'boolean'">
+                            <label class="relative inline-flex items-center cursor-pointer" @click.stop="">
+                              <input type="checkbox" class="sr-only peer" :checked="field.value" @change="saveFieldWithValue(field.path, $event.target.checked)">
+                              <div class="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+                            </label>
+                          </template>
+                          <!-- integer/number: constrained input -->
+                          <template x-if="field.type === 'integer' || field.type === 'number'">
+                            <input type="number"
+                              :min="field.minimum != null ? field.minimum : false"
+                              :max="field.maximum != null ? field.maximum : false"
+                              :value="String(field.value)"
+                              class="w-20 border rounded px-2 py-1 text-xs text-right font-mono"
+                              @change="saveFieldWithValue(field.path, field.type === 'integer' ? Math.trunc(Number($event.target.value)) : Number($event.target.value))"
+                              @click.stop="">
+                          </template>
+                          <!-- string + enum: dropdown -->
+                          <template x-if="field.type === 'string' && field.enum">
+                            <select :value="field.value" class="border rounded px-2 py-1 text-xs" @change="saveFieldWithValue(field.path, $event.target.value)" @click.stop="">
+                              <option x-for="opt in field.enum" :key="opt" :value="opt" x-text="opt"></option>
+                            </select>
+                          </template>
+                          <!-- array: [N items] badge + edit button -->
+                          <template x-if="field.type === 'array'">
+                            <div class="flex items-center gap-1">
+                              <span class="text-xs text-gray-500">[<span x-text="Array.isArray(field.value) ? field.value.length : 0"></span>项]</span>
+                              <button @click.stop="expandArrayField(field)" class="text-xs text-blue-600 hover:text-blue-800 px-1">编辑</button>
                             </div>
                           </template>
-                          <template x-if="field.editing">
-                            <div class="pt-2">
-                              <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
-                              <div class="flex gap-2 mt-1">
-                                <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
-                                <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
-                              </div>
+                          <!-- object / default string: preview + edit button -->
+                          <template x-if="!['boolean','integer','number','array'].includes(field.type) && !(field.type === 'string' && field.enum)">
+                            <div class="flex items-center gap-1 max-w-[200px]">
+                              <span class="text-xs text-gray-600 truncate" x-text="formatFieldValue(field.value)"></span>
+                              <template x-if="!field.editing">
+                                <button @click.stop="editField(field.path)" class="text-xs text-blue-600 hover:text-blue-800 flex-shrink-0">编辑</button>
+                              </template>
+                              <template x-if="field.editing">
+                                <button @click.stop="saveField(field.path)" class="text-xs text-green-600 hover:text-green-800 flex-shrink-0">保存</button>
+                              </template>
                             </div>
+                          </template>
+                          <!-- Source badge -->
+                          <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full flex-shrink-0" x-text="sourceLabel(field.source)"></span>
+                          <!-- Reset button -->
+                          <template x-if="field.source === 'bot' || field.source === 'user'">
+                            <button @click.stop="resetField(field.path)" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0">重置</button>
+                          </template>
+                          <!-- Cancel for editing mode (string/object) -->
+                          <template x-if="field.editing && field.type !== 'array'">
+                            <button @click.stop="cancelEditField(field.path)" class="text-xs text-gray-500 hover:text-gray-700 flex-shrink-0">取消</button>
                           </template>
                         </div>
                       </div>
-                    </template>
-                  </div>
+                      <!-- Expanded edit area for complex types -->
+                      <div x-show="field.expanded" x-cloak class="mt-2 border-t pt-2">
+                        <!-- Array tag editor -->
+                        <template x-if="field.type === 'array' && field.editing">
+                          <div>
+                            <div class="flex flex-wrap gap-1 mb-2">
+                              <template x-for="(item, idx) in (Array.isArray(field.editArray) ? field.editArray : [])" :key="idx">
+                                <span class="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">
+                                  <span x-text="item"></span>
+                                  <button @click="removeArrayItem(field, idx)" class="text-blue-600 hover:text-blue-800 font-bold">&times;</button>
+                                </span>
+                              </template>
+                              <span x-show="!field.editArray || field.editArray.length === 0" class="text-xs text-gray-400">空列表</span>
+                            </div>
+                            <div class="flex gap-1 mb-2">
+                              <input type="text" x-model="field.newArrayItem" @keydown.enter="addArrayItem(field)"
+                                class="flex-1 border rounded px-2 py-1 text-xs" placeholder="输入后回车添加...">
+                              <button @click="addArrayItem(field)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">添加</button>
+                            </div>
+                            <div class="flex gap-2">
+                              <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
+                              <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
+                            </div>
+                          </div>
+                        </template>
+                        <!-- Default textarea for string/object editing -->
+                        <template x-if="field.type !== 'array' && field.editing">
+                          <div>
+                            <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                            <div class="flex gap-2 mt-1">
+                              <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
+                              <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
+                            </div>
+                          </div>
+                        </template>
+                        <!-- Read-only value display when expanded but not editing -->
+                        <template x-if="!field.editing">
+                          <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </template>
             </div>
 
             <!-- JSON view -->
             <div x-show="configView === 'json'" x-cloak>
-              <p class="text-sm text-gray-600 mb-2">编辑 <code>user.json</code> 原始内容：</p>
-              <textarea x-model="userConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateJson"></textarea>
-              <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
-              <button @click="saveUserConfig" :disabled="!userConfigValid || saving" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
+              <!-- JSON sub-tabs -->
+              <div class="flex gap-3 mb-4 border-b">
+                <button @click="configJsonView = 'user'"
+                  :class="configJsonView === 'user' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
+                  class="pb-2 px-1 font-medium text-sm">user.json</button>
+                <button @click="configJsonView = 'bot'; loadBotConfigJson()"
+                  :class="configJsonView === 'bot' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
+                  class="pb-2 px-1 font-medium text-sm">Bot 配置</button>
+              </div>
+
+              <!-- user.json editor -->
+              <div x-show="configJsonView === 'user'">
+                <p class="text-sm text-gray-600 mb-2">编辑 <code>user.json</code> 原始内容：</p>
+                <textarea x-model="userConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateJson"></textarea>
+                <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
+                <button @click="saveUserConfig" :disabled="!userConfigValid || saving" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
+              </div>
+
+              <!-- Bot config editor -->
+              <div x-show="configJsonView === 'bot'">
+                <p class="text-sm text-gray-600 mb-2">编辑 <code x-text="'config/bots/' + selectedBotId + '.json'"></code> 原始内容：</p>
+                <div x-show="botConfigLoading" class="animate-pulse bg-gray-200 rounded h-96"></div>
+                <textarea x-show="!botConfigLoading" x-model="botConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateBotJson"></textarea>
+                <p x-show="!botConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
+                <button @click="saveBotConfig" :disabled="!botConfigValid || saving || botConfigLoading" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
+              </div>
+
               <div x-show="reloadResult" data-testid="config-save-feedback" class="mt-4">
                 <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
                 <h4 class="font-medium mb-2 text-sm">运行时重载：</h4>
@@ -860,12 +951,15 @@ function app() {
 
     // ── Tab: Config Edit ──
     configView: 'fields',
+    configSection: '',            // current config section sub-tab
     configSections: [],           // [{key, label, priority, fields: [{path, value, source, ...}]}]
-    showAdvanced: false,
-    collapsedSections: {},        // {sectionKey: true|false} — true = collapsed
     userConfig: {},
     userConfigText: '',
     userConfigValid: true,
+    configJsonView: 'user',       // 'user' | 'bot'
+    botConfigText: '',
+    botConfigValid: true,
+    botConfigLoading: false,
     reloadResult: null,
 
     // ── Tab: Persona ──
@@ -934,7 +1028,6 @@ function app() {
     // ── init ──
     init() {
       this.checkAuth();
-      this.loadUiPrefs();
     },
 
     // ── API helper (cookies-based auth, no Bearer token) ──
@@ -1213,7 +1306,7 @@ function app() {
       const fields = {};
       const merged = this._mergedCache || {};
       for (const [path, entry] of Object.entries(merged)) {
-        if (path.split('.').pop().startsWith('_comment')) continue;
+        if (path.split('.').pop().startsWith('_')) continue;
         if (tabFilter && entry.tab !== tabFilter) continue;
         fields[path] = {
           path: path,
@@ -1226,6 +1319,10 @@ function app() {
           tab: entry.tab || 'config',
           section: entry.section || 'runtime',
           expanded: false,
+          type: entry.type || 'string',
+          enum: entry.enum || null,
+          minimum: entry.minimum,
+          maximum: entry.maximum,
         };
       }
       return fields;
@@ -1269,44 +1366,16 @@ function app() {
         const fields = this.buildFieldsForTab('config');
         const sectionsLayout = this._layout && this._layout.sections ? this._layout.sections : {};
         this.configSections = this.groupFieldsBySection(fields, sectionsLayout);
+        // Set default section sub-tab if not already selected or current is invalid
+        if (this.configSections.length > 0 && !this.configSections.find(s => s.key === this.configSection)) {
+          this.configSection = this.configSections[0].key;
+        }
       } catch (err) {
         console?.warn('[DicePP] Failed to load config:', err);
         this.configSections = [];
       } finally {
         this.configLoading = false;
       }
-    },
-
-    isSectionExpanded(which, secKey) {
-      // Sections are expanded by default, collapsed = true means user clicked to collapse
-      const key = which + '/' + secKey;
-      return this.collapsedSections[key] !== true;
-    },
-
-    toggleSection(which, secKey) {
-      const key = which + '/' + secKey;
-      if (this.collapsedSections[key]) {
-        delete this.collapsedSections[key];
-      } else {
-        this.collapsedSections[key] = true;
-      }
-      this.saveUiPrefs();
-    },
-
-    expandAllSections(which) {
-      const prefix = which + '/';
-      for (const k of Object.keys(this.collapsedSections)) {
-        if (k.startsWith(prefix)) delete this.collapsedSections[k];
-      }
-      this.saveUiPrefs();
-    },
-
-    collapseAllSections(which) {
-      const sections = which === 'config' ? this.configSections : this.personaConfigSections;
-      for (const sec of sections) {
-        this.collapsedSections[which + '/' + sec.key] = true;
-      }
-      this.saveUiPrefs();
     },
 
     expandAllFields(which) {
@@ -1365,14 +1434,25 @@ function app() {
       if (!field) return;
       field.editing = false;
       field.editValue = '';
+      field.editArray = null;
+      field.newArrayItem = '';
     },
 
     async saveField(path) {
       const field = this._findField(this.configSections, path) || this._findField(this.personaConfigSections, path);
       if (!field) return;
       try {
-        let newVal = field.editValue;
-        try { newVal = JSON.parse(newVal); } catch (_) { /* keep as string */ }
+        let newVal;
+        if (field.type === 'array' && Array.isArray(field.editArray)) {
+          newVal = field.editArray;
+        } else if (field.type === 'array') {
+          // Fallback: array field being edited via old text mode
+          newVal = field.editValue;
+          try { newVal = JSON.parse(newVal); } catch (_) { /* keep as string */ }
+        } else {
+          newVal = field.editValue;
+          try { newVal = JSON.parse(newVal); } catch (_) { /* keep as string */ }
+        }
         const data = await this.api('/api/config/set', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1387,6 +1467,56 @@ function app() {
       } catch (err) {
         this.errorMessage = '保存失败: ' + err.message;
       }
+    },
+
+    // Direct save for type-aware controls (toggle, number, select)
+    async saveFieldWithValue(path, value) {
+      try {
+        const data = await this.api('/api/config/set', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path, value }),
+        });
+        this.reloadResult = data.reload || null;
+        this._mergedCache = null;
+        this._lastBotId = '';
+        if (this.currentTab === 'config') await this.loadConfig();
+        if (this.currentTab === 'persona') await this.loadPersonaConfig();
+      } catch (err) {
+        this.errorMessage = '保存失败: ' + err.message;
+      }
+    },
+
+    // Array editor helpers
+    expandArrayField(field) {
+      field.editing = true;
+      field.editArray = Array.isArray(field.value) ? [...field.value] : [];
+      field.newArrayItem = '';
+      field.expanded = true;
+    },
+
+    addArrayItem(field) {
+      if (!field.editArray) field.editArray = [];
+      const val = field.newArrayItem && field.newArrayItem.trim();
+      if (!val) return;
+      let item = val;
+      if (field.type === 'integer') {
+        item = parseInt(val, 10);
+        if (isNaN(item)) return;
+      } else if (field.type === 'number') {
+        item = parseFloat(val);
+        if (isNaN(item)) return;
+      } else if (field.type === 'boolean') {
+        if (val === 'true') item = true;
+        else if (val === 'false') item = false;
+        else return;
+      }
+      field.editArray.push(item);
+      field.newArrayItem = '';
+    },
+
+    removeArrayItem(field, index) {
+      if (field.editArray) field.editArray.splice(index, 1);
     },
 
     async resetField(path) {
@@ -1421,6 +1551,50 @@ function app() {
       try {
         const parsed = JSON.parse(this.userConfigText);
         const data = await this.api('/api/config/user/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed),
+        });
+        this.reloadResult = data.reload || null;
+      } catch (err) {
+        this.errorMessage = '保存失败: ' + err.message;
+      } finally {
+        this.saving = false;
+      }
+    },
+
+    // Bot config JSON editor
+    async loadBotConfigJson() {
+      if (!this.selectedBotId) return;
+      this.botConfigLoading = true;
+      try {
+        const data = await this.api(`/api/config/bots/${this.selectedBotId}`);
+        this.botConfigText = JSON.stringify(data.config || {}, null, 2);
+        this.botConfigValid = true;
+      } catch (err) {
+        this.botConfigText = '{}';
+        this.botConfigValid = false;
+        this.errorMessage = '加载 Bot 配置失败: ' + err.message;
+      } finally {
+        this.botConfigLoading = false;
+      }
+    },
+
+    validateBotJson() {
+      try {
+        JSON.parse(this.botConfigText);
+        this.botConfigValid = true;
+      } catch (_) {
+        this.botConfigValid = false;
+      }
+    },
+
+    async saveBotConfig() {
+      if (!this.botConfigValid || !this.selectedBotId) return;
+      this.saving = true;
+      try {
+        const parsed = JSON.parse(this.botConfigText);
+        const data = await this.api(`/api/config/bots/${this.selectedBotId}/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(parsed),
@@ -1662,19 +1836,6 @@ function app() {
       } finally {
         this.auditLoading = false;
       }
-    },
-
-    // ── UI prefs (localStorage) ──
-    saveUiPrefs() {
-      try {
-        localStorage.setItem('dicepp_showAdvanced', this.showAdvanced ? '1' : '0');
-      } catch (_) {}
-    },
-
-    loadUiPrefs() {
-      try {
-        this.showAdvanced = localStorage.getItem('dicepp_showAdvanced') === '1';
-      } catch (_) { this.showAdvanced = false; }
     },
 
     // ── Helpers ──

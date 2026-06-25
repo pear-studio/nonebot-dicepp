@@ -702,13 +702,16 @@ def _load_pydantic_models_module():
 
 def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
                          inherited_tab: str = "", inherited_section: str = "") -> dict:
-    """Flatten a Pydantic v2 JSON schema to dotted-key → {title, description, tab, section}.
+    """Flatten a Pydantic v2 JSON schema to dotted-key → {title, description, tab, section, type, ...}.
 
     Model-level json_schema_extra (ConfigDict) keys are merged directly into the
     model schema by Pydantic v2.  Likewise, Field(json_schema_extra={...}) keys
     are merged directly into each property schema — *not* nested under a
     ``json_schema_extra`` sub-key.  This function reads ``dashboard_tab`` and
     ``dashboard_section`` directly from schema nodes.
+
+    Also extracts ``type``, ``enum``, ``minimum``, ``maximum`` from JSON Schema
+    property nodes for type-aware editing in the dashboard frontend.
 
     Known limitation: does not handle anyOf (Optional[BaseModel]) or
     items.$ref (List[BaseModel]).  These patterns exist for fields like
@@ -730,12 +733,29 @@ def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
         field_tab = prop.get("dashboard_tab", tab)
         field_section = prop.get("dashboard_section", section)
 
-        result[full] = {
+        # Determine JSON Schema type; $ref / properties / additionalProperties → object
+        raw_type = prop.get("type")
+        if raw_type:
+            js_type = raw_type
+        elif "$ref" in prop or "properties" in prop or "additionalProperties" in prop:
+            js_type = "object"
+        else:
+            js_type = "string"
+
+        entry = {
             "title": title,
             "description": desc,
             "tab": field_tab,
             "section": field_section,
+            "type": js_type,
         }
+        if "enum" in prop:
+            entry["enum"] = prop["enum"]
+        if "minimum" in prop:
+            entry["minimum"] = prop["minimum"]
+        if "maximum" in prop:
+            entry["maximum"] = prop["maximum"]
+        result[full] = entry
 
         # Resolve $ref for nested models
         if "$ref" in prop:
@@ -767,9 +787,9 @@ def _flatten_json_schema(s: dict, defs: dict, prefix: str = "",
 
 
 def _get_config_field_metadata() -> dict:
-    """Extract field titles, descriptions, tab and section from BotConfig Pydantic model.
+    """Extract field titles, descriptions, tab, section, and type from BotConfig Pydantic model.
 
-    Returns a flat dict mapping dotted keys to {title, description, tab, section}.
+    Returns a flat dict mapping dotted keys to {title, description, tab, section, type, ...}.
     Model-level json_schema_extra (ConfigDict) provides default tab/section;
     field-level json_schema_extra (Field) can override section per-field.
     """
@@ -818,9 +838,11 @@ def _find_meta(dotted: str, meta: dict) -> dict:
     """Match a dotted data key against static schema metadata keys.
 
     Three-level fallback for dynamic keys (e.g. providers.<name>.api_key):
-    1. Exact match
-    2. Remove one segment at a time (skip the dynamic key segment)
-    3. Prefix truncation from right (parent node fallback for tab/section)
+    1. Exact match — full metadata including type/enum/min/max
+    2. Remove one segment at a time (skip the dynamic key segment) — full metadata
+    3. Prefix truncation from right (parent node fallback) — only tab/section,
+       type/enum/min/max are cleared because the parent node type may not match
+       the actual leaf value type (e.g. parent is "object" but leaf is "string").
     """
     if dotted in meta:
         return meta[dotted]
@@ -831,10 +853,13 @@ def _find_meta(dotted: str, meta: dict) -> dict:
         if candidate in meta:
             return meta[candidate]
     # Level 3: prefix fallback (get tab/section from parent, label less precise)
+    # Clear type/enum/min/max because parent type may not match leaf value type
     for i in range(len(parts) - 1, 0, -1):
         prefix = ".".join(parts[:i])
         if prefix in meta:
-            return meta[prefix]
+            result = {k: v for k, v in meta[prefix].items()
+                      if k in ("title", "description", "tab", "section")}
+            return result
     return {}
 
 
@@ -849,7 +874,7 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 
     def _annotate_deep(base: dict, overlay: dict, source: str, prefix: str = ""):
         for key, value in base.items():
-            if key.startswith("_comment"):
+            if key.startswith("_"):
                 continue
             dotted = f"{prefix}.{key}" if prefix else key
             if isinstance(value, dict):
@@ -864,7 +889,7 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
 
         # Extra keys from overlay not in base
         for key, value in overlay.items():
-            if key.startswith("_comment"):
+            if key.startswith("_"):
                 continue
             dotted = f"{prefix}.{key}" if prefix else key
             if key not in base:
@@ -885,7 +910,7 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
             """Flatten dict to dotted keys, return {dotted: value}."""
             items = {}
             for key, value in d.items():
-                if key.startswith("_comment"):
+                if key.startswith("_"):
                     continue
                 dotted = f"{prefix}.{key}" if prefix else key
                 if isinstance(value, dict):
@@ -901,10 +926,14 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
     # Load field metadata from Pydantic models (title=label, description=tooltip, tab, section)
     field_meta = _cached_config_field_metadata()
 
-    # Build output with labels, descriptions, tab and section
+    # Build output with labels, descriptions, tab, section, and type metadata
     output = {}
     for dotted, entry in result_annotated.items():
         meta = _find_meta(dotted, field_meta)
+        # Only filter unknown keys when Pydantic metadata is available;
+        # when Pydantic is unavailable, show all fields as a fallback.
+        if field_meta and not meta:
+            continue
         output[dotted] = {
             "value": entry["value"],
             "source": entry["source"],
@@ -912,6 +941,10 @@ async def config_merged(request: Request, bot_id: Optional[str] = Query(None)):
             "description": meta.get("description", ""),
             "tab": meta.get("tab", "config"),
             "section": meta.get("section", "runtime"),
+            "type": meta.get("type", "string"),
+            "enum": meta.get("enum", None),
+            "minimum": meta.get("minimum", None),
+            "maximum": meta.get("maximum", None),
         }
 
     layout = _cached_config_layout()
@@ -985,6 +1018,8 @@ async def config_bot_save(bot_id: str, request: Request):
     """Validate JSON, atomically write bot config, audit, notify reload."""
     _validate_identifier(bot_id, "bot_id")
     body = await request.json()
+    if not isinstance(body, dict):
+        _err("Body must be a JSON object")
 
     cfg_path = DashboardPaths.bot_config_path(bot_id)
     _write_json_atomic(cfg_path, body)

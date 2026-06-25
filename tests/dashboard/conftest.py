@@ -102,17 +102,19 @@ def tmp_dashboard_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path
     (project_root / "config" / "global.json").write_text(
         json.dumps({
             "_comment": "Developer note — should NOT appear in config_merged",
+            "_llm_comment": "LLM trace notes — should also be excluded",
             "app": {"name": "test_dicepp", "version": "1.0.0"},
             "persona_ai": {
                 "enabled": False,
                 "_comment_persona": "Persona setup notes",
+                "_llm_trace": "nested underscore key — should be excluded",
             },
         })
     )
 
     # ── bot config files ─────────────────────────────────────────────────
     (project_root / "config" / "bots" / "test_bot.json").write_text(
-        json.dumps({"master": ["test_master"], "enabled": True})
+        json.dumps({"master": ["test_master"], "enabled": True, "_llm_meta": "hidden"})
     )
     (project_root / "config" / "bots" / "another_bot.json").write_text(
         json.dumps({"master": ["another_master"], "enabled": True})

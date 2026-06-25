@@ -79,7 +79,7 @@ class TestMergedView:
             assert "basic" in layout["sections"]
 
     def test_merged_excludes_comment_keys(self, test_client: TestClient, tmp_dashboard_paths):
-        """``_comment`` keys (write-only dev notes) must not appear in merged output."""
+        """Underscore-prefixed keys (write-only dev notes) must not appear in merged output."""
         setup_auth(test_client)
         resp = test_client.get("/api/config/merged")
         config = resp.json()["config"]
@@ -88,11 +88,111 @@ class TestMergedView:
         assert config["app.name"]["value"] == "test_dicepp"
         assert config["persona_ai.enabled"]["value"] is False
 
-        # Should NOT include comment keys at any level
+        # Should NOT include any underscore-prefixed keys at any level
         for path in config:
             leaf = path.split(".")[-1]
-            assert not leaf.startswith("_comment"), \
-                f"comment key leaked into merged config: {path}"
+            assert not leaf.startswith("_"), \
+                f"underscore-prefixed key leaked into merged config: {path}"
+
+        # Specifically verify _llm_comment is excluded
+        for path in config:
+            assert "_llm_comment" not in path, \
+                f"_llm_comment leaked: {path}"
+            assert "_llm_trace" not in path, \
+                f"_llm_trace leaked: {path}"
+
+        # Also verify bot config _ keys are filtered (incl. with bot_id query)
+        resp_bot = test_client.get("/api/config/merged?bot_id=test_bot")
+        bot_config = resp_bot.json()["config"]
+        for path in bot_config:
+            assert "_llm_meta" not in path, \
+                f"bot _ key leaked: {path}"
+
+    def test_merged_includes_type_metadata(self, test_client: TestClient, tmp_dashboard_paths, monkeypatch):
+        """Merged output includes type/enum/min/max from Pydantic schema metadata."""
+        from dashboard.src import app as app_mod
+
+        # Write test data that exercises enum/min/max metadata
+        user_cfg = {"log_level": "info", "persona_ai": {"max_messages": 50}}
+        DashboardPaths.CONFIG_USER.write_text(json.dumps(user_cfg))
+
+        known_meta = {
+            "app.name": {"title": "App Name", "tab": "config", "section": "runtime",
+                         "type": "string"},
+            "app.version": {"title": "Version", "tab": "config", "section": "runtime",
+                            "type": "string"},
+            "persona_ai.enabled": {"title": "Enabled", "tab": "persona", "section": "basic",
+                                   "type": "boolean"},
+            "log_level": {"title": "日志级别", "tab": "config", "section": "runtime",
+                          "type": "string", "enum": ["info", "warning", "error"]},
+            "persona_ai.max_messages": {"title": "最大消息数", "tab": "persona", "section": "basic",
+                                        "type": "integer", "minimum": 0, "maximum": 1000},
+        }
+        monkeypatch.setattr(app_mod, "_cached_config_field_metadata", lambda: known_meta)
+
+        setup_auth(test_client)
+        resp = test_client.get("/api/config/merged")
+        config = resp.json()["config"]
+
+        assert config["app.name"]["type"] == "string"
+        assert config["persona_ai.enabled"]["type"] == "boolean"
+        # Verify enum passthrough
+        assert config["log_level"]["type"] == "string"
+        assert config["log_level"]["enum"] == ["info", "warning", "error"]
+        # Verify min/max passthrough
+        assert config["persona_ai.max_messages"]["type"] == "integer"
+        assert config["persona_ai.max_messages"]["minimum"] == 0
+        assert config["persona_ai.max_messages"]["maximum"] == 1000
+        # Verify type field is present in all config entries
+        for dotted, entry in config.items():
+            assert "type" in entry, f"type missing for {dotted}"
+
+    def test_merged_excludes_unknown_keys(self, test_client: TestClient, tmp_dashboard_paths, monkeypatch):
+        """Keys not defined in Pydantic model must be filtered out when metadata is available."""
+        from dashboard.src import app as app_mod
+
+        # Mock metadata to only include known keys
+        known_meta = {
+            "app.name": {"title": "App Name", "tab": "config", "section": "runtime"},
+            "app.version": {"title": "Version", "tab": "config", "section": "runtime"},
+            "persona_ai.enabled": {"title": "Enabled", "tab": "persona", "section": "basic"},
+        }
+        # Add an unknown key to user.json
+        user_cfg = {"app": {"name": "test"}, "some_unknown_key": "should_not_appear"}
+        DashboardPaths.CONFIG_USER.write_text(json.dumps(user_cfg))
+
+        monkeypatch.setattr(app_mod, "_cached_config_field_metadata", lambda: known_meta)
+
+        setup_auth(test_client)
+        resp = test_client.get("/api/config/merged")
+        config = resp.json()["config"]
+
+        # Known keys still present
+        assert "app.name" in config
+        # Unknown key NOT in output
+        assert "some_unknown_key" not in config, \
+            "unknown key should be filtered when Pydantic metadata is available"
+
+    def test_merged_pydantic_unavailable_fallback(self, test_client: TestClient, tmp_dashboard_paths, monkeypatch):
+        """When Pydantic metadata is unavailable, all keys are shown (fallback behavior)."""
+        from dashboard.src import app as app_mod
+
+        # Simulate Pydantic unavailable
+        monkeypatch.setattr(app_mod, "_cached_config_field_metadata", lambda: {})
+
+        # Add an extra key to user.json
+        user_cfg = {"app": {"name": "test"}, "custom_plugin_setting": "value"}
+        DashboardPaths.CONFIG_USER.write_text(json.dumps(user_cfg))
+
+        setup_auth(test_client)
+        resp = test_client.get("/api/config/merged")
+        config = resp.json()["config"]
+
+        # Known key present
+        assert "app.name" in config
+        # Unknown key ALSO present (fallback — no metadata to filter against)
+        assert "custom_plugin_setting" in config, \
+            "unknown keys should be shown when Pydantic metadata is unavailable"
 
 
 class TestSetField:
@@ -195,6 +295,13 @@ class TestBotConfig:
         assert resp.status_code == 200
         assert resp.json()["config"] == {}
 
+    def test_bot_config_save_non_dict_rejected(self, test_client: TestClient):
+        """Non-dict request body must be rejected with 400."""
+        setup_auth(test_client)
+        resp = test_client.post("/api/config/bots/test_bot/save", json=[1, 2, 3])
+        assert resp.status_code == 400
+        assert resp.json()["ok"] is False
+
 
 class TestUserJsonSave:
     def test_save_user_json(self, test_client: TestClient):
@@ -243,6 +350,8 @@ class TestFieldMetadata:
                     "max_messages": {
                         "title": "最大消息数",
                         "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
                         "dashboard_section": "chat_reply",
                     },
                 },
@@ -266,6 +375,11 @@ class TestFieldMetadata:
                     "title": "用户协议",
                     "type": "string",
                     "dashboard_section": "runtime",
+                },
+                "log_level": {
+                    "title": "日志级别",
+                    "type": "string",
+                    "enum": ["info", "warning", "error"],
                 },
                 "persona_ai": {
                     "title": "Persona AI",
@@ -323,6 +437,53 @@ class TestFieldMetadata:
         assert result["persona_ai_providers.api_key"]["section"] == "providers", \
             f"api_key section should be 'providers', got {result.get('persona_ai_providers.api_key', {}).get('section')}"
         assert result["persona_ai_providers.api_key"]["tab"] == "persona"
+
+    def test_field_type_metadata(self):
+        """_flatten_json_schema extracts type/enum/min/max from JSON Schema props."""
+        from dashboard.src.app import _flatten_json_schema
+        schema = self._make_mock_defs()
+        defs = schema.get("$defs", {})
+        result = _flatten_json_schema(schema, defs)
+
+        # String field
+        assert result["agreement"]["type"] == "string"
+        # Boolean field
+        assert result["persona_ai.enabled"]["type"] == "boolean"
+        # Integer field
+        assert result["persona_ai.max_messages"]["type"] == "integer"
+        # Integer with min/max
+        assert result["persona_ai.max_messages"]["minimum"] == 0
+        assert result["persona_ai.max_messages"]["maximum"] == 1000
+        # String enum
+        assert result["log_level"]["type"] == "string"
+        assert result["log_level"]["enum"] == ["info", "warning", "error"]
+
+    def test_dynamic_key_level3_clears_type(self):
+        """Level-3 prefix fallback clears type/enum/min/max (parent type may not match leaf)."""
+        from dashboard.src.app import _find_meta
+
+        field_meta = {
+            "persona_ai.providers": {
+                "title": "模型提供商", "description": "", "tab": "persona", "section": "providers",
+                "type": "object",
+            },
+            "persona_ai.providers.api_key": {
+                "title": "API Key", "description": "", "tab": "persona", "section": "providers",
+                "type": "string",
+            },
+        }
+
+        # Level 2 (skip dynamic segment) — keeps type
+        m = _find_meta("persona_ai.providers.minimax.api_key", field_meta)
+        assert m["title"] == "API Key"
+        assert m["type"] == "string"
+
+        # Level 3 (prefix fallback) — clears type
+        m = _find_meta("persona_ai.providers.openai.models.deepseek.api_key", field_meta)
+        assert m["tab"] == "persona"
+        assert m["section"] == "providers"
+        # type should NOT be inherited from the "object" parent
+        assert "type" not in m, f"type should be cleared in level-3 fallback, got {m.get('type')!r}"
 
     def test_dynamic_key_metadata_match(self):
         """_find_meta matches data keys with dynamic segments against static schema keys.
