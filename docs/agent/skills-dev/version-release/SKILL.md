@@ -206,11 +206,26 @@ git log v{prev}..origin/master --oneline
 uv run bump-my-version bump <patch|minor|major>
 ```
 
+`pre_commit_hooks` 已配置为自动运行 `uv lock && git add uv.lock`，因此 bump commit 会包含同步后的 lockfile。
+
 确认：
 
 - `pyproject.toml` 已更新到新版本。
+- `uv.lock` 中 dicepp 版本与 `pyproject.toml` 一致（确认 pre_commit_hooks 生效）。
 - release metadata 文件包含在版本 bump commit 中。
 - Git tag 为 `v{new_version}`。
+
+验证 uv.lock 同步：
+
+```bash
+uv run pytest tests/test_lockfile_sync.py -v
+```
+
+如果失败，说明 pre_commit_hooks 未生效，手动执行：
+
+```bash
+uv lock && git add uv.lock && git commit --amend --no-edit
+```
 
 ### 9. 推送
 

@@ -115,6 +115,7 @@ commit = true
 tag = true
 message = "Bump version: {current_version} → {new_version}"
 tag_name = "v{new_version}"
+pre_commit_hooks = ["uv lock", "git add uv.lock"]
 parse = """(?P<major>0|[1-9]\\d*)\\.(?P<minor>0|[1-9]\\d*)\\.(?P<patch>0|[1-9]\\d*)
 """
 serialize = ["{major}.{minor}.{patch}"]
