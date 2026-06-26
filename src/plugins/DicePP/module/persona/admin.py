@@ -332,15 +332,18 @@ class AdminDispatcher:
             return "模块未初始化"
         try:
             from .character.loader import CharacterLoader
+            character_name = self.bot.config.persona
+            if not character_name:
+                return "未配置角色（bot.config.persona 为空）"
             new_character = CharacterLoader(self.config.character_path).load(
-                self.config.character_name
+                character_name
             )
             if not new_character:
-                return f"无法加载角色卡: {self.config.character_name}"
+                return f"无法加载角色卡: {character_name}"
             # 检测角色名是否变化，如果变化则切换 persona_db
-            if self.app.current_character_name != self.config.character_name:
-                await self.app.switch_character_db(self.config.character_name)
-                logger.info(f"persona_db 已切换: {self.config.character_name}")
+            if self.app.current_character_name != character_name:
+                await self.app.switch_character_db(character_name)
+                logger.info(f"persona_db 已切换: {character_name}")
             await self.app.update_character(new_character)
             return f"角色卡已重载: {new_character.name}"
         except Exception as e:

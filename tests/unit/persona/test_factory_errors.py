@@ -70,9 +70,9 @@ def _make_bot(
     cfg = MagicMock()
     cfg.enabled = enabled
     cfg.character_path = "/tmp/chars"
-    cfg.character_name = "test"
     cfg.providers = _make_providers_config() if has_providers else {}
     bot.config.persona_ai = cfg
+    bot.config.persona = "test"
 
     bot.db = MagicMock()
     bot.db._db = MagicMock() if db_connected else None
@@ -83,6 +83,24 @@ def _make_bot(
 async def test_disabled_returns_none(monkeypatch):
     """config.enabled=False 时返回 None，不抛异常"""
     bot = _make_bot(enabled=False)
+    result = await create_persona(bot)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_enabled_without_persona_returns_none(monkeypatch):
+    """config.enabled=True 但 bot.config.persona=None 时返回 None"""
+    bot = _make_bot(enabled=True)
+    bot.config.persona = None
+    result = await create_persona(bot)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_enabled_with_empty_persona_returns_none(monkeypatch):
+    """config.enabled=True 但 bot.config.persona='' 时返回 None"""
+    bot = _make_bot(enabled=True)
+    bot.config.persona = ""
     result = await create_persona(bot)
     assert result is None
 

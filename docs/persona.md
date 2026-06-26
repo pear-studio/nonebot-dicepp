@@ -34,18 +34,26 @@ API Key 只写到 `config/user.json`，不要写进 `config/global.json`。
 
 ```json
 "enabled": true,
-"character_name": "default",
 "character_path": "./content/characters",
 "timezone": "Asia/Shanghai",
 "daily_limit": 20
 ```
 
+其中角色名不再写在 `global.json` 里，而是由每个 bot 的账号配置独立指定。
+打开 `config/bots/{你的QQ号}.json`，在顶层加入：
+
+```json
+"persona": "default"
+```
+
+字段 `persona` 对应 `content/characters/{名字}/` 目录。设为 `null` 或不设置时 Persona 不启用。
+
 含义：
 
 | 字段 | 说明 |
 |------|------|
-| `enabled` | 设为 `true` 才会启用 Persona |
-| `character_name` | 使用哪个角色目录 |
+| `enabled` | 设为 `true` 才会启用 Persona（global.json） |
+| `persona` | 角色卡目录名，在 `config/bots/{账号}.json` 顶层设置 |
 | `character_path` | 角色目录根路径，通常不用改 |
 | `timezone` | 时区，国内建议 `Asia/Shanghai` |
 | `daily_limit` | 普通用户每日主模型调用次数 |
@@ -72,10 +80,10 @@ content/characters/default/
 content/characters/mychar/
 ```
 
-然后把 `config/global.json` 中的 `character_name` 改成：
+然后把 `config/bots/{账号}.json` 中的 `persona` 改成：
 
 ```json
-"character_name": "mychar"
+"persona": "mychar"
 ```
 
 角色卡写法见 [persona-character-card.md](./persona-character-card.md)。
@@ -136,7 +144,7 @@ content/characters/mychar/
 检查：
 
 - `persona_ai.enabled` 是否为 `true`
-- `character_name` 是否对应 `content/characters/{name}`
+- `config/bots/{账号}.json` 顶层的 `persona` 是否对应 `content/characters/{name}`
 - `character.yaml` 是否存在
 - YAML 缩进是否正确
 

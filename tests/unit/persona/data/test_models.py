@@ -187,7 +187,6 @@ class TestPersonaConfig:
         config = PersonaConfig()
 
         assert config.enabled == False
-        assert config.character_name == "default"
         assert config.whitelist_enabled == True
         assert config.providers == {}
         assert config.max_concurrent_requests == 2

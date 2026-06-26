@@ -14,12 +14,12 @@ content/characters/{角色名}/
   skin.yaml
 ```
 
-`config/global.json` 中的 `persona_ai.character_name` 要和目录名一致。
+`config/bots/{账号}.json` 顶层的 `persona` 字段要和目录名一致。不设置或为 `null` 时 Persona 不启用。
 
 例如：
 
 ```json
-"character_name": "default"
+"persona": "default"
 ```
 
 会加载：

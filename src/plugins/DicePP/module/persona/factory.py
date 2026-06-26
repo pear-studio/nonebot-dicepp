@@ -232,19 +232,19 @@ class ChatDeps:
     sleep_gate: Optional[SleepGate] = None
 
 
-def _load_character(config) -> Character:
+def _load_character(character_path: str, character_name: str) -> Character:
     """加载角色卡"""
-    character_loader = CharacterLoader(config.character_path)
-    character = character_loader.load(config.character_name)
+    character_loader = CharacterLoader(character_path)
+    character = character_loader.load(character_name)
     if not character:
         raise PersonaCharacterLoadError(
-            f"无法加载角色卡: {config.character_name} (path={config.character_path})"
+            f"无法加载角色卡: {character_name} (path={character_path})"
         )
     logger.info(f"角色卡已加载: {character.name}")
     return character
 
 
-async def _build_store(bot: Bot, config) -> PersonaDataStore:
+async def _build_store(bot: Bot, config, character_name: str) -> PersonaDataStore:
     """初始化数据存储（双连接：persona_db + core_db）"""
     core_db = getattr(getattr(bot, "db", None), "_db", None)
     if core_db is None:
@@ -252,7 +252,7 @@ async def _build_store(bot: Bot, config) -> PersonaDataStore:
 
     # 拼接 persona_db 路径: data/bots/{bot_id}/personas_data_{character_name}.db
     bot_dir = Paths.bot_data_dir(bot.account)
-    persona_db_path = str(bot_dir / f"personas_data_{config.character_name}.db")
+    persona_db_path = str(bot_dir / f"personas_data_{character_name}.db")
     os.makedirs(str(bot_dir), exist_ok=True)
 
     store = PersonaDataStore(
@@ -323,9 +323,9 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
     return port
 
 
-async def _build_infra(bot: Bot, config) -> _Infra:
+async def _build_infra(bot: Bot, config, character_name: str) -> _Infra:
     """创建基础设施组件: store / router / port / segment_dispatcher"""
-    store = await _build_store(bot, config)
+    store = await _build_store(bot, config, character_name)
     router = _build_router(config, store)
     port = _build_port(bot, store)
 
@@ -691,15 +691,19 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         logger.info("Persona AI 模块已禁用")
         return None
 
-    character = _load_character(config)
+    character_name = bot.config.persona
+    if not character_name:
+        logger.info("Persona AI 模块未配置角色（bot.config.persona 为空），已禁用")
+        return None
 
+    character = _load_character(config.character_path, character_name)
     if not config.providers:
         raise PersonaConfigError(
             "未配置任何 LLM 提供者 (persona_ai.providers)。"
             "请参考新格式: persona_ai.providers.<name>.api_key / .base_url / .models[*]"
         )
 
-    infra = await _build_infra(bot, config)
+    infra = await _build_infra(bot, config, character_name)
     tool_registry, event_agent, character_life, _ = _build_tooling(
         infra.store, infra.router, config, character,
     )
@@ -771,5 +775,5 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         session_manager=session_manager,
         segment_dispatcher=infra.segment_dispatcher,
         all_providers_disabled=all_disabled,
-        current_character_name=config.character_name,
+        current_character_name=character_name,
     )

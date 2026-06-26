@@ -68,11 +68,10 @@
   "persona_ai": {
     "_comment_persona": "Persona AI：API 密钥写在 config/user.json 的 persona_ai.primary_api_key（勿提交）。合并顺序 global < user < config/bots/{账号}.json。",
     "_comment_timezone": "timezone 必须为 IANA 时区名，例如 Asia/Shanghai、Europe/Berlin、America/New_York；不要写 UTC+8、GMT+8、CST 等缩写。错误时启动仍可通过校验，但运行时会打 warning 并退回机器人本机时间。",
-    "_comment_character": "character_name 对应 content/characters/{name}/character.yaml。生活事件「一天几条、几点到几点、抖动」在角色卡 extensions.persona（daily_events_count、event_day_*、event_jitter_minutes），不由 persona_ai 列表指定。",
+    "_comment_character": "角色卡在 config/bots/*.json 的顶层 persona 字段指定（对应 content/characters/{name}/）。为 null 时不启用 Persona。生活事件配置见角色卡 extensions.persona。",
     "_comment_tables": "新手配置说明见 docs/configuration.md；Persona 使用见 docs/persona.md；角色卡写法见 docs/persona-character-card.md。",
 
     "enabled": true,
-    "character_name": "qiqi.local",
     "character_path": "./content/characters",
 
     "whitelist_enabled": true,

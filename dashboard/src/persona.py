@@ -219,7 +219,7 @@ def compute_bot_character_map() -> dict[str, list[str]]:
     """Scan config/bots/*.json and return {character_name: [bot_id, ...]}.
 
     Skips _template.json and unreadable files.
-    A bot without persona_ai.character_name is assumed to use "default".
+    Bots without a top-level "persona" field are skipped (persona not configured).
     """
     bots_dir = DashboardPaths.CONFIG_BOTS_DIR
     result: dict[str, list[str]] = {}
@@ -230,8 +230,9 @@ def compute_bot_character_map() -> dict[str, list[str]]:
         if f.suffix != ".json" or f.stem == "_template":
             continue
         cfg = _read_json_safe(f)
-        char_name = cfg.get("persona_ai", {}).get("character_name", "default") or "default"
-        result.setdefault(char_name, []).append(f.stem)
+        char_name = cfg.get("persona")
+        if isinstance(char_name, str) and char_name:
+            result.setdefault(char_name, []).append(f.stem)
 
     return result
 

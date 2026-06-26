@@ -102,21 +102,6 @@
 
 ## persona
 
-### [B-260626-01] 角色卡目录重命名与 bot 配置驱动角色卡选择
-- 创建: 2026-06-26
-- 优先级: P1
-- 类型: refactor
-- 改动量: S
-- 问题表现:
-  1. `qiqi.local` 的 `.local` 后缀多余——gitignore 已忽略 `content/characters/*`（仅放行 `default`），`.local` 无实际作用
-  2. 角色卡选择由 `persona_ai.character_name`（global.json）全局决定，所有 bot 共用同一角色卡。应改为 bot 级别配置字段驱动，让不同 bot 可使用不同角色卡
-  3. 生产环境 `qiqi.local` 目录和 `bots/1276920536.json` 的 `persona: "qiqi.local"` 同样需清理
-- 开发备忘:
-  - 重命名 `qiqi.local` → `qiqi`（dev + prod）
-  - 更新 `config/global.json` 中 `persona_ai.character_name` 引用（dev + prod）
-  - 更新 gitignore 规则，明确只保留 `default` 目录
-  - 评估 `BotConfig.persona` 字段是否能替代 `persona_ai.character_name` 驱动角色卡选择；若可以，简化配置层级
-  - 生产 `bots/1276920536.json` 的 `persona` 字段修正
 
 ### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
 - 创建: 2026-06-22

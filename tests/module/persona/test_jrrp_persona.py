@@ -47,12 +47,12 @@ def _make_cmd(app=None, data_store=None, config=None, enabled=True):
         config.jrrp_persona_enabled = True
         config.whitelist_enabled = False
         config.group_activity_enabled = False
-        config.character_name = "test_char"
     cmd.config = config
 
     # _check_whitelist 使用 self.bot.config.persona_ai，而非 self.config，
     # 因此需同步配置 bot mock
     cmd.bot.config.persona_ai = config
+    cmd.bot.config.persona = None  # 匹配新默认值
 
     return cmd
 

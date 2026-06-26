@@ -44,7 +44,6 @@ def default_persona_config():
     from plugins.DicePP.core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
     return PersonaConfig(
         enabled=True,
-        character_name="test_char",
         character_path="./content/characters",
         providers={
             "openai": ProviderConfig(
@@ -71,6 +70,7 @@ def default_persona_config():
 def make_mock_bot(persona_config=None):
     bot = MagicMock()
     bot.config.persona_ai = persona_config or default_persona_config()
+    bot.config.persona = "test_char"
     bot.config.admin = []
     bot.config.master = ["master_user"]
     bot.account = "test_bot"

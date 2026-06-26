@@ -18,7 +18,6 @@ def _make_bot() -> MagicMock:
     cfg = MagicMock()
     cfg.enabled = True
     cfg.character_path = "/tmp/chars"
-    cfg.character_name = "test"
 
     # 使用新 providers 结构
     provider = MagicMock()
@@ -74,6 +73,7 @@ def _make_bot() -> MagicMock:
     cfg.decay_rate_per_hour = 0.5
     cfg.decay_daily_cap = 5.0
     bot.config.persona_ai = cfg
+    bot.config.persona = "test"
     bot.account = "test_bot"
     bot.db = MagicMock()
     bot.db._db = MagicMock()  # 满足 PersonaDataStore 的 core_db 参数

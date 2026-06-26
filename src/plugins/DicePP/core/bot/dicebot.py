@@ -203,7 +203,15 @@ class Bot:
     def start_up(self, readonly: bool = False):
         self.register_command()
         # Apply persona overrides after commands have registered their loc keys
-        self.loc_helper.set_persona(self.config.persona)
+        if self.config.persona:
+            self.loc_helper.set_persona(self.config.persona)
+        else:
+            logger.debug("[Bot] persona 未配置，跳过 persona 本地化覆写")
+        if not self.config.persona:
+            logger.warning(
+                "[Bot] bot.config.persona 未设置，Persona 子系统禁用"
+                "（每个 bot 需在 config/bots/{账号}.json 顶层配置 persona 字段）"
+            )
 
     async def _safe_update_user_stat(self, user_id: str, updater) -> None:
         """原子更新 user_stat，失败时仅记录日志不抛异常。"""
@@ -529,7 +537,10 @@ class Bot:
         # Refresh subsystems that capture config at construction time
         self._persona_loader.reload()
         self.loc_helper.reset_to_default()
-        self.loc_helper.set_persona(new_cfg.persona)
+        if new_cfg.persona:
+            self.loc_helper.set_persona(new_cfg.persona)
+        else:
+            logger.debug("[Bot] persona 未配置，跳过 persona 本地化覆写")
 
         # Health monitor thresholds
         hc = new_cfg.health_monitor

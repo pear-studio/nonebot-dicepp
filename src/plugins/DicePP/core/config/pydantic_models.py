@@ -107,7 +107,6 @@ class PersonaConfig(BaseModel):
     enabled: bool = Field(default=False, title="启用 Persona")
     daily_report_enabled: bool = Field(default=True, title="日报")
     daily_report_voice_enabled: bool = Field(default=True, title="日报语音")
-    character_name: str = Field(default="default", title="角色名")
     character_path: str = Field(default="./content/characters", title="角色路径")
 
     whitelist_enabled: bool = Field(default=True, title="白名单")
@@ -692,7 +691,7 @@ class BotConfig(BaseModel):
     friend_token: List[str] = Field(default_factory=list, title="好友令牌")
     group_invite: bool = Field(default=True, title="群邀请")
     nickname: str = Field(default="", title="Bot 昵称")
-    persona: str = Field(default="default", title="当前角色")
+    persona: Optional[str] = Field(default=None, title="当前角色", description="角色卡目录名，对应 content/characters/{name}。为 None 时不启用 Persona")
     white_list_group: List[str] = Field(default_factory=list, title="群白名单")
     white_list_user: List[str] = Field(default_factory=list, title="用户白名单")
 

@@ -265,22 +265,46 @@ class TestDeleteCharacter:
 # ── Bot-to-character mapping ───────────────────────────────────────────────────
 
 
-def test_compute_bot_character_map_empty_name_falls_back_to_default(tmp_dashboard_paths):
-    """Bot with empty character_name is mapped to 'default'."""
+def test_compute_bot_character_map_with_persona_field(tmp_dashboard_paths):
+    """Bot with top-level "persona" is mapped; bot without is skipped."""
     import json
     from dashboard.src.persona import compute_bot_character_map
     from dashboard.src.config import DashboardPaths
 
     bots_dir = DashboardPaths.CONFIG_BOTS_DIR
-    bot_path = bots_dir / "_test_empty_char.json"
-    bot_path.write_text(json.dumps({"persona_ai": {"character_name": ""}}))
+    # Bot with persona set
+    bot_with = bots_dir / "_test_with_persona.json"
+    bot_with.write_text(json.dumps({"persona": "qiqi"}))
+    # Bot without persona
+    bot_without = bots_dir / "_test_without_persona.json"
+    bot_without.write_text(json.dumps({}))
     try:
         result = compute_bot_character_map()
-        assert "" not in result
-        assert "default" in result
-        assert "_test_empty_char" in result["default"]
+        assert "qiqi" in result
+        assert "_test_with_persona" in result["qiqi"]
+        assert "_test_without_persona" not in str(result)  # skipped
     finally:
-        bot_path.unlink(missing_ok=True)
+        bot_with.unlink(missing_ok=True)
+        bot_without.unlink(missing_ok=True)
+
+
+def test_compute_bot_character_map_malformed_persona_type(tmp_dashboard_paths):
+    """非字符串 persona 值（dict/list/int/bool）被安全跳过，不抛异常"""
+    import json
+    from dashboard.src.persona import compute_bot_character_map
+    from dashboard.src.config import DashboardPaths
+
+    bots_dir = DashboardPaths.CONFIG_BOTS_DIR
+    for bad_val, label in [({}, "dict"), ([], "list"), (123, "int"), (True, "bool")]:
+        bot_path = bots_dir / f"_test_bad_{label}.json"
+        bot_path.write_text(json.dumps({"persona": bad_val}))
+    try:
+        result = compute_bot_character_map()  # 不应抛异常
+        # 空 dict 和空 list 是 truthy 但不可哈希；修复后均被 isinstance 过滤
+        assert "qiqi" not in result  # 确保没有把非字符串当 key
+    finally:
+        for label in ["dict", "list", "int", "bool"]:
+            (bots_dir / f"_test_bad_{label}.json").unlink(missing_ok=True)
 
 
 # ── Validation helpers ────────────────────────────────────────────────────────

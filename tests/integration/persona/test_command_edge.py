@@ -124,7 +124,6 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
         # 与 default_persona_config() 同源, 但启用 group_activity
         persona = PersonaConfig(
             enabled=True,
-            character_name="test_char",
             character_path="./content/characters",
             providers={
                 "openai": ProviderConfig(
