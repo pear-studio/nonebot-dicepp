@@ -178,7 +178,7 @@ class EventGenerationAgent:
     def _slot_type_hint(slot_type: str) -> str:
         """根据槽位类型返回场景标注文本。"""
         if slot_type == "wake_up":
-            return "\n当前事件类型: wake_up（角色刚刚醒来）\nwake_up 恢复规则：体力自然恢复，energy_delta 保底 +20\n"
+            return "\n当前事件类型: wake_up（角色刚刚醒来）\n"
         elif slot_type == "good_night":
             return "\n当前事件类型: good_night（角色准备入睡）\n"
         return ""
@@ -249,6 +249,13 @@ class EventGenerationAgent:
             if context.intention_created_at:
                 intention_text += f"（始于 {context.intention_created_at.strftime('%H:%M')}）"
 
+        dm_context = ""
+        if context.permanent_state and context.permanent_state.strip():
+            dm_context = f"\nDM 备忘:\n{context.permanent_state}\n"
+
+        scenario_text = context.scenario or context.world or ""
+        scenario_section = f"场景:\n{scenario_text}\n" if scenario_text else ""
+
         system_prompt = f"""你是世界观设定专家。基于以下信息生成一个生活事件。
 
 角色:
@@ -257,12 +264,9 @@ class EventGenerationAgent:
 世界观:
 {context.world or "现代日常世界"}
 
-场景:
-{context.scenario or "日常生活"}
-
-角色当前状态:
+{scenario_section}角色当前状态:
 {state_text}
-{self._STATE_SCALE_PROMPT}
+{dm_context}{self._STATE_SCALE_PROMPT}
 {self._slot_type_hint(context.slot_type)}
 生成要求:
 1. 以第三人称客观叙述描述发生了什么（不携带主观情绪）

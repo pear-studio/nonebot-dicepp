@@ -167,11 +167,11 @@ class TestStateScalePrompt:
         assert "倾向" not in health_section
         assert "可承担" not in health_section
 
-    def test_wake_up_recovery_rule_present(self):
-        """wake_up 恢复规则存在于 slot_type_hint 中"""
+    def test_wake_up_recovery_rule_not_leaked_to_llm(self):
+        """wake_up 恢复规则保底由代码层执行，不应泄露给 LLM"""
         hint = EventGenerationAgent._slot_type_hint("wake_up")
         assert "wake_up" in hint
-        assert "保底 +20" in hint
+        assert "保底" not in hint
         # 通用 prompt 中不应包含 wake_up 规则
         prompt = EventGenerationAgent._STATE_SCALE_PROMPT
         assert "wake_up 事件特殊规则" not in prompt
@@ -354,6 +354,55 @@ class TestGenerateEventResult:
         await agent.generate_event_result(context)
         system_prompt = mock_run.call_args.kwargs["messages"][0]["content"]
         assert "当前事件类型:" not in system_prompt
+
+    # ── scenario 动态章节测试 ──
+
+    @pytest.mark.asyncio
+    async def test_scenario_section_omitted_when_both_empty(self, agent, mock_router, monkeypatch):
+        """scenario 和 world 均为空时，不输出"场景:"章节（动态章节方案）"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        mock_run = AsyncMock()
+        monkeypatch.setattr(AgentRuntime, "run", mock_run)
+
+        await agent.generate_event_result(EventContext(
+            character_name="小雨", character_description="温柔的少女",
+            world="", scenario="", recent_diaries=[], today_events=[],
+            current_time=datetime(2024, 1, 1, 10, 0)))
+
+        system_prompt = mock_run.call_args.kwargs["messages"][0]["content"]
+        assert "场景:" not in system_prompt
+
+    @pytest.mark.asyncio
+    async def test_scenario_section_present_when_world_set(self, agent, mock_router, monkeypatch):
+        """world 非空时，"场景:"章节正常输出"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        mock_run = AsyncMock()
+        monkeypatch.setattr(AgentRuntime, "run", mock_run)
+
+        await agent.generate_event_result(EventContext(
+            character_name="小雨", character_description="温柔的少女",
+            world="奇幻大陆", scenario="", recent_diaries=[], today_events=[],
+            current_time=datetime(2024, 1, 1, 10, 0)))
+
+        system_prompt = mock_run.call_args.kwargs["messages"][0]["content"]
+        assert "场景:\n奇幻大陆" in system_prompt
+
+    # ── DM 备忘防御性检查 ──
+
+    @pytest.mark.asyncio
+    async def test_permanent_state_whitespace_only_not_injected(self, agent, mock_router, monkeypatch):
+        """纯空白 permanent_state 不注入"DM 备忘"章节"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        mock_run = AsyncMock()
+        monkeypatch.setattr(AgentRuntime, "run", mock_run)
+
+        await agent.generate_event_result(EventContext(
+            character_name="小雨", character_description="温柔的少女",
+            world="", scenario="", recent_diaries=[], today_events=[],
+            permanent_state="  ", current_time=datetime(2024, 1, 1, 10, 0)))
+
+        system_prompt = mock_run.call_args.kwargs["messages"][0]["content"]
+        assert "DM 备忘" not in system_prompt
 
 
 class TestGenerateEventReaction:
