@@ -112,8 +112,19 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 8. `batch-update` 写入完成后自动标记阶段 3 完成；若 Confirm 内容包含 `需补充回复`，自动回退阶段 2。无需手动更新 checklist
 9. 检查是否存在 `需补充回复` 条目：
    - **有** → 向用户明确报告哪些 Rn 需 Defender 补充回复，提示运行 `review2-reply`，**本轮到此为止**。阶段 2 已被 `batch-update` 自动回退，阶段 3 保持勾选
-   - **无** → 提示下一步：`review4-execute <文件名>`
+   - **无** → 扫描所有 `已共识·实施` 条目，预估修改范围并向用户汇报（见步骤 9a），然后提示下一步：`review4-execute <文件名>`
    - 同时汇报本次归档结果：`归档 N 条到 backlog: B-...`
+9a. **实施范围预估**（仅当存在 `已共识·实施` 条目时，仅向用户汇报，不写入 review 文档）：
+   - 逐条扫描 `已共识·实施` 的 Rn，从 Review/Reply/Confirm 块中提取具体改点
+   - 对每个涉及的非测试文件，确认文件是否存在、估算改动行数
+   - 排版由 agent 自行选择，建议使用表格
+   - 每条必须包含：
+     - **条目号**（Rn）
+     - **改动内容摘要**：措辞正式，可用 Review 原标题或精炼版本；必要时可补充一句效果说明；不写代码片段、不断言行号
+     - **预估行数**：不含测试文件行数
+   - 涉及的非测试文件列路径，裁剪到模块最后两级（如 `life/event_agent.py` 而非 `src/plugins/DicePP/module/persona/life/event_agent.py`）
+   - 所有条目结束后给一句粗略量级总评
+   - 预估基于 Review/Reply/Confirm 中描述的具体改点；若无法合理预估，如实说明不确定性
 
 ## Confirm 子块格式
 
@@ -156,4 +167,4 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
 请 Defender 运行 review2-reply 针对上述条目补充回复，完成后再重新运行 review3-confirm。
 ```
 
-若无 `需补充回复`，提示下一步：`review4-execute <文件名>`
+若无 `需补充回复`，先汇报实施范围预估（步骤 9a），再提示下一步：`review4-execute <文件名>`
