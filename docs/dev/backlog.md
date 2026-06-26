@@ -62,6 +62,14 @@
     - 创建存档时允许短暂停写；恢复由 Manager 编排，恢复前自动创建 pre-restore 存档，失败时保留 pre-restore 并提供恢复入口。
     - release metadata 标记数据/配置风险时，升级前必须强提示或门禁创建存档。
 
+### [B-260626-b6bb08] DicePP 分布式 QQ 协议端 APK
+- 创建: 2026-06-26
+- 优先级: P2
+- 类型: feature
+- 改动量: XL
+- 问题表现: 集中部署方式下 QQ 协议端存在单点风险，需将协议端分布到用户设备上
+- 开发备忘: 开发 Android APK，内嵌 OneBot 协议端，用户安装后扫码登录即可接入 DicePP 服务器。Kotlin 壳 + Go 二进制，前台服务保活。预估 7-9 天。
+
 ## deployment
 
 ### [B-260618-8fce87] 3.0.0 Manager Foundation：本地 Manager 与 Runtime Backend
@@ -101,7 +109,6 @@
   - 不纳入 DiceHub 远程控制闭环；只要求本地 Dashboard + Manager 路径可用。
 
 ## persona
-
 
 ### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
 - 创建: 2026-06-22
