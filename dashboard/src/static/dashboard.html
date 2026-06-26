@@ -631,49 +631,217 @@
 
             <!-- 角色卡 sub-tab -->
             <div x-show="personaView === 'characters'" x-cloak>
-              <div x-show="charactersLoading" class="space-y-3 p-4">
-                <div class="animate-pulse bg-gray-200 rounded h-5 w-1/4"></div>
-                <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
+              <!-- Action bar -->
+              <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold">角色卡管理</h3>
+                <button @click="showNewCharacterModal = true" class="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">新建角色卡</button>
               </div>
-              <div x-show="!charactersLoading && characters.length === 0" class="text-gray-500 text-center py-8">暂无角色卡</div>
-              <div x-show="characters.length > 0" class="bg-white rounded-lg shadow overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200">
-                  <thead class="bg-gray-50">
-                    <tr>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">角色名</th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">配置文件</th>
-                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-gray-200">
-                    <template x-for="ch in characters" :key="ch.name">
-                      <tr class="hover:bg-gray-50">
-                        <td class="px-4 py-2 text-sm font-medium" x-text="ch.name"></td>
-                        <td class="px-4 py-2 text-sm text-gray-500">
-                          <span x-show="ch.has_config" class="text-green-600">character.yaml</span>
-                          <span x-show="!ch.has_config" class="text-gray-400">无</span>
-                        </td>
-                        <td class="px-4 py-2">
-                          <button @click="viewCharacter(ch.name)" class="text-blue-600 hover:text-blue-800 text-xs mr-2">查看</button>
-                        </td>
-                      </tr>
-                    </template>
-                  </tbody>
-                </table>
+
+              <!-- Loading skeleton -->
+              <div x-show="charactersLoading" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <template x-for="i in 6">
+                  <div class="animate-pulse bg-white rounded-lg shadow p-4 h-32"></div>
+                </template>
               </div>
-              <!-- Character YAML editor modal -->
-              <div x-show="editingCharacter" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak>
-                <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl max-h-[85vh] flex flex-col">
-                  <div class="flex justify-between items-center p-4 border-b">
-                    <h3 class="font-bold" x-text="'角色卡: ' + editingCharacter"></h3>
-                    <button @click="editingCharacter = ''" class="text-gray-500 hover:text-gray-700">&times;</button>
+
+              <!-- Empty state -->
+              <div x-show="!charactersLoading && characters.length === 0" class="text-gray-500 text-center py-12">
+                <div class="text-4xl mb-3">🎭</div>
+                <p class="text-lg">暂无角色卡</p>
+                <p class="text-sm mt-1">点击"新建角色卡"创建第一个角色</p>
+              </div>
+
+              <!-- Card grid -->
+              <div x-show="!charactersLoading && characters.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <template x-for="ch in characters" :key="ch.name">
+                  <div class="bg-white rounded-lg shadow hover:shadow-md transition cursor-pointer border border-gray-100"
+                       @click="openCharacterDetail(ch.name)">
+                    <!-- Card header -->
+                    <div class="p-4 pb-3">
+                      <div class="flex items-center justify-between">
+                        <span class="font-bold text-lg truncate" x-text="ch.display_name || ch.name"></span>
+                        <span x-show="ch.is_default" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full flex-shrink-0 ml-2">默认</span>
+                      </div>
+                      <div class="text-xs text-gray-400 mt-0.5" x-text="ch.name"></div>
+                    </div>
+                    <!-- Card body -->
+                    <div class="px-4 pb-4 pt-0">
+                      <p class="text-sm text-gray-600 line-clamp-2" x-text="ch.description_snippet || '无描述'"></p>
+                      <div class="mt-3 flex flex-wrap gap-1">
+                        <template x-for="bot in ch.used_by" :key="bot">
+                          <span class="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded" x-text="bot"></span>
+                        </template>
+                        <span x-show="!ch.used_by || ch.used_by.length === 0" class="text-xs text-gray-400">未使用</span>
+                      </div>
+                    </div>
                   </div>
-                  <div class="p-4 overflow-y-auto flex-1">
-                    <textarea x-model="characterYamlText" class="w-full h-96 border rounded p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </template>
+              </div>
+
+              <!-- ====== Character Detail/Edit Modal ====== -->
+              <div x-show="characterDetail !== null" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak @click.self="closeCharacterDetail()">
+                <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl max-h-[90vh] flex flex-col">
+                  <!-- Modal header -->
+                  <div class="flex justify-between items-center p-4 border-b">
+                    <div class="flex items-center gap-3">
+                      <h3 class="font-bold text-lg" x-text="'角色卡: ' + (characterDetail?.display_name || characterDetail?.name)"></h3>
+                      <span x-show="characterDetail?.is_default" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">默认角色卡不可编辑</span>
+                    </div>
+                    <button @click="closeCharacterDetail()" class="text-gray-500 hover:text-gray-700 text-2xl leading-none">&times;</button>
+                  </div>
+
+                  <!-- Modal body: section tabs -->
+                  <div class="flex-1 overflow-y-auto p-4">
+                    <div x-show="characterDetailLoading" class="text-center py-8 text-gray-400">加载中...</div>
+
+                    <template x-if="!characterDetailLoading && characterDetail">
+                      <div>
+                        <!-- Section tabs -->
+                        <div class="flex gap-2 mb-4 border-b pb-2">
+                          <button @click="characterDetailSection = 'basic'"
+                                  :class="characterDetailSection === 'basic' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
+                                  class="pb-1 px-2 text-sm font-medium">基本信息</button>
+                          <button @click="characterDetailSection = 'dialogue'"
+                                  :class="characterDetailSection === 'dialogue' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
+                                  class="pb-1 px-2 text-sm font-medium">对话配置</button>
+                          <button @click="characterDetailSection = 'worldbook'"
+                                  :class="characterDetailSection === 'worldbook' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
+                                  class="pb-1 px-2 text-sm font-medium">世界书</button>
+                          <button @click="characterDetailSection = 'extensions'"
+                                  :class="characterDetailSection === 'extensions' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
+                                  class="pb-1 px-2 text-sm font-medium">扩展设置</button>
+                        </div>
+
+                        <!-- Basic section -->
+                        <div x-show="characterDetailSection === 'basic'" class="space-y-3" @input="markCharacterDirty()">
+                          <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">角色名</label>
+                            <input x-model="characterEditData.basic_name" :disabled="!characterDetailEdit || characterDetail?.is_default"
+                                   class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500">
+                          </div>
+                          <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">描述</label>
+                            <textarea x-model="characterEditData.basic_description" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="3"
+                                      class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
+                          </div>
+                          <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">个性</label>
+                            <textarea x-model="characterEditData.basic_personality" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="3"
+                                      class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
+                          </div>
+                          <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">情景</label>
+                            <textarea x-model="characterEditData.basic_scenario" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="2"
+                                      class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
+                          </div>
+                          <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">系统提示词</label>
+                            <textarea x-model="characterEditData.basic_system_prompt" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="4"
+                                      class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
+                          </div>
+                        </div>
+
+                        <!-- Dialogue section -->
+                        <div x-show="characterDetailSection === 'dialogue'" class="space-y-3" @input="markCharacterDirty()">
+                          <div>
+                            <label class="block text-xs font-medium text-gray-500 mb-1">对话示例（占位符：&#123;&#123;user&#125;&#125; / &#123;&#123;char&#125;&#125;）</label>
+                            <textarea x-model="characterEditData.dialogue_mes_example" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="8"
+                                      class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
+                          </div>
+                        </div>
+
+                        <!-- World book section (JSON block) -->
+                        <div x-show="characterDetailSection === 'worldbook'" class="space-y-3" @input="markCharacterDirty()">
+                          <label class="block text-xs font-medium text-gray-500 mb-1">世界书条目（JSON 格式）</label>
+                          <textarea x-model="characterEditData.character_book_json" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="12"
+                                    class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
+                          <p class="text-xs text-gray-400">每一条目格式：{"keys": ["触发词"], "content": "内容", "enabled": true}</p>
+                        </div>
+
+                        <!-- Extensions section (JSON block) -->
+                        <div x-show="characterDetailSection === 'extensions'" class="space-y-3" @input="markCharacterDirty()">
+                          <label class="block text-xs font-medium text-gray-500 mb-1">DicePP 扩展设置（JSON 格式）</label>
+                          <textarea x-model="characterEditData.extensions_json" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="12"
+                                    class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
+                          <div class="text-xs text-gray-400 space-y-0.5">
+                            <p>可用字段（均为可选）：</p>
+                            <p>relation_labels: [5个好感度标签], world: 世界观, daily_events_count: 每日事件数</p>
+                            <p>event_day_start_hour: 8, event_day_end_hour: 22, event_jitter_minutes: 60</p>
+                            <p>image_gen_style / image_gen_appearance: 图片生成风格/外貌</p>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+
+                  <!-- Modal footer -->
+                  <div class="flex justify-between items-center p-4 border-t">
+                    <div>
+                      <button x-show="!characterDetail?.is_default" @click="confirmDeleteCharacter()"
+                              class="px-3 py-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded text-sm">删除角色卡</button>
+                    </div>
+                    <div class="flex gap-2">
+                      <template x-if="!characterDetailEdit">
+                        <button x-show="!characterDetail?.is_default" @click="enterCharacterEdit()"
+                                class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">编辑</button>
+                      </template>
+                      <template x-if="characterDetailEdit">
+                        <button @click="saveCharacter()" :disabled="saving || !characterDetailDirty"
+                                class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm"
+                                :class="characterDetailDirty ? 'animate-pulse' : ''">保存</button>
+                      </template>
+                      <template x-if="characterDetailEdit">
+                        <button @click="cancelCharacterEdit()"
+                                class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
+                      </template>
+                      <button @click="closeCharacterDetail()" class="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 text-sm">关闭</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ====== New Character Modal ====== -->
+              <div x-show="showNewCharacterModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak @click.self="showNewCharacterModal = false">
+                <div class="bg-white rounded-lg shadow-xl w-96 max-w-[90vw]">
+                  <div class="flex justify-between items-center p-4 border-b">
+                    <h3 class="font-bold">新建角色卡</h3>
+                    <button @click="showNewCharacterModal = false" class="text-gray-500 hover:text-gray-700 text-xl leading-none">&times;</button>
+                  </div>
+                  <div class="p-4 space-y-3">
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-1">目录名 <span class="text-red-500">*</span></label>
+                      <input x-model="newCharacterName" placeholder="例如: my-character" @input="newCharacterName = newCharacterName.replace(/[\/\\\x00]/g, '')"
+                             class="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                      <p class="text-xs text-gray-400 mt-1">英文字母、数字、下划线和连字符，建议避免中文</p>
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 mb-1">显示名称</label>
+                      <input x-model="newCharacterDisplayName" placeholder="角色中文名（可留空，默认为目录名）"
+                             class="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    </div>
                   </div>
                   <div class="flex justify-end gap-2 p-4 border-t">
-                    <button @click="editingCharacter = ''" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
-                    <button @click="saveCharacter" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm">保存</button>
+                    <button @click="showNewCharacterModal = false" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
+                    <button @click="createCharacter()" :disabled="!newCharacterName.trim() || newCharacterCreating"
+                            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm">创建</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ====== Delete Confirmation Modal ====== -->
+              <div x-show="deleteConfirmCharacter !== null" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak>
+                <div class="bg-white rounded-lg shadow-xl w-96 max-w-[90vw]">
+                  <div class="p-4">
+                    <h3 class="font-bold text-lg mb-3">确认删除</h3>
+                    <p class="text-sm text-gray-600">
+                      确定要删除角色卡 <span class="font-bold" x-text="deleteConfirmCharacter"></span> 吗？
+                    </p>
+                    <p class="text-sm text-red-500 mt-2">此操作不可逆，角色卡目录和所有文件将被永久删除。</p>
+                  </div>
+                  <div class="flex justify-end gap-2 p-4 border-t">
+                    <button @click="deleteConfirmCharacter = null" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
+                    <button @click="deleteCharacter()" :disabled="deleteConfirmLoading"
+                            class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm">确认删除</button>
                   </div>
                 </div>
               </div>
@@ -969,8 +1137,22 @@ function app() {
     personaLayoutSections: [],    // persona sections from layout
     // Character cards
     characters: [],
-    editingCharacter: '',
-    characterYamlText: '',
+    // Detail/Edit modal
+    characterDetail: null,           // null=hidden, object=loaded card data
+    characterDetailLoading: false,
+    characterDetailEdit: false,      // false=view, true=edit mode
+    characterDetailSection: 'basic', // current section tab
+    characterDetailDirty: false,     // unsaved changes
+    characterEditData: {},           // working copy for the form
+    _characterEditPristine: null,    // snapshot before entering edit mode
+    // New character modal
+    showNewCharacterModal: false,
+    newCharacterName: '',
+    newCharacterDisplayName: '',
+    newCharacterCreating: false,
+    // Delete confirmation
+    deleteConfirmCharacter: null,
+    deleteConfirmLoading: false,
 
     // ── Tab: Content ──
     contentDirs: ['decks', 'random', 'queries', 'characters', 'excel'],
@@ -1213,6 +1395,7 @@ function app() {
 
     switchTab(tabId) {
       if (this._hasEditingFields() && !confirm('有未保存的修改，确定要离开吗？')) return;
+      if (this.characterDetailDirty && !confirm('有未保存的角色卡修改，确定要离开吗？')) return;
       this.currentTab = tabId;
       this.loadTabData(tabId);
     },
@@ -1220,6 +1403,7 @@ function app() {
     onBotChange() {
       if (!this.selectedBotId) return;
       if (this._hasEditingFields() && !confirm('有未保存的修改，确定要切换 Bot 吗？')) return;
+      if (this.characterDetailDirty && !confirm('有未保存的角色卡修改，确定要切换 Bot 吗？')) return;
       this._mergedCache = null;
       this._lastBotId = '';
       this.loadTabData(this.currentTab);
@@ -1610,6 +1794,10 @@ function app() {
     // ── Persona Tab ──
     switchPersonaView(view) {
       if (this._hasEditingFields() && !confirm('有未保存的修改，确定要切换吗？')) return;
+      if (this.characterDetailDirty) {
+        if (!confirm('有未保存的角色卡修改，确定要切换吗？')) return;
+        this.characterDetailDirty = false;
+      }
       this.personaView = view;
       if (view === 'characters') this.loadCharacters();
     },
@@ -1660,32 +1848,172 @@ function app() {
       }
     },
 
-    async viewCharacter(name) {
+    // ── Character Detail Modal ──
+    async openCharacterDetail(name) {
+      if (this.characterDetailDirty) {
+        if (!confirm('有未保存的修改，确定要离开吗？')) return;
+        this.characterDetailDirty = false;
+      }
+      this.characterDetailLoading = true;
+      this.characterDetail = null;
+      this.characterDetailEdit = false;
+      this.characterDetailSection = 'basic';
       try {
         const data = await this.api(`/api/persona/characters/${encodeURIComponent(name)}`);
-        this.editingCharacter = name;
-        this.characterYamlText = data.content || '';
+        this.characterDetail = data;
+        this._initCharacterEditData(data);
       } catch (err) {
         this.errorMessage = '加载角色卡失败: ' + err.message;
+      } finally {
+        this.characterDetailLoading = false;
+      }
+    },
+
+    _initCharacterEditData(cd) {
+      // cd has shape: {name, display_name, is_default, basic: {...}, dialogue: {...}, character_book: {...}, extensions: {...}}
+      this.characterEditData = {
+        basic_name: cd.display_name || cd.name,
+        basic_description: cd.basic?.description || '',
+        basic_personality: cd.basic?.personality || '',
+        basic_scenario: cd.basic?.scenario || '',
+        basic_system_prompt: cd.basic?.system_prompt || '',
+        dialogue_mes_example: cd.dialogue?.mes_example || '',
+        character_book_json: JSON.stringify(cd.character_book?.entries || [], null, 2),
+        extensions_json: JSON.stringify(cd.extensions || {}, null, 2),
+      };
+    },
+
+    closeCharacterDetail() {
+      if (this.characterDetailDirty) {
+        if (!confirm('有未保存的修改，确定要关闭吗？')) return;
+        this.characterDetailDirty = false;
+      }
+      this.characterDetail = null;
+      this.characterEditData = {};
+      this.characterDetailEdit = false;
+      this._characterEditPristine = null;
+    },
+
+    enterCharacterEdit() {
+      if (this.characterDetail?.is_default) return;
+      this._characterEditPristine = JSON.stringify(this.characterEditData);
+      this.characterDetailEdit = true;
+      this.characterDetailDirty = false;
+    },
+
+    cancelCharacterEdit() {
+      if (this._characterEditPristine) {
+        try {
+          this.characterEditData = JSON.parse(this._characterEditPristine);
+        } catch (e) { /* fall through */ }
+      }
+      this.characterDetailEdit = false;
+      this.characterDetailDirty = false;
+      this._characterEditPristine = null;
+    },
+
+    markCharacterDirty() {
+      if (!this.characterDetailEdit) return;
+      if (this._characterEditPristine !== null) {
+        this.characterDetailDirty = JSON.stringify(this.characterEditData) !== this._characterEditPristine;
       }
     },
 
     async saveCharacter() {
-      if (!this.editingCharacter) return;
+      if (!this.characterDetail || this.characterDetail.is_default) return;
+      const cd = this.characterDetail;
+      const ed = this.characterEditData;
+
+      // Parse JSON fields
+      let character_book;
+      let extensions;
+      try {
+        character_book = { entries: JSON.parse(ed.character_book_json || '[]') };
+      } catch (e) { this.errorMessage = '世界书 JSON 格式错误: ' + e.message; return; }
+      try {
+        extensions = JSON.parse(ed.extensions_json || '{}');
+      } catch (e) { this.errorMessage = '扩展设置 JSON 格式错误: ' + e.message; return; }
+
+      const payload = {
+        display_name: ed.basic_name,
+        basic: {
+          description: ed.basic_description,
+          personality: ed.basic_personality,
+          scenario: ed.basic_scenario,
+          system_prompt: ed.basic_system_prompt,
+        },
+        dialogue: {
+          mes_example: ed.dialogue_mes_example,
+        },
+        character_book: character_book,
+        extensions: extensions,
+      };
+
       this.saving = true;
       try {
-        await this.api(`/api/persona/characters/${encodeURIComponent(this.editingCharacter)}/save`, {
+        await this.api(`/api/persona/characters/${encodeURIComponent(cd.name)}/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: this.characterYamlText }),
+          body: JSON.stringify({ character: payload }),
         });
-        this.editingCharacter = '';
-        this.characterYamlText = '';
+        this.characterDetailDirty = false;
+        this._characterEditPristine = null;
+        // Refresh the detail & list
+        this.characterDetailEdit = false;
+        await this.openCharacterDetail(cd.name);
         await this.loadCharacters();
       } catch (err) {
         this.errorMessage = '保存角色卡失败: ' + err.message;
       } finally {
         this.saving = false;
+      }
+    },
+
+    // ── New Character ──
+    async createCharacter() {
+      const name = this.newCharacterName.trim();
+      if (!name) return;
+      this.newCharacterCreating = true;
+      try {
+        await this.api(`/api/persona/characters/${encodeURIComponent(name)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_name: this.newCharacterDisplayName.trim() || name }),
+        });
+        this.showNewCharacterModal = false;
+        this.newCharacterName = '';
+        this.newCharacterDisplayName = '';
+        await this.loadCharacters();
+      } catch (err) {
+        this.errorMessage = '创建角色卡失败: ' + err.message;
+      } finally {
+        this.newCharacterCreating = false;
+      }
+    },
+
+    // ── Delete ──
+    confirmDeleteCharacter() {
+      if (!this.characterDetail || this.characterDetail.is_default) return;
+      this.deleteConfirmCharacter = this.characterDetail.name;
+    },
+
+    async deleteCharacter() {
+      const name = this.deleteConfirmCharacter;
+      if (!name) return;
+      this.deleteConfirmLoading = true;
+      try {
+        await this.api(`/api/persona/characters/${encodeURIComponent(name)}`, {
+          method: 'DELETE',
+        });
+        this.characterDetail = null;
+        this.characterEditData = {};
+        this.characterDetailEdit = false;
+        this.deleteConfirmCharacter = null;
+        await this.loadCharacters();
+      } catch (err) {
+        this.errorMessage = '删除角色卡失败: ' + err.message;
+      } finally {
+        this.deleteConfirmLoading = false;
       }
     },
 

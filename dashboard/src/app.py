@@ -27,15 +27,19 @@ from .auth import (
     validate_password,
     verify_password_db,
 )
+from ._helpers import _err, _is_path_traversal, _ok, _read_json_safe
 from .audit import get_recent as audit_get_recent
 from .audit import log as audit_log
 from .config import DashboardPaths
+from .persona_routes import router as persona_router
 
 logger = logging.getLogger("dashboard")
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
 app = FastAPI(title="DicePP Dashboard", version="1.0.0")
+
+app.include_router(persona_router)
 
 _LOGIN_FAILURE_LIMIT = 5
 _LOGIN_FAILURE_COOLDOWN_SECONDS = 30
@@ -105,34 +109,6 @@ def _init_db(db_path: str) -> None:
         conn.close()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-
-def _ok(data: dict = None) -> dict:
-    """Wrap success response."""
-    result = {"ok": True}
-    if data:
-        result.update(data)
-    return result
-
-
-def _err(message: str, status_code: int = 400) -> HTTPException:
-    """Raise an error response."""
-    raise HTTPException(status_code=status_code, detail={"ok": False, "message": message})
-
-
-def _read_json_safe(path: Path) -> dict:
-    """Read a JSON file, return empty dict if missing or corrupted."""
-    if not path.exists():
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        logger.warning(f"Skipping unreadable config file: {path}")
-        return {}
-
-
 # Config files that the dashboard must never overwrite (git-managed).
 _READONLY_CONFIG_NAMES: set[str] = {"global.json"}
 
@@ -164,15 +140,6 @@ def _write_json_atomic(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _is_path_traversal(path: str, base: Path) -> bool:
-    """Check if the resolved path escapes the given base directory."""
-    if not path:
-        return True
-    try:
-        resolved = (base / path).resolve()
-        return not resolved.is_relative_to(base.resolve())
-    except (ValueError, OSError):
-        return True
 
 
 _ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
@@ -1055,83 +1022,6 @@ async def config_user_save(request: Request):
 
     reload_results = await _notify_reload(db_path)
     return _ok({"saved": True, "reload": reload_results})
-
-
-# ── Persona character cards ──────────────────────────────────────────────────
-
-_CHAR_NAME_PATTERN = re.compile(r'^[^\x00/\\]{1,128}$')
-
-
-def _validate_character_name(name: str) -> None:
-    """Validate character name: 1-128 chars, no path separators or null bytes."""
-    if not name or not _CHAR_NAME_PATTERN.match(name):
-        _err(f"角色名格式无效：1~128 位非空字符，禁止路径分隔符和空字节", 400)
-
-
-@app.get("/api/persona/characters", dependencies=[Depends(require_auth)])
-async def persona_characters(request: Request):
-    """List character directories under content/characters/."""
-    chars_dir = DashboardPaths.CONTENT_DIR / "characters"
-    characters = []
-    if chars_dir.exists():
-        for d in sorted(chars_dir.iterdir()):
-            if d.is_dir() and not d.name.startswith('.'):
-                char_yaml = d / "character.yaml"
-                characters.append({
-                    "name": d.name,
-                    "has_config": char_yaml.exists(),
-                })
-    return _ok({"characters": characters})
-
-
-@app.get("/api/persona/characters/{name}", dependencies=[Depends(require_auth)])
-async def persona_character_get(name: str, request: Request):
-    """Read character.yaml for a character."""
-    _validate_character_name(name)
-    if _is_path_traversal(name, DashboardPaths.CONTENT_DIR / "characters"):
-        _err("Path traversal detected", 400)
-
-    yaml_path = DashboardPaths.CONTENT_DIR / "characters" / name / "character.yaml"
-    if not yaml_path.exists():
-        _err(f"Character not found: {name}", 404)
-
-    try:
-        content = yaml_path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
-        _err("Cannot read character.yaml as text", 400)
-
-    return _ok({"name": name, "content": content})
-
-
-@app.post("/api/persona/characters/{name}/save", dependencies=[Depends(require_auth)])
-async def persona_character_save(name: str, request: Request):
-    """Save character.yaml for a character (creates directory if needed)."""
-    _validate_character_name(name)
-    if _is_path_traversal(name, DashboardPaths.CONTENT_DIR / "characters"):
-        _err("Path traversal detected", 400)
-
-    body = await request.json()
-    content = body.get("content", "")
-    if not isinstance(content, str):
-        _err("content must be a string")
-
-    yaml_path = DashboardPaths.CONTENT_DIR / "characters" / name / "character.yaml"
-    yaml_path.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic write: .tmp + fsync + os.replace (consistent with _write_json_atomic)
-    tmp_path = yaml_path.with_suffix(".yaml.tmp")
-    tmp_path.write_text(content, encoding="utf-8")
-    fd = os.open(str(tmp_path), os.O_RDONLY)
-    os.fsync(fd)
-    os.close(fd)
-    os.replace(tmp_path, yaml_path)
-
-    db_path = request.app.state.dashboard_db
-    audit_log(db_path, "persona.character.save", name, "",
-              ip=request.client.host if request.client else "")
-
-    return _ok({"saved": True})
-
-
 
 
 # ── Shared bot status computation ──────────────────────────────────────────────
