@@ -155,7 +155,7 @@ class DailyReportGenerator:
         return "\n\n".join(parts)
 
     async def _build_segment_2(self, stats: Dict[str, Any]) -> str:
-        lines = ["—" * 30, ""]
+        lines = ["—— 运营统计 ——", ""]
 
         # 活跃用户与群
         au = stats["active_users"]
