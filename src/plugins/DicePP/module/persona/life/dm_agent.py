@@ -2,7 +2,7 @@
 DM Agent — 世界观裁决者
 
 负责生成客观生活事件（System Agent 角色）。
-Phase 1: 一次 LLM 调用，收集 record_event，返回 EventGenerationResult。
+Phase 2: 通过 `say` 工具与角色对话，DM 裁决角色行动，D20 判定规则。
 """
 from typing import Any, Optional
 import json
@@ -37,6 +37,22 @@ _STATE_SCALE_PROMPT = """体力（0-100）影响角色能做什么：
 
 单事件状态变化幅度 ≤ ±20"""
 
+# D20 裁决规则（注入 DM system prompt）
+_D20_RULING_PROMPT = """D20 判定规则 — 当角色采取一个有风险或有难度系数的行动时，使用 roll_dice 工具判定：
+
+DC 5（简单）：d20 ≥ 5 成功
+DC 10（一般）：d20 ≥ 10 成功
+DC 15（困难）：d20 ≥ 15 成功
+DC 20（极高）：d20 ≥ 20 成功
+
+大成功：d20 = 20（完美结果，额外的正面效果）
+大失败：d20 = 1（灾难性结果，额外的负面效果）
+失败：d20 < DC
+成功：d20 ≥ DC
+
+根据角色当前状态、行动描述和场景上下文判断 DC 值。
+你可以自主决定是否需要判定——日常事务不需要判定，只有有风险、有难度或被干扰的情况才需要。"""
+
 
 class DMAgent(Agent):
     """DM Agent — 世界观裁决者"""
@@ -44,7 +60,7 @@ class DMAgent(Agent):
     name = "DM"
     role = "世界观裁决者"
     state_model = DMState
-    tools = ["roll_dice", "record_event", "read_events", "search_events"]
+    tools = ["roll_dice", "say", "read_events", "search_events"]
 
     def __init__(
         self,
@@ -66,8 +82,9 @@ class DMAgent(Agent):
     def build_system_prompt(self, state: DMState, context: dict) -> str:
         """构建 DM 系统提示词
 
-        稳定部分：DM 身份 + 裁决规则 + 状态刻度
+        稳定部分：DM 身份 + 裁决规则 + D20 判定 + 状态刻度
         动态部分：state.scratchpad（DM 备忘）+ context（角色信息/场景/状态）
+        system_prompt 在 Conversation 生命周期内只构建一次（保持前缀稳定）。
         """
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
@@ -75,7 +92,6 @@ class DMAgent(Agent):
         scenario = context.get("scenario", "")
         state_text = context.get("state_text", "")
         slot_type = context.get("slot_type", "system")
-        chain_depth = context.get("chain_depth", 0)
 
         dm_context = ""
         if state.scratchpad and state.scratchpad.strip():
@@ -83,7 +99,7 @@ class DMAgent(Agent):
 
         scenario_section = f"场景:\n{scenario}\n" if scenario else ""
 
-        system_prompt = f"""你是世界观设定专家。基于以下信息生成一个生活事件。
+        system_prompt = f"""你是 TRPG 主持人（DM），负责裁决角色的行动并叙述结果。
 
 角色:
 {character_name} - {character_description or "普通人"}
@@ -94,48 +110,57 @@ class DMAgent(Agent):
 {scenario_section}角色当前状态:
 {state_text}
 {dm_context}{_STATE_SCALE_PROMPT}
+
+{_D20_RULING_PROMPT}
 {self._slot_type_hint(slot_type)}
-生成要求:
+叙述要求:
 1. 以第三人称客观叙述描述发生了什么（不携带主观情绪）
 2. 只记录可观察的行为和状态（动作、位置、物品、身体状态）
 3. 不包含心理活动、情绪评价、内心独白
 4. 不使用"觉得""认为""感到"等主观动词
-5. description 自然叙事，不强制字数上限，但保持简洁
-6. context_summary 为事件摘要，30-60字，仅包含关键事实（谁、在哪、做了什么、结果）
-7. 符合世界观和场景设定{'，场景中的具体动作是参考而非约束' if chain_depth == 0 else '，场景中描述的当前动作是强制上下文，不要重复其中已经完成的事，只描述接下来新发生的事'}
+5. 内容自然叙事，不强制字数上限，但保持简洁
+6. context_summary 为事件摘要，不超过60字，仅包含关键事实（谁、在哪、做了什么、结果）
+7. 符合世界观和场景设定，场景中的具体动作是参考而非约束
 8. 避免与今天已发生事件在具体内容上高度重复，优先描述不同的事
 9. 同时给出该事件对角色体力/心情/健康的影响（delta，可选整数，范围-20~+20）
 
-你必须通过调用 record_event 工具来输出结果。"""
+你必须通过调用 say 工具来输出结果。"""
 
         return system_prompt
 
     def _build_user_prompt(self, context: dict) -> str:
-        """构建用户提示词"""
+        """构建用户提示词
+
+        depth == 0: 场景生成（首次呈现场景）
+        depth >= 1: 裁决角色企图（包含角色的 follow_up_text）
+        """
         diary_context = context.get("diary_context", "")
         events_context = context.get("events_context", "")
-        intention_text = context.get("intention_text", "")
         now_str = context.get("now_str", "??:??")
         date_str = context.get("date_str", "")
         chain_depth = context.get("chain_depth", 0)
+        follow_up_text = context.get("follow_up_text", "")
 
         if chain_depth == 0:
             task_hint = "请生成一个符合世界观的生活事件"
         else:
-            task_hint = "请描述角色在当前场景中接下来做了什么"
+            task_hint = (
+                f"角色想要：{follow_up_text}\n\n"
+                f"请评估这个行动的难度，必要时调用 roll_dice 判定，通过 say 叙述结果。"
+            )
 
         user_prompt = (
             f"当前日期: {date_str}\n当前时间: {now_str}"
-            f"{intention_text}{diary_context}{events_context}"
-            f"\n\n{task_hint}，并通过 record_event 工具记录:"
+            f"{diary_context}{events_context}"
+            f"\n\n{task_hint}"
         )
         return user_prompt
 
     def _get_openai_tools(self) -> list:
-        """返回 record_event 工具"""
-        from ..tools.collecting import RECORD_EVENT_TOOL
+        """返回 say 工具（DM 版本 description）"""
+        from ..tools.collecting import SAY_TOOL_DM
 
-        return [RECORD_EVENT_TOOL.to_openai_format()]
+        return [SAY_TOOL_DM.to_openai_format()]
 
     @staticmethod
     def _slot_type_hint(slot_type: str) -> str:
@@ -147,7 +172,7 @@ class DMAgent(Agent):
         return ""
 
     async def run(self, context: dict) -> AgentResult:
-        """DM 生成生活事件"""
+        """DM 生成生活事件（通过 say 工具）"""
         self._cached_state = await self.load_state()
         try:
             scratchpad = context.get("_scratchpad")
@@ -186,7 +211,8 @@ class DMAgent(Agent):
 
             try:
                 args = collected[0]
-                description = str(args.get("description", "")).strip().strip('"').strip("'")
+                # 从 SayArgs 字段构建 EventGenerationResult
+                description = str(args.get("content", "")).strip().strip('"').strip("'")
                 if not description:
                     description = "我正在房间里休息。"
 

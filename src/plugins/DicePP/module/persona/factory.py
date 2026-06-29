@@ -60,10 +60,9 @@ from .tools.suggest_action import SUGGEST_ACTION_TOOL, make_suggest_action_execu
 from .tools.generate_image import make_generate_image_tool_def, make_generate_image_executor
 from .tools.look_at_past_image import LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor
 from .tools.collecting import (
-    RECORD_EVENT_TOOL,
-    RECORD_REACTION_TOOL,
     RECORD_DIARY_ENTRY_TOOL,
     RECORD_SHARE_MESSAGE_TOOL,
+    SAY_TOOL_DM,
     life_collecting_executor,
 )
 
@@ -352,8 +351,10 @@ def _build_tooling(
     Phase 1: 创建 DM / Character / SA 三个 Agent 实例。
     """
     tool_registry = ToolRegistry()
-    tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
-    tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
+    # say 工具统一替代 record_event / record_reaction（通过 _run_life_collect_loop → build_collecting_registry）
+    # SAY_TOOL_DM 和 SAY_TOOL_CHARACTER 共享 name="say" — 只注册 DM 版本
+    # Character 版本仅通过 to_openai_format() 使用，不经 registry
+    tool_registry.register(ToolDomain.LIFE, SAY_TOOL_DM, life_collecting_executor)
     tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
     tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
 

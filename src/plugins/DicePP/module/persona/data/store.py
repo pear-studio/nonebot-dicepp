@@ -39,6 +39,7 @@ from .migrations import (
     ALTER_LLM_TRACES_COLUMNS,
     ALTER_USER_RELATIONSHIPS_COLUMNS,
     ALTER_SCORE_HISTORY_COLUMNS,
+    ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE,
 )
 
 
@@ -172,6 +173,11 @@ class PersonaDataStore:
             except sqlite3.OperationalError as e:
                 if "duplicate column" not in str(e):
                     raise
+        # share_desire 列清理（Phase 3 业务逻辑已全部移除）
+        try:
+            await persona_db.execute(ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE)
+        except sqlite3.OperationalError:
+            pass  # 列已不存在或 DB 为全新创建
         await persona_db.commit()
 
     async def switch_persona_db(self, new_character_name: str) -> None:
@@ -1276,7 +1282,6 @@ class PersonaDataStore:
         event_type: str,
         description: str,
         reaction: str = "",
-        share_desire: float = 0.0,
         duration_minutes: int = 0,
         system_prompt_digest: str = "",
         raw_response: str = "",
@@ -1290,18 +1295,17 @@ class PersonaDataStore:
             """
             INSERT INTO persona_daily_events (
                 date, event_type, description, reaction,
-                share_desire, duration_minutes,
+                duration_minutes,
                 system_prompt_digest, raw_response,
                 energy_delta, mood_delta, health_delta, created_at,
                 context_summary
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 date,
                 event_type,
                 description,
                 reaction,
-                share_desire,
                 duration_minutes,
                 system_prompt_digest,
                 raw_response,
@@ -1319,7 +1323,7 @@ class PersonaDataStore:
         """获取某天的所有事件"""
         async with self.db.execute(
             """
-            SELECT id, event_type, description, reaction, share_desire,
+            SELECT id, event_type, description, reaction,
                    duration_minutes, created_at,
                    system_prompt_digest, raw_response,
                    energy_delta, mood_delta, health_delta,
@@ -1338,7 +1342,6 @@ class PersonaDataStore:
                     event_type=row["event_type"],
                     description=row["description"],
                     reaction=row["reaction"] or "",
-                    share_desire=row["share_desire"] if row.get("share_desire") is not None else 0.0,
                     duration_minutes=row["duration_minutes"] if row.get("duration_minutes") is not None else 0,
                     created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
                     system_prompt_digest=row.get("system_prompt_digest") or "",
@@ -1371,7 +1374,7 @@ class PersonaDataStore:
 
         async with self.db.execute(
             """
-            SELECT id, date, event_type, description, reaction, share_desire,
+            SELECT id, date, event_type, description, reaction,
                    duration_minutes, created_at,
                    system_prompt_digest, raw_response,
                    energy_delta, mood_delta, health_delta,
@@ -1392,7 +1395,6 @@ class PersonaDataStore:
                     event_type=row["event_type"],
                     description=row["description"],
                     reaction=row["reaction"] or "",
-                    share_desire=row["share_desire"] if row.get("share_desire") is not None else 0.0,
                     duration_minutes=row["duration_minutes"] if row.get("duration_minutes") is not None else 0,
                     created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
                     system_prompt_digest=row.get("system_prompt_digest") or "",
@@ -1409,7 +1411,7 @@ class PersonaDataStore:
         """按 ID 查询单条事件"""
         async with self.db.execute(
             """
-            SELECT id, date, event_type, description, reaction, share_desire,
+            SELECT id, date, event_type, description, reaction,
                    duration_minutes, created_at,
                    system_prompt_digest, raw_response,
                    energy_delta, mood_delta, health_delta,
@@ -1428,7 +1430,6 @@ class PersonaDataStore:
                 event_type=row["event_type"],
                 description=row["description"],
                 reaction=row["reaction"] or "",
-                share_desire=row["share_desire"] if row.get("share_desire") is not None else 0.0,
                 duration_minutes=row["duration_minutes"] if row.get("duration_minutes") is not None else 0,
                 created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
                 system_prompt_digest=row.get("system_prompt_digest") or "",

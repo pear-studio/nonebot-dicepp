@@ -134,7 +134,6 @@ class EventStore(Protocol):
         event_type: str,
         description: str,
         reaction: str = "",
-        share_desire: float = 0.0,
         duration_minutes: int = 0,
         system_prompt_digest: str = "",
         raw_response: str = "",

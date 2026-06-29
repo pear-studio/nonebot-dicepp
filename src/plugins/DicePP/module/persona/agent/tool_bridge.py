@@ -17,6 +17,7 @@ from ..tools.collecting import (
     RecordReactionArgs,
     RecordScoreArgs,
     RecordShareMessageArgs,
+    SayArgs,
 )
 from ..tools.context import ToolContext
 from ..tools.registry import ToolRegistry as OldToolRegistry
@@ -137,8 +138,12 @@ _ARGS_SCHEMA_MAP: Dict[str, Type[BaseModel]] = {
 
 _EXTERNAL_TOOLS = {"send_reply_segment", "generate_image"}
 _STATE_WRITE_TOOLS = {
-    "record_event", "record_reaction", "record_diary_entry",
-    "record_share_message", "record_score",
+    "say",
+    "record_event",  # [DEPRECATED]
+    "record_reaction",  # [DEPRECATED]
+    "record_diary_entry",
+    "record_share_message",
+    "record_score",
     "record_evaluation", "score_relationship",
 }
 
@@ -258,6 +263,7 @@ def build_registry(
 
 
 _COLLECTING_MODELS: List[Type[BaseModel]] = [
+    SayArgs,
     RecordEventArgs,
     RecordReactionArgs,
     RecordDiaryEntryArgs,
@@ -332,15 +338,19 @@ async def run_structured_collect(
     user_id: str = "",
     group_id: str = "",
     required_tools: list | None = None,
+    tools: Optional[list[dict]] = None,
     temperature: float = 0.7,
     timeout: int | None = None,
     selection=None,
     max_rounds: int = 1,
     extra_registry: Optional[ToolRegistry] = None,
-) -> tuple[list, Any]:
-    """运行 structured_collect 模式，返回 (collected_args, runtime_result)。
+) -> tuple[list, Any, list]:
+    """运行 structured_collect 模式，返回 (collected_args, runtime_result, final_messages)。
 
     Args:
+        required_tools: 必需工具名列表，也用于限定注册的工具。
+        tools: OpenAI 格式工具定义列表。提供时 LLM 看到这些定义（含自定义 description），
+              否则使用从 registry 自动生成的 schema。
         extra_registry: 可选，附加的工具注册表（如只读查询工具），
             其工具不与 required_tools 冲突，作为可选工具提供给 LLM。
     """
@@ -372,12 +382,13 @@ async def run_structured_collect(
         group_id=group_id,
         tool_registry=tool_registry,
         required_tools=required_tools,
+        tools=tools,
         temperature=temperature,
         timeout=timeout,
         selection=selection,
         mode="structured_collect",
     )
-    return collected, result
+    return collected, result, list(result.final_messages)
 
 
 def _dynamic_model(name: str, parameters: dict) -> Type[BaseModel]:

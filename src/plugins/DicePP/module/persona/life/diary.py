@@ -96,7 +96,7 @@ class DiaryGenerator:
                 "energy": character_state.energy if character_state else None,
                 "mood": character_state.mood if character_state else None,
                 "health": character_state.health if character_state else None,
-                "current_intention": character_state.current_intention if character_state else None,
+                "current_intention": None,  # [DEPRECATED] 已从 CharacterState 移除
             }
             result = await self.character_agent.diary(context)
 

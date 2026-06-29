@@ -69,7 +69,6 @@ CREATE TABLE IF NOT EXISTS persona_daily_events (
     event_type TEXT NOT NULL,
     description TEXT NOT NULL,
     reaction TEXT DEFAULT '',
-    share_desire REAL DEFAULT 0.0,
     duration_minutes INTEGER DEFAULT 0,
     system_prompt_digest TEXT DEFAULT '',
     raw_response TEXT DEFAULT '',
@@ -534,3 +533,8 @@ ALTER_SCORE_HISTORY_COLUMNS = [
     ALTER_SCORE_HISTORY_ADD_REPUTATION_DELTA,
     ALTER_SCORE_HISTORY_ADD_FAMILIARITY_DELTA,
 ]
+
+# share_desire 列清理（Phase 3 业务逻辑已全部移除）
+ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE = """
+ALTER TABLE persona_daily_events DROP COLUMN share_desire;
+"""

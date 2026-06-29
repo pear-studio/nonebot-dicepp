@@ -12,8 +12,31 @@ from .registry import ToolDef
 # ── Pydantic Args Schemas (for new ToolSpec/EffectKind) ──────
 
 
+class SayArgs(BaseModel):
+    """Agent 通信工具 — DM 和 Character 共用
+
+    DM 使用此工具向角色叙述世界中发生的事。
+    Character 使用此工具表达反应、感受和意图。
+    """
+    content: str = Field(..., description="你要说的话")
+    # DM 专用（可选）：
+    energy_delta: int = Field(default=0, ge=-20, le=20,
+                               description="事件对体力的影响（DM 专用，可选）")
+    mood_delta: int = Field(default=0, ge=-20, le=20,
+                             description="事件对心情的影响（DM 专用，可选）")
+    health_delta: int = Field(default=0, ge=-20, le=20,
+                               description="事件对健康的影响（DM 专用，可选）")
+    duration_minutes: int = Field(default=0, ge=0, le=2880,
+                                   description="事件持续时间（分钟），0 表示瞬时（DM 专用，可选）")
+    context_summary: str = Field(default="", min_length=0, max_length=60,
+                                  description="事件摘要，用于聊天上下文注入（DM 专用，可选）")
+    # Character 专用（可选）：
+    has_follow_up: bool = Field(default=False,
+                                 description="是否想继续行动。true=DM 继续裁决（Character 专用）")
+
+
 class RecordEventArgs(BaseModel):
-    """记录生成的生活事件及其对角色状态的影响"""
+    """[DEPRECATED] 记录生成的生活事件及其对角色状态的影响 — 请使用 SayArgs"""
     description: str = Field(..., description="事件描述，自然叙事，不强制字数上限但保持简洁")
     context_summary: str = Field(
         ..., min_length=30, max_length=60,
@@ -38,20 +61,8 @@ class RecordEventArgs(BaseModel):
 
 
 class RecordReactionArgs(BaseModel):
-    """记录角色对事件的内心反应、分享欲望、行动倾向和意向更新"""
+    """[DEPRECATED] 记录角色对事件的内心反应、分享欲望、行动倾向和意向更新 — 请使用 SayArgs"""
     reaction: str = Field(..., min_length=30, max_length=80, description="30-80 字的内心反应，仅用于日记和上下文")
-    share_desire: float = Field(
-        ..., ge=0.0, le=1.0,
-        description=(
-            "角色主动想把这件事说出去的程度，0~1。锚点："
-            "0.0-0.2 纯个人日常/重复琐事，没必要说；"
-            "0.3-0.4 顺嘴可提的小事，被问才会说；"
-            "0.5-0.6 自然想提起的事，聊起来会主动提（小心情/新发现/吐槽）；"
-            "0.7-0.8 比较强的分享冲动（做了决定/情绪波动想找人说/小成就）；"
-            "0.9-1.0 迫不及待想说出去（强烈情绪/期待已久的成就感/兴奋念头）。"
-            "重复的日常动作给低分，依据是'分享价值'非'事件戏剧性'。"
-        ),
-    )
     follow_up_action: Optional[str] = Field(
         default=None,
         description="根据当前情况，角色决定做并且已经开始做的事。如果有，填写具体描述，这会触发事件-反应链的续写。如果没有则填 null",
@@ -113,6 +124,28 @@ RECORD_SCORE_TOOL = ToolDef(
     name="record_score",
     description="记录评分结果：好感度变化和用户事实提取。统一替代旧的 score_relationship 和 record_evaluation 工具",
     parameters=RecordScoreArgs.model_json_schema(),
+)
+
+# ── say 工具（DM 和 Character 共用 schema，不同 description）──
+
+SAY_TOOL_DM = ToolDef(
+    name="say",
+    description=(
+        "向角色叙述世界中发生的事。使用第三人称客观叙述，只描述可观察的行为和状态。"
+        "通过 energy_delta/mood_delta/health_delta 标注事件对角色的影响。"
+        "角色收到叙述后会做出反应——如果角色想继续行动，你会在下一轮收到新的裁决请求。"
+    ),
+    parameters=SayArgs.model_json_schema(),
+)
+
+SAY_TOOL_CHARACTER = ToolDef(
+    name="say",
+    description=(
+        "表达你的反应、感受和意图。从第一人称视角说话。"
+        "如果你想继续行动（调查、对话、移动等），设置 has_follow_up=true。"
+        "DM 会对你提出的行动进行裁决并叙述结果。"
+    ),
+    parameters=SayArgs.model_json_schema(),
 )
 
 

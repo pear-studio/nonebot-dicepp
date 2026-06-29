@@ -82,6 +82,8 @@ class AgentRunResult:
     error: str = ""
     provider: str = ""
     model: str = ""
+    final_messages: list = field(default_factory=list)
+    """runtime.run() 结束时 state.messages 的副本，不含内部纠正注入（由调用方过滤）"""
 
     def log_if_failed(self, component: str) -> None:
         """若非正常完成，打一条自包含的 warning 日志。"""
@@ -608,6 +610,7 @@ class AgentLoop:
             error=state.error,
             provider=provider,
             model=model,
+            final_messages=list(state.messages),
         )
 
 

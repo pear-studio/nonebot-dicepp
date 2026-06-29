@@ -53,12 +53,11 @@ class TestReadEventsTool:
         assert "暂无事件记录" in result
 
     @pytest.mark.asyncio
-    async def test_shows_deltas_and_share_desire(self, temp_db):
+    async def test_shows_deltas(self, temp_db):
         today = date_type.today().strftime("%Y-%m-%d")
         await temp_db.add_daily_event(
             today, "system", "事件A",
             energy_delta=5, mood_delta=-3, health_delta=0,
-            share_desire=0.75,
         )
 
         executor = make_read_events_executor()
@@ -66,7 +65,6 @@ class TestReadEventsTool:
 
         assert "+5" in result
         assert "-3" in result
-        assert "75%" in result
 
     @pytest.mark.asyncio
     async def test_no_store_returns_unavailable(self, temp_db):

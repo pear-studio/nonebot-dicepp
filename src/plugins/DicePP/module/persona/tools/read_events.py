@@ -6,7 +6,7 @@ READ_EVENTS_TOOL = ToolDef(
     name="read_events",
     description=(
         "按日期读取当天的事件列表。类似 ls events/ 命令，"
-        "读取指定日期的所有事件详情（含 reaction、share_desire、状态变化等）。"
+        "读取指定日期的所有事件详情（含 reaction、状态变化等）。"
     ),
     parameters={
         "type": "object",
@@ -50,8 +50,6 @@ def make_read_events_executor():
                 lines.append(f"   心情: {'+' if e.mood_delta >= 0 else ''}{e.mood_delta}")
             if e.health_delta is not None:
                 lines.append(f"   健康: {'+' if e.health_delta >= 0 else ''}{e.health_delta}")
-            if e.share_desire > 0:
-                lines.append(f"   分享欲: {e.share_desire:.0%}")
 
         return "\n".join(lines)
 

@@ -57,7 +57,7 @@ class ScoringAgent:
         )
 
         try:
-            collected_args, runtime_result = await run_structured_collect(
+            collected_args, runtime_result, _ = await run_structured_collect(
                 router=self.llm_router,
                 store=self._store,
                 messages=[{"role": "user", "content": prompt}],

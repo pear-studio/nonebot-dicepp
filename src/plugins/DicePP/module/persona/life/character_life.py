@@ -114,7 +114,6 @@ class CharacterLife:
         self.boundary_receiver: Optional[BoundaryReceiver] = None
         self._boundaries_loaded = False
         self._state_lock = asyncio.Lock()
-        self._pending_shares: List[Tuple[str, str, float]] = []
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
@@ -411,12 +410,6 @@ class CharacterLife:
             character_state = await self.data_store.get_character_state()
             if character_state:
                 self._migrate_legacy_state(character_state)
-                if (character_state.intention_created_at
-                        and character_state.intention_created_at.date() != now.date()):
-                    character_state.current_intention = None
-                    character_state.intention_created_at = None
-                    await self.data_store.update_character_state(character_state)
-                    logger.debug("跨天空清意向: {}", today)
             else:
                 character_state = CharacterState(
                     energy=self.config.default_energy,
@@ -473,13 +466,9 @@ class CharacterLife:
                 if ongoing_context:
                     state_context += "\n" + ongoing_context
 
-                # 链续写场景
-                if chain_depth == 0:
-                    chain_scenario = base_scenario
-                elif prev_follow_up:
-                    chain_scenario = f"{self.character.scenario}\n\n【当前场景：{prev_follow_up}】"
-                else:
-                    chain_scenario = self.character.scenario
+                # 链续写场景（system_prompt 在 Conversation 生命周期内冻结，
+                # 动态意图通过 follow_up_text → user_prompt 传递）
+                chain_scenario = base_scenario
 
                 # 构建日记上下文
                 diary_context = ""
@@ -507,12 +496,6 @@ class CharacterLife:
                         + "\n\n角色的一天还在继续。"
                     )
 
-                # 意向文本
-                intention_text = ""
-                if character_state.current_intention:
-                    intention_text = f"\n当前意向: {character_state.current_intention}"
-                    if character_state.intention_created_at:
-                        intention_text += f"（始于 {character_state.intention_created_at.strftime('%H:%M')}）"
 
                 now_str = now.strftime("%H:%M")
                 date_str = now.strftime("%Y年%m月%d日")
@@ -523,6 +506,9 @@ class CharacterLife:
                     break
 
                 # 传递 scratchpad 给 DM Agent
+                # 将 Character 的 follow_up 内容作为 DM 裁决上下文
+                follow_up_text = prev_follow_up if chain_depth >= 1 else ""
+
                 dm_context = {
                     "character_name": self.character.name,
                     "character_description": self.character.description,
@@ -531,11 +517,11 @@ class CharacterLife:
                     "state_text": state_context,
                     "diary_context": diary_context,
                     "events_context": events_context,
-                    "intention_text": intention_text,
                     "now_str": now_str,
                     "date_str": date_str,
                     "slot_type": slot_type if chain_depth == 0 else "system",
                     "chain_depth": chain_depth,
+                    "follow_up_text": follow_up_text,
                     "_scratchpad": dm_state.scratchpad,
                 }
                 dm_result = await self.dm_agent.run(dm_context)
@@ -570,12 +556,10 @@ class CharacterLife:
                     "event": event_result.description,
                     "character_name": self.character.name,
                     "character_description": self.character.description,
-                    "share_policy": "optional",
                     "today_events": list(chain_events),
                     "energy": character_state.energy,
                     "mood": character_state.mood,
                     "health": character_state.health,
-                    "current_intention": character_state.current_intention,
                 }
                 char_result = await self.character_agent.react(char_context)
                 if not char_result.success or not isinstance(char_result.data, EventReactionResult):
@@ -584,20 +568,8 @@ class CharacterLife:
 
                 reaction_result: EventReactionResult = char_result.data
 
-                # 意向生命周期处理
-                pending_plan = reaction_result.pending_plan
-                if pending_plan is None:
-                    pass
-                elif pending_plan == "":
-                    character_state.current_intention = None
-                    character_state.intention_created_at = None
-                    await self.data_store.update_character_state(character_state)
-                else:
-                    character_state.current_intention = pending_plan
-                    character_state.intention_created_at = now
-                    await self.data_store.update_character_state(character_state)
-
-                prev_follow_up = reaction_result.follow_up_action
+                # 桥接：Character 的 last_say_content 作为下一次 DM 裁决的 follow_up_text
+                prev_follow_up = reaction_result.last_say_content
 
                 combined_raw = CharacterLife._serialize_raw_parts(
                     event_result.raw_response, reaction_result.raw_response)
@@ -608,7 +580,6 @@ class CharacterLife:
                     event_type=slot_type if chain_depth == 0 else "system",
                     description=event_result.description,
                     reaction=reaction_result.reaction,
-                    share_desire=reaction_result.share_desire,
                     duration_minutes=event_result.duration_minutes,
                     system_prompt_digest=event_result.system_prompt_digest,
                     raw_response=combined_raw,
@@ -625,7 +596,6 @@ class CharacterLife:
                     "event_id": f"evt_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}",
                     "description": event_result.description,
                     "reaction": reaction_result.reaction,
-                    "share_desire": reaction_result.share_desire,
                     "duration_minutes": event_result.duration_minutes,
                     "time": time_str,
                     "slot_type": slot_type if chain_depth == 0 else "system",
@@ -633,20 +603,19 @@ class CharacterLife:
 
                 logger.debug(
                     "[chain] {} @ {} depth={} energy={}({:+d}) mood={}({:+d}) health={}({:+d}) "
-                    "follow_up={!r} pending_plan={!r} fallback={}",
+                    "has_follow_up={} fallback={}",
                     self.character.name, time_str, chain_depth + 1,
                     character_state.energy, ed,
                     character_state.mood, md,
                     character_state.health, hd,
-                    reaction_result.follow_up_action,
-                    pending_plan,
+                    reaction_result.has_follow_up,
                     is_fallback,
                 )
 
-                chain_events.append({"description": event_result.description, "time": time_str})
+                chain_events.append({"description": event_result.description, "time": time_str, "created_at": now.isoformat()})
                 chain_depth += 1
 
-                if reaction_result.follow_up_action is not None and reaction_result.follow_up_action != "":
+                if reaction_result.has_follow_up:
                     if chain_depth >= 2:
                         self._chain_triggered_today = True
                     continue
@@ -807,11 +776,6 @@ class CharacterLife:
         date_str = now.strftime("%Y年%m月%d日")
 
         # 意向文本（与计划事件路径一致）
-        intention_text = ""
-        if character_state.current_intention:
-            intention_text = f"\n当前意向: {character_state.current_intention}"
-            if character_state.intention_created_at:
-                intention_text += f"（始于 {character_state.intention_created_at.strftime('%H:%M')}）"
 
         # ── 调用 DM Agent ──
         if self.dm_agent is None:
@@ -826,7 +790,6 @@ class CharacterLife:
             "state_text": state_context,
             "diary_context": diary_context,
             "events_context": events_context,
-            "intention_text": intention_text,
             "now_str": now_str,
             "date_str": date_str,
             "slot_type": "system",
@@ -859,12 +822,10 @@ class CharacterLife:
             "event": event_result.description,
             "character_name": self.character.name,
             "character_description": self.character.description,
-            "share_policy": "optional",
             "today_events": list(today_event_dicts),
             "energy": character_state.energy,
             "mood": character_state.mood,
             "health": character_state.health,
-            "current_intention": character_state.current_intention,
         }
         char_result = await self.character_agent.react(char_context)
         if not char_result.success or not isinstance(char_result.data, EventReactionResult):
@@ -873,18 +834,7 @@ class CharacterLife:
 
         reaction_result: EventReactionResult = char_result.data
 
-        pending_plan = reaction_result.pending_plan
-        if pending_plan is None:
-            pass
-        elif pending_plan == "":
-            character_state.current_intention = None
-            character_state.intention_created_at = None
-            await self.data_store.update_character_state(character_state)
-        else:
-            character_state.current_intention = pending_plan
-            character_state.intention_created_at = now
-            await self.data_store.update_character_state(character_state)
-
+        # pending_plan 已移除（由 Conversation 天内上下文替代）
         combined_raw = CharacterLife._serialize_raw_parts(
             event_result.raw_response, reaction_result.raw_response)
 
@@ -894,7 +844,6 @@ class CharacterLife:
                 event_type="spontaneous",
                 description=event_result.description,
                 reaction=reaction_result.reaction,
-                share_desire=reaction_result.share_desire,
                 duration_minutes=event_result.duration_minutes,
                 system_prompt_digest=event_result.system_prompt_digest,
                 raw_response=combined_raw,
@@ -913,13 +862,6 @@ class CharacterLife:
                 duration_minutes=event_result.duration_minutes,
             )
 
-        if reaction_result.share_desire > 0:
-            self._pending_shares.append((
-                event_result.description,
-                reaction_result.reaction,
-                reaction_result.share_desire,
-            ))
-
         logger.info(
             "[spontaneous] 注入成功 desc=%s energy=%+d mood=%+d health=%+d",
             event_result.description[:60],
@@ -927,7 +869,3 @@ class CharacterLife:
         )
         return True
 
-    def drain_pending_shares(self) -> List[Tuple[str, str, float]]:
-        shares = list(self._pending_shares)
-        self._pending_shares.clear()
-        return shares

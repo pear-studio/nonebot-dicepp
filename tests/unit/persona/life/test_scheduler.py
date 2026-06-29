@@ -64,32 +64,8 @@ class TestProactiveSchedulerBasics:
         )
 
     @pytest.mark.asyncio
-    async def test_shutdown_cancels_pending_tasks(self, scheduler):
-        """验证 shutdown 取消所有待处理任务并清理状态"""
-        # 创建一些模拟的 pending 任务
-        async def _dummy():
-            try:
-                await asyncio.sleep(3600)
-            except asyncio.CancelledError:
-                raise
-
-        t1 = asyncio.create_task(_dummy())
-        t2 = asyncio.create_task(_dummy())
-        scheduler._pending_shares.add(t1)
-        scheduler._pending_shares.add(t2)
-
-        await scheduler.shutdown()
-
-        # 所有任务应已被取消
-        assert t1.cancelled()
-        assert t2.cancelled()
-        # pending_shares 应已被清空
-        assert len(scheduler._pending_shares) == 0
-
-    @pytest.mark.asyncio
-    async def test_shutdown_empty_does_not_raise(self, scheduler):
-        """验证 shutdown 在没有 pending 任务时不会报错"""
-        scheduler._pending_shares.clear()
+    async def test_shutdown_does_not_raise(self, scheduler):
+        """验证 shutdown 不会抛出异常"""
         await scheduler.shutdown()  # 不应抛出异常
 
     @pytest.mark.asyncio
@@ -410,6 +386,7 @@ class TestCharacterActiveExtendedEnd:
 # ── Q114: schedule_share ──────────────────────────────────────────────────
 
 
+@pytest.mark.skip(reason="schedule_share 已移除，待主动分享功能恢复")
 class TestScheduleShare:
     """测试 schedule_share 方法"""
 

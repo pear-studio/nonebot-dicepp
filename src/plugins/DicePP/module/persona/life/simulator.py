@@ -114,28 +114,10 @@ class LifeSimulator:
                     logger.info(
                         f"角色生活事件: {event_chain[0].get('description', '')[:50]}..."
                     )
-                    self._schedule_share_from_chain(event_chain)
             except asyncio.TimeoutError:
                 logger.warning("tick: 角色生活事件生成超时（>300s），跳过本次以避免阻塞 proactive 系统")
             except Exception:
                 logger.exception("tick: 角色生活事件生成失败")
-
-            # 消费自发事件待分享信息
-            for desc, reaction, share_desire in self.character_life.drain_pending_shares():
-                if not self.scheduler:
-                    break
-                if share_desire >= self.config.proactive_event_share_threshold:
-                    delay = random.randint(
-                        self.config.proactive_event_share_delay_min,
-                        self.config.proactive_event_share_delay_max,
-                    )
-                    self.scheduler.schedule_share(
-                        event_id="",
-                        event_description=desc,
-                        reaction=reaction,
-                        share_desire=share_desire,
-                        delay_minutes=delay,
-                    )
 
         # 运行主动消息调度器
         if self.scheduler:
@@ -147,11 +129,19 @@ class LifeSimulator:
                 logger.exception("tick: 主动消息调度失败")
 
     async def tick_daily(self) -> Optional[str]:
-        """每日调用 — 清理 trace、关系衰减、生成日记、SA 规划"""
+        """每日调用 — 清理 trace、关系衰减、生成日记、SA 规划、Conversation compact"""
         try:
             await self._run_cleanup()
             await self.apply_relationship_decay_batch()
             diary = await self.diary_generator.generate_diary()
+
+            # 日终 compact Conversation（截断，释放 cache 资源）
+            for name, agent in [("DM", self.dm_agent), ("Character", self.character_agent)]:
+                if agent:
+                    try:
+                        await agent.compact_conversation()
+                    except Exception:
+                        logger.warning(f"{name} compact_conversation 失败", exc_info=True)
 
             # Phase 1: SA Agent 规划
             if diary and self.sa_agent:
@@ -192,24 +182,6 @@ class LifeSimulator:
             logger.info("SA 叙事规划完成")
         else:
             logger.warning(f"SA 叙事规划失败: {result.error}")
-
-    def _schedule_share_from_chain(self, event_chain: List[Dict[str, Any]]) -> None:
-        """从事件链中选取分享欲望最高的事件，调度分享。"""
-        if not self.scheduler:
-            return
-        best_event = max(event_chain, key=lambda e: e.get("share_desire", 0.0))
-        if best_event.get("share_desire", 0.0) >= self.config.proactive_event_share_threshold:
-            delay = random.randint(
-                self.config.proactive_event_share_delay_min,
-                self.config.proactive_event_share_delay_max,
-            )
-            self.scheduler.schedule_share(
-                event_id=best_event.get("event_id", ""),
-                event_description=best_event.get("description", ""),
-                reaction=best_event.get("reaction", ""),
-                share_desire=best_event.get("share_desire", 0.0),
-                delay_minutes=delay,
-            )
 
     async def apply_relationship_decay_batch(self) -> int:
         """每日批处理"""

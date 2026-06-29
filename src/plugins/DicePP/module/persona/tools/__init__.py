@@ -6,12 +6,15 @@ from .collecting import (
     RECORD_DIARY_ENTRY_TOOL,
     RECORD_SHARE_MESSAGE_TOOL,
     RECORD_SCORE_TOOL,
+    SAY_TOOL_DM,
+    SAY_TOOL_CHARACTER,
     life_collecting_executor,
     RecordEventArgs,
     RecordReactionArgs,
     RecordDiaryEntryArgs,
     RecordShareMessageArgs,
     RecordScoreArgs,
+    SayArgs,
 )
 
 __all__ = [
@@ -23,10 +26,13 @@ __all__ = [
     "RECORD_DIARY_ENTRY_TOOL",
     "RECORD_SHARE_MESSAGE_TOOL",
     "RECORD_SCORE_TOOL",
+    "SAY_TOOL_DM",
+    "SAY_TOOL_CHARACTER",
     "life_collecting_executor",
     "RecordEventArgs",
     "RecordReactionArgs",
     "RecordDiaryEntryArgs",
     "RecordShareMessageArgs",
     "RecordScoreArgs",
+    "SayArgs",
 ]

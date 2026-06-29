@@ -134,7 +134,7 @@ class ActionEvaluator:
         from ..agent.tool_bridge import run_structured_collect
 
         try:
-            collected_args, runtime_result = await run_structured_collect(
+            collected_args, runtime_result, _ = await run_structured_collect(
                 router=self._router,
                 store=self._store,
                 messages=[

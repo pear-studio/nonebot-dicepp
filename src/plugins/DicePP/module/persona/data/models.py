@@ -253,7 +253,6 @@ class DailyEvent(BaseModel):
     description: str  # 事件描述
     context_summary: str = ""  # 聊天上下文注入用的简短摘要
     reaction: str = ""  # 角色反应
-    share_desire: float = 0.0  # 分享欲望值 0~1
     duration_minutes: int = 0  # 持续时间（分钟），0 表示瞬时
     system_prompt_digest: str = ""  # Phase 7a
     raw_response: str = ""  # Phase 7a
@@ -271,8 +270,6 @@ class CharacterState(BaseModel):
     energy: Optional[int] = None  # None 表示尚未初始化（旧版纯文本迁移兼容）
     mood: Optional[int] = None
     health: Optional[int] = None
-    current_intention: Optional[str] = None
-    intention_created_at: Optional[datetime] = None
 
 
 class DMState(BaseModel):

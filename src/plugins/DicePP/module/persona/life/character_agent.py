@@ -13,9 +13,9 @@ from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import EVENT_GEN, DIARY, SUMMARIZE
 from ..tools.collecting import (
-    RECORD_REACTION_TOOL,
     RECORD_DIARY_ENTRY_TOOL,
     RECORD_SHARE_MESSAGE_TOOL,
+    SAY_TOOL_CHARACTER,
 )
 from utils.time import format_timestamp, format_relative_time, wall_now
 from .agent import Agent
@@ -46,7 +46,7 @@ class CharacterAgent(Agent):
     name = "Character"
     role = "角色第一人称"
     state_model = CharacterState
-    tools = ["record_reaction"]
+    tools = ["say"]
 
     def __init__(
         self,
@@ -56,7 +56,6 @@ class CharacterAgent(Agent):
         tool_registry=None,
     ):
         super().__init__(store, router, config, tool_registry=tool_registry)
-        self._current_mode = "reaction"  # 默认模式，在 react/diary/share/opening 入口前更新
 
     async def load_state(self) -> CharacterState:
         """从 store 加载角色状态"""
@@ -71,7 +70,6 @@ class CharacterAgent(Agent):
         energy: Optional[int],
         mood: Optional[int],
         health: Optional[int],
-        intention: Optional[str] = None,
     ) -> str:
         """构建状态 prompt 片段"""
         lines = []
@@ -81,8 +79,6 @@ class CharacterAgent(Agent):
             lines.append(f"心情: {mood}/100")
         if health is not None:
             lines.append(f"健康: {health}/100")
-        if intention is not None:
-            lines.append(f"当前意向: {intention}")
         return "\n".join(lines) if lines else "无记录"
 
     def build_system_prompt(self, state: CharacterState, context: dict) -> str:
@@ -109,7 +105,7 @@ class CharacterAgent(Agent):
         character_description = context.get("character_description", "")
         state_text = self._format_state_prompt(
             context.get("energy"), context.get("mood"),
-            context.get("health"), intention=context.get("current_intention"),
+            context.get("health"),
         )
 
         system_prompt = f"""你是{character_name}。
@@ -120,21 +116,14 @@ class CharacterAgent(Agent):
 你当前的状态:
 {state_text}
 
-请对发生的事件做出内心反应，并通过工具调用记录你的反应、分享欲望、行动倾向和意向更新。
+请对发生的事件做出内心反应，通过 say 工具表达你的感受和想法。
 要求:
 1. 使用第一人称"我"
 2. 反应 30-80 字，表达真实感受
 3. 反映角色性格特点和当前状态
-4. 分享欲望值 0~1，表示你"主动想把这件事说出去"的程度（不是事件本身有不有趣，而是"你此刻想不想找人说"）。参考锚点：
-     - 0.0~0.2: 纯个人日常/隐私/重复琐事，没必要让别人知道（如刷牙、走神、发呆）
-     - 0.3~0.4: 顺嘴可提的小事，被问到才会说（如吃了什么、路过哪里）
-     - 0.5~0.6: 自然想提起的事，不急着说但聊起来会主动提
-     - 0.7~0.8: 比较强的分享冲动，主动想说
-     - 0.9~1.0: 迫不及待想说出去
-5. follow_up_action: 角色决定做并且已经开始做的事
-6. pending_plan: 短期想法或计划，还没有开始做
+4. 如果你想继续行动（调查、对话、移动等），设置 has_follow_up=true，DM 会对你提出的行动进行裁决
 
-你必须通过调用 record_reaction 工具来记录你的内心反应、分享欲望、跟进动作和待办计划。"""
+你必须通过调用 say 工具来表达你的反应。"""
         return system_prompt
 
     # ── Diary Prompt ─────────────────────────────────────────
@@ -144,7 +133,7 @@ class CharacterAgent(Agent):
         character_description = context.get("character_description", "")
         state_text = self._format_state_prompt(
             context.get("energy"), context.get("mood"),
-            context.get("health"), intention=context.get("current_intention"),
+            context.get("health"),
         )
 
         system_prompt = f"""你是{character_name}。正在写今天的日记。
@@ -254,12 +243,6 @@ class CharacterAgent(Agent):
     def _build_reaction_user_prompt(self, context: dict) -> str:
         event = context.get("event", "")
         today_events = context.get("today_events", [])
-        current_intention = context.get("current_intention")
-
-        intention_text = ""
-        if current_intention:
-            intention_text = f"\n当前意向: {current_intention}"
-
         today_context = ""
         if today_events:
             events_lines = []
@@ -278,9 +261,9 @@ class CharacterAgent(Agent):
             today_context = "\n今天已发生事件:\n" + "\n".join(events_lines)
 
         user_prompt = (
-            f"{today_context}{intention_text}"
+            f"{today_context}"
             f"\n\n当前事件: {event}"
-            f"\n\n请先思考，然后通过 record_reaction 工具记录你的内心反应、分享欲望、跟进动作和待办计划。"
+            f"\n\n请先思考，然后通过 say 工具表达你的反应。如果你想继续行动，设置 has_follow_up=true。"
         )
         return user_prompt
 
@@ -290,13 +273,9 @@ class CharacterAgent(Agent):
         energy = context.get("energy")
         mood = context.get("mood")
         health = context.get("health")
-        current_intention = context.get("current_intention")
-
-        state_text = self._format_state_prompt(energy, mood, health, intention=current_intention)
+        state_text = self._format_state_prompt(energy, mood, health)
 
         intention_text = ""
-        if current_intention:
-            intention_text = f"\n当前惦记的事: {current_intention}"
 
         events_lines = []
         tz = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
@@ -342,14 +321,11 @@ class CharacterAgent(Agent):
         energy = context.get("energy")
         mood = context.get("mood")
         health = context.get("health")
-        current_intention = context.get("current_intention")
         today_events = context.get("today_events")
 
-        state_text = self._format_state_prompt(energy, mood, health, intention=current_intention)
+        state_text = self._format_state_prompt(energy, mood, health)
 
         intention_text = ""
-        if current_intention:
-            intention_text = f"\n当前惦记的事: {current_intention}"
 
         today_events_text = ""
         if today_events:
@@ -397,19 +373,6 @@ class CharacterAgent(Agent):
     def _build_opening_user_prompt(self, context: dict) -> str:
         return "请用第一人称写2-3句日报开场白："
 
-    # ── Tool Selection ───────────────────────────────────────
-
-    def _get_openai_tools(self) -> list:
-        mode = self._current_mode if hasattr(self, "_current_mode") else "reaction"
-        if mode == "reaction":
-            return [RECORD_REACTION_TOOL.to_openai_format()]
-        elif mode == "diary":
-            return [RECORD_DIARY_ENTRY_TOOL.to_openai_format()]
-        elif mode == "share":
-            return [RECORD_SHARE_MESSAGE_TOOL.to_openai_format()]
-        return []
-
-    # ── Public API ───────────────────────────────────────────
 
     async def run(self, context: dict) -> AgentResult:
         """统一入口 — 根据 context["mode"] 分派到专用方法。
@@ -429,71 +392,67 @@ class CharacterAgent(Agent):
             return await self.react(context)
 
     async def react(self, context: dict) -> AgentResult:
-        """角色对事件做出反应
+        """角色对事件做出反应（通过 Conversation 管理消息线程）
 
         context 字段:
             event: str — 事件描述
             character_name: str
             character_description: str
             energy/mood/health: Optional[int]
-            current_intention: Optional[str]
             today_events: List[dict]
 
         Returns:
             AgentResult(data=EventReactionResult)
         """
-        self._current_mode = "reaction"
         context["mode"] = "reaction"
 
         from ..life._llm_utils import _run_life_collect_loop
 
-        # load_state() 用于验证状态存在并供 Phase 2 的 current_intention 注入使用
+        # load_state() 用于验证状态存在性
         state = await self.load_state()
         system_prompt = self._build_reaction_prompt(state, context)
         user_prompt = self._build_reaction_user_prompt(context)
 
+        # NOTE: 此 Conversation 集成模式在 agent.py 与 character_agent.py 两处重复，
+        # 如需新增第三处，应提取为 Agent._run_with_conv()
+        conv = await self._ensure_conversation(context, system_prompt_override=system_prompt)
+
+        conv.add_user(user_prompt)
+        prev_len = conv.length
+
         # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-        collected = await _run_life_collect_loop(
+        collected, final_msgs = await _run_life_collect_loop(
             router=self.router,
             store=self.store,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            tools=[RECORD_REACTION_TOOL.to_openai_format()],
+            messages=conv.render(self._system_prompt),
+            tools=[SAY_TOOL_CHARACTER.to_openai_format()],
             temperature=0.9,
             selection=EVENT_GEN,
             bg_timeout=self._bg_timeout,
             max_rounds=self._max_rounds,
         )
 
+        conv.extend(final_msgs[prev_len + 1:])  # +1 跳过 system prompt 位，prev_len 不含 system
+
         if not collected:
-            logger.warning("反应生成: LLM 未调用 record_reaction 工具")
+            logger.warning("反应生成: LLM 未调用 say 工具")
             return AgentResult(
                 success=False,
                 data=EventReactionResult(reaction="（默默地想着这件事）"),
-                error="LLM 未调用 record_reaction",
+                error="LLM 未调用 say 工具",
             )
 
         try:
             args = collected[0]
             character_name = context.get("character_name", "")
-            share_policy = context.get("share_policy", "optional")
 
-            reaction = str(args.get("reaction", "")).strip().strip('"').strip("'")
+            # 从 SayArgs 的 content 字段获取角色反应
+            reaction = str(args.get("content", "")).strip().strip('"').strip("'")
             if not reaction:
                 reaction = f"（{character_name}默默地想着这件事）"
-            share_desire = max(0.0, min(1.0, float(args.get("share_desire", 0.0))))
-            follow_up_action = args.get("follow_up_action")
-            if follow_up_action is not None:
-                follow_up_action = str(follow_up_action).strip()
-            pending_plan = args.get("pending_plan")
-            if pending_plan is None:
-                pass
-            elif isinstance(pending_plan, str):
-                pass
-            else:
-                pending_plan = None
+
+            # has_follow_up: 是否想继续行动
+            has_follow_up = bool(args.get("has_follow_up", False))
 
             if len(reaction) > 80:
                 reaction = reaction[:77] + "..."
@@ -502,9 +461,8 @@ class CharacterAgent(Agent):
                 success=True,
                 data=EventReactionResult(
                     reaction=reaction,
-                    share_desire=share_desire,
-                    follow_up_action=follow_up_action,
-                    pending_plan=pending_plan,
+                    has_follow_up=has_follow_up,
+                    last_say_content=reaction,
                     raw_response=json.dumps(args, ensure_ascii=False),
                 ),
                 raw_response=json.dumps(args, ensure_ascii=False),
@@ -512,26 +470,18 @@ class CharacterAgent(Agent):
 
         except Exception as e:
             logger.error(f"反应生成解析失败: {e}", exc_info=True)
-            share_policy = context.get("share_policy", "optional")
-            if share_policy == "required":
-                fallback_desire = 1.0
-            elif share_policy == "never":
-                fallback_desire = 0.0
-            else:
-                fallback_desire = 0.5
             return AgentResult(
                 success=False,
                 data=EventReactionResult(
                     reaction="（默默地想着这件事）",
-                    share_desire=fallback_desire,
-                    follow_up_action=None,
-                    pending_plan=None,
+                    has_follow_up=False,
+                    last_say_content="",
                 ),
                 error=str(e),
             )
 
     async def diary(self, context: dict) -> AgentResult:
-        """生成日记
+        """生成日记（单轮独立调用，不使用 Conversation 跨调用上下文积累）
 
         context 字段:
             events: List[dict] — 当天事件列表
@@ -539,17 +489,15 @@ class CharacterAgent(Agent):
             character_description: str
             yesterday_diary: Optional[str]
             energy/mood/health: Optional[int]
-            current_intention: Optional[str]
 
         Returns:
             AgentResult(data=str) — 日记文本
         """
-        self._current_mode = "diary"
         context["mode"] = "diary"
 
         from ..life._llm_utils import _run_life_collect_loop
 
-        # load_state() 用于验证状态存在并供 Phase 2 的 current_intention 注入使用
+        # load_state() 用于验证状态存在性
         state = await self.load_state()
         system_prompt = self._build_diary_prompt(state, context)
         user_prompt = self._build_diary_user_prompt(context)
@@ -557,7 +505,7 @@ class CharacterAgent(Agent):
         # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
         extra_registry = None
 
-        collected = await _run_life_collect_loop(
+        collected, _ = await _run_life_collect_loop(
             router=self.router,
             store=self.store,
             messages=[
@@ -595,19 +543,18 @@ class CharacterAgent(Agent):
             )
 
     async def share(self, context: dict) -> AgentResult:
-        """生成分享消息
+        """生成分享消息（单轮独立调用，不使用 Conversation 跨调用上下文积累）
 
         context 字段: 分享消息上下文各字段平铺为 dict
 
         Returns:
             AgentResult(data=str) — 消息文本；彻底失败返回 data=None 的 success=True 结果
         """
-        self._current_mode = "share"
         context["mode"] = "share"
 
         from ..life._llm_utils import _run_life_collect_loop
 
-        # load_state() 用于验证状态存在并供 Phase 2 的 current_intention 注入使用
+        # load_state() 用于验证状态存在性
         state = await self.load_state()
         system_prompt = self._build_share_prompt(state, context)
         user_prompt = self._build_share_user_prompt(context)
@@ -620,7 +567,7 @@ class CharacterAgent(Agent):
         for attempt in range(max_parse_retries + 1):
             try:
                 # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-                collected = await _run_life_collect_loop(
+                collected, _ = await _run_life_collect_loop(
                     router=self.router,
                     store=self.store,
                     messages=[
@@ -674,10 +621,9 @@ class CharacterAgent(Agent):
         Returns:
             AgentResult(data=str) — 开场白文本，失败返回 None
         """
-        self._current_mode = "opening"
         context["mode"] = "opening"
 
-        # load_state() 用于验证状态存在并供 Phase 2 的 current_intention 注入使用
+        # load_state() 用于验证状态存在性
         state = await self.load_state()
         system_prompt = self._build_opening_prompt(state, context)
         user_prompt = self._build_opening_user_prompt(context)

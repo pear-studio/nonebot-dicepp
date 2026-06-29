@@ -33,7 +33,6 @@ class EventGenerationResult:
 class EventReactionResult:
     """Character Agent 对事件的反应结果"""
     reaction: str = ""
-    share_desire: float = 0.0
-    follow_up_action: Optional[str] = None  # None=无后续行动, 非空字符串=续写, 空字符串=不续写
-    pending_plan: Optional[str] = None  # None=保持, ""=清空, 非空=更新
+    has_follow_up: bool = False  # 是否想继续行动，true=DM 继续裁决
+    last_say_content: str = ""  # 角色上一轮的 say content，供 DM 裁决上下文（当前等于 reaction，未来可能不同）
     raw_response: str = ""  # LLM 原始工具调用参数 JSON
