@@ -33,12 +33,14 @@ from .gateway.port import MessagePort
 from .life.action_evaluator import ActionEvaluator
 from .life.character_life import CharacterLife, CharacterLifeConfig
 from .life.diary import DiaryGenerator, DiaryConfig
-from .life.event_agent import EventGenerationAgent
 from .life.proactive_config import ProactiveConfig
 from .life.proactive_scheduler import ProactiveScheduler
 from .life.simulator import LifeSimulator, LifeConfig
 from .life.protocols import SleepGate
 from .life.target import TargetSelector
+from .life.dm_agent import DMAgent
+from .life.character_agent import CharacterAgent
+from .life.sa_agent import SAAgent
 from .llm.coordinator import LLMCallCoordinator
 from .llm.router import LLMRouter
 from .tools.registry import ToolRegistry, ToolDomain
@@ -81,7 +83,7 @@ class PersonaApp:
     all_providers_disabled: bool = False
     current_character_name: str = ""
 
-    # ── 角色卡 ────────────────────────────────────────────────
+    # ── 角色卡 ──
 
     async def update_character(self, character: Character) -> None:
         """统一传播新的角色卡到所有子系统。"""
@@ -105,7 +107,7 @@ class PersonaApp:
         char = self.chat.character
         return char.get_relation_labels() if char else []
 
-    # ── 对话 ──────────────────────────────────────────────────
+    # ── 对话 ──
 
     async def clear_chat_history(self, user_id: str, group_id: str) -> None:
         await self.chat.clear_history(user_id, group_id)
@@ -116,12 +118,12 @@ class PersonaApp:
     ) -> Optional[str]:
         return await self.chat.chat(user_id, group_id, message, nickname, image_data_urls=image_data_urls)
 
-    # ── 消息发送 ──────────────────────────────────────────────
+    # ── 消息发送 ──
 
     async def send_message(self, user_id: str, group_id: str, content: str, msg_id: Optional[int] = None) -> bool:
         return await self.port.send(user_id, group_id, content, msg_id=msg_id)
 
-    # ── LLM 路由器 ────────────────────────────────────────────
+    # ── LLM 路由器 ──
 
     def get_router(self) -> Optional[LLMRouter]:
         return self.chat.router
@@ -134,7 +136,7 @@ class PersonaApp:
         router = self.chat.router
         return router.get_latency_percentiles(provider_name) if router else {}
 
-    # ── 调度器 ────────────────────────────────────────────────
+    # ── 调度器 ──
 
     def get_scheduler(self) -> Optional[ProactiveScheduler]:
         return self.life.scheduler
@@ -143,9 +145,9 @@ class PersonaApp:
         scheduler = self.life.scheduler
         return scheduler.get_status() if scheduler else {}
 
-    def get_scheduler_event_agent(self) -> Optional[Any]:
-        scheduler = self.life.scheduler
-        return scheduler.event_agent if scheduler else None
+    def get_character_agent(self) -> Optional[Any]:
+        """返回 LifeSimulator 持有的 CharacterAgent（日报/外部模块使用）"""
+        return getattr(self.life, 'character_agent', None)
 
     def pause_scheduler(self) -> None:
         scheduler = self.life.scheduler
@@ -157,7 +159,7 @@ class PersonaApp:
         if scheduler:
             scheduler.config.enabled = True
 
-    # ── 衰减计算 ──────────────────────────────────────────────
+    # ── 衰减计算 ──
 
     def get_decay_calculator(self) -> Optional[DecayCalculator]:
         return self.chat.decay_calculator
@@ -166,7 +168,7 @@ class PersonaApp:
         calc = self.chat.decay_calculator
         return calc.effective_relationship(rel) if calc else rel
 
-    # ── 生命周期驱动 ──────────────────────────────────────────
+    # ── 生命周期驱动 ──
 
     async def is_awake(self) -> bool:
         """角色是否处于唤醒状态。委托给 ``ChatSession.is_awake()``。"""
@@ -250,7 +252,6 @@ async def _build_store(bot: Bot, config, character_name: str) -> PersonaDataStor
     if core_db is None:
         raise PersonaStorageError("数据库未初始化（bot.db 或 bot.db._db 为 None）")
 
-    # 拼接 persona_db 路径: data/bots/{bot_id}/personas_data_{character_name}.db
     bot_dir = Paths.bot_data_dir(bot.account)
     persona_db_path = str(bot_dir / f"personas_data_{character_name}.db")
     os.makedirs(str(bot_dir), exist_ok=True)
@@ -269,7 +270,6 @@ async def _build_store(bot: Bot, config, character_name: str) -> PersonaDataStor
         raise PersonaStorageError(f"数据库表初始化失败: {e}") from e
     logger.info(f"数据存储已初始化: persona_db={persona_db_path}")
 
-    # 迁移旧 persona_settings 中的 'code' 到 persona_global_settings
     await _migrate_code_setting(store)
 
     return store
@@ -279,7 +279,7 @@ async def _migrate_code_setting(store: PersonaDataStore) -> None:
     """首次启动时将旧 persona_settings 中的 'code' 迁移到 persona_global_settings"""
     existing = await store.get_global_setting("code")
     if existing is not None:
-        await store.delete_setting("code")  # 清理 persona_db 侧残留
+        await store.delete_setting("code")
         return
     old_code = await store.get_setting("code")
     if old_code is not None:
@@ -346,22 +346,43 @@ def _build_tooling(
     router: LLMRouter,
     config,
     character: Character,
-) -> tuple[ToolRegistry, EventGenerationAgent, CharacterLife, ActionEvaluator]:
-    """创建工具注册表、事件代理、角色生活、动作评估器"""
+) -> tuple[ToolRegistry, DMAgent, CharacterAgent, SAAgent, CharacterLife, ActionEvaluator]:
+    """创建工具注册表、Agent 实例、角色生活、动作评估器
+
+    Phase 1: 创建 DM / Character / SA 三个 Agent 实例。
+    """
     tool_registry = ToolRegistry()
     tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
     tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
     tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
     tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
 
-    event_agent = EventGenerationAgent(router, tool_registry, config=config, store=store)
+    # Phase 1: roll_dice / read_events / search_events 注册到 LIFE 域
+    # （DM Agent 运行时可访问）
+    tool_registry.register(ToolDomain.LIFE, ROLL_DICE_TOOL, roll_dice_executor)
+    tool_registry.register(
+        ToolDomain.LIFE,
+        READ_EVENTS_TOOL,
+        make_read_events_executor(),
+    )
+    tool_registry.register(
+        ToolDomain.LIFE,
+        SEARCH_EVENTS_TOOL,
+        make_search_events_executor(),
+    )
+
+    # ── 创建 Agent 实例 ──
+    dm_agent = DMAgent(store, router, config=config, tool_registry=tool_registry)
+    character_agent = CharacterAgent(store, router, config=config, tool_registry=tool_registry)
+    sa_agent = SAAgent(store, router, config=config, tool_registry=tool_registry)
 
     life_config = CharacterLifeConfig.from_persona(config)
     character_life = CharacterLife(
         config=life_config,
-        event_agent=event_agent,
         data_store=store,
         character=character,
+        dm_agent=dm_agent,
+        character_agent=character_agent,
     )
 
     action_evaluator = ActionEvaluator(
@@ -445,8 +466,8 @@ def _build_tooling(
     tool_registry.register(ToolDomain.CHAT, gen_tool_def, gen_executor)
     tool_registry.register(ToolDomain.CHAT, LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor)
 
-    logger.info("工具注册表与分段调度器已初始化")
-    return tool_registry, event_agent, character_life, action_evaluator
+    logger.info("工具注册表与 Agent 实例已初始化")
+    return tool_registry, dm_agent, character_agent, sa_agent, character_life, action_evaluator
 
 
 def _make_resolve_query_db(bot: Bot):
@@ -525,9 +546,14 @@ async def _build_life(
     port: MessagePort,
     decay_calculator: DecayCalculator,
     character_life: CharacterLife,
-    event_agent: EventGenerationAgent,
+    dm_agent: DMAgent,
+    character_agent: CharacterAgent,
+    sa_agent: SAAgent,
 ) -> LifeSimulator:
-    """组装 LifeSimulator — 仅构造 scheduler, diary_generator 等外围组件"""
+    """组装 LifeSimulator
+
+    Phase 1: Agent 引用注入到 ProactiveScheduler / DiaryGenerator / LifeSimulator。
+    """
     target_selector = TargetSelector(
         data_store=store,
         bot_config=config,
@@ -539,7 +565,7 @@ async def _build_life(
         config=scheduler_config,
         data_store=store,
         character=character,
-        event_agent=event_agent,
+        character_agent=character_agent,
         decay_calculator=decay_calculator,
         target_selector=target_selector,
         coordinator=coordinator,
@@ -557,7 +583,7 @@ async def _build_life(
     )
     diary_generator = DiaryGenerator(
         store=store,
-        event_agent=event_agent,
+        character_agent=character_agent,
         character=character,
         config=diary_config,
     )
@@ -570,6 +596,9 @@ async def _build_life(
         diary_generator=diary_generator,
         character=character,
         config=life_config_obj,
+        dm_agent=dm_agent,
+        character_agent=character_agent,
+        sa_agent=sa_agent,
         port=port,
         decay_calculator=decay_calculator,
     )
@@ -582,13 +611,7 @@ async def _startup_summary(
     infra: _Infra,
     bot: Bot,
 ) -> None:
-    """输出启动汇总：结构化日志 + master 消息（仅可用模型）。
-
-    状态语义：
-    - OK: enabled 且 probe 成功
-    - FAIL: enabled 但 probe 失败
-    - DISABLED: provider 或 model 配置为 enabled=False（不会触发 probe）
-    """
+    """输出启动汇总：结构化日志 + master 消息（仅可用模型）。"""
     llm_entries: List[tuple] = []
     gen_entries: List[tuple] = []
     for pname, pconfig in providers.items():
@@ -652,7 +675,6 @@ async def _startup_summary(
     msg_lines = ["Persona AI 启动完成"]
     msg_lines.append(f"角色卡: {character.name}" + (f" — {desc}" if desc else ""))
 
-    # 全失败告警（开 LLM 全部不可用时单独提示）
     if llm_entries and not available_llm and failed_llm:
         msg_lines.append(
             f"[ALERT] 所有 {len(failed_llm)} 个 LLM 模型 probe 失败"
@@ -704,7 +726,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         )
 
     infra = await _build_infra(bot, config, character_name)
-    tool_registry, event_agent, character_life, _ = _build_tooling(
+    tool_registry, dm_agent, character_agent, sa_agent, character_life, _ = _build_tooling(
         infra.store, infra.router, config, character,
     )
 
@@ -747,13 +769,14 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         sleep_gate=character_life,
     ))
 
-    # 注入 session_manager 到 ChatSession
     chat.session_manager = session_manager
 
     life = await _build_life(
         infra.store, character, config, coordinator, infra.port, decay_calculator,
         character_life=character_life,
-        event_agent=event_agent,
+        dm_agent=dm_agent,
+        character_agent=character_agent,
+        sa_agent=sa_agent,
     )
 
     probe_results: Dict[tuple, bool] = {}

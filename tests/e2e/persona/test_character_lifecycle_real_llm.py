@@ -39,7 +39,7 @@ from typing import Optional
 import aiosqlite
 import pytest
 
-# 精简日志：只输出 persona INFO 及以上，event_agent 保留 DEBUG 以便查看 prompt
+# 精简日志
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -53,7 +53,6 @@ logging.getLogger("persona.event_agent").setLevel(logging.DEBUG)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "plugins"))
 
 from DicePP.module.persona.llm.router import LLMRouter
-from DicePP.module.persona.life.event_agent import EventGenerationAgent
 from DicePP.module.persona.tools.registry import ToolRegistry, ToolDomain
 from DicePP.module.persona.tools.collecting import (
     RECORD_EVENT_TOOL,
@@ -62,6 +61,8 @@ from DicePP.module.persona.tools.collecting import (
     RECORD_SHARE_MESSAGE_TOOL,
     life_collecting_executor,
 )
+from DicePP.module.persona.life.dm_agent import DMAgent
+from DicePP.module.persona.life.character_agent import CharacterAgent
 from DicePP.module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
@@ -179,29 +180,34 @@ async def _run_full_day_lifecycle() -> dict:
         tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
         tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
         tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
-        agent = EventGenerationAgent(router, tool_registry)
+
+        # Phase 1: 创建 Agent 实例
+        from unittest.mock import MagicMock
+        dm_agent = DMAgent(store, router, config=MagicMock(), tool_registry=tool_registry)
+        character_agent = CharacterAgent(store, router, config=MagicMock(), tool_registry=tool_registry)
+
         config = CharacterLifeConfig(
             enabled=True,
             slot_match_window_minutes=15,
-            
+
             timezone="Asia/Shanghai",
             min_event_interval_minutes=5,
             chain_max_depth=3,
             chain_force_extend_once_prob=0.0,
         )
-        from unittest.mock import MagicMock
         life = CharacterLife(
             config=config,
-            event_agent=agent,
             data_store=store,
             character=character,
+            dm_agent=dm_agent,
+            character_agent=character_agent,
         )
         life.boundary_receiver = MagicMock()
         diary_generator = DiaryGenerator(
             store=store,
-            event_agent=agent,
+            character_agent=character_agent,
             character=character,
-            config=DiaryConfig( timezone="Asia/Shanghai"),
+            config=DiaryConfig(timezone="Asia/Shanghai"),
         )
 
         # 先触发一次 tick 生成槽位（时间设为边界前，不会触发事件）

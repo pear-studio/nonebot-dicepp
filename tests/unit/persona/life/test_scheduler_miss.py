@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
 from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 from plugins.DicePP.module.persona.data.models import RelationshipState
+from plugins.DicePP.module.persona.life.types import AgentResult
 
 
 def _make_mock_character():
@@ -126,8 +127,8 @@ class TestProactiveSchedulerMissYou:
         mock_data_store.get_daily_events.return_value = [self._make_event()]
 
         mock_agent = AsyncMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))
+        scheduler.character_agent = mock_agent
 
         result = await scheduler._check_missed_users()
         # 即使内存 _last_proactive_time 为空，也应因 DB 中已有 last_miss_sent_at 而跳过
@@ -155,8 +156,8 @@ class TestProactiveSchedulerMissYou:
         mock_data_store.get_daily_events.return_value = [self._make_event()]
 
         mock_agent = AsyncMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))
+        scheduler.character_agent = mock_agent
 
         result = await scheduler._check_missed_users()
         assert len(result) == 1
@@ -286,8 +287,8 @@ class TestProactiveSchedulerMissProbability:
         mock_data_store.get_daily_events.return_value = [self._make_event()]
 
         mock_agent = AsyncMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))
+        scheduler.character_agent = mock_agent
 
         result = await scheduler._check_missed_users()
         assert len(result) == 1
@@ -306,8 +307,8 @@ class TestProactiveSchedulerMissProbability:
         mock_data_store.get_daily_events.return_value = [self._make_event()]
 
         mock_agent = AsyncMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))
+        scheduler.character_agent = mock_agent
 
         result = await scheduler._check_missed_users()
         assert result == []
@@ -331,8 +332,8 @@ class TestProactiveSchedulerMissProbability:
         mock_data_store.list_active_relationships.return_value = [rel]
         # 即使所有条件满足，低信誉也跳过
         mock_data_store.get_daily_events.return_value = [self._make_event()]
-        scheduler.event_agent = AsyncMock()
-        scheduler.event_agent.generate_share_message = AsyncMock(return_value="msg")
+        scheduler.character_agent = MagicMock()
+        scheduler.character_agent.share = AsyncMock(return_value=AgentResult(success=True, data="msg"))
 
         result = await scheduler._check_missed_users()
         assert result == []
@@ -360,8 +361,8 @@ class TestProactiveSchedulerMissProbability:
         mock_data_store.list_active_relationships.return_value = [rel]
         mock_data_store.get_daily_events.return_value = [self._make_event()]
 
-        scheduler.event_agent = AsyncMock()
-        scheduler.event_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
+        scheduler.character_agent = MagicMock()
+        scheduler.character_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))
 
         result = await scheduler._check_missed_users()
         assert len(result) == 1  # 通过门控后正常触发
@@ -399,8 +400,8 @@ class TestProactiveSchedulerMissProbability:
 
         # 让消息生成成功
         mock_agent = AsyncMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))
+        scheduler.character_agent = mock_agent
 
         result = await scheduler._check_missed_users()
         assert len(result) == 1
@@ -419,8 +420,8 @@ class TestProactiveSchedulerMissProbability:
 
         # 让消息生成成功
         mock_agent = AsyncMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))
+        scheduler.character_agent = mock_agent
 
         await scheduler._check_missed_users()
         mock_data_store.update_relationship.assert_called()
@@ -463,8 +464,8 @@ class TestProactiveSchedulerMessageCreation:
         from plugins.DicePP.module.persona.life.models import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         mock_agent = AsyncMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="有点想你了呢~")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))
+        scheduler.character_agent = mock_agent
         msg = await scheduler._create_miss_you_message(target, "吃了蛋糕", "")
         assert msg["user_id"] == "u1"
         assert msg["group_id"] == ""

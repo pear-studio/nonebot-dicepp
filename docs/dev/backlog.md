@@ -110,33 +110,62 @@
 
 ## persona
 
-### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
-- 创建: 2026-06-22
+### [B-260622-0ed4e3] DM 条目化、D20 两轮裁决与叙事线索管理
+- 创建: 2026-06-29
 - 优先级: P1
 - 类型: refactor
 - 改动量: L
 - 问题表现:
-  - 事件生成（`EventGenerationAgent.generate_event_result`）当前 prompt 自称"世界观设定专家"，但实际没有 DM 的裁决权和隐藏信息
-  - 角色反应中的 `follow_up_action` 直接注入下一环事件的 scenario，角色企图直接兑现为事件走向。中途没有不确定性——角色想去采药就一定能采到，不会遇到意外
-  - 缺少长线叙事记忆：DM 不知道当前有哪些线索在推进、进展到哪了。每次事件生成是独立的，产出趋于流水账和随机事件
-  - 没有从状态数值到叙事意义的动态裁决——体力低是一个数字，DM 不据此调整事件走向（静态 `_STATE_SCALE_PROMPT` 仅提供刻度描述，缺乏上下文相关的裁决能力）
+  - 当前 DMAgent（`dm_agent.py`）已拆分并跑通一次 LLM 调用产出事件，但 DM 的裁决权仍是 prompt 层自称——`follow_up_action` 直接注入 chain context 的 scenario，角色企图直接兑现为事件走向，无不确定性
+  - D20 工具已声明可用（`self.tools = ["roll_dice", ...]`）但 Phase 1 prompt 不引导使用——DM 不掷骰子裁决角色企图
+  - `DMState.scratchpad` 已建表但仅做自由笔记——未条目化（创建线索/推进/合并/完结/归档），LLM 自行管理但无结构化约束，长线叙事记忆弱
+  - 裁决需要两轮 LLM：第一轮 DM 评估 DC + 调用 roll_dice → 第二轮根据掷骰结果生成叙事。Phase 1 仅一轮直达事件描述
 - 开发备忘:
-  2026-06-26 第一阶段已完成（event_agent.py prompt 调整）：
-  - `_slot_type_hint` 已移除向 LLM 泄露 `recovery_energy` 保底的行，保底仍由 `character_life.py:568` 代码层执行
-  - `permanent_state` 已接入 system prompt，作为 "DM 备忘" 区块供 LLM 参考
-  - "日常生活" 硬编码 fallback 已删除，scenario 为空时回退到世界观描述（`context.world`）
+  Phase 1（已完成 2026-06-29）：`EventGenerationAgent`（~1800行）拆分为 `Agent` 基类 + `DMAgent` + `CharacterAgent` + `SAAgent`。`DMState`/`SAState` 表已建，`roll_dice` 工具已注册，`follow_up_action` 语义已从"直接注入场景"改为"角色企图，提交 DM 裁决"（prompt 层），链循环保留。
 
-  DM 定位（剩余工作）：世界观层，拥有裁决权，知道角色不知道的隐藏设定。角色只能产生"企图"（follow_up_action / pending_plan），DM 裁决企图的执行结果。
+  Phase 2 剩余工作：
+  - **DM 条目化**：`DMState.scratchpad` 从自由文本升级为结构化线索管理。LLM 在裁决过程中自行创建/推进/合并/完结/归档叙事线索，单次 focus ≤3 条
+  - **D20 两轮裁决**：第一轮 LLM → 评估 DC + 调用 `roll_dice("1d20")` → 四档判定；第二轮 LLM → 根据判定结果生成叙事。D20 仅用于角色企图（主角/NPC），不用于客观时间节点（wake_up/good_night）
+  - **裁决流程**：tick → DM load_state(scratchpad) → 读取 roleplay_context（角色状态 + 今日事件 + 企图）→ 第一轮裁决（DC + D20）→ 第二轮叙事生成 → 产出 EventGenerationResult → Character 反应 → 循环
+  - **影响面**：`dm_agent.py`（run() 改为两轮 LLM 流程 + prompt 重写）、`dm_agent.py`（scratchpad 条目化）、`character_life.py`（context 构建配合裁决流程）
 
-  流程设计：tick → DM 读取角色状态 + DM 备忘（permanent_state DM 区）+ 角色企图 → DM 裁决：产出事件（可能产出一连串叙事链规划）→ 角色生成 reaction + 新的企图 → 循环。DM 产出的叙事链是柔性参考，非时间表——下次 tick 重新裁决。
+### [B-260629-5a1f2c] SA 条目化与选择性注入 DM prompt
+- 创建: 2026-06-29
+- 优先级: P1
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+  - 当前 SAAgent（`sa_agent.py`）仅在 tick_daily 产生纯文本 `SAState.notes`——无 NPC/地点/剧情弧线等分类化记忆
+  - SA 产出的叙事设定无法被 DM 消费：`tick_daily` 的 SA.plan() 写 notes，但下次 DM 生成事件时不读取 SA 状态，DM 不知道 SA 准备了什么
+  - SA 需要条目化：将叙事产出分类为 NPC、地点、剧情弧线、待触发事件等类型，使 DM 在生成事件时可以按需拉取相关条目注入 prompt
+- 开发备忘:
+  依赖 B-260622-0ed4e3（DM 条目化）先落地——SA 条目化的结构需与 DM 的线索管理格式对齐，且 SA→DM 注入需要 DM 侧有对应的消费机制。
+  影响面：`sa_agent.py`（plan() 改为条目化输出）、`sa_agent.py`（prompt 重写引导分类产出）、`data/models.py`（SAState 扩展或新增条目表）、`dm_agent.py`（接收 SA 注入条目）、`simulator.py`（tick_daily 编排 SA→DM 注入）
 
-  DM 备忘管理：LLM 自行管理 `CharacterState.text`（已接入 prompt）——创建线索、推进、合并重复线索、完结、归档。线索整体数量不限，但 focus 上限约 3 条，其余闲置。不结构化，让 LLM 自行把握。
+### [B-260629-b7d3e1] Character.scenario 字段移除评估
+- 创建: 2026-06-29
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现:
+  - `Character.scenario`（角色卡中定义的静态场景文本）在事件生成中被拼入 DM context，但 DM 条目化后场景上下文应由 DM 自身（`DMState.scratchpad` + SA 注入）动态产出
+  - 若 DM 动态场景已可替代静态 scenario，保留该字段增加角色卡定义复杂度且与实际运行状态不一致
+  - `daily_report.py` 中是否依赖 scenario 待确认
+- 开发备忘:
+  依赖 B-260622-0ed4e3 + B-260629-5a1f2c 落地后评估——确认 DM 动态场景 + SA 注入已能覆盖原本 scenario 的所有使用场景后再移除。
+  影响面：`character/models.py`（Character.scenario 字段）、`character_life.py`（DM context 中的 scenario 拼装）、`daily_report.py`（如有引用）
 
-  scenario 清理（剩余）：评估 `Character.scenario` 字段是否移除——事件生成的场景上下文由 DM 动态产出。
-
-  与现有机制的衔接：`pending_plan`/`follow_up_action` 保留——角色仍产生企图，DM 裁决取代直接兑现。`slot_type` 的 wake_up/good_night 保留——起床和入睡是客观时间节点。`recovery_energy` floor 在 DM 架构下重新评估——DM 可依据睡眠质量叙事产出匹配的 delta。
-
-  影响面：`character_life.py`（DM 裁决循环）、`event_agent.py`（prompt 重写为 DM 视角）、`character/models.py`（`Character.scenario` 字段评估是否移除）、`collecting.py`（事件参数可能调整）。
+### [B-260629-c8f2d4] LLM 路由基础设施 move to Agent 基类
+- 创建: 2026-06-29
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现:
+  - `_llm_utils.py` 的 `_run_life_collect_loop()` 被 `agent.py`、`character_agent.py`、`dm_agent.py` 三个文件导入，但它是 Agent 体系的核心调用路径，放在 `life/` 包的私有模块中定位模糊
+  - `Agent.run()` 已有模板方法（load → build prompt → collect），但内部仍需从 `_llm_utils` import 路由函数——可以考虑将 `_run_life_collect_loop` 的逻辑内联到 `Agent` 基类或作为 protected 方法
+- 开发备忘:
+  此条为纯代码组织优化，无功能影响。在所有 Phase 2 功能变更稳定后再执行，避免功能重构与代码移动交织。
+  影响面：`agent.py`（内联或新增 protected 方法）、`_llm_utils.py`（删除或精简）、`character_agent.py` / `dm_agent.py`（调用路径更新）
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01

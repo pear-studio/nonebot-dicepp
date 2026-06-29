@@ -268,12 +268,25 @@ class CharacterState(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    text: str = ""  # 自由文本格式，由 LLM 维护（保留向后兼容）
     energy: Optional[int] = None  # None 表示尚未初始化（旧版纯文本迁移兼容）
     mood: Optional[int] = None
     health: Optional[int] = None
     current_intention: Optional[str] = None
     intention_created_at: Optional[datetime] = None
+
+
+class DMState(BaseModel):
+    """DM 工作状态 — 单行表 JSON blob"""
+
+    scene: str = ""  # 当前场景上下文
+    recent_rulings: str = ""  # 最近裁决记录
+    scratchpad: str = ""  # 自由工作笔记
+
+
+class SAState(BaseModel):
+    """SA 世界设定 — 单行表 JSON blob"""
+
+    notes: str = ""  # 叙事规划 + NPC/地点/剧情设定
 
 
 class GroupActivity(BaseModel):

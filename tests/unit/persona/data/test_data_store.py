@@ -590,22 +590,21 @@ class TestCharacterStateCRUD:
         assert state.health is None
 
         # 更新结构化状态
-        state.text = "Feeling happy"
         state.energy = 60
+        state.current_intention = "Feeling happy"
         await store.update_character_state(state)
 
         loaded = await store.get_character_state()
-        assert loaded.text == "Feeling happy"
         assert loaded.energy == 60
+        assert loaded.current_intention == "Feeling happy"
 
-        # 兼容旧版纯文本：直接存储字符串时应该作为 text 字段解析
+        # 兼容旧版纯文本：text 字段已删除，旧纯文本数据回退到空 CharacterState
         await store.db.execute(
             "INSERT OR REPLACE INTO persona_character_state (id, text, updated_at) VALUES (1, ?, ?)",
             ("Feeling tired", "2024-01-01T00:00:00"),
         )
         await store.db.commit()
         legacy = await store.get_character_state()
-        assert legacy.text == "Feeling tired"
         assert legacy.energy is None  # 旧版纯文本迁移：结构化字段保持 None
 
 

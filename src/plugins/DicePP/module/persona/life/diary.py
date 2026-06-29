@@ -1,6 +1,7 @@
 """日记生成器
 
 从 CharacterLife 中提取日记生成逻辑，独立为 DiaryGenerator。
+Phase 1: 使用 CharacterAgent 替代 EventGenerationAgent。
 """
 from typing import Optional, List
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from datetime import timedelta
 
 from ..data.store import PersonaDataStore
 from ..character.models import Character
-from ..life.event_agent import EventGenerationAgent
+from .character_agent import CharacterAgent
 from utils.time import wall_now
 
 
@@ -22,17 +23,17 @@ class DiaryConfig:
 
 
 class DiaryGenerator:
-    """日记生成器 — 负责获取当日事件、调用 LLM 生成日记、保存与清理"""
+    """日记生成器 — 负责获取当日事件、调用 CharacterAgent 生成日记、保存与清理"""
 
     def __init__(
         self,
         store: PersonaDataStore,
-        event_agent: EventGenerationAgent,
+        character_agent: CharacterAgent,
         character: Character,
         config: DiaryConfig,
     ):
         self.store = store
-        self.event_agent = event_agent
+        self.character_agent = character_agent
         self.character_name = character.name
         self.character_description = character.description
         self.config = config
@@ -86,17 +87,24 @@ class DiaryGenerator:
                     "time": evt_time,
                 })
 
-            diary_content = await self.event_agent.generate_diary(
-                events=events_dict,
-                character_name=self.character_name,
-                character_description=self.character_description,
-                yesterday_diary=prev_diary,
-                energy=character_state.energy if character_state else None,
-                mood=character_state.mood if character_state else None,
-                health=character_state.health if character_state else None,
-                current_intention=character_state.current_intention if character_state else None,
-            )
+            # 调用 CharacterAgent.diary()
+            context = {
+                "events": events_dict,
+                "character_name": self.character_name,
+                "character_description": self.character_description,
+                "yesterday_diary": prev_diary,
+                "energy": character_state.energy if character_state else None,
+                "mood": character_state.mood if character_state else None,
+                "health": character_state.health if character_state else None,
+                "current_intention": character_state.current_intention if character_state else None,
+            }
+            result = await self.character_agent.diary(context)
 
+            if not result.success or not result.data:
+                logger.warning("日记生成为空")
+                return None
+
+            diary_content = result.data
             await self.store.save_diary(diary_date, diary_content)
 
             logger.info(f"生成日记: {len(diary_content)} 字")
@@ -105,4 +113,3 @@ class DiaryGenerator:
         except Exception as e:
             logger.exception(f"生成日记失败: {e}")
             return None
-

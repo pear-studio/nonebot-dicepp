@@ -2,7 +2,7 @@
 集成测试: 完整「角色一天」模拟
 
 覆盖：起床 → 事件链 → 睡觉 → 日记 → 次日恢复
-使用 mock LLM 验证代码路径，通过 caplog 验证 prompt 注入。
+使用 mock Agent 验证代码路径。
 """
 
 import pytest
@@ -18,8 +18,8 @@ from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.data.models import CharacterState
-from plugins.DicePP.module.persona.life.event_agent import (
-    EventGenerationAgent, EventGenerationResult, EventReactionResult,
+from plugins.DicePP.module.persona.life.types import (
+    EventGenerationResult, EventReactionResult, AgentResult,
 )
 
 
@@ -53,74 +53,47 @@ def character():
 
 
 @pytest.fixture
-def mock_event_agent():
-    """Mock event agent，按调用顺序返回不同结果"""
-    agent = MagicMock(spec=EventGenerationAgent)
+def mock_agents():
+    """Mock DM agent 和 Character agent，按调用顺序返回不同结果"""
 
-    # 按顺序返回的事件结果（边界事件 wake_up/good_night 也调用 generate_event_result）
-    event_results = [
-        # wake_up
-        EventGenerationResult(description="伸了个懒腰", duration_minutes=0, energy_delta=0, mood_delta=0, health_delta=0),
-        # 槽位事件 1: 咖啡
-        EventGenerationResult(
-            description="泡了一杯咖啡", duration_minutes=15,
-            energy_delta=5, mood_delta=10, health_delta=0,
-        ),
-        # 槽位事件 2: 散步
-        EventGenerationResult(
-            description="在公园散步", duration_minutes=30,
-            energy_delta=-10, mood_delta=5, health_delta=3,
-        ),
-        # 槽位事件 3: 看书
-        EventGenerationResult(
-            description="坐在长椅上看书", duration_minutes=45,
-            energy_delta=-5, mood_delta=8, health_delta=0,
-        ),
-        # good_night
-        EventGenerationResult(description="打了个哈欠", duration_minutes=0, energy_delta=0, mood_delta=0, health_delta=0),
-        # 次日槽位事件
-        EventGenerationResult(description="吃早餐", duration_minutes=20),
+    class MockDMAgent:
+        async def run(self, context):
+            return mock_dm_responses.pop(0)
+        async def load_state(self):
+            from plugins.DicePP.module.persona.data.models import DMState
+            return DMState()
+
+    class MockCharacterAgent:
+        async def react(self, context):
+            return mock_char_responses.pop(0)
+        async def load_state(self):
+            return CharacterState()
+        async def diary(self, context):
+            return AgentResult(success=True, data="今天喝了咖啡，散了步，看了书。很充实的一天。")
+
+    # Mock DM 按顺序返回的事件结果
+    mock_dm_responses = [
+        AgentResult(success=True, data=EventGenerationResult(description="伸了个懒腰", duration_minutes=0, energy_delta=0, mood_delta=0, health_delta=0)),
+        AgentResult(success=True, data=EventGenerationResult(description="泡了一杯咖啡", duration_minutes=15, energy_delta=5, mood_delta=10, health_delta=0)),
+        AgentResult(success=True, data=EventGenerationResult(description="在公园散步", duration_minutes=30, energy_delta=-10, mood_delta=5, health_delta=3)),
+        AgentResult(success=True, data=EventGenerationResult(description="坐在长椅上看书", duration_minutes=45, energy_delta=-5, mood_delta=8, health_delta=0)),
+        AgentResult(success=True, data=EventGenerationResult(description="打了个哈欠", duration_minutes=0, energy_delta=0, mood_delta=0, health_delta=0)),
+        AgentResult(success=True, data=EventGenerationResult(description="吃早餐", duration_minutes=20)),
     ]
-    agent.generate_event_result = AsyncMock(side_effect=event_results)
 
-    # 按顺序返回的反应结果
-    reaction_results = [
-        # wake_up：无 tendency
-        EventReactionResult(
-            reaction="早上好", share_desire=0.5,
-            follow_up_action="", pending_plan=None,
-        ),
-        # 咖啡：有 tendency，触发续链
-        EventReactionResult(
-            reaction="咖啡很香", share_desire=0.6,
-            follow_up_action="想去公园走走", pending_plan=None,
-        ),
-        # 散步：有 tendency，触发续链
-        EventReactionResult(
-            reaction="空气很好", share_desire=0.5,
-            follow_up_action="想找个地方看书", pending_plan=None,
-        ),
-        # 看书：无 tendency，链结束
-        EventReactionResult(
-            reaction="书很有意思", share_desire=0.4,
-            follow_up_action="", pending_plan="",
-        ),
-        # good_night：无 tendency
-        EventReactionResult(
-            reaction="困了", share_desire=0.3,
-            follow_up_action="", pending_plan=None,
-        ),
-        # 次日事件反应
-        EventReactionResult(
-            reaction="好吃", share_desire=0.5,
-            follow_up_action="", pending_plan=None,
-        ),
+    # Mock Character 按顺序返回的反应结果
+    mock_char_responses = [
+        AgentResult(success=True, data=EventReactionResult(reaction="早上好", share_desire=0.5, follow_up_action="", pending_plan=None)),
+        AgentResult(success=True, data=EventReactionResult(reaction="咖啡很香", share_desire=0.6, follow_up_action="想去公园走走", pending_plan=None)),
+        AgentResult(success=True, data=EventReactionResult(reaction="空气很好", share_desire=0.5, follow_up_action="想找个地方看书", pending_plan=None)),
+        AgentResult(success=True, data=EventReactionResult(reaction="书很有意思", share_desire=0.4, follow_up_action="", pending_plan="")),
+        AgentResult(success=True, data=EventReactionResult(reaction="困了", share_desire=0.3, follow_up_action="", pending_plan=None)),
+        AgentResult(success=True, data=EventReactionResult(reaction="好吃", share_desire=0.5, follow_up_action="", pending_plan=None)),
     ]
-    agent.generate_event_reaction = AsyncMock(side_effect=reaction_results)
 
-    agent.generate_diary = AsyncMock(return_value="今天喝了咖啡，散了步，看了书。很充实的一天。")
-
-    return agent
+    dm = MockDMAgent()
+    char = MockCharacterAgent()
+    return dm, char
 
 
 @pytest.fixture
@@ -128,7 +101,7 @@ def config():
     return CharacterLifeConfig(
         enabled=True,
         slot_match_window_minutes=15,
-        
+
         timezone="Asia/Shanghai",
         min_event_interval_minutes=5,
         chain_max_depth=3,
@@ -137,13 +110,15 @@ def config():
 
 
 @pytest.fixture
-def life(temp_db, mock_event_agent, character, config):
+def life(temp_db, mock_agents, character, config):
     from unittest.mock import MagicMock
+    dm_agent, character_agent = mock_agents
     life = CharacterLife(
         config=config,
-        event_agent=mock_event_agent,
         data_store=temp_db,
         character=character,
+        dm_agent=dm_agent,
+        character_agent=character_agent,
     )
     life.boundary_receiver = MagicMock()
     return life
@@ -153,7 +128,7 @@ def life(temp_db, mock_event_agent, character, config):
 class TestCharacterDaySimulation:
     """完整一天模拟 — 分阶段聚焦测试"""
 
-    # ── helper: time advancement ──────────────────────────────────────
+    # ── helper: time advancement ──
     def _set_time(self, monkeypatch, dt: datetime):
         monkeypatch.setattr(
             "plugins.DicePP.module.persona.life.character_life.wall_now",
@@ -179,21 +154,43 @@ class TestCharacterDaySimulation:
         assert state.energy == 70  # 50 + wake_up floor 20
 
     @pytest.mark.asyncio
-    async def test_chain_event_updates_state_within_bounds(self, life, mock_event_agent, monkeypatch):
+    async def test_chain_event_updates_state_within_bounds(self, life, mock_agents, monkeypatch):
         """槽位事件链更新状态，energy stays in [0, 100]"""
-        from plugins.DicePP.module.persona.life.event_agent import EventGenerationResult, EventReactionResult
+        dm_agent, character_agent = mock_agents
 
-        # Override mock to produce chainable results
-        mock_event_agent.generate_event_result = AsyncMock(side_effect=[
+        # Override mock responses to produce chainable results
+        # Reset the pop lists with chainable mocks
+        chain_event_results = [
             EventGenerationResult(description="泡了一杯咖啡", duration_minutes=15, energy_delta=5, mood_delta=3, health_delta=0),
             EventGenerationResult(description="在公园散步", duration_minutes=30, energy_delta=-2, mood_delta=2, health_delta=1),
             EventGenerationResult(description="坐在长椅上看书", duration_minutes=45, energy_delta=-1, mood_delta=1, health_delta=0),
-        ])
-        mock_event_agent.generate_event_reaction = AsyncMock(side_effect=[
+        ]
+        chain_reaction_results = [
             EventReactionResult(reaction="咖啡很香", share_desire=0.6, follow_up_action="想去散步", pending_plan=None),
             EventReactionResult(reaction="空气很好", share_desire=0.5, follow_up_action="想看书", pending_plan=None),
             EventReactionResult(reaction="书很有意思", share_desire=0.4, follow_up_action="", pending_plan=""),
-        ])
+        ]
+
+        # Create new mock agents with chainable data
+        class ChainDMAgent:
+            def __init__(self, events):
+                self._events = list(events)
+            async def run(self, context):
+                return AgentResult(success=True, data=self._events.pop(0))
+            async def load_state(self):
+                from plugins.DicePP.module.persona.data.models import DMState
+                return DMState()
+
+        class ChainCharacterAgent:
+            def __init__(self, reactions):
+                self._reactions = list(reactions)
+            async def react(self, context):
+                return AgentResult(success=True, data=self._reactions.pop(0))
+            async def load_state(self):
+                return CharacterState()
+
+        life.dm_agent = ChainDMAgent(chain_event_results)
+        life.character_agent = ChainCharacterAgent(chain_reaction_results)
 
         await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
         self._set_time(monkeypatch, datetime(2024, 1, 1, 10, 0, 0))

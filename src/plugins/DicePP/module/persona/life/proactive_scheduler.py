@@ -16,7 +16,6 @@ from ..data.models import RelationshipState, DEFAULT_RELATION_LABELS
 from ..character.models import Character
 from ..game.decay import DecayCalculator
 from utils.time import wall_now, format_timestamp, format_relative_time
-from .event_agent import EventGenerationAgent, ShareMessageContext
 from .protocols import BoundaryReceiver
 from .models import ShareTarget
 from .utils import effective_for_proactive
@@ -25,6 +24,7 @@ from .proactive_config import ProactiveConfig
 if TYPE_CHECKING:
     from .target import TargetSelector
     from ..llm.coordinator import LLMCallCoordinator
+    from .character_agent import CharacterAgent
 
 
 class ProactiveScheduler(BoundaryReceiver):
@@ -40,13 +40,13 @@ class ProactiveScheduler(BoundaryReceiver):
         character: Character,
         target_selector: "TargetSelector",
         coordinator: "LLMCallCoordinator",
-        event_agent: Optional[EventGenerationAgent] = None,
+        character_agent: Optional["CharacterAgent"] = None,
         decay_calculator: Optional[DecayCalculator] = None,
     ):
         self.config = config
         self.data_store = data_store
         self.character = character
-        self.event_agent = event_agent
+        self.character_agent = character_agent
         self._decay_calculator = decay_calculator
         self.target_selector = target_selector
         self.coordinator = coordinator
@@ -452,7 +452,7 @@ class ProactiveScheduler(BoundaryReceiver):
         Returns:
             消息 dict，生成失败返回 None
         """
-        if not self.event_agent:
+        if not self.character_agent:
             return None
 
         try:
@@ -478,7 +478,7 @@ class ProactiveScheduler(BoundaryReceiver):
 
             share_examples = self.character.extensions.share_message_examples
 
-            # 获取角色当前状态与今日事件（Phase 2 prompt 注入）
+            # 获取角色当前状态与今日事件
             character_state = await self.data_store.get_character_state()
             today = self._get_today_str()
             today_db_events = await self.data_store.get_daily_events(today)
@@ -487,29 +487,32 @@ class ProactiveScheduler(BoundaryReceiver):
                 evt_time = e.created_at.strftime("%H:%M") if e.created_at else "??:??"
                 today_events.append({"description": e.description, "time": evt_time})
 
-            context = ShareMessageContext(
-                event_description=event_description,
-                reaction=reaction,
-                character_name=self.character.name,
-                character_description=self.character.description,
-                target_user_id=target.user_id,
-                relationship_score=relationship_score,
-                relation_label=relation_label,
-                user_profile_facts=self._format_user_profile_facts(user_profile),
-                recent_history=self._format_recent_history(recent_msgs, self.config.share_context_history_limit),
-                message_type=message_type,
-                environment=environment,
-                share_message_examples=share_examples,
-                energy=character_state.energy if character_state else None,
-                mood=character_state.mood if character_state else None,
-                health=character_state.health if character_state else None,
-                today_events=today_events if today_events else None,
-                current_intention=character_state.current_intention if character_state else None,
-            )
+            # 构建 share context dict
+            share_context = {
+                "mode": "share",
+                "event_description": event_description,
+                "reaction": reaction,
+                "character_name": self.character.name,
+                "character_description": self.character.description,
+                "target_user_id": target.user_id,
+                "relationship_score": relationship_score,
+                "relation_label": relation_label,
+                "user_profile_facts": self._format_user_profile_facts(user_profile),
+                "recent_history": self._format_recent_history(recent_msgs, self.config.share_context_history_limit),
+                "message_type": message_type,
+                "environment": environment,
+                "share_message_examples": share_examples,
+                "energy": character_state.energy if character_state else None,
+                "mood": character_state.mood if character_state else None,
+                "health": character_state.health if character_state else None,
+                "today_events": today_events if today_events else None,
+                "current_intention": character_state.current_intention if character_state else None,
+            }
 
-            message = await self.event_agent.generate_share_message(context)
-            if not message:
+            result = await self.character_agent.share(share_context)
+            if not result.success or result.data is None:
                 return None
+            message = result.data
         except asyncio.CancelledError:
             raise
         except Exception as e:

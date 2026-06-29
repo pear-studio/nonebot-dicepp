@@ -282,20 +282,18 @@ class TestCharacterState:
         from plugins.DicePP.module.persona.data.models import CharacterState
 
         state = CharacterState(
-            text="状态文本",
             energy=80,
             unknown_field="should be ignored",
             legacy_extra={"old_key": "old_value"},
         )
-        assert state.text == "状态文本"
         assert state.energy == 80
+        # extra=ignore 确保未知字段被静默丢弃
 
     def test_default_values(self):
         """默认值验证"""
         from plugins.DicePP.module.persona.data.models import CharacterState
 
         state = CharacterState()
-        assert state.text == ""
         assert state.energy is None
         assert state.mood is None
         assert state.health is None
@@ -305,10 +303,10 @@ class TestCharacterState:
         """extra 字段不会出现在 model_dump 中"""
         from plugins.DicePP.module.persona.data.models import CharacterState
 
-        state = CharacterState(text="hello", extra_field="ignored")
+        state = CharacterState(energy=80, extra_field="ignored")
         dumped = state.model_dump()
         assert "extra_field" not in dumped
-        assert dumped["text"] == "hello"
+        assert dumped["energy"] == 80
 
 
 if __name__ == "__main__":

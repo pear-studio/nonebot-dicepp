@@ -2,7 +2,7 @@
 角色生活模拟
 
 管理角色的全天生活事件生成和日记记录。
-事件触发时刻由角色卡 PersonaExtensions.generate_event_times() 决定（日内分钟槽位）。
+Phase 1: 退回纯状态管理，LLM 调用委托给 DM/Character Agent。
 """
 import asyncio
 import json
@@ -14,16 +14,18 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
-from .event_agent import EventGenerationAgent, EventContext, EventGenerationResult, EventReactionResult
 from ..character.models import Character
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
-from ..data.models import CharacterState
-from utils.time import wall_now
+from ..data.models import CharacterState, DMState
+from utils.time import wall_now, format_timestamp
+from .types import EventGenerationResult, EventReactionResult
 from .protocols import BoundaryReceiver
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
+    from .dm_agent import DMAgent
+    from .character_agent import CharacterAgent
 
 
 @dataclass
@@ -54,20 +56,15 @@ class CharacterLifeConfig:
         good_night_cooldown_hours: int = 22,
     ):
         self.enabled = enabled
-        # 当前「时:分」与计划槽位（自 0 点起的分钟）相差不超过该值则触发；tick 约 60s 一轮
         self.slot_match_window_minutes = slot_match_window_minutes
         self.timezone = timezone
         self.min_event_interval_minutes = min_event_interval_minutes
-        # 事件-反应链配置
         self.chain_max_depth = max(1, min(10, chain_max_depth))
         self.chain_force_extend_once_prob = chain_force_extend_once_prob
-        # wake_up 体力 delta floor 值
         self.recovery_energy = recovery_energy
-        # 旧版纯文本状态迁移默认值
         self.default_energy = default_energy
         self.default_mood = default_mood
         self.default_health = default_health
-        # good_night 冷却时间（小时），防止再生后同窗口内重复触发
         self.good_night_cooldown_hours = good_night_cooldown_hours
 
     @classmethod
@@ -90,37 +87,33 @@ class CharacterLifeConfig:
 
 
 class CharacterLife:
-    """角色生活管理器"""
+    """角色生活管理器 — Phase 1: 纯状态管理，LLM 委托给 Agent"""
 
     def __init__(
         self,
         config: CharacterLifeConfig,
-        event_agent: EventGenerationAgent,
         data_store: PersonaDataStore,
         character: Character,
+        dm_agent: Optional["DMAgent"] = None,
+        character_agent: Optional["CharacterAgent"] = None,
     ):
         self.config = config
-        self.event_agent = event_agent
         self.data_store = data_store
         self.character = character
-        # 当日计划槽位（自 0 点起的分钟, 槽位类型），边界槽位类型为 wake_up/good_night，日常为 system
+        self.dm_agent = dm_agent
+        self.character_agent = character_agent
+        # 当日计划槽位
         self._slot_minutes_today: Optional[List[Tuple[int, str]]] = None
         self._fired_slot_indices: Set[int] = set()
         self._last_event_date: Optional[str] = None
         self._ongoing_activities: List[OngoingActivity] = []
-        # 活跃时间波动边界（分钟，自 0 点起）
         self._today_jittered_start: Optional[int] = None
         self._today_jittered_end: Optional[int] = None
-        # 今天是否已触发过链式事件（深度 >= 2）
         self._chain_triggered_today: bool = False
-        # good_night 冷却：记录上次触发时间，防止再生后同窗口内重复触发（跨午夜场景）
         self._last_good_night_fired_at: Optional[datetime] = None
-        # 可选的边界接收器，用于同步波动边界和标记边界事件
         self.boundary_receiver: Optional[BoundaryReceiver] = None
         self._boundaries_loaded = False
-        # 状态读写并发锁（保护 inject_spontaneous_event 与 generate_daily_event 的 state 读写区间）
         self._state_lock = asyncio.Lock()
-        # 待处理的自发事件分享信息，由 LifeSimulator.tick() 消费
         self._pending_shares: List[Tuple[str, str, float]] = []
 
     def update_character(self, character: Character) -> None:
@@ -128,7 +121,6 @@ class CharacterLife:
         self.character = character
 
     def set_boundary_receiver(self, receiver: Optional[BoundaryReceiver]) -> None:
-        """仅在装配阶段调用一次，不支持运行时替换。"""
         if self._boundaries_loaded:
             raise RuntimeError("必须在 load_persistent_state 之前注入 boundary_receiver")
         self.boundary_receiver = receiver
@@ -138,35 +130,24 @@ class CharacterLife:
 
     @property
     def _spans_midnight(self) -> bool:
-        """角色活跃时间是否跨午夜。优先使用抖动后的实际边界。"""
         if self._today_jittered_start is not None and self._today_jittered_end is not None:
             end = self._today_jittered_end
             start = self._today_jittered_start
             return end >= 1440 or start > end
-        # 回退：基础小时（仅在 _reset_daily_state 首次调用且无旧槽位时使用）
         start_base = self.character.extensions.event_day_start_hour * 60
         end_base = self.character.extensions.event_day_end_hour * 60
         return (start_base >= end_base) or (end_base >= 1440)
 
     def _compute_daily_boundaries(self) -> tuple[int, int, random.Random]:
-        """根据日期+角色名 seed 稳定采样今日波动边界，返回(起床分钟, 睡觉分钟, seeded_rng)。"""
         today_str = self._get_today_str()
         seed_str = f"{today_str}:{self.character.name}"
         rng = random.Random(seed_str)
-
         start_jitter = self.character.extensions.event_day_start_jitter_minutes
         end_jitter = self.character.extensions.event_day_end_jitter_minutes
-
         start_base = self.character.extensions.event_day_start_hour * 60
         end_base = self.character.extensions.event_day_end_hour * 60
-
-        start_jitter_val = rng.randint(-start_jitter, start_jitter)
-        end_jitter_val = rng.randint(-end_jitter, end_jitter)
-
-        start_time = start_base + start_jitter_val
-        end_time = end_base + end_jitter_val
-        # 确保至少活跃 1 小时（避免 start == end 导致 scheduler 与槽位过滤不一致）
-        # 仅在非跨午夜场景下修正（跨午夜时 start_time >= end_time 是正常的）
+        start_time = start_base + rng.randint(-start_jitter, start_jitter)
+        end_time = end_base + rng.randint(-end_jitter, end_jitter)
         if start_base < end_base and start_time >= end_time:
             end_time = start_time + 60
         return start_time, end_time, rng
@@ -175,20 +156,16 @@ class CharacterLife:
         start, end, rng = self._compute_daily_boundaries()
         self._today_jittered_start = start
         self._today_jittered_end = end
-        # 同步波动边界到 receiver（保持扩展范围值，下游自行归一化）
         if self.boundary_receiver is not None:
             self.boundary_receiver.set_jittered_boundaries(start, end)
         else:
             logger.debug("boundary_receiver 未注入，跳过波动边界同步")
         min_interval = self.config.min_event_interval_minutes
-        # 前置约束：调整可用区间以避开边界区域（使用扩展范围值）
         constrained_start = start + min_interval
         constrained_end = end - min_interval
         raw: List[Tuple[int, str]] = []
-        # 边界槽位（原始分钟，可能 > 1440）
         raw.append((start, "wake_up"))
         raw.append((end, "good_night"))
-        # 日常槽位（generate_event_times 也需要扩展范围值）
         if constrained_start < constrained_end:
             raw_slots = self.character.extensions.generate_event_times(
                 start_minute=constrained_start, end_minute=constrained_end, rng=rng
@@ -200,8 +177,6 @@ class CharacterLife:
                 "角色 %s 当日可用区间过短（%02d:%02d-%02d:%02d，min_interval=%d），仅生成边界槽位",
                 self.character.name, start // 60, start % 60, end // 60, end % 60, min_interval
             )
-        # 按原始分钟排序（保证逻辑顺序：wake_up → system → good_night），
-        # 然后归一化分钟到 [0, 1440) 供 tick 时钟匹配
         raw.sort(key=lambda x: x[0])
         self._slot_minutes_today = [(m % 1440, t) for m, t in raw]
         logger.debug(
@@ -211,18 +186,11 @@ class CharacterLife:
         )
 
     def _reset_daily_state(self) -> None:
-        """按日历日切换时重置槽位；同日则保证槽位已加载。
-
-        跨午夜角色（end_hour >= 24）在角色日结束前推迟 reset，
-        避免前一天的 good_night 槽位在 00:00 被清空。
-        """
         today = self._get_today_str()
         if self._last_event_date == today:
             if self._slot_minutes_today is None:
                 self._regenerate_slots_for_today()
             return
-
-        # 跨午夜保护：角色日尚未结束时延迟 reset
         if self._spans_midnight:
             has_unfired = (
                 self._slot_minutes_today is not None
@@ -231,7 +199,6 @@ class CharacterLife:
             if has_unfired:
                 self._last_event_date = today
                 return
-
         self._fired_slot_indices.clear()
         self._chain_triggered_today = False
         self._today_jittered_start = None
@@ -276,7 +243,6 @@ class CharacterLife:
         self._last_event_date = today
         sm = data.get("slot_minutes")
         if isinstance(sm, list) and sm:
-            # 兼容旧版：纯整数列表转为 system 类型槽位
             self._slot_minutes_today = []
             for item in sm:
                 if item is None:
@@ -285,12 +251,10 @@ class CharacterLife:
                     self._slot_minutes_today.append((int(item[0]), str(item[1])))
                 else:
                     self._slot_minutes_today.append((int(item), "system"))
-            # 归一化旧持久化槽位分钟到 [0, 1440)（兼容 end_hour >= 24 的旧数据）
             self._slot_minutes_today = [
                 (m % 1440, t) for m, t in self._slot_minutes_today
             ]
         else:
-            # 旧版仅持久化 hours，无法还原分钟槽位：当日重新采样
             self._regenerate_slots_for_today()
         fired = data.get("fired")
         if isinstance(fired, list):
@@ -311,16 +275,13 @@ class CharacterLife:
                     )
                 except (KeyError, TypeError, ValueError):
                     continue
-        # 加载链式触发标记
         self._chain_triggered_today = bool(data.get("chain_triggered"))
-        # 加载 good_night 冷却时间戳
         lg = data.get("last_good_night_fired_at")
         if isinstance(lg, str):
             try:
                 self._last_good_night_fired_at = datetime.fromisoformat(lg)
             except ValueError:
                 self._last_good_night_fired_at = None
-        # 恢复波动边界（兼容旧持久化数据）
         js = data.get("jittered_start")
         je = data.get("jittered_end")
         if js is not None and je is not None:
@@ -359,37 +320,24 @@ class CharacterLife:
         )
 
     async def tick(self) -> Optional[List[Dict[str, Any]]]:
-        """
-        检查是否需要生成事件（统一遍历所有槽位，包括边界事件和日常事件）
-
-        Returns:
-            生成的事件链列表，如果没有则返回 None
-        """
         if not self.config.enabled:
             return None
-
         self._reset_daily_state()
         self._cleanup_expired_activities()
-
         now = self.config.now()
         now_m = now.hour * 60 + now.minute
-
         slots = self._slot_minutes_today
         if not slots:
             return None
-
         win = max(1, self.config.slot_match_window_minutes)
-
         remaining = len(slots) - len(self._fired_slot_indices)
         for i, (slot_m, slot_type) in enumerate(slots):
             if i in self._fired_slot_indices:
                 continue
-            # good_night 冷却：防止再生后新槽位在窗口内立即重复触发
             if (slot_type == "good_night"
                     and self._last_good_night_fired_at is not None
                     and (now - self._last_good_night_fired_at).total_seconds() < 3600 * self.config.good_night_cooldown_hours):
                 continue
-            # 循环距离：处理 slot_m 接近 0 / now_m 接近 1439 的跨午夜边界
             dist = min(abs(now_m - slot_m), 1440 - abs(now_m - slot_m))
             if dist > win:
                 continue
@@ -400,23 +348,16 @@ class CharacterLife:
             event_chain = await self.generate_daily_event(slot_type)
             if event_chain:
                 self._fired_slot_indices.add(i)
-                # 跨午夜模式下，最后一个槽位（good_night）触发后
-                # 立即为当前日历日再生槽位，避免"僵尸日"
                 if self._spans_midnight and len(self._fired_slot_indices) == len(slots):
                     self._fired_slot_indices.clear()
                     self._regenerate_slots_for_today()
-                # good_night 冷却：防止再生后新槽位在窗口内立即重复触发
-                # 先于 save 设置，确保持久化快照包含冷却时间戳
                 if slot_type == "good_night":
                     self._last_good_night_fired_at = now
-
                 await self.save_persistent_state()
                 return event_chain
-
         return None
 
     def _migrate_legacy_state(self, state: Any) -> None:
-        """初始化旧版纯文本迁移的 None 状态（原地修改）"""
         if state.energy is None:
             state.energy = self.config.default_energy
         if state.mood is None:
@@ -426,24 +367,25 @@ class CharacterLife:
 
     @staticmethod
     def _clamp_delta(d: Optional[int]) -> int:
-        """将 delta 值约束到 [-20, 20] 范围内。"""
         if d is None:
             return 0
         return max(-20, min(20, d))
 
+    @staticmethod
+    def _serialize_raw_parts(event_raw: str, reaction_raw: str) -> str:
+        raw_parts: Dict[str, Any] = {}
+        for key, raw in [("event", event_raw), ("reaction", reaction_raw)]:
+            if raw:
+                try:
+                    raw_parts[key] = json.loads(raw)
+                except json.JSONDecodeError:
+                    raw_parts[key] = raw
+        return json.dumps(raw_parts, ensure_ascii=False) if raw_parts else ""
+
     async def generate_daily_event(self, slot_type: str = "system") -> List[Dict[str, Any]]:
-        """生成每日生活事件（事件-反应链），边界事件复用同一流程。
-
-        Args:
-            slot_type: 槽位类型 ("system" | "wake_up" | "good_night")
-
-        Returns:
-            事件链列表，每个元素是一个事件字典
-        """
         try:
             today = self._get_today_str()
             now = self.config.now()
-
             t0 = time.monotonic()
             async with self._state_lock:
                 result = await self._generate_daily_event_impl(today, now, slot_type)
@@ -453,7 +395,6 @@ class CharacterLife:
                     f"generate_daily_event 耗时 {elapsed_ge:.1f}s (>30s) slot_type={slot_type}"
                 )
             return result
-
         except Exception as e:
             logger.exception("生成生活事件失败: {}", e)
             return []
@@ -461,9 +402,12 @@ class CharacterLife:
     async def _generate_daily_event_impl(
         self, today: str, now, slot_type: str
     ) -> List[Dict[str, Any]]:
-        """generate_daily_event 的 state-locked 实现"""
+        """generate_daily_event 的 state-locked 实现
+
+        Phase 1: 通过 DMAgent + CharacterAgent 而非 EventGenerationAgent。
+        """
         try:
-            # 获取角色状态，初始化旧版迁移的 None 字段，处理跨天空清意向
+            # 获取角色状态
             character_state = await self.data_store.get_character_state()
             if character_state:
                 self._migrate_legacy_state(character_state)
@@ -485,11 +429,13 @@ class CharacterLife:
                     character_state.energy, character_state.mood, character_state.health,
                 )
 
+            # 加载 DM 状态（用于 scratchpad 替代旧的 character_state.text）
+            dm_state = await self.data_store.get_dm_state()
+
             # 加载一次上下文（链内复用）
             recent_diaries = await self._get_recent_diaries(3)
             today_db_events = await self._get_today_events()
 
-            # 构建带时间戳的今日事件列表供 prompt 使用
             chain_events: List[Dict[str, str]] = []
             for e in today_db_events:
                 evt_time = e.created_at.strftime("%H:%M") if e.created_at else "??:??"
@@ -502,7 +448,6 @@ class CharacterLife:
             event_chain: List[Dict[str, Any]] = []
             prev_follow_up: Optional[str] = None
 
-            # 根据槽位类型注入场景提示
             if slot_type == "wake_up":
                 base_scenario = f"{self.character.scenario}\n\n【当前场景：角色刚刚醒来】"
             elif slot_type == "good_night":
@@ -514,23 +459,21 @@ class CharacterLife:
                 if chain_depth >= self.config.chain_max_depth:
                     break
 
-                # 每环统一获取时间基准，避免 LLM 调用延迟导致时间漂移
                 now = self.config.now()
                 time_str = now.strftime("%H:%M")
 
-                # 构建当前状态上下文
+                # 构建状态上下文
                 ongoing = self.get_ongoing_activities()
                 ongoing_context = "\n".join(
                     f"- 进行中: {a.description}" for a in ongoing
                 ) if ongoing else ""
-
                 state_context = (
                     f"体力{character_state.energy}/心情{character_state.mood}/健康{character_state.health}"
                 )
                 if ongoing_context:
                     state_context += "\n" + ongoing_context
 
-                # 链续写时以上一环 follow_up_action 为场景提示
+                # 链续写场景
                 if chain_depth == 0:
                     chain_scenario = base_scenario
                 elif prev_follow_up:
@@ -538,60 +481,113 @@ class CharacterLife:
                 else:
                     chain_scenario = self.character.scenario
 
-                context = EventContext(
-                    character_name=self.character.name,
-                    character_description=self.character.description,
-                    world=self.character.extensions.world,
-                    scenario=chain_scenario,
-                    recent_diaries=recent_diaries,
-                    today_events=list(chain_events),
-                    permanent_state=character_state.text + ("\n当前状态: " + state_context if state_context else ""),
-                    current_time=now,
-                    energy=character_state.energy,
-                    mood=character_state.mood,
-                    health=character_state.health,
-                    current_intention=character_state.current_intention,
-                    intention_created_at=character_state.intention_created_at,
-                    slot_type=slot_type if chain_depth == 0 else "system",
-                    chain_depth=chain_depth,
-                )
+                # 构建日记上下文
+                diary_context = ""
+                if recent_diaries:
+                    diary_context = "\n最近日记:\n" + "\n".join(
+                        f"- {d[:100]}..." if len(d) > 100 else f"- {d}"
+                        for d in recent_diaries[-3:]
+                    )
 
-                # 生成事件
-                event_result = await self.event_agent.generate_event_result(context)
+                # 构建今日事件上下文
+                events_context = ""
+                if chain_events:
+                    events_lines = []
+                    for e in chain_events[-5:]:
+                        created_at = e.get("created_at")
+                        if created_at and now:
+                            ts = format_timestamp(created_at, now)
+                        else:
+                            ts = e.get("time", "??:??")
+                        desc = e.get("description", "")
+                        events_lines.append(f"- [{ts}] {desc}")
+                    events_context = (
+                        "\n\n今天已经做过的事：\n"
+                        + "\n".join(events_lines)
+                        + "\n\n角色的一天还在继续。"
+                    )
+
+                # 意向文本
+                intention_text = ""
+                if character_state.current_intention:
+                    intention_text = f"\n当前意向: {character_state.current_intention}"
+                    if character_state.intention_created_at:
+                        intention_text += f"（始于 {character_state.intention_created_at.strftime('%H:%M')}）"
+
+                now_str = now.strftime("%H:%M")
+                date_str = now.strftime("%Y年%m月%d日")
+
+                # ── 调用 DM Agent ──
+                if self.dm_agent is None:
+                    logger.error("dm_agent 未注入，无法生成事件")
+                    break
+
+                # 传递 scratchpad 给 DM Agent
+                dm_context = {
+                    "character_name": self.character.name,
+                    "character_description": self.character.description,
+                    "world": self.character.extensions.world,
+                    "scenario": chain_scenario,
+                    "state_text": state_context,
+                    "diary_context": diary_context,
+                    "events_context": events_context,
+                    "intention_text": intention_text,
+                    "now_str": now_str,
+                    "date_str": date_str,
+                    "slot_type": slot_type if chain_depth == 0 else "system",
+                    "chain_depth": chain_depth,
+                    "_scratchpad": dm_state.scratchpad,
+                }
+                dm_result = await self.dm_agent.run(dm_context)
+                if not dm_result.success or not isinstance(dm_result.data, EventGenerationResult):
+                    logger.warning("DM 生成事件失败，终止链")
+                    break
+
+                event_result: EventGenerationResult = dm_result.data
 
                 # 单事件 delta 硬约束
+                ed = CharacterLife._clamp_delta(event_result.energy_delta)
                 md = CharacterLife._clamp_delta(event_result.mood_delta)
                 hd = CharacterLife._clamp_delta(event_result.health_delta)
 
-                # wake_up 体力 floor 保底：跳过通用 clamp，保留 LLM 输出
+                # wake_up 体力 floor 保底
                 if slot_type == "wake_up":
                     ed = max(event_result.energy_delta or 0, self.config.recovery_energy)
-                else:
-                    ed = CharacterLife._clamp_delta(event_result.energy_delta)
 
-                # 更新状态
-                character_state.energy = max(0, min(100, character_state.energy + ed))
-                character_state.mood = max(0, min(100, character_state.mood + md))
-                character_state.health = max(0, min(100, character_state.health + hd))
+                # 更新角色状态
+                character_state.energy = max(0, min(100, (character_state.energy if character_state.energy is not None else 50) + ed))
+                character_state.mood = max(0, min(100, (character_state.mood if character_state.mood is not None else 50) + md))
+                character_state.health = max(0, min(100, (character_state.health if character_state.health is not None else 50) + hd))
                 await self.data_store.update_character_state(character_state)
 
-                # 生成反应
-                reaction_result = await self.event_agent.generate_event_reaction(
-                    event=event_result.description,
-                    character_name=self.character.name,
-                    character_description=self.character.description,
-                    share_policy="optional",
-                    today_events=list(chain_events),
-                    energy=character_state.energy,
-                    mood=character_state.mood,
-                    health=character_state.health,
-                    current_intention=character_state.current_intention,
-                )
+                # ── 调用 Character Agent ──
+                if self.character_agent is None:
+                    logger.error("character_agent 未注入，无法生成反应")
+                    break
+
+                char_context = {
+                    "mode": "reaction",
+                    "event": event_result.description,
+                    "character_name": self.character.name,
+                    "character_description": self.character.description,
+                    "share_policy": "optional",
+                    "today_events": list(chain_events),
+                    "energy": character_state.energy,
+                    "mood": character_state.mood,
+                    "health": character_state.health,
+                    "current_intention": character_state.current_intention,
+                }
+                char_result = await self.character_agent.react(char_context)
+                if not char_result.success or not isinstance(char_result.data, EventReactionResult):
+                    logger.warning("Character 反应生成失败，终止链")
+                    break
+
+                reaction_result: EventReactionResult = char_result.data
 
                 # 意向生命周期处理
                 pending_plan = reaction_result.pending_plan
                 if pending_plan is None:
-                    pass  # 保持当前意向不变
+                    pass
                 elif pending_plan == "":
                     character_state.current_intention = None
                     character_state.intention_created_at = None
@@ -601,7 +597,6 @@ class CharacterLife:
                     character_state.intention_created_at = now
                     await self.data_store.update_character_state(character_state)
 
-                # 捕获本环 follow_up_action 供下一环场景提示
                 prev_follow_up = reaction_result.follow_up_action
 
                 combined_raw = CharacterLife._serialize_raw_parts(
@@ -626,7 +621,6 @@ class CharacterLife:
                 if event_result.duration_minutes > 0:
                     self._add_ongoing_activity(event_result.description, event_result.duration_minutes)
 
-                # 记录当前环事件到链
                 event_chain.append({
                     "event_id": f"evt_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}",
                     "description": event_result.description,
@@ -637,7 +631,6 @@ class CharacterLife:
                     "slot_type": slot_type if chain_depth == 0 else "system",
                 })
 
-                # debug trace
                 logger.debug(
                     "[chain] {} @ {} depth={} energy={}({:+d}) mood={}({:+d}) health={}({:+d}) "
                     "follow_up={!r} pending_plan={!r} fallback={}",
@@ -650,18 +643,14 @@ class CharacterLife:
                     is_fallback,
                 )
 
-                # 添加到 chain_events 供下一轮使用
                 chain_events.append({"description": event_result.description, "time": time_str})
-
                 chain_depth += 1
 
-                # 检查是否续链（follow_up_action 为 None 或空字符串均不续链）
                 if reaction_result.follow_up_action is not None and reaction_result.follow_up_action != "":
                     if chain_depth >= 2:
                         self._chain_triggered_today = True
                     continue
 
-                # follow_up_action 为空：检查保底
                 if chain_depth == 1 and not self._chain_triggered_today and not is_fallback:
                     if random.random() < self.config.chain_force_extend_once_prob:
                         is_fallback = True
@@ -684,7 +673,6 @@ class CharacterLife:
             return []
 
     async def _get_recent_diaries(self, days: int) -> List[str]:
-        """获取最近 N 天的日记"""
         diaries = []
         for i in range(1, days + 1):
             date = (self.config.now() - timedelta(days=i)).strftime("%Y-%m-%d")
@@ -694,12 +682,10 @@ class CharacterLife:
         return diaries
 
     async def _get_today_events(self) -> List[Any]:
-        """获取今天的事件"""
         today = self._get_today_str()
         return await self.data_store.get_daily_events(today)
 
     def get_event_status(self) -> Dict[str, Any]:
-        """获取事件生成状态（用于调试）"""
         self._reset_daily_state()
         return {
             "enabled": self.config.enabled,
@@ -715,10 +701,9 @@ class CharacterLife:
             "chain_force_extend_once_prob": self.config.chain_force_extend_once_prob,
         }
 
-    # ── SleepGate ──────────────────────────────────────────────
+    # ── SleepGate ──
 
     def _slot_fired(self, slot_type: str) -> bool:
-        """检查指定类型的槽位是否已触发"""
         if not self._slot_minutes_today:
             return False
         for i, (_, st) in enumerate(self._slot_minutes_today):
@@ -727,51 +712,31 @@ class CharacterLife:
         return False
 
     async def is_awake(self) -> bool:
-        """检查角色是否清醒（供 ChatSession 睡眠门控使用）"""
         async with self._state_lock:
             return self._is_awake_locked()
 
     def _is_awake_locked(self) -> bool:
-        """is_awake 的无锁实现，调用方负责持有 _state_lock"""
         if self._today_jittered_start is None or self._today_jittered_end is None:
             return True
-
         now = self.config.now()
         now_m = now.hour * 60 + now.minute
         start = self._today_jittered_start
         end = self._today_jittered_end
-
         in_window: bool
         if self._spans_midnight:
-            # end >= 1440 或 start > end：跨午夜活跃窗
             start_n = start % 1440
             end_n = end % 1440
             in_window = now_m >= start_n or now_m <= end_n
-        elif end >= start:
-            in_window = start <= now_m <= end
         else:
-            in_window = now_m >= start or now_m <= end
-
+            # 当 _spans_midnight=False 时，_spans_midnight 属性保证 end >= start 恒成立
+            in_window = start <= now_m <= end
         if not in_window:
             return False
-
         if self._slot_fired("good_night") and not self._slot_fired("wake_up"):
             return False
-
         return True
 
-    @staticmethod
-    def _serialize_raw_parts(event_raw: str, reaction_raw: str) -> str:
-        raw_parts: Dict[str, Any] = {}
-        for key, raw in [("event", event_raw), ("reaction", reaction_raw)]:
-            if raw:
-                try:
-                    raw_parts[key] = json.loads(raw)
-                except json.JSONDecodeError:
-                    raw_parts[key] = raw
-        return json.dumps(raw_parts, ensure_ascii=False) if raw_parts else ""
-
-    # ── Spontaneous Event Injection ────────────────────────────
+    # ── Spontaneous Event Injection ──
 
     async def _get_today_event_dicts(self) -> List[Dict[str, str]]:
         events = await self._get_today_events()
@@ -785,8 +750,7 @@ class CharacterLife:
     async def inject_spontaneous_event(self, action_description: str) -> bool:
         """注入自发事件，绕开槽位系统。
 
-        注意：此方法不检查 is_awake()，允许在睡眠期间仍有自发事件注入。
-        调用方（suggest_action executor）如需拦截，应自行检查清醒状态。
+        Phase 1: 通过 DMAgent + CharacterAgent 而非 EventGenerationAgent。
         """
         async with self._state_lock:
             try:
@@ -800,6 +764,9 @@ class CharacterLife:
         if not character_state:
             return False
         self._migrate_legacy_state(character_state)
+
+        # 获取 DM state scratchpad（替代旧的 character_state.text）
+        dm_state = await self.data_store.get_dm_state()
 
         now = self.config.now()
         recent_diaries = await self._get_recent_diaries(3)
@@ -815,42 +782,96 @@ class CharacterLife:
         if ongoing_context:
             state_context += "\n" + ongoing_context
 
-        context = EventContext(
-            character_name=self.character.name,
-            character_description=self.character.description,
-            world=self.character.extensions.world,
-            scenario=f"{self.character.scenario}\n\n【当前场景：{action_description}】",
-            recent_diaries=recent_diaries,
-            today_events=list(today_event_dicts),
-            permanent_state=character_state.text + ("\n当前状态: " + state_context if state_context else ""),
-            current_time=now,
-            energy=character_state.energy,
-            mood=character_state.mood,
-            health=character_state.health,
-            current_intention=character_state.current_intention,
-            intention_created_at=character_state.intention_created_at,
-        )
+        # 构建日记上下文
+        diary_context = ""
+        if recent_diaries:
+            diary_context = "\n最近日记:\n" + "\n".join(
+                f"- {d[:100]}..." if len(d) > 100 else f"- {d}"
+                for d in recent_diaries[-3:]
+            )
 
-        event_result = await self.event_agent.generate_event_result(context)
+        events_context = ""
+        if today_event_dicts:
+            events_lines = []
+            for e in today_event_dicts[-5:]:
+                ts = e.get("time", "??:??")
+                desc = e.get("description", "")
+                events_lines.append(f"- [{ts}] {desc}")
+            events_context = (
+                "\n\n今天已经做过的事：\n"
+                + "\n".join(events_lines)
+                + "\n\n角色的一天还在继续。"
+            )
+
+        now_str = now.strftime("%H:%M")
+        date_str = now.strftime("%Y年%m月%d日")
+
+        # 意向文本（与计划事件路径一致）
+        intention_text = ""
+        if character_state.current_intention:
+            intention_text = f"\n当前意向: {character_state.current_intention}"
+            if character_state.intention_created_at:
+                intention_text += f"（始于 {character_state.intention_created_at.strftime('%H:%M')}）"
+
+        # ── 调用 DM Agent ──
+        if self.dm_agent is None:
+            logger.error("[spontaneous] dm_agent 未注入")
+            return False
+
+        dm_context = {
+            "character_name": self.character.name,
+            "character_description": self.character.description,
+            "world": self.character.extensions.world,
+            "scenario": f"{self.character.scenario}\n\n【当前场景：{action_description}】",
+            "state_text": state_context,
+            "diary_context": diary_context,
+            "events_context": events_context,
+            "intention_text": intention_text,
+            "now_str": now_str,
+            "date_str": date_str,
+            "slot_type": "system",
+            "chain_depth": 0,
+            "_scratchpad": dm_state.scratchpad,
+        }
+        dm_result = await self.dm_agent.run(dm_context)
+        if not dm_result.success or not isinstance(dm_result.data, EventGenerationResult):
+            logger.warning("[spontaneous] DM 生成事件失败")
+            return False
+
+        event_result: EventGenerationResult = dm_result.data
+
         ed = CharacterLife._clamp_delta(event_result.energy_delta)
         md = CharacterLife._clamp_delta(event_result.mood_delta)
         hd = CharacterLife._clamp_delta(event_result.health_delta)
 
-        character_state.energy = max(0, min(100, character_state.energy + ed))
-        character_state.mood = max(0, min(100, character_state.mood + md))
-        character_state.health = max(0, min(100, character_state.health + hd))
+        character_state.energy = max(0, min(100, (character_state.energy if character_state.energy is not None else 50) + ed))
+        character_state.mood = max(0, min(100, (character_state.mood if character_state.mood is not None else 50) + md))
+        character_state.health = max(0, min(100, (character_state.health if character_state.health is not None else 50) + hd))
         await self.data_store.update_character_state(character_state)
 
-        reaction_result = await self.event_agent.generate_event_reaction(
-            event=event_result.description,
-            character_name=self.character.name,
-            character_description=self.character.description,
-            share_policy="optional",
-            today_events=list(today_event_dicts),
-            energy=character_state.energy,
-            mood=character_state.mood,
-            health=character_state.health,
-        )
+        # ── 调用 Character Agent ──
+        if self.character_agent is None:
+            logger.error("[spontaneous] character_agent 未注入")
+            return False
+
+        char_context = {
+            "mode": "reaction",
+            "event": event_result.description,
+            "character_name": self.character.name,
+            "character_description": self.character.description,
+            "share_policy": "optional",
+            "today_events": list(today_event_dicts),
+            "energy": character_state.energy,
+            "mood": character_state.mood,
+            "health": character_state.health,
+            "current_intention": character_state.current_intention,
+        }
+        char_result = await self.character_agent.react(char_context)
+        if not char_result.success or not isinstance(char_result.data, EventReactionResult):
+            logger.warning("[spontaneous] Character 反应生成失败")
+            return False
+
+        reaction_result: EventReactionResult = char_result.data
 
         pending_plan = reaction_result.pending_plan
         if pending_plan is None:
@@ -907,10 +928,6 @@ class CharacterLife:
         return True
 
     def drain_pending_shares(self) -> List[Tuple[str, str, float]]:
-        """取出并清除所有待分享的自发事件信息，供 LifeSimulator 消费。
-
-        sync 实现：list copy + clear 之间无 await 点，asyncio 单线程模型下天然安全。
-        """
         shares = list(self._pending_shares)
         self._pending_shares.clear()
         return shares

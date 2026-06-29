@@ -57,6 +57,7 @@ class DailyReportGenerator:
         router=None,
         character=None,
         config=None,
+        character_agent=None,
     ):
         self._bot = bot
         self._port = port
@@ -64,12 +65,18 @@ class DailyReportGenerator:
         self._router = router
         self._character = character
         self._config = config
+        self._character_agent = character_agent
 
     def set_app(self, app) -> None:
         """PersonaApp 就位后注入引用"""
         self._store = app.store
         self._router = app.get_router() if hasattr(app, "get_router") else self._router
         self._character = app.get_character() if hasattr(app, "get_character") else self._character
+        # 从 PersonaApp 获取 CharacterAgent 实例，避免重复创建
+        if hasattr(app, 'get_character_agent'):
+            ca = app.get_character_agent()
+            if ca is not None:
+                self._character_agent = ca
 
     # ── 入口 ───────────────────────────────────────────────────
 
@@ -392,17 +399,30 @@ class DailyReportGenerator:
         voice_enabled = bool(self._config.daily_report_voice_enabled) if self._config else True
         if voice_enabled and self._character and self._router:
             try:
-                from ..life.event_agent import EventGenerationAgent
                 summary = await self._build_summary(diary, core_stats)
-                opening = await EventGenerationAgent.generate_report_opening(
-                    self._router,
-                    self._character.name,
-                    getattr(self._character, "description", "") or "",
-                    summary,
-                    store=self._store,
-                )
-                if opening:
-                    return opening
+                # 使用共享的 CharacterAgent 实例（由 PersonaApp 注入），避免重复创建
+                if self._character_agent is not None:
+                    agent = self._character_agent
+                else:
+                    # 回退路径：正常情况下不应触发（set_app() 已注入 character_agent）
+                    # 保留以防独立构造场景（测试/手动快照）。tool_registry 在此路径不需要：
+                    # opening() 使用 AgentRuntime.run() 而非 _run_life_collect_loop。
+                    logger.warning("CharacterAgent 未注入，使用临时实例生成开场白（非正常路径）")
+                    from ..life.character_agent import CharacterAgent
+                    agent = CharacterAgent(
+                        store=self._store,
+                        router=self._router,
+                        config=self._config,
+                    )
+                context = {
+                    "mode": "opening",
+                    "character_name": self._character.name,
+                    "character_description": getattr(self._character, "description", "") or "",
+                    "summary": summary,
+                }
+                result = await agent.opening(context)
+                if result.success and result.data:
+                    return result.data
             except Exception:
                 logger.warning("LLM 开场白生成异常，降级为纯模板", exc_info=True)
         return self._template_opening(diary)

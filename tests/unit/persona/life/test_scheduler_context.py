@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
 from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 from plugins.DicePP.module.persona.data.models import RelationshipState
+from plugins.DicePP.module.persona.life.types import AgentResult
 
 
 def _make_mock_character():
@@ -79,8 +80,8 @@ class TestBuildAndGenerateShareMessage:
         from plugins.DicePP.module.persona.life.models import ShareTarget
 
         mock_agent = MagicMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="默认消息")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="默认消息"))
+        scheduler.character_agent = mock_agent
 
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         msg = await scheduler._build_and_generate_share_message(
@@ -95,12 +96,12 @@ class TestBuildAndGenerateShareMessage:
         assert msg["content"] == "默认消息"
         assert msg["type"] == "scheduled_event"
 
-        # 验证传给 generate_share_message 的 context 包含默认值
-        ctx = mock_agent.generate_share_message.call_args[0][0]
-        assert ctx.relationship_score == 0.0
-        assert ctx.relation_label == ""
-        assert ctx.user_profile_facts == "（无）"
-        assert ctx.recent_history == "（无）"
+        # 验证传给 share 的 context 包含默认值
+        ctx = mock_agent.share.call_args[0][0]
+        assert ctx["relationship_score"] == 0.0
+        assert ctx["relation_label"] == ""
+        assert ctx["user_profile_facts"] == "（无）"
+        assert ctx["recent_history"] == "（无）"
 
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_with_relationship(self, scheduler, mock_data_store):
@@ -111,8 +112,8 @@ class TestBuildAndGenerateShareMessage:
         mock_data_store.get_relationship = AsyncMock(return_value=rel)
 
         mock_agent = MagicMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="关系消息")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="关系消息"))
+        scheduler.character_agent = mock_agent
 
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         msg = await scheduler._build_and_generate_share_message(
@@ -123,11 +124,11 @@ class TestBuildAndGenerateShareMessage:
             environment="private",
         )
 
-        ctx = mock_agent.generate_share_message.call_args[0][0]
+        ctx = mock_agent.share.call_args[0][0]
         # composite_score = familiarity*0.6 + intimacy*0.4 = 50*0.6 + 100*0.4 = 70
-        assert ctx.relationship_score == 70.0
-        assert ctx.relation_label == "默契"
-        assert ctx.message_type == "miss_you"
+        assert ctx["relationship_score"] == 70.0
+        assert ctx["relation_label"] == "默契"
+        assert ctx["message_type"] == "miss_you"
 
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_returns_none_on_agent_failure(self, scheduler):
@@ -135,8 +136,8 @@ class TestBuildAndGenerateShareMessage:
         from plugins.DicePP.module.persona.life.models import ShareTarget
 
         mock_agent = MagicMock()
-        mock_agent.generate_share_message = AsyncMock(return_value=None)
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data=None))
+        scheduler.character_agent = mock_agent
 
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         msg = await scheduler._build_and_generate_share_message(
@@ -151,10 +152,10 @@ class TestBuildAndGenerateShareMessage:
 
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_no_agent(self, scheduler):
-        """event_agent 为 None 时返回 None"""
+        """character_agent 为 None 时返回 None"""
         from plugins.DicePP.module.persona.life.models import ShareTarget
 
-        scheduler.event_agent = None
+        scheduler.character_agent = None
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         msg = await scheduler._build_and_generate_share_message(
             target=target,
@@ -173,8 +174,8 @@ class TestBuildAndGenerateShareMessage:
         mock_data_store.get_user_profile = AsyncMock(side_effect=Exception("db error"))
 
         mock_agent = MagicMock()
-        mock_agent.generate_share_message = AsyncMock(return_value="消息")
-        scheduler.event_agent = mock_agent
+        mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="消息"))
+        scheduler.character_agent = mock_agent
 
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         msg = await scheduler._build_and_generate_share_message(

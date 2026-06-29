@@ -27,7 +27,7 @@ from ..utils.privacy import mask_sensitive_string
 from .models import (
     WhitelistEntry, DailyUsage, ScoreEvent, ScoreDeltas, UserProfile,
     RelationshipState, DailyEvent, GroupActivity, UserLLMConfig,
-    LLMTraceRecord, CharacterState,
+    LLMTraceRecord, CharacterState, DMState, SAState,
     ScoringFailure, UnifiedMessage, MessageType, DEFAULT_RELATION_LABELS,
     DEFAULT_SESSION_TOKEN_BUDGET,
 )
@@ -1452,7 +1452,7 @@ class PersonaDataStore:
     # ========== 角色状态 ==========
 
     async def get_character_state(self) -> CharacterState:
-        """获取角色永久状态（结构化，兼容旧版纯文本格式）"""
+        """获取角色永久状态（结构化 JSON）"""
         async with self.db.execute(
             "SELECT text FROM persona_character_state WHERE id = 1"
         ) as cursor:
@@ -1462,7 +1462,6 @@ class PersonaDataStore:
         if not raw:
             return CharacterState()
 
-        # 尝试解析新版 JSON 格式
         try:
             data = json.loads(raw)
             if isinstance(data, dict):
@@ -1470,20 +1469,101 @@ class PersonaDataStore:
                     return CharacterState.model_validate(data)
                 except ValidationError as ve:
                     logger.warning(
-                        "CharacterState JSON 字段验证失败，降级为纯文本: %s 异常类型: %s 原始数据: %s",
-                        str(ve), type(ve).__name__, raw[:500],
+                        "CharacterState JSON 字段验证失败: %s 原始数据: %s",
+                        str(ve), raw[:500],
                     )
         except json.JSONDecodeError:
             pass
 
-        # 旧版纯文本格式：作为 text 字段返回，energy/mood/health 保持 None
-        return CharacterState(text=raw)
+        # Phase 1: 旧版纯文本数据 — 记录日志后返回默认值（设计决策：不迁移中间数据）
+        logger.warning(
+            "旧版 CharacterState 纯文本数据已丢弃，长度=%d — "
+            "返回空默认值（Phase 1 设计中明确不迁移中间数据）",
+            len(raw),
+        )
+        return CharacterState()
 
     async def update_character_state(self, state: CharacterState) -> None:
         """更新角色永久状态（结构化 JSON 存储）"""
         await self.db.execute(
             """
             INSERT INTO persona_character_state (id, text)
+            VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET text = excluded.text,
+                                          updated_at = CURRENT_TIMESTAMP
+            """,
+            (state.model_dump_json(),)
+        )
+        await self.db.commit()
+
+    # ========== DM 状态 (Phase 1 Agent 框架) ==========
+
+    async def get_dm_state(self) -> DMState:
+        """获取 DM 工作状态（单行 JSON blob）"""
+        async with self.db.execute(
+            "SELECT text FROM persona_dm_state WHERE id = 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            raw = row["text"] if row else ""
+
+        if not raw:
+            return DMState()
+
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                try:
+                    return DMState.model_validate(data)
+                except ValidationError:
+                    pass
+        except json.JSONDecodeError:
+            pass
+
+        return DMState()
+
+    async def update_dm_state(self, state: DMState) -> None:
+        """更新 DM 工作状态"""
+        await self.db.execute(
+            """
+            INSERT INTO persona_dm_state (id, text)
+            VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET text = excluded.text,
+                                          updated_at = CURRENT_TIMESTAMP
+            """,
+            (state.model_dump_json(),)
+        )
+        await self.db.commit()
+
+    # ========== SA 状态 (Phase 1 Agent 框架) ==========
+
+    async def get_sa_state(self) -> SAState:
+        """获取 SA 世界设定（单行 JSON blob）"""
+        async with self.db.execute(
+            "SELECT text FROM persona_sa_state WHERE id = 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            raw = row["text"] if row else ""
+
+        if not raw:
+            return SAState()
+
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                try:
+                    return SAState.model_validate(data)
+                except ValidationError:
+                    pass
+        except json.JSONDecodeError:
+            pass
+
+        return SAState()
+
+    async def update_sa_state(self, state: SAState) -> None:
+        """更新 SA 世界设定"""
+        await self.db.execute(
+            """
+            INSERT INTO persona_sa_state (id, text)
             VALUES (1, ?)
             ON CONFLICT(id) DO UPDATE SET text = excluded.text,
                                           updated_at = CURRENT_TIMESTAMP

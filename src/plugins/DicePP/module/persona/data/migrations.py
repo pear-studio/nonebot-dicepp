@@ -326,6 +326,24 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_type
 ON persona_agent_events(event_type);
 """
 
+# DM 状态表 (Phase 1 Agent 框架)
+CREATE_DM_STATE_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_dm_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    text TEXT DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+# SA 状态表 (Phase 1 Agent 框架)
+CREATE_SA_STATE_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_sa_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    text TEXT DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 # message_stream 扩展列（Phase M1），用 ALTER TABLE 以避免影响已有 schema
 ALTER_MESSAGE_STREAM_ADD_AGENT_RUN_ID = """
 ALTER TABLE message_stream ADD COLUMN agent_run_id TEXT DEFAULT '';
@@ -418,6 +436,9 @@ PERSONA_DB_MIGRATIONS = [
     CREATE_AGENT_EVENTS_TABLE,
     CREATE_AGENT_EVENTS_RUN_INDEX,
     CREATE_AGENT_EVENTS_TYPE_INDEX,
+    # Phase 1: Agent 框架 — DM / SA 状态表
+    CREATE_DM_STATE_TABLE,
+    CREATE_SA_STATE_TABLE,
 ]
 
 # ── 留主库 → core_db（4 张表） ──────────────────────────────────

@@ -1,7 +1,7 @@
 """生活模拟器
 
-驱动角色生活事件、主动消息调度、日记生成。
-编排 CharacterLife、ProactiveScheduler、DiaryGenerator。
+Phase 1: 持有 DM / Character / SA 三个 Agent 实例，由 LifeSimulator 编排。
+CharacterLife 退回纯状态管理（槽位触发、数值加减）。
 """
 import asyncio
 import time
@@ -19,9 +19,11 @@ from .protocols import EventSharePort
 from .diary import DiaryGenerator
 from .character_life import CharacterLife
 
-
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
+    from .dm_agent import DMAgent
+    from .character_agent import CharacterAgent
+    from .sa_agent import SAAgent
 
 
 @dataclass
@@ -31,7 +33,6 @@ class LifeConfig:
     proactive_event_share_threshold: float = 0.4
     proactive_event_share_delay_min: int = 1
     proactive_event_share_delay_max: int = 5
-    # 仅控制 LLMRouter 是否写入新 trace；不影响 run_cleanup 的清理行为
     trace_enabled: bool = False
     trace_max_age_days: int = 7
     score_history_max_age_days: int = 90
@@ -57,7 +58,7 @@ class LifeConfig:
 
 
 class LifeSimulator:
-    """生活模拟器 — 驱动角色生活事件、主动消息、日记生成"""
+    """生活模拟器 — Phase 1: 持有 DM / Character / SA Agent，编排协作"""
 
     def __init__(
         self,
@@ -67,6 +68,9 @@ class LifeSimulator:
         diary_generator: DiaryGenerator,
         character: Character,
         config: LifeConfig,
+        dm_agent: Optional["DMAgent"] = None,
+        character_agent: Optional["CharacterAgent"] = None,
+        sa_agent: Optional["SAAgent"] = None,
         port: Optional[EventSharePort] = None,
         decay_calculator: Optional[DecayCalculator] = None,
     ):
@@ -76,6 +80,9 @@ class LifeSimulator:
         self.diary_generator = diary_generator
         self.character = character
         self.config = config
+        self.dm_agent = dm_agent
+        self.character_agent = character_agent
+        self.sa_agent = sa_agent
         self.port = port
         self.decay_calculator = decay_calculator
 
@@ -113,7 +120,7 @@ class LifeSimulator:
             except Exception:
                 logger.exception("tick: 角色生活事件生成失败")
 
-            # 消费自发事件待分享信息（drain 保证不丢并发注入的事件）
+            # 消费自发事件待分享信息
             for desc, reaction, share_desire in self.character_life.drain_pending_shares():
                 if not self.scheduler:
                     break
@@ -134,25 +141,57 @@ class LifeSimulator:
         if self.scheduler:
             try:
                 proactive_msgs = await self.scheduler.tick()
-                # 串行 await 保证消息顺序，请勿改为 gather
                 for msg in proactive_msgs:
                     await self._send_msg(msg)
             except Exception:
                 logger.exception("tick: 主动消息调度失败")
 
-
     async def tick_daily(self) -> Optional[str]:
-        """每日调用 — 清理 trace、关系衰减、生成日记"""
+        """每日调用 — 清理 trace、关系衰减、生成日记、SA 规划"""
         try:
             await self._run_cleanup()
             await self.apply_relationship_decay_batch()
             diary = await self.diary_generator.generate_diary()
+
+            # Phase 1: SA Agent 规划
+            if diary and self.sa_agent:
+                try:
+                    await self._run_sa_planning()
+                except Exception as e:
+                    logger.warning(f"SA 规划失败: {e}", exc_info=True)
+
             if diary:
                 logger.info(f"生成日记: {len(diary)} 字")
             return diary
         except Exception as e:
             logger.exception(f"tick_daily 失败: {e}")
             return None
+
+    async def _run_sa_planning(self) -> None:
+        """执行 SA 叙事规划"""
+        # 收集素材
+        today = self.character_life._get_today_str()
+        diary_text = await self.store.get_diary(today) or "（无）"
+        today_events = await self.store.get_daily_events(today)
+        events_text = "\n".join(
+            f"- {e.description} ({e.reaction})"
+            for e in today_events[-10:]
+        ) if today_events else "（无）"
+
+        dm_state = await self.store.get_dm_state()
+        dm_scratchpad = dm_state.scratchpad or "（无）"
+
+        sa_context = {
+            "diary_text": diary_text,
+            "events_text": events_text,
+            "dm_scratchpad": dm_scratchpad,
+        }
+
+        result = await self.sa_agent.plan(sa_context)
+        if result.success:
+            logger.info("SA 叙事规划完成")
+        else:
+            logger.warning(f"SA 叙事规划失败: {result.error}")
 
     def _schedule_share_from_chain(self, event_chain: List[Dict[str, Any]]) -> None:
         """从事件链中选取分享欲望最高的事件，调度分享。"""
@@ -173,7 +212,7 @@ class LifeSimulator:
             )
 
     async def apply_relationship_decay_batch(self) -> int:
-        """每日批处理：将长时间未互动用户的时间衰减写入数据库。返回写库条数。"""
+        """每日批处理"""
         if not self.decay_calculator or not self.character:
             return 0
         n = 0
@@ -197,7 +236,6 @@ class LifeSimulator:
                 await self.store.add_score_event(
                     ScoreEvent(
                         user_id=rel.user_id,
-                        # 关系统一后衰减为全局行为，group_id 仅作审计（reason 字段已记录衰减标识）
                         group_id="",
                         deltas=deltas,
                         familiarity_delta=familiarity_delta,
@@ -225,7 +263,6 @@ class LifeSimulator:
             return []
 
     async def _run_cleanup(self) -> None:
-        """统一数据清理（每日触发一次）。"""
         try:
             await self.store.run_cleanup(
                 llm_traces_max_age_days=self.config.trace_max_age_days,
@@ -238,7 +275,6 @@ class LifeSimulator:
             logger.warning(f"数据清理失败: {e}", exc_info=True)
 
     async def _send_msg(self, msg: Dict[str, Any]) -> None:
-        """通过 EventSharePort 发送单条消息"""
         if not self.port:
             logger.warning("MessagePort 未注入，消息无法发送")
             return

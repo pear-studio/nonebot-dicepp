@@ -14,6 +14,7 @@ from core.statistics.basic_stat import StatElementBase
 from plugins.DicePP.module.persona.report.daily_report import (
     DailyReportGenerator, _DIARY_UNAVAILABLE,
 )
+from plugins.DicePP.module.persona.life.types import AgentResult
 from plugins.DicePP.module.persona.gateway.port import MessagePort
 from plugins.DicePP.utils.time import wall_now, get_current_date_int
 from plugins.DicePP.core.message_types import MessageType
@@ -181,9 +182,12 @@ class TestDailyReportGenerator:
 
         mock_opening = "早上好，主人！今天机器人状态良好。"
 
-        target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        target = "plugins.DicePP.module.persona.life.character_agent.CharacterAgent"
         core_stats = gen._empty_core_stats()
-        with patch(target, new_callable=AsyncMock, return_value=mock_opening):
+        with patch(target) as mock_char_agent_cls:
+            mock_agent = MagicMock()
+            mock_agent.opening = AsyncMock(return_value=AgentResult(success=True, data=mock_opening))
+            mock_char_agent_cls.return_value = mock_agent
             opening = await gen._generate_opening("昨日日记测试", core_stats)
 
         assert opening == mock_opening
@@ -200,9 +204,12 @@ class TestDailyReportGenerator:
         gen._character.description = ""
         gen._router = MagicMock()
 
-        target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        target = "plugins.DicePP.module.persona.life.character_agent.CharacterAgent"
         core_stats = gen._empty_core_stats()
-        with patch(target, new_callable=AsyncMock, side_effect=RuntimeError("LLM down")):
+        with patch(target) as mock_char_agent_cls:
+            mock_agent = MagicMock()
+            mock_agent.opening = AsyncMock(side_effect=RuntimeError("LLM down"))
+            mock_char_agent_cls.return_value = mock_agent
             opening = await gen._generate_opening("昨日日记测试", core_stats)
 
         # 降级为模板
@@ -220,9 +227,13 @@ class TestDailyReportGenerator:
         gen._character.description = ""
         gen._router = MagicMock()
 
-        target = "plugins.DicePP.module.persona.life.event_agent.EventGenerationAgent.generate_report_opening"
+        from plugins.DicePP.module.persona.life.types import AgentResult
+        target = "plugins.DicePP.module.persona.life.character_agent.CharacterAgent"
         core_stats = gen._empty_core_stats()
-        with patch(target, new_callable=AsyncMock, return_value=None):
+        with patch(target) as mock_char_cls:
+            mock_agent = MagicMock()
+            mock_agent.opening = AsyncMock(return_value=AgentResult(success=True, data=None))
+            mock_char_cls.return_value = mock_agent
             opening = await gen._generate_opening("昨日日记测试", core_stats)
 
         # 降级为模板
