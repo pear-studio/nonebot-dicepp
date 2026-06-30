@@ -12,6 +12,7 @@ import asyncio
 import json
 import time
 import random
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone as tz
 
 from utils.string import estimate_tokens
@@ -55,6 +56,20 @@ def _format_group_message(msg_dict: Dict[str, Any], ts: str, img_prefix: str, co
     speaker = msg_dict.get("speaker_name") or msg_dict.get("display_name", "")
     speaker_part = f"[{speaker}] " if speaker else ""
     return f"[{ts}] {speaker_part}{img_prefix}{content}"
+
+
+@dataclass
+class ChatCallContext:
+    """chat() 调用上下文 — 收敛透传参数，减少多层签名变更。
+
+    替代原先分散在 4 层调用链中的 is_command / image_data_urls /
+    transient_message / nickname 四个独立参数。
+    """
+
+    is_command: bool = False
+    image_data_urls: Optional[List[str]] = None
+    transient_message: Optional[str] = None
+    nickname: str = ""
 
 
 class ChatSession:
@@ -118,16 +133,18 @@ class ChatSession:
         user_id: str,
         group_id: str,
         message: str,
-        nickname: str = "",
-        image_data_urls: Optional[List[str]] = None,
-        is_command: bool = False,
+        ctx: Optional[ChatCallContext] = None,
     ) -> Optional[str]:
         """处理单条用户消息，返回回复文本（None 表示不回复）
 
         Args:
-            is_command: 为 True 时跳过睡眠门控、冷淡拒绝门控和评分。
-                          用于 jrrp 等非对话命令的 persona 介入。
+            ctx: 调用上下文（is_command / image_data_urls / transient_message / nickname）。
+                 为 None 时使用默认值（非命令模式，无图片，无临时消息，空昵称）。
         """
+        if ctx is None:
+            ctx = ChatCallContext()
+        is_command = ctx.is_command
+        image_data_urls = ctx.image_data_urls
         # 5 秒内完全相同的消息去重（防手抖/网络重试）
         dedup_key = f"{user_id}:{group_id}"
         now = time.monotonic()
@@ -192,9 +209,7 @@ class ChatSession:
                 f" image_count={len(image_data_urls) if image_data_urls else 0}"
                 f" target_key={target_key}"
             )
-            response = await self._chat_via_coordinator(user_id, group_id, message, target_key,
-                                                        image_data_urls=image_data_urls,
-                                                        is_command=is_command)
+            response = await self._chat_via_coordinator(user_id, group_id, message, target_key, ctx=ctx)
             return response
 
         except asyncio.CancelledError:
@@ -233,16 +248,17 @@ class ChatSession:
 
     async def _coordinator_chat_call_fn(
         self, user_id: str, group_id: str, messages: List[str],
-        image_data_urls: Optional[List[str]] = None,
-        is_command: bool = False,
+        ctx: ChatCallContext,
     ) -> Optional[str]:
         """coordinator chat 路径的单轮 LLM 调用。"""
         current_message = "\n".join(messages) if messages else ""
 
-        messages_for_llm = await self._build_messages(user_id, group_id)
+        messages_for_llm = await self._build_messages(
+            user_id, group_id, ctx=ctx,
+        )
 
         response, delivery_performed = await self._chat_with_tools(
-            user_id, group_id, messages_for_llm, image_data_urls=image_data_urls,
+            user_id, group_id, messages_for_llm, image_data_urls=ctx.image_data_urls,
         )
 
         if delivery_performed:
@@ -253,7 +269,7 @@ class ChatSession:
             )
             return ""
 
-        if not is_command:
+        if not ctx.is_command:
             await self._after_response(user_id, group_id, current_message, response)
 
         # Session 后处理：追加 assistant 消息 + token 估算 + 压缩检查
@@ -353,8 +369,7 @@ class ChatSession:
 
     async def _chat_via_coordinator(
         self, user_id: str, group_id: str, message: str, target_key: str,
-        image_data_urls: Optional[List[str]] = None,
-        is_command: bool = False,
+        ctx: ChatCallContext,
     ) -> Optional[str]:
         fallback_response: Optional[str] = None
         current_message_for_exhausted = message
@@ -364,15 +379,14 @@ class ChatSession:
             current_message = "\n".join(messages) if messages else message
             current_message_for_exhausted = current_message
             return await self._coordinator_chat_call_fn(
-                user_id, group_id, messages, image_data_urls=image_data_urls,
-                is_command=is_command,
+                user_id, group_id, messages, ctx=ctx,
             )
 
         async def on_exhausted(last_exception: Optional[Exception] = None):
             nonlocal fallback_response
             fallback_response = await self._coordinator_on_exhausted(
                 user_id, group_id, current_message_for_exhausted, last_exception,
-                is_command=is_command,
+                is_command=ctx.is_command,
             )
 
         async def _on_result(result: str):
@@ -675,9 +689,12 @@ class ChatSession:
         self,
         user_id: str,
         group_id: str,
+        ctx: ChatCallContext,
     ) -> List[Dict[str, str]]:
         is_group = bool(group_id)
         scope_id = group_id or user_id
+        transient_message = ctx.transient_message
+        nickname = ctx.nickname
         # now 统一计算并向下透传：_collect_event_notifications 的窗口过滤、
         # 时间前缀、_build_diary_context 的时间计算均使用同一壁钟时间，
         # 禁止各方法内部独立调用 wall_now()
@@ -685,7 +702,7 @@ class ChatSession:
 
         # 防御性回退：session_manager 未注入时不崩溃（factory 中 ChatSession 构造早于 session_manager 注入）
         if self.session_manager is None:
-            return await self._build_messages_legacy(user_id, group_id)
+            return await self._build_messages_legacy(user_id, group_id, ctx=ctx)
 
         # 1. 构建 static_prompt + hash
         static_prompt = self.context_builder.build_static_prompt()
@@ -725,9 +742,32 @@ class ChatSession:
                 await self.session_manager.append_messages(session.session_id, [cross_day_msg])
                 session_msg_dicts.append({"role": "user", "content": cross_day})
 
-        # 格式化并追加当前用户消息（从 _fetch_short_term_history 获取）
+        # 格式化并追加当前用户消息
+        # history_dicts 仍需获取（供 _build_lore_sections 扫描），但不在 transient 路径中取 [-1]
         history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
-        if history_dicts:
+
+        if transient_message is not None:
+            # 临时消息路径：仅注入当前 LLM 上下文，不持久化到 session
+            # 适用于 jrrp 等不需要在对话历史中累积的事件消息。
+            # 参考 SillyTavern 的 injected 标记方案：若未来多源注入（如生命事件、
+            # 系统通知）可考虑在消息上增加标记字段区分来源，而非仅靠旁路参数。
+            #
+            # 当前为单源过渡版（transient_message: Optional[str]），
+            # 理想设计：transient_messages: List[InjectedMessage] where
+            #   InjectedMessage = {"source": str, "content": str, "priority": int}
+            #   按 priority 降序注入，同级按 list 顺序。
+            #   _format_message_for_session 根据 source 选择不同格式化模板。
+            #   迁移时下方 "系统" display_name 改为 source 映射。
+            ts = now.strftime("%H:%M")
+            transient_dict: Dict[str, Any] = {
+                "role": "user",
+                "content": transient_message,
+                "created_at": now,
+                "display_name": "系统",
+            }
+            formatted_current = self._format_message_for_session(transient_dict, is_group)
+            session_msg_dicts.append({"role": "user", "content": formatted_current})
+        elif history_dicts:
             current_msg_dict = history_dicts[-1]
             formatted_current = self._format_message_for_session(current_msg_dict, is_group)
             current_persona_msg = PersonaSessionMessage(
@@ -782,6 +822,7 @@ class ChatSession:
         self,
         user_id: str,
         group_id: str,
+        ctx: ChatCallContext,
     ) -> List[Dict[str, str]]:
         """旧版 _build_messages（当 session_manager 为 None 时回退）"""
         history_dicts, _ = await self._fetch_short_term_history(user_id, group_id)
@@ -793,6 +834,18 @@ class ChatSession:
             self.config.max_history_turns,
             self.config.max_history_tokens,
         )
+
+        # transient_message 注入（与主路径保持一致的格式化逻辑）
+        if ctx.transient_message is not None:
+            ts = wall_now(self.config.timezone).strftime("%H:%M")
+            transient_dict: Dict[str, Any] = {
+                "role": "user",
+                "content": ctx.transient_message,
+                "created_at": wall_now(self.config.timezone),
+                "display_name": "系统",
+            }
+            formatted_transient = self._format_message_for_session(transient_dict, is_group)
+            truncated.append({"role": "user", "content": formatted_transient})
 
         profile = await self.store.get_user_profile(user_id)
         rel = await self.store.get_relationship(user_id)

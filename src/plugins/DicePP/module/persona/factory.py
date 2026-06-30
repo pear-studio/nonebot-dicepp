@@ -115,7 +115,9 @@ class PersonaApp:
         self, user_id: str, group_id: str, message: str, nickname: str,
         image_data_urls: Optional[List[str]] = None,
     ) -> Optional[str]:
-        return await self.chat.chat(user_id, group_id, message, nickname, image_data_urls=image_data_urls)
+        from ..chat.session import ChatCallContext
+        ctx = ChatCallContext(nickname=nickname, image_data_urls=image_data_urls)
+        return await self.chat.chat(user_id, group_id, message, ctx=ctx)
 
     # ── 消息发送 ──
 

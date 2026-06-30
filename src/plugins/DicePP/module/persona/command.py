@@ -571,8 +571,9 @@ class PersonaCommand(UserCommandBase):
         # 2. 获取用户显示名
         user_name = await self.bot.get_nickname(user_id, group_id)
 
-        # 3. 构建注入 LLM 的事件消息（写入 message_stream，
-        #    确保 _build_messages() → _fetch_short_term_history() 能读取到）
+        # 3. 构建注入 LLM 的事件消息
+        #    通过 transient_message 旁路直接注入 LLM 上下文，不写入 message_stream，
+        #    避免在 session 中累积形成 few-shot 污染链（详见 P0 修复方案）。
         if result.direction == 'up':
             change_text = f"上涨 {result.delta_percent}%"
         elif result.direction == 'down':
@@ -587,56 +588,39 @@ class PersonaCommand(UserCommandBase):
             f"请以角色身份就此说一两句话，自然地提及运势数值。"
         )
 
-        # 4. 将 event_msg 以 user 角色写入 message_stream，
-        #    使 _build_messages() 的 _fetch_short_term_history() 能将其纳入 LLM 上下文
-        #    持久化失败时跳过 LLM 调用，直接走模板回退
-        event_persisted = False
-        if self.data_store:
-            try:
-                await self.data_store.add_message_stream(
-                    user_id=user_id,
-                    group_id=group_id,
-                    role="user",
-                    type=MessageType.COMMAND,
-                    content=event_msg,
-                    display_name=user_name,
-                )
-                event_persisted = True
-            except Exception as e:
-                logger.warning(f"[Persona] _handle_jrrp event_msg 持久化失败: {e}")
-
-        # 5. 调 LLM 生成角色评语（is_command=True）
+        # 4. 调 LLM 生成角色评语
+        #    transient_message=event_msg：事件仅注入当前 LLM 上下文，不持久化。
+        #    message=".jrrp"：仅用于去重/缓冲，不进入 LLM 上下文。
+        #    参考 SillyTavern 的 injected 标记方案——若未来多源注入可考虑消息级标记字段。
         #    segment 启用时：dispatcher 自动发送，chat() 返回空串
         #    segment 未启用时：chat() 返回评语文本，需手动发送
-        if not event_persisted:
-            # event_msg 未持久化 → LLM 无上下文，回退到模板
-            logger.warning("[Persona] _handle_jrrp event_msg 未持久化，跳过 LLM 调用")
-            fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
-                                        result.delta_percent, result.direction)
-            await self._send(user_id, group_id, fallback)
-        else:
-            try:
-                commentary = await self.app.chat.chat(
-                    user_id=user_id,
-                    group_id=group_id,
-                    message=event_msg,
-                    nickname=user_name,
-                    is_command=True,
-                )
-                if commentary:
-                    await self._send(user_id, group_id, commentary)
-                elif self.app.segment_dispatcher is None:
-                    # 非 segment 模式下 LLM 返回空串，回退到模板确保用户可见
-                    fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
-                                                result.delta_percent, result.direction)
-                    await self._send(user_id, group_id, fallback)
-                # segment 模式下 chat() 返回空串表示 dispatcher 已发送，不额外回退
-            except Exception as e:
-                # LLM 调用失败时，回退到模板
-                logger.warning(f"[Persona] _handle_jrrp LLM 调用失败，回退到模板: {e}")
+        from .chat.session import ChatCallContext
+        ctx = ChatCallContext(
+            is_command=True,
+            transient_message=event_msg,
+            nickname=user_name,
+        )
+        try:
+            commentary = await self.app.chat.chat(
+                user_id=user_id,
+                group_id=group_id,
+                message=".jrrp",
+                ctx=ctx,
+            )
+            if commentary:
+                await self._send(user_id, group_id, commentary)
+            elif self.app.segment_dispatcher is None:
+                # 非 segment 模式下 LLM 返回空串，回退到模板确保用户可见
                 fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
                                             result.delta_percent, result.direction)
                 await self._send(user_id, group_id, fallback)
+            # segment 模式下 chat() 返回空串表示 dispatcher 已发送，不额外回退
+        except Exception as e:
+            # LLM 调用失败时，回退到模板
+            logger.warning(f"[Persona] _handle_jrrp LLM 调用失败，回退到模板: {e}")
+            fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
+                                        result.delta_percent, result.direction)
+            await self._send(user_id, group_id, fallback)
 
         return []
 
