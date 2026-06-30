@@ -263,7 +263,7 @@ def _update_stats_with_record(stats: Dict[str, Any], record: Dict[str, Any], *, 
     participants = stats.setdefault("participants", {})
     info = participants.setdefault(user_id, {"count": 0, "nickname": None})
     info["count"] = info.get("count", 0) + 1
-    if nickname and nickname not in ("UNDEF_NAME", "----"):
+    if nickname and nickname != "----":
         info["nickname"] = nickname
 
     if source_is_bot:
@@ -653,7 +653,7 @@ def register_log_hooks(bot: Bot) -> None:
             return
         try:
             nickname = await bot.get_nickname(bot.account, group_id)
-            if not nickname or nickname in ("UNDEF_NAME", "----"):
+            if not nickname or nickname == "----":
                 nickname = display_name or "Bot"
             append_log_record(bot, group_id, user_id, nickname, content,
                             str(msg_id) if msg_id else None)
@@ -1459,7 +1459,7 @@ class LogCommand(UserCommandBase):
                     nick = await self.bot.get_nickname(uid, group_id)
                 except Exception:
                     nick = None
-                if nick and nick not in ("UNDEF_NAME", "----"):
+                if nick and nick != "----":
                     nickname_cache[uid] = nick
 
         msg_map: Dict[str, Dict[str, str]] = {}
@@ -1489,7 +1489,7 @@ class LogCommand(UserCommandBase):
                     nick = await self.bot.get_nickname(at_uid, group_id)
                 except Exception:
                     nick = None
-                if nick and nick not in ("UNDEF_NAME", "----"):
+                if nick and nick != "----":
                     nickname_cache[at_uid] = nick
 
         def humanize_cq(raw: str) -> str:
@@ -1512,7 +1512,7 @@ class LogCommand(UserCommandBase):
                 uid = match.group(1)
                 # 优先用预取的昵称缓存，其次用 user_display，最后 fallback 到 uid
                 nick = nickname_cache.get(uid) or user_display.get(uid)
-                if not nick or nick in ("UNDEF_NAME", "----"):
+                if not nick or nick == "----":
                     nick = uid
                 return f"@{nick}"
 

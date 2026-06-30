@@ -36,8 +36,6 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-NICKNAME_ERROR = "UNDEF_NAME"
-
 
 @runtime_checkable
 class PostSendHook(Protocol):
@@ -673,7 +671,22 @@ class Bot:
         if not self._delay_init_done:
             await self.delay_init_command()
 
-        await self.update_nickname(meta.user_id, "origin", meta.nickname)
+        # 记录昵称
+        # origin: QQ 原始昵称，空值跳过防止覆盖已有记录
+        if self._valid_name(meta.nickname):
+            await self.update_nickname(meta.user_id, "origin", meta.nickname)
+        # card: QQ 群名片，存 {group_id}.card（仅群聊）
+        if meta.group_id:
+            card_key = self._card_key(meta.group_id)
+            card_val = meta.sender.card or ""
+            _existing = await self.db.nickname.get(meta.user_id, card_key)
+            if card_val.strip():
+                if _existing is None or _existing.nickname != card_val:
+                    await self.db.nickname.upsert(
+                        UserNickname(user_id=meta.user_id, group_id=card_key, nickname=card_val)
+                    )
+            elif _existing is not None and meta.sender.card is not None:
+                await self.db.nickname.delete(meta.user_id, card_key)
 
         msg = preprocess_msg(msg)  # 转换中文符号, 转换小写等等
 
@@ -743,7 +756,7 @@ class Bot:
                     continue
                 # 入站记录（逐 msg_cur 去重）
                 if not recorded and self._inbound_message_hooks:
-                    display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
+                    display_name = await self.get_nickname(meta.user_id, meta.group_id)
                     msg_type = getattr(command, "message_type", None)
                     msg_type_val = msg_type.value if hasattr(msg_type, "value") else str(msg_type or msg_type_default)
                     for hook in self._inbound_message_hooks:
@@ -811,7 +824,7 @@ class Bot:
 
             # 未匹配任何命令的消息：以 ambient 类型记录（不参与 persona 上下文）
             if not recorded and self._inbound_message_hooks:
-                display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
+                display_name = await self.get_nickname(meta.user_id, meta.group_id)
                 for hook in self._inbound_message_hooks:
                     try:
                         await hook(
@@ -915,26 +928,55 @@ class Bot:
         if master_list:
             await self.proxy.process_bot_command(BotSendMsgCommand(self.account, msg, [PrivateMessagePort(master_list[0])]))
 
+    @staticmethod
+    def _valid_name(name: Optional[str]) -> bool:
+        """检查昵称是否非空、非纯空白。"""
+        return name is not None and name.strip() != ""
+
+    @staticmethod
+    def _card_key(group_id: str) -> str:
+        """返回群名片在 nickname 表中的 group_id 键（{group_id}.card）。"""
+        return f"{group_id}.card"
+
     async def get_nickname(self, user_id: str, group_id: str = "") -> str:
         """
         获取用户昵称
         Args:
             user_id: 账号
             group_id: 群号, 为空代表默认
-        """
-        if not group_id:
-            group_id = "default"
 
-        _nick_row = await self.db.nickname.get(user_id, group_id)
-        if _nick_row:
-            return _nick_row.nickname
+        Fallback 链：群特定 → 全局自定义 → 群名片(card) → QQ昵称(origin) → user_id
+        """
+        orig_group_id = group_id
+
+        # 1. 群特定昵称 (.nn in group) — 仅当有实际群号时
+        if orig_group_id:
+            _nick_row = await self.db.nickname.get(user_id, orig_group_id)
+            if _nick_row and self._valid_name(_nick_row.nickname):
+                return _nick_row.nickname.strip()
+
+        # 2. 全局自定义昵称 (.nn in private)
         _nick_row = await self.db.nickname.get(user_id, "default")
-        if _nick_row:
-            return _nick_row.nickname
+        if _nick_row and self._valid_name(_nick_row.nickname):
+            return _nick_row.nickname.strip()
+
+        # 3. 群名片 (card, 仅群聊)
+        if orig_group_id:
+            _nick_row = await self.db.nickname.get(user_id, self._card_key(orig_group_id))
+            if _nick_row and self._valid_name(_nick_row.nickname):
+                return _nick_row.nickname.strip()
+
+        # 4. QQ 原始昵称 (origin)
         _nick_row = await self.db.nickname.get(user_id, "origin")
-        if _nick_row:
-            return _nick_row.nickname
-        return NICKNAME_ERROR
+        if _nick_row and self._valid_name(_nick_row.nickname):
+            return _nick_row.nickname.strip()
+
+        # 5. 兜底：QQ号
+        logger.warning(
+            f"[get_nickname] 所有 fallback 均未命中，回退到 user_id"
+            f" (user_id={user_id}, group_id={orig_group_id!r})"
+        )
+        return user_id
 
     async def update_nickname(self, user_id: str, group_id: str = "", nickname: str = ""):
         """
