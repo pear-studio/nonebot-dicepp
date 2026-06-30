@@ -138,8 +138,9 @@ class Agent(ABC):
         Args:
             context: 用于 build_system_prompt 的上下文（若需要构建）
             system_prompt_override: 若提供，直接使用此 prompt 而非基类的
-                                    build_system_prompt()。CharacterAgent 使用此参数
-                                    传入特定的 reaction prompt。
+                                    build_system_prompt()。
+                                    调用方可使用此参数在首次创建 Conversation 时锁定
+                                    自定义 system prompt；Conversation 已存在时忽略。
         """
         if self._conversation is not None:
             return self._conversation
@@ -160,6 +161,59 @@ class Agent(ABC):
             self._init_conversation(self._system_prompt or "")
 
         return self._conversation
+
+    async def _run_with_conv(
+        self,
+        context: dict,
+        initial_system_prompt: str,
+        user_prompt: str,
+        tools: list,
+        temperature: float,
+        selection: SelectionPolicy,
+        extra_registry: Optional[Any] = None,
+        required_tool: Optional[str] = None,
+    ) -> "tuple[list, Conversation]":
+        """通过 Conversation 执行一轮 LLM 收集循环。
+
+        封装 Conversation 集成模式：
+        _ensure_conversation → add_user → render → _run_life_collect_loop → extend。
+        DM Agent 与 CharacterAgent 共用此方法，避免重复。
+
+        Args:
+            context: 传入 _ensure_conversation 的上下文（需包含聊标识等）
+            initial_system_prompt: 首次调用时锁定为 Conversation 的 system_prompt；
+                                   Conversation 已存在时忽略。
+            user_prompt: 本轮 user message 内容
+            tools: OpenAI 格式工具定义列表
+            temperature: 采样温度
+            selection: 模型选择策略
+            extra_registry: 只读查询工具注册表（DM 用，CharacterAgent 传 None）
+            required_tool: 必调工具名；None 时从 tools[0] 推导
+
+        Returns:
+            (collected_args, conversation): 收集的工具调用参数列表和 Conversation 实例
+        """
+        from ..life._llm_utils import _run_life_collect_loop
+
+        conv = await self._ensure_conversation(context, system_prompt_override=initial_system_prompt)
+        conv.add_user(user_prompt)
+        prev_len = conv.length
+
+        collected, final_msgs = await _run_life_collect_loop(
+            router=self.router,
+            store=self.store,
+            messages=conv.render(self._system_prompt),  # type: ignore[arg-type]
+            tools=tools,
+            temperature=temperature,
+            selection=selection,
+            bg_timeout=self._bg_timeout,
+            max_rounds=self._max_rounds,
+            extra_registry=extra_registry,
+            required_tool=required_tool,
+        )
+
+        conv.extend(final_msgs[prev_len + 1:])  # +1 跳过 system prompt 位，prev_len 不含 system
+        return collected, conv
 
     async def compact_conversation(self) -> None:
         """每日收尾：清空 conversation 并重置状态。
@@ -183,38 +237,31 @@ class Agent(ABC):
         2. 执行层运行 → conv.extend(增量)
         3. 解析 collected[0] 为结果 dataclass
 
-        当前仅 DMAgent 使用此模板方法（通过 tool-bridge 收集结构化输出）。
-        CharacterAgent 和 SAAgent 覆盖 run() 使用独立路径：
-        - CharacterAgent: 按 mode 分派到 react()/diary()/share()/opening()
-        - SAAgent: 委托到 plan()，使用 AgentRuntime.run() 获取纯文本输出
+        DMAgent 使用此模板方法（通过 tool-bridge 收集结构化输出）。
+        CharacterAgent 覆盖 run() 按 mode 分派到 react()/diary()/share()/opening()。
+        SAAgent 覆盖 run() 委托到 plan()，使用 AgentRuntime.run() 获取纯文本输出。
         子类可覆盖此方法以添加解析逻辑。
         """
-        from ..life._llm_utils import _run_life_collect_loop
-
         # 加载状态（如果尚未缓存）
         if self._cached_state is None:
             self._cached_state = await self.load_state()
 
-        # NOTE: 此 Conversation 集成模式在 agent.py 与 character_agent.py 两处重复，
-        # 如需新增第三处，应提取为 Agent._run_with_conv()
-        conv = await self._ensure_conversation(context)
+        system_prompt = (
+            self._cached_system_prompt
+            if self._cached_system_prompt is not None
+            else self.build_system_prompt(self._cached_state, context)
+        )
         user_prompt = self._build_user_prompt(context)
-        conv.add_user(user_prompt)
 
-        prev_len = conv.length
-        collected, final_msgs = await _run_life_collect_loop(
-            router=self.router,
-            store=self.store,
-            messages=conv.render(self._system_prompt),  # type: ignore[arg-type]
+        collected, _conv = await self._run_with_conv(
+            context=context,
+            initial_system_prompt=system_prompt,
+            user_prompt=user_prompt,
             tools=self._get_openai_tools(),
             temperature=0.9,
             selection=self._get_selection_policy(),
-            bg_timeout=self._bg_timeout,
-            max_rounds=self._max_rounds,
             extra_registry=self._build_extra_registry(),
         )
-
-        conv.extend(final_msgs[prev_len + 1:])  # +1 跳过 system prompt 位，prev_len 不含 system
 
         if not collected:
             return AgentResult(success=False, data=None, error="LLM 未调用工具")

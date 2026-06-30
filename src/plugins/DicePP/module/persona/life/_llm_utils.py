@@ -25,6 +25,7 @@ async def _run_life_collect_loop(
     bg_timeout: int = _DEFAULT_BG_TIMEOUT,
     max_rounds: int = 10,
     extra_registry: Optional[Any] = None,
+    required_tool: Optional[str] = None,
 ) -> tuple[list, list]:
     """LLM 路由基础设施 — 通过 tool-bridge 收集结构化输出
 
@@ -38,6 +39,8 @@ async def _run_life_collect_loop(
         bg_timeout: 超时秒数
         max_rounds: 最大轮次
         extra_registry: 额外工具注册表（只读查询工具）
+        required_tool: 必调工具名。若不为 None，直接用作 required_tools；
+                       若为 None，从 tools[0] 推导（向后兼容）
 
     Returns:
         (collected_args, final_msgs): 收集的 LLM 工具调用参数列表和最终 messages
@@ -45,13 +48,18 @@ async def _run_life_collect_loop(
     from ..agent.tool_bridge import run_structured_collect
     from utils.logger import logger
 
-    tool_name = ""
     if not tools:
         return [], []
-    first = tools[0]
-    if isinstance(first, dict):
-        func = first.get("function", first)
-        tool_name = func.get("name", "")
+
+    if required_tool is not None:
+        tool_name = required_tool
+    else:
+        first = tools[0]
+        if isinstance(first, dict):
+            func = first.get("function", first)
+            tool_name = func.get("name", "")
+        else:
+            tool_name = ""
 
     collected, run_result, final_msgs = await run_structured_collect(
         router=router,

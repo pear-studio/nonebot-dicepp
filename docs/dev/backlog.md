@@ -189,6 +189,30 @@
   此条为纯代码组织优化，无功能影响。在所有 Phase 2 功能变更稳定后再执行，避免功能重构与代码移动交织。
   影响面：`agent.py`（内联或新增 protected 方法）、`_llm_utils.py`（删除或精简）、`character_agent.py` / `dm_agent.py`（调用路径更新）
 
+### [B-260630-9f3fa0] Conversation 事务性保护 — add_user 后的失败回滚
+- 创建: 2026-06-30
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现: conv.add_user() 后 LLM 调用失败时，Conversation 中留下悬挂的 user 消息（无 assistant 响应）。重试时会重复追加导致上下文污染。当前 react() 和 diary() 均无事务性保护。
+- 开发备忘: 在 add_user/LLM 调用/extend 之间加事务性边界：记录 add_user 前的 Conversation 快照，LLM 调用失败时回滚到快照状态。
+
+### [B-260630-05739c] 状态变更通知 message — 事件溯源模式注入 Conversation
+- 创建: 2026-06-30
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现: 当前状态（体力/心情/健康）在每轮 user message 中简单拼接，状态变更时无独立通知事件。每轮拼接使得状态变更的历史不可追溯，且与事件溯源模式不一致。
+- 开发备忘: 状态变更应作为独立 notification message 注入 Conversation，渲染上下文时可通过扫描数据库记录重建。参考 character_agent.py build_system_prompt() 分层重构后的 user prompt 状态注入逻辑。
+
+### [B-260630-1f9286] 工具定义与传入规则梳理 — 统一 required_tool 语义和传递路径
+- 创建: 2026-06-30
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现: 当前 required_tools 从 tools[0] 隐式推导；SAY_TOOL_DM 与 SAY_TOOL_CHARACTER 共享 name=say 但通过不同路径传递（factory 只注册 DM 版，Character 版仅用 to_openai_format）；工具传递三路并行（_run_life_collect_loop / AgentRuntime.run() / run_structured_collect）；opening() 走独立 AgentRuntime 路径。整体缺乏统一的工具注册、传递与 required 语义。
+- 开发备忘: 1. 梳理所有工具定义和调用路径 2. 统一 required_tool 语义（显式传入优于从 tools[0] 推导）3. 统一工具传递路径（收敛 _run_life_collect_loop 和 AgentRuntime 两条线或明确分工）4. 考虑 SAY_TOOL 的 name 冲突解决方案（如 namespace 前缀）
+
 ### [B-260630-46af37] compact_conversation 改为 LLM 摘要压缩
 - 创建: 2026-06-30
 - 优先级: P2
@@ -203,20 +227,6 @@
     - 调用一次轻量 LLM 将 _messages 压缩为叙事摘要，保留关键信息
     - 需评估压缩 LLM 的 token 消耗和延时
     - 影响面: life/agent.py compact_conversation()
-
-### [B-260630-789272] diary/share/opening 模式从单轮独立调用迁移到 Conversation
-- 创建: 2026-06-30
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-    - 当前仅 reaction 模式使用 Conversation 跨调用上下文积累
-    - diary/share/opening 仍是单轮独立调用，各自创建一次性 LLM 调用
-    - 无法利用已累积的 Conversation 上下文增强生成质量
-- 开发备忘:
-    - 参考 react() 中的 Conversation 集成模式（agent.py / character_agent.py 已加交叉注释标注重复位置）
-    - diary 是否使用独立 Conversation 取决于设计决策（日记是否需要反应上下文）
-    - 影响面: character_agent.py diary()/share()/opening()
 
 ### [B-260630-38ec7f] share_desire 概念重新设计及 share_threshold 死配置清理
 - 创建: 2026-06-30

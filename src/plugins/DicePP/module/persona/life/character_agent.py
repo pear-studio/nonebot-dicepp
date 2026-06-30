@@ -82,78 +82,29 @@ class CharacterAgent(Agent):
         return "\n".join(lines) if lines else "无记录"
 
     def build_system_prompt(self, state: CharacterState, context: dict) -> str:
-        """根据 context.mode 选择 prompt 模板
+        """构建纯人设层 system prompt — 角色身份 + 核心边界。
 
-        mode: "reaction" | "diary" | "share" | "opening"
+        不包含 mode 特定任务指令。任务指令由各 user prompt builder 注入。
+        state 形参保留给 Agent ABC 接口兼容；角色身份数据实际通过 context dict 注入，
+        状态数据（体力/心情/健康）在 user prompt 层注入。
         """
-        mode = context.get("mode", "reaction")
-        if mode == "reaction":
-            return self._build_reaction_prompt(state, context)
-        elif mode == "diary":
-            return self._build_diary_prompt(state, context)
-        elif mode == "share":
-            return self._build_share_prompt(state, context)
-        elif mode == "opening":
-            return self._build_opening_prompt(state, context)
-        else:
-            return self._build_reaction_prompt(state, context)
-
-    # ── Reaction Prompt ──────────────────────────────────────
-
-    def _build_reaction_prompt(self, state: CharacterState, context: dict) -> str:
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
-        state_text = self._format_state_prompt(
-            context.get("energy"), context.get("mood"),
-            context.get("health"),
-        )
 
         system_prompt = f"""你是{character_name}。
 
 角色设定:
 {character_description}
 
-你当前的状态:
-{state_text}
-
-请对发生的事件做出内心反应，通过 say 工具表达你的感受和想法。
-要求:
+核心要求:
 1. 使用第一人称"我"
-2. 反应 30-80 字，表达真实感受
-3. 反映角色性格特点和当前状态
-4. 如果你想继续行动（调查、对话、移动等），设置 has_follow_up=true，DM 会对你提出的行动进行裁决
-
-你必须通过调用 say 工具来表达你的反应。"""
-        return system_prompt
-
-    # ── Diary Prompt ─────────────────────────────────────────
-
-    def _build_diary_prompt(self, state: CharacterState, context: dict) -> str:
-        character_name = context.get("character_name", "")
-        character_description = context.get("character_description", "")
-        state_text = self._format_state_prompt(
-            context.get("energy"), context.get("mood"),
-            context.get("health"),
-        )
-
-        system_prompt = f"""你是{character_name}。正在写今天的日记。
-
-角色设定:
-{character_description}
-
-日记是你的私人空间——可以记录，可以反省，可以计划，可以抱怨，可以什么也不写。用你习惯的方式写，写多少算多少。
-
-要求:
-1. 使用第一人称"我"
-2. 100-200字
-3. 语气符合角色性格
-4. 不需要提及今天发生的所有事——选你真正想写的来写
-
-你必须通过调用 record_diary_entry 工具来输出日记内容，不要直接回复文本。"""
+2. 语气符合角色性格
+3. 不编造与当前上下文无关的内容"""
         return system_prompt
 
     # ── Share Prompt ─────────────────────────────────────────
 
+    # TODO: 迁移到 build_system_prompt() 纯人设 + mode 特定 user prompt 分层范式
     def _build_share_prompt(self, state: CharacterState, context: dict) -> str:
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
@@ -206,6 +157,7 @@ class CharacterAgent(Agent):
 
     # ── Opening Prompt ───────────────────────────────────────
 
+    # TODO: 迁移到 build_system_prompt() 纯人设 + mode 特定 user prompt 分层范式
     def _build_opening_prompt(self, state: CharacterState, context: dict) -> str:
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
@@ -243,6 +195,11 @@ class CharacterAgent(Agent):
     def _build_reaction_user_prompt(self, context: dict) -> str:
         event = context.get("event", "")
         today_events = context.get("today_events", [])
+        state_text = self._format_state_prompt(
+            context.get("energy"), context.get("mood"),
+            context.get("health"),
+        )
+
         today_context = ""
         if today_events:
             events_lines = []
@@ -261,9 +218,12 @@ class CharacterAgent(Agent):
             today_context = "\n今天已发生事件:\n" + "\n".join(events_lines)
 
         user_prompt = (
+            f"你当前的状态:\n{state_text}"
             f"{today_context}"
             f"\n\n当前事件: {event}"
-            f"\n\n请先思考，然后通过 say 工具表达你的反应。如果你想继续行动，设置 has_follow_up=true。"
+            f"\n\n请对发生的事件做出内心反应，通过 say 工具表达你的感受和想法。"
+            f"\n要求: 30-80字，表达真实感受，反映角色性格特点和当前状态。"
+            f"\n如果你想继续行动（调查、对话、移动等），设置 has_follow_up=true。"
         )
         return user_prompt
 
@@ -274,8 +234,6 @@ class CharacterAgent(Agent):
         mood = context.get("mood")
         health = context.get("health")
         state_text = self._format_state_prompt(energy, mood, health)
-
-        intention_text = ""
 
         events_lines = []
         tz = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
@@ -301,12 +259,19 @@ class CharacterAgent(Agent):
 
         user_prompt = f"""当前日期: {date_str}
 今天最终状态:
-{state_text}{intention_text}
+{state_text}
 
 今天经历的一些片段:
 {events_text}{yesterday_context}
 
-写今天的日记:"""
+写今天的日记。
+日记是你的私人空间——可以记录，可以反省，可以计划，可以抱怨，可以什么也不写。用你习惯的方式写。
+要求:
+1. 100-200字
+2. 语气符合角色性格
+3. 不需要提及今天发生的所有事——选你真正想写的来写
+
+你必须通过调用 record_diary_entry 工具来输出日记内容，不要直接回复文本。"""
         return user_prompt
 
     def _build_share_user_prompt(self, context: dict) -> str:
@@ -406,33 +371,20 @@ class CharacterAgent(Agent):
         """
         context["mode"] = "reaction"
 
-        from ..life._llm_utils import _run_life_collect_loop
-
         # load_state() 用于验证状态存在性
         state = await self.load_state()
-        system_prompt = self._build_reaction_prompt(state, context)
+        system_prompt = self.build_system_prompt(state, context)
         user_prompt = self._build_reaction_user_prompt(context)
 
-        # NOTE: 此 Conversation 集成模式在 agent.py 与 character_agent.py 两处重复，
-        # 如需新增第三处，应提取为 Agent._run_with_conv()
-        conv = await self._ensure_conversation(context, system_prompt_override=system_prompt)
-
-        conv.add_user(user_prompt)
-        prev_len = conv.length
-
         # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-        collected, final_msgs = await _run_life_collect_loop(
-            router=self.router,
-            store=self.store,
-            messages=conv.render(self._system_prompt),
+        collected, _conv = await self._run_with_conv(
+            context=context,
+            initial_system_prompt=system_prompt,
+            user_prompt=user_prompt,
             tools=[SAY_TOOL_CHARACTER.to_openai_format()],
             temperature=0.9,
             selection=EVENT_GEN,
-            bg_timeout=self._bg_timeout,
-            max_rounds=self._max_rounds,
         )
-
-        conv.extend(final_msgs[prev_len + 1:])  # +1 跳过 system prompt 位，prev_len 不含 system
 
         if not collected:
             logger.warning("反应生成: LLM 未调用 say 工具")
@@ -481,7 +433,7 @@ class CharacterAgent(Agent):
             )
 
     async def diary(self, context: dict) -> AgentResult:
-        """生成日记（单轮独立调用，不使用 Conversation 跨调用上下文积累）
+        """生成日记（通过 Conversation 复用天内 reaction 上下文）
 
         context 字段:
             events: List[dict] — 当天事件列表
@@ -495,29 +447,20 @@ class CharacterAgent(Agent):
         """
         context["mode"] = "diary"
 
-        from ..life._llm_utils import _run_life_collect_loop
-
         # load_state() 用于验证状态存在性
         state = await self.load_state()
-        system_prompt = self._build_diary_prompt(state, context)
+        system_prompt = self.build_system_prompt(state, context)
         user_prompt = self._build_diary_user_prompt(context)
 
         # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-        extra_registry = None
-
-        collected, _ = await _run_life_collect_loop(
-            router=self.router,
-            store=self.store,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+        collected, _conv = await self._run_with_conv(
+            context=context,
+            initial_system_prompt=system_prompt,
+            user_prompt=user_prompt,
             tools=[RECORD_DIARY_ENTRY_TOOL.to_openai_format()],
-            temperature=0.85,
+            temperature=0.9,  # 0.9 与 react() 统一，旧值 0.85
             selection=DIARY,
-            bg_timeout=self._bg_timeout,
-            max_rounds=self._max_rounds,
-            extra_registry=extra_registry,
+            required_tool="record_diary_entry",
         )
 
         if not collected:
