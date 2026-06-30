@@ -110,24 +110,27 @@
 
 ## persona
 
-### [B-260622-0ed4e3] DM 条目化、D20 两轮裁决与叙事线索管理
-- 创建: 2026-06-29
+### [B-260630-44f47a] 生活事件时间加速测试功能
+- 创建: 2026-06-30
 - 优先级: P1
-- 类型: refactor
-- 改动量: L
-- 问题表现:
-  - 当前 DMAgent（`dm_agent.py`）已拆分并跑通一次 LLM 调用产出事件，但 DM 的裁决权仍是 prompt 层自称——`follow_up_action` 直接注入 chain context 的 scenario，角色企图直接兑现为事件走向，无不确定性
-  - D20 工具已声明可用（`self.tools = ["roll_dice", ...]`）但 Phase 1 prompt 不引导使用——DM 不掷骰子裁决角色企图
-  - `DMState.scratchpad` 已建表但仅做自由笔记——未条目化（创建线索/推进/合并/完结/归档），LLM 自行管理但无结构化约束，长线叙事记忆弱
-  - 裁决需要两轮 LLM：第一轮 DM 评估 DC + 调用 roll_dice → 第二轮根据掷骰结果生成叙事。Phase 1 仅一轮直达事件描述
-- 开发备忘:
-  Phase 1（已完成 2026-06-29）：`EventGenerationAgent`（~1800行）拆分为 `Agent` 基类 + `DMAgent` + `CharacterAgent` + `SAAgent`。`DMState`/`SAState` 表已建，`roll_dice` 工具已注册，`follow_up_action` 语义已从"直接注入场景"改为"角色企图，提交 DM 裁决"（prompt 层），链循环保留。
+- 类型: feature
+- 改动量: M
+- 问题表现: 生活事件（life events）的评测和调试只能依赖真实时间流逝; 无法快速模拟一周或一个月的 tick 推进效果; 导致 life event 相关功能的调试、回归测试和效果验证周期极长
+- 开发备忘: 引入时间加速/模拟时钟机制，允许在测试/调试模式下按需推进模拟时间（如 +7d、+30d）; 可能方向：(a) Simulator/tick 循环增加可配置时间倍速因子；(b) 提供 debug 命令或 API 手动触发指定天数的 tick 批量执行；(c) 引入 clock abstraction，测试时注入 fake clock; 影响面: life/simulator.py、event/time 相关模块、可能的 debug 命令入口
 
-  Phase 2 剩余工作：
-  - **DM 条目化**：`DMState.scratchpad` 从自由文本升级为结构化线索管理。LLM 在裁决过程中自行创建/推进/合并/完结/归档叙事线索，单次 focus ≤3 条
-  - **D20 两轮裁决**：第一轮 LLM → 评估 DC + 调用 `roll_dice("1d20")` → 四档判定；第二轮 LLM → 根据判定结果生成叙事。D20 仅用于角色企图（主角/NPC），不用于客观时间节点（wake_up/good_night）
-  - **裁决流程**：tick → DM load_state(scratchpad) → 读取 roleplay_context（角色状态 + 今日事件 + 企图）→ 第一轮裁决（DC + D20）→ 第二轮叙事生成 → 产出 EventGenerationResult → Character 反应 → 循环
-  - **影响面**：`dm_agent.py`（run() 改为两轮 LLM 流程 + prompt 重写）、`dm_agent.py`（scratchpad 条目化）、`character_life.py`（context 构建配合裁决流程）
+### [B-260630-e9fcc8] Conversation 消息线程 DB 持久化
+- 创建: 2026-06-30
+- 优先级: P1
+- 类型: feature
+- 改动量: M
+- 问题表现:
+    - Conversation 仅内存中存活，bot 重启或进程退出后天内上下文全部丢失
+    - DM/Character 失去对今日已发生对话的全部记忆，无法恢复叙事连续性
+- 开发备忘:
+    - 在 persona_session_message 基础上增加 Conversation 序列化/反序列化
+    - 可考虑 JSON/msgpack 序列化 _messages 列表
+    - 跨天 compact 时自动清理旧消息
+    - 影响面: life/conversation.py、data/store.py、data/models.py
 
 ### [B-260629-5a1f2c] SA 条目化与选择性注入 DM prompt
 - 创建: 2026-06-29
@@ -139,33 +142,8 @@
   - SA 产出的叙事设定无法被 DM 消费：`tick_daily` 的 SA.plan() 写 notes，但下次 DM 生成事件时不读取 SA 状态，DM 不知道 SA 准备了什么
   - SA 需要条目化：将叙事产出分类为 NPC、地点、剧情弧线、待触发事件等类型，使 DM 在生成事件时可以按需拉取相关条目注入 prompt
 - 开发备忘:
-  依赖 B-260622-0ed4e3（DM 条目化）先落地——SA 条目化的结构需与 DM 的线索管理格式对齐，且 SA→DM 注入需要 DM 侧有对应的消费机制。
+  依赖 DM 条目化（scratchpad 结构化线索管理）先落地——SA 条目化的结构需与 DM 的线索管理格式对齐，且 SA→DM 注入需要 DM 侧有对应的消费机制。
   影响面：`sa_agent.py`（plan() 改为条目化输出）、`sa_agent.py`（prompt 重写引导分类产出）、`data/models.py`（SAState 扩展或新增条目表）、`dm_agent.py`（接收 SA 注入条目）、`simulator.py`（tick_daily 编排 SA→DM 注入）
-
-### [B-260629-b7d3e1] Character.scenario 字段移除评估
-- 创建: 2026-06-29
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现:
-  - `Character.scenario`（角色卡中定义的静态场景文本）在事件生成中被拼入 DM context，但 DM 条目化后场景上下文应由 DM 自身（`DMState.scratchpad` + SA 注入）动态产出
-  - 若 DM 动态场景已可替代静态 scenario，保留该字段增加角色卡定义复杂度且与实际运行状态不一致
-  - `daily_report.py` 中是否依赖 scenario 待确认
-- 开发备忘:
-  依赖 B-260622-0ed4e3 + B-260629-5a1f2c 落地后评估——确认 DM 动态场景 + SA 注入已能覆盖原本 scenario 的所有使用场景后再移除。
-  影响面：`character/models.py`（Character.scenario 字段）、`character_life.py`（DM context 中的 scenario 拼装）、`daily_report.py`（如有引用）
-
-### [B-260629-c8f2d4] LLM 路由基础设施 move to Agent 基类
-- 创建: 2026-06-29
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现:
-  - `_llm_utils.py` 的 `_run_life_collect_loop()` 被 `agent.py`、`character_agent.py`、`dm_agent.py` 三个文件导入，但它是 Agent 体系的核心调用路径，放在 `life/` 包的私有模块中定位模糊
-  - `Agent.run()` 已有模板方法（load → build prompt → collect），但内部仍需从 `_llm_utils` import 路由函数——可以考虑将 `_run_life_collect_loop` 的逻辑内联到 `Agent` 基类或作为 protected 方法
-- 开发备忘:
-  此条为纯代码组织优化，无功能影响。在所有 Phase 2 功能变更稳定后再执行，避免功能重构与代码移动交织。
-  影响面：`agent.py`（内联或新增 protected 方法）、`_llm_utils.py`（删除或精简）、`character_agent.py` / `dm_agent.py`（调用路径更新）
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01
@@ -185,6 +163,76 @@
   - LLM 路由中优先使用用户自有 key（若已配置），回退到全局 provider
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
+
+### [B-260629-b7d3e1] Character.scenario 字段移除评估
+- 创建: 2026-06-29
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现:
+  - `Character.scenario`（角色卡中定义的静态场景文本）在事件生成中被拼入 DM context，但 DM 条目化后场景上下文应由 DM 自身（`DMState.scratchpad` + SA 注入）动态产出
+  - 若 DM 动态场景已可替代静态 scenario，保留该字段增加角色卡定义复杂度且与实际运行状态不一致
+  - `daily_report.py` 中是否依赖 scenario 待确认
+- 开发备忘:
+  依赖 DM 条目化（scratchpad 结构化线索管理）+ SA 条目化 (B-260629-5a1f2c) 落地后评估——确认 DM 动态场景 + SA 注入已能覆盖原本 scenario 的所有使用场景后再移除。
+  影响面：`character/models.py`（Character.scenario 字段）、`character_life.py`（DM context 中的 scenario 拼装）、`daily_report.py`（如有引用）
+
+### [B-260629-c8f2d4] LLM 路由基础设施 move to Agent 基类
+- 创建: 2026-06-29
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现:
+  - `_llm_utils.py` 的 `_run_life_collect_loop()` 被 `agent.py`、`character_agent.py`、`dm_agent.py` 三个文件导入，但它是 Agent 体系的核心调用路径，放在 `life/` 包的私有模块中定位模糊
+  - `Agent.run()` 已有模板方法（load → build prompt → collect），但内部仍需从 `_llm_utils` import 路由函数——可以考虑将 `_run_life_collect_loop` 的逻辑内联到 `Agent` 基类或作为 protected 方法
+- 开发备忘:
+  此条为纯代码组织优化，无功能影响。在所有 Phase 2 功能变更稳定后再执行，避免功能重构与代码移动交织。
+  影响面：`agent.py`（内联或新增 protected 方法）、`_llm_utils.py`（删除或精简）、`character_agent.py` / `dm_agent.py`（调用路径更新）
+
+### [B-260630-46af37] compact_conversation 改为 LLM 摘要压缩
+- 创建: 2026-06-30
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - 当前 compact_conversation 仅做 clear() 清空
+    - 日终前的所有对话记忆被丢弃而非提炼为叙事线索
+    - 跨事件累积的叙事上下文（人物/地点/事件/线索）完全丢失
+- 开发备忘:
+    - 将 compact 从 clear 改为 LLM summary 压缩
+    - 调用一次轻量 LLM 将 _messages 压缩为叙事摘要，保留关键信息
+    - 需评估压缩 LLM 的 token 消耗和延时
+    - 影响面: life/agent.py compact_conversation()
+
+### [B-260630-789272] diary/share/opening 模式从单轮独立调用迁移到 Conversation
+- 创建: 2026-06-30
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - 当前仅 reaction 模式使用 Conversation 跨调用上下文积累
+    - diary/share/opening 仍是单轮独立调用，各自创建一次性 LLM 调用
+    - 无法利用已累积的 Conversation 上下文增强生成质量
+- 开发备忘:
+    - 参考 react() 中的 Conversation 集成模式（agent.py / character_agent.py 已加交叉注释标注重复位置）
+    - diary 是否使用独立 Conversation 取决于设计决策（日记是否需要反应上下文）
+    - 影响面: character_agent.py diary()/share()/opening()
+
+### [B-260630-38ec7f] share_desire 概念重新设计及 share_threshold 死配置清理
+- 创建: 2026-06-30
+- 优先级: P2
+- 类型: refactor
+- 改动量: L
+- 问题表现:
+    - Phase 2+3 已将 share_desire 从数据模型/CRUD/协议/DB 列全量清理
+    - schedule_share 已移除 (Phase 4 R3)，proactive_event_share_threshold 配置（proactive_config.py / simulator.py / pydantic_models.py）变为死配置
+    - "角色对事件有分享欲望→触发主动分享"概念本身有价值，当前无替代机制
+    - 主动分享仅靠 tick 时间窗口触发，缺少事件级筛选
+- 开发备忘:
+    - share_desire 重新设计暂不启动，等 SA 条目化 (B-260629-5a1f2c) 落地后系统性设计
+    - share_threshold 配置清理: 移除 proactive_config.py 属性及 from_persona_config 映射，移除 simulator.py 传递，清理或标记 DEPRECATED pydantic_models.py 字段
+    - 新方案应与 SA 叙事产出和角色状态结合，避免回到独立数值字段旧模式
+    - 影响面: proactive_config.py、simulator.py、pydantic_models.py
 
 ## release
 
