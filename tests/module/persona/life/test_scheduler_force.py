@@ -52,8 +52,9 @@ def make_scheduler(cfg, data_store, coordinator, targets, agent_result="hello"):
     )
 
     mock_agent = MagicMock()
-    mock_agent.generate_share_message = AsyncMock(return_value=agent_result)
-    scheduler.event_agent = mock_agent
+    from plugins.DicePP.module.persona.life.types import AgentResult
+    mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data=agent_result))
+    scheduler.character_agent = mock_agent
 
     return scheduler
 

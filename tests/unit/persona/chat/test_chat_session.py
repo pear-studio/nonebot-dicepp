@@ -16,7 +16,7 @@ from plugins.DicePP.utils.time import wall_now
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from plugins.DicePP.module.persona.chat.session import ChatSession, ChatConfig
+from plugins.DicePP.module.persona.chat.session import ChatSession, ChatCallContext, ChatConfig
 from plugins.DicePP.module.persona.data.models import DailyEvent, RelationshipState
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.llm.coordinator import LLMCallCoordinator
@@ -781,7 +781,7 @@ class TestFlagLifecycle:
 
     @pytest.mark.asyncio
     async def test_chat_via_coordinator_returns_empty_str_for_delivery_performed(self, seg_session):
-        result = await seg_session._chat_via_coordinator("u1", "", "hi", "user:u1")
+        result = await seg_session._chat_via_coordinator("u1", "", "hi", "user:u1", ctx=ChatCallContext())
         assert result == ""
 
     @pytest.mark.asyncio
@@ -826,12 +826,12 @@ class TestChargingPath:
         coordinator = LLMCallCoordinator()
         session = _make_session(coordinator=coordinator)
 
-        async def fake_chat_call(user_id, group_id, messages, **kwargs):
+        async def fake_chat_call(user_id, group_id, messages, ctx, **kwargs):
             await session.router.increment_usage(user_id)
             return "reply"
 
         session._coordinator_chat_call_fn = fake_chat_call
-        result = await session._coordinator_chat_call_fn("u1", "", [], timeout=30)
+        result = await session._coordinator_chat_call_fn("u1", "", [], ctx=ChatCallContext())
 
         assert result == "reply"
         session.router.increment_usage.assert_awaited_once_with("u1")
@@ -1116,7 +1116,7 @@ class TestIsCommandGateBypass:
         session._sleep_gate = sleep_gate
         session.character.extensions.sleep_messages = ["角色正在休息..."]
 
-        result = await session.chat("u1", "", ".jrrp", is_command=True)
+        result = await session.chat("u1", "", ".jrrp", ctx=ChatCallContext(is_command=True))
         # 不被睡眠门控拦截，走 LLM 路径
         assert result == "reply"
 
@@ -1135,7 +1135,7 @@ class TestIsCommandGateBypass:
             MagicMock(role="user", content="prev"),
         ])
 
-        result = await session.chat("u1", "", ".jrrp", is_command=True)
+        result = await session.chat("u1", "", ".jrrp", ctx=ChatCallContext(is_command=True))
         assert result == "reply"  # 不被拒绝门控拦截
 
     @pytest.mark.asyncio
@@ -1147,7 +1147,7 @@ class TestIsCommandGateBypass:
         sleep_gate.is_awake = AsyncMock(return_value=False)
         session._sleep_gate = sleep_gate
 
-        await session.chat("u1", "", ".jrrp", is_command=True)
+        await session.chat("u1", "", ".jrrp", ctx=ChatCallContext(is_command=True))
         # ScoringTrigger.on_interaction 不应被调用
         session._scoring_trigger.on_interaction.assert_not_called()
 
@@ -1169,6 +1169,6 @@ class TestIsCommandGateBypass:
         sleep_gate.is_awake = AsyncMock(return_value=False)
         session._sleep_gate = sleep_gate
 
-        result = await session.chat("u1", "", ".jrrp", is_command=True)
+        result = await session.chat("u1", "", ".jrrp", ctx=ChatCallContext(is_command=True))
         assert result == "reply"
         session._scoring_trigger.on_interaction.assert_not_called()

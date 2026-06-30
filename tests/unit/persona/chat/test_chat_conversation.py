@@ -12,6 +12,7 @@ import asyncio
 from datetime import date, datetime
 
 import pytest
+from plugins.DicePP.module.persona.chat.session import ChatCallContext
 from plugins.DicePP.module.persona.data.models import (
     RelationshipState,
 )
@@ -231,13 +232,13 @@ async def test_group_multi_user(temp_db):
     ])
     session = build_conversation_session(store=store, scripted_provider=sp)
 
-    r1 = await session.chat("alice", "g1", "大家好我是Alice", nickname="Alice")
+    r1 = await session.chat("alice", "g1", "大家好我是Alice", ctx=ChatCallContext(nickname="Alice"))
     assert r1 == "Alice你好！"
 
-    r2 = await session.chat("bob", "g1", "我是Bob", nickname="Bob")
+    r2 = await session.chat("bob", "g1", "我是Bob", ctx=ChatCallContext(nickname="Bob"))
     assert r2 == "Bob你也好！"
 
-    r3 = await session.chat("alice", "g1", "今天天气不错", nickname="Alice")
+    r3 = await session.chat("alice", "g1", "今天天气不错", ctx=ChatCallContext(nickname="Alice"))
     assert r3 == "今天真热闹。"
 
     # 验证上下文含发言者名称

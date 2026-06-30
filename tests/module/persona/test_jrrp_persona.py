@@ -11,6 +11,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 
 from core.communication import MessageMetaData
+from plugins.DicePP.module.persona.chat.session import ChatCallContext
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -162,14 +163,11 @@ class TestHandleJrrp:
                           direction='up', is_min=False, is_max=False)
 
     async def test_sends_info_line_and_commentary(self, mock_jrrp_result):
-        """正常路径：写入 event_msg → LLM 评语（不发模板数值行）"""
+        """正常路径：event_msg 通过 transient_message 传入 chat() → LLM 评语"""
         app = MagicMock()
         app.chat.chat = AsyncMock(return_value="运气不错呢！")
 
-        data_store = MagicMock()
-        data_store.add_message_stream = AsyncMock()
-
-        cmd = _make_cmd(app=app, data_store=data_store)
+        cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
 
         meta = _make_meta()
@@ -178,13 +176,14 @@ class TestHandleJrrp:
                 result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
-        # event_msg 以 user 角色写入 message_stream，包含 display_name
-        user_calls = [c for c in data_store.add_message_stream.await_args_list
-                      if c.kwargs.get("role") == "user"]
-        assert len(user_calls) == 1, \
-            f"event_msg 应在 chat() 前以 user 角色写入，实际调用: {data_store.add_message_stream.await_args_list}"
-        assert user_calls[0].kwargs.get("display_name") == "test_user", \
-            f"event_msg 应携带 display_name=test_user，实际: {user_calls[0].kwargs.get('display_name')}"
+        # event_msg 通过 transient_message 传入 chat()，不写入 message_stream
+        app.chat.chat.assert_awaited_once()
+        chat_kwargs = app.chat.chat.await_args.kwargs
+        assert chat_kwargs.get("ctx").transient_message is not None, \
+            "应传入 transient_message"
+        assert "[事件] test_user 查询了今日运势" in chat_kwargs["ctx"].transient_message, \
+            f"transient_message 应包含事件内容，实际: {chat_kwargs['transient_message'][:80]}..."
+        assert "今日: 75/100" in chat_kwargs["ctx"].transient_message
         # 只发了 LLM 评语，没有模板数值行
         assert cmd._send.await_count == 1
         cmd._send.assert_any_call("U123", "", "运气不错呢！")
@@ -196,8 +195,6 @@ class TestHandleJrrp:
 
         cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
-        cmd.data_store = MagicMock()
-        cmd.data_store.add_message_stream = AsyncMock()
 
         meta = _make_meta()
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
@@ -207,10 +204,10 @@ class TestHandleJrrp:
                     result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
-        # event_msg 仍在 chat() 前以 user 角色写入
-        user_calls = [c for c in cmd.data_store.add_message_stream.await_args_list
-                      if c.kwargs.get("role") == "user"]
-        assert len(user_calls) == 1
+        # chat() 被调用（携带 transient_message），但 LLM 抛出异常
+        app.chat.chat.assert_awaited_once()
+        chat_kwargs = app.chat.chat.await_args.kwargs
+        assert chat_kwargs.get("ctx").transient_message is not None
         # 回退时发送完整模板文本（数值 + 趋势），仅发送一次
         cmd._send.assert_any_call("U123", "",
                                   "test_user的今日人品是:75\n人品比昨天上升了25.0%！")
@@ -224,8 +221,6 @@ class TestHandleJrrp:
 
         cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
-        cmd.data_store = MagicMock()
-        cmd.data_store.add_message_stream = AsyncMock()
 
         meta = _make_meta()
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
@@ -244,8 +239,6 @@ class TestHandleJrrp:
 
         cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
-        cmd.data_store = MagicMock()
-        cmd.data_store.add_message_stream = AsyncMock()
 
         meta = _make_meta()
         fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
@@ -260,41 +253,23 @@ class TestHandleJrrp:
         assert cmd._send.await_count == 1
         cmd._send.assert_called_once_with("U123", "", fallback_text)
 
-    async def test_fallback_when_event_not_persisted(self, mock_jrrp_result):
-        """event_msg 持久化失败时回退到 format_jrrp_text"""
+    async def test_works_without_data_store(self, mock_jrrp_result):
+        """data_store=None 时 _handle_jrrp 仍能工作（transient_message 不依赖持久化）"""
         app = MagicMock()
-        app.chat.chat = AsyncMock(return_value="不会调到这里")
+        app.chat.chat = AsyncMock(return_value="运气不错！")
         cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
+        cmd.data_store = None
 
         meta = _make_meta()
-        fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
-
-        # 子用例 A：data_store=None → event_persisted=False
-        cmd.data_store = None
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
             with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_text",
-                           return_value=fallback_text):
-                    result_a = await cmd._handle_jrrp("U123", "", meta)
-        assert result_a == []
-        cmd._send.assert_called_once_with("U123", "", fallback_text)
+                result = await cmd._handle_jrrp("U123", "", meta)
 
-        # 子用例 B：add_message_stream 抛异常 → event_persisted=False
-        cmd._send.reset_mock()
-        cmd.data_store = MagicMock()
-        cmd.data_store.add_message_stream = AsyncMock(side_effect=RuntimeError("DB down"))
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
-                with patch("module.misc.jrrp_utils.format_jrrp_text",
-                           return_value=fallback_text):
-                    with patch("module.persona.command.logger") as mock_logger:
-                        result_b = await cmd._handle_jrrp("U123", "", meta)
-        assert result_b == []
-        cmd._send.assert_called_once_with("U123", "", fallback_text)
-        warning_calls = [c[0][0] for c in mock_logger.warning.call_args_list]
-        assert any("event_msg 持久化失败" in msg for msg in warning_calls), \
-            f"应有持久化失败 warning，实际: {warning_calls}"
+        assert result == []
+        # data_store 为 None 不应阻塞 LLM 调用（transient_message 走旁路）
+        app.chat.chat.assert_awaited_once()
+        cmd._send.assert_called_once_with("U123", "", "运气不错！")
 
 
 # ── Test: is_command=True propagation ────────────────────────────────────
@@ -311,8 +286,6 @@ class TestIsCommandPropagation:
 
         cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
-        cmd.data_store = MagicMock()
-        cmd.data_store.add_message_stream = AsyncMock()
 
         meta = _make_meta()
         mock_result = JrrpResult(jrrp=50, zrrp=50, delta=0, delta_percent=0.0,
@@ -325,7 +298,7 @@ class TestIsCommandPropagation:
         # 验证 chat.chat 被调用且 is_command=True
         app.chat.chat.assert_awaited_once()
         assert app.chat.chat.await_args is not None
-        assert app.chat.chat.await_args.kwargs.get("is_command") is True
+        assert app.chat.chat.await_args.kwargs.get("ctx").is_command is True
 
 
     async def test_chat_session_is_command_skips_sleep_gate(self):
@@ -356,7 +329,8 @@ class TestIsCommandPropagation:
 
         # is_command=True 时即使角色睡眠也应放行
         result = await session.chat(
-            user_id="U123", group_id="", message=".jrrp", is_command=True,
+            user_id="U123", group_id="", message=".jrrp",
+            ctx=ChatCallContext(is_command=True),
         )
         assert result == "jrrp response"
         # 睡眠门控不应被触发
@@ -442,19 +416,16 @@ class TestPersonaAppIsAwake:
 # ── Test: event_msg → LLM context 管道验证 ─────────────────────────────────
 
 class TestJrrpLLMContext:
-    """验证 _handle_jrrp 的 event_msg 真正进入 LLM 上下文（防 R1 同类回归）"""
+    """验证 _handle_jrrp 的 event_msg 通过 transient_message 进入 LLM 上下文"""
 
-    async def test_event_msg_persisted_as_user_before_chat(self):
-        """event_msg 以 user 角色先于 chat() 写入 message_stream"""
+    async def test_event_msg_passed_as_transient_message(self):
+        """event_msg 以 transient_message 参数传入 chat()，不写入 message_stream"""
         from module.misc.jrrp_utils import JrrpResult
 
         app = MagicMock()
         app.chat.chat = AsyncMock(return_value="运气不错！")
 
-        data_store = MagicMock()
-        data_store.add_message_stream = AsyncMock()
-
-        cmd = _make_cmd(app=app, data_store=data_store)
+        cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
 
         meta = _make_meta()
@@ -465,29 +436,25 @@ class TestJrrpLLMContext:
             with patch("utils.time.get_current_date_raw"):
                 await cmd._handle_jrrp("U123", "", meta)
 
-        # 收集所有 add_message_stream 调用
-        calls = data_store.add_message_stream.await_args_list
-        call_kwargs = [c.kwargs for c in calls]
-
-        # 验证存在一条 role="user" 且 content 包含 event_msg 核心内容
-        user_calls = [k for k in call_kwargs if k.get("role") == "user"]
-        assert len(user_calls) >= 1, f"应有至少一次 user 角色持久化，实际: {call_kwargs}"
-
-        user_content = user_calls[0]["content"]
-        assert "[事件]" in user_content, \
-            f"event_msg 应包含 [事件] 前缀，实际: {user_content[:80]}..."
-        assert "test_user 查询了今日运势" in user_content, \
-            f"event_msg 应包含用户和运势信息，实际: {user_content[:80]}..."
-        assert "今日: 75/100" in user_content, \
-            f"event_msg 应包含今日运势值，实际: {user_content[:80]}..."
-        assert "昨日: 60/100" in user_content, \
-            f"event_msg 应包含昨日运势值，实际: {user_content[:80]}..."
-        assert "上涨 25.0%" in user_content, \
-            f"event_msg 应包含趋势方向，实际: {user_content[:80]}..."
-        assert "请以角色身份就此说一两句话" in user_content, \
-            f"event_msg 应包含角色指令，实际: {user_content[:80]}..."
-
-        # 验证 chat() 在 event_msg 持久化之后调用（通过检查调用顺序）
+        # 验证 chat() 被调用且 ctx.transient_message 包含完整 event 内容
         app.chat.chat.assert_awaited_once()
-        assert app.chat.chat.await_args.kwargs.get("is_command") is True
+        ctx = app.chat.chat.await_args.kwargs.get("ctx")
+        assert ctx is not None, "应传入 ctx (ChatCallContext)"
+        tm = ctx.transient_message
+        assert tm is not None, "ctx.transient_message 不应为 None"
+        assert "[事件] test_user 查询了今日运势" in tm, \
+            f"transient_message 应包含 [事件] 前缀，实际: {tm[:80]}..."
+        assert "今日: 75/100" in tm, \
+            f"transient_message 应包含今日运势值，实际: {tm[:80]}..."
+        assert "昨日: 60/100" in tm, \
+            f"transient_message 应包含昨日运势值，实际: {tm[:80]}..."
+        assert "上涨 25.0%" in tm, \
+            f"transient_message 应包含趋势方向，实际: {tm[:80]}..."
+        assert "请以角色身份就此说一两句话" in tm, \
+            f"transient_message 应包含角色指令，实际: {tm[:80]}..."
+
+        # 验证 is_command=True, message=".jrrp"（R2: message 仅用于去重/缓冲）
+        assert ctx.is_command is True
+        assert app.chat.chat.await_args.kwargs["message"] == ".jrrp", \
+            f"message 应为 '.jrrp'（仅用于去重/缓冲），实际: {app.chat.chat.await_args.kwargs.get('message')}"
 
