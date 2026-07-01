@@ -19,6 +19,7 @@ from ..tools.collecting import (
 )
 from utils.time import format_timestamp, format_relative_time, wall_now
 from .agent import Agent
+from .change_sources import CharacterStateChangeSource
 from .types import AgentResult, EventReactionResult
 
 if TYPE_CHECKING:
@@ -41,7 +42,13 @@ _DEFAULT_SHARE_EXAMPLES: List[str] = [
 
 
 class CharacterAgent(Agent):
-    """Character Agent — 角色第一人称"""
+    """Character Agent — 角色第一人称
+
+    状态数据（体力/心情/健康）通过 ChangeSource 通知管道在 Conversation 中注入——
+    首轮 pull_notifications() 获得各维度的初始化通知，后续仅在状态变化时产生增量通知
+    （如 "体力 -10 (当前 65/100)"）。同天多轮反应且状态无变化时，LLM 仅依靠上下文记忆
+    感知状态，不再在每轮 user prompt 中内联注入绝对值。
+    """
 
     name = "Character"
     role = "角色第一人称"
@@ -85,8 +92,10 @@ class CharacterAgent(Agent):
         """构建纯人设层 system prompt — 角色身份 + 核心边界。
 
         不包含 mode 特定任务指令。任务指令由各 user prompt builder 注入。
-        state 形参保留给 Agent ABC 接口兼容；角色身份数据实际通过 context dict 注入，
-        状态数据（体力/心情/健康）在 user prompt 层注入。
+        state 形参保留给 Agent ABC 接口兼容；角色身份数据实际通过 context dict 注入。
+        状态数据（体力/心情/健康）：reaction 模式由 CharacterStateChangeSource
+        通过 Conversation 通知管道注入，diary/share 当前仍在 user prompt 层注入
+        （待后续统一迁移到通知管道）。
         """
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
@@ -102,7 +111,9 @@ class CharacterAgent(Agent):
 3. 不编造与当前上下文无关的内容"""
         return system_prompt
 
-    # ── Share Prompt ─────────────────────────────────────────
+    def _get_change_sources(self) -> "list[ChangeSource]":
+        """订阅角色状态变更通知（体力/心情/健康三维合并为单 source，一次 DB 查询）。"""
+        return [CharacterStateChangeSource(self.store)]
 
     # TODO: 迁移到 build_system_prompt() 纯人设 + mode 特定 user prompt 分层范式
     def _build_share_prompt(self, state: CharacterState, context: dict) -> str:
@@ -195,10 +206,6 @@ class CharacterAgent(Agent):
     def _build_reaction_user_prompt(self, context: dict) -> str:
         event = context.get("event", "")
         today_events = context.get("today_events", [])
-        state_text = self._format_state_prompt(
-            context.get("energy"), context.get("mood"),
-            context.get("health"),
-        )
 
         today_context = ""
         if today_events:
@@ -217,10 +224,10 @@ class CharacterAgent(Agent):
                 events_lines.append(f"- [{time_str}] {desc}")
             today_context = "\n今天已发生事件:\n" + "\n".join(events_lines)
 
+        context_prefix = f"{today_context}\n" if today_context else ""
         user_prompt = (
-            f"你当前的状态:\n{state_text}"
-            f"{today_context}"
-            f"\n\n当前事件: {event}"
+            f"{context_prefix}"
+            f"当前事件: {event}"
             f"\n\n请对发生的事件做出内心反应，通过 say 工具表达你的感受和想法。"
             f"\n要求: 30-80字，表达真实感受，反映角色性格特点和当前状态。"
             f"\n如果你想继续行动（调查、对话、移动等），设置 has_follow_up=true。"
@@ -275,6 +282,10 @@ class CharacterAgent(Agent):
         return user_prompt
 
     def _build_share_user_prompt(self, context: dict) -> str:
+        # 当前 share() 不经过 Conversation 管道（直接构造 ad-hoc messages 调用
+        # _run_life_collect_loop），ChangeSource 通知不会注入。状态数据由 context
+        # 直接传入 _format_state_prompt()。后续若 share() 迁移到 Conversation 模式，
+        # 应同步移除内联状态文本。
         event_description = context.get("event_description", "")
         reaction = context.get("reaction", "")
         relationship_score = context.get("relationship_score", 0.0)
@@ -363,8 +374,10 @@ class CharacterAgent(Agent):
             event: str — 事件描述
             character_name: str
             character_description: str
-            energy/mood/health: Optional[int]
             today_events: List[dict]
+
+        状态数据（体力/心情/健康）现由 CharacterStateChangeSource 通过
+        Conversation 通知管道注入，无需 caller 在 context 中传递。
 
         Returns:
             AgentResult(data=EventReactionResult)

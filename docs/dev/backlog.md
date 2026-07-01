@@ -189,6 +189,14 @@
   此条为纯代码组织优化，无功能影响。在所有 Phase 2 功能变更稳定后再执行，避免功能重构与代码移动交织。
   影响面：`agent.py`（内联或新增 protected 方法）、`_llm_utils.py`（删除或精简）、`character_agent.py` / `dm_agent.py`（调用路径更新）
 
+### [B-260630-26d6a7] 通知消息 name/content 前缀一致性扫描与 role 验证
+- 创建: 2026-06-30
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现: 当前 notification/transient 消息混用 name 字段和 content 前缀来区分通知与真用户输入，缺乏一致性
+- 开发备忘: 1. 扫描全项目所有类似注入点，确认 name 和 content 前缀是否都有使用；2. 判断是否应将 role 从 user 统一改为 system；3. 跑真实 LLM 验证 system role 通知消息的行为差异。结论以 LLM 验证结果为准。
+
 ### [B-260630-9f3fa0] Conversation 事务性保护 — add_user 后的失败回滚
 - 创建: 2026-06-30
 - 优先级: P2
@@ -196,14 +204,6 @@
 - 改动量: S
 - 问题表现: conv.add_user() 后 LLM 调用失败时，Conversation 中留下悬挂的 user 消息（无 assistant 响应）。重试时会重复追加导致上下文污染。当前 react() 和 diary() 均无事务性保护。
 - 开发备忘: 在 add_user/LLM 调用/extend 之间加事务性边界：记录 add_user 前的 Conversation 快照，LLM 调用失败时回滚到快照状态。
-
-### [B-260630-05739c] 状态变更通知 message — 事件溯源模式注入 Conversation
-- 创建: 2026-06-30
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现: 当前状态（体力/心情/健康）在每轮 user message 中简单拼接，状态变更时无独立通知事件。每轮拼接使得状态变更的历史不可追溯，且与事件溯源模式不一致。
-- 开发备忘: 状态变更应作为独立 notification message 注入 Conversation，渲染上下文时可通过扫描数据库记录重建。参考 character_agent.py build_system_prompt() 分层重构后的 user prompt 状态注入逻辑。
 
 ### [B-260630-1f9286] 工具定义与传入规则梳理 — 统一 required_tool 语义和传递路径
 - 创建: 2026-06-30

@@ -116,6 +116,23 @@ class Agent(ABC):
             logger.warning("_build_extra_registry 构建失败，DM 只读查询工具将不可用", exc_info=True)
             return None
 
+    # ── ChangeSource 支持 ───────────────────────────────────────
+
+    def _get_change_sources(self) -> "list[ChangeSource]":
+        """返回要注册到 Conversation 的 ChangeSource 列表。
+
+        子类覆盖此方法以订阅变更通知。默认返回空列表。
+        """
+        return []
+
+    def _register_change_sources(self, conv: "Conversation") -> None:
+        """将 _get_change_sources() 返回的 source 注册到 Conversation。
+
+        只在 _ensure_conversation 首次创建 Conversation 时调用。
+        """
+        for source in self._get_change_sources():
+            conv.register(source)
+
     # ── Conversation 支持 ─────────────────────────────────────
 
     def _init_conversation(self, system_prompt: str) -> "Conversation":
@@ -155,10 +172,13 @@ class Agent(ABC):
                     else self.build_system_prompt(state, context)
                 )
             self._init_conversation(system_prompt)
+            # 注册 ChangeSource —— 只在 Conversation 创建时调用一次
+            self._register_change_sources(self._conversation)
 
         # R4: _system_prompt 已设置但 _conversation 为 None 时，防御性创建
         if self._conversation is None:
             self._init_conversation(self._system_prompt or "")
+            self._register_change_sources(self._conversation)
 
         return self._conversation
 
@@ -196,6 +216,7 @@ class Agent(ABC):
         from ..life._llm_utils import _run_life_collect_loop
 
         conv = await self._ensure_conversation(context, system_prompt_override=initial_system_prompt)
+        await conv.pull_notifications()
         conv.add_user(user_prompt)
         prev_len = conv.length
 

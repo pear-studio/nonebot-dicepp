@@ -170,3 +170,37 @@ class TestFormatStatePrompt:
         from plugins.DicePP.module.persona.life.character_agent import CharacterAgent
         result = CharacterAgent._format_state_prompt(energy=None, mood=None, health=None)
         assert result == '无记录'
+
+
+class TestCharacterAgentChangeSources:
+    """测试 CharacterAgent._get_change_sources()"""
+
+    def test_returns_single_source(self):
+        from unittest.mock import MagicMock
+        store = MagicMock()
+        router = MagicMock()
+        agent = CharacterAgent(store=store, router=router)
+        sources = agent._get_change_sources()
+        assert len(sources) == 1
+        assert sources[0].source_id == "state.character"
+        assert sources[0].name == "状态变化"
+        assert sources[0].priority == 10
+
+
+class TestReactionUserPromptNoStateText:
+    """验证 _build_reaction_user_prompt 不再拼接 _format_state_prompt"""
+
+    def test_no_state_text_in_user_prompt(self):
+        from unittest.mock import MagicMock
+        store = MagicMock()
+        router = MagicMock()
+        agent = CharacterAgent(store=store, router=router)
+        prompt = agent._build_reaction_user_prompt({
+            "event": "远处传来声音",
+            "energy": 80, "mood": 60, "health": 90,
+        })
+        assert "你当前的状态" not in prompt
+        assert "体力:" not in prompt
+        assert "心情:" not in prompt
+        assert "健康:" not in prompt
+        assert "当前事件: 远处传来声音" in prompt
