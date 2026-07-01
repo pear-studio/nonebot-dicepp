@@ -22,6 +22,20 @@ from dashboard.src.config import DashboardPaths
 # is initialised even when only setup_auth is called directly.
 
 
+def _reset_app_module_caches() -> None:
+    """清除 dashboard.src.app 的模块级缓存，确保测试隔离。
+
+    ``_pydantic_module_cache`` / ``_config_field_metadata_cache`` /
+    ``_config_layout_cache`` 是模块级全局变量。若某个测试修改了
+    ``DashboardPaths.PROJECT_ROOT`` 并重建缓存，缓存会污染后续测试。
+    """
+    import dashboard.src.app as app_mod
+
+    app_mod._pydantic_module_cache = None
+    app_mod._config_field_metadata_cache = None
+    app_mod._config_layout_cache = None
+
+
 def _init_test_db(project_root: Path) -> str:
     """Create dashboard.db in project_root/dashboard/data/ and return its path."""
     db_path = str(project_root / "dashboard" / "data" / "dashboard.db")
@@ -172,6 +186,7 @@ def test_client(tmp_dashboard_paths: Path, monkeypatch: pytest.MonkeyPatch) -> T
     initialised.
     """
     db_path = _init_test_db(tmp_dashboard_paths)
+    _reset_app_module_caches()
     app.state.dashboard_db = db_path
     app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
@@ -194,6 +209,7 @@ def dual_clients(
 ) -> tuple[TestClient, TestClient]:
     """Two TestClients sharing the same dashboard.db for session-rotation tests."""
     db_path = _init_test_db(tmp_dashboard_paths)
+    _reset_app_module_caches()
 
     app1 = app  # share the same FastAPI app instance
     app1.state.dashboard_db = db_path
