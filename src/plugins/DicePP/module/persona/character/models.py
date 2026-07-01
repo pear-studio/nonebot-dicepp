@@ -101,7 +101,7 @@ class Character(BaseModel):
     name: str
     description: str = ""
     personality: str = ""
-    scenario: str = ""
+    scenario: str = ""  # 仅用于 Life 首次启动初始化，不注入日常 prompt（SillyTavern V2 兼容字段）
     mes_example: str = ""
     system_prompt: str = ""
     character_book: Optional[CharacterBook] = None

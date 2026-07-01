@@ -85,11 +85,8 @@ class DMAgent(Agent):
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
         world = context.get("world", "现代日常世界")
-        scenario = context.get("scenario", "")
         state_text = context.get("state_text", "")
         slot_type = context.get("slot_type", "system")
-
-        scenario_section = f"场景:\n{scenario}\n" if scenario else ""
 
         system_prompt = f"""你是 TRPG 主持人（DM），负责裁决角色的行动并叙述结果。
 
@@ -99,7 +96,7 @@ class DMAgent(Agent):
 世界观:
 {world or "现代日常世界"}
 
-{scenario_section}角色当前状态:
+角色当前状态:
 {state_text}
 
 {_STATE_SCALE_PROMPT}
@@ -133,6 +130,10 @@ class DMAgent(Agent):
         date_str = context.get("date_str", "")
         chain_depth = context.get("chain_depth", 0)
         follow_up_text = context.get("follow_up_text", "")
+        init_scenario_text = context.get("init_scenario_text", "")
+
+        # 附加场景上下文（首次启动或自发事件路径注入）
+        init_section = f"\n\n【场景】\n{init_scenario_text}" if init_scenario_text else ""
 
         if chain_depth == 0:
             task_hint = "请生成一个符合世界观的生活事件"
@@ -144,6 +145,7 @@ class DMAgent(Agent):
 
         user_prompt = (
             f"当前日期: {date_str}\n当前时间: {now_str}"
+            f"{init_section}"
             f"{diary_context}{events_context}"
             f"\n\n{task_hint}"
         )

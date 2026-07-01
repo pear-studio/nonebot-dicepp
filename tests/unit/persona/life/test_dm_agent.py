@@ -42,7 +42,7 @@ class TestDMAgentRun:
             "character_name": "测试角色",
             "character_description": "一个冒险者",
             "world": "奇幻世界",
-            "scenario": "",
+            "init_scenario_text": "",
             "state_text": "体力50/心情50/健康50",
             "slot_type": "system",
             "chain_depth": 0,
@@ -280,3 +280,70 @@ class TestStoryDeckInjection:
         )
         assert "老李" not in injected_text
         assert "图书馆" in injected_text  # 图书馆未注入过
+
+
+class TestDMBuildUserPrompt:
+    """R3/R6: _build_user_prompt 的 init_scenario_text 渲染行为"""
+
+    @pytest.fixture
+    def mock_store(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def mock_router(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def dm_agent(self, mock_store, mock_router):
+        return DMAgent(store=mock_store, router=mock_router)
+
+    def test_init_scenario_text_empty(self, dm_agent):
+        """init_scenario_text 为空时不注入场景段落"""
+        context = {
+            "init_scenario_text": "",
+            "diary_context": "",
+            "events_context": "",
+            "now_str": "12:00",
+            "date_str": "2026-01-01",
+            "chain_depth": 0,
+            "follow_up_text": "",
+        }
+        prompt = dm_agent._build_user_prompt(context)
+        assert "【场景】" not in prompt
+        assert "初始场景" not in prompt
+
+    def test_init_scenario_text_nonempty_depth_zero(self, dm_agent):
+        """init_scenario_text 非空且 depth=0 时注入【场景】段落"""
+        context = {
+            "init_scenario_text": "在古老遗迹中",
+            "diary_context": "",
+            "events_context": "",
+            "now_str": "12:00",
+            "date_str": "2026-01-01",
+            "chain_depth": 0,
+            "follow_up_text": "",
+        }
+        prompt = dm_agent._build_user_prompt(context)
+        assert "【场景】" in prompt
+        assert "在古老遗迹中" in prompt
+
+    def test_init_scenario_text_nonempty_depth_one(self, dm_agent):
+        """init_scenario_text 非空且 depth=1 时清空后不应出现（由 character_life 的 R3 修复保证）
+
+        此测试验证 dm_agent 层面对 init_scenario_text 字段的处理不区分 depth——
+        depth 过滤是 character_life 的职责（首次注入后清空 init_scenario_text）。
+        dm_agent 本身对任意 depth 都会渲染非空的 init_scenario_text。
+        """
+        context = {
+            "init_scenario_text": "在古老遗迹中",
+            "diary_context": "",
+            "events_context": "",
+            "now_str": "12:00",
+            "date_str": "2026-01-01",
+            "chain_depth": 1,
+            "follow_up_text": "继续探索",
+        }
+        prompt = dm_agent._build_user_prompt(context)
+        # dm_agent 不自行过滤 depth，由 character_life 侧在首次注入后清空保证语义
+        assert "【场景】" in prompt
+        assert "在古老遗迹中" in prompt

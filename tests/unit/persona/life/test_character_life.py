@@ -1234,3 +1234,125 @@ class TestSpontaneousIntentionContext:
         life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
         life.boundary_receiver = MagicMock()
         return life
+
+
+class TestFirstBoot:
+    """R1/R2/R7: _first_boot 生命周期 — 标记在 DM 成功后才清除，JSON 损坏视为首启"""
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState(energy=50, mood=50, health=50))
+        store.update_character_state = AsyncMock()
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.add_daily_event = AsyncMock()
+        store.get_diary = AsyncMock(return_value=None)
+        return store
+
+    @pytest.fixture
+    def character(self):
+        ext = PersonaExtensions(daily_events_count=1, event_day_start_hour=8, event_day_end_hour=22, event_jitter_minutes=0)
+        return Character(name='测试角色', description='探险家', scenario='在古老遗迹中', extensions=ext)
+
+    @pytest.mark.asyncio
+    async def test_first_boot_preserved_on_dm_failure(self, mock_data_store, character):
+        """R1: dm_agent=None 时 _first_boot 不被清除，下次 tick 可重试注入"""
+        config = CharacterLifeConfig(enabled=True)
+        life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=None, character_agent=None, character=character)
+        life.boundary_receiver = MagicMock()
+        life._first_boot = True
+        await life.generate_daily_event()
+        assert life._first_boot is True, "DM 失败时 _first_boot 应保持 True，下次 tick 可重试注入"
+
+    @pytest.mark.asyncio
+    async def test_load_state_corrupted_json_sets_first_boot(self, mock_data_store, character):
+        """R2: JSON 损坏时 _first_boot 设为 True，视为首次启动重建"""
+        mock_data_store.get_setting = AsyncMock(return_value="{broken")
+        config = CharacterLifeConfig(enabled=True)
+        life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=None, character_agent=None, character=character)
+        await life.load_persistent_state()
+        assert life._first_boot is True, "JSON 损坏应视为首次启动"
+
+    @pytest.mark.asyncio
+    async def test_load_state_valid_data_first_boot_unchanged(self, mock_data_store, character):
+        """正常持久化数据时 _first_boot 保持原值"""
+        import json
+        valid_data = json.dumps({"date": "2024-01-01", "slot_minutes": [[480, "wake_up"], [720, "system"], [1320, "good_night"]], "fired": []})
+        mock_data_store.get_setting = AsyncMock(return_value=valid_data)
+        config = CharacterLifeConfig(enabled=True)
+        life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=None, character_agent=None, character=character)
+        life._first_boot = False
+        await life.load_persistent_state()
+        assert life._first_boot is False, "正常数据不应触发首次启动"
+
+    @pytest.mark.asyncio
+    async def test_load_state_empty_data_sets_first_boot(self, mock_data_store, character):
+        """无持久化数据（真正首次启动）时 _first_boot 设为 True"""
+        mock_data_store.get_setting = AsyncMock(return_value=None)
+        config = CharacterLifeConfig(enabled=True)
+        life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=None, character_agent=None, character=character)
+        await life.load_persistent_state()
+        assert life._first_boot is True, "无持久化数据应标记为首次启动"
+
+    @pytest.mark.asyncio
+    async def test_first_boot_preserved_when_char_agent_fails(self, mock_data_store, character):
+        """R1: DM 成功但 Character Agent 失败时 _first_boot 保持 True"""
+        config = CharacterLifeConfig(enabled=True)
+        dm = MagicMock()
+        dm.run = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventGenerationResult(description='测试事件', duration_minutes=0,
+                                       energy_delta=0, mood_delta=0, health_delta=0)))
+        char = MagicMock()
+        char.react = AsyncMock(return_value=AgentResult(success=False, data=None, error='模拟失败'))
+        life = CharacterLife(config=config, data_store=mock_data_store,
+                             dm_agent=dm, character_agent=char, character=character)
+        life.boundary_receiver = MagicMock()
+        life._first_boot = True
+        await life.generate_daily_event()
+        assert life._first_boot is True, (
+            "Character Agent 失败时 _first_boot 应保持 True，下次 tick 可重试完整事件链"
+        )
+
+    @pytest.mark.asyncio
+    async def test_first_boot_cleared_after_full_chain(self, mock_data_store, character):
+        """R2: DM + Character Agent 全成功后 _first_boot 清除为 False"""
+        config = CharacterLifeConfig(enabled=True)
+        dm = MagicMock()
+        dm.run = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventGenerationResult(description='测试事件', duration_minutes=0,
+                                       energy_delta=0, mood_delta=0, health_delta=0)))
+        char = MagicMock()
+        char.react = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventReactionResult(reaction='嗯', has_follow_up=False)))
+        life = CharacterLife(config=config, data_store=mock_data_store,
+                             dm_agent=dm, character_agent=char, character=character)
+        life.boundary_receiver = MagicMock()
+        life._first_boot = True
+        await life.generate_daily_event()
+        assert life._first_boot is False, (
+            "DM + Character Agent 全成功后 _first_boot 应清除"
+        )
+
+    @pytest.mark.asyncio
+    async def test_first_boot_preserved_on_dm_run_failure(self, mock_data_store, character):
+        """R3: DM run() 返回 success=False 时 _first_boot 保持 True"""
+        config = CharacterLifeConfig(enabled=True)
+        dm = MagicMock()
+        dm.run = AsyncMock(return_value=AgentResult(
+            success=False,
+            data=EventGenerationResult(description='', duration_minutes=0),
+            error='模拟 DM 失败'))
+        char = MagicMock()
+        life = CharacterLife(config=config, data_store=mock_data_store,
+                             dm_agent=dm, character_agent=char, character=character)
+        life.boundary_receiver = MagicMock()
+        life._first_boot = True
+        await life.generate_daily_event()
+        assert life._first_boot is True, (
+            "DM run() 返回 failure 时 _first_boot 应保持 True"
+        )

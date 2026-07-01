@@ -216,14 +216,12 @@ class SAAgent(Agent):
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
         world = context.get("world", "")
-        scenario = context.get("scenario", "")
         diary_text = context.get("diary_text", "")
         events_text = context.get("events_text", "")
 
         prompt = f"""角色信息：
 {character_name} — {character_description}
 世界观：{world}
-场景：{scenario}
 
 你的叙事线（fronts）当前状态：
 {_format_fronts(fronts_dicts)}

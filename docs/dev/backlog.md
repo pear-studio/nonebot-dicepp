@@ -151,19 +151,6 @@
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
 
-### [B-260629-b7d3e1] Character.scenario 字段移除评估
-- 创建: 2026-06-29
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现:
-  - `Character.scenario`（角色卡中定义的静态场景文本）在事件生成中被拼入 DM context，但 DM 条目化后场景上下文应由 DM 自身（`DMState.scratchpad` + SA 注入）动态产出
-  - 若 DM 动态场景已可替代静态 scenario，保留该字段增加角色卡定义复杂度且与实际运行状态不一致
-  - `daily_report.py` 中是否依赖 scenario 待确认
-- 开发备忘:
-  依赖 DM 条目化（scratchpad 结构化线索管理）+ SA 条目化 (B-260629-5a1f2c) 落地后评估——确认 DM 动态场景 + SA 注入已能覆盖原本 scenario 的所有使用场景后再移除。
-  影响面：`character/models.py`（Character.scenario 字段）、`character_life.py`（DM context 中的 scenario 拼装）、`daily_report.py`（如有引用）
-
 ### [B-260630-26d6a7] 通知消息 name/content 前缀一致性扫描与 role 验证
 - 创建: 2026-06-30
 - 优先级: P2

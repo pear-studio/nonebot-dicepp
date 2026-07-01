@@ -132,6 +132,7 @@ class CharacterLife:
         self.boundary_receiver: Optional[BoundaryReceiver] = None
         self._boundaries_loaded = False
         self._state_lock = asyncio.Lock()
+        self._first_boot: bool = False  # Life 首次启动标记，用于 init_scenario 一次性注入
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用"""
@@ -249,10 +250,13 @@ class CharacterLife:
         self._boundaries_loaded = True
         raw = await self.data_store.get_setting(PERSONA_SK_CHARACTER_LIFE)
         if not raw:
+            self._first_boot = True
             return
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
+            self._first_boot = True
+            logger.warning("Life 持久化状态 JSON 损坏，视为首次启动重建")
             return
         today = self._get_today_str()
         if data.get("date") != today:
@@ -456,12 +460,11 @@ class CharacterLife:
             event_chain: List[Dict[str, Any]] = []
             prev_follow_up: Optional[str] = None
 
-            if slot_type == "wake_up":
-                base_scenario = f"{self.character.scenario}\n\n【当前场景：角色刚刚醒来】"
-            elif slot_type == "good_night":
-                base_scenario = f"{self.character.scenario}\n\n【当前场景：角色准备入睡】"
-            else:
-                base_scenario = self.character.scenario
+            # ── 首次启动：注入 init_scenario 到 DM context（仅一次）──
+            # _first_boot 在 dm_agent.run() 成功后才清除，避免 DM 失败时场景永久丢失
+            init_scenario_text = ""
+            if self._first_boot and self.character.scenario:
+                init_scenario_text = self.character.scenario
 
             while True:
                 if chain_depth >= self.config.chain_max_depth:
@@ -480,10 +483,6 @@ class CharacterLife:
                 )
                 if ongoing_context:
                     state_context += "\n" + ongoing_context
-
-                # 链续写场景（system_prompt 在 Conversation 生命周期内冻结，
-                # 动态意图通过 follow_up_text → user_prompt 传递）
-                chain_scenario = base_scenario
 
                 # 构建日记上下文
                 diary_context = ""
@@ -527,7 +526,7 @@ class CharacterLife:
                     "character_name": self.character.name,
                     "character_description": self.character.description,
                     "world": self.character.extensions.world,
-                    "scenario": chain_scenario,
+                    "init_scenario_text": init_scenario_text,
                     "state_text": state_context,
                     "diary_context": diary_context,
                     "events_context": events_context,
@@ -541,6 +540,10 @@ class CharacterLife:
                 if not dm_result.success or not isinstance(dm_result.data, EventGenerationResult):
                     logger.warning("DM 生成事件失败，终止链")
                     break
+
+                # 首次注入后清空，避免泄漏到后续链迭代（R3）
+                if init_scenario_text:
+                    init_scenario_text = ""
 
                 event_result: EventGenerationResult = dm_result.data
 
@@ -613,6 +616,11 @@ class CharacterLife:
                     "time": time_str,
                     "slot_type": slot_type if chain_depth == 0 else "system",
                 })
+
+                # 首次启动标记清除：与首个事件链完整写入原子绑定（R1）
+                if self._first_boot:
+                    self._first_boot = False
+                    logger.info("Life 首次启动场景已成功注入并完成首个事件链")
 
                 logger.debug(
                     "[chain] {} @ {} depth={} energy={}({:+d}) mood={}({:+d}) health={}({:+d}) "
@@ -796,7 +804,7 @@ class CharacterLife:
             "character_name": self.character.name,
             "character_description": self.character.description,
             "world": self.character.extensions.world,
-            "scenario": f"{self.character.scenario}\n\n【当前场景：{action_description}】",
+            "init_scenario_text": action_description,
             "state_text": state_context,
             "diary_context": diary_context,
             "events_context": events_context,

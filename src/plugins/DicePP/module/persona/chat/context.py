@@ -93,7 +93,7 @@ class ContextBuilder:
         self.character = character
 
     def _render_character_base(self) -> List[str]:
-        """渲染角色卡静态段落（描述/性格/场景/名称/示例对话/尾部指令）。
+        """渲染角色卡静态段落（描述/性格/名称/示例对话/尾部指令）。
 
         build_static_prompt 和 _build_system_prompt 共用此方法。
         """
@@ -105,8 +105,6 @@ class ContextBuilder:
                 parts.append(self.character.description)
             if self.character.personality:
                 parts.append(f"性格: {self.character.personality}")
-            if self.character.scenario:
-                parts.append(f"场景: {self.character.scenario}")
         parts.append(f"你的名字是: {self.character.name}")
         if self.character.mes_example:
             example = self.character.format_mes_example()

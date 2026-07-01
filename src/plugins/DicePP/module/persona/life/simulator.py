@@ -176,7 +176,6 @@ class LifeSimulator:
             "character_name": self.character.name,
             "character_description": self.character.description,
             "world": self.character.extensions.world,
-            "scenario": self.character.scenario,
             "diary_text": diary_text,
             "events_text": events_text,
             "story_deck_is_empty": story_deck_is_empty,

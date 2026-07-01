@@ -42,7 +42,6 @@ class TestSAAgent:
             "character_name": "测试角色",
             "character_description": "一个冒险者",
             "world": "奇幻世界",
-            "scenario": "在城镇中",
             "diary_text": "今天去了市场。",
             "events_text": "在市场买到了稀有草药。",
             "story_deck_is_empty": True,
@@ -198,7 +197,7 @@ class TestSABuildUserPrompt:
         """_build_user_prompt 应包含 _FRONT_RULES"""
         context = {
             "character_name": "测试", "character_description": "描述",
-            "world": "现代", "scenario": "",
+            "world": "现代",
             "diary_text": "", "events_text": "",
             "story_deck_is_empty": False,
         }
@@ -210,7 +209,7 @@ class TestSABuildUserPrompt:
         """fronts 为空 + story_deck_is_empty=True 时包含 bootstrap 引导"""
         context = {
             "character_name": "测试", "character_description": "描述",
-            "world": "现代", "scenario": "",
+            "world": "现代",
             "diary_text": "", "events_text": "",
             "story_deck_is_empty": True,
         }
@@ -222,7 +221,7 @@ class TestSABuildUserPrompt:
         """fronts 非空时不包含 bootstrap 引导"""
         context = {
             "character_name": "测试", "character_description": "描述",
-            "world": "现代", "scenario": "",
+            "world": "现代",
             "diary_text": "", "events_text": "",
             "story_deck_is_empty": True,
         }
@@ -233,7 +232,7 @@ class TestSABuildUserPrompt:
         """story_deck 非空时不包含 bootstrap 引导（即使 fronts 为空）"""
         context = {
             "character_name": "测试", "character_description": "描述",
-            "world": "现代", "scenario": "",
+            "world": "现代",
             "diary_text": "", "events_text": "",
             "story_deck_is_empty": False,
         }
