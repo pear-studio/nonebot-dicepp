@@ -168,13 +168,18 @@ class LifeSimulator:
             for e in today_events[-10:]
         ) if today_events else "（无）"
 
-        dm_state = await self.store.get_dm_state()
-        dm_scratchpad = dm_state.scratchpad or "（无）"
+        # 检查 story_deck 是否为空
+        story_deck_count = await self.store.get_story_deck_count()
+        story_deck_is_empty = story_deck_count == 0
 
         sa_context = {
+            "character_name": self.character.name,
+            "character_description": self.character.description,
+            "world": self.character.extensions.world,
+            "scenario": self.character.scenario,
             "diary_text": diary_text,
             "events_text": events_text,
-            "dm_scratchpad": dm_scratchpad,
+            "story_deck_is_empty": story_deck_is_empty,
         }
 
         result = await self.sa_agent.plan(sa_context)

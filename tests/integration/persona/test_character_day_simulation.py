@@ -40,8 +40,7 @@ def mock_agents():
             return mock_dm_responses.pop(0)
 
         async def load_state(self):
-            from plugins.DicePP.module.persona.data.models import DMState
-            return DMState()
+            return None  # DMAgent state_model=None
 
     class MockCharacterAgent:
 
@@ -112,8 +111,7 @@ class TestCharacterDaySimulation:
                 return AgentResult(success=True, data=self._events.pop(0))
 
             async def load_state(self):
-                from plugins.DicePP.module.persona.data.models import DMState
-                return DMState()
+                return None  # DMAgent state_model=None
 
         class ChainCharacterAgent:
 

@@ -25,7 +25,7 @@ class Agent(ABC):
 
     name: str = ""
     role: str = ""
-    state_model: type[BaseModel] = BaseModel
+    state_model: type[BaseModel] | None = None
     tools: list[str] = []
 
     def __init__(
@@ -54,8 +54,10 @@ class Agent(ABC):
         self._conversation: Optional["Conversation"] = None
         self._system_prompt: Optional[str] = None
 
-    async def load_state(self) -> BaseModel:
-        """加载状态，子类可覆盖。默认返回空 state_model 实例。"""
+    async def load_state(self) -> Optional[BaseModel]:
+        """加载状态，子类可覆盖。默认返回 state_model 实例或 None。"""
+        if self.state_model is None:
+            return None
         return self.state_model()
 
     async def save_state(self, state: BaseModel) -> None:
@@ -165,7 +167,9 @@ class Agent(ABC):
         if self._system_prompt is None:
             system_prompt = system_prompt_override
             if system_prompt is None:
-                state = self._cached_state if self._cached_state is not None else await self.load_state()
+                state = None
+                if self.state_model is not None:
+                    state = self._cached_state if self._cached_state is not None else await self.load_state()
                 system_prompt = (
                     self._cached_system_prompt
                     if self._cached_system_prompt is not None
@@ -263,15 +267,22 @@ class Agent(ABC):
         SAAgent 覆盖 run() 委托到 plan()，使用 AgentRuntime.run() 获取纯文本输出。
         子类可覆盖此方法以添加解析逻辑。
         """
-        # 加载状态（如果尚未缓存）
-        if self._cached_state is None:
-            self._cached_state = await self.load_state()
+        # 加载状态（如果尚未缓存且 state_model 不为 None）
+        if self.state_model is not None:
+            if self._cached_state is None:
+                self._cached_state = await self.load_state()
 
-        system_prompt = (
-            self._cached_system_prompt
-            if self._cached_system_prompt is not None
-            else self.build_system_prompt(self._cached_state, context)
-        )
+            system_prompt = (
+                self._cached_system_prompt
+                if self._cached_system_prompt is not None
+                else self.build_system_prompt(self._cached_state, context)
+            )
+        else:
+            system_prompt = (
+                self._cached_system_prompt
+                if self._cached_system_prompt is not None
+                else self.build_system_prompt(None, context)
+            )
         user_prompt = self._build_user_prompt(context)
 
         collected, _conv = await self._run_with_conv(

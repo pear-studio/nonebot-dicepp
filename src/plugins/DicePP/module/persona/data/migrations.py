@@ -343,6 +343,23 @@ CREATE TABLE IF NOT EXISTS persona_sa_state (
 );
 """
 
+# Story Deck 表 (SA + DM 共享叙事条目图)
+CREATE_STORY_DECK_TABLE = """
+CREATE TABLE IF NOT EXISTS persona_story_deck (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,
+    type TEXT NOT NULL,
+    content TEXT NOT NULL
+);
+"""
+
+# 首次部署前执行，无可保留生产数据。
+# 若后续 DM 状态模型再次变更且生产已有数据，应先添加迁移步骤
+# （如将旧 scratchpad 转为 story_deck 条目）再 DROP。
+DROP_DM_STATE_TABLE = """
+DROP TABLE IF EXISTS persona_dm_state;
+"""
+
 # message_stream 扩展列（Phase M1），用 ALTER TABLE 以避免影响已有 schema
 ALTER_MESSAGE_STREAM_ADD_AGENT_RUN_ID = """
 ALTER TABLE message_stream ADD COLUMN agent_run_id TEXT DEFAULT '';
@@ -438,6 +455,8 @@ PERSONA_DB_MIGRATIONS = [
     # Phase 1: Agent 框架 — DM / SA 状态表
     CREATE_DM_STATE_TABLE,
     CREATE_SA_STATE_TABLE,
+    # Story Deck 叙事条目图
+    CREATE_STORY_DECK_TABLE,
 ]
 
 # ── 留主库 → core_db（4 张表） ──────────────────────────────────

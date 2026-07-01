@@ -273,7 +273,12 @@ class CharacterState(BaseModel):
 
 
 class DMState(BaseModel):
-    """DM 工作状态 — 单行表 JSON blob"""
+    """[已弃用] DM 工作状态 — 单行表 JSON blob。
+
+    DMState 表已删除（persona_dm_state），此类仅保留用于向后兼容
+    （store.get_dm_state() 返回空默认值，update_dm_state() 为 no-op）。
+    DM 工作状态已被 story_deck 系统取代。
+    """
 
     scene: str = ""  # 当前场景上下文
     recent_rulings: str = ""  # 最近裁决记录
@@ -283,7 +288,41 @@ class DMState(BaseModel):
 class SAState(BaseModel):
     """SA 世界设定 — 单行表 JSON blob"""
 
-    notes: str = ""  # 叙事规划 + NPC/地点/剧情设定
+    model_config = ConfigDict(extra="ignore")
+
+    fronts: list["Front"] = Field(default_factory=list)  # 叙事前线规划
+
+
+# ── Story Deck 相关模型 ──────────────────────────────────────
+
+# 合法条目类型常量
+VALID_ENTRY_TYPES: frozenset[str] = frozenset({"entity", "detail", "plot"})
+
+
+class StoryDeckEntry(BaseModel):
+    """Story Deck 叙事条目"""
+
+    key: str  # 自然语言 key，唯一
+    type: str  # entity | detail | plot
+    content: str  # 条目正文，≤300 字
+
+
+class Thread(BaseModel):
+    """Front 中的单条叙事线"""
+
+    name: str  # 叙事线名称
+    direction: str = ""  # 走向（一句话）
+    milestones: list[str] = Field(default_factory=list)  # 2-4 步
+    outcome: str = ""  # 终点状态
+    related: list[str] = Field(default_factory=list)  # 关联 story_deck key 列表
+
+
+class Front(BaseModel):
+    """SA 的长线规划"""
+
+    name: str  # Front 名称
+    type: str  # campaign | adventure
+    threads: list[Thread] = Field(default_factory=list)
 
 
 class GroupActivity(BaseModel):

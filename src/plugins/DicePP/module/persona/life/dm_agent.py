@@ -3,11 +3,11 @@ DM Agent — 世界观裁决者
 
 负责生成客观生活事件（System Agent 角色）。
 Phase 2: 通过 `say` 工具与角色对话，DM 裁决角色行动，D20 判定规则。
+Story Deck: chain_depth==0 时自动注入匹配的叙事条目。
 """
 from typing import Any, Optional
 import json
 from utils.logger import logger
-from ..data.models import DMState
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter
 from .agent import Agent
@@ -53,13 +53,16 @@ DC 20（极高）：d20 ≥ 20 成功
 根据角色当前状态、行动描述和场景上下文判断 DC 值。
 你可以自主决定是否需要判定——日常事务不需要判定，只有有风险、有难度或被干扰的情况才需要。"""
 
+# Story Deck 注入前缀
+_STORY_DECK_INJECTION_PREFIX = "[故事提示 (story_deck)]"
+
 
 class DMAgent(Agent):
     """DM Agent — 世界观裁决者"""
 
     name = "DM"
     role = "世界观裁决者"
-    state_model = DMState
+    state_model = None  # DM 不再需要持久状态（DMState 表已删除）
     tools = ["roll_dice", "say", "read_events", "search_events"]
 
     def __init__(
@@ -71,20 +74,13 @@ class DMAgent(Agent):
     ):
         super().__init__(store, router, config, tool_registry=tool_registry)
 
-    async def load_state(self) -> DMState:
-        """从 store 加载 DM 工作状态"""
-        return await self.store.get_dm_state()
-
-    async def save_state(self, state: DMState) -> None:
-        """持久化 DM 工作状态"""
-        await self.store.update_dm_state(state)
-
-    def build_system_prompt(self, state: DMState, context: dict) -> str:
+    def build_system_prompt(self, state: None, context: dict) -> str:
         """构建 DM 系统提示词
 
         稳定部分：DM 身份 + 裁决规则 + D20 判定 + 状态刻度
-        动态部分：state.scratchpad（DM 备忘）+ context（角色信息/场景/状态）
+        动态部分：context（角色信息/场景/状态）
         system_prompt 在 Conversation 生命周期内只构建一次（保持前缀稳定）。
+        state 参数为 None（DM 不再持有持久状态）。
         """
         character_name = context.get("character_name", "")
         character_description = context.get("character_description", "")
@@ -92,10 +88,6 @@ class DMAgent(Agent):
         scenario = context.get("scenario", "")
         state_text = context.get("state_text", "")
         slot_type = context.get("slot_type", "system")
-
-        dm_context = ""
-        if state.scratchpad and state.scratchpad.strip():
-            dm_context = f"\nDM 备忘:\n{state.scratchpad}\n"
 
         scenario_section = f"场景:\n{scenario}\n" if scenario else ""
 
@@ -109,7 +101,8 @@ class DMAgent(Agent):
 
 {scenario_section}角色当前状态:
 {state_text}
-{dm_context}{_STATE_SCALE_PROMPT}
+
+{_STATE_SCALE_PROMPT}
 
 {_D20_RULING_PROMPT}
 {self._slot_type_hint(slot_type)}
@@ -162,6 +155,20 @@ class DMAgent(Agent):
 
         return [SAY_TOOL_DM.to_openai_format()]
 
+    def _build_extra_registry(self) -> Any:
+        """构建只读工具注册表，额外注册 search_story_deck"""
+        registry = super()._build_extra_registry()
+        if registry is None:
+            from ..agent.tool_executor import ToolRegistry as NewTR
+            registry = NewTR()
+        # 注册 search_story_deck（DM 只读查询 story_deck）
+        try:
+            from ..tools.story_deck import register_search_story_deck
+            register_search_story_deck(registry, self.store)
+        except Exception:
+            logger.warning("search_story_deck 注册失败，DM 叙事条目查询将不可用", exc_info=True)
+        return registry
+
     @staticmethod
     def _slot_type_hint(slot_type: str) -> str:
         """根据槽位类型返回场景标注文本"""
@@ -171,21 +178,108 @@ class DMAgent(Agent):
             return "\n当前事件类型: good_night（角色准备入睡）\n"
         return ""
 
+    # ── Story Deck 注入逻辑 ────────────────────────────────────
+
+    async def _build_story_deck_injection(
+        self, context: dict
+    ) -> Optional[str]:
+        """构建 story_deck 注入文本。
+
+        仅在 chain_depth==0 时调用。匹配 story_deck entries 到当前上下文，
+        排序、去重、裁剪后返回注入文本。
+
+        Returns:
+            注入文本或 None（无匹配条目时）
+        """
+        chain_depth = context.get("chain_depth", 0)
+        if chain_depth != 0:
+            return None
+
+        # 构建匹配文本
+        follow_up_text = context.get("follow_up_text", "")
+        events_context = context.get("events_context", "")
+        match_text = f"{follow_up_text}\n{events_context}"
+
+        if not match_text.strip():
+            return None
+
+        # 获取所有条目
+        all_entries = await self.store.list_story_deck_entries(limit=200)
+        if not all_entries:
+            return None
+
+        # 匹配：entry.key 在匹配文本中做子串匹配
+        matched = []
+        for entry in all_entries:
+            if entry.key and entry.key in match_text:
+                matched.append(entry)
+
+        if not matched:
+            return None
+
+        # 排序：plot > entity > detail
+        type_priority = {"plot": 0, "entity": 1, "detail": 2}
+        matched.sort(key=lambda e: type_priority.get(e.type, 99))
+
+        # 去重：通过 Conversation 公共方法查询已注入的 key（不直接访问 _messages）
+        injected_keys: set[str] = set()
+        if self._conversation is not None:
+            injected_keys = self._conversation.get_keys_by_message_prefix(_STORY_DECK_INJECTION_PREFIX)
+
+        # 裁剪：≤ max_injection
+        max_injection = getattr(self.config, "story_deck_max_injection", 3) if self.config else 3
+        selected = []
+        for entry in matched:
+            if entry.key in injected_keys:
+                continue
+            selected.append(entry)
+            if len(selected) >= max_injection:
+                break
+
+        if not selected:
+            return None
+
+        # 格式化注入文本
+        lines = [_STORY_DECK_INJECTION_PREFIX]
+        for entry in selected:
+            content_preview = entry.content
+            from ..tools.story_deck import format_injection_line
+            lines.append(format_injection_line(entry.key, entry.type, content_preview))
+
+        return "\n".join(lines)
+
+    # ── 核心执行 ──────────────────────────────────────────────
+
     async def run(self, context: dict) -> AgentResult:
-        """DM 生成生活事件（通过 say 工具）"""
-        self._cached_state = await self.load_state()
+        """DM 生成生活事件（通过 say 工具）
+
+        chain_depth==0 时：先注入 story_deck 叙事条目，再执行正常事件生成。
+        """
+        chain_depth = context.get("chain_depth", 0)
+
+        # 提前构建 system_prompt 并缓存，避免在基类 run() 和 system_prompt_digest
+        # 中重复构建（每次构建 ~50 行字符串拼接）
+        self._cached_system_prompt = self.build_system_prompt(None, context)
+
+        # chain_depth==0 时：注入 story_deck 条目
+        # 契约假设（依赖基类 Agent 行为）：
+        #   (1) _ensure_conversation 在 _conversation 已设置时幂等 no-op
+        #   (2) super().run() 中再次调用 _ensure_conversation 不覆盖已注入消息
+        #   (3) _cached_system_prompt 在两次调用间不变
+        # 若上述任一假设被破坏，改为直接调用 _run_with_conv 替代 super().run()
+        if chain_depth == 0:
+            try:
+                injection_text = await self._build_story_deck_injection(context)
+                if injection_text:
+                    # 确保 Conversation 存在
+                    conv = await self._ensure_conversation(context, system_prompt_override=self._cached_system_prompt)
+                    await conv.pull_notifications()
+                    conv.add_user(injection_text)
+                    logger.debug(f"DM story_deck 注入: {len(injection_text)} 字")
+            except Exception:
+                logger.warning("story_deck 注入失败，继续正常事件生成", exc_info=True)
+
         try:
-            scratchpad = context.get("_scratchpad")
-            if scratchpad is not None and scratchpad != self._cached_state.scratchpad:
-                self._cached_state.scratchpad = scratchpad
-                await self.save_state(self._cached_state)
-
-            # 提前构建 system_prompt 并缓存，避免在基类 run() 和 system_prompt_digest
-            # 中重复构建（每次构建 ~50 行字符串拼接）
-            self._cached_system_prompt = self.build_system_prompt(
-                self._cached_state, context
-            )
-
             result = await super().run(context)
             if not result.success:
                 logger.warning("DM 事件生成失败: LLM 未调用工具")

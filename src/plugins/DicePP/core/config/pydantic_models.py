@@ -440,6 +440,38 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "life_sim"},
     )
 
+    # Story Deck 配置
+    story_deck_max_injection: int = Field(
+        default=3, title="DM 注入上限",
+        description="DM 每次最多注入的 story deck 条目数",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    story_deck_max_entries: int = Field(
+        default=100, title="条目总量上限",
+        description="story_deck 条目总数上限",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    front_max_campaign: int = Field(
+        default=1, title="Campaign Front 上限",
+        description="SA 最多持有的 campaign front 数量",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    front_max_adventure: int = Field(
+        default=2, title="Adventure Front 上限",
+        description="SA 最多持有的 adventure front 数量",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    threads_per_front: int = Field(
+        default=3, title="每条 Front 线程上限",
+        description="每个 front 内最多 threads 数量",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    sa_max_rounds: int = Field(
+        default=100, title="SA 多轮对话上限",
+        description="SA 单次规划的最大 LLM tool-call 轮数。100 轮支持多 front/thread 创建 + 错误重试。降低可控制 API 成本",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+
     # Phase 2: 信誉拒绝机制配置
     relationship_refuse_enabled: bool = Field(
         default=True, title="信誉拒绝",

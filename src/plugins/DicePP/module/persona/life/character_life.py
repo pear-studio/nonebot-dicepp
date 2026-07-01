@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from ..character.models import Character
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
-from ..data.models import CharacterState, DMState
+from ..data.models import CharacterState
 from utils.time import wall_now, format_timestamp
 from .types import EventGenerationResult, EventReactionResult
 from .protocols import BoundaryReceiver
@@ -54,6 +54,12 @@ class CharacterLifeConfig:
         default_mood: int = 50,
         default_health: int = 50,
         good_night_cooldown_hours: int = 22,
+        story_deck_max_injection: int = 3,
+        story_deck_max_entries: int = 100,
+        front_max_campaign: int = 1,
+        front_max_adventure: int = 2,
+        threads_per_front: int = 3,
+        sa_max_rounds: int = 100,
     ):
         self.enabled = enabled
         self.slot_match_window_minutes = slot_match_window_minutes
@@ -66,6 +72,12 @@ class CharacterLifeConfig:
         self.default_mood = default_mood
         self.default_health = default_health
         self.good_night_cooldown_hours = good_night_cooldown_hours
+        self.story_deck_max_injection = story_deck_max_injection
+        self.story_deck_max_entries = story_deck_max_entries
+        self.front_max_campaign = front_max_campaign
+        self.front_max_adventure = front_max_adventure
+        self.threads_per_front = threads_per_front
+        self.sa_max_rounds = sa_max_rounds
 
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "CharacterLifeConfig":
@@ -80,6 +92,12 @@ class CharacterLifeConfig:
             default_mood=persona.character_life_default_mood,
             default_health=persona.character_life_default_health,
             recovery_energy=persona.character_life_recovery_energy,
+            story_deck_max_injection=persona.story_deck_max_injection,
+            story_deck_max_entries=persona.story_deck_max_entries,
+            front_max_campaign=persona.front_max_campaign,
+            front_max_adventure=persona.front_max_adventure,
+            threads_per_front=persona.threads_per_front,
+            sa_max_rounds=persona.sa_max_rounds,
         )
 
     def now(self) -> datetime:
@@ -422,9 +440,6 @@ class CharacterLife:
                     character_state.energy, character_state.mood, character_state.health,
                 )
 
-            # 加载 DM 状态（用于 scratchpad 替代旧的 character_state.text）
-            dm_state = await self.data_store.get_dm_state()
-
             # 加载一次上下文（链内复用）
             recent_diaries = await self._get_recent_diaries(3)
             today_db_events = await self._get_today_events()
@@ -505,7 +520,6 @@ class CharacterLife:
                     logger.error("dm_agent 未注入，无法生成事件")
                     break
 
-                # 传递 scratchpad 给 DM Agent
                 # 将 Character 的 follow_up 内容作为 DM 裁决上下文
                 follow_up_text = prev_follow_up if chain_depth >= 1 else ""
 
@@ -522,7 +536,6 @@ class CharacterLife:
                     "slot_type": slot_type if chain_depth == 0 else "system",
                     "chain_depth": chain_depth,
                     "follow_up_text": follow_up_text,
-                    "_scratchpad": dm_state.scratchpad,
                 }
                 dm_result = await self.dm_agent.run(dm_context)
                 if not dm_result.success or not isinstance(dm_result.data, EventGenerationResult):
@@ -734,9 +747,6 @@ class CharacterLife:
             return False
         self._migrate_legacy_state(character_state)
 
-        # 获取 DM state scratchpad（替代旧的 character_state.text）
-        dm_state = await self.data_store.get_dm_state()
-
         now = self.config.now()
         recent_diaries = await self._get_recent_diaries(3)
         today_event_dicts = await self._get_today_event_dicts()
@@ -794,7 +804,6 @@ class CharacterLife:
             "date_str": date_str,
             "slot_type": "system",
             "chain_depth": 0,
-            "_scratchpad": dm_state.scratchpad,
         }
         dm_result = await self.dm_agent.run(dm_context)
         if not dm_result.success or not isinstance(dm_result.data, EventGenerationResult):

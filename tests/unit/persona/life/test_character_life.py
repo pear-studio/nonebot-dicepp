@@ -10,7 +10,7 @@ from plugins.DicePP.module.persona.life.character_life import CharacterLife, Cha
 from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult, AgentResult
 from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
-from plugins.DicePP.module.persona.data.models import CharacterState, DMState
+from plugins.DicePP.module.persona.data.models import CharacterState
 
 class MockAgentSet:
     """Mock Agent 容器 — 同时包含 dm (DMAgent mock) 和 char (CharacterAgent mock)
@@ -44,8 +44,6 @@ def mock_data_store():
     store.set_setting = AsyncMock()
     store.get_character_state = AsyncMock(return_value=CharacterState())
     store.update_character_state = AsyncMock()
-    store.get_dm_state = AsyncMock(return_value=DMState())
-    store.update_dm_state = AsyncMock()
     store.get_recent_diaries = AsyncMock(return_value=[])
     store.get_daily_events = AsyncMock(return_value=[])
     store.add_daily_event = AsyncMock()
@@ -172,7 +170,7 @@ class TestCharacterLifeBasics:
     async def test_fallback_delta_applies_to_character_state(self, life, mock_event_agent, mock_data_store, monkeypatch):
         """R10: fallback EventGenerationResult 经 _clamp_delta 后状态累加值验证"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
-        from plugins.DicePP.module.persona.data.models import CharacterState, DMState
+        from plugins.DicePP.module.persona.data.models import CharacterState
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
         initial_state = CharacterState(energy=50, mood=50, health=50)
@@ -204,13 +202,12 @@ class TestCharacterLifePersistence:
 
     @pytest.fixture
     def mock_data_store(self):
-        from plugins.DicePP.module.persona.data.models import CharacterState, DMState
+        from plugins.DicePP.module.persona.data.models import CharacterState
         store = MagicMock()
         store.get_setting = AsyncMock(return_value=None)
         store.set_setting = AsyncMock()
         store.get_character_state = AsyncMock(return_value=CharacterState())
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         return store
 
     @pytest.fixture
@@ -277,10 +274,9 @@ class TestCharacterLifeDiary:
         store = MagicMock()
         store.get_setting = AsyncMock(return_value=None)
         store.set_setting = AsyncMock()
-        from plugins.DicePP.module.persona.data.models import CharacterState, DMState, DailyEvent
+        from plugins.DicePP.module.persona.data.models import CharacterState, DailyEvent
         store.get_character_state = AsyncMock(return_value=CharacterState())
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         store.get_daily_events = AsyncMock(return_value=[DailyEvent(date='2024-01-01', event_type='scheduled', description='早上喝咖啡', context_summary='早上喝咖啡', reaction='很香', created_at=datetime(2024, 1, 1, 9, 0))])
         store.get_diary = AsyncMock(return_value='昨天去了公园')
         store.save_diary = AsyncMock()
@@ -508,7 +504,6 @@ class TestCharacterLifePhase2:
         store.set_setting = AsyncMock()
         store.get_character_state = AsyncMock(return_value=CharacterState(energy=50, mood=50, health=50))
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         store.get_daily_events = AsyncMock(return_value=[])
         store.add_daily_event = AsyncMock()
         store.get_diary = AsyncMock(return_value=None)
@@ -723,7 +718,6 @@ class TestDayTransitionRemoved:
         store.set_setting = AsyncMock()
         store.get_character_state = AsyncMock(return_value=CharacterState(energy=10, mood=10, health=10))
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         store.get_daily_events = AsyncMock(return_value=[])
         store.add_daily_event = AsyncMock()
         store.get_diary = AsyncMock(return_value=None)
@@ -778,7 +772,6 @@ class TestCrossMidnightSlots:
         store.set_setting = AsyncMock()
         store.get_character_state = AsyncMock(return_value=CharacterState())
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         store.get_daily_events = AsyncMock(return_value=[])
         store.add_daily_event = AsyncMock()
         store.get_diary = AsyncMock(return_value=None)
@@ -858,7 +851,6 @@ class TestMidnightResetDelay:
         store.set_setting = AsyncMock()
         store.get_character_state = AsyncMock(return_value=CharacterState())
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         store.get_daily_events = AsyncMock(return_value=[])
         store.add_daily_event = AsyncMock()
         store.get_diary = AsyncMock(return_value=None)
@@ -991,7 +983,6 @@ class TestMidnightEndHourJitter:
         store.set_setting = AsyncMock()
         store.get_character_state = AsyncMock(return_value=CharacterState())
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         store.get_daily_events = AsyncMock(return_value=[])
         store.add_daily_event = AsyncMock()
         store.get_diary = AsyncMock(return_value=None)
@@ -1147,7 +1138,6 @@ class TestStateZeroPreserved:
         store.set_setting = AsyncMock()
         store.get_character_state = AsyncMock(return_value=CharacterState(energy=0, mood=0, health=0))
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         store.get_daily_events = AsyncMock(return_value=[])
         store.add_daily_event = AsyncMock()
         store.get_diary = AsyncMock(return_value=None)
@@ -1224,7 +1214,6 @@ class TestSpontaneousIntentionContext:
         store.set_setting = AsyncMock()
         store.get_character_state = AsyncMock(return_value=CharacterState(energy=50, mood=50, health=50))
         store.update_character_state = AsyncMock()
-        store.get_dm_state = AsyncMock(return_value=DMState())
         store.get_daily_events = AsyncMock(return_value=[])
         store.add_daily_event = AsyncMock()
         store.get_diary = AsyncMock(return_value=None)

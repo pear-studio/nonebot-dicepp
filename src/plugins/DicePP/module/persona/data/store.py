@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from ..image_cache import ImageCache
 from datetime import datetime, timedelta
 import json
+import re
 from utils.logger import logger
 import os
 import base64
@@ -30,6 +31,7 @@ from .models import (
     LLMTraceRecord, CharacterState, DMState, SAState,
     ScoringFailure, UnifiedMessage, MessageType, DEFAULT_RELATION_LABELS,
     DEFAULT_SESSION_TOKEN_BUDGET,
+    StoryDeckEntry, VALID_ENTRY_TYPES,
 )
 from .migrations import (
     PERSONA_DB_MIGRATIONS, CORE_DB_MIGRATIONS,
@@ -40,6 +42,7 @@ from .migrations import (
     ALTER_USER_RELATIONSHIPS_COLUMNS,
     ALTER_SCORE_HISTORY_COLUMNS,
     ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE,
+    DROP_DM_STATE_TABLE,
 )
 
 
@@ -94,6 +97,11 @@ class PersonaDataStore:
         if self._persona_db is None:
             raise RuntimeError("PersonaDataStore 未打开，先调用 await store.open()")
         return self._persona_db
+
+    @property
+    def timezone(self) -> str:
+        """公共时区属性（原 _timezone 为内部命名约定）"""
+        return self._timezone
 
     async def _init_connection(self, conn: aiosqlite.Connection) -> None:
         """设置连接 PRAGMA"""
@@ -178,6 +186,8 @@ class PersonaDataStore:
             await persona_db.execute(ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE)
         except sqlite3.OperationalError:
             pass  # 列已不存在或 DB 为全新创建
+        # DM 状态表清理（被 story_deck 取代）
+        await persona_db.execute(DROP_DM_STATE_TABLE)
         await persona_db.commit()
 
     async def switch_persona_db(self, new_character_name: str) -> None:
@@ -1354,6 +1364,44 @@ class PersonaDataStore:
                 for row in rows
             ]
 
+    async def get_events_range(self, start_date: str, end_date: str) -> List[DailyEvent]:
+        """获取日期范围内的所有事件（单次 SQL 查询）。
+
+        替代逐日调用 get_daily_events 的 N+1 模式。
+        """
+        async with self.db.execute(
+            """
+            SELECT id, date, event_type, description, reaction,
+                   duration_minutes, created_at,
+                   system_prompt_digest, raw_response,
+                   energy_delta, mood_delta, health_delta,
+                   context_summary
+            FROM persona_daily_events
+            WHERE date BETWEEN ? AND ?
+            ORDER BY date DESC, created_at DESC
+            """,
+            (start_date, end_date),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                DailyEvent(
+                    id=row["id"],
+                    date=row.get("date", ""),
+                    event_type=row["event_type"],
+                    description=row["description"],
+                    reaction=row["reaction"] or "",
+                    duration_minutes=row["duration_minutes"] if row.get("duration_minutes") is not None else 0,
+                    created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
+                    system_prompt_digest=row.get("system_prompt_digest") or "",
+                    raw_response=row.get("raw_response") or "",
+                    energy_delta=row.get("energy_delta"),
+                    mood_delta=row.get("mood_delta"),
+                    health_delta=row.get("health_delta"),
+                    context_summary=row.get("context_summary") or "",
+                )
+                for row in rows
+            ]
+
     async def clear_daily_events(self, date: str) -> None:
         """清空某天的事件"""
         await self.db.execute(
@@ -1497,43 +1545,229 @@ class PersonaDataStore:
         )
         await self.db.commit()
 
-    # ========== DM 状态 (Phase 1 Agent 框架) ==========
+    # ========== DM 状态 (Phase 1 Agent 框架 — 已废弃，表已删除) ==========
 
     async def get_dm_state(self) -> DMState:
-        """获取 DM 工作状态（单行 JSON blob）"""
-        async with self.db.execute(
-            "SELECT text FROM persona_dm_state WHERE id = 1"
-        ) as cursor:
-            row = await cursor.fetchone()
-            raw = row["text"] if row else ""
-
-        if not raw:
-            return DMState()
-
-        try:
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                try:
-                    return DMState.model_validate(data)
-                except ValidationError:
-                    pass
-        except json.JSONDecodeError:
-            pass
-
+        """[已废弃] 获取 DM 工作状态。DMState 表已删除，始终返回空默认值。"""
         return DMState()
 
     async def update_dm_state(self, state: DMState) -> None:
-        """更新 DM 工作状态"""
+        """[已废弃] 更新 DM 工作状态。DMState 表已删除，无操作。"""
+        pass
+
+    # ========== Story Deck (叙事条目图) ==========
+
+    @staticmethod
+    def _row_to_story_deck_entry(row: dict) -> StoryDeckEntry:
+        return StoryDeckEntry(
+            key=row["key"],
+            type=row["type"],
+            content=row["content"],
+        )
+
+    async def get_story_deck_entry(self, key: str) -> Optional[StoryDeckEntry]:
+        """单条精确查询"""
+        async with self.db.execute(
+            "SELECT key, type, content FROM persona_story_deck WHERE key = ?",
+            (key,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return self._row_to_story_deck_entry(row)
+
+    async def list_story_deck_entries(
+        self, type: Optional[str] = None, limit: int = 50, offset: int = 0
+    ) -> list[StoryDeckEntry]:
+        """分页列表查询，返回 key + type + content，可按 type 过滤"""
+        if type is not None and type not in VALID_ENTRY_TYPES:
+            logger.warning(f"list_story_deck_entries: 无效 type={type}，返回空列表（合法值: entity/detail/plot）")
+            return []
+        if type is not None:
+            async with self.db.execute(
+                "SELECT key, type, content FROM persona_story_deck "
+                "WHERE type = ? ORDER BY key LIMIT ? OFFSET ?",
+                (type, limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        else:
+            async with self.db.execute(
+                "SELECT key, type, content FROM persona_story_deck "
+                "ORDER BY key LIMIT ? OFFSET ?",
+                (limit, offset),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return [self._row_to_story_deck_entry(r) for r in rows]
+
+    async def search_story_deck(self, query: str) -> list[StoryDeckEntry]:
+        """key + content 子串匹配，返回匹配列表"""
+        if not query or not query.strip():
+            return []
+        safe_query = self._sanitize_search_query(query)
+        pattern = f"%{safe_query}%"
+        # 精确匹配 key 优先，再子串搜索
+        async with self.db.execute(
+            "SELECT key, type, content FROM persona_story_deck WHERE key = ?",
+            (query,),
+        ) as cursor:
+            exact_row = await cursor.fetchone()
+        exact = [self._row_to_story_deck_entry(exact_row)] if exact_row else []
+
+        async with self.db.execute(
+            "SELECT key, type, content FROM persona_story_deck "
+            "WHERE key LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' "
+            "ORDER BY key LIMIT 50",
+            (pattern, pattern),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        fuzzy = [self._row_to_story_deck_entry(r) for r in rows]
+
+        # 合并：精确命中排最前，去重
+        seen = {e.key for e in exact}
+        result = list(exact)
+        for e in fuzzy:
+            if e.key not in seen:
+                result.append(e)
+                seen.add(e.key)
+        return result
+
+    async def upsert_story_deck_entry(
+        self, key: str, type: str, content: str, max_entries: int = 100
+    ) -> tuple[bool, Optional[str]]:
+        """创建或更新条目。含引用校验和总量上限校验。
+
+        Returns:
+            (success, error_reason): success=True 表示操作成功；
+            error_reason 在失败时包含原因描述。
+        """
+        # 校验 type
+        if type not in VALID_ENTRY_TYPES:
+            return False, f"无效的 type: {type}，必须是 entity/detail/plot"
+
+        # 校验 key 长度：至少 2 个汉字或 3 个 ASCII 字符
+        key_len = len(key)
+        ascii_count = sum(1 for c in key if ord(c) < 128)
+        non_ascii_count = key_len - ascii_count
+        if non_ascii_count < 2 and key_len < 3:
+            return False, "key 长度不足：至少需要 2 个汉字，或 3 个及以上字符"
+
+        # 校验 content 长度：≤300 字
+        if len(content) > 300:
+            return False, f"content 超长: {len(content)} > 300 字"
+
+        # 校验 [[key]] 引用完整性
+        refs = re.findall(r"\[\[([^\]]+)\]\]", content)
+        for ref in refs:
+            # 排除自引用
+            if ref == key:
+                continue
+            async with self.db.execute(
+                "SELECT 1 FROM persona_story_deck WHERE key = ?", (ref,)
+            ) as cursor:
+                if await cursor.fetchone() is None:
+                    return False, f"引用目标不存在: [[{ref}]]"
+
+        # 事务内检查 exists + 总量上限 + INSERT，防止并发竞态
+        try:
+            await self.db.execute("BEGIN IMMEDIATE")
+            async with self.db.execute(
+                "SELECT key FROM persona_story_deck WHERE key = ?", (key,)
+            ) as cursor:
+                exists = await cursor.fetchone() is not None
+
+            if not exists:
+                async with self.db.execute(
+                    "SELECT COUNT(*) as cnt FROM persona_story_deck"
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    if row and row["cnt"] >= max_entries:
+                        await self.db.execute("ROLLBACK")
+                        return False, f"条目总数已达上限 {max_entries}，请先清理旧条目"
+                await self.db.execute(
+                    "INSERT INTO persona_story_deck (key, type, content) VALUES (?, ?, ?)",
+                    (key, type, content),
+                )
+            else:
+                await self.db.execute(
+                    """
+                    INSERT INTO persona_story_deck (key, type, content)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET content = excluded.content
+                    """,
+                    (key, type, content),
+                )
+            await self.db.commit()
+            return True, None
+        except Exception:
+            await self.db.execute("ROLLBACK")
+            raise
+
+    async def delete_story_deck_entry(self, key: str) -> tuple[bool, Optional[str], list[str]]:
+        """删除条目。含反向引用检查。
+
+        Returns:
+            (success, error_reason, backlink_keys): success=True 表示已删除；
+            backlink_keys 是引用此 key 的其他条目 key 列表（仅在 success=True 时有意义）。
+        """
+        # 检查条目是否存在
+        entry = await self.get_story_deck_entry(key)
+        if entry is None:
+            return False, f"条目不存在: {key}", []
+
+        # 反向引用检查
+        safe_pattern = self._sanitize_search_query(f"[[{key}]]")
+        async with self.db.execute(
+            "SELECT key FROM persona_story_deck "
+            "WHERE content LIKE ? ESCAPE '\\' AND key != ?",
+            (f"%{safe_pattern}%", key),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        backlinks = [r["key"] for r in rows]
+
         await self.db.execute(
-            """
-            INSERT INTO persona_dm_state (id, text)
-            VALUES (1, ?)
-            ON CONFLICT(id) DO UPDATE SET text = excluded.text,
-                                          updated_at = CURRENT_TIMESTAMP
-            """,
-            (state.model_dump_json(),)
+            "DELETE FROM persona_story_deck WHERE key = ?", (key,)
         )
         await self.db.commit()
+        return True, None, backlinks
+
+    async def get_linked_entries(self, key: str) -> list[StoryDeckEntry]:
+        """一度关联：content 中 [[linked]] + 其他条目 content 中引用此 key"""
+        entry = await self.get_story_deck_entry(key)
+        if entry is None:
+            return []
+
+        # 此条目引用了谁
+        refs = re.findall(r"\[\[([^\]]+)\]\]", entry.content)
+        # 谁引用了此条目
+        safe_pattern = self._sanitize_search_query(f"[[{key}]]")
+        async with self.db.execute(
+            "SELECT key, type, content FROM persona_story_deck "
+            "WHERE content LIKE ? ESCAPE '\\' AND key != ?",
+            (f"%{safe_pattern}%", key),
+        ) as cursor:
+            backlink_rows = await cursor.fetchall()
+
+        seen = {key}
+        result: list[StoryDeckEntry] = []
+        for ref in refs:
+            if ref not in seen:
+                ref_entry = await self.get_story_deck_entry(ref)
+                if ref_entry:
+                    result.append(ref_entry)
+                    seen.add(ref)
+        for row in backlink_rows:
+            if row["key"] not in seen:
+                result.append(self._row_to_story_deck_entry(row))
+                seen.add(row["key"])
+        return result
+
+    async def get_story_deck_count(self) -> int:
+        """获取条目总数"""
+        async with self.db.execute(
+            "SELECT COUNT(*) as cnt FROM persona_story_deck"
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row["cnt"] if row else 0
 
     # ========== SA 状态 (Phase 1 Agent 框架) ==========
 

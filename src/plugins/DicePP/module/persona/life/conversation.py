@@ -190,6 +190,29 @@ class Conversation:
         self._messages.clear()
         self._cursors.clear()
 
+    def get_keys_by_message_prefix(self, prefix: str) -> set[str]:
+        """扫描 _messages，返回所有以 prefix 开头消息中提取的 key 集合。
+
+        用于 DMAgent story_deck 注入去重：扫描 Conversation 中
+        已注入的 [故事提示 (story_deck)] 消息，提取已注入的条目 key。
+
+        格式约定：prefix 开头的消息中，每行 "- key (type)：..." 的 key
+        部分被提取。此方法是 Conversation 对消息格式的单一封装点，
+        调用方不直接访问 _messages。
+        """
+        keys: set[str] = set()
+        for msg in self._messages:
+            content = msg.get("content", "")
+            if isinstance(content, str) and content.startswith(prefix):
+                for line in content.split("\n"):
+                    line = line.strip()
+                    if line.startswith("- "):
+                        from ..tools.story_deck import parse_injection_key
+                        key_part = parse_injection_key(line)
+                        if key_part:
+                            keys.add(key_part)
+        return keys
+
     @property
     def length(self) -> int:
         """当前消息数（不含 system prompt）。"""
