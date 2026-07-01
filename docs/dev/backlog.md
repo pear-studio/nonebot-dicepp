@@ -132,19 +132,6 @@
     - 跨天 compact 时自动清理旧消息
     - 影响面: life/conversation.py、data/store.py、data/models.py
 
-### [B-260629-5a1f2c] SA 条目化与选择性注入 DM prompt
-- 创建: 2026-06-29
-- 优先级: P1
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-  - 当前 SAAgent（`sa_agent.py`）仅在 tick_daily 产生纯文本 `SAState.notes`——无 NPC/地点/剧情弧线等分类化记忆
-  - SA 产出的叙事设定无法被 DM 消费：`tick_daily` 的 SA.plan() 写 notes，但下次 DM 生成事件时不读取 SA 状态，DM 不知道 SA 准备了什么
-  - SA 需要条目化：将叙事产出分类为 NPC、地点、剧情弧线、待触发事件等类型，使 DM 在生成事件时可以按需拉取相关条目注入 prompt
-- 开发备忘:
-  依赖 DM 条目化（scratchpad 结构化线索管理）先落地——SA 条目化的结构需与 DM 的线索管理格式对齐，且 SA→DM 注入需要 DM 侧有对应的消费机制。
-  影响面：`sa_agent.py`（plan() 改为条目化输出）、`sa_agent.py`（prompt 重写引导分类产出）、`data/models.py`（SAState 扩展或新增条目表）、`dm_agent.py`（接收 SA 注入条目）、`simulator.py`（tick_daily 编排 SA→DM 注入）
-
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01
 - 优先级: P2
@@ -177,18 +164,6 @@
   依赖 DM 条目化（scratchpad 结构化线索管理）+ SA 条目化 (B-260629-5a1f2c) 落地后评估——确认 DM 动态场景 + SA 注入已能覆盖原本 scenario 的所有使用场景后再移除。
   影响面：`character/models.py`（Character.scenario 字段）、`character_life.py`（DM context 中的 scenario 拼装）、`daily_report.py`（如有引用）
 
-### [B-260629-c8f2d4] LLM 路由基础设施 move to Agent 基类
-- 创建: 2026-06-29
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现:
-  - `_llm_utils.py` 的 `_run_life_collect_loop()` 被 `agent.py`、`character_agent.py`、`dm_agent.py` 三个文件导入，但它是 Agent 体系的核心调用路径，放在 `life/` 包的私有模块中定位模糊
-  - `Agent.run()` 已有模板方法（load → build prompt → collect），但内部仍需从 `_llm_utils` import 路由函数——可以考虑将 `_run_life_collect_loop` 的逻辑内联到 `Agent` 基类或作为 protected 方法
-- 开发备忘:
-  此条为纯代码组织优化，无功能影响。在所有 Phase 2 功能变更稳定后再执行，避免功能重构与代码移动交织。
-  影响面：`agent.py`（内联或新增 protected 方法）、`_llm_utils.py`（删除或精简）、`character_agent.py` / `dm_agent.py`（调用路径更新）
-
 ### [B-260630-26d6a7] 通知消息 name/content 前缀一致性扫描与 role 验证
 - 创建: 2026-06-30
 - 优先级: P2
@@ -196,14 +171,6 @@
 - 改动量: S
 - 问题表现: 当前 notification/transient 消息混用 name 字段和 content 前缀来区分通知与真用户输入，缺乏一致性
 - 开发备忘: 1. 扫描全项目所有类似注入点，确认 name 和 content 前缀是否都有使用；2. 判断是否应将 role 从 user 统一改为 system；3. 跑真实 LLM 验证 system role 通知消息的行为差异。结论以 LLM 验证结果为准。
-
-### [B-260630-9f3fa0] Conversation 事务性保护 — add_user 后的失败回滚
-- 创建: 2026-06-30
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现: conv.add_user() 后 LLM 调用失败时，Conversation 中留下悬挂的 user 消息（无 assistant 响应）。重试时会重复追加导致上下文污染。当前 react() 和 diary() 均无事务性保护。
-- 开发备忘: 在 add_user/LLM 调用/extend 之间加事务性边界：记录 add_user 前的 Conversation 快照，LLM 调用失败时回滚到快照状态。
 
 ### [B-260630-1f9286] 工具定义与传入规则梳理 — 统一 required_tool 语义和传递路径
 - 创建: 2026-06-30

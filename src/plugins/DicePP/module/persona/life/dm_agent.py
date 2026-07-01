@@ -266,14 +266,15 @@ class DMAgent(Agent):
         #   (1) _ensure_conversation 在 _conversation 已设置时幂等 no-op
         #   (2) super().run() 中再次调用 _ensure_conversation 不覆盖已注入消息
         #   (3) _cached_system_prompt 在两次调用间不变
-        # 若上述任一假设被破坏，改为直接调用 _run_with_conv 替代 super().run()
+        # 若上述任一假设被破坏，改为直接调用 _process 替代 super().run()
         if chain_depth == 0:
             try:
                 injection_text = await self._build_story_deck_injection(context)
                 if injection_text:
                     # 确保 Conversation 存在
                     conv = await self._ensure_conversation(context, system_prompt_override=self._cached_system_prompt)
-                    await conv.pull_notifications()
+                    n, c = await conv.fetch_notifications()
+                    conv.apply_notifications(n, c)
                     conv.add_user(injection_text)
                     logger.debug(f"DM story_deck 注入: {len(injection_text)} 字")
             except Exception:

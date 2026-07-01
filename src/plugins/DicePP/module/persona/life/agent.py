@@ -186,7 +186,7 @@ class Agent(ABC):
 
         return self._conversation
 
-    async def _run_with_conv(
+    async def _process(
         self,
         context: dict,
         initial_system_prompt: str,
@@ -197,17 +197,14 @@ class Agent(ABC):
         extra_registry: Optional[Any] = None,
         required_tool: Optional[str] = None,
     ) -> "tuple[list, Conversation]":
-        """通过 Conversation 执行一轮 LLM 收集循环。
+        """通过 Conversation 执行一轮 LLM 收集（fetch → build → call → commit）。
 
-        封装 Conversation 集成模式：
-        _ensure_conversation → add_user → render → _run_life_collect_loop → extend。
-        DM Agent 与 CharacterAgent 共用此方法，避免重复。
+        LLM 调用前不改变 Conversation 状态——失败自动安全，无需回滚。
 
         Args:
-            context: 传入 _ensure_conversation 的上下文（需包含聊标识等）
-            initial_system_prompt: 首次调用时锁定为 Conversation 的 system_prompt；
-                                   Conversation 已存在时忽略。
-            user_prompt: 本轮 user message 内容
+            context: 传入 _ensure_conversation 的上下文
+            initial_system_prompt: 首次 Conversation 创建时的 system_prompt
+            user_prompt: 本轮 user message
             tools: OpenAI 格式工具定义列表
             temperature: 采样温度
             selection: 模型选择策略
@@ -215,29 +212,49 @@ class Agent(ABC):
             required_tool: 必调工具名；None 时从 tools[0] 推导
 
         Returns:
-            (collected_args, conversation): 收集的工具调用参数列表和 Conversation 实例
+            (collected_args, conversation)
         """
-        from ..life._llm_utils import _run_life_collect_loop
+        from ..agent.tool_bridge import run_structured_collect
 
         conv = await self._ensure_conversation(context, system_prompt_override=initial_system_prompt)
-        await conv.pull_notifications()
-        conv.add_user(user_prompt)
-        prev_len = conv.length
 
-        collected, final_msgs = await _run_life_collect_loop(
+        # ── fetch：纯读，不改变 Conversation 状态 ──
+        notifs, new_cursors = await conv.fetch_notifications()
+
+        # ── build：拼装发送给 LLM 的完整消息列表 ──
+        assert self._system_prompt is not None
+        msgs = conv.render(self._system_prompt)
+        for n in notifs:
+            msgs.append(n.to_message())
+        msgs.append({"role": "user", "content": user_prompt})
+        sent_len = len(msgs)
+
+        # ── LLM call ──
+        if required_tool is None and tools:
+            first = tools[0]
+            if isinstance(first, dict):
+                func = first.get("function", first)
+                required_tool = func.get("name", "")
+
+        collected, run_result, final_msgs = await run_structured_collect(
             router=self.router,
             store=self.store,
-            messages=conv.render(self._system_prompt),  # type: ignore[arg-type]
-            tools=tools,
+            messages=msgs,
             temperature=temperature,
+            timeout=self._bg_timeout,
             selection=selection,
-            bg_timeout=self._bg_timeout,
+            required_tools=[required_tool] if required_tool else None,
             max_rounds=self._max_rounds,
             extra_registry=extra_registry,
-            required_tool=required_tool,
+            tools=tools,
         )
+        run_result.log_if_failed(required_tool or "")
 
-        conv.extend(final_msgs[prev_len + 1:])  # +1 跳过 system prompt 位，prev_len 不含 system
+        # ── commit：一次性落盘（通知 + 用户消息 + LLM 响应）──
+        conv.apply_notifications(notifs, new_cursors)
+        conv.add_user(user_prompt)
+        conv.extend(final_msgs[sent_len:])
+
         return collected, conv
 
     async def compact_conversation(self) -> None:
@@ -257,10 +274,7 @@ class Agent(ABC):
     async def run(self, context: dict) -> AgentResult:
         """一站式执行：加载状态 → 拼 prompt → LLM 执行 → 返回结果
 
-        使用 Conversation 管理消息线程：
-        1. _ensure_conversation() → conv.add_user(user_prompt)
-        2. 执行层运行 → conv.extend(增量)
-        3. 解析 collected[0] 为结果 dataclass
+        使用 Conversation 管理消息线程（fetch → build → LLM call → commit）。
 
         DMAgent 使用此模板方法（通过 tool-bridge 收集结构化输出）。
         CharacterAgent 覆盖 run() 按 mode 分派到 react()/diary()/share()/opening()。
@@ -285,7 +299,7 @@ class Agent(ABC):
             )
         user_prompt = self._build_user_prompt(context)
 
-        collected, _conv = await self._run_with_conv(
+        collected, _conv = await self._process(
             context=context,
             initial_system_prompt=system_prompt,
             user_prompt=user_prompt,

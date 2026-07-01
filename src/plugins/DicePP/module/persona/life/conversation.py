@@ -11,10 +11,12 @@ truncate() 仅在日终 compact 时调用一次，是显式的 cache-reset 点�
 - system prompt 不进 _messages——由 Agent 单独持有，render() 时拼接
 
 变更通知订阅：
-- Conversation 持有 ChangeSource 列表，通过 pull_notifications() 拉取变更通知
-- ChangeSource 是外部注入的有状态对象，Conversation 代替存储不透明 cursor
-- 通知消息混入 _messages，格式为 {"role": "user", "name": ..., "content": "[通知] ..."}
+- Conversation 持有 ChangeSource 列表和 opaque cursor
+- fetch_notifications() 拉取通知（纯读，不突变 _messages / _cursors）
+- apply_notifications() 将通知写入 _messages 并更新 cursor
+- 调用方在 fetch → LLM call → apply 之间获得事务性保障
 """
+
 
 from dataclasses import dataclass
 from typing import Any, List, Optional, Protocol, runtime_checkable
@@ -41,13 +43,24 @@ class Notification:
     content: str
     name: str = "系统通知"
 
+    def to_message(self) -> dict:
+        """转为 OpenAI 消息格式。"""
+        return {
+            "role": "user",
+            "name": self.name,
+            "content": f"{NOTIFICATION_PREFIX} {self.content}",
+        }
+
 
 @runtime_checkable
 class ChangeSource(Protocol):
     """变更来源协议
 
-    Conversation 在 pull_notifications() 中调用 update(cursor)，
-    传入上次产生的 cursor（首次为 None），拿到通知列表和新 cursor。
+    Conversation 在 fetch_notifications() 中调用 update(cursor)，
+    传入上次已提交的 cursor（首次为 None），拿到通知列表和新 cursor。
+
+    update() 必须幂等：以相同 cursor 重复调用应返回相同结果。
+    cursor 由 Conversation 外部管理，update() 不得自行持久化状态。
     """
 
     source_id: str
@@ -55,10 +68,10 @@ class ChangeSource(Protocol):
     name: str
 
     async def update(self, cursor: Any) -> "tuple[list[Notification], Any]":
-        """拉取变更通知。
+        """拉取变更通知（幂等）。
 
         Args:
-            cursor: 上次 update 返回的 cursor，首次为 None
+            cursor: 上次 apply_notifications() 提交的 cursor，首次为 None
 
         Returns:
             (notifications, new_cursor): 本次变更通知列表 + 新 cursor
@@ -71,9 +84,11 @@ class Conversation:
 
     system prompt 不进 _messages——由 Agent 单独持有，render() 时拼接。
 
-    变更通知订阅：
-    - 通过 register() 注册 ChangeSource
-    - pull_notifications() 拉取变更通知，通知作为 user 消息混入 _messages
+    变更通知事务性：
+    - register() 注册 ChangeSource
+    - fetch_notifications() 拉取通知（纯读）
+    - apply_notifications() 提交通知到 _messages 并更新 cursor
+    - fetch → LLM call → apply 之间自动获得事务性保障
     """
 
     def __init__(self) -> None:
@@ -97,33 +112,44 @@ class Conversation:
         self._change_sources.append(source)
         self._change_sources.sort(key=lambda s: (s.priority, s.source_id))
 
-    async def pull_notifications(self) -> None:
-        """遍历所有 ChangeSource，拉取变更通知并注入 _messages。
+    async def fetch_notifications(self) -> tuple[list[Notification], dict[str, Any]]:
+        """拉取所有 ChangeSource 的待推送通知。
+
+        纯读操作——不改变 _messages 和 _cursors。调用方拿到通知列表和待提交的
+        cursor 快照后，可在 LLM 调用成功后通过 apply_notifications() 一次性落盘。
 
         每个 source.update() 用 try/except 包裹——单个 source 失败
         记录警告日志并继续处理其余 source，不阻断整体流程。
+
+        Returns:
+            (notifications, new_cursors): 通知列表 + 待提交的 cursor 映射
         """
+        all_notifs: list[Notification] = []
+        new_cursors: dict[str, Any] = {}
         for source in self._change_sources:
             try:
                 cursor = self._cursors.get(source.source_id)
                 notifications, new_cursor = await source.update(cursor)
-                self._cursors[source.source_id] = new_cursor
-                # TODO (B-260630-26d6a7): 通知消息 role='user' / name + '[通知]' 前缀为
-                # 暂定方案。待 real LLM 验证 system role 行为差异后统一迁移——若结论为
-                # 改用 system role，此处消息格式、NOTIFICATION_PREFIX 常量及 render() 逻辑
-                # 需联动修改。
-                for n in notifications:
-                    self._messages.append({
-                        "role": "user",
-                        "name": n.name,
-                        "content": f"{NOTIFICATION_PREFIX} {n.content}",
-                    })
+                all_notifs.extend(notifications)
+                new_cursors[source.source_id] = new_cursor
             except Exception:
                 logger.warning(
-                    f"Conversation.pull_notifications: "
+                    f"Conversation.fetch_notifications: "
                     f"source {source.source_id} update 失败，已跳过",
                     exc_info=True,
                 )
+        return all_notifs, new_cursors
+
+    def apply_notifications(
+        self, notifications: list[Notification], new_cursors: dict[str, Any]
+    ) -> None:
+        """将通知写入 _messages 并更新 cursors。
+
+        与 fetch_notifications() 配对使用，在 LLM 调用成功后一次性落盘。
+        """
+        for n in notifications:
+            self._messages.append(n.to_message())
+        self._cursors.update(new_cursors)
 
     def add_user(self, content: str) -> None:
         """追加一条 user 消息。"""
@@ -146,6 +172,13 @@ class Conversation:
                     continue
             self._messages.append(msg)
 
+    def get_messages(self) -> List[dict]:
+        """返回内部消息列表的副本（不含 system prompt）。
+
+        调用方可在此基础上拼接 system prompt、待提交通知、用户消息等。
+        """
+        return list(self._messages)
+
     def render(self, system_prompt: str) -> List[dict]:
         """返回完整 messages 列表，system prompt 在最前面。
 
@@ -155,7 +188,7 @@ class Conversation:
         Returns:
             完整的消息列表，system prompt + _messages
         """
-        return [{"role": "system", "content": system_prompt}, *self._messages]
+        return [{"role": "system", "content": system_prompt}, *self.get_messages()]
 
     def truncate(self, keep_recent: int) -> None:
         """截断旧消息，保留最近 N 条。

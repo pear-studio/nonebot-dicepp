@@ -181,11 +181,12 @@ class TestChangeSourceRegistration:
         assert conv._change_sources[0].priority == 10  # replaced with s2
 
 
-class TestPullNotifications:
-    """测试 pull_notifications"""
+class TestFetchApplyNotifications:
+    """测试 fetch_notifications() + apply_notifications() 事务模式"""
 
     @pytest.mark.asyncio
-    async def test_update_none_produces_init_notification(self):
+    async def test_fetch_is_pure_read(self):
+        """fetch 不改变 _messages 和 _cursors"""
         conv = Conversation()
         note = _make_notification(content="初始状态")
         source = FakeChangeSource(
@@ -193,7 +194,24 @@ class TestPullNotifications:
             update_returns=([note], "cursor_v1"),
         )
         conv.register(source)
-        await conv.pull_notifications()
+        # fetch 前记录
+        prev_len = conv.length
+        prev_cursors = dict(conv._cursors)
+        notifs, new_cursors = await conv.fetch_notifications()
+        # fetch 不突变
+        assert conv.length == prev_len
+        assert conv._cursors == prev_cursors
+        # 返回值正确
+        assert len(notifs) == 1
+        assert notifs[0].content == "初始状态"
+        assert new_cursors == {"state.test": "cursor_v1"}
+
+    @pytest.mark.asyncio
+    async def test_apply_commits_notifications_and_cursors(self):
+        """apply 将通知写回并更新 cursor"""
+        conv = Conversation()
+        note = _make_notification(content="初始状态")
+        conv.apply_notifications([note], {"state.test": "cursor_v1"})
         assert conv.length == 1
         assert conv._messages[0]["role"] == "user"
         assert conv._messages[0]["name"] == "测试"
@@ -201,17 +219,19 @@ class TestPullNotifications:
         assert conv._cursors["state.test"] == "cursor_v1"
 
     @pytest.mark.asyncio
-    async def test_update_passes_cursor(self):
+    async def test_fetch_passes_cursor(self):
         conv = Conversation()
         source = FakeChangeSource(
             source_id="state.test", priority=10,
             update_returns=([], "new_cursor"),
         )
         conv.register(source)
-        # cursor 必须在 register 之后设置——register() 会清理同 source_id 的旧 cursor
         conv._cursors["state.test"] = "old_cursor"
-        await conv.pull_notifications()
+        notifs, new_cursors = await conv.fetch_notifications()
         assert source.update_calls == ["old_cursor"]
+        assert new_cursors == {"state.test": "new_cursor"}
+        # cursor 尚未更新
+        assert conv._cursors["state.test"] == "old_cursor"
 
     @pytest.mark.asyncio
     async def test_no_change_no_messages(self):
@@ -221,9 +241,8 @@ class TestPullNotifications:
             update_returns=([], "same_cursor"),
         )
         conv.register(source)
-        prev_len = conv.length
-        await conv.pull_notifications()
-        assert conv.length == prev_len
+        notifs, _ = await conv.fetch_notifications()
+        assert notifs == []
 
     @pytest.mark.asyncio
     async def test_source_exception_does_not_block_others(self):
@@ -239,14 +258,16 @@ class TestPullNotifications:
         ok_note = _make_notification(source_id="ok.source", content="ok")
         ok_source = FakeChangeSource(
             source_id="ok.source", priority=10,
-            update_returns=([ok_note], "cursor"),
+            update_returns=([ok_note], "cursor_ok"),
         )
         conv.register(FailingSource())
         conv.register(ok_source)
-        await conv.pull_notifications()
-        # ok_source 的通知仍然被注入
-        assert conv.length == 1
-        assert "ok" in conv._messages[0]["content"]
+        notifs, new_cursors = await conv.fetch_notifications()
+        # ok_source 的通知拉取成功
+        assert len(notifs) == 1
+        assert notifs[0].content == "ok"
+        # failing source 没有出现在 new_cursors 中（被跳过）
+        assert "fail.source" not in new_cursors
 
     @pytest.mark.asyncio
     async def test_multiple_rounds_cursor_advances(self):
@@ -268,22 +289,24 @@ class TestPullNotifications:
 
         source = TwoStepSource()
         conv.register(source)
-        # 第一轮
-        await conv.pull_notifications()
+        # 第一轮：fetch + apply
+        notifs1, cursors1 = await conv.fetch_notifications()
+        conv.apply_notifications(notifs1, cursors1)
         assert conv._cursors["step.source"] == "step1"
         assert conv._messages[-1]["content"].endswith("变化1")
         # 第二轮
-        await conv.pull_notifications()
+        notifs2, cursors2 = await conv.fetch_notifications()
+        conv.apply_notifications(notifs2, cursors2)
         assert conv._cursors["step.source"] == "step2"
         assert conv._messages[-1]["content"].endswith("变化2")
 
     @pytest.mark.asyncio
     async def test_empty_sources_noop(self):
-        """空 source 列表时 pull_notifications() 安全 no-op"""
+        """空 source 列表时 fetch 安全返回空"""
         conv = Conversation()
-        prev_len = conv.length
-        await conv.pull_notifications()
-        assert conv.length == prev_len
+        notifs, new_cursors = await conv.fetch_notifications()
+        assert notifs == []
+        assert new_cursors == {}
 
 
 class TestNotificationMessageFormat:

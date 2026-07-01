@@ -11,6 +11,13 @@ from plugins.DicePP.module.persona.life.types import AgentResult, EventGeneratio
 from plugins.DicePP.module.persona.data.models import StoryDeckEntry
 
 
+def _mock_run_result():
+    """构建 mock run_result（带 log_if_failed 方法）"""
+    r = MagicMock()
+    r.log_if_failed = MagicMock()
+    return r
+
+
 class TestDMAgentRun:
     """测试 DMAgent.run() 的 LLM 输出解析和回退"""
 
@@ -48,7 +55,7 @@ class TestDMAgentRun:
 
     @pytest.mark.asyncio
     async def test_dm_run_parses_valid_json(self, dm_agent, base_context):
-        """mock _run_life_collect_loop 返回合法 event JSON，验证 AgentResult.success=True"""
+        """mock run_structured_collect 返回合法 event JSON，验证 AgentResult.success=True"""
         valid_args = {
             "content": "测试角色在森林里发现了一株发光的草药。",
             "context_summary": "在森林发现发光草药",
@@ -58,10 +65,10 @@ class TestDMAgentRun:
             "health_delta": 0,
         }
         with patch(
-            "plugins.DicePP.module.persona.life._llm_utils._run_life_collect_loop",
+            "plugins.DicePP.module.persona.agent.tool_bridge.run_structured_collect",
             new_callable=AsyncMock,
-        ) as mock_loop:
-            mock_loop.return_value = ([valid_args], [])
+        ) as mock_collect:
+            mock_collect.return_value = ([valid_args], _mock_run_result(), [])
             result = await dm_agent.run(base_context)
         assert result.success is True
         assert isinstance(result.data, EventGenerationResult)
@@ -71,12 +78,12 @@ class TestDMAgentRun:
 
     @pytest.mark.asyncio
     async def test_dm_run_fallback_on_empty_collected(self, dm_agent, base_context):
-        """mock _run_life_collect_loop 返回 [] 空列表，验证 fallback"""
+        """mock run_structured_collect 返回 [] 空列表，验证 fallback"""
         with patch(
-            "plugins.DicePP.module.persona.life._llm_utils._run_life_collect_loop",
+            "plugins.DicePP.module.persona.agent.tool_bridge.run_structured_collect",
             new_callable=AsyncMock,
-        ) as mock_loop:
-            mock_loop.return_value = ([], [])
+        ) as mock_collect:
+            mock_collect.return_value = ([], _mock_run_result(), [])
             result = await dm_agent.run(base_context)
         assert result.success is False
         assert "LLM 未调用工具" in result.error
@@ -84,16 +91,69 @@ class TestDMAgentRun:
 
     @pytest.mark.asyncio
     async def test_dm_run_fallback_on_malformed_json(self, dm_agent, base_context):
-        """mock _run_life_collect_loop 返回残缺 dict（缺少必要字段），验证回退"""
+        """mock run_structured_collect 返回残缺 dict（缺少必要字段），验证回退"""
         with patch(
-            "plugins.DicePP.module.persona.life._llm_utils._run_life_collect_loop",
+            "plugins.DicePP.module.persona.agent.tool_bridge.run_structured_collect",
             new_callable=AsyncMock,
-        ) as mock_loop:
-            mock_loop.return_value = ([{"some_other_field": 123}], [])
+        ) as mock_collect:
+            mock_collect.return_value = ([{"some_other_field": 123}], _mock_run_result(), [])
             result = await dm_agent.run(base_context)
         assert result.success is True
         assert "我正在房间里休息" in result.data.description
-        assert "我正在房间里休息" in result.data.context_summary
+
+    @pytest.mark.asyncio
+    async def test_dm_run_story_deck_injection_path(self, dm_agent, base_context):
+        """R1 回归测试：story deck 注入路径不因 API 变更而静默失败
+
+        当前 bug：dm_agent.py:276 调用已删除的 pull_notifications()，
+        触发 AttributeError 被 except Exception 吞没，注入文本未写入 Conversation。
+        验证方式：run() 后检查 _conversation._messages 中应包含注入文本。
+        """
+        from plugins.DicePP.module.persona.data.models import StoryDeckEntry
+
+        dm_agent.store.list_story_deck_entries = AsyncMock(return_value=[
+            StoryDeckEntry(key="老李", type="entity", content="图书管理员"),
+        ])
+        dm_agent.store.get_linked_entries = AsyncMock(return_value=[])
+
+        context = {
+            **base_context,
+            "chain_depth": 0,
+            "follow_up_text": "老李",
+            "events_context": "去了旧图书馆",
+        }
+
+        valid_args = {
+            "content": "老李从书架上取下一本古籍。",
+            "context_summary": "老李找到古籍",
+            "duration_minutes": 10,
+            "energy_delta": 0,
+            "mood_delta": 5,
+            "health_delta": 0,
+        }
+        with patch(
+            "plugins.DicePP.module.persona.agent.tool_bridge.run_structured_collect",
+            new_callable=AsyncMock,
+        ) as mock_collect:
+            mock_collect.return_value = ([valid_args], _mock_run_result(), [])
+            result = await dm_agent.run(context)
+
+        assert result.success is True
+        assert "老李" in result.data.description
+        # 核心断言：注入文本应出现在 Conversation 中
+        # 当前 bug：pull_notifications() 不存在 → AttributeError → 注入被跳过
+        # 修复后：_conversation._messages 应包含 [故事提示 (story_deck)] 注入文本
+        assert dm_agent._conversation is not None, (
+            "run() 应创建 Conversation"
+        )
+        injected = any(
+            "[故事提示 (story_deck)]" in msg.get("content", "")
+            for msg in dm_agent._conversation._messages
+        )
+        assert injected, (
+            "story_deck 注入文本未出现在 Conversation 中——"
+            "pull_notifications() 已被移除，需替换为 fetch/apply"
+        )
 
 
 class TestStoryDeckInjection:

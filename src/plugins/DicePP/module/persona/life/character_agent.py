@@ -45,7 +45,7 @@ class CharacterAgent(Agent):
     """Character Agent — 角色第一人称
 
     状态数据（体力/心情/健康）通过 ChangeSource 通知管道在 Conversation 中注入——
-    首轮 pull_notifications() 获得各维度的初始化通知，后续仅在状态变化时产生增量通知
+    首轮 fetch_notifications()/apply_notifications() 获得各维度的初始化通知，后续仅在状态变化时产生增量通知
     （如 "体力 -10 (当前 65/100)"）。同天多轮反应且状态无变化时，LLM 仅依靠上下文记忆
     感知状态，不再在每轮 user prompt 中内联注入绝对值。
     """
@@ -282,10 +282,9 @@ class CharacterAgent(Agent):
         return user_prompt
 
     def _build_share_user_prompt(self, context: dict) -> str:
-        # 当前 share() 不经过 Conversation 管道（直接构造 ad-hoc messages 调用
-        # _run_life_collect_loop），ChangeSource 通知不会注入。状态数据由 context
-        # 直接传入 _format_state_prompt()。后续若 share() 迁移到 Conversation 模式，
-        # 应同步移除内联状态文本。
+        # TODO: share 重构中，暂时禁用。恢复时 ChangeSource 通知不会自动注入
+        # （share 为单轮独立调用，不经过 Conversation），状态数据由 context
+        # 直接传入 _format_state_prompt()。
         event_description = context.get("event_description", "")
         reaction = context.get("reaction", "")
         relationship_score = context.get("relationship_score", 0.0)
@@ -360,6 +359,7 @@ class CharacterAgent(Agent):
             return await self.react(context)
         elif mode == "diary":
             return await self.diary(context)
+        # TODO: share 重构中，暂时禁用
         elif mode == "share":
             return await self.share(context)
         elif mode == "opening":
@@ -390,7 +390,7 @@ class CharacterAgent(Agent):
         user_prompt = self._build_reaction_user_prompt(context)
 
         # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-        collected, _conv = await self._run_with_conv(
+        collected, _conv = await self._process(
             context=context,
             initial_system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -466,7 +466,7 @@ class CharacterAgent(Agent):
         user_prompt = self._build_diary_user_prompt(context)
 
         # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-        collected, _conv = await self._run_with_conv(
+        collected, _conv = await self._process(
             context=context,
             initial_system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -498,72 +498,10 @@ class CharacterAgent(Agent):
                 data="今天发生了一些事，但我太累了，简单记录一下。",
             )
 
+    # TODO: share 重构中，暂时禁用
     async def share(self, context: dict) -> AgentResult:
-        """生成分享消息（单轮独立调用，不使用 Conversation 跨调用上下文积累）
-
-        context 字段: 分享消息上下文各字段平铺为 dict
-
-        Returns:
-            AgentResult(data=str) — 消息文本；彻底失败返回 data=None 的 success=True 结果
-        """
-        context["mode"] = "share"
-
-        from ..life._llm_utils import _run_life_collect_loop
-
-        # load_state() 用于验证状态存在性
-        state = await self.load_state()
-        system_prompt = self._build_share_prompt(state, context)
-        user_prompt = self._build_share_user_prompt(context)
-
-        max_chars = getattr(self.config, "proactive_share_max_chars", 200) if self.config else 200
-        max_chars = max(10, max_chars)
-        max_parse_retries = 2
-        backoff_base = getattr(self.config, "proactive_share_backoff_base_seconds", 2) if self.config else 2
-
-        for attempt in range(max_parse_retries + 1):
-            try:
-                # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-                collected, _ = await _run_life_collect_loop(
-                    router=self.router,
-                    store=self.store,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    tools=[RECORD_SHARE_MESSAGE_TOOL.to_openai_format()],
-                    temperature=0.85,
-                    selection=SUMMARIZE,
-                    bg_timeout=self._bg_timeout,
-                    max_rounds=self._max_rounds,
-                )
-            except ServiceUnavailableError as e:
-                logger.error(f"分享消息: 无可用 provider: {e}", exc_info=True)
-                return AgentResult(success=True, data=None)
-            except Exception as e:
-                logger.error(f"分享消息生成失败: {e}", exc_info=True)
-                return AgentResult(success=True, data=None)
-
-            if not collected:
-                logger.warning("分享消息: LLM 未调用 record_share_message 工具")
-                return AgentResult(success=True, data=None)
-
-            try:
-                args = collected[0]
-                message = str(args.get("message", "")).strip().strip('"').strip("'")
-                if not message:
-                    if attempt < max_parse_retries:
-                        await asyncio.sleep(backoff_base ** (attempt + 1))
-                        continue
-                    return AgentResult(success=True, data=None)
-
-                if len(message) > max_chars:
-                    message = message[:max_chars - 3] + "..."
-                return AgentResult(success=True, data=message)
-
-            except Exception as e:
-                logger.error(f"分享消息解析失败: {e}")
-                return AgentResult(success=True, data=None)
-
+        """[DISABLED] 生成分享消息 — 重构中，暂时返回空结果"""
+        logger.warning("share() 已被禁用（重构中），返回空结果")
         return AgentResult(success=True, data=None)
 
     async def opening(self, context: dict) -> AgentResult:
