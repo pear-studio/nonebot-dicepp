@@ -40,10 +40,19 @@ from .state import AgentRunState
 from .tool_executor import ToolExecutor, ToolRegistry
 from ..llm.selection import SelectionPolicy, CHAT
 
-_L1_CORRECTION_MSG = {
-    "role": "user",
-    "content": "[系统指令] 你必须调用工具来完成任务。不要直接输出文本——只能通过调用工具来输出结果。",
-}
+def _l1_correction_msg(required_tools: Optional[List[str]] = None) -> dict:
+    """构建 L1 纠正消息，可选指名具体必需工具。"""
+    if required_tools:
+        tools_str = "、".join(required_tools)
+        tool_hint = f"必须调用 {tools_str} 工具来输出。"
+    else:
+        tool_hint = "必须调用工具来完成任务。"
+    return {
+        "role": "user",
+        "content": (
+            f"[系统指令] 你必须调用工具来输出结果，不要直接回复文本。{tool_hint}"
+        ),
+    }
 
 _CORRECTION_INTERIM_REASON = "final_required_after_interim"
 _CORRECTION_INTERIM_MSG = (
@@ -213,14 +222,15 @@ class AgentLoop:
                     and not tool_calls
                     and tools
                     and (not content.strip() or required_tool_output)):
-                state.messages.append(dict(_L1_CORRECTION_MSG))
+                correction_msg = _l1_correction_msg(required_tools)
+                state.messages.append(correction_msg)
                 state.output_correction_count += 1
                 await self._event_bus.emit(
                     "CorrectionInjected",
                     CorrectionInjectedPayload(
                         reason="tool_required",
                         round_index=round_idx,
-                        message=_L1_CORRECTION_MSG["content"],
+                        message=correction_msg["content"],
                     ),
                     state,
                 )
