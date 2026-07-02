@@ -6,6 +6,7 @@ Phase 1: 退回纯状态管理，LLM 调用委托给 DM/Character Agent。
 """
 import asyncio
 import json
+import sys
 import time
 from utils.logger import logger
 import random
@@ -198,8 +199,20 @@ class CharacterLife:
             )
         raw.sort(key=lambda x: x[0])
         self._slot_minutes_today = [(m % 1440, t) for m, t in raw]
+        # 诊断：记录调用来源和槽位变更前后的状态
+        caller_frame = sys._getframe(1)
+        caller_file = caller_frame.f_code.co_filename.split("/")[-1]
+        caller_line = caller_frame.f_lineno
+        logger.info(
+            "regenerate_slots: today={} n_slots={} fired_before={} "
+            "spans_midnight={} caller={}:{}",
+            self._get_today_str(), len(self._slot_minutes_today),
+            sorted(self._fired_slot_indices),
+            self._spans_midnight,
+            caller_file, caller_line,
+        )
         logger.debug(
-            "角色生活当日槽位 %s: %s (边界: %02d:%02d-%02d:%02d)",
+            "角色生活当日槽位 {}: {} (边界: {:02d}:{:02d}-{:02d}:{:02d})",
             self._get_today_str(), self._slot_minutes_today,
             start // 60, start % 60, end // 60, end % 60,
         )
@@ -216,6 +229,14 @@ class CharacterLife:
                 and len(self._fired_slot_indices) < len(self._slot_minutes_today)
             )
             if has_unfired:
+                logger.debug(
+                    "reset_daily_state: 跨夜延期 — today={} last={} "
+                    "unfired={}/{} spans_midnight={}",
+                    today, self._last_event_date,
+                    len(self._slot_minutes_today) - len(self._fired_slot_indices),
+                    len(self._slot_minutes_today),
+                    self._spans_midnight,
+                )
                 self._last_event_date = today
                 return
         self._fired_slot_indices.clear()
@@ -341,6 +362,22 @@ class CharacterLife:
             json.dumps(payload, ensure_ascii=False),
         )
 
+    def _is_slot_matchable(self, i: int, now_m: int, now: datetime, win: int) -> bool:
+        """检查槽位 i 是否可匹配（未触发、距离在窗口内、未冷却）。"""
+        slots = self._slot_minutes_today
+        if slots is None:
+            return False
+        if i in self._fired_slot_indices:
+            return False
+        _slot_m, slot_type = slots[i]
+        if (slot_type == "good_night"
+                and self._last_good_night_fired_at is not None
+                and (now - self._last_good_night_fired_at).total_seconds()
+                    < 3600 * self.config.good_night_cooldown_hours):
+            return False
+        dist = min(abs(now_m - _slot_m), 1440 - abs(now_m - _slot_m))
+        return dist <= win
+
     async def tick(self) -> Optional[List[Dict[str, Any]]]:
         if not self.config.enabled:
             return None
@@ -354,15 +391,9 @@ class CharacterLife:
         win = max(1, self.config.slot_match_window_minutes)
         remaining = len(slots) - len(self._fired_slot_indices)
         for i, (slot_m, slot_type) in enumerate(slots):
-            if i in self._fired_slot_indices:
-                continue
-            if (slot_type == "good_night"
-                    and self._last_good_night_fired_at is not None
-                    and (now - self._last_good_night_fired_at).total_seconds() < 3600 * self.config.good_night_cooldown_hours):
+            if not self._is_slot_matchable(i, now_m, now, win):
                 continue
             dist = min(abs(now_m - slot_m), 1440 - abs(now_m - slot_m))
-            if dist > win:
-                continue
             logger.debug(
                 f"tick 槽位触发: slot={i}/{len(slots)} type={slot_type} "
                 f"plan={slot_m}min now={now_m}min remaining={remaining}"
@@ -371,12 +402,43 @@ class CharacterLife:
             if event_chain:
                 self._fired_slot_indices.add(i)
                 if self._spans_midnight and len(self._fired_slot_indices) == len(slots):
+                    logger.info(
+                        "tick: 所有槽位已触发 (fired={}/{}), 跨夜模式再生槽位 "
+                        "(today={}, spans_midnight={})",
+                        len(self._fired_slot_indices), len(slots),
+                        self._get_today_str(), self._spans_midnight,
+                    )
                     self._fired_slot_indices.clear()
                     self._regenerate_slots_for_today()
                 if slot_type == "good_night":
                     self._last_good_night_fired_at = now
                 await self.save_persistent_state()
                 return event_chain
+            else:
+                # 槽位匹配成功但事件生成失败 — 记录诊断信息
+                logger.warning(
+                    "tick: 槽位匹配但事件生成返回空 — slot={}/{} type={} "
+                    "plan={}min now={}min dist={}min fired={}",
+                    i, len(slots), slot_type, slot_m, now_m, dist,
+                    sorted(self._fired_slot_indices),
+                )
+        # 所有槽位遍历完毕，无一匹配 — 记录诊断信息
+        if not any(
+            self._is_slot_matchable(i, now_m, now, win)
+            for i in range(len(slots))
+        ):
+            # 构建未匹配槽位的距离快照
+            slot_snapshots = []
+            for i, (sm, st) in enumerate(slots):
+                if i in self._fired_slot_indices:
+                    continue
+                d = min(abs(now_m - sm), 1440 - abs(now_m - sm))
+                slot_snapshots.append(f"{st}@{sm}min(dist={d})")
+            logger.warning(
+                "tick: 无槽位匹配 — now={}min win={}min fired={}/{} slots=[{}]",
+                now_m, win, len(self._fired_slot_indices), len(slots),
+                ", ".join(slot_snapshots) if slot_snapshots else "none",
+            )
         return None
 
     def _migrate_legacy_state(self, state: Any) -> None:
