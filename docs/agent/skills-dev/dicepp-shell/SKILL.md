@@ -32,6 +32,46 @@ uv run dicepp-shell rm <session>
 - `--nick <name>`：设置用户昵称
 - `--private`：使用私聊模式
 
+## warp — 生活模拟时间加速
+
+`warp` 推进虚构时间，驱动 persona 生活模拟运行指定天数（DM 叙事 → Character 反应 → Diary → SA 叙事规划）。用于调试 LLM prompt、生活模拟逻辑和叙事质量。
+
+```bash
+uv run dicepp-shell warp <session> --days <N> [--start <ISO>] [--dry-run] [--json]
+```
+
+**执行前必须新建 session**（`dicepp-shell start <new-session>`），不要复用已有 session。复用会导致新旧 warp 的 `persona_story_deck`、`persona_daily_events`、`persona_sa_state` 等数据混在同一 DB 中，故事条目跨叙事污染，分析结果不可靠。
+
+**常用选项：**
+
+- `--days <N>`：模拟天数（≥1，必填）
+- `--start <ISO>`：起始虚构时间（ISO 格式，如 `1351-10-26T08:00`）。默认随机生成 1000–1500 年间的虚构日期
+- `--dry-run`：仅预估 LLM 调用次数和 token 量级，不实际执行
+- `--json`：输出结构化结果
+
+**使用流程：**
+
+```bash
+# 1. 新建独立 session
+uv run dicepp-shell start warp-qiqi-test
+
+# 2. 先 dry-run 确认成本
+uv run dicepp-shell warp warp-qiqi-test --days 2 --dry-run
+
+# 3. 执行 warp
+uv run dicepp-shell warp warp-qiqi-test --days 2
+
+# 4. 分析完成后清理
+uv run dicepp-shell rm warp-qiqi-test
+```
+
+**注意事项：**
+
+- warp 使用真实 LLM，执行前先用 `--dry-run` 确认调用次数和 token 量级
+- 每次 warp 消耗 50–200 次 LLM 调用，耗时 5–20 分钟
+- 虚构日期默认随机生成，避免与真实墙钟混淆
+- warp 完成后，DM/Character 对话原文、SA 思考过程等原始数据在 `persona_llm_traces` 和 `persona_agent_events` 表中，可导出分析
+
 ## 验收原则
 
 - 使用能表达真实用户行为的消息，不要只验证内部函数路径。
