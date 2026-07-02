@@ -88,6 +88,7 @@ class TestCharacterDaySimulation:
     @pytest.mark.asyncio
     async def test_wake_up_event_applies_energy_floor(self, life, monkeypatch):
         """08:15 wake_up 事件触发并应用 energy floor"""
+        life.config.chain_max_depth = 1
         await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
         self._set_time(datetime(2024, 1, 1, 8, 15, 0))
         result = await life.tick()
@@ -144,6 +145,7 @@ class TestCharacterDaySimulation:
     @pytest.mark.asyncio
     async def test_good_night_slot_fires(self, life, monkeypatch):
         """21:50 good_night 事件触发"""
+        life.config.chain_max_depth = 1
         await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
         self._set_time(datetime(2024, 1, 1, 21, 50, 0))
         life._slot_minutes_today = [(21 * 60 + 50, 'good_night')]

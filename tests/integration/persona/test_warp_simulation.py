@@ -281,7 +281,7 @@ class TestWarpSimulation:
     async def test_stepped_clock_preserves_time_during_event_chain(self, life, temp_db):
         """SteppedClock 在 DM/Character agent 调用期间保持冻结"""
         # 需要 chain_max_depth >= 2 才能触发 follow_up 链
-        life.config.chain_max_depth = 3
+        life.config.chain_max_depth = 2
 
         # 使用带 follow_up 的链式事件 agent
         chain_dm = [
