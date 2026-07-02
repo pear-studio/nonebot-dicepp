@@ -290,8 +290,8 @@ class BotRunner:
                     try:
                         await app.tick()
                         elapsed = _time.monotonic() - t0
-                        slots_processed += 1
                         if elapsed < 0.5:
+                            skipped += 1
                             # 尝试读取 character_life 内部状态辅助诊断
                             try:
                                 cl_status = char_life.get_event_status()
@@ -301,12 +301,13 @@ class BotRunner:
                             except Exception:
                                 cl_enabled, cl_fired, cl_total = "?", "?", "?"
                             logger.warning(
-                                f"  [{slot_label}] OK ({elapsed:.1f}s) ⚠️ 疑似槽位跳过 — "
+                                f"  [{slot_label}] SKIP ({elapsed:.1f}s) — "
                                 f"day={day_idx} slot={slot_idx} type={slot_type} "
                                 f"clock={slot_dt.isoformat()} "
                                 f"cl_enabled={cl_enabled} cl_fired={cl_fired}/{cl_total}"
                             )
                         else:
+                            slots_processed += 1
                             logger.info(
                                 f"  [{slot_label}] OK ({elapsed:.1f}s)"
                             )
