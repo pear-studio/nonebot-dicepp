@@ -191,8 +191,8 @@ class TestCharacterLifeBasics:
         assert updated_state.health == 50
         call_kwargs = mock_data_store.add_daily_event.call_args.kwargs
         assert call_kwargs['energy_delta'] == 0
-        assert call_kwargs['mood_delta'] is None
-        assert call_kwargs['health_delta'] is None
+        assert call_kwargs['mood_delta'] == 0
+        assert call_kwargs['health_delta'] == 0
 
 class TestCharacterLifePersistence:
     """测试状态持久化"""

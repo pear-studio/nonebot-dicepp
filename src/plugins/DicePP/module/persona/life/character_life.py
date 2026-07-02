@@ -612,9 +612,9 @@ class CharacterLife:
                     duration_minutes=event_result.duration_minutes,
                     system_prompt_digest=event_result.system_prompt_digest,
                     raw_response=combined_raw,
-                    energy_delta=event_result.energy_delta,
-                    mood_delta=event_result.mood_delta,
-                    health_delta=event_result.health_delta,
+                    energy_delta=ed,
+                    mood_delta=md,
+                    health_delta=hd,
                     context_summary=event_result.context_summary,
                 )
 
