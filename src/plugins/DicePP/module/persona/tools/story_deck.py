@@ -185,7 +185,8 @@ def register_search_story_deck(registry: ToolRegistry, store: "PersonaDataStore"
 def make_search_story_deck_executor(store: "PersonaDataStore"):
     """创建 search_story_deck 执行器（DM + SA 共享）"""
 
-    async def executor(args: SearchStoryDeckArgs) -> str:
+    async def executor(**kwargs) -> str:
+        args = SearchStoryDeckArgs(**kwargs)
         query = args.query.strip()
         if not query:
             return "请提供搜索关键词"
@@ -213,7 +214,8 @@ def make_search_story_deck_executor(store: "PersonaDataStore"):
 def make_list_story_deck_executor(store: "PersonaDataStore"):
     """创建 list_story_deck 执行器（SA 专用）"""
 
-    async def executor(args: ListStoryDeckArgs) -> str:
+    async def executor(**kwargs) -> str:
+        args = ListStoryDeckArgs(**kwargs)
         etype = args.type
         limit = max(1, min(100, args.limit or 50))
         offset = max(0, args.offset or 0)
@@ -237,7 +239,8 @@ def make_list_story_deck_executor(store: "PersonaDataStore"):
 def make_read_past_events_executor(store: "PersonaDataStore"):
     """创建 read_past_events 执行器（SA 专用）"""
 
-    async def executor(args: ReadPastEventArgs) -> str:
+    async def executor(**kwargs) -> str:
+        args = ReadPastEventArgs(**kwargs)
         days = max(1, min(90, args.days))
         limit = max(1, min(50, args.limit or 20))
         offset = max(0, args.offset or 0)
@@ -264,7 +267,8 @@ def make_read_past_events_executor(store: "PersonaDataStore"):
 def make_edit_story_deck_executor(store: "PersonaDataStore", max_entries: int = 100):
     """创建 edit_story_deck 执行器（SA 专用）"""
 
-    async def executor(args: EditStoryDeckArgs) -> str:
+    async def executor(**kwargs) -> str:
+        args = EditStoryDeckArgs(**kwargs)
         if not args.changes:
             return "changes 列表为空，无操作"
 
@@ -354,7 +358,8 @@ def make_edit_fronts_executor(
     fronts 是对 SAState.fronts 的可变引用，工具直接修改它。
     """
 
-    async def executor(args: EditFrontsArgs) -> str:
+    async def executor(**kwargs) -> str:
+        args = EditFrontsArgs(**kwargs)
         if not args.changes:
             return "changes 列表为空，无操作"
 
