@@ -229,7 +229,7 @@ class CharacterAgent(Agent):
             f"{context_prefix}"
             f"当前事件: {event}"
             f"\n\n请对发生的事件做出内心反应，通过 say 工具表达你的感受和想法。"
-            f"\n要求: 30-80字，表达真实感受，反映角色性格特点和当前状态。"
+            f"\n要求: 30-200字，表达真实感受，反映角色性格特点和当前状态。"
             f"\n如果你想继续行动（调查、对话、移动等），设置 has_follow_up=true。"
         )
         return user_prompt
@@ -419,8 +419,8 @@ class CharacterAgent(Agent):
             # has_follow_up: 是否想继续行动
             has_follow_up = bool(args.get("has_follow_up", False))
 
-            if len(reaction) > 80:
-                reaction = reaction[:77] + "..."
+            if len(reaction) > 200:
+                reaction = reaction[:197] + "..."
 
             return AgentResult(
                 success=True,
