@@ -72,6 +72,16 @@ Outcome 要求：
 # ── 格式化辅助 ─────────────────────────────────────────────────
 
 
+def _str_field(value, default: str = "") -> str:
+    """从可能是 dict 的值中安全提取字符串（防御 LLM function call 传入 dict）"""
+    if isinstance(value, dict):
+        val = value.get("name")
+        return val.strip() if isinstance(val, str) else default
+    if isinstance(value, str):
+        return value.strip()
+    return default
+
+
 def _format_fronts(fronts: list[dict]) -> str:
     """将 fronts 列表格式化为可读文本"""
     if not fronts:
@@ -368,7 +378,7 @@ def make_edit_fronts_executor(
 
         for i, change in enumerate(args.changes):
             action = change.get("action", "")
-            front_name = change.get("front", "").strip()
+            front_name = _str_field(change.get("front", ""))
 
             if not front_name:
                 errors.append({"index": i, "reason": "缺少 front 名称"})
@@ -383,18 +393,21 @@ def make_edit_fronts_executor(
 
             if action == "add_thread":
                 thread = change.get("thread", {})
-                if not thread or not thread.get("name"):
+                if isinstance(thread, str):
+                    # LLM 可能将 thread 传成 string，转为 dict
+                    thread = {"name": thread}
+                if not isinstance(thread, dict) or not thread.get("name"):
                     errors.append({"index": i, "front": front_name, "reason": "add_thread 缺少 thread.name"})
                     continue
 
-                thread_name = thread.get("name", "").strip()
+                thread_name = _str_field(thread.get("name", ""))
                 if not thread_name:
                     errors.append({"index": i, "front": front_name, "reason": "thread.name 不能为空"})
                     continue
 
                 if front is None:
                     # 新建 front
-                    ftype = change.get("type", "adventure").strip()
+                    ftype = _str_field(change.get("type", "adventure"), "adventure")
                     if ftype not in ("campaign", "adventure"):
                         errors.append({"index": i, "front": front_name, "reason": f"无效 type: {ftype}"})
                         continue
@@ -445,7 +458,7 @@ def make_edit_fronts_executor(
                         applied.append({"action": "add_thread", "front": front_name, "thread": thread_name})
 
             elif action == "update_thread":
-                thread_name = change.get("thread", "").strip()
+                thread_name = _str_field(change.get("thread", ""))
                 if not thread_name:
                     errors.append({"index": i, "front": front_name, "reason": "update_thread 缺少 thread 名称"})
                     continue
@@ -472,7 +485,7 @@ def make_edit_fronts_executor(
                 applied.append({"action": "update_thread", "front": front_name, "thread": thread_name})
 
             elif action == "remove_thread":
-                thread_name = change.get("thread", "").strip()
+                thread_name = _str_field(change.get("thread", ""))
                 if not thread_name:
                     errors.append({"index": i, "front": front_name, "reason": "remove_thread 缺少 thread 名称"})
                     continue
