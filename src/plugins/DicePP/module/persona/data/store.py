@@ -41,6 +41,7 @@ from .migrations import (
     ALTER_SCORE_HISTORY_COLUMNS,
     ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE,
     DROP_DM_STATE_TABLE,
+    ALTER_PERSONA_SESSION_CURSORS_JSON,
 )
 
 
@@ -187,6 +188,12 @@ class PersonaDataStore:
             pass  # 列已不存在或 DB 为全新创建
         # DM 状态表清理（被 story_deck 取代）
         await persona_db.execute(DROP_DM_STATE_TABLE)
+        # Phase 2: Conversation 持久化 — cursors JSON 列（幂等 ALTER TABLE）
+        try:
+            await persona_db.execute(ALTER_PERSONA_SESSION_CURSORS_JSON)
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e):
+                raise
         await persona_db.commit()
 
     async def switch_persona_db(self, new_character_name: str) -> None:
@@ -2378,6 +2385,7 @@ class PersonaDataStore:
             token_budget=row.get("token_budget", DEFAULT_SESSION_TOKEN_BUDGET),
             token_estimate=row.get("token_estimate", 0),
             status=row["status"],
+            cursors_json=row.get("cursors_json") or "{}",
             last_active_at=datetime.fromisoformat(row["last_active_at"]) if row.get("last_active_at") else None,
             created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
         )
@@ -2438,7 +2446,7 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT session_id, user_id, character_id, static_prompt, static_hash,
-                   token_budget, token_estimate, status, last_active_at, created_at
+                   token_budget, token_estimate, status, cursors_json, last_active_at, created_at
             FROM persona_session
             WHERE user_id = ? AND status = 'active'
             ORDER BY last_active_at DESC
@@ -2455,7 +2463,7 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT session_id, user_id, character_id, static_prompt, static_hash,
-                   token_budget, token_estimate, status, last_active_at, created_at
+                   token_budget, token_estimate, status, cursors_json, last_active_at, created_at
             FROM persona_session
             WHERE session_id = ?
             """,

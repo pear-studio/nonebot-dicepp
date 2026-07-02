@@ -130,6 +130,9 @@ async def test_create_persona_success_registers_tools(monkeypatch):
         async def get_global_setting(self, key):
             return None
 
+        async def add_message_stream(self, **kwargs):
+            pass
+
     monkeypatch.setattr(
         "plugins.DicePP.module.persona.factory.PersonaDataStore",
         FakeStore,

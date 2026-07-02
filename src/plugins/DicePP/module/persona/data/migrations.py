@@ -388,6 +388,7 @@ CREATE TABLE IF NOT EXISTS persona_session (
     token_budget INTEGER DEFAULT 64000,
     token_estimate INTEGER DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active',
+    cursors_json TEXT DEFAULT '{}',
     last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -396,6 +397,10 @@ CREATE TABLE IF NOT EXISTS persona_session (
 CREATE_PERSONA_SESSION_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_persona_session_user_status
 ON persona_session(user_id, status);
+"""
+
+ALTER_PERSONA_SESSION_CURSORS_JSON = """
+ALTER TABLE persona_session ADD COLUMN cursors_json TEXT DEFAULT '{}';
 """
 
 CREATE_PERSONA_SESSION_MESSAGE_TABLE = """

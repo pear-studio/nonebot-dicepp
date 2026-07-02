@@ -13,7 +13,7 @@ from core.config.basic import Paths
 
 from .character.loader import CharacterLoader
 from .character.models import Character
-from .chat.session import ChatSession
+from .chat.orchestrator import ChatOrchestrator
 from .chat.chat_config import ChatConfig
 from .chat.scoring import ScoringAgent
 from .chat.context import ContextBuilder
@@ -73,7 +73,7 @@ from .chat.segment_dispatcher import SegmentDispatcher
 class PersonaApp:
     """Persona 模块入口 — 持有 chat/life/store/port 四个公开句柄"""
 
-    chat: ChatSession
+    chat: ChatOrchestrator
     life: LifeSimulator
     store: PersonaDataStore
     port: MessagePort
@@ -115,9 +115,10 @@ class PersonaApp:
         self, user_id: str, group_id: str, message: str, nickname: str,
         image_data_urls: Optional[List[str]] = None,
     ) -> Optional[str]:
-        from ..chat.session import ChatCallContext
-        ctx = ChatCallContext(nickname=nickname, image_data_urls=image_data_urls)
-        return await self.chat.chat(user_id, group_id, message, ctx=ctx)
+        return await self.chat.chat(
+            user_id, group_id, message,
+            image_data_urls=image_data_urls, nickname=nickname,
+        )
 
     # ── 消息发送 ──
 
@@ -491,8 +492,8 @@ def _make_resolve_query_db(bot: Bot):
     return _resolve_query_db
 
 
-def _build_chat(deps: ChatDeps) -> ChatSession:
-    """组装 ChatSession"""
+def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
+    """组装 ChatOrchestrator（替代 ChatSession）"""
     scoring_agent = ScoringAgent(deps.router, timezone=deps.config.timezone,
                                  max_rounds=deps.config.background_llm_max_rounds,
                                  store=deps.store)
@@ -524,20 +525,17 @@ def _build_chat(deps: ChatDeps) -> ChatSession:
         decay_calculator=deps.decay_calculator, character=deps.character,
         config=chat_config,
     )
-    return ChatSession(
+    return ChatOrchestrator(
         store=deps.store,
         router=deps.router,
-        tool_registry=deps.tool_registry,
-        coordinator=deps.coordinator,
         character=deps.character,
         config=chat_config,
         scoring_trigger=scoring_trigger,
         response_handler=response_handler,
         context_builder=context_builder,
-        decay_calculator=deps.decay_calculator,
-        query_store=deps.query_store,
-        resolve_db=deps.resolve_db,
         sleep_gate=deps.sleep_gate,
+        tool_registry=deps.tool_registry,
+        decay_calculator=deps.decay_calculator,
     )
 
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from utils.logger import logger
+
 from ..agent.runtime import AgentRuntime
 from ..agent.request import AgentRunLimits, ToolUseMode
 from ..llm.router import LLMRouter
@@ -26,7 +28,7 @@ class ToolResult:
 
     new_messages: list[dict] = field(default_factory=list)
     final_text: str = ""
-    final_reason: str = ""  # "stop" | "tool_called" | "max_rounds" | "error"
+    final_reason: str = ""
     delivery_performed: bool = False
 
 
@@ -60,8 +62,6 @@ class ToolLoop:
         Returns:
             ToolResult: 含增量消息和结果信息
         """
-        # 构建 tool_registry（简化：调用方通过 config 传递，或使用旧接口）
-        # 当前过渡阶段直接调用 AgentRuntime 现有 API
         sent_len = len(messages)
 
         if config.mode == "chat":
@@ -71,9 +71,9 @@ class ToolLoop:
                 tool_registry=None,  # type: ignore[arg-type]
                 temperature=config.temperature,
                 timeout=config.timeout,
+                image_data_urls=config.image_data_urls,
             )
         else:
-            # collect / react 等模式
             result = await self._runtime.run(
                 messages=messages,
                 user_id="", group_id="",
@@ -92,13 +92,33 @@ class ToolLoop:
                 bill_usage=False,
             )
 
-        # 提取增量消息：AgentRunResult 由 AgentLoop 在 state.messages 中保持
-        # 当前 AgentRuntime 不直接暴露增量，使用空列表作为过渡
-        new_messages: list[dict] = []
+        # 提取增量消息
+        all_msgs = result.final_messages if result.final_messages else []
+        # 过滤纠正注入（[系统指令] 前缀）
+        new_msgs = _filter_corrections(all_msgs[sent_len:])
 
         return ToolResult(
-            new_messages=new_messages,
+            new_messages=new_msgs,
             final_text=result.final_text or "",
             final_reason=result.final_reason or "stop",
             delivery_performed=result.delivery_performed or False,
         )
+
+
+_CORRECTION_PREFIX = "[系统指令]"
+
+
+def _filter_corrections(msgs: list[dict]) -> list[dict]:
+    """过滤掉内部纠正注入消息。"""
+    filtered = [
+        m for m in msgs
+        if not (
+            m.get("role") == "user"
+            and isinstance(m.get("content"), str)
+            and m["content"].startswith(_CORRECTION_PREFIX)
+        )
+    ]
+    removed = len(msgs) - len(filtered)
+    if removed > 0:
+        logger.debug(f"_filter_corrections: removed {removed} correction message(s)")
+    return filtered

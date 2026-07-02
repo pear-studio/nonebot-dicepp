@@ -76,6 +76,7 @@ class RunConfig:
     temperature: float = 0.9
     timeout: int = 60
     max_rounds: int = 10
+    image_data_urls: list[str] | None = None
 
 
 @dataclass

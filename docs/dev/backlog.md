@@ -159,6 +159,14 @@
 - 问题表现: 当前 notification/transient 消息混用 name 字段和 content 前缀来区分通知与真用户输入，缺乏一致性
 - 开发备忘: 1. 扫描全项目所有类似注入点，确认 name 和 content 前缀是否都有使用；2. 判断是否应将 role 从 user 统一改为 system；3. 跑真实 LLM 验证 system role 通知消息的行为差异。结论以 LLM 验证结果为准。
 
+### [B-260702-7b8fc3] AgentRuntime 纠正注入改为元数据标记（非内容匹配），解除 ToolLoop 字符串耦合
+- 创建: 2026-07-02
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现: _filter_corrections 依赖硬编码 [系统指令] 字符串前缀识别纠正消息，与 AgentRuntime 注入侧字符串耦合。若注入格式变化过滤静默失效。
+- 开发备忘: 在 AgentRuntime 层为纠正消息添加元数据标记（如特殊 role 或 _internal flag），使 ToolLoop._filter_corrections 不依赖内容匹配。影响面: agent/loop.py（注入侧）+ life/tool_loop.py（过滤侧）。
+
 ### [B-260630-1f9286] 工具定义与传入规则梳理 — 统一 required_tool 语义和传递路径
 - 创建: 2026-06-30
 - 优先级: P2

@@ -188,6 +188,7 @@ class PersonaSession(BaseModel):
     token_budget: int = DEFAULT_SESSION_TOKEN_BUDGET
     token_estimate: int = 0
     status: str = "active"
+    cursors_json: str = "{}"
     last_active_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 

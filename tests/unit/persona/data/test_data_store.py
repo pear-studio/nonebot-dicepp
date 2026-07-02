@@ -1232,6 +1232,52 @@ class TestSessionCRUD:
         assert fetched is None
 
     @pytest.mark.asyncio
+    async def test_get_active_session_reads_cursors_json(self, temp_db):
+        """R2: get_active_session 可读取 cursors_json 列"""
+        import json
+        from datetime import datetime
+        store = temp_db
+        session = await store.create_session(
+            user_id='u1', character_id='char1', static_prompt='test',
+            static_hash='h1', token_budget=64000, status='active',
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+        # 直写 SQL 设置非默认 cursors_json（模拟 ConversationStore.put() 的行为）
+        cursors = {"time.date": "2026-07-02"}
+        await store.db.execute(
+            "UPDATE persona_session SET cursors_json=? WHERE session_id=?",
+            (json.dumps(cursors, ensure_ascii=False), session.session_id),
+        )
+        await store.db.commit()
+        active = await store.get_active_session('u1')
+        assert active is not None
+        assert active.cursors_json is not None
+        parsed = json.loads(active.cursors_json) if isinstance(active.cursors_json, str) else active.cursors_json
+        assert parsed.get("time.date") == "2026-07-02"
+
+    @pytest.mark.asyncio
+    async def test_get_session_by_id_reads_cursors_json(self, temp_db):
+        """R2: get_session_by_id 可读取 cursors_json 列"""
+        import json
+        from datetime import datetime
+        store = temp_db
+        session = await store.create_session(
+            user_id='u1', character_id='char1', static_prompt='test',
+            static_hash='h1', token_budget=64000, status='active',
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+        cursors = {"time.date": "2026-07-01"}
+        await store.db.execute(
+            "UPDATE persona_session SET cursors_json=? WHERE session_id=?",
+            (json.dumps(cursors, ensure_ascii=False), session.session_id),
+        )
+        await store.db.commit()
+        fetched = await store.get_session_by_id(session.session_id)
+        assert fetched is not None
+        parsed = json.loads(fetched.cursors_json) if isinstance(fetched.cursors_json, str) else fetched.cursors_json
+        assert parsed.get("time.date") == "2026-07-01"
+
+    @pytest.mark.asyncio
     async def test_add_and_get_session_messages(self, temp_db):
         store = temp_db
         from datetime import datetime
