@@ -55,14 +55,14 @@ class CharacterLoader:
         warmth_labels = persona_data.get("warmth_labels", [])
         if warmth_labels and not relation_labels:
             logger.warning(
-                "角色卡 [%s] 使用已废弃的 warmth_labels 键名，请更新为 relation_labels",
+                "角色卡 [{}] 使用已废弃的 warmth_labels 键名，请更新为 relation_labels",
                 character_name or data.get("name", "未知"),
             )
             relation_labels = warmth_labels
         # initial_relationship 已废弃，忽略
         if "initial_relationship" in persona_data:
             logger.warning(
-                "角色卡 [%s] 使用已废弃的 initial_relationship 字段，已忽略",
+                "角色卡 [{}] 使用已废弃的 initial_relationship 字段，已忽略",
                 character_name or data.get("name", "未知"),
             )
 
@@ -98,7 +98,7 @@ class CharacterLoader:
             character_book = CharacterBook(entries=entries)
         
         if data.get("first_mes"):
-            logger.debug("角色卡包含已弃用的 first_mes 字段，将被忽略: %s", data.get("name"))
+            logger.debug("角色卡包含已弃用的 first_mes 字段，将被忽略: {}", data.get("name"))
 
         return Character(
             name=data.get("name", "未命名"),

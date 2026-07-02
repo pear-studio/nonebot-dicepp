@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import warnings
 import contextvars
 import traceback
 from pathlib import Path
@@ -69,6 +70,37 @@ def _patch_extra(record: dict) -> None:
     所有 handler 在格式化前都能拿到安全的默认值。
     """
     record["extra"].setdefault("request_id", "--------")
+    _warn_percent_format(record)
+
+
+_PERCENT_WARNED: set = set()
+
+def _warn_percent_format(record: dict) -> None:
+    """检测 Loguru 不支持的 %-格式化字符串，发现时发出一次 Python Warning。
+
+    Loguru 使用 {} 而非 %s/%d/%r，含 % 格式符的消息会把 %s 原样输出。
+    此检查在 patcher 阶段运行（格式化前），访问的是原始消息模板。
+    """
+    msg = record.get("message", "")
+    if not isinstance(msg, str):
+        return
+    if "%" not in msg:
+        return
+    # 检测常见的 Python logging %-格式符
+    if not re.search(r"%[sdr]", msg):
+        return
+
+    key = (record["file"].name, record["line"], msg[:80])
+    if key in _PERCENT_WARNED:
+        return
+    _PERCENT_WARNED.add(key)
+
+    warnings.warn(
+        f"Loguru 不支持 %-格式化，%%s/%%d/%%r 会被原样输出，请改用 {{}}: "
+        f"{record['file'].name}:{record['line']} — {msg[:120]}",
+        category=UserWarning,
+        stacklevel=2,
+    )
 
 
 # 移除默认 handler

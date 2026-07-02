@@ -64,13 +64,13 @@ def make_suggest_action_executor(
                     if result == "approved":
                         injected = await character_life._inject_spontaneous_event_impl(action_idea)
                         logger.info(
-                            "[suggest_action] INJECT user=%s success=%s", user_id, injected,
+                            "[suggest_action] INJECT user={} success={}", user_id, injected,
                         )
             except Exception:
                 logger.exception("[suggest_action] 异步评估失败")
 
         asyncio.create_task(_evaluate_and_inject())
-        logger.info("[suggest_action] QUEUED user=%s idea=%s", user_id, action_idea[:80])
+        logger.info("[suggest_action] QUEUED user={} idea={}", user_id, action_idea[:80])
         return "action noted"
 
     return executor

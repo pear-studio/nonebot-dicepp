@@ -219,7 +219,7 @@ class BotRunner:
             if life_sim.dm_agent and hasattr(life_sim.dm_agent, "model"):
                 model = life_sim.dm_agent.model or model
         except Exception as exc:
-            logger.debug("获取 DM Agent model 名失败: %s", exc)
+            logger.debug("获取 DM Agent model 名失败: {}", exc)
 
         if dry_run:
             return {
