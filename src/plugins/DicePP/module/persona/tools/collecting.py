@@ -30,9 +30,12 @@ class SayArgs(BaseModel):
                                    description="事件持续时间（分钟），0 表示瞬时（DM 专用，可选）")
     context_summary: str = Field(default="", min_length=0, max_length=60,
                                   description="事件摘要，用于聊天上下文注入（DM 专用，可选）")
-    # Character 专用（可选）：
+    # Character 专用（可选，deprecated — 不再在 prompt 中要求，保留 schema 兼容）：
     has_follow_up: bool = Field(default=False,
-                                 description="是否想继续行动。true=DM 继续裁决（Character 专用）")
+                                 description="是否想继续行动（已弃用，请使用 want_to_end）")
+    # 双方共用（新）：
+    want_to_end: bool = Field(default=False,
+                               description="提议结束当前场景。对方收到提示后可调用 end_conversation 同意，或继续发言覆盖。")
 
 
 class RecordEventArgs(BaseModel):
@@ -94,6 +97,11 @@ class RecordScoreArgs(BaseModel):
     facts: Dict[str, Any] = Field(default_factory=dict, description="提取或更新的用户事实，key-value 形式")
 
 
+class EndConversationArgs(BaseModel):
+    """同意结束当前对话链。调用即表示同意对方的结束提议，对话链将优雅收束。
+    调用即表示同意——语义由工具名承载，无需额外字段。"""
+
+
 # ── Old-format ToolDef definitions (backward compat) ─────────
 
 RECORD_EVENT_TOOL = ToolDef(
@@ -126,14 +134,22 @@ RECORD_SCORE_TOOL = ToolDef(
     parameters=RecordScoreArgs.model_json_schema(),
 )
 
+END_CONVERSATION_TOOL = ToolDef(
+    name="end_conversation",
+    description="同意结束当前对话链。当对方提议结束（want_to_end=true）且你也认为场景可以自然收束时调用。"
+                "调用后对话链结束，已生成的所有内容都会被保存。",
+    parameters=EndConversationArgs.model_json_schema(),
+)
+
 # ── say 工具（DM 和 Character 共用 schema，不同 description）──
 
 SAY_TOOL_DM = ToolDef(
     name="say",
     description=(
-        "向角色叙述世界中发生的事。使用第三人称客观叙述，只描述可观察的行为和状态。"
+        "向角色叙述周围发生的事。使用第三人称客观叙述，只描述可观察的行为和状态。"
         "通过 energy_delta/mood_delta/health_delta 标注事件对角色的影响。"
-        "角色收到叙述后会做出反应——如果角色想继续行动，你会在下一轮收到新的裁决请求。"
+        "want_to_end=true 表示你提议结束当前场景。对方会收到提示。"
+        "同意对方的结束提议时调用 end_conversation。"
     ),
     parameters=SayArgs.model_json_schema(),
 )
@@ -141,9 +157,10 @@ SAY_TOOL_DM = ToolDef(
 SAY_TOOL_CHARACTER = ToolDef(
     name="say",
     description=(
-        "表达你的反应、感受和意图。从第一人称视角说话。"
-        "如果你想继续行动（调查、对话、移动等），设置 has_follow_up=true。"
-        "DM 会对你提出的行动进行裁决并叙述结果。"
+        "表达你的反应、感受和想做的事。从第一人称视角说话。"
+        "DM 会阅读你的发言，自动判断你的行动是否需要裁决并叙述结果。"
+        "want_to_end=true 表示你提议结束当前场景。"
+        "收到 DM 的结束提议时，同意则调用 end_conversation，不同意则继续 say。"
     ),
     parameters=SayArgs.model_json_schema(),
 )

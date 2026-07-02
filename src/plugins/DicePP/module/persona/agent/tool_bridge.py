@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Type
 from pydantic import BaseModel, Field, create_model
 
 from ..tools.collecting import (
+    EndConversationArgs,
     RecordDiaryEntryArgs,
     RecordEventArgs,
     RecordReactionArgs,
@@ -264,6 +265,7 @@ def build_registry(
 
 _COLLECTING_MODELS: List[Type[BaseModel]] = [
     SayArgs,
+    EndConversationArgs,
     RecordEventArgs,
     RecordReactionArgs,
     RecordDiaryEntryArgs,

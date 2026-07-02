@@ -411,12 +411,13 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "life_sim"},
     )
     character_life_chain_max_depth: int = Field(
-        default=3, title="事件链最大深度",
+        default=5, title="事件链最大深度",
+        description="DM-Character 多轮对话的最大轮数，硬上限兜底",
         json_schema_extra={"dashboard_section": "life_sim"},
     )
     character_life_chain_force_extend_once_prob: float = Field(
-        default=0.0, title="保底续写概率",
-        description="仅在当天首次事件后、action_tendency 为空时触发一次保底续写的概率，保证链深度至少为 2",
+        default=0.0, title="保底续写概率 [已弃用]",
+        description="已弃用，由 want_to_end + end_conversation 共识结束协议替代。保留字段以兼容旧配置。",
         json_schema_extra={"dashboard_section": "life_sim"},
     )
     character_life_min_event_interval_minutes: int = Field(

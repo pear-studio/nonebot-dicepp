@@ -14,6 +14,7 @@ class AgentResult:
     data: Any
     error: Optional[str] = None
     raw_response: str = ""
+    terminated_by: str = ""  # 终止工具名（"end_conversation" 或空）
 
 
 @dataclass
@@ -25,6 +26,7 @@ class EventGenerationResult:
     energy_delta: Optional[int] = None
     mood_delta: Optional[int] = None
     health_delta: Optional[int] = None
+    want_to_end: bool = False  # DM 是否提议结束当前场景
     raw_response: str = ""  # LLM 原始工具调用参数 JSON
     system_prompt_digest: str = ""  # 生成时使用的 system_prompt
 
@@ -33,6 +35,7 @@ class EventGenerationResult:
 class EventReactionResult:
     """Character Agent 对事件的反应结果"""
     reaction: str = ""
-    has_follow_up: bool = False  # 是否想继续行动，true=DM 继续裁决
+    has_follow_up: bool = False  # deprecated，是否想继续行动（不再用于链控）
+    want_to_end: bool = False  # Character 是否提议结束当前场景
     last_say_content: str = ""  # 角色上一轮的 say content，供 DM 裁决上下文（当前等于 reaction，未来可能不同）
     raw_response: str = ""  # LLM 原始工具调用参数 JSON

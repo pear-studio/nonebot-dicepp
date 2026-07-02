@@ -24,12 +24,12 @@ class MockAgentSet:
 
     def __init__(self):
         dm = MagicMock()
-        dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='窗外下起了小雨', duration_minutes=60)))
+        dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='窗外下起了小雨', duration_minutes=60, want_to_end=True)))
         dm.load_state = AsyncMock()
         dm.save_state = AsyncMock()
         dm.build_system_prompt = MagicMock(return_value='')
         char = MagicMock()
-        char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='喜欢听雨声')))
+        char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='喜欢听雨声', want_to_end=True)))
         char.diary = AsyncMock(return_value=AgentResult(success=True, data='今天过得很充实'))
         char.load_state = AsyncMock()
         char.save_state = AsyncMock()
@@ -177,8 +177,8 @@ class TestCharacterLifeBasics:
         initial_state = CharacterState(energy=50, mood=50, health=50)
         mock_data_store.get_character_state = AsyncMock(return_value=initial_state)
         mock_data_store.update_character_state = AsyncMock()
-        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='我正在房间里休息。', duration_minutes=0, energy_delta=0, mood_delta=None, health_delta=None)))
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='')))
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='我正在房间里休息。', duration_minutes=0, energy_delta=0, mood_delta=None, health_delta=None, want_to_end=True)))
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='', want_to_end=True)))
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._fired_slot_indices = set()
         life._last_event_date = '2024-01-01'
@@ -596,7 +596,7 @@ class TestCharacterLifePhase2:
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='极端事件', duration_minutes=0, energy_delta=-30, mood_delta=50, health_delta=None)))
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='极端事件', duration_minutes=0, energy_delta=-30, mood_delta=50, health_delta=None, want_to_end=True)))
         await life.tick()
         mock_data_store.update_character_state.assert_awaited()
         updated_state = mock_data_store.update_character_state.call_args[0][0]
@@ -605,45 +605,40 @@ class TestCharacterLifePhase2:
         assert updated_state.health == 50
 
     @pytest.mark.asyncio
-    async def test_chain_fallback_triggers(self, life, mock_event_agent, monkeypatch):
-        """保底概率 1.0 时一定触发保底续写"""
+    async def test_chain_force_extend_once_prob_ignored(self, life, mock_event_agent, monkeypatch):
+        """已弃用：chain_force_extend_once_prob 不再影响链深度（want_to_end 协议替代）"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life.config.chain_force_extend_once_prob = 1.0
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='一般')))
-        result = await life.tick()
-        assert len(result) == 2
-        assert len(mock_event_agent.dm.run.await_args_list) == 2
-
-    @pytest.mark.asyncio
-    async def test_chain_fallback_disabled_after_chain_triggered(self, life, mock_event_agent, monkeypatch):
-        """今天已触发过链式（深度>=2）后保底概率降为 0"""
-        from plugins.DicePP.module.persona.life.types import EventReactionResult
-        fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        set_test_clock(fake_now)
-        life.config.chain_force_extend_once_prob = 1.0
-        life._chain_triggered_today = True
-        life._slot_minutes_today = [(10 * 60, 'system')]
-        life._last_event_date = '2024-01-01'
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='一般')))
+        # DM 和 Character 都 set want_to_end=True → 单轮后双方共识结束
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventGenerationResult(description='事件', want_to_end=True)))
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventReactionResult(reaction='一般', want_to_end=True)))
         result = await life.tick()
         assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_chain_fallback_empty_tendency_to_system(self, life, mock_event_agent, monkeypatch):
-        """保底时 System Agent 的 follow_up_action 留空（自主续写）"""
+    async def test_chain_no_consensus_continues_to_max_depth(self, life, mock_event_agent, monkeypatch):
+        """双方都不提议 end → 链续写到 max_depth"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
-        life.config.chain_force_extend_once_prob = 1.0
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='一般')))
-        await life.tick()
-        assert len(mock_event_agent.dm.run.await_args_list) == 2
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventGenerationResult(description='事件', want_to_end=False)))
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventReactionResult(reaction='继续', want_to_end=False)))
+        result = await life.tick()
+        assert len(result) == life.config.chain_max_depth
 
     @pytest.mark.asyncio
     async def test_wake_up_floor_corrects_negative_delta(self, life, mock_data_store, mock_event_agent, monkeypatch):
@@ -655,8 +650,8 @@ class TestCharacterLifePhase2:
         life._today_jittered_end = 22 * 60 - 15
         life._slot_minutes_today = [(8 * 60 + 15, 'wake_up')]
         life._last_event_date = '2024-01-01'
-        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='醒来', duration_minutes=0, energy_delta=-5, mood_delta=0, health_delta=0)))
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='嗯')))
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='醒来', duration_minutes=0, energy_delta=-5, mood_delta=0, health_delta=0, want_to_end=True)))
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='嗯', want_to_end=True)))
         await life.tick()
         updated_state = mock_data_store.update_character_state.call_args[0][0]
         assert updated_state.energy == 70
@@ -671,8 +666,8 @@ class TestCharacterLifePhase2:
         life._today_jittered_end = 22 * 60 - 15
         life._slot_minutes_today = [(8 * 60 + 15, 'wake_up')]
         life._last_event_date = '2024-01-01'
-        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='醒来很有精神', duration_minutes=0, energy_delta=25, mood_delta=0, health_delta=0)))
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='精神很好')))
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='醒来很有精神', duration_minutes=0, energy_delta=25, mood_delta=0, health_delta=0, want_to_end=True)))
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='精神很好', want_to_end=True)))
         await life.tick()
         updated_state = mock_data_store.update_character_state.call_args[0][0]
         assert updated_state.energy == 75
@@ -685,8 +680,8 @@ class TestCharacterLifePhase2:
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='日常事件', duration_minutes=0, energy_delta=-10, mood_delta=0, health_delta=0)))
-        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='嗯')))
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='日常事件', duration_minutes=0, energy_delta=-10, mood_delta=0, health_delta=0, want_to_end=True)))
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='嗯', want_to_end=True)))
         await life.tick()
         updated_state = mock_data_store.update_character_state.call_args[0][0]
         assert updated_state.energy == 40
@@ -1078,6 +1073,109 @@ class TestMidnightEndHourJitter:
         assert life._last_event_date == '2024-01-02'
         types = [t for _, t in life._slot_minutes_today or []]
         assert 'wake_up' in types
+
+class TestEndConversationSlotConsumption:
+    """R1 回归: chain_depth==0 时 end_conversation 应消耗 slot"""
+
+    @pytest.fixture
+    def mock_event_agent(self):
+        return MockAgentSet()
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState(energy=50, mood=50, health=50))
+        store.update_character_state = AsyncMock()
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.add_daily_event = AsyncMock()
+        store.get_diary = AsyncMock(return_value=None)
+        store.save_diary = AsyncMock()
+        store.clear_daily_events = AsyncMock()
+        store.prune_diaries = AsyncMock(return_value=0)
+        return store
+
+    @pytest.fixture
+    def character(self):
+        ext = PersonaExtensions(daily_events_count=1, event_day_start_hour=8, event_day_end_hour=22, event_jitter_minutes=0, event_day_start_jitter_minutes=0, event_day_end_jitter_minutes=0)
+        return Character(name='测试角色', description='测试', extensions=ext)
+
+    @pytest.fixture
+    def config(self):
+        return CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', chain_max_depth=5)
+
+    @pytest.fixture
+    def life(self, config, mock_event_agent, mock_data_store, character):
+        life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
+        life.boundary_receiver = MagicMock()
+        return life
+
+    @pytest.mark.asyncio
+    async def test_char_end_conversation_at_depth0_consumes_slot(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """Character 在 depth==0 调用 end_conversation → event_chain 非空，slot 被消耗"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        set_test_clock(fake_now)
+        life._slot_minutes_today = [(10 * 60, 'system')]
+        life._last_event_date = '2024-01-01'
+        # DM 正常生成事件
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventGenerationResult(description='DM 生成了事件', duration_minutes=30)))
+        # Character 调用 end_conversation（无 say，纯结束）
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventReactionResult(reaction=''),
+            terminated_by='end_conversation'))
+        result = await life.tick()
+        # 核心断言：event_chain 非空 → slot 被标记为 fired
+        assert result is not None, 'event_chain 不应为 None'
+        assert len(result) >= 1, f'event_chain 应非空，got {result}'
+        assert 0 in life._fired_slot_indices, 'slot 0 应被标记为 fired'
+        # DM 事件应已保存到 DB
+        mock_data_store.add_daily_event.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_dm_end_conversation_at_depth0_consumes_slot(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """DM 在 depth==0 调用 end_conversation → event_chain 非空，slot 被消耗"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        set_test_clock(fake_now)
+        life._slot_minutes_today = [(10 * 60, 'system')]
+        life._last_event_date = '2024-01-01'
+        # DM 直接调用 end_conversation（无 say 内容）
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventGenerationResult(),
+            terminated_by='end_conversation'))
+        result = await life.tick()
+        # 核心断言：event_chain 非空 → slot 被消耗
+        assert result is not None, 'event_chain 不应为 None'
+        assert len(result) >= 1, f'event_chain 应非空以消耗 slot，got {result}'
+        assert 0 in life._fired_slot_indices, 'slot 0 应被标记为 fired'
+
+    @pytest.mark.asyncio
+    async def test_dm_say_then_end_conversation_at_depth0(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """DM 在 depth==0 先 say 再 end_conversation → say 内容被保存，slot 被消耗"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        set_test_clock(fake_now)
+        life._slot_minutes_today = [(10 * 60, 'system')]
+        life._last_event_date = '2024-01-01'
+        # DM 同时 say + end_conversation（R2 场景——在 DMAgent.run() 内处理）
+        # 此处模拟 DMAgent.run() 已正确提取 say 并返回不含 terminated_by 的 EventGenerationResult
+        mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventGenerationResult(description='DM 最后叙述了一句', duration_minutes=10,
+                                       energy_delta=-5, mood_delta=3)))
+        mock_event_agent.char.react = AsyncMock(return_value=AgentResult(
+            success=True,
+            data=EventReactionResult(reaction='嗯'),
+            terminated_by='end_conversation'))
+        result = await life.tick()
+        assert result is not None
+        assert len(result) >= 1
+        assert 0 in life._fired_slot_indices
+        mock_data_store.add_daily_event.assert_called()
+
 
 class TestGenerateDailyEventDirect:
     """直接测试 generate_daily_event（不通过 tick）"""

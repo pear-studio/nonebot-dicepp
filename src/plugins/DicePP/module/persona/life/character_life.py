@@ -47,8 +47,8 @@ class CharacterLifeConfig:
         slot_match_window_minutes: int = 15,
         timezone: str = "Asia/Shanghai",
         min_event_interval_minutes: int = 5,
-        chain_max_depth: int = 3,
-        chain_force_extend_once_prob: float = 0.0,
+        chain_max_depth: int = 5,
+        chain_force_extend_once_prob: float = 0.0,  # deprecated，不再使用（want_to_end+end_conversation 替代）
         recovery_energy: int = 20,
         default_energy: int = 50,
         default_mood: int = 50,
@@ -128,7 +128,7 @@ class CharacterLife:
         self._ongoing_activities: List[OngoingActivity] = []
         self._today_jittered_start: Optional[int] = None
         self._today_jittered_end: Optional[int] = None
-        self._chain_triggered_today: bool = False
+        self._chain_triggered_today: bool = False  # deprecated: 保底续写逻辑已移除，仅保留序列化兼容，后续大版本清理
         self._last_good_night_fired_at: Optional[datetime] = None
         self.boundary_receiver: Optional[BoundaryReceiver] = None
         self._boundaries_loaded = False
@@ -468,10 +468,12 @@ class CharacterLife:
                 chain_events.append({"description": e.description, "time": evt_time, "created_at": evt_iso})
 
             # ── 事件-反应链循环 ──
+            # want_to_end + end_conversation 双方共识结束协议
             chain_depth = 0
-            is_fallback = False
             event_chain: List[Dict[str, Any]] = []
-            prev_follow_up: Optional[str] = None
+            prev_char_say: Optional[str] = None
+            dm_want_to_end = False   # DM 上一轮是否提议结束
+            char_want_to_end = False # Character 上一轮是否提议结束
 
             # ── 首次启动：注入 init_scenario 到 DM context（仅一次）──
             # _first_boot 在 dm_agent.run() 成功后才清除，避免 DM 失败时场景永久丢失
@@ -479,10 +481,7 @@ class CharacterLife:
             if self._first_boot and self.character.scenario:
                 init_scenario_text = self.character.scenario
 
-            while True:
-                if chain_depth >= self.config.chain_max_depth:
-                    break
-
+            while chain_depth < self.config.chain_max_depth:
                 now = self.config.now()
                 time_str = now.strftime("%H:%M")
 
@@ -523,7 +522,6 @@ class CharacterLife:
                         + "\n\n角色的一天还在继续。"
                     )
 
-
                 now_str = now.strftime("%H:%M")
                 date_str = now.strftime("%Y年%m月%d日")
 
@@ -532,8 +530,7 @@ class CharacterLife:
                     logger.error("dm_agent 未注入，无法生成事件")
                     break
 
-                # 将 Character 的 follow_up 内容作为 DM 裁决上下文
-                follow_up_text = prev_follow_up if chain_depth >= 1 else ""
+                follow_up_text = prev_char_say if chain_depth >= 1 else ""
 
                 dm_context = {
                     "character_name": self.character.name,
@@ -548,8 +545,24 @@ class CharacterLife:
                     "slot_type": slot_type if chain_depth == 0 else "system",
                     "chain_depth": chain_depth,
                     "follow_up_text": follow_up_text,
+                    "char_want_to_end": char_want_to_end,
                 }
                 dm_result = await self.dm_agent.run(dm_context)
+
+                # 检查 DM 是否调用了 end_conversation
+                if dm_result.terminated_by == "end_conversation":
+                    # 至少追加一条标记性条目以消耗 slot（无 say 内容时仍需标记 slot 已 fired）
+                    event_chain.append({
+                        "event_id": f"evt_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}",
+                        "description": "",
+                        "reaction": "",
+                        "duration_minutes": 0,
+                        "time": time_str,
+                        "slot_type": slot_type if chain_depth == 0 else "system",
+                    })
+                    logger.debug("[chain] DM 调用 end_conversation，链结束")
+                    break
+
                 if not dm_result.success or not isinstance(dm_result.data, EventGenerationResult):
                     logger.warning("DM 生成事件失败，终止链")
                     break
@@ -560,7 +573,7 @@ class CharacterLife:
 
                 event_result: EventGenerationResult = dm_result.data
 
-                # 单事件 delta 硬约束
+                # 单事件 delta 硬约束（先应用 delta，再检查终止，避免数据丢失）
                 ed = CharacterLife._clamp_delta(event_result.energy_delta)
                 md = CharacterLife._clamp_delta(event_result.mood_delta)
                 hd = CharacterLife._clamp_delta(event_result.health_delta)
@@ -589,16 +602,49 @@ class CharacterLife:
                     "energy": character_state.energy,
                     "mood": character_state.mood,
                     "health": character_state.health,
+                    "dm_want_to_end": event_result.want_to_end,
                 }
                 char_result = await self.character_agent.react(char_context)
+
+                # Character 调用了 end_conversation → 保存当前轮然后结束
+                if char_result.terminated_by == "end_conversation":
+                    # 如果 Character 调用了 end_conversation，DM 的 say 已存在 → 保存
+                    if event_result.description:
+                        combined_raw = CharacterLife._serialize_raw_parts(
+                            event_result.raw_response, "")
+                        await self.data_store.add_daily_event(
+                            date=today,
+                            event_type=slot_type if chain_depth == 0 else "system",
+                            description=event_result.description,
+                            reaction="",
+                            duration_minutes=event_result.duration_minutes,
+                            system_prompt_digest=event_result.system_prompt_digest,
+                            raw_response=combined_raw,
+                            energy_delta=ed,
+                            mood_delta=md,
+                            health_delta=hd,
+                            context_summary=event_result.context_summary,
+                        )
+                    # 追加到 event_chain 以消耗 slot（避免 chain_depth==0 时空列表导致 slot 未 fired）
+                    event_chain.append({
+                        "event_id": f"evt_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}",
+                        "description": event_result.description or "",
+                        "reaction": "",
+                        "duration_minutes": event_result.duration_minutes,
+                        "time": time_str,
+                        "slot_type": slot_type if chain_depth == 0 else "system",
+                    })
+                    logger.debug("[chain] Character 调用 end_conversation，链结束")
+                    break
+
                 if not char_result.success or not isinstance(char_result.data, EventReactionResult):
                     logger.warning("Character 反应生成失败，终止链")
                     break
 
                 reaction_result: EventReactionResult = char_result.data
 
-                # 桥接：Character 的 last_say_content 作为下一次 DM 裁决的 follow_up_text
-                prev_follow_up = reaction_result.last_say_content
+                # 桥接：Character 的 last_say_content 作为下一轮 DM 的 follow_up_text
+                prev_char_say = reaction_result.last_say_content
 
                 combined_raw = CharacterLife._serialize_raw_parts(
                     event_result.raw_response, reaction_result.raw_response)
@@ -637,37 +683,32 @@ class CharacterLife:
 
                 logger.debug(
                     "[chain] {} @ {} depth={} energy={}({:+d}) mood={}({:+d}) health={}({:+d}) "
-                    "has_follow_up={} fallback={}",
+                    "dm_want_to_end={} char_want_to_end={}",
                     self.character.name, time_str, chain_depth + 1,
                     character_state.energy, ed,
                     character_state.mood, md,
                     character_state.health, hd,
-                    reaction_result.has_follow_up,
-                    is_fallback,
+                    event_result.want_to_end,
+                    reaction_result.want_to_end,
                 )
 
                 chain_events.append({"description": event_result.description, "time": time_str, "created_at": now.isoformat()})
                 chain_depth += 1
 
-                if reaction_result.has_follow_up:
-                    if chain_depth >= 2:
-                        self._chain_triggered_today = True
-                    continue
+                # 双方共识结束：DM 和 Character 同轮都设 want_to_end=true → 自动收束
+                if event_result.want_to_end and reaction_result.want_to_end:
+                    logger.debug("[chain] 双方共识结束（want_to_end 同轮均为 true）")
+                    break
 
-                if chain_depth == 1 and not self._chain_triggered_today and not is_fallback:
-                    if random.random() < self.config.chain_force_extend_once_prob:
-                        is_fallback = True
-                        logger.info("[chain] 触发保底续写: {}", self.character.name)
-                        continue
-
-                break
+                # 更新 want_to_end 状态，供下一轮传递
+                dm_want_to_end = event_result.want_to_end
+                char_want_to_end = reaction_result.want_to_end
 
             if event_chain:
                 logger.info(
-                    "生成生活事件链: {}... (深度={}, 保底={})",
+                    "生成生活事件链: {}... (深度={})",
                     event_chain[0]["description"][:50],
                     chain_depth,
-                    is_fallback,
                 )
             return event_chain
 
@@ -701,7 +742,6 @@ class CharacterLife:
             "event_jitter_minutes": self.character.extensions.event_jitter_minutes,
             "chain_triggered_today": self._chain_triggered_today,
             "chain_max_depth": self.config.chain_max_depth,
-            "chain_force_extend_once_prob": self.config.chain_force_extend_once_prob,
         }
 
     # ── SleepGate ──

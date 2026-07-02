@@ -53,6 +53,22 @@ class Agent(ABC):
         )
         self._conversation: Optional["Conversation"] = None
         self._system_prompt: Optional[str] = None
+        self._last_terminated_by: str = ""  # 上轮 _process() 的终止工具名
+
+    def _check_terminated(self, default_data: Any = None) -> "Optional[AgentResult]":
+        """检查上轮 _process() 是否由终止工具结束。若是，返回封装好的 AgentResult。
+
+        子类（DMAgent, CharacterAgent）在解析 collected 数据前调用此方法，
+        避免重复的 end_conversation 检测逻辑。
+        """
+        if self._last_terminated_by == "end_conversation":
+            from .types import AgentResult
+            return AgentResult(
+                success=True,
+                data=default_data,
+                terminated_by="end_conversation",
+            )
+        return None
 
     async def load_state(self) -> Optional[BaseModel]:
         """加载状态，子类可覆盖。默认返回 state_model 实例或 None。"""
@@ -249,6 +265,9 @@ class Agent(ABC):
             tools=tools,
         )
         run_result.log_if_failed(required_tool or "")
+
+        # 记录终止工具（供调用方检查是否由 end_conversation 终止）
+        self._last_terminated_by = run_result.terminated_by
 
         # ── commit：一次性落盘（通知 + 用户消息 + LLM 响应）──
         conv.apply_notifications(notifs, new_cursors)

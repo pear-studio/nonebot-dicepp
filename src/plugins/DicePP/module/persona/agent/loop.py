@@ -54,6 +54,9 @@ _CORRECTION_INTERIM_MSG = (
 # 工具排序常量：vision 工具 > 其他 > send_reply_segment
 _VISION_TOOLS = frozenset({"generate_image"})
 
+# 终止工具：即使不在 required_tools 中也允许调用，调用后立即终止循环
+_TERMINATION_TOOLS: frozenset[str] = frozenset({"end_conversation"})
+
 
 def _tool_sort_key(tc: dict) -> int:
     name = tc["name"]
@@ -84,6 +87,7 @@ class AgentRunResult:
     model: str = ""
     final_messages: list = field(default_factory=list)
     """runtime.run() 结束时 state.messages 的副本，不含内部纠正注入（由调用方过滤）"""
+    terminated_by: str = ""  # 终止工具名（"end_conversation" 或空）
 
     def log_if_failed(self, component: str) -> None:
         """若非正常完成，打一条自包含的 warning 日志。"""
@@ -257,8 +261,10 @@ class AgentLoop:
                                           total_tokens_in, total_tokens_out, provider, model)
 
             # ── structured_collect：只执行 required_tools 中的工具，防止同轮混入非目标工具数据 ──
+            # 终止工具（如 end_conversation）豁免过滤，允许在任何模式下调用
             if state.mode == "structured_collect" and required_tools:
-                tool_calls = [tc for tc in tool_calls if tc["name"] in required_tools]
+                tool_calls = [tc for tc in tool_calls
+                              if tc["name"] in required_tools or tc["name"] in _TERMINATION_TOOLS]
                 if not tool_calls:
                     continue
 
@@ -299,6 +305,13 @@ class AgentLoop:
                         _required_succeeded.add(tc["name"])
                 else:
                     tool_errors_this_round.append((tc, tr))
+
+            # ── 检测终止工具（end_conversation）：任一方调用即终止循环 ──
+            if any(tc["name"] == "end_conversation" and tr.get("status") == "success"
+                   for tc, tr in zip(tool_calls, tool_results)):
+                state.final_reason = "end_conversation_called"
+                return await self._finish(state, "completed", "end_conversation_called",
+                                          total_tokens_in, total_tokens_out, provider, model)
 
             # ── 工具错误纠正 ──
             if tool_errors_this_round:
@@ -611,6 +624,7 @@ class AgentLoop:
             provider=provider,
             model=model,
             final_messages=list(state.messages),
+            terminated_by="end_conversation" if reason == "end_conversation_called" else "",
         )
 
 

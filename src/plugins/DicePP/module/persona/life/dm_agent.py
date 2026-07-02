@@ -88,7 +88,7 @@ class DMAgent(Agent):
         state_text = context.get("state_text", "")
         slot_type = context.get("slot_type", "system")
 
-        system_prompt = f"""你是 TRPG 主持人（DM），负责裁决角色的行动并叙述结果。
+        system_prompt = f"""你是 TRPG 主持人（DM），负责根据故事脉络和时间推进场景。
 
 角色:
 {character_name} - {character_description or "普通人"}
@@ -103,26 +103,44 @@ class DMAgent(Agent):
 
 {_D20_RULING_PROMPT}
 {self._slot_type_hint(slot_type)}
-叙述要求:
-1. 以第三人称客观叙述描述发生了什么（不携带主观情绪）
-2. 只记录可观察的行为和状态（动作、位置、物品、身体状态）
-3. 不包含心理活动、情绪评价、内心独白
-4. 不使用"觉得""认为""感到"等主观动词
-5. 内容自然叙事，不强制字数上限，但保持简洁
-6. context_summary 为事件摘要，不超过60字，仅包含关键事实（谁、在哪、做了什么、结果）
-7. 符合世界观和场景设定，场景中的具体动作是参考而非约束
-8. 避免与今天已发生事件在具体内容上高度重复，优先描述不同的事
-9. 同时给出该事件对角色体力/心情/健康的影响（delta，可选整数，范围-20~+20）
+核心原则:
+你是世界的叙述者，不是角色的操控者。
 
-你必须通过调用 say 工具来输出结果。"""
+你的职责:
+1. 根据故事发展和当前时间，描述角色周围正在发生的事
+   - 环境变化（天气、光线、气味、声响）
+   - NPC 的行为和对话
+   - 之前事件的自然延续和后果浮现
+   - 日常节奏中的新变化或异常现象
+2. 阅读角色的发言，判断需要你做什么
+   - 角色做了有风险/难度的行动 → 暗骰裁决（不展示 DC 和掷骰结果），叙述结果
+   - 角色在观察/回忆/嗅闻/辨别某事物 → 可直接补充角色应知的合理细节（知识、感知）
+   - 角色只是表达感受或做日常事务 → 可自然收束（设置 want_to_end=true），也可引入推动故事的新信息
+3. 自然收束场景
+   - 当前场景已到自然停顿点时 → 设置 want_to_end=true 提议结束
+   - 收到角色的结束提议且你也同意时 → 调用 end_conversation 优雅收束
+   - 如果你有重要的新信息要补充，可以继续 say（会覆盖结束提议）
+
+不要做的事:
+- 不要替角色做决定：不写角色的自主行动（走向哪、拿起什么、说什么话、做什么事）
+- 不要包含心理活动、情绪评价、内心独白
+- 不使用"觉得""认为""感到"等主观动词来描述角色
+- 不要跳时间，除非角色明确表示进行长时间重复劳动
+- 避免与今天已发生事件在具体内容上高度重复
+
+叙述要求:
+1. 第三人称客观叙述
+2. context_summary 为事件摘要，不超过 60 字
+3. 给出该事件对角色体力/心情/健康的影响（delta，可选，-20~+20）
+4. 必须通过调用 say 工具输出。同意对方的结束提议时调用 end_conversation。"""
 
         return system_prompt
 
     def _build_user_prompt(self, context: dict) -> str:
         """构建用户提示词
 
-        depth == 0: 场景生成（首次呈现场景）
-        depth >= 1: 裁决角色企图（包含角色的 follow_up_text）
+        depth == 0: 呈现角色周围的情境（不替角色行动）
+        depth >= 1: 裁决/补充角色的发言
         """
         diary_context = context.get("diary_context", "")
         events_context = context.get("events_context", "")
@@ -131,16 +149,24 @@ class DMAgent(Agent):
         chain_depth = context.get("chain_depth", 0)
         follow_up_text = context.get("follow_up_text", "")
         init_scenario_text = context.get("init_scenario_text", "")
+        char_want_to_end = context.get("char_want_to_end", False)
 
         # 附加场景上下文（首次启动或自发事件路径注入）
         init_section = f"\n\n【场景】\n{init_scenario_text}" if init_scenario_text else ""
 
         if chain_depth == 0:
-            task_hint = "请生成一个符合世界观的生活事件"
+            task_hint = (
+                "请根据以上故事脉络、时间和角色状态，描述角色此刻周围正在发生的事。"
+                "只描述外部世界的变化——不要替角色做决定。"
+            )
         else:
             task_hint = (
-                f"角色想要：{follow_up_text}\n\n"
-                f"请评估这个行动的难度，必要时调用 roll_dice 判定，通过 say 叙述结果。"
+                f"角色说/做了：{follow_up_text}\n\n"
+                f"请阅读角色的发言：\n"
+                f"- 如果有需要裁决的行动（风险/难度），暗骰裁决后叙述结果（不展示DC和骰值）\n"
+                f"- 如果角色在观察/回忆/辨别，可直接补充合理细节\n"
+                f"- 如果角色只是日常表达、没有需要你介入的内容，可以自然收束（设置 want_to_end=true）\n"
+                f"- 如果角色已提议结束且你也同意，调用 end_conversation"
             )
 
         user_prompt = (
@@ -149,13 +175,25 @@ class DMAgent(Agent):
             f"{diary_context}{events_context}"
             f"\n\n{task_hint}"
         )
+
+        # 注入 want_to_end 信号提示
+        if char_want_to_end:
+            user_prompt += (
+                "\n\n[提示] 角色认为当前场景可以收束了。"
+                "如果你也同意，调用 end_conversation 工具。"
+                "如果你还有需要补充的信息，正常 say 即可（会覆盖结束提议）。"
+            )
+
         return user_prompt
 
     def _get_openai_tools(self) -> list:
-        """返回 say 工具（DM 版本 description）"""
-        from ..tools.collecting import SAY_TOOL_DM
+        """返回 say 工具（DM 版本 description）+ end_conversation"""
+        from ..tools.collecting import SAY_TOOL_DM, END_CONVERSATION_TOOL
 
-        return [SAY_TOOL_DM.to_openai_format()]
+        return [
+            SAY_TOOL_DM.to_openai_format(),
+            END_CONVERSATION_TOOL.to_openai_format(),
+        ]
 
     def _build_extra_registry(self) -> Any:
         """构建只读工具注册表，额外注册 search_story_deck"""
@@ -284,6 +322,46 @@ class DMAgent(Agent):
 
         try:
             result = await super().run(context)
+
+            # 检查是否由 end_conversation 终止
+            if self._last_terminated_by == "end_conversation":
+                # 同轮可能同时调用了 say + end_conversation，优先提取 say 数据
+                collected = result.data
+                if isinstance(collected, list):
+                    for item in collected:
+                        if item and "content" in item:
+                            # 有 say 内容：解析并正常返回，不含 terminated_by（say 已保存）
+                            say_args = item
+                            description = str(say_args.get("content", "")).strip().strip('"').strip("'")
+                            if description:
+                                duration_minutes = max(0, min(2880, int(say_args.get("duration_minutes", 0))))
+                                context_summary = str(say_args.get("context_summary", "")).strip().strip('"').strip("'") or description[:60]
+                                def _parse_delta(val) -> Optional[int]:
+                                    if val is None: return None
+                                    try: return max(-20, min(20, int(val)))
+                                    except (TypeError, ValueError): return None
+                                return AgentResult(
+                                    success=True,
+                                    data=EventGenerationResult(
+                                        description=description,
+                                        context_summary=context_summary,
+                                        duration_minutes=duration_minutes,
+                                        energy_delta=_parse_delta(say_args.get("energy_delta")),
+                                        mood_delta=_parse_delta(say_args.get("mood_delta")),
+                                        health_delta=_parse_delta(say_args.get("health_delta")),
+                                        want_to_end=bool(say_args.get("want_to_end", False)),
+                                        raw_response=json.dumps(say_args, ensure_ascii=False),
+                                        system_prompt_digest=self._cached_system_prompt,
+                                    ),
+                                    raw_response=json.dumps(say_args, ensure_ascii=False),
+                                )
+                # 无 say 内容：返回空结果，标记 terminated_by
+                return AgentResult(
+                    success=True,
+                    data=EventGenerationResult(),
+                    terminated_by="end_conversation",
+                )
+
             if not result.success:
                 logger.warning("DM 事件生成失败: LLM 未调用工具")
                 return AgentResult(
@@ -307,7 +385,16 @@ class DMAgent(Agent):
                 )
 
             try:
-                args = collected[0]
+                # 在 collected 中查找 say 工具的参数（可能混有 end_conversation 的空 dict）
+                say_args = None
+                for item in collected:
+                    if item and "content" in item:
+                        say_args = item
+                        break
+                if say_args is None:
+                    say_args = collected[0] if collected else {}
+
+                args = say_args
                 # 从 SayArgs 字段构建 EventGenerationResult
                 description = str(args.get("content", "")).strip().strip('"').strip("'")
                 if not description:
@@ -332,6 +419,7 @@ class DMAgent(Agent):
                 energy_delta = _parse_delta(args.get("energy_delta"))
                 mood_delta = _parse_delta(args.get("mood_delta"))
                 health_delta = _parse_delta(args.get("health_delta"))
+                want_to_end = bool(args.get("want_to_end", False))
 
                 return AgentResult(
                     success=True,
@@ -342,6 +430,7 @@ class DMAgent(Agent):
                         energy_delta=energy_delta,
                         mood_delta=mood_delta,
                         health_delta=health_delta,
+                        want_to_end=want_to_end,
                         raw_response=json.dumps(args, ensure_ascii=False),
                         system_prompt_digest=self._cached_system_prompt,
                     ),
@@ -365,3 +454,4 @@ class DMAgent(Agent):
         finally:
             self._cached_state = None
             self._cached_system_prompt = None
+            self._last_terminated_by = ""

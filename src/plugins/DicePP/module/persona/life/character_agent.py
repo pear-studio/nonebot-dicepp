@@ -13,6 +13,7 @@ from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import EVENT_GEN, DIARY, SUMMARIZE
 from ..tools.collecting import (
+    END_CONVERSATION_TOOL,
     RECORD_DIARY_ENTRY_TOOL,
     RECORD_SHARE_MESSAGE_TOOL,
     SAY_TOOL_CHARACTER,
@@ -108,7 +109,8 @@ class CharacterAgent(Agent):
 核心要求:
 1. 使用第一人称"我"
 2. 语气符合角色性格
-3. 不编造与当前上下文无关的内容"""
+3. 不编造与当前上下文无关的内容
+4. 不要替 DM 叙述结果——你只表达自己的感受、想法和行动意图"""
         return system_prompt
 
     def _get_change_sources(self) -> "list[ChangeSource]":
@@ -206,6 +208,7 @@ class CharacterAgent(Agent):
     def _build_reaction_user_prompt(self, context: dict) -> str:
         event = context.get("event", "")
         today_events = context.get("today_events", [])
+        dm_want_to_end = context.get("dm_want_to_end", False)
 
         today_context = ""
         if today_events:
@@ -228,10 +231,22 @@ class CharacterAgent(Agent):
         user_prompt = (
             f"{context_prefix}"
             f"当前事件: {event}"
-            f"\n\n请对发生的事件做出内心反应，通过 say 工具表达你的感受和想法。"
-            f"\n要求: 30-200字，表达真实感受，反映角色性格特点和当前状态。"
-            f"\n如果你想继续行动（调查、对话、移动等），设置 has_follow_up=true。"
+            f"\n\n请对发生的事做出反应。通过 say 工具表达你的感受、想法和想做的事。"
+            f"\n\n要求: 30-200字，第一人称，反映角色性格和当前状态。"
+            f"\n你想做什么就说什么——DM 会根据你的行动决定是否需要裁决并叙述结果。"
+            f"\n\n结束场景:"
+            f"\n- 如果你觉得场景可以自然收束了，设置 want_to_end=true"
+            f"\n- 收到 DM 的结束提议时，同意则调用 end_conversation，不同意则继续 say"
         )
+
+        # 注入 DM 的 want_to_end 信号
+        if dm_want_to_end:
+            user_prompt += (
+                "\n\n[提示] DM 认为当前场景可以收束了。"
+                "如果你也同意，调用 end_conversation 工具。"
+                "如果你还有想说的或想做的，继续正常 say 即可（会覆盖结束提议）。"
+            )
+
         return user_prompt
 
     def _build_diary_user_prompt(self, context: dict) -> str:
@@ -375,6 +390,7 @@ class CharacterAgent(Agent):
             character_name: str
             character_description: str
             today_events: List[dict]
+            dm_want_to_end: bool — DM 是否提议结束
 
         状态数据（体力/心情/健康）现由 CharacterStateChangeSource 通过
         Conversation 通知管道注入，无需 caller 在 context 中传递。
@@ -384,66 +400,114 @@ class CharacterAgent(Agent):
         """
         context["mode"] = "reaction"
 
-        # load_state() 用于验证状态存在性
-        state = await self.load_state()
-        system_prompt = self.build_system_prompt(state, context)
-        user_prompt = self._build_reaction_user_prompt(context)
-
-        # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-        collected, _conv = await self._process(
-            context=context,
-            initial_system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            tools=[SAY_TOOL_CHARACTER.to_openai_format()],
-            temperature=0.9,
-            selection=EVENT_GEN,
-        )
-
-        if not collected:
-            logger.warning("反应生成: LLM 未调用 say 工具")
-            return AgentResult(
-                success=False,
-                data=EventReactionResult(reaction="（默默地想着这件事）"),
-                error="LLM 未调用 say 工具",
-            )
-
         try:
-            args = collected[0]
-            character_name = context.get("character_name", "")
+            # load_state() 用于验证状态存在性
+            state = await self.load_state()
+            system_prompt = self.build_system_prompt(state, context)
+            user_prompt = self._build_reaction_user_prompt(context)
 
-            # 从 SayArgs 的 content 字段获取角色反应
-            reaction = str(args.get("content", "")).strip().strip('"').strip("'")
-            if not reaction:
-                reaction = f"（{character_name}默默地想着这件事）"
+            # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
+            collected, _conv = await self._process(
+                context=context,
+                initial_system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                tools=[
+                    SAY_TOOL_CHARACTER.to_openai_format(),
+                    END_CONVERSATION_TOOL.to_openai_format(),
+                ],
+                temperature=0.9,
+                selection=EVENT_GEN,
+            )
 
-            # has_follow_up: 是否想继续行动
-            has_follow_up = bool(args.get("has_follow_up", False))
+            # 检查是否由 end_conversation 终止
+            if self._last_terminated_by == "end_conversation":
+                # 同轮可能同时调用了 say + end_conversation，优先提取 say 数据
+                say_args = None
+                for item in collected:
+                    if item and "content" in item:
+                        say_args = item
+                        break
+                if say_args is not None:
+                    reaction = str(say_args.get("content", "")).strip().strip('"').strip("'")
+                    if reaction:
+                        if len(reaction) > 200:
+                            reaction = reaction[:197] + "..."
+                        return AgentResult(
+                            success=True,
+                            data=EventReactionResult(
+                                reaction=reaction,
+                                has_follow_up=bool(say_args.get("has_follow_up", False)),
+                                want_to_end=bool(say_args.get("want_to_end", False)),
+                                last_say_content=reaction,
+                                raw_response=json.dumps(say_args, ensure_ascii=False),
+                            ),
+                            raw_response=json.dumps(say_args, ensure_ascii=False),
+                        )
+                # 无 say 内容：返回空结果，标记 terminated_by
+                return AgentResult(
+                    success=True,
+                    data=EventReactionResult(reaction=""),
+                    terminated_by="end_conversation",
+                )
 
-            if len(reaction) > 200:
-                reaction = reaction[:197] + "..."
+            if not collected:
+                logger.warning("反应生成: LLM 未调用 say 工具")
+                return AgentResult(
+                    success=False,
+                    data=EventReactionResult(reaction="（默默地想着这件事）"),
+                    error="LLM 未调用 say 工具",
+                )
 
-            return AgentResult(
-                success=True,
-                data=EventReactionResult(
-                    reaction=reaction,
-                    has_follow_up=has_follow_up,
-                    last_say_content=reaction,
+            try:
+                # 在 collected 中查找 say 工具的参数（可能混有 end_conversation 的空 dict）
+                say_args = None
+                for item in collected:
+                    if item and "content" in item:
+                        say_args = item
+                        break
+                if say_args is None:
+                    say_args = collected[0] if collected else {}
+
+                args = say_args
+                character_name = context.get("character_name", "")
+
+                # 从 SayArgs 的 content 字段获取角色反应
+                reaction = str(args.get("content", "")).strip().strip('"').strip("'")
+                if not reaction:
+                    reaction = f"（{character_name}默默地想着这件事）"
+
+                # has_follow_up: deprecated，保留解析但不再用于链控
+                has_follow_up = bool(args.get("has_follow_up", False))
+                want_to_end = bool(args.get("want_to_end", False))
+
+                if len(reaction) > 200:
+                    reaction = reaction[:197] + "..."
+
+                return AgentResult(
+                    success=True,
+                    data=EventReactionResult(
+                        reaction=reaction,
+                        has_follow_up=has_follow_up,
+                        want_to_end=want_to_end,
+                        last_say_content=reaction,
+                        raw_response=json.dumps(args, ensure_ascii=False),
+                    ),
                     raw_response=json.dumps(args, ensure_ascii=False),
-                ),
-                raw_response=json.dumps(args, ensure_ascii=False),
-            )
+                )
 
-        except Exception as e:
-            logger.error(f"反应生成解析失败: {e}", exc_info=True)
-            return AgentResult(
-                success=False,
-                data=EventReactionResult(
-                    reaction="（默默地想着这件事）",
-                    has_follow_up=False,
-                    last_say_content="",
-                ),
-                error=str(e),
-            )
+            except Exception as e:
+                logger.error(f"反应生成解析失败: {e}", exc_info=True)
+                return AgentResult(
+                    success=False,
+                    data=EventReactionResult(
+                        reaction="（默默地想着这件事）",
+                        has_follow_up=False,
+                        want_to_end=False,
+                    ),
+                    error=str(e),
+                )
+        finally:
+            self._last_terminated_by = ""
 
     async def diary(self, context: dict) -> AgentResult:
         """生成日记（通过 Conversation 复用天内 reaction 上下文）
