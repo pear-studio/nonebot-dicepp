@@ -315,7 +315,7 @@ class DMAgent(Agent):
                     conv = await self._ensure_conversation(context, system_prompt_override=self._cached_system_prompt)
                     n, c = await conv.fetch_notifications()
                     conv.apply_notifications(n, c)
-                    conv.add_user(injection_text)
+                    conv.add_message("user", injection_text)
                     logger.debug(f"DM story_deck 注入: {len(injection_text)} 字")
             except Exception:
                 logger.warning("story_deck 注入失败，继续正常事件生成", exc_info=True)

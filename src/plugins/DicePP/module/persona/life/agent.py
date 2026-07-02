@@ -271,8 +271,8 @@ class Agent(ABC):
 
         # ── commit：一次性落盘（通知 + 用户消息 + LLM 响应）──
         conv.apply_notifications(notifs, new_cursors)
-        conv.add_user(user_prompt)
-        conv.extend(final_msgs[sent_len:])
+        conv.add_message("user", user_prompt)
+        conv.add_messages(final_msgs[sent_len:])
 
         return collected, conv
 

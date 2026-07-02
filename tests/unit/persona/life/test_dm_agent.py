@@ -264,7 +264,7 @@ class TestStoryDeckInjection:
         # 模拟 Conversation 中已有老李的注入
         from plugins.DicePP.module.persona.life.conversation import Conversation
         conv = Conversation()
-        conv.add_user(
+        conv.add_message("user",
             f"{_STORY_DECK_INJECTION_PREFIX}\n- 老李 (entity)：图书管理员\n"
         )
         dm_agent._conversation = conv
