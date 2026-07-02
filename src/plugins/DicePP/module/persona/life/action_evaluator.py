@@ -50,8 +50,8 @@ class ActionEvaluator:
         self._timeout = config.suggest_action_evaluation_timeout
 
     def _get_today_str(self) -> str:
-        from utils.time import wall_now
-        return wall_now(self._timezone).strftime("%Y-%m-%d")
+        from utils.time import get_clock
+        return get_clock().now().strftime("%Y-%m-%d")
 
     @staticmethod
     def _extract_location(today_events: List) -> str:
@@ -96,8 +96,8 @@ class ActionEvaluator:
         )
 
     def _now(self):
-        from utils.time import wall_now
-        return wall_now(self._timezone)
+        from utils.time import get_clock
+        return get_clock().now()
 
     async def evaluate(
         self,

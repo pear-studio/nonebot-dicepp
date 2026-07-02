@@ -15,7 +15,7 @@ from ..data.persist_keys import PERSONA_SK_SCHEDULER
 from ..data.models import RelationshipState, DEFAULT_RELATION_LABELS
 from ..character.models import Character
 from ..game.decay import DecayCalculator
-from utils.time import wall_now, format_timestamp, format_relative_time
+from utils.time import format_timestamp, format_relative_time
 from .protocols import BoundaryReceiver
 from .models import ShareTarget
 from .utils import effective_for_proactive
@@ -91,7 +91,8 @@ class ProactiveScheduler(BoundaryReceiver):
         return self._llm_semaphore
 
     def _now(self) -> datetime:
-        return wall_now(self.config.timezone)
+        from utils.time import get_clock
+        return get_clock().now()
 
     def _get_today_str(self) -> str:
         return self._now().strftime("%Y-%m-%d")

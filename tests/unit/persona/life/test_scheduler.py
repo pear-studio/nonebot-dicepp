@@ -12,6 +12,7 @@ from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveSche
 from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 from plugins.DicePP.module.persona.data.models import RelationshipState
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
+from utils.time import set_test_clock
 
 
 def _make_mock_character():
@@ -83,34 +84,22 @@ class TestProactiveSchedulerBasics:
     @pytest.mark.asyncio
     async def test_inactive_hours_blocks_messages(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 2, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: fake_now,
-        )
+        set_test_clock(fake_now,)
         result = await scheduler.tick()
         assert result == []
 
     @pytest.mark.asyncio
     async def test_character_active_hours(self, scheduler, monkeypatch):
         # 07:00 不活跃
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 7, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 7, 0, 0))
         assert scheduler._is_character_active() is False
 
         # 10:00 活跃
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 10, 0, 0))
         assert scheduler._is_character_active() is True
 
         # 23:00 不活跃
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 23, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 23, 0, 0))
         assert scheduler._is_character_active() is False
 
     @pytest.mark.asyncio
@@ -120,33 +109,21 @@ class TestProactiveSchedulerBasics:
         scheduler.character.extensions.event_day_end_hour = 8
 
         # 23:00 活跃
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 23, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 23, 0, 0))
         assert scheduler._is_character_active() is True
 
         # 02:00 活跃
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 2, 0, 0))
         assert scheduler._is_character_active() is True
 
         # 10:00 不活跃
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 10, 0, 0))
         assert scheduler._is_character_active() is False
 
     @pytest.mark.asyncio
     async def test_can_send_to_key_respects_interval(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: fake_now,
-        )
+        set_test_clock(fake_now,)
         assert scheduler._can_send_to_key("user:u1") is True
         scheduler._last_proactive_time["user:u1"] = fake_now - timedelta(hours=2)
         assert scheduler._can_send_to_key("user:u1") is False
@@ -156,10 +133,7 @@ class TestProactiveSchedulerBasics:
     @pytest.mark.asyncio
     async def test_reset_daily_state(self, scheduler, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: fake_now,
-        )
+        set_test_clock(fake_now,)
         scheduler._last_event_date = "2024-01-01"
         scheduler._reset_daily_state()
         assert scheduler._last_event_date == "2024-01-02"
@@ -208,10 +182,7 @@ class TestProactiveSchedulerPersistence:
     @pytest.mark.asyncio
     async def test_load_and_save_state(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: fake_now,
-        )
+        set_test_clock(fake_now,)
         raw = json.dumps({
             "date": "2024-01-01",
             "pending": [
@@ -243,10 +214,7 @@ class TestProactiveSchedulerPersistence:
     @pytest.mark.asyncio
     async def test_load_old_date_updates_date(self, scheduler, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: fake_now,
-        )
+        set_test_clock(fake_now,)
         raw = json.dumps({
             "date": "2024-01-01",
             "pending": [],
@@ -297,10 +265,7 @@ class TestCharacterActiveExtendedEnd:
         scheduler._jittered_start_minute = 480   # 08:00
         scheduler._jittered_end_minute = 1500     # 25:00
 
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 0, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 0, 0, 0))
         assert scheduler._is_character_active() is True
 
     def test_jittered_end_hour_25_2am_inactive(self, scheduler, monkeypatch):
@@ -308,10 +273,7 @@ class TestCharacterActiveExtendedEnd:
         scheduler._jittered_start_minute = 480
         scheduler._jittered_end_minute = 1500
 
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 2, 0, 0))
         assert scheduler._is_character_active() is False
 
     def test_fallback_end_hour_25_midnight_active(self, scheduler, monkeypatch):
@@ -319,10 +281,7 @@ class TestCharacterActiveExtendedEnd:
         scheduler._jittered_start_minute = None  # 强制走回退分支
         scheduler._jittered_end_minute = None
 
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 0, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 0, 0, 0))
         assert scheduler._is_character_active() is True
 
     def test_fallback_end_hour_25_2am_inactive(self, scheduler, monkeypatch):
@@ -330,10 +289,7 @@ class TestCharacterActiveExtendedEnd:
         scheduler._jittered_start_minute = None
         scheduler._jittered_end_minute = None
 
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 2, 0, 0))
         assert scheduler._is_character_active() is False
 
     # ── end_hour=24 + 非零 jitter 测试（R1/R2 修复验证） ──
@@ -343,10 +299,7 @@ class TestCharacterActiveExtendedEnd:
         scheduler._jittered_start_minute = 480    # 08:00
         scheduler._jittered_end_minute = 1410     # 23:30（负抖动，不跨午夜）
 
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 2, 0, 0))
         assert scheduler._is_character_active() is False
 
     def test_end_hour_24_negative_jitter_active_at_10am(self, scheduler, monkeypatch):
@@ -354,10 +307,7 @@ class TestCharacterActiveExtendedEnd:
         scheduler._jittered_start_minute = 480
         scheduler._jittered_end_minute = 1410
 
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 10, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 10, 0, 0))
         assert scheduler._is_character_active() is True
 
     def test_end_hour_24_positive_jitter_active_at_midnight(self, scheduler, monkeypatch):
@@ -365,10 +315,7 @@ class TestCharacterActiveExtendedEnd:
         scheduler._jittered_start_minute = 480    # 08:00
         scheduler._jittered_end_minute = 1470     # 00:30 next day（正抖动，跨午夜）
 
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 0, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 0, 0, 0))
         assert scheduler._is_character_active() is True
 
     def test_end_hour_24_positive_jitter_inactive_at_2am(self, scheduler, monkeypatch):
@@ -376,10 +323,7 @@ class TestCharacterActiveExtendedEnd:
         scheduler._jittered_start_minute = 480
         scheduler._jittered_end_minute = 1470
 
-        monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.wall_now",
-            lambda tz: datetime(2024, 1, 1, 2, 0, 0),
-        )
+        set_test_clock(datetime(2024, 1, 1, 2, 0, 0))
         assert scheduler._is_character_active() is False
 
 

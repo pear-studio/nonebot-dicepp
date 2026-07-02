@@ -15,6 +15,7 @@ from plugins.DicePP.module.persona.character.models import Character, PersonaExt
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.data.models import CharacterState
 from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult, AgentResult
+from utils.time import set_test_clock
 
 @pytest.fixture
 async def temp_db():
@@ -74,21 +75,21 @@ def life(temp_db, mock_agents, character, config):
 class TestCharacterDaySimulation:
     """完整一天模拟 — 分阶段聚焦测试"""
 
-    def _set_time(self, monkeypatch, dt: datetime):
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: dt)
+    def _set_time(self, dt: datetime):
+        set_test_clock(dt)
 
     @pytest.mark.asyncio
     async def test_before_wake_up_returns_none(self, life, monkeypatch):
         """07:00 起床前 tick 返回 None"""
         await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
-        self._set_time(monkeypatch, datetime(2024, 1, 1, 7, 0, 0))
+        self._set_time(datetime(2024, 1, 1, 7, 0, 0))
         assert await life.tick() is None
 
     @pytest.mark.asyncio
     async def test_wake_up_event_applies_energy_floor(self, life, monkeypatch):
         """08:15 wake_up 事件触发并应用 energy floor"""
         await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
-        self._set_time(monkeypatch, datetime(2024, 1, 1, 8, 15, 0))
+        self._set_time(datetime(2024, 1, 1, 8, 15, 0))
         result = await life.tick()
         assert len(result) == 1
         assert result[0].get('slot_type') == 'wake_up'
@@ -126,7 +127,7 @@ class TestCharacterDaySimulation:
         life.dm_agent = ChainDMAgent(chain_event_results)
         life.character_agent = ChainCharacterAgent(chain_reaction_results)
         await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
-        self._set_time(monkeypatch, datetime(2024, 1, 1, 10, 0, 0))
+        self._set_time(datetime(2024, 1, 1, 10, 0, 0))
         life._last_event_date = '2024-01-01'
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._fired_slot_indices.clear()
@@ -144,7 +145,7 @@ class TestCharacterDaySimulation:
     async def test_good_night_slot_fires(self, life, monkeypatch):
         """21:50 good_night 事件触发"""
         await life.data_store.update_character_state(CharacterState(energy=50, mood=50, health=50))
-        self._set_time(monkeypatch, datetime(2024, 1, 1, 21, 50, 0))
+        self._set_time(datetime(2024, 1, 1, 21, 50, 0))
         life._slot_minutes_today = [(21 * 60 + 50, 'good_night')]
         result = await life.tick()
         assert len(result) == 1
@@ -154,7 +155,7 @@ class TestCharacterDaySimulation:
     async def test_cross_day_no_recovery_fallback(self, life, monkeypatch):
         """跨天兜底恢复已移除：跨天时不再触发状态恢复"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         await life.data_store.update_character_state(CharacterState(energy=10, mood=10, health=10))
         life._last_event_date = '2023-12-31'
         life._slot_minutes_today = [(10 * 60, 'system')]

@@ -1,7 +1,7 @@
 import time
 import datetime
 
-from typing import Optional, Union
+from typing import Optional, Union, Protocol, runtime_checkable
 from utils.logger import logger
 
 china_tz = datetime.timezone(datetime.timedelta(hours=8), "北京时间")
@@ -41,6 +41,77 @@ def wall_now(timezone_name: str = "Asia/Shanghai") -> datetime.datetime:
             e,
         )
         return datetime.datetime.now()
+
+
+# ── Clock 抽象 ──────────────────────────────────────────────
+
+
+@runtime_checkable
+class Clock(Protocol):
+    """时间源抽象 — 生产用 WallClock，调试用 SteppedClock。
+
+    now() 返回 naive datetime（与 SQLite / fromisoformat 兼容），
+    与 wall_now() 的行为保持一致。
+    """
+
+    def now(self) -> datetime.datetime:
+        ...
+
+
+class WallClock:
+    """生产时钟 — 委托给 wall_now()"""
+
+    def __init__(self, timezone: str = "Asia/Shanghai"):
+        self._tz = timezone
+
+    def now(self) -> datetime.datetime:
+        return wall_now(self._tz)
+
+
+class SteppedClock:
+    """步进时钟 — 时间冻结，手动推进。用于调试/测试。
+
+    now() 是纯 getter，不带自动推进副作用。
+    """
+
+    def __init__(self, start: datetime.datetime):
+        self._current = start
+
+    def now(self) -> datetime.datetime:
+        return self._current
+
+    def step_to(self, dt: datetime.datetime) -> None:
+        self._current = dt
+
+    def step_by(self, **kwargs) -> None:
+        self._current += datetime.timedelta(**kwargs)
+
+
+# 模块级单例 — 默认 WallClock
+_clock: Clock = WallClock()
+
+
+def get_clock() -> Clock:
+    """返回当前注入的 Clock 实例（默认 WallClock）。
+
+    全局 Clock 固定使用 Asia/Shanghai 时区，忽略各模块级的 timezone 配置。
+    DicePP 面向中文用户，单一东八区，无多时区需求。
+    """
+    return _clock
+
+
+def set_clock(c: Clock) -> None:
+    """注入 Clock 实例（仅调试/测试使用）。
+
+    生产环境从不调用此函数，行为等价于始终使用 wall_now()。
+    """
+    global _clock
+    _clock = c
+
+
+def set_test_clock(dt: datetime.datetime) -> None:
+    """测试辅助 — 注入固定时间的 SteppedClock。"""
+    set_clock(SteppedClock(dt))
 
 
 def format_relative_time(

@@ -27,6 +27,14 @@ from plugins.DicePP.module.persona.command import PersonaCommand
 from core.communication import MessageMetaData, MessageSender
 
 
+@pytest.fixture(autouse=True)
+def _reset_clock_after_test():
+    """每个测试后恢复 WallClock，确保 SteppedClock 不泄漏到其他测试。"""
+    yield
+    from utils.time import set_clock, WallClock
+    set_clock(WallClock())
+
+
 # --------------------------------------------------------------------------- #
 # Helpers — module-level functions, also re-exported via autouse fixture below
 # --------------------------------------------------------------------------- #

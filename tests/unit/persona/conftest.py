@@ -8,6 +8,14 @@ from unittest.mock import MagicMock, AsyncMock
 from plugins.DicePP.module.persona.data.models import UserLLMConfig
 
 
+@pytest.fixture(autouse=True)
+def reset_clock_after_test():
+    """每个测试后恢复 WallClock，确保 SteppedClock 不泄漏到其他测试。"""
+    yield
+    from utils.time import set_clock, WallClock
+    set_clock(WallClock())
+
+
 class MockDataStore:
     """配额/白名单测试通用 mock store。"""
 

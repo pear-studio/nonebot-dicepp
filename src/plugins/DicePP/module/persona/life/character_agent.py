@@ -17,7 +17,7 @@ from ..tools.collecting import (
     RECORD_SHARE_MESSAGE_TOOL,
     SAY_TOOL_CHARACTER,
 )
-from utils.time import format_timestamp, format_relative_time, wall_now
+from utils.time import format_timestamp, format_relative_time
 from .agent import Agent
 from .change_sources import CharacterStateChangeSource
 from .types import AgentResult, EventReactionResult
@@ -210,8 +210,8 @@ class CharacterAgent(Agent):
         today_context = ""
         if today_events:
             events_lines = []
-            tz = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
-            now = wall_now(tz)
+            from utils.time import get_clock
+            now = get_clock().now()
             for e in today_events:
                 created_at = e.get("created_at")
                 if created_at:
@@ -243,8 +243,8 @@ class CharacterAgent(Agent):
         state_text = self._format_state_prompt(energy, mood, health)
 
         events_lines = []
-        tz = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
-        now = wall_now(tz)
+        from utils.time import get_clock
+        now = get_clock().now()
         for e in events:
             created_at = e.get("created_at")
             if created_at:
@@ -304,8 +304,8 @@ class CharacterAgent(Agent):
 
         today_events_text = ""
         if today_events:
-            tz = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
-            now = wall_now(tz)
+            from utils.time import get_clock
+            now = get_clock().now()
             ev_lines = []
             for e in today_events:
                 created_at = e.get("created_at")

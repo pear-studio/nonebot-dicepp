@@ -32,6 +32,14 @@ def _parse_dice_sequence(dice_str: str) -> list[int]:
         _error(f"Invalid dice sequence: {dice_str}. Expected format: 20,18,15,8")
 
 
+def _positive_int(v: str) -> int:
+    """argparse type 校验 — 正整数（>= 1）"""
+    n = int(v)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"days 必须 >= 1，收到 {n}")
+    return n
+
+
 def cmd_start(args) -> None:
     """创建或进入会话"""
     try:
@@ -115,6 +123,66 @@ def cmd_rm(args) -> None:
         _error(f"Session '{args.name}' not found")
 
 
+def cmd_warp(args) -> None:
+    """推进模拟时间，驱动角色生活模拟运行指定天数"""
+    if not session_exists(args.name):
+        _error(f"Session '{args.name}' not found. Run 'start' first.")
+
+    meta = load_session(args.name)
+    if not meta:
+        _error(f"Failed to load session '{args.name}'")
+
+    session_dir = get_session_dir(args.name)
+    runner = BotRunner(session_dir)
+
+    async def run():
+        await runner.start()
+        try:
+            return await runner.warp(
+                days=args.days,
+                start=args.start,
+                dry_run=args.dry_run,
+            )
+        finally:
+            await runner.stop()
+
+    result = asyncio.run(run())
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        if result.get("dry_run"):
+            _print_dry_run(result)
+        else:
+            _print_warp_result(result)
+
+
+def _print_dry_run(result: dict) -> None:
+    """打印 dry-run 成本预估"""
+    est = result["estimate"]
+    model = result.get("model", "unknown")
+    print("warp 成本预估 (--dry-run):")
+    print(f"  DM Agent:             {est['dm_calls']:>4d} 次")
+    print(f"  Character (reaction): {est['char_reaction_calls']:>4d} 次")
+    print(f"  Character (diary):    {est['char_diary_calls']:>4d} 次")
+    print(f"  SA Agent (planning):  {est['sa_calls']:>4d} 次")
+    print(f"  ─" + "─" * 37)
+    print(f"  合计:                 {est['total_calls']:>4d} 次 LLM 调用")
+    print(f"\n  模型: {model}")
+    print(f"  预估耗时: ~{est['estimated_minutes']} 分钟")
+    print(f"  Token 量级: ~{est['token_scale']}")
+
+
+def _print_warp_result(result: dict) -> None:
+    """打印 warp 执行结果"""
+    days = result.get("days", 0)
+    slots = result.get("slots_processed", 0)
+    errors = result.get("errors", 0)
+    skipped = result.get("skipped", 0)
+    print(f"warp 完成: {days} 天, {slots} 个槽位已处理"
+          + (f", {errors} 个错误" if errors else "")
+          + (f", {skipped} 个跳过" if skipped else ""))
+
+
 def main() -> None:
     """主入口"""
     # 确保 Windows 终端使用 UTF-8 编码
@@ -161,6 +229,28 @@ def main() -> None:
     rm_parser = subparsers.add_parser("rm", help="Remove a session")
     rm_parser.add_argument("name", help="Session name")
     rm_parser.set_defaults(func=cmd_rm)
+
+    # warp command
+    warp_parser = subparsers.add_parser(
+        "warp", help="Fast-forward simulated time to drive life simulation"
+    )
+    warp_parser.add_argument("name", help="Session name")
+    warp_parser.add_argument(
+        "--days", type=_positive_int, required=True, help="Number of days to simulate (>= 1)"
+    )
+    warp_parser.add_argument(
+        "--start",
+        help="Starting datetime in ISO format (default: random fictional date, e.g. 1247-03-15)",
+    )
+    warp_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print cost estimate without executing",
+    )
+    warp_parser.add_argument(
+        "--json", action="store_true", help="Output in JSON format"
+    )
+    warp_parser.set_defaults(func=cmd_warp)
 
     args = parser.parse_args()
     args.func(args)

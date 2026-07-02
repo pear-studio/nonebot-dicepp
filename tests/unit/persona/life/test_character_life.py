@@ -11,6 +11,7 @@ from plugins.DicePP.module.persona.life.types import EventGenerationResult, Even
 from plugins.DicePP.module.persona.life.diary import DiaryGenerator, DiaryConfig
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.module.persona.data.models import CharacterState
+from utils.time import set_test_clock
 
 class MockAgentSet:
     """Mock Agent 容器 — 同时包含 dm (DMAgent mock) 和 char (CharacterAgent mock)
@@ -114,7 +115,7 @@ class TestCharacterLifeBasics:
     @pytest.mark.asyncio
     async def test_tick_generates_slots_on_first_run(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.character.extensions.daily_events_count = 2
         result = await life.tick()
         assert len(life._slot_minutes_today) == 4
@@ -122,7 +123,7 @@ class TestCharacterLifeBasics:
     @pytest.mark.asyncio
     async def test_tick_triggers_event_when_time_matches(self, life, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         result = await life.tick()
@@ -135,7 +136,7 @@ class TestCharacterLifeBasics:
     @pytest.mark.asyncio
     async def test_tick_no_double_trigger_same_slot(self, life, mock_event_agent, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         life._fired_slot_indices.add(0)
@@ -146,7 +147,7 @@ class TestCharacterLifeBasics:
     @pytest.mark.asyncio
     async def test_tick_time_not_match_skips(self, life, mock_event_agent, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(12 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         result = await life.tick()
@@ -156,7 +157,7 @@ class TestCharacterLifeBasics:
     @pytest.mark.asyncio
     async def test_ongoing_activities_persisted(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._fired_slot_indices = set()
         life._last_event_date = '2024-01-01'
@@ -172,7 +173,7 @@ class TestCharacterLifeBasics:
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         from plugins.DicePP.module.persona.data.models import CharacterState
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         initial_state = CharacterState(energy=50, mood=50, health=50)
         mock_data_store.get_character_state = AsyncMock(return_value=initial_state)
         mock_data_store.update_character_state = AsyncMock()
@@ -229,7 +230,7 @@ class TestCharacterLifePersistence:
     @pytest.mark.asyncio
     async def test_load_state_same_day(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         raw = '{"date": "2024-01-01", "slot_minutes": [480, 720, 960], "fired": [0], "jittered_start": 420, "jittered_end": 1260}'
         mock_data_store.get_setting.return_value = raw
         await life.load_persistent_state()
@@ -240,7 +241,7 @@ class TestCharacterLifePersistence:
     @pytest.mark.asyncio
     async def test_load_state_old_day_regenerates(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 2, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         raw = '{"date": "2024-01-01", "slot_minutes": [480], "fired": [0]}'
         mock_data_store.get_setting.return_value = raw
         await life.load_persistent_state()
@@ -249,7 +250,7 @@ class TestCharacterLifePersistence:
     @pytest.mark.asyncio
     async def test_save_state(self, life, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(480, 'system'), (720, 'system')]
         life._fired_slot_indices = {0}
         life._last_event_date = '2024-01-01'
@@ -298,7 +299,7 @@ class TestCharacterLifeDiary:
     @pytest.mark.asyncio
     async def test_generate_diary_success(self, diary_generator, mock_event_agent, mock_data_store, monkeypatch):
         fake_now = datetime(2024, 1, 1, 23, 30, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.diary.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         result = await diary_generator.generate_diary()
         assert result == '今天过得很充实'
         mock_event_agent.char.diary.assert_called_once()
@@ -311,7 +312,7 @@ class TestCharacterLifeDiary:
         diary 必须获取昨天的事件、前天的日记上下文，并将日记保存到昨天。
         """
         fake_now = datetime(2024, 1, 2, 0, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.diary.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         result = await diary_generator.generate_diary()
         assert result == '今天过得很充实'
         mock_data_store.get_daily_events.assert_called_once_with('2024-01-01')
@@ -319,6 +320,32 @@ class TestCharacterLifeDiary:
         mock_event_agent.char.diary.assert_called_once()
         assert mock_event_agent.char.diary.call_args[0][0]['yesterday_diary'] == '昨天去了公园'
         mock_data_store.save_diary.assert_called_once_with('2024-01-01', '今天过得很充实')
+
+    @pytest.mark.asyncio
+    async def test_diary_prompt_uses_injected_clock(self, diary_generator, mock_event_agent, mock_data_store):
+        """R1 回归测试: generate_diary() 使用注入的 SteppedClock 而非 wall_now(tz)。
+
+        设置 SteppedClock 为 2099 年（远离真实墙钟），验证 diary_date
+        基于注入时间计算。若回退到 wall_now(tz) 将得到当前真实年份的日期，
+        断言会因日期不匹配而失败。
+        """
+        from plugins.DicePP.module.persona.data.models import DailyEvent
+
+        fake_now = datetime(2099, 6, 15, 23, 30, 0)
+        set_test_clock(fake_now)
+
+        mock_data_store.get_daily_events.return_value = [
+            DailyEvent(date='2099-06-15', event_type='scheduled',
+                       description='未来事件', context_summary='', reaction='',
+                       created_at=datetime(2099, 6, 15, 9, 0))
+        ]
+
+        result = await diary_generator.generate_diary()
+        assert result is not None
+
+        # 关键断言：日期基于注入时钟，而非 wall_now(tz) 的真实墙钟
+        mock_data_store.get_daily_events.assert_called_once_with('2099-06-15')
+        mock_data_store.save_diary.assert_called_once_with('2099-06-15', '今天过得很充实')
 
 class TestCharacterLifeStatus:
     """测试状态查询"""
@@ -332,7 +359,7 @@ class TestCharacterLifeStatus:
 
     def test_get_event_status(self, life, monkeypatch):
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(480, 'system'), (720, 'system')]
         life._fired_slot_indices = {0}
         life._last_event_date = '2024-01-01'
@@ -369,7 +396,7 @@ class TestCharacterLifePhase1:
     def test_compute_daily_boundaries_stable(self, life, monkeypatch):
         """同一天多次计算波动边界结果一致"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         start1, end1, rng1 = life._compute_daily_boundaries()
         start2, end2, rng2 = life._compute_daily_boundaries()
         assert start1 == start2
@@ -379,16 +406,16 @@ class TestCharacterLifePhase1:
         """不同日期波动边界不同（大概率）"""
         fake_now1 = datetime(2024, 1, 1, 10, 0, 0)
         fake_now2 = datetime(2024, 1, 2, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now1)
+        set_test_clock(fake_now1)
         start1, end1, rng1 = life._compute_daily_boundaries()
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now2)
+        set_test_clock(fake_now2)
         start2, end2, rng2 = life._compute_daily_boundaries()
         assert (start1, end1) != (start2, end2)
 
     def test_compute_daily_boundaries_within_range(self, life, monkeypatch):
         """波动边界在合理范围内"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         start, end, rng = life._compute_daily_boundaries()
         assert 7 * 60 <= start <= 8 * 60 + 30
         assert 21 * 60 + 30 <= end <= 22 * 60 + 30
@@ -397,7 +424,7 @@ class TestCharacterLifePhase1:
     def test_compute_daily_boundaries_start_gte_end(self, life, monkeypatch):
         """验证 start>=end 时 end_time 修正为 start+60 确保至少活跃 1 小时"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.character.extensions.event_day_start_hour = 9
         life.character.extensions.event_day_end_hour = 10
         life.character.extensions.event_day_start_jitter_minutes = 60
@@ -418,7 +445,7 @@ class TestCharacterLifePhase1:
     async def test_tick_skips_before_wake_up(self, life, monkeypatch):
         """当前时间未到起床时间时跳过所有槽位"""
         fake_now = datetime(2024, 1, 1, 7, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 8 * 60 + 15
         life._today_jittered_end = 22 * 60 - 15
         life._slot_minutes_today = [(10 * 60, 'system'), (14 * 60, 'system')]
@@ -430,7 +457,7 @@ class TestCharacterLifePhase1:
     async def test_boundary_event_wake_up(self, life, mock_data_store, monkeypatch):
         """起床边界槽位在窗口内触发"""
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 8 * 60 + 15
         life._today_jittered_end = 22 * 60 - 15
         life._slot_minutes_today = [(8 * 60 + 15, 'wake_up'), (10 * 60, 'system')]
@@ -444,7 +471,7 @@ class TestCharacterLifePhase1:
     async def test_boundary_event_good_night(self, life, mock_data_store, monkeypatch):
         """睡觉边界槽位在窗口内触发"""
         fake_now = datetime(2024, 1, 1, 21, 50, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 8 * 60 + 15
         life._today_jittered_end = 21 * 60 + 50
         life._slot_minutes_today = [(10 * 60, 'system'), (21 * 60 + 50, 'good_night')]
@@ -457,7 +484,7 @@ class TestCharacterLifePhase1:
     async def test_boundary_event_no_double_trigger(self, life, monkeypatch):
         """边界槽位当天不重复触发（通过 _fired_slot_indices）"""
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 8 * 60 + 15
         life._today_jittered_end = 22 * 60 - 15
         life._slot_minutes_today = [(8 * 60 + 15, 'wake_up'), (10 * 60, 'system')]
@@ -470,7 +497,7 @@ class TestCharacterLifePhase1:
     async def test_slot_filtered_by_min_interval(self, life, monkeypatch):
         """日常槽位生成在约束区间内，与边界保持间隔"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._regenerate_slots_for_today()
         start = life._today_jittered_start
         end = life._today_jittered_end
@@ -531,7 +558,7 @@ class TestCharacterLifePhase2:
     def test_boundary_receiver_synced_on_slot_generation(self, life, monkeypatch):
         """槽位生成时波动边界正确同步到 boundary_receiver"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._regenerate_slots_for_today()
         start = life._today_jittered_start
         end = life._today_jittered_end
@@ -541,7 +568,7 @@ class TestCharacterLifePhase2:
     async def test_chain_depth_one_when_no_tendency(self, life, mock_event_agent, monkeypatch):
         """follow_up_action 为空时只生成一个事件"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         result = await life.tick()
@@ -553,7 +580,7 @@ class TestCharacterLifePhase2:
         """follow_up_action 非空时链式续写到 max_depth"""
         from plugins.DicePP.module.persona.life.types import EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         mock_event_agent.char.react = AsyncMock(return_value=AgentResult(success=True, data=EventReactionResult(reaction='继续', has_follow_up=True)))
@@ -566,7 +593,7 @@ class TestCharacterLifePhase2:
         """单事件 delta 硬约束：超出 ±20 被钳制"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='极端事件', duration_minutes=0, energy_delta=-30, mood_delta=50, health_delta=None)))
@@ -582,7 +609,7 @@ class TestCharacterLifePhase2:
         """保底概率 1.0 时一定触发保底续写"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.config.chain_force_extend_once_prob = 1.0
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
@@ -596,7 +623,7 @@ class TestCharacterLifePhase2:
         """今天已触发过链式（深度>=2）后保底概率降为 0"""
         from plugins.DicePP.module.persona.life.types import EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.config.chain_force_extend_once_prob = 1.0
         life._chain_triggered_today = True
         life._slot_minutes_today = [(10 * 60, 'system')]
@@ -610,7 +637,7 @@ class TestCharacterLifePhase2:
         """保底时 System Agent 的 follow_up_action 留空（自主续写）"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.config.chain_force_extend_once_prob = 1.0
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
@@ -623,7 +650,7 @@ class TestCharacterLifePhase2:
         """wake_up 事件：LLM 返回负 delta → floor 修正为 recovery_energy"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 8 * 60 + 15
         life._today_jittered_end = 22 * 60 - 15
         life._slot_minutes_today = [(8 * 60 + 15, 'wake_up')]
@@ -639,7 +666,7 @@ class TestCharacterLifePhase2:
         """wake_up 事件：LLM 返回正值高于 floor → 保留原值（不经过 clamp）"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 8, 15, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 8 * 60 + 15
         life._today_jittered_end = 22 * 60 - 15
         life._slot_minutes_today = [(8 * 60 + 15, 'wake_up')]
@@ -655,7 +682,7 @@ class TestCharacterLifePhase2:
         """非 wake_up 事件不受 floor 约束"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='日常事件', duration_minutes=0, energy_delta=-10, mood_delta=0, health_delta=0)))
@@ -668,7 +695,7 @@ class TestCharacterLifePhase2:
     async def test_inject_spontaneous_event_default_slot_type_system(self, life, mock_data_store, mock_event_agent, monkeypatch):
         """inject_spontaneous_event 未传 slot_type → dm_context 默认 "system" """
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         original_dm_run = mock_event_agent.dm.run
         captured_slot_types = []
 
@@ -685,7 +712,7 @@ class TestCharacterLifePhase2:
     async def test_inject_spontaneous_event_exception_returns_false(self, life, mock_event_agent, monkeypatch):
         """验证 inject_spontaneous_event 捕获异常并返回 False"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
 
         async def broken_impl(action_description):
             raise RuntimeError('模拟注入异常')
@@ -696,7 +723,7 @@ class TestCharacterLifePhase2:
     def test_min_interval_too_large_generates_boundary_slots_only(self, life, monkeypatch):
         """min_event_interval 过大时仅生成边界槽位（wake_up / good_night）"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.config.min_event_interval_minutes = 800
         life._regenerate_slots_for_today()
         types = [t for _, t in life._slot_minutes_today]
@@ -739,7 +766,7 @@ class TestDayTransitionRemoved:
     async def test_tick_no_recovery_on_day_cross(self, life, mock_data_store, monkeypatch):
         """跨天时 tick() 不触发额外恢复（仅有事件正常流程的状态变更）"""
         fake_now = datetime(2024, 1, 2, 8, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._last_event_date = '2024-01-01'
         mock_data_store.update_character_state.reset_mock()
         await life.tick()
@@ -791,7 +818,7 @@ class TestCrossMidnightSlots:
     def test_slots_normalized_to_clock_range(self, life, monkeypatch):
         """所有 slot_m 在 [0, 1440) 范围内"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._regenerate_slots_for_today()
         for slot_m, _ in life._slot_minutes_today:
             assert 0 <= slot_m < 1440
@@ -799,7 +826,7 @@ class TestCrossMidnightSlots:
     def test_slots_logical_order_preserved(self, life, monkeypatch):
         """归一化后 good_night 仍在列表末尾"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._regenerate_slots_for_today()
         types = [t for _, t in life._slot_minutes_today]
         assert types[0] == 'wake_up'
@@ -809,7 +836,7 @@ class TestCrossMidnightSlots:
     async def test_tick_matches_good_night_post_midnight(self, life, mock_data_store, monkeypatch):
         """模拟 01:00（次日凌晨），验证 good_night 槽位被匹配"""
         fake_now = datetime(2024, 1, 1, 1, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._regenerate_slots_for_today()
         life._last_event_date = '2024-01-01'
         result = await life.tick()
@@ -820,7 +847,7 @@ class TestCrossMidnightSlots:
     async def test_tick_matches_system_slot_post_midnight(self, life, mock_data_store, monkeypatch):
         """模拟 00:30，验证跨午夜 system slot 被匹配"""
         fake_now = datetime(2024, 1, 1, 0, 30, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._regenerate_slots_for_today()
         life._last_event_date = '2024-01-01'
         for i, (slot_m, slot_type) in enumerate(life._slot_minutes_today):
@@ -864,7 +891,7 @@ class TestMidnightResetDelay:
     def test_reset_delayed_when_unfired_and_spans_midnight(self, life, monkeypatch):
         """有未触发槽位 + 跨午夜 → 延迟 reset"""
         fake_now = datetime(2024, 1, 2, 0, 1, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(480, 'wake_up'), (60, 'good_night')]
         life._fired_slot_indices = {0}
         life._last_event_date = '2024-01-01'
@@ -875,7 +902,7 @@ class TestMidnightResetDelay:
     def test_reset_proceeds_when_all_fired(self, life, monkeypatch):
         """所有槽位已触发 → 正常 reset"""
         fake_now = datetime(2024, 1, 2, 0, 1, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(480, 'wake_up'), (60, 'good_night')]
         life._fired_slot_indices = {0, 1}
         life._last_event_date = '2024-01-01'
@@ -888,7 +915,7 @@ class TestMidnightResetDelay:
     async def test_post_good_night_regeneration_cooldown(self, life, mock_event_agent, mock_data_store, monkeypatch):
         """good_night 触发→再生后，新 good_night 被冷却阻止，wake_up 仍可触发"""
         fake_now = datetime(2024, 1, 2, 1, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(480, 'wake_up'), (720, 'system'), (60, 'good_night')]
         life._fired_slot_indices = {0, 1}
         life._last_event_date = '2024-01-02'
@@ -903,7 +930,7 @@ class TestMidnightResetDelay:
         assert life._last_good_night_fired_at is not None
         assert 0 not in life._fired_slot_indices
         fake_now_2 = datetime(2024, 1, 2, 1, 1, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now_2)
+        set_test_clock(fake_now_2)
         result2 = await life.tick()
         if result2:
             assert result2[0].get('slot_type') != 'good_night'
@@ -911,7 +938,7 @@ class TestMidnightResetDelay:
     def test_reset_proceeds_when_not_spans_midnight(self, life, monkeypatch):
         """非跨午夜角色，正常 reset"""
         fake_now = datetime(2024, 1, 2, 0, 1, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.character.extensions.event_day_end_hour = 22
         life._slot_minutes_today = [(480, 'wake_up'), (1320, 'good_night')]
         life._fired_slot_indices = {0}
@@ -936,7 +963,7 @@ class TestIsAwakeLockedExtendedEnd:
     def test_awake_at_midnight(self, life, monkeypatch):
         """午夜 00:00 应在活跃窗内（end_hour=25 → 活跃到 01:00）"""
         fake_now = datetime(2024, 1, 1, 0, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1500
         life._slot_minutes_today = [(480, 'wake_up'), (60, 'good_night')]
@@ -945,7 +972,7 @@ class TestIsAwakeLockedExtendedEnd:
     def test_awake_at_1am(self, life, monkeypatch):
         """01:00 仍在活跃窗边界"""
         fake_now = datetime(2024, 1, 1, 1, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1500
         life._slot_minutes_today = [(480, 'wake_up'), (60, 'good_night')]
@@ -954,7 +981,7 @@ class TestIsAwakeLockedExtendedEnd:
     def test_asleep_at_2am(self, life, monkeypatch):
         """02:00 已过活跃窗"""
         fake_now = datetime(2024, 1, 1, 2, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1500
         life._slot_minutes_today = [(480, 'wake_up'), (60, 'good_night')]
@@ -963,7 +990,7 @@ class TestIsAwakeLockedExtendedEnd:
     def test_awake_at_morning(self, life, monkeypatch):
         """09:00 正常活跃时间"""
         fake_now = datetime(2024, 1, 1, 9, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1500
         life._slot_minutes_today = [(480, 'wake_up'), (60, 'good_night')]
@@ -1007,7 +1034,7 @@ class TestMidnightEndHourJitter:
     def test_spans_midnight_false_when_jitter_before_midnight(self, life, monkeypatch):
         """负抖动使 end < 1440 时 _spans_midnight 为 False（R1 修复核心）"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1410
         assert life._spans_midnight is False
@@ -1015,7 +1042,7 @@ class TestMidnightEndHourJitter:
     def test_spans_midnight_true_when_jitter_after_midnight(self, life, monkeypatch):
         """正抖动使 end >= 1440 时 _spans_midnight 为 True"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1470
         assert life._spans_midnight is True
@@ -1023,7 +1050,7 @@ class TestMidnightEndHourJitter:
     def test_not_always_awake_when_jitter_before_midnight(self, life, monkeypatch):
         """负抖动使 end < 1440 时，存在角色不活跃的时刻（修复前为 24/7 清醒）"""
         fake_now = datetime(2024, 1, 1, 2, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1410
         life._slot_minutes_today = [(480, 'wake_up'), (1410 % 1440, 'good_night')]
@@ -1032,7 +1059,7 @@ class TestMidnightEndHourJitter:
     def test_awake_at_midnight_when_jitter_after_midnight(self, life, monkeypatch):
         """正抖动使 end >= 1440 时，午夜应在活跃窗内"""
         fake_now = datetime(2024, 1, 1, 0, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1470
         life._slot_minutes_today = [(480, 'wake_up'), (30, 'good_night')]
@@ -1041,7 +1068,7 @@ class TestMidnightEndHourJitter:
     def test_reset_daily_state_when_not_spans_midnight(self, life, monkeypatch):
         """负抖动使 end < 1440 时，日历日切换应正常 reset（修复前延迟重置导致槽位残留）"""
         fake_now = datetime(2024, 1, 2, 0, 1, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._today_jittered_start = 480
         life._today_jittered_end = 1410
         life._slot_minutes_today = [(480, 'wake_up'), (1410 % 1440, 'good_night')]
@@ -1059,7 +1086,7 @@ class TestGenerateDailyEventDirect:
     async def test_generate_daily_event_system_slot(self, life, monkeypatch):
         """generate_daily_event(slot_type='system') 正常生成事件"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         results = await life.generate_daily_event(slot_type='system')
         assert len(results) >= 1
         assert results[0]['description'] == '窗外下起了小雨'
@@ -1069,7 +1096,7 @@ class TestGenerateDailyEventDirect:
     async def test_generate_daily_event_wake_up(self, life, monkeypatch):
         """generate_daily_event(slot_type='wake_up') 生成起床事件"""
         fake_now = datetime(2024, 1, 1, 8, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         results = await life.generate_daily_event(slot_type='wake_up')
         assert len(results) >= 1
         assert results[0]['slot_type'] == 'wake_up'
@@ -1078,7 +1105,7 @@ class TestGenerateDailyEventDirect:
     async def test_generate_daily_event_exception_returns_empty(self, life, monkeypatch):
         """generate_daily_event 异常时返回空列表"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
 
         async def broken_impl(today, now, slot_type):
             raise RuntimeError('模拟异常')
@@ -1097,7 +1124,7 @@ class TestGenerateDailyEventExceptionFallback:
     async def test_agent_result_exception_returns_empty(self, life, monkeypatch):
         """EventGenerationAgent.generate_event_result 抛出异常时返回空列表"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.dm_agent.run = AsyncMock(side_effect=RuntimeError('DM agent exception'))
         results = await life.generate_daily_event(slot_type='system')
         assert results == []
@@ -1107,7 +1134,7 @@ class TestGenerateDailyEventExceptionFallback:
         """EventGenerationAgent.generate_event_reaction 抛出异常时返回空列表"""
         from plugins.DicePP.module.persona.life.types import EventGenerationResult
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life.dm_agent.run = AsyncMock(return_value=AgentResult(success=True, data=EventGenerationResult(description='测试事件', duration_minutes=0)))
         life.character_agent.react = AsyncMock(side_effect=RuntimeError('反应生成失败'))
         results = await life.generate_daily_event(slot_type='system')
@@ -1120,7 +1147,7 @@ class TestInjectSpontaneousEventDirect:
     async def test_inject_spontaneous_event_success(self, life, mock_event_agent, monkeypatch):
         """inject_spontaneous_event 正常注入成功返回 True"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         result = await life.inject_spontaneous_event('角色正在发呆')
         assert result is True
 
@@ -1159,7 +1186,7 @@ class TestStateZeroPreserved:
     async def test_zero_preserved_with_zero_delta(self, life, mock_data_store, monkeypatch):
         """energy/mood/health=0 时 delta=0，验证状态保持 0"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
@@ -1176,7 +1203,7 @@ class TestStateZeroPreserved:
     async def test_zero_plus_positive_delta(self, life, mock_data_store, monkeypatch):
         """energy=0 时 delta=+10，验证结果为 10（而非 60）"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult
@@ -1191,7 +1218,7 @@ class TestStateZeroPreserved:
     async def test_none_uses_default_50(self, life, mock_data_store, monkeypatch):
         """energy=None 时使用默认值 50"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
-        monkeypatch.setattr('plugins.DicePP.module.persona.life.character_life.wall_now', lambda tz: fake_now)
+        set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
         from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult

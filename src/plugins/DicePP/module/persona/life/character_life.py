@@ -18,7 +18,7 @@ from ..character.models import Character
 from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
 from ..data.models import CharacterState
-from utils.time import wall_now, format_timestamp
+from utils.time import format_timestamp
 from .types import EventGenerationResult, EventReactionResult
 from .protocols import BoundaryReceiver
 
@@ -101,7 +101,8 @@ class CharacterLifeConfig:
         )
 
     def now(self) -> datetime:
-        return wall_now(self.timezone)
+        from utils.time import get_clock
+        return get_clock().now()
 
 
 class CharacterLife:
@@ -419,6 +420,18 @@ class CharacterLife:
         except Exception as e:
             logger.exception("生成生活事件失败: {}", e)
             return []
+
+    def advance_to_day(self, target_date: datetime.date) -> List[Tuple[int, str]]:
+        """准备推进到指定日期，返回当日槽位列表 [(slot_minutes, slot_type), ...]。
+
+        封装跨天重置逻辑（_reset_daily_state、good_night 冷却重置），
+        供 warp/timewarp 等外部编排工具使用。
+        """
+        from datetime import timedelta
+        self._last_event_date = (target_date - timedelta(days=1)).isoformat()
+        self._reset_daily_state()
+        self._last_good_night_fired_at = None
+        return list(self._slot_minutes_today or [])
 
     async def _generate_daily_event_impl(
         self, today: str, now, slot_type: str
