@@ -22,20 +22,6 @@ from dashboard.src.config import DashboardPaths
 # is initialised even when only setup_auth is called directly.
 
 
-def _reset_app_module_caches() -> None:
-    """清除 dashboard.src.app 的模块级缓存，确保测试隔离。
-
-    ``_pydantic_module_cache`` / ``_config_field_metadata_cache`` /
-    ``_config_layout_cache`` 是模块级全局变量。若某个测试修改了
-    ``DashboardPaths.PROJECT_ROOT`` 并重建缓存，缓存会污染后续测试。
-    """
-    import dashboard.src.app as app_mod
-
-    app_mod._pydantic_module_cache = None
-    app_mod._config_field_metadata_cache = None
-    app_mod._config_layout_cache = None
-
-
 def _init_test_db(project_root: Path) -> str:
     """Create dashboard.db in project_root/dashboard/data/ and return its path."""
     db_path = str(project_root / "dashboard" / "data" / "dashboard.db")
@@ -56,7 +42,10 @@ def _patch_paths(monkeypatch: pytest.MonkeyPatch, project_root: Path) -> None:
     monkeypatch.setattr(DashboardPaths, "CONFIG_GLOBAL", project_root / "config" / "global.json")
     monkeypatch.setattr(DashboardPaths, "CONFIG_USER", project_root / "config" / "user.json")
     monkeypatch.setattr(DashboardPaths, "CONFIG_BOTS_DIR", project_root / "config" / "bots")
+    monkeypatch.setattr(DashboardPaths, "DATA_ROOT", project_root / "data")
     monkeypatch.setattr(DashboardPaths, "DATA_BOTS_DIR", project_root / "data" / "bots")
+    monkeypatch.setattr(DashboardPaths, "LOGS_DIR", project_root / "data" / "logs")
+    monkeypatch.setattr(DashboardPaths, "RUNTIME_LOG", project_root / "data" / "logs" / "dicepp-runtime.log")
     monkeypatch.setattr(DashboardPaths, "CONTENT_DIR", project_root / "content")
     monkeypatch.setenv("DICEPP_PROJECT_ROOT", str(project_root))
 
@@ -116,19 +105,17 @@ def tmp_dashboard_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path
     (project_root / "config" / "global.json").write_text(
         json.dumps({
             "_comment": "Developer note — should NOT appear in config_merged",
-            "_llm_comment": "LLM trace notes — should also be excluded",
             "app": {"name": "test_dicepp", "version": "1.0.0"},
             "persona_ai": {
                 "enabled": False,
                 "_comment_persona": "Persona setup notes",
-                "_llm_trace": "nested underscore key — should be excluded",
             },
         })
     )
 
     # ── bot config files ─────────────────────────────────────────────────
     (project_root / "config" / "bots" / "test_bot.json").write_text(
-        json.dumps({"master": ["test_master"], "enabled": True, "_llm_meta": "hidden"})
+        json.dumps({"master": ["test_master"], "enabled": True})
     )
     (project_root / "config" / "bots" / "another_bot.json").write_text(
         json.dumps({"master": ["another_master"], "enabled": True})
@@ -186,11 +173,20 @@ def test_client(tmp_dashboard_paths: Path, monkeypatch: pytest.MonkeyPatch) -> T
     initialised.
     """
     db_path = _init_test_db(tmp_dashboard_paths)
-    _reset_app_module_caches()
     app.state.dashboard_db = db_path
     app.state.dashboard_paths = DashboardPaths
     app.state.login_failures = {}
     app.state.status_subscribers = []
+    if hasattr(app.state, "manager_settings"):
+        delattr(app.state, "manager_settings")
+    if hasattr(app.state, "manager_service"):
+        delattr(app.state, "manager_service")
+    if hasattr(app.state, "manager_db_path"):
+        delattr(app.state, "manager_db_path")
+    monkeypatch.delenv("DICEPP_MANAGER_RUNTIME", raising=False)
+    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_COMMAND", raising=False)
+    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_CWD", raising=False)
+    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_STOP_TIMEOUT", raising=False)
     # Existing endpoint tests model the supported Windows direct-LAN setup path.
     monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
     return TestClient(
@@ -209,13 +205,22 @@ def dual_clients(
 ) -> tuple[TestClient, TestClient]:
     """Two TestClients sharing the same dashboard.db for session-rotation tests."""
     db_path = _init_test_db(tmp_dashboard_paths)
-    _reset_app_module_caches()
 
     app1 = app  # share the same FastAPI app instance
     app1.state.dashboard_db = db_path
     app1.state.dashboard_paths = DashboardPaths
     app1.state.login_failures = {}
     app1.state.status_subscribers = []
+    if hasattr(app1.state, "manager_settings"):
+        delattr(app1.state, "manager_settings")
+    if hasattr(app1.state, "manager_service"):
+        delattr(app1.state, "manager_service")
+    if hasattr(app1.state, "manager_db_path"):
+        delattr(app1.state, "manager_db_path")
+    monkeypatch.delenv("DICEPP_MANAGER_RUNTIME", raising=False)
+    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_COMMAND", raising=False)
+    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_CWD", raising=False)
+    monkeypatch.delenv("DICEPP_MANAGER_PROCESS_STOP_TIMEOUT", raising=False)
 
     from fastapi.testclient import TestClient as TC
     monkeypatch.setattr("dashboard.src.app._is_windows_runtime", lambda: True)
