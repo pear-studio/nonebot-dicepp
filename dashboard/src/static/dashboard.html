@@ -50,7 +50,7 @@
         <p>Linux 请运行：</p>
         <code class="block mt-2 p-3 bg-gray-100 rounded text-xs break-all">docker compose run --rm --no-deps dashboard python -m dashboard admin init</code>
         <p class="mt-3">Windows 也可运行：</p>
-        <code class="block mt-2 p-3 bg-gray-100 rounded text-xs">DicePPDashboard.exe admin init</code>
+        <code class="block mt-2 p-3 bg-gray-100 rounded text-xs">DicePP.exe admin init</code>
       </div>
       <p x-show="setupError" x-text="setupError" id="setup-error" class="mt-4 text-red-600 text-sm text-center"></p>
     </div>
@@ -113,186 +113,6 @@
 
     <!-- Main content area -->
     <main class="flex-1 overflow-y-auto p-6">
-      <!-- Tab: 概览 -->
-      <div x-show="currentTab === 'overview'" x-cloak>
-        <h2 class="text-xl font-bold mb-4">概览</h2>
-
-        <!-- Overview skeleton -->
-        <div x-show="overviewLoading" class="space-y-4">
-          <div class="animate-pulse bg-white rounded-lg shadow p-4 space-y-3">
-            <div class="bg-gray-200 rounded h-6 w-1/4"></div>
-            <div class="bg-gray-200 rounded h-4 w-3/4"></div>
-            <div class="bg-gray-200 rounded h-4 w-1/2"></div>
-          </div>
-        </div>
-
-        <div x-show="!overviewLoading">
-
-          <!-- ── Bot 运行状态 ── -->
-          <section class="mb-6">
-            <h3 class="text-lg font-semibold text-gray-800 mb-3">🤖 Bot 运行状态</h3>
-            <div x-show="overviewBots.length === 0" class="text-gray-500 text-sm">暂无 Bot 数据</div>
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              <template x-for="bot in overviewBots" :key="bot.bot_id">
-                <div class="bg-white rounded-lg shadow p-4 border-l-4" :class="bot.online ? 'border-green-500' : 'border-red-400'">
-                  <div class="flex items-center gap-2 mb-3">
-                    <span class="w-3 h-3 rounded-full inline-block flex-shrink-0" :class="bot.online ? 'bg-green-500' : 'bg-red-500'"></span>
-                    <span class="font-bold text-sm truncate" x-text="bot.bot_id"></span>
-                    <span class="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" :class="bot.online ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="bot.online ? '在线' : '离线'"></span>
-                  </div>
-                  <div class="text-xs text-gray-500 space-y-1">
-                    <div class="flex justify-between"><span>版本</span> <span class="text-gray-700" x-text="bot.version || '-'"></span></div>
-                    <div class="flex justify-between"><span>最后心跳</span> <span class="text-gray-700" x-text="fmtRelativeTime(bot.last_heartbeat_ts)"></span></div>
-                  </div>
-                </div>
-              </template>
-            </div>
-          </section>
-
-          <!-- ── 核心运营统计 ── -->
-          <section class="mb-6" x-show="overviewCoreStats">
-            <h3 class="text-lg font-semibold text-gray-800 mb-3">📊 核心运营统计</h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div class="bg-white rounded-lg shadow p-4 text-center">
-                <div class="text-2xl font-bold text-blue-600" x-text="overviewCoreStats.users"></div>
-                <div class="text-xs text-gray-500 mt-1">累计用户</div>
-              </div>
-              <div class="bg-white rounded-lg shadow p-4 text-center">
-                <div class="text-2xl font-bold text-indigo-600" x-text="overviewCoreStats.groups"></div>
-                <div class="text-xs text-gray-500 mt-1">累计群聊</div>
-              </div>
-            </div>
-          </section>
-
-          <!-- ── Persona 今日 ── -->
-          <section class="mb-6" x-show="overviewPersonaStats">
-            <h3 class="text-lg font-semibold text-gray-800 mb-3">🎭 Persona 今日</h3>
-
-            <!-- Chat stats -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              <div class="bg-white rounded-lg shadow p-4 text-center">
-                <div class="text-2xl font-bold text-green-600" x-text="overviewPersonaStats.chat_messages"></div>
-                <div class="text-xs text-gray-500 mt-1">聊天消息</div>
-              </div>
-              <div class="bg-white rounded-lg shadow p-4 text-center">
-                <div class="text-2xl font-bold text-teal-600" x-text="overviewPersonaStats.chat_users"></div>
-                <div class="text-xs text-gray-500 mt-1">参与用户</div>
-              </div>
-              <div class="bg-white rounded-lg shadow p-4 text-center">
-                <div class="text-2xl font-bold text-cyan-600" x-text="overviewPersonaStats.chat_groups"></div>
-                <div class="text-xs text-gray-500 mt-1">覆盖群聊</div>
-              </div>
-            </div>
-
-            <!-- Character state + events row -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <!-- Character state -->
-              <div class="bg-white rounded-lg shadow p-4" x-show="Object.keys(overviewPersonaStats.character_state || {}).length > 0">
-                <h4 class="text-sm font-semibold text-gray-700 mb-2">角色状态</h4>
-                <div class="space-y-2 text-sm">
-                  <template x-if="overviewPersonaStats.character_state.energy != null">
-                    <div class="flex items-center gap-2">
-                      <span class="text-gray-500 w-12">体力</span>
-                      <div class="flex-1 bg-gray-200 rounded-full h-2">
-                        <div class="bg-yellow-500 rounded-full h-2" :style="'width:' + overviewPersonaStats.character_state.energy + '%'"></div>
-                      </div>
-                      <span class="text-gray-700 text-xs w-8 text-right" x-text="overviewPersonaStats.character_state.energy"></span>
-                    </div>
-                  </template>
-                  <template x-if="overviewPersonaStats.character_state.mood != null">
-                    <div class="flex items-center gap-2">
-                      <span class="text-gray-500 w-12">心情</span>
-                      <div class="flex-1 bg-gray-200 rounded-full h-2">
-                        <div class="bg-pink-500 rounded-full h-2" :style="'width:' + overviewPersonaStats.character_state.mood + '%'"></div>
-                      </div>
-                      <span class="text-gray-700 text-xs w-8 text-right" x-text="overviewPersonaStats.character_state.mood"></span>
-                    </div>
-                  </template>
-                  <template x-if="overviewPersonaStats.character_state.health != null">
-                    <div class="flex items-center gap-2">
-                      <span class="text-gray-500 w-12">健康</span>
-                      <div class="flex-1 bg-gray-200 rounded-full h-2">
-                        <div class="bg-green-500 rounded-full h-2" :style="'width:' + overviewPersonaStats.character_state.health + '%'"></div>
-                      </div>
-                      <span class="text-gray-700 text-xs w-8 text-right" x-text="overviewPersonaStats.character_state.health"></span>
-                    </div>
-                  </template>
-                  <template x-if="overviewPersonaStats.character_state.current_intention">
-                    <div class="text-xs text-gray-500 mt-2 pt-2 border-t">
-                      <span class="text-gray-400">当前意向：</span>
-                      <span x-text="overviewPersonaStats.character_state.current_intention"></span>
-                    </div>
-                  </template>
-                </div>
-              </div>
-
-              <!-- Today's events -->
-              <div class="bg-white rounded-lg shadow p-4" x-show="overviewPersonaStats.events && overviewPersonaStats.events.length > 0">
-                <h4 class="text-sm font-semibold text-gray-700 mb-2">今日事件</h4>
-                <div class="space-y-2">
-                  <template x-for="evt in overviewPersonaStats.events" :key="evt.id">
-                    <div class="flex items-start gap-2 text-sm">
-                      <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 flex-shrink-0" x-text="evt.type"></span>
-                      <span class="text-gray-700" x-text="evt.description"></span>
-                    </div>
-                  </template>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- ── 今日 LLM 用量 ── -->
-          <section class="mb-6" x-show="overviewLlmUsage">
-            <h3 class="text-lg font-semibold text-gray-800 mb-3">⚡ 今日 LLM 用量</h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-              <div class="bg-white rounded-lg shadow p-4 text-center">
-                <div class="text-2xl font-bold text-purple-600" x-text="fmtTokens(overviewLlmUsage.total_tokens)"></div>
-                <div class="text-xs text-gray-500 mt-1">Token 消耗</div>
-              </div>
-              <div class="bg-white rounded-lg shadow p-4 text-center">
-                <div class="text-2xl font-bold text-blue-600" x-text="overviewLlmUsage.requests"></div>
-                <div class="text-xs text-gray-500 mt-1">请求次数</div>
-              </div>
-              <div class="bg-white rounded-lg shadow p-4 text-center">
-                <div class="text-2xl font-bold" :class="overviewLlmUsage.errors > 0 ? 'text-red-600' : 'text-gray-400'" x-text="overviewLlmUsage.errors"></div>
-                <div class="text-xs text-gray-500 mt-1">错误次数</div>
-              </div>
-            </div>
-
-            <!-- By model -->
-            <div class="bg-white rounded-lg shadow overflow-hidden" x-show="overviewLlmUsage.by_model && overviewLlmUsage.by_model.length > 0">
-              <table class="min-w-full divide-y divide-gray-200 text-sm">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">模型</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">请求</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Token</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                  <template x-for="m in overviewLlmUsage.by_model" :key="m.provider + '/' + m.model">
-                    <tr class="hover:bg-gray-50">
-                      <td class="px-4 py-2 text-gray-700">
-                        <span x-show="m.provider" x-text="m.provider + '/'"></span><span x-text="m.model"></span>
-                      </td>
-                      <td class="px-4 py-2 text-right text-gray-600" x-text="m.requests"></td>
-                      <td class="px-4 py-2 text-right text-gray-600" x-text="fmtTokens(m.tokens)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <!-- Empty state: no bot selected, no persona data -->
-          <div x-show="!overviewCoreStats && !overviewPersonaStats && !overviewLlmUsage && (overviewBots.length === 0 || !selectedBotId)" class="text-center text-gray-500 py-12">
-            <p class="text-lg">暂无数据</p>
-            <p class="text-sm mt-1" x-text="!selectedBotId ? '请在左侧选择一个 Bot 查看详情' : '请确保 Bot 已连接或选择一个 Bot'"></p>
-          </div>
-
-        </div>
-      </div>
-
       <!-- Tab: 数据浏览 -->
       <div x-show="currentTab === 'data'" x-cloak>
         <h2 class="text-xl font-bold mb-4">数据浏览</h2>
@@ -374,166 +194,75 @@
                 <div class="animate-pulse bg-gray-200 rounded h-4 w-5/6"></div>
                 <div class="animate-pulse bg-gray-200 rounded h-4 w-2/3"></div>
               </div>
-              <!-- Section sub-tab navigation -->
-              <div x-show="!configLoading" class="flex flex-wrap gap-1 mb-4">
-                <template x-for="sec in configSections" :key="sec.key">
-                  <button @click="configSection = sec.key"
-                    :class="configSection === sec.key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100'"
-                    class="px-3 py-1.5 rounded text-xs font-medium border transition">
-                    <span x-text="sec.label"></span>
-                    <span class="ml-1 opacity-70" x-text="'(' + sec.fields.length + ')'"></span>
-                  </button>
-                </template>
-              </div>
-              <!-- Field expand/collapse toolbar -->
-              <div x-show="!configLoading" class="flex items-center gap-3 mb-3">
-                <button @click="expandAllFields('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">展开字段</button>
-                <button @click="collapseAllFields('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">折叠字段</button>
+              <!-- Toolbar -->
+              <div x-show="!configLoading" class="flex items-center gap-3 mb-4">
+                <button @click="expandAllSections('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">展开全部</button>
+                <button @click="collapseAllSections('config')" class="text-xs px-3 py-1 border rounded hover:bg-gray-100">折叠全部</button>
+                <label class="flex items-center gap-1 text-xs text-gray-500 cursor-pointer">
+                  <input type="checkbox" x-model="showAdvanced" @change="saveUiPrefs()">
+                  显示高级设置
+                </label>
               </div>
               <div x-show="!configLoading && configSections.length === 0" class="text-gray-500 text-center py-4">暂无配置</div>
-              <!-- Section content (one section visible at a time) -->
+              <!-- Grouped sections -->
               <template x-for="sec in configSections" :key="sec.key">
-                <div x-show="configSection === sec.key" class="space-y-1">
-                  <div x-show="sec.fields.length === 0" class="text-gray-400 text-sm text-center py-4">此分组暂无配置字段</div>
-                  <template x-for="field in sec.fields" :key="field.path">
-                    <div class="border rounded-lg bg-white p-2">
-                      <div class="flex items-center justify-between gap-2">
-                        <!-- Label area -->
-                        <div class="flex items-center gap-2 min-w-0 flex-1 cursor-pointer" @click="field.expanded = !field.expanded" :title="field.description || ''">
-                          <span class="font-medium text-sm truncate" x-text="field.label || field.path"></span>
-                          <span class="text-xs text-gray-400 flex-shrink-0 hidden sm:inline" x-text="field.label ? field.path : ''"></span>
+                <div x-show="sec.priority !== 'low' || showAdvanced" class="mb-4">
+                  <div @click="toggleSection('config', sec.key)" class="flex items-center gap-2 p-2 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 border">
+                    <svg :class="isSectionExpanded('config', sec.key) ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    <span class="font-semibold text-sm" x-text="sec.label"></span>
+                    <span class="text-xs text-gray-400" x-text="'(' + sec.fields.length + ')'"></span>
+                  </div>
+                  <div x-show="isSectionExpanded('config', sec.key)" class="mt-1 space-y-1">
+                    <template x-for="field in sec.fields" :key="field.path">
+                      <div class="border rounded-lg bg-white">
+                        <div class="flex items-center justify-between p-2 cursor-pointer hover:bg-gray-50" @click="field.expanded = !field.expanded">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <svg :class="field.expanded ? 'rotate-90' : ''" class="w-3 h-3 text-gray-400 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <span class="font-medium text-sm truncate" x-text="field.label || field.path" :title="field.description || ''"></span>
+                            <span class="text-xs text-gray-400 flex-shrink-0 hidden sm:inline" x-text="field.label ? field.path : ''"></span>
+                          </div>
+                          <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                            <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full" x-text="sourceLabel(field.source)"></span>
+                            <template x-if="field.source === 'bot' || field.source === 'user'">
+                              <button @click.stop="resetField(field.path)" class="text-xs text-red-500 hover:text-red-700">重置</button>
+                            </template>
+                            <template x-if="field.editing">
+                              <button @click.stop="saveField(field.path)" class="text-xs text-green-600 hover:text-green-800">保存</button>
+                            </template>
+                            <template x-if="!field.editing">
+                              <button @click.stop="editField(field.path)" class="text-xs text-blue-600 hover:text-blue-800">编辑</button>
+                            </template>
+                          </div>
                         </div>
-                        <!-- Value area with type-aware controls -->
-                        <div class="flex items-center gap-2 flex-shrink-0 ml-2">
-                          <!-- boolean: toggle switch -->
-                          <template x-if="field.type === 'boolean'">
-                            <label class="relative inline-flex items-center cursor-pointer" @click.stop="">
-                              <input type="checkbox" class="sr-only peer" :checked="field.value" @change="saveFieldWithValue(field.path, $event.target.checked)">
-                              <div class="w-9 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
-                            </label>
-                          </template>
-                          <!-- integer/number: constrained input -->
-                          <template x-if="field.type === 'integer' || field.type === 'number'">
-                            <input type="number"
-                              :min="field.minimum != null ? field.minimum : false"
-                              :max="field.maximum != null ? field.maximum : false"
-                              :value="String(field.value)"
-                              class="w-20 border rounded px-2 py-1 text-xs text-right font-mono"
-                              @change="saveFieldWithValue(field.path, field.type === 'integer' ? Math.trunc(Number($event.target.value)) : Number($event.target.value))"
-                              @click.stop="">
-                          </template>
-                          <!-- string + enum: dropdown -->
-                          <template x-if="field.type === 'string' && field.enum">
-                            <select :value="field.value" class="border rounded px-2 py-1 text-xs" @change="saveFieldWithValue(field.path, $event.target.value)" @click.stop="">
-                              <option x-for="opt in field.enum" :key="opt" :value="opt" x-text="opt"></option>
-                            </select>
-                          </template>
-                          <!-- array: [N items] badge + edit button -->
-                          <template x-if="field.type === 'array'">
-                            <div class="flex items-center gap-1">
-                              <span class="text-xs text-gray-500">[<span x-text="Array.isArray(field.value) ? field.value.length : 0"></span>项]</span>
-                              <button @click.stop="expandArrayField(field)" class="text-xs text-blue-600 hover:text-blue-800 px-1">编辑</button>
+                        <div x-show="field.expanded" x-cloak class="px-3 pb-2 border-t">
+                          <template x-if="!field.editing">
+                            <div class="pt-2">
+                              <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
                             </div>
                           </template>
-                          <!-- object / default string: preview + edit button -->
-                          <template x-if="!['boolean','integer','number','array'].includes(field.type) && !(field.type === 'string' && field.enum)">
-                            <div class="flex items-center gap-1 max-w-[200px]">
-                              <span class="text-xs text-gray-600 truncate" x-text="formatFieldValue(field.value)"></span>
-                              <template x-if="!field.editing">
-                                <button @click.stop="editField(field.path)" class="text-xs text-blue-600 hover:text-blue-800 flex-shrink-0">编辑</button>
-                              </template>
-                              <template x-if="field.editing">
-                                <button @click.stop="saveField(field.path)" class="text-xs text-green-600 hover:text-green-800 flex-shrink-0">保存</button>
-                              </template>
+                          <template x-if="field.editing">
+                            <div class="pt-2">
+                              <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
+                              <div class="flex gap-2 mt-1">
+                                <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
+                                <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
+                              </div>
                             </div>
-                          </template>
-                          <!-- Source badge -->
-                          <span :class="sourceBadgeClass(field.source)" class="text-xs px-2 py-0.5 rounded-full flex-shrink-0" x-text="sourceLabel(field.source)"></span>
-                          <!-- Reset button -->
-                          <template x-if="field.source === 'bot' || field.source === 'user'">
-                            <button @click.stop="resetField(field.path)" class="text-xs text-red-500 hover:text-red-700 flex-shrink-0">重置</button>
-                          </template>
-                          <!-- Cancel for editing mode (string/object) -->
-                          <template x-if="field.editing && field.type !== 'array'">
-                            <button @click.stop="cancelEditField(field.path)" class="text-xs text-gray-500 hover:text-gray-700 flex-shrink-0">取消</button>
                           </template>
                         </div>
                       </div>
-                      <!-- Expanded edit area for complex types -->
-                      <div x-show="field.expanded" x-cloak class="mt-2 border-t pt-2">
-                        <!-- Array tag editor -->
-                        <template x-if="field.type === 'array' && field.editing">
-                          <div>
-                            <div class="flex flex-wrap gap-1 mb-2">
-                              <template x-for="(item, idx) in (Array.isArray(field.editArray) ? field.editArray : [])" :key="idx">
-                                <span class="inline-flex items-center gap-1 bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">
-                                  <span x-text="item"></span>
-                                  <button @click="removeArrayItem(field, idx)" class="text-blue-600 hover:text-blue-800 font-bold">&times;</button>
-                                </span>
-                              </template>
-                              <span x-show="!field.editArray || field.editArray.length === 0" class="text-xs text-gray-400">空列表</span>
-                            </div>
-                            <div class="flex gap-1 mb-2">
-                              <input type="text" x-model="field.newArrayItem" @keydown.enter="addArrayItem(field)"
-                                class="flex-1 border rounded px-2 py-1 text-xs" placeholder="输入后回车添加...">
-                              <button @click="addArrayItem(field)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">添加</button>
-                            </div>
-                            <div class="flex gap-2">
-                              <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
-                              <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
-                            </div>
-                          </div>
-                        </template>
-                        <!-- Default textarea for string/object editing -->
-                        <template x-if="field.type !== 'array' && field.editing">
-                          <div>
-                            <textarea x-model="field.editValue" class="w-full border rounded p-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" rows="3"></textarea>
-                            <div class="flex gap-2 mt-1">
-                              <button @click="saveField(field.path)" class="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">保存</button>
-                              <button @click="cancelEditField(field.path)" class="px-2 py-1 bg-gray-200 text-xs rounded hover:bg-gray-300">取消</button>
-                            </div>
-                          </div>
-                        </template>
-                        <!-- Read-only value display when expanded but not editing -->
-                        <template x-if="!field.editing">
-                          <pre class="bg-gray-50 p-2 rounded text-xs overflow-x-auto" x-text="formatFieldValue(field.value)"></pre>
-                        </template>
-                      </div>
-                    </div>
-                  </template>
+                    </template>
+                  </div>
                 </div>
               </template>
             </div>
 
             <!-- JSON view -->
             <div x-show="configView === 'json'" x-cloak>
-              <!-- JSON sub-tabs -->
-              <div class="flex gap-3 mb-4 border-b">
-                <button @click="configJsonView = 'user'"
-                  :class="configJsonView === 'user' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
-                  class="pb-2 px-1 font-medium text-sm">user.json</button>
-                <button @click="configJsonView = 'bot'; loadBotConfigJson()"
-                  :class="configJsonView === 'bot' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
-                  class="pb-2 px-1 font-medium text-sm">Bot 配置</button>
-              </div>
-
-              <!-- user.json editor -->
-              <div x-show="configJsonView === 'user'">
-                <p class="text-sm text-gray-600 mb-2">编辑 <code>user.json</code> 原始内容：</p>
-                <textarea x-model="userConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateJson"></textarea>
-                <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
-                <button @click="saveUserConfig" :disabled="!userConfigValid || saving" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
-              </div>
-
-              <!-- Bot config editor -->
-              <div x-show="configJsonView === 'bot'">
-                <p class="text-sm text-gray-600 mb-2">编辑 <code x-text="'config/bots/' + selectedBotId + '.json'"></code> 原始内容：</p>
-                <div x-show="botConfigLoading" class="animate-pulse bg-gray-200 rounded h-96"></div>
-                <textarea x-show="!botConfigLoading" x-model="botConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateBotJson"></textarea>
-                <p x-show="!botConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
-                <button @click="saveBotConfig" :disabled="!botConfigValid || saving || botConfigLoading" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
-              </div>
-
+              <p class="text-sm text-gray-600 mb-2">编辑 <code>user.json</code> 原始内容：</p>
+              <textarea x-model="userConfigText" class="w-full h-96 border rounded-lg p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" @input="validateJson"></textarea>
+              <p x-show="!userConfigValid" class="text-red-600 text-sm mt-1">JSON 格式错误，请修正后再保存</p>
+              <button @click="saveUserConfig" :disabled="!userConfigValid || saving" class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium">保存</button>
               <div x-show="reloadResult" data-testid="config-save-feedback" class="mt-4">
                 <div class="text-sm text-green-600 mb-1">配置已保存到磁盘</div>
                 <h4 class="font-medium mb-2 text-sm">运行时重载：</h4>
@@ -631,217 +360,49 @@
 
             <!-- 角色卡 sub-tab -->
             <div x-show="personaView === 'characters'" x-cloak>
-              <!-- Action bar -->
-              <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">角色卡管理</h3>
-                <button @click="showNewCharacterModal = true" class="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">新建角色卡</button>
+              <div x-show="charactersLoading" class="space-y-3 p-4">
+                <div class="animate-pulse bg-gray-200 rounded h-5 w-1/4"></div>
+                <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
               </div>
-
-              <!-- Loading skeleton -->
-              <div x-show="charactersLoading" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                <template x-for="i in 6">
-                  <div class="animate-pulse bg-white rounded-lg shadow p-4 h-32"></div>
-                </template>
-              </div>
-
-              <!-- Empty state -->
-              <div x-show="!charactersLoading && characters.length === 0" class="text-gray-500 text-center py-12">
-                <div class="text-4xl mb-3">🎭</div>
-                <p class="text-lg">暂无角色卡</p>
-                <p class="text-sm mt-1">点击"新建角色卡"创建第一个角色</p>
-              </div>
-
-              <!-- Card grid -->
-              <div x-show="!charactersLoading && characters.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                <template x-for="ch in characters" :key="ch.name">
-                  <div class="bg-white rounded-lg shadow hover:shadow-md transition cursor-pointer border border-gray-100"
-                       @click="openCharacterDetail(ch.name)">
-                    <!-- Card header -->
-                    <div class="p-4 pb-3">
-                      <div class="flex items-center justify-between">
-                        <span class="font-bold text-lg truncate" x-text="ch.display_name || ch.name"></span>
-                        <span x-show="ch.is_default" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full flex-shrink-0 ml-2">默认</span>
-                      </div>
-                      <div class="text-xs text-gray-400 mt-0.5" x-text="ch.name"></div>
-                    </div>
-                    <!-- Card body -->
-                    <div class="px-4 pb-4 pt-0">
-                      <p class="text-sm text-gray-600 line-clamp-2" x-text="ch.description_snippet || '无描述'"></p>
-                      <div class="mt-3 flex flex-wrap gap-1">
-                        <template x-for="bot in ch.used_by" :key="bot">
-                          <span class="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded" x-text="bot"></span>
-                        </template>
-                        <span x-show="!ch.used_by || ch.used_by.length === 0" class="text-xs text-gray-400">未使用</span>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-              </div>
-
-              <!-- ====== Character Detail/Edit Modal ====== -->
-              <div x-show="characterDetail !== null" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak @click.self="closeCharacterDetail()">
-                <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl max-h-[90vh] flex flex-col">
-                  <!-- Modal header -->
-                  <div class="flex justify-between items-center p-4 border-b">
-                    <div class="flex items-center gap-3">
-                      <h3 class="font-bold text-lg" x-text="'角色卡: ' + (characterDetail?.display_name || characterDetail?.name)"></h3>
-                      <span x-show="characterDetail?.is_default" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">默认角色卡不可编辑</span>
-                    </div>
-                    <button @click="closeCharacterDetail()" class="text-gray-500 hover:text-gray-700 text-2xl leading-none">&times;</button>
-                  </div>
-
-                  <!-- Modal body: section tabs -->
-                  <div class="flex-1 overflow-y-auto p-4">
-                    <div x-show="characterDetailLoading" class="text-center py-8 text-gray-400">加载中...</div>
-
-                    <template x-if="!characterDetailLoading && characterDetail">
-                      <div>
-                        <!-- Section tabs -->
-                        <div class="flex gap-2 mb-4 border-b pb-2">
-                          <button @click="characterDetailSection = 'basic'"
-                                  :class="characterDetailSection === 'basic' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
-                                  class="pb-1 px-2 text-sm font-medium">基本信息</button>
-                          <button @click="characterDetailSection = 'dialogue'"
-                                  :class="characterDetailSection === 'dialogue' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
-                                  class="pb-1 px-2 text-sm font-medium">对话配置</button>
-                          <button @click="characterDetailSection = 'worldbook'"
-                                  :class="characterDetailSection === 'worldbook' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
-                                  class="pb-1 px-2 text-sm font-medium">世界书</button>
-                          <button @click="characterDetailSection = 'extensions'"
-                                  :class="characterDetailSection === 'extensions' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'"
-                                  class="pb-1 px-2 text-sm font-medium">扩展设置</button>
-                        </div>
-
-                        <!-- Basic section -->
-                        <div x-show="characterDetailSection === 'basic'" class="space-y-3" @input="markCharacterDirty()">
-                          <div>
-                            <label class="block text-xs font-medium text-gray-500 mb-1">角色名</label>
-                            <input x-model="characterEditData.basic_name" :disabled="!characterDetailEdit || characterDetail?.is_default"
-                                   class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500">
-                          </div>
-                          <div>
-                            <label class="block text-xs font-medium text-gray-500 mb-1">描述</label>
-                            <textarea x-model="characterEditData.basic_description" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="3"
-                                      class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
-                          </div>
-                          <div>
-                            <label class="block text-xs font-medium text-gray-500 mb-1">个性</label>
-                            <textarea x-model="characterEditData.basic_personality" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="3"
-                                      class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
-                          </div>
-                          <div>
-                            <label class="block text-xs font-medium text-gray-500 mb-1">情景</label>
-                            <textarea x-model="characterEditData.basic_scenario" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="2"
-                                      class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
-                          </div>
-                          <div>
-                            <label class="block text-xs font-medium text-gray-500 mb-1">系统提示词</label>
-                            <textarea x-model="characterEditData.basic_system_prompt" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="4"
-                                      class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
-                          </div>
-                        </div>
-
-                        <!-- Dialogue section -->
-                        <div x-show="characterDetailSection === 'dialogue'" class="space-y-3" @input="markCharacterDirty()">
-                          <div>
-                            <label class="block text-xs font-medium text-gray-500 mb-1">对话示例（占位符：&#123;&#123;user&#125;&#125; / &#123;&#123;char&#125;&#125;）</label>
-                            <textarea x-model="characterEditData.dialogue_mes_example" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="8"
-                                      class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
-                          </div>
-                        </div>
-
-                        <!-- World book section (JSON block) -->
-                        <div x-show="characterDetailSection === 'worldbook'" class="space-y-3" @input="markCharacterDirty()">
-                          <label class="block text-xs font-medium text-gray-500 mb-1">世界书条目（JSON 格式）</label>
-                          <textarea x-model="characterEditData.character_book_json" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="12"
-                                    class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
-                          <p class="text-xs text-gray-400">每一条目格式：{"keys": ["触发词"], "content": "内容", "enabled": true}</p>
-                        </div>
-
-                        <!-- Extensions section (JSON block) -->
-                        <div x-show="characterDetailSection === 'extensions'" class="space-y-3" @input="markCharacterDirty()">
-                          <label class="block text-xs font-medium text-gray-500 mb-1">DicePP 扩展设置（JSON 格式）</label>
-                          <textarea x-model="characterEditData.extensions_json" :disabled="!characterDetailEdit || characterDetail?.is_default" rows="12"
-                                    class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"></textarea>
-                          <div class="text-xs text-gray-400 space-y-0.5">
-                            <p>可用字段（均为可选）：</p>
-                            <p>relation_labels: [5个好感度标签], world: 世界观, daily_events_count: 每日事件数</p>
-                            <p>event_day_start_hour: 8, event_day_end_hour: 22, event_jitter_minutes: 60</p>
-                            <p>image_gen_style / image_gen_appearance: 图片生成风格/外貌</p>
-                          </div>
-                        </div>
-                      </div>
+              <div x-show="!charactersLoading && characters.length === 0" class="text-gray-500 text-center py-8">暂无角色卡</div>
+              <div x-show="characters.length > 0" class="bg-white rounded-lg shadow overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="bg-gray-50">
+                    <tr>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">角色名</th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">配置文件</th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-200">
+                    <template x-for="ch in characters" :key="ch.name">
+                      <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-2 text-sm font-medium" x-text="ch.name"></td>
+                        <td class="px-4 py-2 text-sm text-gray-500">
+                          <span x-show="ch.has_config" class="text-green-600">character.yaml</span>
+                          <span x-show="!ch.has_config" class="text-gray-400">无</span>
+                        </td>
+                        <td class="px-4 py-2">
+                          <button @click="viewCharacter(ch.name)" class="text-blue-600 hover:text-blue-800 text-xs mr-2">查看</button>
+                        </td>
+                      </tr>
                     </template>
-                  </div>
-
-                  <!-- Modal footer -->
-                  <div class="flex justify-between items-center p-4 border-t">
-                    <div>
-                      <button x-show="!characterDetail?.is_default" @click="confirmDeleteCharacter()"
-                              class="px-3 py-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded text-sm">删除角色卡</button>
-                    </div>
-                    <div class="flex gap-2">
-                      <template x-if="!characterDetailEdit">
-                        <button x-show="!characterDetail?.is_default" @click="enterCharacterEdit()"
-                                class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">编辑</button>
-                      </template>
-                      <template x-if="characterDetailEdit">
-                        <button @click="saveCharacter()" :disabled="saving || !characterDetailDirty"
-                                class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm"
-                                :class="characterDetailDirty ? 'animate-pulse' : ''">保存</button>
-                      </template>
-                      <template x-if="characterDetailEdit">
-                        <button @click="cancelCharacterEdit()"
-                                class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
-                      </template>
-                      <button @click="closeCharacterDetail()" class="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 text-sm">关闭</button>
-                    </div>
-                  </div>
-                </div>
+                  </tbody>
+                </table>
               </div>
-
-              <!-- ====== New Character Modal ====== -->
-              <div x-show="showNewCharacterModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak @click.self="showNewCharacterModal = false">
-                <div class="bg-white rounded-lg shadow-xl w-96 max-w-[90vw]">
+              <!-- Character YAML editor modal -->
+              <div x-show="editingCharacter" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak>
+                <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl max-h-[85vh] flex flex-col">
                   <div class="flex justify-between items-center p-4 border-b">
-                    <h3 class="font-bold">新建角色卡</h3>
-                    <button @click="showNewCharacterModal = false" class="text-gray-500 hover:text-gray-700 text-xl leading-none">&times;</button>
+                    <h3 class="font-bold" x-text="'角色卡: ' + editingCharacter"></h3>
+                    <button @click="editingCharacter = ''" class="text-gray-500 hover:text-gray-700">&times;</button>
                   </div>
-                  <div class="p-4 space-y-3">
-                    <div>
-                      <label class="block text-sm font-medium text-gray-700 mb-1">目录名 <span class="text-red-500">*</span></label>
-                      <input x-model="newCharacterName" placeholder="例如: my-character" @input="newCharacterName = newCharacterName.replace(/[\/\\\x00]/g, '')"
-                             class="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
-                      <p class="text-xs text-gray-400 mt-1">英文字母、数字、下划线和连字符，建议避免中文</p>
-                    </div>
-                    <div>
-                      <label class="block text-sm font-medium text-gray-700 mb-1">显示名称</label>
-                      <input x-model="newCharacterDisplayName" placeholder="角色中文名（可留空，默认为目录名）"
-                             class="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
-                    </div>
+                  <div class="p-4 overflow-y-auto flex-1">
+                    <textarea x-model="characterYamlText" class="w-full h-96 border rounded p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
                   </div>
                   <div class="flex justify-end gap-2 p-4 border-t">
-                    <button @click="showNewCharacterModal = false" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
-                    <button @click="createCharacter()" :disabled="!newCharacterName.trim() || newCharacterCreating"
-                            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm">创建</button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- ====== Delete Confirmation Modal ====== -->
-              <div x-show="deleteConfirmCharacter !== null" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50" x-cloak>
-                <div class="bg-white rounded-lg shadow-xl w-96 max-w-[90vw]">
-                  <div class="p-4">
-                    <h3 class="font-bold text-lg mb-3">确认删除</h3>
-                    <p class="text-sm text-gray-600">
-                      确定要删除角色卡 <span class="font-bold" x-text="deleteConfirmCharacter"></span> 吗？
-                    </p>
-                    <p class="text-sm text-red-500 mt-2">此操作不可逆，角色卡目录和所有文件将被永久删除。</p>
-                  </div>
-                  <div class="flex justify-end gap-2 p-4 border-t">
-                    <button @click="deleteConfirmCharacter = null" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
-                    <button @click="deleteCharacter()" :disabled="deleteConfirmLoading"
-                            class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm">确认删除</button>
+                    <button @click="editingCharacter = ''" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 text-sm">取消</button>
+                    <button @click="saveCharacter" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm">保存</button>
                   </div>
                 </div>
               </div>
@@ -989,52 +550,665 @@
         </div>
       </div>
 
+      <!-- Tab: 存档 -->
+      <div x-show="currentTab === 'archives'" x-cloak data-testid="archives-tab">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-bold">存档</h2>
+          <button
+            @click="loadArchives()"
+            :disabled="archivesLoading || archiveCreating"
+            data-testid="archives-refresh-button"
+            class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+          >刷新</button>
+        </div>
+
+        <div class="bg-white rounded-lg shadow mb-4">
+          <div class="p-4 border-b">
+            <h3 class="font-semibold">创建存档</h3>
+          </div>
+          <div class="p-4">
+            <div class="flex flex-wrap items-end gap-3">
+              <div class="min-w-64 flex-1">
+                <label for="archive-description" class="block text-xs font-medium text-gray-500 mb-1">说明</label>
+                <input
+                  id="archive-description"
+                  x-model.trim="archiveDescription"
+                  data-testid="archive-description-input"
+                  type="text"
+                  class="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  placeholder="可选"
+                  :disabled="archiveCreating"
+                />
+              </div>
+              <button
+                @click="createArchive()"
+                :disabled="archiveCreating"
+                data-testid="archive-create-button"
+                class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+                x-text="archiveCreating ? '创建中...' : '创建'"
+              ></button>
+            </div>
+            <div x-show="archiveCreateMessage" x-cloak data-testid="archive-create-success" class="mt-3 bg-green-50 border border-green-200 text-green-700 p-2 rounded text-sm" x-text="archiveCreateMessage"></div>
+            <div x-show="archiveCreateError" x-cloak data-testid="archive-create-error" class="mt-3 bg-red-50 border border-red-200 text-red-700 p-2 rounded text-sm" x-text="archiveCreateError"></div>
+          </div>
+        </div>
+
+        <div x-show="archivesError" x-cloak data-testid="archives-error" class="mb-4 bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="archivesError"></div>
+
+        <div class="bg-white rounded-lg shadow overflow-x-auto mb-4">
+          <div class="p-4 border-b flex items-center justify-between">
+            <h3 class="font-semibold">存档列表</h3>
+            <span class="text-xs text-gray-500" x-text="archivesLoading ? '加载中...' : `${archives.length} 个存档`"></span>
+          </div>
+          <div x-show="archivesLoading" class="space-y-3 p-4">
+            <div class="animate-pulse bg-gray-200 rounded h-5 w-1/4"></div>
+            <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
+            <div class="animate-pulse bg-gray-200 rounded h-4 w-1/2"></div>
+          </div>
+          <table x-show="!archivesLoading && archives.length > 0" data-testid="archive-table" class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">文件名</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">创建时间</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">大小</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">状态</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">说明</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">文件数</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              <template x-for="archive in archives" :key="archive.filename">
+                <tr class="hover:bg-gray-50" data-testid="archive-row">
+                  <td class="px-4 py-3 text-sm font-mono" x-text="archive.filename"></td>
+                  <td class="px-4 py-3 text-sm text-gray-600 whitespace-nowrap" x-text="formatIsoTimestamp(archive.created_at)"></td>
+                  <td class="px-4 py-3 text-sm text-gray-600" x-text="formatFileSize(archive.size)"></td>
+                  <td class="px-4 py-3 text-sm">
+                    <span
+                      class="text-xs px-2 py-0.5 rounded-full"
+                      :class="archive.valid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                      x-text="archive.valid ? '可用' : '异常'"
+                    ></span>
+                  </td>
+                  <td class="px-4 py-3 text-sm text-gray-600 max-w-xs truncate" x-text="archive.description || '-'"></td>
+                  <td class="px-4 py-3 text-sm text-gray-600" x-text="archive.file_count ?? '-'"></td>
+                  <td class="px-4 py-3">
+                    <div class="flex flex-wrap gap-2">
+                      <button
+                        @click="viewArchive(archive)"
+                        :disabled="!archive.valid || archiveDetailLoading"
+                        data-testid="archive-detail-button"
+                        class="px-2 py-1 text-xs border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >详情</button>
+                      <button
+                        @click="verifyArchive(archive)"
+                        :disabled="!archive.valid || archiveVerifying || archiveDeleting[archive.filename] === true"
+                        data-testid="archive-verify-button"
+                        class="px-2 py-1 text-xs border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        x-text="archiveVerifying && archiveVerifyArchive?.filename === archive.filename ? '检查中' : '检查存档'"
+                      ></button>
+                      <button
+                        @click="requestArchiveRestorePlan(archive)"
+                        :disabled="!archive.valid || archivePlanLoading || archiveDeleting[archive.filename] === true"
+                        data-testid="archive-plan-button"
+                        class="px-2 py-1 text-xs border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        x-text="archivePlanLoading && archivePlanArchive?.filename === archive.filename ? '预览中' : '恢复预览'"
+                      ></button>
+                      <button
+                        @click="deleteArchive(archive)"
+                        :disabled="archiveDeleting[archive.filename] === true"
+                        data-testid="archive-delete-button"
+                        class="px-2 py-1 text-xs border border-red-200 text-red-600 rounded hover:bg-red-50 disabled:opacity-50"
+                        x-text="archiveDeleting[archive.filename] === true ? '删除中' : '删除'"
+                      ></button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="!archivesLoading && archives.length === 0" class="text-center text-gray-500 py-8">暂无存档</div>
+        </div>
+
+        <div x-show="archiveVerifyArchive || archiveVerifying || archiveVerifyError" x-cloak data-testid="archive-verify-panel" class="bg-white rounded-lg shadow mb-4">
+          <div class="p-4 border-b flex items-center justify-between gap-4">
+            <div>
+              <h3 class="font-semibold">检查结果</h3>
+              <div class="text-xs text-gray-500 mt-1" x-text="archiveVerifyArchive?.filename || ''"></div>
+            </div>
+            <button @click="clearArchiveVerify()" class="px-2 py-1 text-xs border rounded hover:bg-gray-100">关闭</button>
+          </div>
+          <div class="p-4 space-y-3">
+            <div x-show="archiveVerifying" data-testid="archive-verify-loading" class="text-sm text-gray-500">正在检查存档...</div>
+            <div x-show="archiveVerifyError" x-cloak data-testid="archive-verify-error" class="bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="archiveVerifyError"></div>
+            <template x-if="archiveVerify && !archiveVerifyError">
+              <div class="space-y-4 text-sm">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <div class="text-xs text-gray-500">检查结果</div>
+                    <div
+                      data-testid="archive-verify-status"
+                      class="font-medium"
+                      :class="archiveVerify.verified ? 'text-green-700' : 'text-red-700'"
+                      x-text="archiveVerify.verified ? '可恢复' : '需要处理'"
+                    ></div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">可恢复文件</div>
+                    <div data-testid="archive-verify-restorable-count" class="font-medium" x-text="archiveVerifyRestorableFiles(archiveVerify).length"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs text-gray-500 mb-1">问题</div>
+                  <ul
+                    x-show="archiveVerifyList(archiveVerify.problems).length > 0"
+                    data-testid="archive-verify-problems"
+                    class="list-disc list-inside bg-red-50 border border-red-100 rounded p-2 text-red-700 space-y-1"
+                  >
+                    <template x-for="(problem, index) in archiveVerifyList(archiveVerify.problems)" :key="`problem-${index}`">
+                      <li x-text="problem"></li>
+                    </template>
+                  </ul>
+                  <div x-show="archiveVerifyList(archiveVerify.problems).length === 0" data-testid="archive-verify-problems-empty" class="bg-gray-50 border rounded p-2 text-gray-500">-</div>
+                </div>
+                <div>
+                  <div class="text-xs text-gray-500 mb-1">提醒</div>
+                  <ul
+                    x-show="archiveVerifyList(archiveVerify.warnings).length > 0"
+                    data-testid="archive-verify-warnings"
+                    class="list-disc list-inside bg-yellow-50 border border-yellow-100 rounded p-2 text-yellow-800 space-y-1"
+                  >
+                    <template x-for="(warning, index) in archiveVerifyList(archiveVerify.warnings)" :key="`warning-${index}`">
+                      <li x-text="warning"></li>
+                    </template>
+                  </ul>
+                  <div x-show="archiveVerifyList(archiveVerify.warnings).length === 0" data-testid="archive-verify-warnings-empty" class="bg-gray-50 border rounded p-2 text-gray-500">-</div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div x-show="archivePlanArchive || archivePlanLoading || archivePlanError || archivePlanVerification" x-cloak data-testid="archive-plan-panel" class="bg-white rounded-lg shadow mb-4">
+          <div class="p-4 border-b flex items-center justify-between gap-4">
+            <div>
+              <h3 class="font-semibold">恢复预览</h3>
+              <div class="text-xs text-gray-500 mt-1" x-text="archivePlanArchive?.filename || ''"></div>
+            </div>
+            <button @click="clearArchivePlan()" class="px-2 py-1 text-xs border rounded hover:bg-gray-100">关闭</button>
+          </div>
+          <div class="p-4 space-y-4">
+            <div x-show="archivePlanLoading" data-testid="archive-plan-loading" class="text-sm text-gray-500">正在生成恢复预览...</div>
+            <div x-show="archivePlanError" x-cloak data-testid="archive-plan-error" class="bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="archivePlanError"></div>
+            <template x-if="archivePlanVerification && !archivePlanLoading && !archivePlanError">
+              <div class="space-y-3 text-sm">
+                <div data-testid="archive-plan-verification-failed" class="bg-red-50 border border-red-200 text-red-700 p-3 rounded">检查未通过</div>
+                <div>
+                  <div class="text-xs text-gray-500 mb-1">问题</div>
+                  <ul
+                    x-show="archivePlanList(archivePlanVerification.problems).length > 0"
+                    data-testid="archive-plan-verification-problems"
+                    class="list-disc list-inside bg-red-50 border border-red-100 rounded p-2 text-red-700 space-y-1"
+                  >
+                    <template x-for="(problem, index) in archivePlanList(archivePlanVerification.problems)" :key="`plan-verification-problem-${index}`">
+                      <li x-text="problem"></li>
+                    </template>
+                  </ul>
+                  <div x-show="archivePlanList(archivePlanVerification.problems).length === 0" data-testid="archive-plan-verification-problems-empty" class="bg-gray-50 border rounded p-2 text-gray-500">-</div>
+                </div>
+              </div>
+            </template>
+            <template x-if="archivePlan && !archivePlanLoading && !archivePlanError">
+              <div class="space-y-4 text-sm">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <div class="text-xs text-gray-500">将恢复</div>
+                    <div data-testid="archive-plan-entry-count" class="font-medium" x-text="archivePlanRestorableCount(archivePlan)"></div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">新增</div>
+                    <div data-testid="archive-plan-create-count" class="font-medium text-green-700" x-text="archivePlanActionCount(archivePlan, 'create')"></div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">覆盖</div>
+                    <div data-testid="archive-plan-overwrite-count" class="font-medium text-yellow-700" x-text="archivePlanActionCount(archivePlan, 'overwrite')"></div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">无法恢复</div>
+                    <div data-testid="archive-plan-blocked-count" class="font-medium text-red-700" x-text="archivePlanActionCount(archivePlan, 'blocked')"></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs text-gray-500 mb-1">问题</div>
+                  <ul
+                    x-show="archivePlanList(archivePlan.problems).length > 0"
+                    data-testid="archive-plan-problems"
+                    class="list-disc list-inside bg-red-50 border border-red-100 rounded p-2 text-red-700 space-y-1"
+                  >
+                    <template x-for="(problem, index) in archivePlanList(archivePlan.problems)" :key="`plan-problem-${index}`">
+                      <li x-text="problem"></li>
+                    </template>
+                  </ul>
+                  <div x-show="archivePlanList(archivePlan.problems).length === 0" data-testid="archive-plan-problems-empty" class="bg-gray-50 border rounded p-2 text-gray-500">-</div>
+                </div>
+                <div>
+                  <div class="text-xs text-gray-500 mb-1">提醒</div>
+                  <ul
+                    x-show="archivePlanList(archivePlan.warnings).length > 0"
+                    data-testid="archive-plan-warnings"
+                    class="list-disc list-inside bg-yellow-50 border border-yellow-100 rounded p-2 text-yellow-800 space-y-1"
+                  >
+                    <template x-for="(warning, index) in archivePlanList(archivePlan.warnings)" :key="`plan-warning-${index}`">
+                      <li x-text="warning"></li>
+                    </template>
+                  </ul>
+                  <div x-show="archivePlanList(archivePlan.warnings).length === 0" data-testid="archive-plan-warnings-empty" class="bg-gray-50 border rounded p-2 text-gray-500">-</div>
+                </div>
+                <div class="border-t pt-3 space-y-3" data-testid="archive-restore-controls">
+                  <div
+                    x-show="!archiveCanRestore(archivePlan)"
+                    data-testid="archive-restore-disabled-reason"
+                    class="bg-red-50 border border-red-100 text-red-700 p-2 rounded"
+                    x-text="archiveRestoreDisabledReason(archivePlan)"
+                  ></div>
+                  <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+                    <div>
+                      <label class="block text-xs text-gray-500 mb-1" for="archive-restore-description">恢复前备份说明</label>
+                      <input
+                        id="archive-restore-description"
+                        x-model="archiveRestoreDescription"
+                        :disabled="!archiveCanRestore(archivePlan) || archiveRestoring"
+                        data-testid="archive-restore-description"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                        placeholder="可选"
+                      >
+                    </div>
+                    <div class="space-y-2">
+                      <label class="flex items-center gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          x-model="archiveRestoreQuiesceRuntime"
+                          :disabled="!archiveCanRestore(archivePlan) || archiveRestoring"
+                          data-testid="archive-restore-quiesce-runtime"
+                          class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                        <span>恢复前暂停 Bot（推荐）</span>
+                      </label>
+                      <label class="flex items-center gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          x-model="archiveRestoreConfirmed"
+                          :disabled="!archiveCanRestore(archivePlan) || archiveRestoring"
+                          data-testid="archive-restore-confirm"
+                          class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                        <span>确认按此计划恢复</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <button
+                      @click="restoreArchive()"
+                      :disabled="!archiveCanRestore(archivePlan) || !archiveRestoreConfirmed || archiveRestoring"
+                      data-testid="archive-restore-button"
+                      class="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      x-text="archiveRestoring ? '恢复中...' : '恢复'"
+                    ></button>
+                    <span x-show="archiveRestoreConfirmed && archiveCanRestore(archivePlan)" class="text-xs text-gray-500">恢复前会自动创建备份存档</span>
+                  </div>
+                  <div x-show="archiveRestoreError" x-cloak data-testid="archive-restore-error" class="bg-red-50 border border-red-200 text-red-700 p-3 rounded text-sm" x-text="archiveRestoreError"></div>
+                  <template x-if="archiveRestoreResult">
+                    <div class="space-y-3">
+                      <div
+                        data-testid="archive-restore-status"
+                        class="p-3 rounded border text-sm"
+                        :class="archiveRestoreHasFailures(archiveRestoreResult) ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'"
+                        x-text="archiveRestoreHasFailures(archiveRestoreResult) ? '恢复失败' : '恢复完成'"
+                      ></div>
+                      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                        <div>
+                          <div class="text-xs text-gray-500">恢复前备份</div>
+                          <div data-testid="archive-restore-pre-restore" class="font-mono text-xs break-all" x-text="archiveRestorePreRestoreFilename(archiveRestoreResult)"></div>
+                        </div>
+                        <div>
+                          <div class="text-xs text-gray-500">已恢复</div>
+                          <div data-testid="archive-restore-restored-count" class="font-medium text-green-700" x-text="archiveRestoreEntries(archiveRestoreResult, 'restored_entries').length"></div>
+                        </div>
+                        <div>
+                          <div class="text-xs text-gray-500">失败</div>
+                          <div data-testid="archive-restore-failed-count" class="font-medium text-red-700" x-text="archiveRestoreEntries(archiveRestoreResult, 'failed_entries').length"></div>
+                        </div>
+                      </div>
+                      <div
+                        x-show="archiveRestoreHasFailures(archiveRestoreResult) && archiveRestorePreRestoreFilename(archiveRestoreResult) !== '-'"
+                        x-cloak
+                        class="flex flex-wrap items-center gap-3 rounded border border-red-100 bg-red-50 p-3 text-sm"
+                        data-testid="archive-restore-pre-restore-action"
+                      >
+                        <div class="text-red-700">可基于恢复前自动创建的存档继续查看恢复预览。</div>
+                        <button
+                          @click="requestArchiveRestorePlan(archiveRestorePreRestoreArchive(archiveRestoreResult))"
+                          :disabled="archivePlanLoading || !archiveRestorePreRestoreArchive(archiveRestoreResult)?.filename"
+                          data-testid="archive-restore-pre-restore-plan-button"
+                          class="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >查看恢复前存档预览</button>
+                      </div>
+                      <div x-show="archiveRestoreEntries(archiveRestoreResult, 'failed_entries').length > 0">
+                        <div class="text-xs text-gray-500 mb-1">失败原因</div>
+                        <div class="overflow-x-auto border rounded">
+                          <table data-testid="archive-restore-failed-entries" class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                              <tr>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">原因</th>
+                              </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                              <template x-for="entry in archiveRestoreEntries(archiveRestoreResult, 'failed_entries')" :key="`failed-${entry.arcname}`">
+                                <tr>
+                                  <td class="px-3 py-2 text-xs text-red-700" x-text="entry.error || '-'"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <div x-show="archiveRestoreRuntimeQuiesce" x-cloak data-testid="archive-restore-runtime-quiesce" class="border rounded">
+                    <div class="px-3 py-2 bg-gray-50 border-b text-sm font-medium">运行控制处理</div>
+                    <div class="p-3 space-y-3 text-sm">
+                      <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+                        <div>
+                          <div class="text-xs text-gray-500">Bot</div>
+                          <div data-testid="archive-restore-runtime-bots" class="font-mono text-xs break-all" x-text="archiveRuntimeQuiesceBots(archiveRestoreRuntimeQuiesce).join(', ') || '-'"></div>
+                        </div>
+                        <div>
+                          <div class="text-xs text-gray-500">失败阶段</div>
+                          <div data-testid="archive-restore-runtime-failed-stage" class="font-mono text-xs" x-text="archiveRuntimeStageLabel(archiveRestoreRuntimeQuiesce?.failed_stage)"></div>
+                        </div>
+                        <div>
+                          <div class="text-xs text-gray-500">已开始恢复</div>
+                          <div data-testid="archive-restore-runtime-restore-started" class="font-mono text-xs" x-text="archiveBooleanLabel(archiveRestoreRuntimeQuiesce?.restore_started)"></div>
+                        </div>
+                        <div>
+                          <div class="text-xs text-gray-500">已尝试重启</div>
+                          <div data-testid="archive-restore-runtime-restart-attempted" class="font-mono text-xs" x-text="archiveBooleanLabel(archiveRestoreRuntimeQuiesce?.restart_attempted)"></div>
+                        </div>
+                        <div>
+                          <div class="text-xs text-gray-500">启动失败</div>
+                          <div data-testid="archive-restore-runtime-start-failed" class="font-mono text-xs" x-text="archiveBooleanLabel(archiveRestoreRuntimeQuiesce?.start_failed)"></div>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="text-xs text-gray-500 mb-1">暂停操作</div>
+                        <div class="overflow-x-auto border rounded">
+                          <table data-testid="archive-restore-runtime-stop-operations" class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                              <tr>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Bot</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">操作</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">结果</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">消息</th>
+                              </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                              <template x-for="(op, index) in archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'stop_operations')" :key="`restore-stop-${op.operation_id || op.bot_id || index}`">
+                                <tr>
+                                  <td class="px-3 py-2 text-xs font-mono" x-text="op.bot_id || '-'"></td>
+                                  <td class="px-3 py-2 text-xs" x-text="actionLabel(op.action)"></td>
+                                  <td class="px-3 py-2 text-xs" x-text="operationStatusLabel(op.status)"></td>
+                                  <td class="px-3 py-2 text-xs text-gray-600" x-text="op.message || '-'"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                          <div x-show="archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'stop_operations').length === 0" data-testid="archive-restore-runtime-stop-empty" class="p-3 text-xs text-gray-500">-</div>
+                        </div>
+                      </div>
+                      <div>
+                        <div class="text-xs text-gray-500 mb-1">恢复启动操作</div>
+                        <div class="overflow-x-auto border rounded">
+                          <table data-testid="archive-restore-runtime-start-operations" class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                              <tr>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Bot</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">操作</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">结果</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">消息</th>
+                              </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                              <template x-for="(op, index) in archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'start_operations')" :key="`restore-start-${op.operation_id || op.bot_id || index}`">
+                                <tr>
+                                  <td class="px-3 py-2 text-xs font-mono" x-text="op.bot_id || '-'"></td>
+                                  <td class="px-3 py-2 text-xs" x-text="actionLabel(op.action)"></td>
+                                  <td class="px-3 py-2 text-xs" x-text="operationStatusLabel(op.status)"></td>
+                                  <td class="px-3 py-2 text-xs text-gray-600" x-text="op.message || '-'"></td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                          <div x-show="archiveRuntimeQuiesceOperations(archiveRestoreRuntimeQuiesce, 'start_operations').length === 0" data-testid="archive-restore-runtime-start-empty" class="p-3 text-xs text-gray-500">-</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div x-show="archiveDetail || archiveDetailLoading || archiveDetailError" x-cloak data-testid="archive-detail-panel" class="bg-white rounded-lg shadow">
+          <div class="p-4 border-b flex items-center justify-between gap-4">
+            <div>
+              <h3 class="font-semibold">存档信息</h3>
+              <div class="text-xs text-gray-500 mt-1" x-text="archiveDetailArchive?.filename || ''"></div>
+            </div>
+            <button @click="clearArchiveDetail()" class="px-2 py-1 text-xs border rounded hover:bg-gray-100">关闭</button>
+          </div>
+          <div class="p-4">
+            <div x-show="archiveDetailLoading" class="text-sm text-gray-500">正在读取...</div>
+            <div x-show="archiveDetailError" x-cloak data-testid="archive-detail-error" class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded text-sm" x-text="archiveDetailError"></div>
+            <template x-if="archiveDetail && !archiveDetailError">
+              <div class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <div class="text-xs text-gray-500">存档格式</div>
+                    <div data-testid="archive-detail-format-version" class="font-medium" x-text="archiveDetail.format_version ?? '-'"></div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">DicePP 版本</div>
+                    <div data-testid="archive-detail-dicepp-version" class="font-medium" x-text="archiveDetail.dicepp_version || '-'"></div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">文件数量</div>
+                    <div data-testid="archive-detail-file-count" class="font-medium" x-text="archiveChecksumFileCount(archiveDetail)"></div>
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <div class="text-xs text-gray-500">创建时间</div>
+                    <div data-testid="archive-detail-created-at" class="font-medium" x-text="formatIsoTimestamp(archiveDetail.created_at)"></div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-gray-500">说明</div>
+                    <div data-testid="archive-detail-description" class="font-medium" x-text="archiveDetail.description || '-'"></div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
       <!-- Tab: 运行监控 -->
-      <div x-show="currentTab === 'monitor'" x-cloak>
-        <h2 class="text-xl font-bold mb-4">运行监控</h2>
-        <div class="bg-white rounded-lg shadow overflow-x-auto">
-          <!-- Monitor skeleton — only shown while SSE connection is live -->
-          <div x-show="monitorLoading && eventSourceConnected" class="space-y-3 p-4">
+      <div x-show="currentTab === 'monitor'" x-cloak data-testid="monitor-tab">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-bold">运行监控</h2>
+          <div class="flex items-center gap-2">
+            <button
+              @click="loadManagerRuntimeLogs()"
+              :disabled="managerRuntimeLogsDisabled()"
+              :title="managerCanViewRuntimeLogs() ? '读取全局运行日志' : '未接入运行控制，无法读取运行日志'"
+              data-testid="manager-runtime-log-button"
+              class="px-3 py-1.5 border text-sm rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              x-text="managerLogsLoading && managerLogsBotId === 'runtime' ? '读取中' : '运行日志'"
+            ></button>
+            <button @click="loadMonitor()" :disabled="monitorLoading || managerLoading || managerOperationsLoading" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50">刷新</button>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow mb-4">
+          <div class="p-4 border-b">
+            <div class="flex flex-col gap-1">
+              <div class="text-sm font-medium">
+                运行控制：<span data-testid="monitor-runtime-backend" :title="runtimeBackendLabel(managerHealth?.runtime_backend)" x-text="runtimeBackendLabel(managerHealth?.runtime_backend)"></span>
+              </div>
+              <div class="text-sm text-gray-500" x-text="managerRuntimeSummary()"></div>
+            </div>
+            <div x-show="managerRuntimeUnavailable()" class="mt-3 bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded text-sm">
+              当前只显示连接状态，启动、停止、重启和运行日志需要接入运行控制；接入 Windows 本机进程后可读取全局 runtime log。
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow overflow-x-auto mb-4">
+          <div class="p-4 border-b flex items-center justify-between">
+            <h3 class="font-semibold">运行状态</h3>
+            <span class="text-xs text-gray-500" x-text="monitorLoading || managerLoading ? '加载中...' : `${runtimeBotRows.length} 个 Bot`"></span>
+          </div>
+          <div x-show="(monitorLoading && eventSourceConnected) || managerLoading" class="space-y-3 p-4">
             <div class="animate-pulse bg-gray-200 rounded h-6 w-1/4"></div>
             <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
             <div class="animate-pulse bg-gray-200 rounded h-4 w-1/2"></div>
             <div class="animate-pulse bg-gray-200 rounded h-4 w-5/6"></div>
             <div class="animate-pulse bg-gray-200 rounded h-4 w-2/3"></div>
           </div>
-          <!-- Connection failure — skeleton is shown but SSE is down -->
-          <div x-show="monitorLoading && !eventSourceConnected"
+          <div x-show="monitorLoading && !eventSourceConnected && runtimeBotRows.length === 0"
                class="text-center text-gray-500 py-8">
             无法连接到实时推送，请检查服务器状态
           </div>
-          <table x-show="!monitorLoading" class="min-w-full divide-y divide-gray-200">
+          <table x-show="!monitorLoading && !managerLoading && runtimeBotRows.length > 0" class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Bot ID</th>
                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">版本</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">状态</th>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">最后心跳</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">连接状态</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">运行时状态</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">消息</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200">
-              <template x-for="bot in monitorBots" :key="bot.bot_id">
+              <template x-for="row in runtimeBotRows" :key="`${row.bot_id}-${row.manager ? 'runtime' : 'connection'}`">
                 <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-3 text-sm" x-text="bot.bot_id"></td>
-                  <td class="px-4 py-3 text-sm" x-text="bot.version || '-'"></td>
+                  <td class="px-4 py-3 text-sm font-medium" x-text="row.bot_id"></td>
+                  <td class="px-4 py-3 text-sm" x-text="row.monitor?.version || row.manager?.version || '-'"></td>
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-1.5">
-                      <span class="w-2.5 h-2.5 rounded-full inline-block" :class="bot.online ? 'bg-green-500' : 'bg-red-500'"></span>
-                      <span class="text-sm" :class="bot.online ? 'text-green-700' : 'text-red-700'" x-text="bot.online ? '在线' : '离线'"></span>
+                      <span class="w-2.5 h-2.5 rounded-full inline-block" :class="row.monitor?.online ? 'bg-green-500' : 'bg-red-500'"></span>
+                      <span class="text-sm" :class="row.monitor?.online ? 'text-green-700' : 'text-red-700'" x-text="row.monitor?.online ? '在线' : '离线'"></span>
                     </div>
+                    <div x-show="formatOptionalTimestamp(row.monitor?.last_heartbeat_ts)" :data-testid="`monitor-heartbeat-${row.bot_id}`" class="text-xs text-gray-500 mt-1" x-text="formatOptionalTimestamp(row.monitor?.last_heartbeat_ts)"></div>
                   </td>
-                  <td class="px-4 py-3 text-sm text-gray-600" x-text="formatTimestamp(bot.last_heartbeat_ts)"></td>
+                  <td class="px-4 py-3 text-sm">
+                    <div class="font-medium" x-text="runtimeStatusPrimary(row.manager?.runtime)"></div>
+                    <div x-show="runtimeStatusDetail(row.manager?.runtime)" class="text-xs text-gray-500" x-text="runtimeStatusDetail(row.manager?.runtime)"></div>
+                    <div class="text-xs text-gray-500" x-show="row.manager?.manager?.operation_status === 'running'" x-text="`正在${actionLabel(row.manager?.manager?.action)}`"></div>
+                  </td>
+                  <td class="px-4 py-3 text-sm text-gray-600 max-w-xs" x-text="row.manager?.runtime?.message || '-'"></td>
+                  <td class="px-4 py-3">
+                    <template x-if="row.manager">
+                      <div class="flex flex-wrap gap-2">
+                        <template x-for="action in ['start', 'stop', 'restart']" :key="`${row.bot_id}-${action}`">
+                          <button
+                            @click="managerOperate(row.manager, action)"
+                            :disabled="managerActionDisabled(row.manager, row.bot_id)"
+                            :title="managerCanOperate(row.manager) ? actionLabel(action) : '未接入运行控制，操作不可用'"
+                            :data-testid="`manager-lifecycle-${action}-${row.bot_id}`"
+                            :class="managerActionDisabled(row.manager, row.bot_id) ? '' : 'hover:bg-gray-100'"
+                            class="px-2 py-1 text-xs border rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                            x-text="managerActionLoading[row.bot_id] ? '执行中' : actionLabel(action)"
+                          ></button>
+                        </template>
+                      </div>
+                    </template>
+                    <template x-if="!row.manager">
+                      <span class="text-xs text-gray-500">运行控制暂不可用</span>
+                    </template>
+                  </td>
                 </tr>
               </template>
             </tbody>
           </table>
-          <div x-show="!monitorLoading && monitorBots.length === 0" class="text-center text-gray-500 py-8">暂无数据</div>
+          <div x-show="!monitorLoading && !managerLoading && runtimeBotRows.length === 0" class="text-center text-gray-500 py-8">暂无数据</div>
           <div x-show="!eventSourceConnected && monitorBots.length > 0" class="text-xs text-yellow-600 px-4 pb-3">
             实时连接已断开，数据可能不是最新
           </div>
+        </div>
+
+        <div x-show="managerLogsBotId" x-cloak data-testid="manager-logs-panel" class="bg-white rounded-lg shadow mb-4">
+          <div class="p-4 border-b flex items-center justify-between gap-4">
+            <div>
+              <h3 class="font-semibold">运行日志</h3>
+              <div class="text-xs text-gray-500 mt-1">全局 Launcher / Dashboard / Manager / runtime log</div>
+            </div>
+            <button @click="clearManagerLogs()" class="px-2 py-1 text-xs border rounded hover:bg-gray-100">关闭</button>
+          </div>
+          <div class="p-4">
+            <div x-show="managerLogsLoading" class="text-sm text-gray-500">正在读取日志...</div>
+            <div x-show="managerLogsError" data-testid="manager-logs-error" class="bg-yellow-50 border border-yellow-200 text-yellow-800 p-3 rounded text-sm" x-text="managerLogsError"></div>
+            <template x-if="managerLogs && !managerLogsError">
+              <div>
+                <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mb-3">
+                  <span x-text="managerLogs.source || '-'"></span>
+                  <span x-text="`${managerLogs.lines ?? 0} 行`"></span>
+                  <span x-show="managerLogs.truncated">已截断</span>
+                </div>
+                <pre data-testid="manager-logs-text" class="bg-gray-900 text-gray-100 rounded p-3 text-xs overflow-x-auto max-h-96 whitespace-pre-wrap" x-text="managerLogs.text || '暂无运行日志'"></pre>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow overflow-x-auto">
+          <div class="p-4 border-b flex items-center justify-between">
+            <h3 class="font-semibold">最近操作</h3>
+            <span class="text-xs text-gray-500" x-text="managerOperationsLoading ? '加载中...' : `${managerOperations.length} 条`"></span>
+          </div>
+          <div x-show="managerOperationsLoading" class="space-y-3 p-4">
+            <div class="animate-pulse bg-gray-200 rounded h-5 w-1/4"></div>
+            <div class="animate-pulse bg-gray-200 rounded h-4 w-3/4"></div>
+            <div class="animate-pulse bg-gray-200 rounded h-4 w-1/2"></div>
+          </div>
+          <table x-show="!managerOperationsLoading && managerOperations.length > 0" class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作编号</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Bot ID</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">操作</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">结果</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">消息</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">时间</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              <template x-for="op in managerOperations" :key="op.operation_id">
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-3 text-sm font-mono" x-text="shortOperationId(op.operation_id)"></td>
+                  <td class="px-4 py-3 text-sm" x-text="op.bot_id"></td>
+                  <td class="px-4 py-3 text-sm" x-text="actionLabel(op.action)"></td>
+                  <td class="px-4 py-3 text-sm" x-text="operationStatusLabel(op.status)"></td>
+                  <td class="px-4 py-3 text-sm text-gray-600 max-w-xs">
+                    <div x-text="op.message || '-'"></div>
+                  </td>
+                  <td class="px-4 py-3 text-sm text-gray-600 whitespace-nowrap" x-text="formatIsoTimestamp(op.updated_at || op.created_at)"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="!managerOperationsLoading && managerOperations.length === 0" class="text-center text-gray-500 py-8">暂无操作记录</div>
         </div>
       </div>
 
@@ -1093,14 +1267,14 @@ function app() {
     loginError: '',
 
     // ── Navigation ──
-    currentTab: 'overview',
+    currentTab: 'data',
     tabs: [
-      { id: 'overview', label: '概览' },
       { id: 'data', label: '数据浏览' },
       { id: 'config', label: '配置编辑' },
       { id: 'persona', label: 'Persona' },
       { id: 'content', label: '内容管理' },
       { id: 'monitor', label: '运行监控' },
+      { id: 'archives', label: '存档' },
       { id: 'audit', label: '审计日志' },
     ],
 
@@ -1119,15 +1293,12 @@ function app() {
 
     // ── Tab: Config Edit ──
     configView: 'fields',
-    configSection: '',            // current config section sub-tab
     configSections: [],           // [{key, label, priority, fields: [{path, value, source, ...}]}]
+    showAdvanced: false,
+    collapsedSections: {},        // {sectionKey: true|false} — true = collapsed
     userConfig: {},
     userConfigText: '',
     userConfigValid: true,
-    configJsonView: 'user',       // 'user' | 'bot'
-    botConfigText: '',
-    botConfigValid: true,
-    botConfigLoading: false,
     reloadResult: null,
 
     // ── Tab: Persona ──
@@ -1137,22 +1308,8 @@ function app() {
     personaLayoutSections: [],    // persona sections from layout
     // Character cards
     characters: [],
-    // Detail/Edit modal
-    characterDetail: null,           // null=hidden, object=loaded card data
-    characterDetailLoading: false,
-    characterDetailEdit: false,      // false=view, true=edit mode
-    characterDetailSection: 'basic', // current section tab
-    characterDetailDirty: false,     // unsaved changes
-    characterEditData: {},           // working copy for the form
-    _characterEditPristine: null,    // snapshot before entering edit mode
-    // New character modal
-    showNewCharacterModal: false,
-    newCharacterName: '',
-    newCharacterDisplayName: '',
-    newCharacterCreating: false,
-    // Delete confirmation
-    deleteConfirmCharacter: null,
-    deleteConfirmLoading: false,
+    editingCharacter: '',
+    characterYamlText: '',
 
     // ── Tab: Content ──
     contentDirs: ['decks', 'random', 'queries', 'characters', 'excel'],
@@ -1173,6 +1330,47 @@ function app() {
 
     // ── Tab: Monitor ──
     monitorBots: [],
+    runtimeBotRows: [],
+
+    // ── Tab: Manager ──
+    managerHealth: null,
+    managerBots: [],
+    managerOperations: [],
+    managerActionLoading: {},
+    managerLogsBotId: '',
+    managerLogs: null,
+    managerLogsError: '',
+    managerLogsLoading: false,
+
+    // ── Tab: Archives ──
+    archives: [],
+    archivesError: '',
+    archivesLoading: false,
+    archiveDescription: '',
+    archiveCreating: false,
+    archiveCreateMessage: '',
+    archiveCreateError: '',
+    archiveDetail: null,
+    archiveDetailArchive: null,
+    archiveDetailError: '',
+    archiveDetailLoading: false,
+    archiveDeleting: {},
+    archiveVerifyArchive: null,
+    archiveVerify: null,
+    archiveVerifyError: '',
+    archiveVerifying: false,
+    archivePlanArchive: null,
+    archivePlan: null,
+    archivePlanVerification: null,
+    archivePlanError: '',
+    archivePlanLoading: false,
+    archiveRestoreConfirmed: false,
+    archiveRestoreQuiesceRuntime: true,
+    archiveRestoreDescription: '',
+    archiveRestoring: false,
+    archiveRestoreError: '',
+    archiveRestoreResult: null,
+    archiveRestoreRuntimeQuiesce: null,
 
     // ── Tab: Audit ──
     auditLogs: [],
@@ -1183,16 +1381,11 @@ function app() {
     personaConfigLoading: false,
     charactersLoading: false,
     contentLoading: false,
+    managerLoading: false,
+    managerOperationsLoading: false,
     monitorLoading: false,
     auditLoading: false,
     saving: false,
-
-    // ── Tab: Overview ──
-    overviewLoading: false,
-    overviewBots: [],
-    overviewCoreStats: null,
-    overviewPersonaStats: null,
-    overviewLlmUsage: null,
 
     // ── SSE ──
     eventSource: null,
@@ -1210,6 +1403,7 @@ function app() {
     // ── init ──
     init() {
       this.checkAuth();
+      this.loadUiPrefs();
     },
 
     // ── API helper (cookies-based auth, no Bearer token) ──
@@ -1220,6 +1414,7 @@ function app() {
         const resp = await fetch(path, { ...options, headers });
         if (resp.status === 401) {
           this.sessionState = 'login';
+          this.resetArchivesState();
           if (this.eventSource) {
             this.eventSource.close();
             this.eventSource = null;
@@ -1228,7 +1423,10 @@ function app() {
         }
         const data = await resp.json();
         if (!data.ok) {
-          throw new Error(data.error || data.message || '请求失败');
+          const apiError = new Error(data.error || data.message || '请求失败');
+          apiError.status = resp.status;
+          apiError.data = data;
+          throw apiError;
         }
         return data;
       } catch (err) {
@@ -1328,12 +1526,17 @@ function app() {
       this.bots = [];
       this.selectedBotId = '';
       this.monitorBots = [];
+      this.runtimeBotRows = [];
+      this.managerHealth = null;
+      this.managerBots = [];
+      this.managerOperations = [];
+      this.managerActionLoading = {};
+      this.managerLogsBotId = '';
+      this.managerLogs = null;
+      this.managerLogsError = '';
+      this.managerLogsLoading = false;
+      this.resetArchivesState();
       this.auditLogs = [];
-      this.overviewBots = [];
-      this.overviewCoreStats = null;
-      this.overviewPersonaStats = null;
-      this.overviewLlmUsage = null;
-      this.overviewLoading = false;
       this._mergedCache = null;
       this._lastBotId = '';
       if (this.eventSource) {
@@ -1358,6 +1561,7 @@ function app() {
           const data = JSON.parse(event.data);
           if (data.bots) {
             this.monitorBots = data.bots;
+            this.refreshRuntimeRows();
             this.monitorLoading = false;
           }
         } catch (err) {
@@ -1395,7 +1599,6 @@ function app() {
 
     switchTab(tabId) {
       if (this._hasEditingFields() && !confirm('有未保存的修改，确定要离开吗？')) return;
-      if (this.characterDetailDirty && !confirm('有未保存的角色卡修改，确定要离开吗？')) return;
       this.currentTab = tabId;
       this.loadTabData(tabId);
     },
@@ -1403,7 +1606,6 @@ function app() {
     onBotChange() {
       if (!this.selectedBotId) return;
       if (this._hasEditingFields() && !confirm('有未保存的修改，确定要切换 Bot 吗？')) return;
-      if (this.characterDetailDirty && !confirm('有未保存的角色卡修改，确定要切换 Bot 吗？')) return;
       this._mergedCache = null;
       this._lastBotId = '';
       this.loadTabData(this.currentTab);
@@ -1411,10 +1613,10 @@ function app() {
 
     loadTabData(tabId) {
       switch (tabId) {
-        case 'overview': this.loadOverview(); break;
         case 'data': this.loadTables(); break;
         case 'config': this.loadConfig(); break;
         case 'persona': this.loadPersonaConfig(); break;
+        case 'archives': this.loadArchives(); break;
         case 'monitor': this.loadMonitor(); break;
         case 'audit': this.loadAudit(); break;
       }
@@ -1490,7 +1692,7 @@ function app() {
       const fields = {};
       const merged = this._mergedCache || {};
       for (const [path, entry] of Object.entries(merged)) {
-        if (path.split('.').pop().startsWith('_')) continue;
+        if (path.split('.').pop().startsWith('_comment')) continue;
         if (tabFilter && entry.tab !== tabFilter) continue;
         fields[path] = {
           path: path,
@@ -1503,10 +1705,6 @@ function app() {
           tab: entry.tab || 'config',
           section: entry.section || 'runtime',
           expanded: false,
-          type: entry.type || 'string',
-          enum: entry.enum || null,
-          minimum: entry.minimum,
-          maximum: entry.maximum,
         };
       }
       return fields;
@@ -1550,16 +1748,44 @@ function app() {
         const fields = this.buildFieldsForTab('config');
         const sectionsLayout = this._layout && this._layout.sections ? this._layout.sections : {};
         this.configSections = this.groupFieldsBySection(fields, sectionsLayout);
-        // Set default section sub-tab if not already selected or current is invalid
-        if (this.configSections.length > 0 && !this.configSections.find(s => s.key === this.configSection)) {
-          this.configSection = this.configSections[0].key;
-        }
       } catch (err) {
         console?.warn('[DicePP] Failed to load config:', err);
         this.configSections = [];
       } finally {
         this.configLoading = false;
       }
+    },
+
+    isSectionExpanded(which, secKey) {
+      // Sections are expanded by default, collapsed = true means user clicked to collapse
+      const key = which + '/' + secKey;
+      return this.collapsedSections[key] !== true;
+    },
+
+    toggleSection(which, secKey) {
+      const key = which + '/' + secKey;
+      if (this.collapsedSections[key]) {
+        delete this.collapsedSections[key];
+      } else {
+        this.collapsedSections[key] = true;
+      }
+      this.saveUiPrefs();
+    },
+
+    expandAllSections(which) {
+      const prefix = which + '/';
+      for (const k of Object.keys(this.collapsedSections)) {
+        if (k.startsWith(prefix)) delete this.collapsedSections[k];
+      }
+      this.saveUiPrefs();
+    },
+
+    collapseAllSections(which) {
+      const sections = which === 'config' ? this.configSections : this.personaConfigSections;
+      for (const sec of sections) {
+        this.collapsedSections[which + '/' + sec.key] = true;
+      }
+      this.saveUiPrefs();
     },
 
     expandAllFields(which) {
@@ -1618,25 +1844,14 @@ function app() {
       if (!field) return;
       field.editing = false;
       field.editValue = '';
-      field.editArray = null;
-      field.newArrayItem = '';
     },
 
     async saveField(path) {
       const field = this._findField(this.configSections, path) || this._findField(this.personaConfigSections, path);
       if (!field) return;
       try {
-        let newVal;
-        if (field.type === 'array' && Array.isArray(field.editArray)) {
-          newVal = field.editArray;
-        } else if (field.type === 'array') {
-          // Fallback: array field being edited via old text mode
-          newVal = field.editValue;
-          try { newVal = JSON.parse(newVal); } catch (_) { /* keep as string */ }
-        } else {
-          newVal = field.editValue;
-          try { newVal = JSON.parse(newVal); } catch (_) { /* keep as string */ }
-        }
+        let newVal = field.editValue;
+        try { newVal = JSON.parse(newVal); } catch (_) { /* keep as string */ }
         const data = await this.api('/api/config/set', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1651,56 +1866,6 @@ function app() {
       } catch (err) {
         this.errorMessage = '保存失败: ' + err.message;
       }
-    },
-
-    // Direct save for type-aware controls (toggle, number, select)
-    async saveFieldWithValue(path, value) {
-      try {
-        const data = await this.api('/api/config/set', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path, value }),
-        });
-        this.reloadResult = data.reload || null;
-        this._mergedCache = null;
-        this._lastBotId = '';
-        if (this.currentTab === 'config') await this.loadConfig();
-        if (this.currentTab === 'persona') await this.loadPersonaConfig();
-      } catch (err) {
-        this.errorMessage = '保存失败: ' + err.message;
-      }
-    },
-
-    // Array editor helpers
-    expandArrayField(field) {
-      field.editing = true;
-      field.editArray = Array.isArray(field.value) ? [...field.value] : [];
-      field.newArrayItem = '';
-      field.expanded = true;
-    },
-
-    addArrayItem(field) {
-      if (!field.editArray) field.editArray = [];
-      const val = field.newArrayItem && field.newArrayItem.trim();
-      if (!val) return;
-      let item = val;
-      if (field.type === 'integer') {
-        item = parseInt(val, 10);
-        if (isNaN(item)) return;
-      } else if (field.type === 'number') {
-        item = parseFloat(val);
-        if (isNaN(item)) return;
-      } else if (field.type === 'boolean') {
-        if (val === 'true') item = true;
-        else if (val === 'false') item = false;
-        else return;
-      }
-      field.editArray.push(item);
-      field.newArrayItem = '';
-    },
-
-    removeArrayItem(field, index) {
-      if (field.editArray) field.editArray.splice(index, 1);
     },
 
     async resetField(path) {
@@ -1747,57 +1912,9 @@ function app() {
       }
     },
 
-    // Bot config JSON editor
-    async loadBotConfigJson() {
-      if (!this.selectedBotId) return;
-      this.botConfigLoading = true;
-      try {
-        const data = await this.api(`/api/config/bots/${this.selectedBotId}`);
-        this.botConfigText = JSON.stringify(data.config || {}, null, 2);
-        this.botConfigValid = true;
-      } catch (err) {
-        this.botConfigText = '{}';
-        this.botConfigValid = false;
-        this.errorMessage = '加载 Bot 配置失败: ' + err.message;
-      } finally {
-        this.botConfigLoading = false;
-      }
-    },
-
-    validateBotJson() {
-      try {
-        JSON.parse(this.botConfigText);
-        this.botConfigValid = true;
-      } catch (_) {
-        this.botConfigValid = false;
-      }
-    },
-
-    async saveBotConfig() {
-      if (!this.botConfigValid || !this.selectedBotId) return;
-      this.saving = true;
-      try {
-        const parsed = JSON.parse(this.botConfigText);
-        const data = await this.api(`/api/config/bots/${this.selectedBotId}/save`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(parsed),
-        });
-        this.reloadResult = data.reload || null;
-      } catch (err) {
-        this.errorMessage = '保存失败: ' + err.message;
-      } finally {
-        this.saving = false;
-      }
-    },
-
     // ── Persona Tab ──
     switchPersonaView(view) {
       if (this._hasEditingFields() && !confirm('有未保存的修改，确定要切换吗？')) return;
-      if (this.characterDetailDirty) {
-        if (!confirm('有未保存的角色卡修改，确定要切换吗？')) return;
-        this.characterDetailDirty = false;
-      }
       this.personaView = view;
       if (view === 'characters') this.loadCharacters();
     },
@@ -1848,172 +1965,32 @@ function app() {
       }
     },
 
-    // ── Character Detail Modal ──
-    async openCharacterDetail(name) {
-      if (this.characterDetailDirty) {
-        if (!confirm('有未保存的修改，确定要离开吗？')) return;
-        this.characterDetailDirty = false;
-      }
-      this.characterDetailLoading = true;
-      this.characterDetail = null;
-      this.characterDetailEdit = false;
-      this.characterDetailSection = 'basic';
+    async viewCharacter(name) {
       try {
         const data = await this.api(`/api/persona/characters/${encodeURIComponent(name)}`);
-        this.characterDetail = data;
-        this._initCharacterEditData(data);
+        this.editingCharacter = name;
+        this.characterYamlText = data.content || '';
       } catch (err) {
         this.errorMessage = '加载角色卡失败: ' + err.message;
-      } finally {
-        this.characterDetailLoading = false;
-      }
-    },
-
-    _initCharacterEditData(cd) {
-      // cd has shape: {name, display_name, is_default, basic: {...}, dialogue: {...}, character_book: {...}, extensions: {...}}
-      this.characterEditData = {
-        basic_name: cd.display_name || cd.name,
-        basic_description: cd.basic?.description || '',
-        basic_personality: cd.basic?.personality || '',
-        basic_scenario: cd.basic?.scenario || '',
-        basic_system_prompt: cd.basic?.system_prompt || '',
-        dialogue_mes_example: cd.dialogue?.mes_example || '',
-        character_book_json: JSON.stringify(cd.character_book?.entries || [], null, 2),
-        extensions_json: JSON.stringify(cd.extensions || {}, null, 2),
-      };
-    },
-
-    closeCharacterDetail() {
-      if (this.characterDetailDirty) {
-        if (!confirm('有未保存的修改，确定要关闭吗？')) return;
-        this.characterDetailDirty = false;
-      }
-      this.characterDetail = null;
-      this.characterEditData = {};
-      this.characterDetailEdit = false;
-      this._characterEditPristine = null;
-    },
-
-    enterCharacterEdit() {
-      if (this.characterDetail?.is_default) return;
-      this._characterEditPristine = JSON.stringify(this.characterEditData);
-      this.characterDetailEdit = true;
-      this.characterDetailDirty = false;
-    },
-
-    cancelCharacterEdit() {
-      if (this._characterEditPristine) {
-        try {
-          this.characterEditData = JSON.parse(this._characterEditPristine);
-        } catch (e) { /* fall through */ }
-      }
-      this.characterDetailEdit = false;
-      this.characterDetailDirty = false;
-      this._characterEditPristine = null;
-    },
-
-    markCharacterDirty() {
-      if (!this.characterDetailEdit) return;
-      if (this._characterEditPristine !== null) {
-        this.characterDetailDirty = JSON.stringify(this.characterEditData) !== this._characterEditPristine;
       }
     },
 
     async saveCharacter() {
-      if (!this.characterDetail || this.characterDetail.is_default) return;
-      const cd = this.characterDetail;
-      const ed = this.characterEditData;
-
-      // Parse JSON fields
-      let character_book;
-      let extensions;
-      try {
-        character_book = { entries: JSON.parse(ed.character_book_json || '[]') };
-      } catch (e) { this.errorMessage = '世界书 JSON 格式错误: ' + e.message; return; }
-      try {
-        extensions = JSON.parse(ed.extensions_json || '{}');
-      } catch (e) { this.errorMessage = '扩展设置 JSON 格式错误: ' + e.message; return; }
-
-      const payload = {
-        display_name: ed.basic_name,
-        basic: {
-          description: ed.basic_description,
-          personality: ed.basic_personality,
-          scenario: ed.basic_scenario,
-          system_prompt: ed.basic_system_prompt,
-        },
-        dialogue: {
-          mes_example: ed.dialogue_mes_example,
-        },
-        character_book: character_book,
-        extensions: extensions,
-      };
-
+      if (!this.editingCharacter) return;
       this.saving = true;
       try {
-        await this.api(`/api/persona/characters/${encodeURIComponent(cd.name)}/save`, {
+        await this.api(`/api/persona/characters/${encodeURIComponent(this.editingCharacter)}/save`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ character: payload }),
+          body: JSON.stringify({ content: this.characterYamlText }),
         });
-        this.characterDetailDirty = false;
-        this._characterEditPristine = null;
-        // Refresh the detail & list
-        this.characterDetailEdit = false;
-        await this.openCharacterDetail(cd.name);
+        this.editingCharacter = '';
+        this.characterYamlText = '';
         await this.loadCharacters();
       } catch (err) {
         this.errorMessage = '保存角色卡失败: ' + err.message;
       } finally {
         this.saving = false;
-      }
-    },
-
-    // ── New Character ──
-    async createCharacter() {
-      const name = this.newCharacterName.trim();
-      if (!name) return;
-      this.newCharacterCreating = true;
-      try {
-        await this.api(`/api/persona/characters/${encodeURIComponent(name)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ display_name: this.newCharacterDisplayName.trim() || name }),
-        });
-        this.showNewCharacterModal = false;
-        this.newCharacterName = '';
-        this.newCharacterDisplayName = '';
-        await this.loadCharacters();
-      } catch (err) {
-        this.errorMessage = '创建角色卡失败: ' + err.message;
-      } finally {
-        this.newCharacterCreating = false;
-      }
-    },
-
-    // ── Delete ──
-    confirmDeleteCharacter() {
-      if (!this.characterDetail || this.characterDetail.is_default) return;
-      this.deleteConfirmCharacter = this.characterDetail.name;
-    },
-
-    async deleteCharacter() {
-      const name = this.deleteConfirmCharacter;
-      if (!name) return;
-      this.deleteConfirmLoading = true;
-      try {
-        await this.api(`/api/persona/characters/${encodeURIComponent(name)}`, {
-          method: 'DELETE',
-        });
-        this.characterDetail = null;
-        this.characterEditData = {};
-        this.characterDetailEdit = false;
-        this.deleteConfirmCharacter = null;
-        await this.loadCharacters();
-      } catch (err) {
-        this.errorMessage = '删除角色卡失败: ' + err.message;
-      } finally {
-        this.deleteConfirmLoading = false;
       }
     },
 
@@ -2109,47 +2086,498 @@ function app() {
       this.viewingFile = true;
     },
 
-    // ── Monitor (SSE-driven, no polling) ──
-    async loadMonitor() {
-      this.monitorLoading = this.monitorBots.length === 0;
+    // ── Manager ──
+    async loadManager() {
+      await Promise.all([this.loadManagerStatus(), this.loadManagerOperations()]);
     },
 
-    // ── Overview ──
-    async loadOverview() {
-      this.overviewLoading = true;
+    async loadManagerStatus() {
+      this.managerLoading = true;
       try {
-        const params = this.selectedBotId ? `?bot_id=${this.selectedBotId}` : '';
-        const data = await this.api(`/api/overview${params}`);
-        this.overviewBots = data.bots || [];
-        this.overviewCoreStats = data.core_stats || null;
-        this.overviewPersonaStats = data.persona_stats || null;
-        this.overviewLlmUsage = data.llm_usage || null;
+        const data = await this.api('/api/manager/status');
+        this.managerHealth = data.health || null;
+        this.managerBots = data.bots || [];
       } catch (err) {
-        console?.warn('[DicePP] Failed to load overview:', err);
-        this.overviewBots = [];
-        this.overviewCoreStats = null;
-        this.overviewPersonaStats = null;
-        this.overviewLlmUsage = null;
+        console?.warn('[DicePP] Failed to load manager status:', err);
+        this.managerHealth = null;
+        this.managerBots = [];
       } finally {
-        this.overviewLoading = false;
+        this.refreshRuntimeRows();
+        this.managerLoading = false;
       }
     },
 
-    fmtTokens(v) {
-      if (v == null) return '0';
-      if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
-      if (v >= 1_000) return (v / 1_000).toFixed(1) + 'K';
-      return String(v);
+    async loadManagerOperations() {
+      this.managerOperationsLoading = true;
+      try {
+        const data = await this.api('/api/manager/operations?limit=50');
+        this.managerOperations = (data.operations || []).filter(
+          (op) => !['update', 'rollback'].includes(op?.action)
+        );
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load manager operations:', err);
+        this.managerOperations = [];
+      } finally {
+        this.managerOperationsLoading = false;
+      }
     },
 
-    fmtRelativeTime(ts) {
-      if (!ts) return '-';
-      const now = Date.now() / 1000;
-      const diff = Math.max(0, now - parseFloat(ts));
-      if (diff < 60) return Math.floor(diff) + '秒前';
-      if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
-      if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
-      return Math.floor(diff / 86400) + '天前';
+    managerRuntimeUnavailable() {
+      return this.managerHealth?.runtime_backend === 'UnavailableRuntimeBackend'
+        || this.managerBots.some((bot) => bot.runtime?.health === 'unavailable');
+    },
+
+    managerRuntimeSummary() {
+      if (this.managerHealth?.status === 'ok') {
+        return 'Dashboard 管理服务正常';
+      }
+      return 'Dashboard 管理服务状态未知';
+    },
+
+    refreshRuntimeRows() {
+      const rows = new Map();
+      for (const bot of this.monitorBots || []) {
+        if (!bot?.bot_id) continue;
+        rows.set(bot.bot_id, { bot_id: bot.bot_id, monitor: bot, manager: null });
+      }
+      for (const bot of this.managerBots || []) {
+        if (!bot?.bot_id) continue;
+        const row = rows.get(bot.bot_id) || { bot_id: bot.bot_id, monitor: null, manager: null };
+        row.manager = bot;
+        rows.set(bot.bot_id, row);
+      }
+      this.runtimeBotRows = Array.from(rows.values());
+    },
+
+    managerCanOperate(bot) {
+      return Boolean(bot)
+        && this.managerHealth?.runtime_backend !== 'UnavailableRuntimeBackend'
+        && bot.runtime?.health !== 'unavailable'
+        && bot.manager?.operation_status !== 'running';
+    },
+
+    managerActionDisabled(bot, botId) {
+      return !this.managerCanOperate(bot) || Boolean(this.managerActionLoading[botId || bot?.bot_id]);
+    },
+
+    managerCanViewRuntimeLogs() {
+      return this.managerHealth?.runtime_backend
+        && this.managerHealth.runtime_backend !== 'UnavailableRuntimeBackend';
+    },
+
+    managerRuntimeLogsDisabled() {
+      return !this.managerCanViewRuntimeLogs()
+        || (this.managerLogsLoading && this.managerLogsBotId === 'runtime');
+    },
+
+    async managerOperate(bot, action) {
+      if (!this.managerCanOperate(bot)) return;
+      this.managerActionLoading = { ...this.managerActionLoading, [bot.bot_id]: true };
+      try {
+        await this.api(`/api/manager/bots/${encodeURIComponent(bot.bot_id)}/${action}`, {
+          method: 'POST',
+        });
+        await this.loadMonitor();
+      } catch (err) {
+        console?.warn('[DicePP] Manager operation failed:', err);
+        await this.loadManagerOperations();
+      } finally {
+        const next = { ...this.managerActionLoading };
+        delete next[bot.bot_id];
+        this.managerActionLoading = next;
+      }
+    },
+
+    async loadManagerRuntimeLogs() {
+      if (!this.managerCanViewRuntimeLogs()) {
+        this.managerLogsBotId = 'runtime';
+        this.managerLogs = null;
+        this.managerLogsError = '当前未接入运行控制，无法读取运行日志';
+        this.managerLogsLoading = false;
+        return;
+      }
+      this.managerLogsBotId = 'runtime';
+      this.managerLogs = null;
+      this.managerLogsError = '';
+      this.managerLogsLoading = true;
+      try {
+        const data = await this.api('/api/manager/logs?lines=200');
+        this.managerLogs = data.logs || null;
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load manager logs:', err);
+        this.managerLogsError = this.managerLogsErrorLabel(err.message);
+      } finally {
+        this.managerLogsLoading = false;
+      }
+    },
+
+    clearManagerLogs() {
+      this.managerLogsBotId = '';
+      this.managerLogs = null;
+      this.managerLogsError = '';
+      this.managerLogsLoading = false;
+    },
+
+    // ── Archives ──
+    resetArchivesState() {
+      this.archives = [];
+      this.archivesError = '';
+      this.archivesLoading = false;
+      this.archiveDescription = '';
+      this.archiveCreating = false;
+      this.archiveCreateMessage = '';
+      this.archiveCreateError = '';
+      this.archiveDetail = null;
+      this.archiveDetailArchive = null;
+      this.archiveDetailError = '';
+      this.archiveDetailLoading = false;
+      this.archiveDeleting = {};
+      this.archiveVerifyArchive = null;
+      this.archiveVerify = null;
+      this.archiveVerifyError = '';
+      this.archiveVerifying = false;
+      this.archivePlanArchive = null;
+      this.archivePlan = null;
+      this.archivePlanVerification = null;
+      this.archivePlanError = '';
+      this.archivePlanLoading = false;
+      this.archiveRestoreConfirmed = false;
+      this.archiveRestoreQuiesceRuntime = true;
+      this.archiveRestoreDescription = '';
+      this.archiveRestoring = false;
+      this.archiveRestoreError = '';
+      this.archiveRestoreResult = null;
+      this.archiveRestoreRuntimeQuiesce = null;
+    },
+
+    async loadArchives() {
+      this.archivesLoading = true;
+      this.archivesError = '';
+      try {
+        const data = await this.api('/api/archives');
+        this.archives = data.archives || [];
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load archives:', err);
+        this.archives = [];
+        this.archivesError = err.message || '读取存档列表失败';
+      } finally {
+        this.archivesLoading = false;
+      }
+    },
+
+    async createArchive() {
+      this.archiveCreating = true;
+      this.archiveCreateMessage = '';
+      this.archiveCreateError = '';
+      try {
+        const data = await this.api('/api/archives', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ description: this.archiveDescription || undefined }),
+        });
+        this.archiveCreateMessage = `已创建 ${data.archive?.filename || '存档'}`;
+        this.archiveDescription = '';
+        this.archiveDetail = data.manifest || null;
+        this.archiveDetailArchive = data.archive || null;
+        this.archiveDetailError = '';
+        this.clearArchiveVerify();
+        this.clearArchivePlan();
+        await this.loadArchives();
+      } catch (err) {
+        console?.warn('[DicePP] Failed to create archive:', err);
+        this.archiveCreateError = err.message || '创建存档失败';
+      } finally {
+        this.archiveCreating = false;
+      }
+    },
+
+    async viewArchive(archive) {
+      if (!archive?.filename) return;
+      this.clearArchiveVerify();
+      this.clearArchivePlan();
+      this.archiveDetailArchive = archive;
+      this.archiveDetail = null;
+      this.archiveDetailError = '';
+      if (!archive.valid) {
+        this.archiveDetailError = '该存档无有效 manifest';
+        return;
+      }
+      const filename = archive.filename;
+      this.archiveDetailLoading = true;
+      try {
+        const data = await this.api(`/api/archives/${encodeURIComponent(filename)}`);
+        if (this.archiveDetailArchive?.filename !== filename) return;
+        this.archiveDetailArchive = data.archive || archive;
+        this.archiveDetail = data.manifest || null;
+      } catch (err) {
+        if (this.archiveDetailArchive?.filename !== filename) return;
+        console?.warn('[DicePP] Failed to load archive detail:', err);
+        this.archiveDetailError = err.message || '读取 manifest 失败';
+      } finally {
+        if (this.archiveDetailArchive?.filename === filename) {
+          this.archiveDetailLoading = false;
+        }
+      }
+    },
+
+    async deleteArchive(archive) {
+      if (!archive?.filename) return;
+      if (!confirm(`删除存档 ${archive.filename}？`)) return;
+      this.archiveDeleting = { ...this.archiveDeleting, [archive.filename]: true };
+      this.archivesError = '';
+      try {
+        await this.api(`/api/archives/${encodeURIComponent(archive.filename)}`, {
+          method: 'DELETE',
+        });
+        if (this.archiveDetailArchive?.filename === archive.filename) {
+          this.clearArchiveDetail();
+        } else if (this.archiveVerifyArchive?.filename === archive.filename) {
+          this.clearArchiveVerify();
+        }
+        if (this.archivePlanArchive?.filename === archive.filename) {
+          this.clearArchivePlan();
+        }
+        await this.loadArchives();
+      } catch (err) {
+        console?.warn('[DicePP] Failed to delete archive:', err);
+        this.archivesError = err.message || '删除存档失败';
+      } finally {
+        const next = { ...this.archiveDeleting };
+        delete next[archive.filename];
+        this.archiveDeleting = next;
+      }
+    },
+
+    clearArchiveDetail() {
+      this.archiveDetail = null;
+      this.archiveDetailArchive = null;
+      this.archiveDetailError = '';
+      this.archiveDetailLoading = false;
+    },
+
+    async verifyArchive(archive) {
+      if (!archive?.filename) return;
+      this.clearArchiveDetail();
+      this.clearArchivePlan();
+      this.archiveVerifyArchive = archive;
+      this.archiveVerify = null;
+      this.archiveVerifyError = '';
+      if (!archive.valid) {
+        this.archiveVerifyError = '该存档无有效 manifest';
+        return;
+      }
+
+      const filename = archive.filename;
+      this.archiveVerifying = true;
+      try {
+        const data = await this.api(`/api/archives/${encodeURIComponent(filename)}/verify`, {
+          method: 'POST',
+        });
+        if (this.archiveVerifyArchive?.filename !== filename) return;
+        this.archiveVerifyArchive = data.verification?.archive || archive;
+        this.archiveVerify = data.verification || null;
+      } catch (err) {
+        if (this.archiveVerifyArchive?.filename !== filename) return;
+        console?.warn('[DicePP] Failed to verify archive:', err);
+        this.archiveVerifyError = err.message || '检查存档失败';
+      } finally {
+        if (this.archiveVerifyArchive?.filename === filename) {
+          this.archiveVerifying = false;
+        }
+      }
+    },
+
+    clearArchiveVerify() {
+      this.archiveVerifyArchive = null;
+      this.archiveVerify = null;
+      this.archiveVerifyError = '';
+      this.archiveVerifying = false;
+    },
+
+    async requestArchiveRestorePlan(archive) {
+      if (!archive?.filename) return;
+      this.clearArchiveDetail();
+      this.clearArchiveVerify();
+      this.archivePlanArchive = archive;
+      this.archivePlan = null;
+      this.archivePlanVerification = null;
+      this.archivePlanError = '';
+      this.clearArchiveRestoreState();
+      if (archive.valid === false) {
+        this.archivePlanError = '该存档无有效 manifest';
+        return;
+      }
+
+      const filename = archive.filename;
+      this.archivePlanLoading = true;
+      try {
+        const resp = await fetch(`/api/archives/${encodeURIComponent(filename)}/restore-plan`, {
+          method: 'POST',
+        });
+        if (resp.status === 401) {
+          this.sessionState = 'login';
+          this.resetArchivesState();
+          if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+          }
+          throw new Error('未授权');
+        }
+        let data = {};
+        try {
+          data = await resp.json();
+        } catch (_) {
+          data = {};
+        }
+        if (this.archivePlanArchive?.filename !== filename) return;
+        if (resp.status === 409 && data.verification) {
+          this.archivePlanArchive = data.verification.archive || archive;
+          this.archivePlanVerification = data.verification;
+          return;
+        }
+        if (!resp.ok || !data.ok) {
+          throw new Error(data.error || data.message || data.detail?.message || '读取恢复预览失败');
+        }
+        this.archivePlanArchive = data.plan?.archive || archive;
+        this.archivePlan = data.plan || null;
+        this.archiveRestoreConfirmed = false;
+        this.archiveRestoreQuiesceRuntime = true;
+      } catch (err) {
+        if (this.archivePlanArchive?.filename !== filename) return;
+        console?.warn('[DicePP] Failed to load archive restore plan:', err);
+        this.archivePlanError = err.message || '读取恢复预览失败';
+      } finally {
+        if (this.archivePlanArchive?.filename === filename) {
+          this.archivePlanLoading = false;
+        }
+      }
+    },
+
+    clearArchivePlan() {
+      this.archivePlanArchive = null;
+      this.archivePlan = null;
+      this.archivePlanVerification = null;
+      this.archivePlanError = '';
+      this.archivePlanLoading = false;
+      this.clearArchiveRestoreState();
+    },
+
+    clearArchiveRestoreState() {
+      this.archiveRestoreConfirmed = false;
+      this.archiveRestoreQuiesceRuntime = true;
+      this.archiveRestoreDescription = '';
+      this.archiveRestoring = false;
+      this.archiveRestoreError = '';
+      this.archiveRestoreResult = null;
+      this.archiveRestoreRuntimeQuiesce = null;
+    },
+
+    async restoreArchive() {
+      const filename = this.archivePlanArchive?.filename;
+      if (!filename || !this.archiveCanRestore(this.archivePlan)) return;
+      if (!this.archiveRestoreConfirmed) {
+        this.archiveRestoreError = '请先确认恢复预览';
+        return;
+      }
+
+      this.archiveRestoring = true;
+      this.archiveRestoreError = '';
+      this.archiveRestoreResult = null;
+      this.archiveRestoreRuntimeQuiesce = null;
+      try {
+        const body = { confirm_restore: true };
+        if (this.archiveRestoreDescription) {
+          body.description = this.archiveRestoreDescription;
+        }
+        if (this.archiveRestoreQuiesceRuntime) {
+          body.quiesce_runtime = true;
+        }
+        const resp = await fetch(`/api/archives/${encodeURIComponent(filename)}/restore`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (resp.status === 401) {
+          this.sessionState = 'login';
+          this.resetArchivesState();
+          if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+          }
+          throw new Error('未授权');
+        }
+        let data = {};
+        try {
+          data = await resp.json();
+        } catch (_) {
+          data = {};
+        }
+        if (this.archivePlanArchive?.filename !== filename) return;
+        if (resp.status === 409 && data.verification) {
+          this.archivePlanVerification = data.verification;
+          this.archivePlan = null;
+          this.archiveRestoreConfirmed = false;
+          this.archiveRestoreQuiesceRuntime = true;
+          this.archiveRestoreRuntimeQuiesce = data.runtime_quiesce || null;
+          this.archiveRestoreError = data.message || '检查未通过，未执行恢复';
+          return;
+        }
+        if (resp.status === 409 && data.plan) {
+          this.archivePlan = data.plan;
+          this.archivePlanVerification = null;
+          this.archiveRestoreConfirmed = false;
+          this.archiveRestoreQuiesceRuntime = true;
+          this.archiveRestoreRuntimeQuiesce = data.runtime_quiesce || null;
+          this.archiveRestoreError = data.message || '恢复预览存在阻塞项，未执行恢复';
+          return;
+        }
+        if (data.restore) {
+          data.restore.restore_failed = !resp.ok || !data.ok;
+          this.archiveRestoreResult = data.restore;
+          this.archiveRestoreConfirmed = false;
+          this.archiveRestoreQuiesceRuntime = true;
+          this.archiveRestoreRuntimeQuiesce = data.runtime_quiesce || data.restore.runtime_quiesce || null;
+          await this.loadArchives();
+          if (!resp.ok || !data.ok || this.archiveRestoreHasFailures(data.restore)) {
+            this.archiveRestoreError = data.message || '恢复失败';
+            return;
+          }
+          return;
+        }
+        if (!resp.ok || !data.ok) {
+          throw new Error(data.error || data.message || data.detail?.message || '恢复失败');
+        }
+      } catch (err) {
+        if (this.archivePlanArchive?.filename !== filename) return;
+        console?.warn('[DicePP] Failed to restore archive:', err);
+        this.archiveRestoreError = err.message || '恢复失败';
+      } finally {
+        if (this.archivePlanArchive?.filename === filename) {
+          this.archiveRestoring = false;
+        }
+      }
+    },
+
+    // ── Monitor ──
+    async loadMonitor() {
+      this.monitorLoading = this.monitorBots.length === 0;
+      const loadBotStatus = async () => {
+        try {
+          const data = await this.api('/api/bots/status');
+          this.monitorBots = data.bots || [];
+        } catch (err) {
+          console?.warn('[DicePP] Failed to load bot status:', err);
+          this.monitorBots = [];
+        } finally {
+          this.refreshRuntimeRows();
+          this.monitorLoading = false;
+        }
+      };
+      await Promise.all([
+        loadBotStatus(),
+        this.loadManagerStatus(),
+        this.loadManagerOperations(),
+      ]);
     },
 
     // ── Audit ──
@@ -2166,6 +2594,19 @@ function app() {
       }
     },
 
+    // ── UI prefs (localStorage) ──
+    saveUiPrefs() {
+      try {
+        localStorage.setItem('dicepp_showAdvanced', this.showAdvanced ? '1' : '0');
+      } catch (_) {}
+    },
+
+    loadUiPrefs() {
+      try {
+        this.showAdvanced = localStorage.getItem('dicepp_showAdvanced') === '1';
+      } catch (_) { this.showAdvanced = false; }
+    },
+
     // ── Helpers ──
     formatTimestamp(ts) {
       if (!ts && ts !== 0) return '-';
@@ -2175,6 +2616,222 @@ function app() {
       } catch (_) {
         return String(ts);
       }
+    },
+
+    formatOptionalTimestamp(ts) {
+      if (!ts && ts !== 0) return '';
+      return this.formatTimestamp(ts);
+    },
+
+    formatIsoTimestamp(value) {
+      if (!value) return '-';
+      try {
+        return new Date(value).toLocaleString('zh-CN');
+      } catch (_) {
+        return String(value);
+      }
+    },
+
+    formatFileSize(size) {
+      const value = Number(size);
+      if (!Number.isFinite(value) || value < 0) return '-';
+      if (value < 1024) return `${value} B`;
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+      if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+      return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+    },
+
+    archiveChecksumFiles(manifest) {
+      const files = manifest?.checksum?.files;
+      if (!files || typeof files !== 'object' || Array.isArray(files)) return [];
+      return Object.keys(files).sort();
+    },
+
+    archiveChecksumFileCount(manifest) {
+      return this.archiveChecksumFiles(manifest).length;
+    },
+
+    archiveVerifyList(value) {
+      if (!Array.isArray(value)) return [];
+      return value.map((item) => String(item));
+    },
+
+    archiveVerifyRestorableFiles(verification) {
+      return this.archiveVerifyList(verification?.restorable_files);
+    },
+
+    archiveVerifyRestorableFilesPreview(verification) {
+      const files = this.archiveVerifyRestorableFiles(verification);
+      if (files.length === 0) return '-';
+      const preview = files.slice(0, 12);
+      const rest = files.length - preview.length;
+      return rest > 0 ? `${preview.join('\n')}\n... +${rest}` : preview.join('\n');
+    },
+
+    archivePlanEntries(plan) {
+      return Array.isArray(plan?.entries) ? plan.entries : [];
+    },
+
+    archivePlanActionCount(plan, action) {
+      return this.archivePlanEntries(plan).filter((entry) => entry?.action === action).length;
+    },
+
+    archivePlanRestorableCount(plan) {
+      return this.archivePlanActionCount(plan, 'create') + this.archivePlanActionCount(plan, 'overwrite');
+    },
+
+    archivePlanList(value) {
+      return this.archiveVerifyList(value);
+    },
+
+    archiveCanRestore(plan) {
+      return this.archivePlanEntries(plan).length > 0
+        && this.archivePlanList(plan?.problems).length === 0
+        && this.archivePlanActionCount(plan, 'blocked') === 0;
+    },
+
+    archiveRestoreDisabledReason(plan) {
+      if (!plan) return '';
+      if (this.archivePlanEntries(plan).length === 0) return '没有可恢复条目';
+      if (this.archivePlanList(plan.problems).length > 0) return '恢复预览存在问题，已禁用恢复';
+      if (this.archivePlanActionCount(plan, 'blocked') > 0) return '存在无法恢复条目，已禁用恢复';
+      return '';
+    },
+
+    archiveRestoreEntries(restore, key) {
+      const value = restore?.[key];
+      return Array.isArray(value) ? value : [];
+    },
+
+    archiveRestoreHasFailures(restore) {
+      return restore?.restore_failed === true
+        || this.archiveRestoreEntries(restore, 'failed_entries').length > 0;
+    },
+
+    archiveRestorePreRestoreFilename(restore) {
+      return restore?.pre_restore_archive?.filename || '-';
+    },
+
+    archiveRestorePreRestoreArchive(restore) {
+      const archive = restore?.pre_restore_archive;
+      const filename = archive?.filename;
+      if (!filename) return null;
+      return this.archives.find((item) => item?.filename === filename) || archive;
+    },
+
+    archiveRuntimeQuiesceBots(runtime) {
+      const bots = runtime?.bots;
+      return Array.isArray(bots) ? bots : [];
+    },
+
+    archiveRuntimeQuiesceOperations(runtime, key) {
+      const operations = runtime?.[key];
+      return Array.isArray(operations) ? operations : [];
+    },
+
+    archiveRuntimeQuiesceValue(value) {
+      if (value === null || value === undefined || value === '') return '-';
+      return String(value);
+    },
+
+    archiveBooleanLabel(value) {
+      if (value === true) return '是';
+      if (value === false) return '否';
+      return '-';
+    },
+
+    archiveRuntimeStageLabel(stage) {
+      return {
+        discover: '发现 Bot',
+        stop: '暂停 Bot',
+        plan: '恢复预览',
+        restore: '写入存档',
+        start: '启动 Bot',
+      }[stage] || this.archiveRuntimeQuiesceValue(stage);
+    },
+
+    shortOperationId(operationId) {
+      return operationId ? String(operationId).slice(0, 8) : '-';
+    },
+
+    actionLabel(action) {
+      return {
+        start: '启动',
+        stop: '停止',
+        restart: '重启',
+      }[action] || action || '-';
+    },
+
+    operationStatusLabel(status) {
+      return {
+        queued: '排队中',
+        running: '执行中',
+        succeeded: '成功',
+        failed: '失败',
+        rejected: '已拒绝',
+      }[status] || status || '-';
+    },
+
+    runtimeHealthLabel(health) {
+      return {
+        unavailable: '未接入',
+        healthy: '健康',
+        stopped: '已停止',
+        unknown: '未知',
+      }[health] || health || '-';
+    },
+
+    runtimeStateLabel(state) {
+      return {
+        running: '运行中',
+        stopped: '已停止',
+        unknown: '未知',
+      }[state] || state || '-';
+    },
+
+    runtimeStatusPrimary(runtime) {
+      const health = runtime?.health;
+      const state = runtime?.runtime_state;
+      if (health === 'unavailable') return '未接入运行控制';
+      if (health === 'healthy') return '健康';
+      if (health === 'stopped') return '已停止';
+      if (state && state !== 'unknown') return this.runtimeStateLabel(state);
+      return this.runtimeHealthLabel(health);
+    },
+
+    runtimeStatusDetail(runtime) {
+      const health = runtime?.health;
+      const state = runtime?.runtime_state;
+      if (health === 'unavailable') return '操作不可用';
+      const stateLabel = this.runtimeStateLabel(state);
+      const primary = this.runtimeStatusPrimary(runtime);
+      if (!state || state === 'unknown' || stateLabel === '-' || stateLabel === primary) return '';
+      return stateLabel;
+    },
+
+    managerStatusLabel(status) {
+      return {
+        ok: '正常',
+      }[status] || status || '-';
+    },
+
+    runtimeBackendLabel(backend) {
+      return {
+        ProcessRuntimeBackend: 'Windows 本机进程',
+        DockerComposeRuntimeBackend: 'Linux Docker Compose',
+        UnavailableRuntimeBackend: '未接入',
+      }[backend] || backend || '-';
+    },
+
+    managerLogsErrorLabel(message) {
+      if (!message) return '日志读取失败';
+      if (message.includes('does not support runtime logs')) {
+        return '当前运行控制后端不支持全局运行日志';
+      }
+      if (message.includes('does not support logs') || message.includes('logs are not configured')) {
+        return '当前未接入运行控制，无法读取运行日志';
+      }
+      return message;
     },
   };
 }
