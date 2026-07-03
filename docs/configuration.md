@@ -128,4 +128,4 @@ docker exec dicepp cat /app/config/user.json
 - `content/`：角色卡、牌组、查询数据等内容
 - `data/`：运行时数据
 
-如果你手上还有旧的 `Data/Config.xlsx`、`Data/Localization.xlsx`、`Data/Chat.xlsx`，建议先保留备份，再按新目录重新配置。
+3.0 尚未提供旧 `Data` 目录的自动迁移。若你手上仍有旧版本 `Data` 资产，请先整体备份，再根据当前 `config/`、`content/`、`data/` 文档手工整理到新目录结构；不要假设旧 Excel 文件会被自动兼容或自动导入。

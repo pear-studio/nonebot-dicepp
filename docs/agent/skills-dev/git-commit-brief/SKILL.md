@@ -19,7 +19,6 @@ description: Read before every local git commit.
 | `feat` | 新功能 |
 | `fix` | Bug 修复 |
 | `refactor` | 重构（不改变外部行为） |
-| `test` | 测试（新增缺失测试或修正已有测试，不涉及业务逻辑变更） |
 | `docs` | 纯文档变更 |
 | `chore` | 杂项维护（不改变功能逻辑的琐事：配置清理、依赖更新、backlog 整理、CI 调整等） |
 
@@ -27,14 +26,13 @@ description: Read before every local git commit.
 
 | Scope | 适用范围 |
 |---|---|
-| `persona` | persona 模块（角色卡、AI、对话、评分、prompt、provider 等） |
-| `dashboard` | Web 管理面板（FastAPI + Alpine.js SPA，配置编辑、数据浏览、监控、SSE 等） |
-| `core` | 核心框架（bot/command/data/db/adapter/stat） |
-| `module` | 其他功能模块（roll/deck/character/initiative/query/common/控制通道等） |
+| `persona` | persona 模块（角色卡、AI、对话、评分、prompt 等） |
+| `core` | 核心框架（bot/command/data/db/adapter） |
+| `module` | 其他功能模块（roll/deck/character/initiative/query/common） |
 | `test` | 测试基础设施（框架、fixture、配置、用例拆分等） |
-| `dev` | 开发环境/工具链（worktree/venv/Docker/shell/CI/发版/打包） |
+| `dev` | 开发环境/工具链（worktree/venv/Docker/shell/CI/配置） |
 | `agent` | Agent 配置与技能文件（docs/agent/rules/、docs/agent/skills-*/、docs/agent/sync.py） |
-| `docs` | 文档（架构、开发指南、release notes 等） |
+| `docs` | 文档（架构、开发指南等） |
 
 不确定 scope 时，选影响最大的模块作为 scope。
 
@@ -58,4 +56,3 @@ description: Read before every local git commit.
 - 标点符号使用半角+空格, 如"xxx, xxx."
 - 读取实际修改的文件, 确认是否都是一个主题修改, 如果无法确定则询问用户. 根据修改的内容编写 commit log, 避免只看文件名称.
 - 可以考虑将不同类别的修改分批提交
-- **完成 backlog 条目实现时，backlog 条目变更与对应代码修改合并在同一个 commit 中提交**，不需要将 backlog 条目的删除/更新单独拆为一个 commit。例如：实现了 `B-xxx` 描述的功能并移除了该条目 → `feat(persona): XXX 功能实现` 一个 commit 同时包含 `docs/dev/backlog.md` 的变更与对应的代码变更

@@ -12,125 +12,58 @@
 
 ---
 
-## data
+## dashboard
 
-### [B-260625-cdbbd9] DND5eDatabase — 基于 5etools-cn 结构化 JSON 重建 D&D 5e 查询数据库
-- 创建: 2026-06-25
-- 优先级: P1
+### [B-260623-6f9e85] 缺少总览/概览 tab 聚合核心数据指标
+- 创建: 2026-06-23
+- 优先级: P2
 - 类型: feature
-- 改动量: XL
-- 问题表现: 当前 content/queries/DND5E*.db 为纯文本 6 字段模型：data(名称,英文,来源,分类,标签,内容)，所有结构化信息混在内容字段中，无法按环位/CR/伤害类型等字段精确筛选。5etools-cn 提供 502 个 JSON 文件、13000+ 条目的深度结构化数据（法术 936 条、怪物 4528 条、物品 2428 条），翻译率法术 99%/专长 100%/技能 100%，数据覆盖远超现有 DB。现有 REGEXP 搜索逐行调 Python re 性能差，随机生成依赖 xlsx 手工维护。
-- 开发备忘: 设计详见 docs/dev/dnd5e-database-design.md。分 5 Phase：(1) 法术表 + 通用 entries 渲染器 + 搜索索引；(2) 怪物表 + Python port of _copy 解析器；(3) 物品/专长表 + 通用 dnd5e_entries 表 + 配置驱动渲染器；(4) 其余 30+ 类别 + 随机生成接入；(5) edition 版本列 + v2024 查询参数。单文件 DND5E.db，LIKE 替代 REGEXP，查询时解析 _copy 继承链，实时 entries 渲染。
+- 改动量: M
+- 问题表现:
+    - 当前 6 个 tab 各自独立，没有一个 overview/dashboard 页面
+    - 无法一眼看到核心指标（在线 bot 数、最近错误、配额使用、配置变更等）
+    - 需要逐个 tab 点开查看，体验分散
+- 开发备忘:
+    - 新增 overview tab（放在 tabs 数组第一位）
+    - 聚合展示：bot 在线状态卡片、最近审计日志摘要、配置覆盖统计、最近错误计数等
+    - 后端可能需要新增 /api/overview 聚合 endpoint，或前端组合现有 API 调用
+    - 影响面：dashboard.html（新 tab UI + 数据获取逻辑）、可能新增 app.py endpoint
+    - 风险：低，纯增量功能；注意 API 调用数量和性能
 
-### [B-260618-56a0a3] 3.0.0 Data Foundation：数据状态架构与迁移基础
-- 创建: 2026-06-18
+### [B-260623-84b827] SSE 端点缺少流式集成测试
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: refactor
+- 改动量: S
+- 问题表现: tests/dashboard/test_sse.py 缺少对 /api/events 端点的端到端流式测试（连接→接收初始状态→断开清理），当前仅测试 auth 和 broadcast 机制
+- 开发备忘: 使用 httpx.AsyncClient + ASGITransport 编写异步流式测试。低优先级，broadcast 机制已通过 TestBroadcast 测试验证
+
+## persona
+
+### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
+- 创建: 2026-06-22
 - 优先级: P1
 - 类型: refactor
 - 改动量: XL
 - 问题表现:
-    - 3.0.0 将面向更多自托管用户，当前 config/data/dashboard/content 的状态边界尚未固化。
-    - 现有 `BotDatabase` 同时管理 bot_data/log 两个 DB，迁移 registry 仍是单一线性链，新 DB 也会经过历史迁移路径。
-    - Persona 仍使用 `ensure_tables()` + SQL 列表 + `ALTER TABLE` try/except，未纳入统一 schema lifecycle。
-    - 本地控制 token 仍以 `data/runtime/local-control.token` 文件形式存在，跨 Bot/Dashboard 共享状态缺少实例级数据库承载。
-    - 配置 JSON 过时字段、新增字段和字段级错误缺少统一 canonical rewrite 策略。
+  - 事件生成（`EventGenerationAgent.generate_event_result`）当前 prompt 自称"世界观设定专家"，但实际没有 DM 的裁决权和隐藏信息
+  - `Character.scenario` 字段默认为空字符串，事件生成 prompt 中场景 fallback 为硬编码 "日常生活"，所有事件共享同一场景上下文，缺乏叙事方向
+  - 角色反应中的 `follow_up_action` 直接注入下一环事件的 scenario，角色企图直接兑现为事件走向。中途没有不确定性——角色想去采药就一定能采到，不会遇到意外
+  - 缺少长线叙事记忆：DM 不知道当前有哪些线索在推进、进展到哪了。每次事件生成是独立的，产出趋于流水账和随机事件
+  - 没有从状态数值到叙事意义的转换——体力低是一个数字，DM 不据此调整事件走向
+  - `_slot_type_hint` 中 "wake_up 恢复规则：体力自然恢复，energy_delta 保底 +20" 导致 LLM 习惯性填满 delta 上限，数值区分度不足
 - 开发备忘:
-    - 设计详见 `docs/dev/data-architecture-3.0.md` 的 Data Foundation 部分。
-    - 新增 `data/dicepp.db` 与 `DicePPDatabase`，local control token 入库；旧 token 文件只作为一次性迁移输入，导入成功后删除。
-    - 引入 SchemaTarget：fresh DB 直接 create latest schema，existing DB forward-only migration；每个 DB 自持 `schema_metadata` / `schema_migrations`。
-    - targets 覆盖 `instance`、`bot_core`、`bot_log`、`persona`，由数据 owner 维护 target 定义。
-    - 配置 JSON 引入 canonical rewrite：普通未知/过时/错误字段可丢弃或默认，关键字段必须迁移、告警或禁用相关功能。
-    - 测试治理：schema equivalence、migration import whitelist、legacy fixture 生命周期注释、retry-safe migration。
+  DM 定位：世界观层，拥有裁决权，知道角色不知道的隐藏设定。角色只能产生"企图"（follow_up_action / pending_plan），DM 裁决企图的执行结果。
 
-## deploy
+  流程设计：tick → DM 读取角色状态 + DM 备忘（permanent_state DM 区）+ 角色企图 → DM 裁决：产出事件（可能产出一连串叙事链规划）→ 角色生成 reaction + 新的企图 → 循环。DM 产出的叙事链是柔性参考，非时间表——下次 tick 重新裁决。
 
-### [B-260615-19b0fa] 3.0.0 Dashboard Save Archives：存档与恢复
-- 创建: 2026-06-15
-- 优先级: P1
-- 类型: feature
-- 改动量: XL
-- 问题表现:
-    - 3.0.0 自托管用户需要像游戏存档一样，在 Dashboard 中创建和恢复 DicePP 状态存档。
-    - 镜像/程序版本回退无法恢复已经变更的 config、data、SQLite DB 或运行时状态，容易让“可回退”产生误导。
-    - 升级前存档、恢复前存档、manifest/checksum、恢复失败处理和 release 风险门禁尚未落地。
-    - Dashboard 自身 DB、content、LLOneBot 数据等边界尚未在存档 UI 中明确告知。
-- 开发备忘:
-    - 设计详见 `docs/dev/data-architecture-3.0.md` 的存档与恢复、阶段 D 部分。
-    - Dashboard 提供独立存档能力：创建、查看、删除、恢复；升级流程仅复用该能力。
-    - 存档为 `data/backups/*.zip`，包含 manifest 和 sha256 checksum。
-    - 包含 `config/`、`data/dicepp.db`、`data/bots/**/{bot_data.db,log.db,personas_data_*.db}`、`data/local_images/`。
-    - 不包含 `dashboard/data/dashboard.db`、`content/`、`data/backups/`、`data/runtime/`、`data/bots/*/logs/`、LLOneBot 数据。
-    - 创建存档时允许短暂停写；恢复由 Manager 编排，恢复前自动创建 pre-restore 存档，失败时保留 pre-restore 并提供恢复入口。
-    - release metadata 标记数据/配置风险时，升级前必须强提示或门禁创建存档。
+  DM 备忘：自由文本，存在 permanent_state 中。LLM 自行管理——创建线索、推进、合并重复线索、完结、归档。线索整体数量不限，但 focus 上限约 3 条，其余闲置。不结构化，让 LLM 自行把握。
 
-### [B-260626-b6bb08] DicePP 分布式 QQ 协议端 APK
-- 创建: 2026-06-26
-- 优先级: P2
-- 类型: feature
-- 改动量: XL
-- 问题表现: 集中部署方式下 QQ 协议端存在单点风险，需将协议端分布到用户设备上
-- 开发备忘: 开发 Android APK，内嵌 OneBot 协议端，用户安装后扫码登录即可接入 DicePP 服务器。Kotlin 壳 + Go 二进制，前台服务保活。预估 7-9 天。
+  scenario 清理：删除 "日常生活" fallback 和 `Character.scenario` 空字符串依赖。事件生成的场景上下文由 DM 动态产出。
 
-## deployment
+  与现有机制的衔接：`pending_plan`/`follow_up_action` 保留——角色仍产生企图，DM 裁决取代直接兑现。`slot_type` 的 wake_up/good_night 保留——起床和入睡是客观时间节点。`recovery_energy` floor 在 DM 架构下重新评估——DM 可依据睡眠质量叙事产出匹配的 delta。
 
-### [B-260618-8fce87] 3.0.0 Manager Foundation：本地 Manager 与 Runtime Backend
-- 创建: 2026-06-18
-- 优先级: P1
-- 类型: feature
-- 改动量: XL
-- 问题表现:
-  - 用户完成首次部署后，仍缺少通过 Dashboard 完成 Bot 启停、重启、更新和回滚的能力。
-  - Dashboard 未来还需要更新自身；由 Dashboard 直接替换自身容器或持有 Bot 子进程，难以保证操作完成、失败恢复和职责边界。
-  - 直接向 Dashboard 挂载 Docker Socket 会把宿主机高权限暴露给复杂 Web 应用。
-  - Linux 以 Docker 容器运行，Windows 以打包进程运行；如果分别实现生命周期逻辑，容易形成两套状态机、错误语义和更新流程。
-  - 3.0.0 Dashboard 存档恢复需要可靠停止 Bot、替换 config/data、重启 Bot，不能由 Dashboard 直接覆盖运行中的 DB 文件。
-- 开发备忘:
-  - 设计详见 `docs/dev/data-architecture-3.0.md` 的 Manager 3.0 范围、阶段 B 部分。
-  - 引入本地 Manager 常驻层，作为 Dashboard 与运行时之间的最小权限管理层；Dashboard 不直接访问 Docker Socket，不直接持有 Bot 生命周期，不直接替换运行中的文件。
-  - Manager Core 统一实现操作状态机、鉴权、审计、健康检查、并发控制、版本兼容、失败恢复和对 Dashboard 的 API。
-  - 平台差异收敛到 Runtime Backend：Linux 使用 DockerRuntime，Windows 使用 ProcessRuntime；两端共享 contract tests。
-  - 3.0.0 纳入本地 Manager 完整能力；DiceHub 远程 WSS 控制、云端更新/回滚/诊断、device-code 授权闭环保留 TODO。
-  - Manager 需为阶段 C 更新/回滚和阶段 D 存档恢复提供停写、停启、状态、日志等基础能力。
-
-### [B-260624-a91b7e] 3.0.0 Local Update And Rollback：本地更新、版本切换与失败恢复
-- 创建: 2026-06-24
-- 优先级: P1
-- 类型: feature
-- 改动量: XL
-- 问题表现:
-  - 3.0.0 前需要 Dashboard 通过 Manager 完成本地启停、重启、更新、版本切换和失败恢复，否则存档恢复和升级门禁无法闭环。
-  - Windows 打包进程与 Linux Docker 部署形态不同，如果更新/回滚逻辑分散实现，会形成两套状态机和错误语义。
-  - 镜像 tag 或程序文件切换必须和数据迁移、存档、健康检查协作，否则失败后用户无法判断当前处于哪个版本/状态。
-- 开发备忘:
-  - 设计详见 `docs/dev/data-architecture-3.0.md` 的阶段 C 部分。
-  - Dashboard 只调用 Manager API；Manager 负责执行启停、重启、日志、状态、版本切换和失败恢复。
-  - Windows 采用 staging 新版本接管：校验下载、停止旧进程、替换程序、健康检查、失败恢复；采用 onedir 发行包，不强求单一物理文件。
-  - Linux 通过受限 DockerRuntime 管理 DicePP 相关容器/compose 服务，禁止 Dashboard 直接暴露 Docker Socket。
-  - 更新前复用阶段 D 存档能力；恢复/回滚后由目标版本按 forward-only migration contract 处理数据。
-  - 不纳入 DiceHub 远程控制闭环；只要求本地 Dashboard + Manager 路径可用。
-
-## persona
-
-### [B-260630-44f47a] 生活事件时间加速测试功能
-- 创建: 2026-06-30
-- 优先级: P1
-- 类型: feature
-- 改动量: M
-- 问题表现: 生活事件（life events）的评测和调试只能依赖真实时间流逝; 无法快速模拟一周或一个月的 tick 推进效果; 导致 life event 相关功能的调试、回归测试和效果验证周期极长
-- 开发备忘: 引入时间加速/模拟时钟机制，允许在测试/调试模式下按需推进模拟时间（如 +7d、+30d）; 可能方向：(a) Simulator/tick 循环增加可配置时间倍速因子；(b) 提供 debug 命令或 API 手动触发指定天数的 tick 批量执行；(c) 引入 clock abstraction，测试时注入 fake clock; 影响面: life/simulator.py、event/time 相关模块、可能的 debug 命令入口
-
-### [B-260630-e9fcc8] Conversation 消息线程 DB 持久化
-- 创建: 2026-06-30
-- 优先级: P1
-- 类型: feature
-- 改动量: M
-- 问题表现:
-    - Conversation 仅内存中存活，bot 重启或进程退出后天内上下文全部丢失
-    - DM/Character 失去对今日已发生对话的全部记忆，无法恢复叙事连续性
-- 开发备忘:
-    - 在 persona_session_message 基础上增加 Conversation 序列化/反序列化
-    - 可考虑 JSON/msgpack 序列化 _messages 列表
-    - 跨天 compact 时自动清理旧消息
-    - 影响面: life/conversation.py、data/store.py、data/models.py
+  影响面：`character_life.py`（DM 裁决循环）、`event_agent.py`（prompt 重写为 DM 视角，删除 scenario 相关 prompt）、`character/models.py`（`Character.scenario` 字段评估是否移除）、`collecting.py`（事件参数可能调整）、`permanent_state` 读写路径。
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01
@@ -151,13 +84,19 @@
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
 
-### [B-260630-26d6a7] 通知消息 name/content 前缀一致性扫描与 role 验证
-- 创建: 2026-06-30
+### [B-260623-7412ec] MiniMaxImageProvider.probe() 适配错误分类，避免配额/鉴权类无意义重试
+- 创建: 2026-06-23
 - 优先级: P2
 - 类型: refactor
 - 改动量: S
-- 问题表现: 当前 notification/transient 消息混用 name 字段和 content 前缀来区分通知与真用户输入，缺乏一致性
-- 开发备忘: 1. 扫描全项目所有类似注入点，确认 name 和 content 前缀是否都有使用；2. 判断是否应将 role 从 user 统一改为 system；3. 跑真实 LLM 验证 system role 通知消息的行为差异。结论以 LLM 验证结果为准。
+- 问题表现:
+    - MiniMaxImageProvider.probe() 仍吞掉所有异常返回 False
+    - 若遭遇配额/鉴权类永久错误会进入无意义重试
+    - OpenAIProvider（及子类 MiniMaxProvider）已更新为 raise 模式，该 provider 使用 httpx 直连未同步
+- 开发备忘:
+    - 方向：将 MiniMaxImageProvider.probe() 改为对预期内异常（httpx.TimeoutException）返回 False，其余 raise
+    - 影响面：仅限 MiniMax 图生模型的探针路径
+    - 风险点：httpx 异常类型与 OpenAI SDK 不同，需确认分类兼容性后再动手
 
 ### [B-260702-7b8fc3] AgentRuntime 纠正注入改为元数据标记（非内容匹配），解除 ToolLoop 字符串耦合
 - 创建: 2026-07-02
@@ -206,7 +145,36 @@
     - 新方案应与 SA 叙事产出和角色状态结合，避免回到独立数值字段旧模式
     - 影响面: proactive_config.py、simulator.py、pydantic_models.py
 
+### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - 当前 `probe()` 返回 `bool`，调用方 `_probe_loop` 只看 True/False，不区分"网络瞬断"和"永久配额耗尽"
+    - minimax 429 配额耗尽时 probe 会重试 10 次才进入 exhausted，期间每次无意义重试约 25 分钟
+    - `classify_error_kind` 已能正确识别 2056 / rate_limit_error，但 probe 路径不调用它
+- 开发备忘:
+    - 方向：probe 返回类型从 `bool` 扩展为携带 ErrorKind，或 probe 内部直接调用 `circuit_breaker.mark_dead()` 跳过重试
+    - 也可给 probe 使用 `max_retries=0` 的独立 client，让 SDK 不重试直接抛出原始异常（带 body）
+    - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
+    - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
+
 ## release
+
+### [B-260615-90ee20] GitHub Release 与多产物发布流程
+- 创建: 2026-06-15
+- 优先级: P2
+- 类型: feature
+- 改动量: L
+- 问题表现:
+    - 已决定 docs/releases/vX.Y.Z.md 作为 release metadata 源头，但未来 GitHub Release body、发布附件、镜像、可能的 Windows exe 产物如何统一发布尚未设计。
+    - 当前第一阶段只计划 GHCR Docker 镜像，尚未覆盖桌面/Windows exe、checksums、构建矩阵、手动/自动发布边界等常见发布产物问题。
+- 开发备忘:
+    - 调研并设计后续 release 流程：以 docs/releases/vX.Y.Z.md 生成或同步 GitHub Release body。
+    - 评估是否在 GitHub Release 附加构建产物，如 Windows exe、压缩包、checksums、SBOM 或签名文件。
+    - 保持第一版实现克制：先不承诺具体 exe 技术路线，未来可比较 PyInstaller、zipapp、独立 Python runtime、Docker-only 等方案。
+    - 需要决定哪些产物由 CI 自动生成，哪些必须人工确认后发布；避免 GitHub Actions 自动部署生产。
 
 ### [B-260617-1cc4a4] 改进 PyInstaller 打包结构以减少 hiddenimports 补丁
 - 创建: 2026-06-17
