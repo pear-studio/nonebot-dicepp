@@ -217,13 +217,21 @@ def _build_collect_registry(
     return reg
 
 
-def _parse_tool_args(new_messages: list[dict], tool_name: str) -> list[dict]:
-    """从 LLM 返回的 new_messages 中提取指定工具的调用参数。
+def _extract_tool_args(new_messages: list[dict], tool_names: set[str] | None = None) -> list[tuple[str, dict]]:
+    """从 LLM 返回的 new_messages 中提取工具调用参数。
 
-    兼容 Anthropic 格式（content list 含 tool_use 块）和 OpenAI 格式（tool_calls）。
+    统一解析函数，兼容 Anthropic 格式（content list 含 tool_use 块）和
+    OpenAI 格式（tool_calls）。
+
+    Args:
+        new_messages: LLM 返回的增量消息列表
+        tool_names: 限定提取的工具名集合；None 表示匹配全部工具
+
+    Returns:
+        [(tool_name, {arg})] — 工具名与参数的对列表
     """
     import json
-    collected: list[dict] = []
+    collected: list[tuple[str, dict]] = []
     for msg in new_messages:
         if msg.get("role") != "assistant":
             continue
@@ -232,19 +240,29 @@ def _parse_tool_args(new_messages: list[dict], tool_name: str) -> list[dict]:
         if isinstance(content, list):
             for block in content:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
-                    if block.get("name") == tool_name:
+                    name = block.get("name", "")
+                    if tool_names is None or name in tool_names:
                         inp = block.get("input", {})
                         if isinstance(inp, dict):
-                            collected.append(inp)
+                            collected.append((name, inp))
         # OpenAI 格式
         elif isinstance(msg.get("tool_calls"), list):
             for tc in msg["tool_calls"]:
                 func = tc.get("function", {})
-                if func.get("name") == tool_name:
+                name = func.get("name", "")
+                if tool_names is None or name in tool_names:
                     try:
                         args = json.loads(func.get("arguments", "{}"))
                     except (json.JSONDecodeError, TypeError):
                         args = {}
                     if isinstance(args, dict):
-                        collected.append(args)
+                        collected.append((name, args))
     return collected
+
+
+def _parse_tool_args(new_messages: list[dict], tool_name: str) -> list[dict]:
+    """从 LLM 返回的 new_messages 中提取指定工具的调用参数。
+
+    _extract_tool_args 的薄封装，按单个工具名过滤并丢弃工具名。
+    """
+    return [args for _name, args in _extract_tool_args(new_messages, {tool_name} if tool_name else None)]

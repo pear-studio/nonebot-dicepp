@@ -12,6 +12,7 @@ import json as _json
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
+from utils.logger import logger
 from utils.time import wall_now, format_timestamp, format_relative_time, DEFAULT_EPOCH
 
 from ..data.store import PersonaDataStore
@@ -237,7 +238,13 @@ class DailyEventChangeSource(ChangeSource):
             event_ids = set(cursor.get("event_ids", []))
             ts = cursor.get("context_since")
             if ts:
-                context_since = datetime.fromisoformat(ts)
+                try:
+                    context_since = datetime.fromisoformat(ts)
+                except ValueError:
+                    logger.warning(
+                        f"DailyEventChangeSource: 无效的 context_since 格式: {ts!r}，重置为 None"
+                    )
+                    context_since = None
 
         # 跨天：重置 event_ids
         if cursor_date is not None and cursor_date != today_str:

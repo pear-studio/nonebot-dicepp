@@ -122,3 +122,140 @@ class TestChatOrchestratorGate:
         )
         result = await orch.chat("u1", "", "hello")
         assert result == "Zzz..."
+
+
+class TestChatOrchestratorChat:
+    """R4: ChatOrchestrator.chat() 核心流程单元测试"""
+
+    @pytest.fixture
+    def orch_with_mocks(self):
+        """构造带 mock Conversation 和 Coordinator 的 ChatOrchestrator。"""
+        from plugins.DicePP.module.persona.life.conversation import RunResult
+
+        store = _make_store()
+        store.get_recent_messages = AsyncMock(return_value=[{}])
+        store.get_relationship = AsyncMock()
+
+        mock_conv = MagicMock(spec=Conversation)
+        mock_conv.run = AsyncMock(return_value=RunResult(
+            final_text="你好！",
+            final_reason="stop",
+            delivery_performed=False,
+        ))
+
+        orch = ChatOrchestrator(
+            store=store, router=MagicMock(), character=_make_char(),
+            config=_make_config(), context_builder=_make_context_builder(),
+        )
+        orch._ensure_conversation = AsyncMock(return_value=mock_conv)
+
+        return orch, mock_conv, store
+
+    @pytest.mark.asyncio
+    async def test_chat_happy_path(self, orch_with_mocks):
+        """mock coordinator.submit 返回成功文本"""
+        orch, mock_conv, store = orch_with_mocks
+
+        orch._coordinator.submit = AsyncMock(return_value=MagicMock(
+            status="success", value="你好！",
+        ))
+
+        result = await orch.chat("u1", "", "hello")
+        assert result == "你好！"
+
+    @pytest.mark.asyncio
+    async def test_chat_transient_injection(self, orch_with_mocks):
+        """transient_message 正确传入 conv.run()"""
+        orch, mock_conv, store = orch_with_mocks
+
+        # 模拟 coordinator.submit 内部调用 chat_call_fn
+        async def mock_submit(target_key, message, chat_call_fn, *,
+                              continue_on_buffered, on_result, on_exhausted):
+            result = await chat_call_fn([message])
+            return MagicMock(status="success", value=result)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
+
+        await orch.chat("u1", "", "hello", transient_message="用户打了个喷嚏")
+
+        # 验证 conv.run() 被调用时 transient 参数传入正确
+        call_kwargs = mock_conv.run.call_args.kwargs
+        assert call_kwargs.get("transient") == "用户打了个喷嚏", (
+            f"transient 未正确传入 conv.run()，实际: {call_kwargs.get('transient')}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_chat_dedup_same_message(self, orch_with_mocks):
+        """5s 内重复消息返回 None"""
+        orch, mock_conv, store = orch_with_mocks
+
+        orch._coordinator.submit = AsyncMock(return_value=MagicMock(
+            status="success", value="你好！",
+        ))
+
+        # 第一条应正常返回
+        result1 = await orch.chat("u1", "", "hello")
+        assert result1 is not None
+
+        # 第二条相同消息应去重
+        result2 = await orch.chat("u1", "", "hello")
+        assert result2 is None
+
+    @pytest.mark.asyncio
+    async def test_chat_reputation_refused(self, orch_with_mocks):
+        """低信誉时返回拒绝消息"""
+        from plugins.DicePP.module.persona.data.models import RelationshipState
+
+        orch, mock_conv, store = orch_with_mocks
+        orch._chat_config.relationship_refuse_enabled = True
+
+        rel = RelationshipState(user_id="u1", reputation=-50)
+        store.get_relationship = AsyncMock(return_value=rel)
+
+        result = await orch.chat("u1", "", "hello")
+        # 信誉低于阈值（默认 30），应返回拒绝消息
+        assert result is not None
+        # 不是正常 LLM 回复
+        assert result != "你好！"
+
+    @pytest.mark.asyncio
+    async def test_chat_quota_exceeded_fallback(self, orch_with_mocks):
+        """QuotaExceeded 时调用 on_exhausted 回调返回 fallback 文案"""
+        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
+
+        orch, mock_conv, store = orch_with_mocks
+
+        # 模拟 coordinator.submit 内部调用 on_exhausted
+        async def mock_submit(target_key, message, chat_call_fn, *,
+                              continue_on_buffered, on_result, on_exhausted):
+            fallback = await on_exhausted(QuotaExceeded("今日配额已用完"))
+            return MagicMock(status="success", value=fallback)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
+
+        result = await orch.chat("u1", "", "hello")
+        assert result is not None
+        # fallback 文案应包含配额相关提示
+        assert "配额" in result or "key" in result
+
+    @pytest.mark.asyncio
+    async def test_chat_calls_scoring_trigger(self, orch_with_mocks):
+        """回复后处理调用 scoring_trigger.on_interaction"""
+        orch, mock_conv, store = orch_with_mocks
+
+        mock_scoring_trigger = MagicMock()
+        mock_scoring_trigger.on_interaction = AsyncMock()
+        orch._scoring_trigger = mock_scoring_trigger
+
+        # 模拟 coordinator.submit 内部调用 chat_call_fn → conv.run → after_response
+        async def mock_submit(target_key, message, chat_call_fn, *,
+                              continue_on_buffered, on_result, on_exhausted):
+            result = await chat_call_fn([message])
+            return MagicMock(status="success", value=result)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
+
+        result = await orch.chat("u1", "", "hello", is_command=False)
+        assert result == "你好！"
+        # 验证 scoring_trigger.on_interaction 被调用
+        mock_scoring_trigger.on_interaction.assert_awaited_once()

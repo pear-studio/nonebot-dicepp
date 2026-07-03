@@ -152,9 +152,13 @@ class ActionEvaluator:
                     temperature=0.3,
                     timeout=self._timeout,
                     selection=SCORING,
-                    max_rounds=1,
                 ),
             )
+            if tool_result.final_reason and tool_result.final_reason not in ("stop", "max_rounds", "direct_content"):
+                logger.warning(
+                    f"[ActionEvaluator] LLM 执行异常 reason={tool_result.final_reason}"
+                )
+                return ("rejected", "LLM 协议错误")
             from .tool_loop import _parse_tool_args
             collected_args = _parse_tool_args(tool_result.new_messages, "record_evaluation")
         except ServiceUnavailableError:

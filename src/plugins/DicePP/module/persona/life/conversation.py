@@ -78,7 +78,6 @@ class RunConfig:
     selection: Any | None = None
     temperature: float = 0.9
     timeout: int = 60
-    max_rounds: int = 10
     image_data_urls: list[str] | None = None
 
 
@@ -337,7 +336,7 @@ class Conversation:
         snapshot = Snapshot(
             # 当前所有 messages 的 content 均为 str；若未来支持多模态 list content，改用 copy.deepcopy
             messages=[dict(m) for m in self._messages],
-            cursors=self._cursors,
+            cursors=dict(self._cursors),
             system_prompt=self._system_prompt,
         )
         await self._store.put(self._id or "", snapshot)
@@ -376,6 +375,9 @@ class Conversation:
         Returns:
             生成的摘要文本（用于日志/调试）。
         """
+        if keep_recent <= 0:
+            logger.warning("compact: keep_recent <= 0，跳过压缩")
+            return ""
         if len(self._messages) <= keep_recent:
             return ""
 

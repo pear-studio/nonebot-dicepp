@@ -93,3 +93,34 @@ class TestScoringToolPath:
 
         assert result.deltas == ScoreDeltas()
         assert result.parse_error != ""
+
+
+class TestScoringLLMAbnormal:
+    """R1: 验证 batch_analyze 在 ToolLoop 返回异常 final_reason 时显式标记错误"""
+
+    @pytest.mark.asyncio
+    async def test_scoring_llm_abnormal_reason(self, agent, mock_router, monkeypatch):
+        """LLM 返回异常 final_reason 时应显式标记 parse_error"""
+        from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
+        from plugins.DicePP.module.persona.agent.loop import AgentRunResult
+
+        async def abnormal_run(self, messages, user_id, group_id, tool_registry, **kwargs):
+            return AgentRunResult(
+                run_id="test",
+                turn_id="test",
+                status="completed",
+                final_reason="provider_error",
+                final_text="",
+                final_messages=list(messages),
+                delivery_performed=False,
+            )
+
+        monkeypatch.setattr(AgentRuntime, "run", abnormal_run)
+        result = await agent.batch_analyze(
+            messages=[{"role": "user", "content": "test"}, {"role": "assistant", "content": "ok"}],
+        )
+
+        assert "LLM 协议错误" in result.parse_error, (
+            f"期望 parse_error 含 'LLM 协议错误' 但得到 '{result.parse_error}' —— "
+            f"final_reason='provider_error' 时应返回精确错误信息而非默认 total_score=50"
+        )

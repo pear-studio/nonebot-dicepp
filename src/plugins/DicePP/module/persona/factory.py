@@ -1,6 +1,6 @@
 """Persona 模块工厂函数
 
-负责从 Bot 组装所有依赖，创建 ChatSession / LifeSimulator / MessagePort。
+负责从 Bot 组装所有依赖，创建 ChatOrchestrator / LifeSimulator / MessagePort。
 """
 import asyncio
 import os
@@ -173,7 +173,7 @@ class PersonaApp:
     # ── 生命周期驱动 ──
 
     async def is_awake(self) -> bool:
-        """角色是否处于唤醒状态。委托给 ``ChatSession.is_awake()``。"""
+        """角色是否处于唤醒状态。委托给 ``ChatOrchestrator.is_awake()``。"""
         return await self.chat.is_awake()
 
     async def tick(self) -> None:

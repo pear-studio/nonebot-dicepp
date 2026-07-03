@@ -421,7 +421,6 @@ class CharacterAgent(Agent):
                 required_tools=["say"],
                 temperature=0.9,
                 selection=EVENT_GEN,
-                max_rounds=self._max_rounds,
                 timeout=self._bg_timeout,
             ),
         )
@@ -548,7 +547,6 @@ class CharacterAgent(Agent):
                 required_tools=["record_diary_entry"],
                 temperature=0.9,
                 selection=DIARY,
-                max_rounds=self._max_rounds,
                 timeout=self._bg_timeout,
             ),
         )

@@ -256,7 +256,6 @@ class Agent(ABC):
                 required_tools=[first_tool_name] if first_tool_name else None,
                 temperature=0.9,
                 selection=self._get_selection_policy(),
-                max_rounds=self._max_rounds,
                 timeout=self._bg_timeout,
                 tool_registry=self._build_extra_registry(),
             ),
@@ -272,13 +271,11 @@ class Agent(ABC):
 
 
 def _parse_tool_inputs(messages: list[dict], tools: list[dict]) -> list[dict]:
-    """从消息列表中提取工具调用的参数。
+    """从消息列表中提取工具调用的参数，注入 _tool_name 元数据。
 
-    扫描给定的 messages，提取 assistant 消息中 tool_use 块的 input 字段。
-    兼容 Anthropic 格式（content 为 list 含 tool_use 块）和 OpenAI 格式（tool_calls）。
-    不修改传入的 dict。
+    基于 _extract_tool_args 统一函数，自行注入 _tool_name。
     """
-    import json
+    from .tool_loop import _extract_tool_args
 
     tool_names = set()
     for t in tools:
@@ -287,30 +284,7 @@ def _parse_tool_inputs(messages: list[dict], tools: list[dict]) -> list[dict]:
         if name:
             tool_names.add(name)
 
-    collected: list[dict] = []
-    for msg in messages:
-        if msg.get("role") != "assistant":
-            continue
-        # Anthropic 格式: content 为 list，含 type="tool_use" 块
-        content = msg.get("content")
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    name = block.get("name", "")
-                    if name in tool_names or not tool_names:
-                        inp = block.get("input", {})
-                        if isinstance(inp, dict):
-                            collected.append({"_tool_name": name, **inp})
-        # OpenAI 格式: tool_calls 字段
-        elif isinstance(msg.get("tool_calls"), list):
-            for tc in msg["tool_calls"]:
-                func = tc.get("function", {})
-                name = func.get("name", "")
-                if name in tool_names or not tool_names:
-                    try:
-                        args = json.loads(func.get("arguments", "{}"))
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-                    if isinstance(args, dict):
-                        collected.append({"_tool_name": name, **args})
-    return collected
+    return [
+        {"_tool_name": name, **args}
+        for name, args in _extract_tool_args(messages, tool_names if tool_names else None)
+    ]

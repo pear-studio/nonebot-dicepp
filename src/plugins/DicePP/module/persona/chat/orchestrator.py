@@ -38,14 +38,6 @@ if TYPE_CHECKING:
 _DEFAULT_SLEEP_MESSAGES = ("角色正在休息，请稍后再来",)
 
 
-def _format_group_message(
-    msg_dict: Dict[str, Any], ts: str, img_prefix: str, content: str,
-) -> str:
-    """群聊消息格式化（[HH:MM] [speaker_name] content + 图片标记）。"""
-    speaker = msg_dict.get("speaker_name") or msg_dict.get("display_name", "")
-    speaker_part = f"[{speaker}] " if speaker else ""
-    return f"[{ts}] {speaker_part}{img_prefix}{content}"
-
 
 class ChatOrchestrator:
     """聊天编排层 — 替代 ChatSession 的编排逻辑。
@@ -244,10 +236,13 @@ class ChatOrchestrator:
             self._store, user_id=user_id,
             character_id=self._character.character_id,
         )
+        from ..agent.request import AgentRunLimits
+
         tool_loop = ToolLoop(
             router=self._router,
             store=self._store,
             tool_registry=self._tool_registry,
+            limits=AgentRunLimits(max_rounds=self._chat_config.tools_max_rounds),
         )
 
         conv = Conversation(store=conv_store, tool_loop=tool_loop)
