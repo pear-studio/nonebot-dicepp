@@ -302,7 +302,7 @@ class OpenAIProvider:
             return True
         except asyncio.TimeoutError:
             logger.warning(f"probe timeout: model={self.model}")
-            return False
+            raise  # 重新抛出，让 _probe_loop 通过 classify_from_provider 归类为 NETWORK_ERROR
         except Exception as e:
             _log_probe_error(self.model, e)
             raise  # 重新抛出，让调用方用 classify_from_provider 分类后做路由决策

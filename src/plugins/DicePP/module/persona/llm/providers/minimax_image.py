@@ -26,6 +26,41 @@ _NON_RETRYABLE_CODES = {
 # 2xxx 系列一般为业务/配额错误，1xxx 系列为请求/鉴权错误
 
 
+def _raise_permanent_probe_error(resp) -> None:
+    """解析 MiniMax 错误响应体，对永久错误（配额/鉴权）抛出异常。
+
+    使 _probe_loop 能通过 classify_from_provider → mark_dead 跳过无意义重试，
+    而非将永久错误与网络瞬断同等对待、耗尽 10 次 probe 后才进入 exhausted。
+    """
+    try:
+        body = resp.json()
+    except Exception:
+        return
+    if not isinstance(body, dict):
+        return
+    # OpenAI 兼容格式: {"error": {"code": "2056", "message": "..."}}
+    error = body.get("error", {})
+    if isinstance(error, dict):
+        code = error.get("code")
+        if code is not None:
+            try:
+                if int(code) in _NON_RETRYABLE_CODES:
+                    msg = str(error.get("message", ""))
+                    raise Exception(f"[{code}] {msg}")
+            except (ValueError, TypeError):
+                pass
+    # MiniMax 原生格式: {"base_resp": {"status_code": 2056}}
+    base_resp = body.get("base_resp", {})
+    if isinstance(base_resp, dict):
+        code = base_resp.get("status_code")
+        if code is not None:
+            try:
+                if int(code) in _NON_RETRYABLE_CODES:
+                    raise Exception(f"[{code}]")
+            except (ValueError, TypeError):
+                pass
+
+
 class MiniMaxImageProvider:
     """MiniMax image-01 图片生成提供者"""
 
@@ -136,10 +171,11 @@ class MiniMaxImageProvider:
                         f"image gen probe unexpected status: model={self.model} "
                         f"status={resp.status_code} body={resp.text[:300]}"
                     )
+                    _raise_permanent_probe_error(resp)
                 return success
         except httpx.TimeoutException:
             logger.warning(f"image gen probe timeout: model={self.model}")
-            return False
+            raise  # 重新抛出，让 _probe_loop 通过 classify_from_provider 归类为 NETWORK_ERROR
 
     @staticmethod
     def classify_error(exception: Exception) -> ErrorClass:
@@ -159,8 +195,14 @@ class MiniMaxImageProvider:
 
     @staticmethod
     def classify_error_kind(exception: Exception) -> Optional[ErrorKind]:
-        """MiniMax 图生细粒度错误分类 — 匹配内容过滤错误码"""
+        """MiniMax 图生细粒度错误分类 — 永久错误码优先，其次内容过滤"""
         error_msg = str(exception).lower()
+        # 永久错误码优先匹配（配额/鉴权），避免回退到 _classify_non_retryable 兜底损失语义
+        for code in _NON_RETRYABLE_CODES:
+            if f"[{code}]" in error_msg:
+                if code in (2056, 1008):
+                    return ErrorKind.QUOTA_EXCEEDED
+                return ErrorKind.PROVIDER_ERROR
         # 2013 细分：MiniMax 复用此码表示参数错误和内容审核
         if "2013" in error_msg and "invalid params" not in error_msg:
             return ErrorKind.CONTENT_FILTERED

@@ -247,8 +247,8 @@ class TestProbe:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_probe_returns_false_on_timeout(self, provider):
-        """probe 在超时时返回 False"""
+    async def test_probe_raises_on_timeout(self, provider):
+        """probe 在超时时抛出异常（交由 _probe_loop 通过 classify_from_provider 归类为 NETWORK_ERROR）"""
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client_cls.return_value.__aenter__.return_value = mock_client
@@ -256,8 +256,8 @@ class TestProbe:
                 side_effect=httpx.TimeoutException("timeout")
             )
 
-            result = await provider.probe()
-        assert result is False
+            with pytest.raises(httpx.TimeoutException):
+                await provider.probe()
 
     @pytest.mark.asyncio
     async def test_probe_raises_on_non_timeout_exception(self, provider):
