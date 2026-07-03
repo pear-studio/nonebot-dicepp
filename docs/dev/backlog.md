@@ -12,58 +12,7 @@
 
 ---
 
-## dashboard
-
-### [B-260623-6f9e85] 缺少总览/概览 tab 聚合核心数据指标
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: feature
-- 改动量: M
-- 问题表现:
-    - 当前 6 个 tab 各自独立，没有一个 overview/dashboard 页面
-    - 无法一眼看到核心指标（在线 bot 数、最近错误、配额使用、配置变更等）
-    - 需要逐个 tab 点开查看，体验分散
-- 开发备忘:
-    - 新增 overview tab（放在 tabs 数组第一位）
-    - 聚合展示：bot 在线状态卡片、最近审计日志摘要、配置覆盖统计、最近错误计数等
-    - 后端可能需要新增 /api/overview 聚合 endpoint，或前端组合现有 API 调用
-    - 影响面：dashboard.html（新 tab UI + 数据获取逻辑）、可能新增 app.py endpoint
-    - 风险：低，纯增量功能；注意 API 调用数量和性能
-
-### [B-260623-84b827] SSE 端点缺少流式集成测试
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现: tests/dashboard/test_sse.py 缺少对 /api/events 端点的端到端流式测试（连接→接收初始状态→断开清理），当前仅测试 auth 和 broadcast 机制
-- 开发备忘: 使用 httpx.AsyncClient + ASGITransport 编写异步流式测试。低优先级，broadcast 机制已通过 TestBroadcast 测试验证
-
 ## persona
-
-### [B-260622-0ed4e3] DM 层接管事件生成：裁决权、隐藏设定与叙事线索管理
-- 创建: 2026-06-22
-- 优先级: P1
-- 类型: refactor
-- 改动量: XL
-- 问题表现:
-  - 事件生成（`EventGenerationAgent.generate_event_result`）当前 prompt 自称"世界观设定专家"，但实际没有 DM 的裁决权和隐藏信息
-  - `Character.scenario` 字段默认为空字符串，事件生成 prompt 中场景 fallback 为硬编码 "日常生活"，所有事件共享同一场景上下文，缺乏叙事方向
-  - 角色反应中的 `follow_up_action` 直接注入下一环事件的 scenario，角色企图直接兑现为事件走向。中途没有不确定性——角色想去采药就一定能采到，不会遇到意外
-  - 缺少长线叙事记忆：DM 不知道当前有哪些线索在推进、进展到哪了。每次事件生成是独立的，产出趋于流水账和随机事件
-  - 没有从状态数值到叙事意义的转换——体力低是一个数字，DM 不据此调整事件走向
-  - `_slot_type_hint` 中 "wake_up 恢复规则：体力自然恢复，energy_delta 保底 +20" 导致 LLM 习惯性填满 delta 上限，数值区分度不足
-- 开发备忘:
-  DM 定位：世界观层，拥有裁决权，知道角色不知道的隐藏设定。角色只能产生"企图"（follow_up_action / pending_plan），DM 裁决企图的执行结果。
-
-  流程设计：tick → DM 读取角色状态 + DM 备忘（permanent_state DM 区）+ 角色企图 → DM 裁决：产出事件（可能产出一连串叙事链规划）→ 角色生成 reaction + 新的企图 → 循环。DM 产出的叙事链是柔性参考，非时间表——下次 tick 重新裁决。
-
-  DM 备忘：自由文本，存在 permanent_state 中。LLM 自行管理——创建线索、推进、合并重复线索、完结、归档。线索整体数量不限，但 focus 上限约 3 条，其余闲置。不结构化，让 LLM 自行把握。
-
-  scenario 清理：删除 "日常生活" fallback 和 `Character.scenario` 空字符串依赖。事件生成的场景上下文由 DM 动态产出。
-
-  与现有机制的衔接：`pending_plan`/`follow_up_action` 保留——角色仍产生企图，DM 裁决取代直接兑现。`slot_type` 的 wake_up/good_night 保留——起床和入睡是客观时间节点。`recovery_energy` floor 在 DM 架构下重新评估——DM 可依据睡眠质量叙事产出匹配的 delta。
-
-  影响面：`character_life.py`（DM 裁决循环）、`event_agent.py`（prompt 重写为 DM 视角，删除 scenario 相关 prompt）、`character/models.py`（`Character.scenario` 字段评估是否移除）、`collecting.py`（事件参数可能调整）、`permanent_state` 读写路径。
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01
@@ -106,6 +55,21 @@
 - 问题表现: _filter_corrections 依赖硬编码 [系统指令] 字符串前缀识别纠正消息，与 AgentRuntime 注入侧字符串耦合。若注入格式变化过滤静默失效。
 - 开发备忘: 在 AgentRuntime 层为纠正消息添加元数据标记（如特殊 role 或 _internal flag），使 ToolLoop._filter_corrections 不依赖内容匹配。影响面: agent/loop.py（注入侧）+ life/tool_loop.py（过滤侧）。
 
+### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
+- 创建: 2026-06-23
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现:
+    - 当前 `probe()` 返回 `bool`，调用方 `_probe_loop` 只看 True/False，不区分"网络瞬断"和"永久配额耗尽"
+    - minimax 429 配额耗尽时 probe 会重试 10 次才进入 exhausted，期间每次无意义重试约 25 分钟
+    - `classify_error_kind` 已能正确识别 2056 / rate_limit_error，但 probe 路径不调用它
+- 开发备忘:
+    - 方向：probe 返回类型从 `bool` 扩展为携带 ErrorKind，或 probe 内部直接调用 `circuit_breaker.mark_dead()` 跳过重试
+    - 也可给 probe 使用 `max_retries=0` 的独立 client，让 SDK 不重试直接抛出原始异常（带 body）
+    - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
+    - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
+
 ### [B-260630-1f9286] 工具定义与传入规则梳理 — 统一 required_tool 语义和传递路径
 - 创建: 2026-06-30
 - 优先级: P2
@@ -145,36 +109,7 @@
     - 新方案应与 SA 叙事产出和角色状态结合，避免回到独立数值字段旧模式
     - 影响面: proactive_config.py、simulator.py、pydantic_models.py
 
-### [B-260623-4a2c1d] probe 路径感知错误分类，避免配额/鉴权类错误无意义重试
-- 创建: 2026-06-23
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现:
-    - 当前 `probe()` 返回 `bool`，调用方 `_probe_loop` 只看 True/False，不区分"网络瞬断"和"永久配额耗尽"
-    - minimax 429 配额耗尽时 probe 会重试 10 次才进入 exhausted，期间每次无意义重试约 25 分钟
-    - `classify_error_kind` 已能正确识别 2056 / rate_limit_error，但 probe 路径不调用它
-- 开发备忘:
-    - 方向：probe 返回类型从 `bool` 扩展为携带 ErrorKind，或 probe 内部直接调用 `circuit_breaker.mark_dead()` 跳过重试
-    - 也可给 probe 使用 `max_retries=0` 的独立 client，让 SDK 不重试直接抛出原始异常（带 body）
-    - 波及所有 provider 的 probe 实现和 router 探针循环，需要统一设计
-    - 已加 WARNING 级日志辅助判断异常类型，等下次生产环境再现后确认具体异常链再动手
-
 ## release
-
-### [B-260615-90ee20] GitHub Release 与多产物发布流程
-- 创建: 2026-06-15
-- 优先级: P2
-- 类型: feature
-- 改动量: L
-- 问题表现:
-    - 已决定 docs/releases/vX.Y.Z.md 作为 release metadata 源头，但未来 GitHub Release body、发布附件、镜像、可能的 Windows exe 产物如何统一发布尚未设计。
-    - 当前第一阶段只计划 GHCR Docker 镜像，尚未覆盖桌面/Windows exe、checksums、构建矩阵、手动/自动发布边界等常见发布产物问题。
-- 开发备忘:
-    - 调研并设计后续 release 流程：以 docs/releases/vX.Y.Z.md 生成或同步 GitHub Release body。
-    - 评估是否在 GitHub Release 附加构建产物，如 Windows exe、压缩包、checksums、SBOM 或签名文件。
-    - 保持第一版实现克制：先不承诺具体 exe 技术路线，未来可比较 PyInstaller、zipapp、独立 Python runtime、Docker-only 等方案。
-    - 需要决定哪些产物由 CI 自动生成，哪些必须人工确认后发布；避免 GitHub Actions 自动部署生产。
 
 ### [B-260617-1cc4a4] 改进 PyInstaller 打包结构以减少 hiddenimports 补丁
 - 创建: 2026-06-17
