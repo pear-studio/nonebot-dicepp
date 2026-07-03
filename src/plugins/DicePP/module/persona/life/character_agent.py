@@ -400,115 +400,121 @@ class CharacterAgent(Agent):
             AgentResult(data=EventReactionResult)
         """
         context["mode"] = "reaction"
+        from .conversation import RunConfig
+        from .agent import _parse_tool_inputs
 
-        try:
-            # load_state() 用于验证状态存在性
-            state = await self.load_state()
-            system_prompt = self.build_system_prompt(state, context)
-            user_prompt = self._build_reaction_user_prompt(context)
+        # load_state() 用于验证状态存在性
+        state = await self.load_state()
+        system_prompt = self.build_system_prompt(state, context)
+        user_prompt = self._build_reaction_user_prompt(context)
 
-            # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-            collected, _conv = await self._process(
-                context=context,
-                initial_system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                tools=[
-                    SAY_TOOL_CHARACTER.to_openai_format(),
-                    END_CONVERSATION_TOOL.to_openai_format(),
-                ],
+        tools = [
+            SAY_TOOL_CHARACTER.to_openai_format(),
+            END_CONVERSATION_TOOL.to_openai_format(),
+        ]
+        conv = await self._ensure_conversation(context, system_prompt_override=system_prompt)
+        result = await conv.run(
+            user_prompt,
+            RunConfig(
+                mode="collect",
+                tools=tools,
+                required_tools=["say"],
                 temperature=0.9,
                 selection=EVENT_GEN,
+                max_rounds=self._max_rounds,
+                timeout=self._bg_timeout,
+            ),
+        )
+        self._last_terminated_by = result.terminated_by
+        collected = _parse_tool_inputs(result.new_messages, tools)
+
+        # 检查是否由 end_conversation 终止
+        if self._last_terminated_by == "end_conversation":
+            # 同轮可能同时调用了 say + end_conversation，优先提取 say 数据
+            say_args = None
+            for item in collected:
+                if item and "content" in item:
+                    say_args = item
+                    break
+            if say_args is not None:
+                reaction = str(say_args.get("content", "")).strip().strip('"').strip("'")
+                if reaction:
+                    if len(reaction) > 200:
+                        reaction = reaction[:197] + "..."
+                    return AgentResult(
+                        success=True,
+                        data=EventReactionResult(
+                            reaction=reaction,
+                            has_follow_up=bool(say_args.get("has_follow_up", False)),
+                            want_to_end=bool(say_args.get("want_to_end", False)),
+                            last_say_content=reaction,
+                            raw_response=json.dumps(say_args, ensure_ascii=False),
+                        ),
+                        raw_response=json.dumps(say_args, ensure_ascii=False),
+                    )
+            # 无 say 内容：返回空结果，标记 terminated_by
+            return AgentResult(
+                success=True,
+                data=EventReactionResult(reaction=""),
+                terminated_by="end_conversation",
             )
 
-            # 检查是否由 end_conversation 终止
-            if self._last_terminated_by == "end_conversation":
-                # 同轮可能同时调用了 say + end_conversation，优先提取 say 数据
-                say_args = None
-                for item in collected:
-                    if item and "content" in item:
-                        say_args = item
-                        break
-                if say_args is not None:
-                    reaction = str(say_args.get("content", "")).strip().strip('"').strip("'")
-                    if reaction:
-                        if len(reaction) > 200:
-                            reaction = reaction[:197] + "..."
-                        return AgentResult(
-                            success=True,
-                            data=EventReactionResult(
-                                reaction=reaction,
-                                has_follow_up=bool(say_args.get("has_follow_up", False)),
-                                want_to_end=bool(say_args.get("want_to_end", False)),
-                                last_say_content=reaction,
-                                raw_response=json.dumps(say_args, ensure_ascii=False),
-                            ),
-                            raw_response=json.dumps(say_args, ensure_ascii=False),
-                        )
-                # 无 say 内容：返回空结果，标记 terminated_by
-                return AgentResult(
-                    success=True,
-                    data=EventReactionResult(reaction=""),
-                    terminated_by="end_conversation",
-                )
+        if not collected:
+            logger.warning("反应生成: LLM 未调用 say 工具")
+            return AgentResult(
+                success=False,
+                data=EventReactionResult(reaction="（默默地想着这件事）"),
+                error="LLM 未调用 say 工具",
+            )
 
-            if not collected:
-                logger.warning("反应生成: LLM 未调用 say 工具")
-                return AgentResult(
-                    success=False,
-                    data=EventReactionResult(reaction="（默默地想着这件事）"),
-                    error="LLM 未调用 say 工具",
-                )
+        try:
+            # 在 collected 中查找 say 工具的参数（可能混有 end_conversation 的空 dict）
+            say_args = None
+            for item in collected:
+                if item and "content" in item:
+                    say_args = item
+                    break
+            if say_args is None:
+                say_args = collected[0] if collected else {}
 
-            try:
-                # 在 collected 中查找 say 工具的参数（可能混有 end_conversation 的空 dict）
-                say_args = None
-                for item in collected:
-                    if item and "content" in item:
-                        say_args = item
-                        break
-                if say_args is None:
-                    say_args = collected[0] if collected else {}
+            args = say_args
+            character_name = context.get("character_name", "")
 
-                args = say_args
-                character_name = context.get("character_name", "")
+            # 从 SayArgs 的 content 字段获取角色反应
+            reaction = str(args.get("content", "")).strip().strip('"').strip("'")
+            if not reaction:
+                reaction = f"（{character_name}默默地想着这件事）"
 
-                # 从 SayArgs 的 content 字段获取角色反应
-                reaction = str(args.get("content", "")).strip().strip('"').strip("'")
-                if not reaction:
-                    reaction = f"（{character_name}默默地想着这件事）"
+            # has_follow_up: deprecated，保留解析但不再用于链控
+            has_follow_up = bool(args.get("has_follow_up", False))
+            want_to_end = bool(args.get("want_to_end", False))
 
-                # has_follow_up: deprecated，保留解析但不再用于链控
-                has_follow_up = bool(args.get("has_follow_up", False))
-                want_to_end = bool(args.get("want_to_end", False))
+            if len(reaction) > 200:
+                reaction = reaction[:197] + "..."
 
-                if len(reaction) > 200:
-                    reaction = reaction[:197] + "..."
-
-                return AgentResult(
-                    success=True,
-                    data=EventReactionResult(
-                        reaction=reaction,
-                        has_follow_up=has_follow_up,
-                        want_to_end=want_to_end,
-                        last_say_content=reaction,
-                        raw_response=json.dumps(args, ensure_ascii=False),
-                    ),
+            return AgentResult(
+                success=True,
+                data=EventReactionResult(
+                    reaction=reaction,
+                    has_follow_up=has_follow_up,
+                    want_to_end=want_to_end,
+                    last_say_content=reaction,
                     raw_response=json.dumps(args, ensure_ascii=False),
-                )
+                ),
+                raw_response=json.dumps(args, ensure_ascii=False),
+            )
 
-            except Exception as e:
-                logger.error(f"反应生成解析失败: {e}", exc_info=True)
-                return AgentResult(
-                    success=False,
-                    data=EventReactionResult(
-                        reaction="（默默地想着这件事）",
-                        has_follow_up=False,
-                        want_to_end=False,
-                    ),
-                    error=str(e),
-                )
-        finally:
-            self._last_terminated_by = ""
+        except Exception as e:
+            logger.error(f"反应生成解析失败: {e}", exc_info=True)
+            return AgentResult(
+                success=False,
+                data=EventReactionResult(
+                    reaction="（默默地想着这件事）",
+                    has_follow_up=False,
+                    want_to_end=False,
+                ),
+                error=str(e),
+            )
 
     async def diary(self, context: dict) -> AgentResult:
         """生成日记（通过 Conversation 复用天内 reaction 上下文）
@@ -524,22 +530,29 @@ class CharacterAgent(Agent):
             AgentResult(data=str) — 日记文本
         """
         context["mode"] = "diary"
+        from .conversation import RunConfig
+        from .agent import _parse_tool_inputs
 
         # load_state() 用于验证状态存在性
         state = await self.load_state()
         system_prompt = self.build_system_prompt(state, context)
         user_prompt = self._build_diary_user_prompt(context)
 
-        # extra_registry 对 CharacterAgent 始终为 None（tools 与只读工具集无交集）
-        collected, _conv = await self._process(
-            context=context,
-            initial_system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            tools=[RECORD_DIARY_ENTRY_TOOL.to_openai_format()],
-            temperature=0.9,  # 0.9 与 react() 统一，旧值 0.85
-            selection=DIARY,
-            required_tool="record_diary_entry",
+        tools = [RECORD_DIARY_ENTRY_TOOL.to_openai_format()]
+        conv = await self._ensure_conversation(context, system_prompt_override=system_prompt)
+        result = await conv.run(
+            user_prompt,
+            RunConfig(
+                mode="collect",
+                tools=tools,
+                required_tools=["record_diary_entry"],
+                temperature=0.9,
+                selection=DIARY,
+                max_rounds=self._max_rounds,
+                timeout=self._bg_timeout,
+            ),
         )
+        collected = _parse_tool_inputs(result.new_messages, tools)
 
         if not collected:
             logger.warning("日记生成: LLM 未调用 record_diary_entry 工具")

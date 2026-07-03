@@ -244,7 +244,11 @@ class ChatOrchestrator:
             self._store, user_id=user_id,
             character_id=self._character.character_id,
         )
-        tool_loop = ToolLoop(router=self._router, store=self._store)
+        tool_loop = ToolLoop(
+            router=self._router,
+            store=self._store,
+            tool_registry=self._tool_registry,
+        )
 
         conv = Conversation(store=conv_store, tool_loop=tool_loop)
         conv.system_prompt = self._context_builder.build_static_prompt()

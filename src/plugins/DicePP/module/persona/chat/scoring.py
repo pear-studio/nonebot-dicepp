@@ -44,7 +44,9 @@ class ScoringAgent:
         *,
         warn_pending: bool = False,
     ) -> ScoringAnalysisResult:
-        from ..agent.tool_bridge import run_structured_collect
+        from ..life.tool_loop import ToolLoop, _parse_tool_args
+        from ..life.conversation import RunConfig
+        from ..agent.request import AgentRunLimits
 
         tool_name = "record_score"
 
@@ -57,20 +59,24 @@ class ScoringAgent:
         )
 
         try:
-            collected_args, runtime_result, _ = await run_structured_collect(
+            tool_loop = ToolLoop(
                 router=self.llm_router,
                 store=self._store,
-                messages=[{"role": "user", "content": prompt}],
-                user_id=user_id,
-                group_id=group_id,
-                required_tools=["record_score"],
-                temperature=0.7,
-                timeout=60,
-                selection=SCORING,
-                max_rounds=self.max_rounds,
+                limits=AgentRunLimits(max_rounds=self.max_rounds),
             )
-            runtime_result.log_if_failed("scoring")
-            content = runtime_result.final_text or ""
+            tool_result = await tool_loop.execute(
+                messages=[{"role": "user", "content": prompt}],
+                config=RunConfig(
+                    mode="collect",
+                    required_tools=["record_score"],
+                    temperature=0.7,
+                    timeout=60,
+                    selection=SCORING,
+                    max_rounds=self.max_rounds,
+                ),
+            )
+            collected_args = _parse_tool_args(tool_result.new_messages, tool_name)
+            content = tool_result.final_text or ""
 
         except ServiceUnavailableError as e:
             logger.error(f"评分: 无可用 LLM provider: {e}")

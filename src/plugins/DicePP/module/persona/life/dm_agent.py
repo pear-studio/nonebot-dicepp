@@ -454,4 +454,3 @@ class DMAgent(Agent):
         finally:
             self._cached_state = None
             self._cached_system_prompt = None
-            self._last_terminated_by = ""

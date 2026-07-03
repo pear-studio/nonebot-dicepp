@@ -131,26 +131,32 @@ class ActionEvaluator:
 
     async def _call_llm(self, user_prompt: str, user_id: str = "") -> Tuple[str, str]:
         from ..llm.router import ServiceUnavailableError
-        from ..agent.tool_bridge import run_structured_collect
+        from ..life.tool_loop import ToolLoop
+        from ..life.conversation import RunConfig
+        from ..agent.request import AgentRunLimits
 
         try:
-            collected_args, runtime_result, _ = await run_structured_collect(
+            tool_loop = ToolLoop(
                 router=self._router,
                 store=self._store,
+                limits=AgentRunLimits(max_rounds=1),
+            )
+            tool_result = await tool_loop.execute(
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
-                user_id=user_id,
-                required_tools=["record_evaluation"],
-                temperature=0.3,
-                timeout=self._timeout,
-                selection=SCORING,
-                max_rounds=1,
+                config=RunConfig(
+                    mode="collect",
+                    required_tools=["record_evaluation"],
+                    temperature=0.3,
+                    timeout=self._timeout,
+                    selection=SCORING,
+                    max_rounds=1,
+                ),
             )
-            runtime_result.log_if_failed("ActionEvaluator")
-            if runtime_result.status != "completed":
-                return ("rejected", "LLM 协议错误")
+            from .tool_loop import _parse_tool_args
+            collected_args = _parse_tool_args(tool_result.new_messages, "record_evaluation")
         except ServiceUnavailableError:
             logger.warning("[ActionEvaluator] 无可用 LLM provider")
             return ("rejected", "无可用 LLM 服务")

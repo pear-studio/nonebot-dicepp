@@ -127,6 +127,8 @@ _ARGS_SCHEMA_MAP: Dict[str, Type[BaseModel]] = {
     "generate_image": GenerateImageArgs,
     "look_at_past_image": LookAtPastImageArgs,
     # M2: 结构化采集工具
+    "say": SayArgs,
+    "end_conversation": EndConversationArgs,
     "record_event": RecordEventArgs,
     "record_reaction": RecordReactionArgs,
     "record_diary_entry": RecordDiaryEntryArgs,
@@ -258,139 +260,6 @@ def build_registry(
         reg.register(spec)
 
     return reg
-
-
-# ── 结构化采集工具专用注册 ──────────────────────────────────────
-
-
-_COLLECTING_MODELS: List[Type[BaseModel]] = [
-    SayArgs,
-    EndConversationArgs,
-    RecordEventArgs,
-    RecordReactionArgs,
-    RecordDiaryEntryArgs,
-    RecordShareMessageArgs,
-    RecordScoreArgs,
-    RecordEvaluationArgs,
-]
-
-
-def _model_to_tool_name(model: Type[BaseModel]) -> str:
-    """从 Pydantic model 类名推导工具名（PascalCase → snake_case，去 Args 后缀）。"""
-    name = model.__name__
-    if name.endswith("Args"):
-        name = name[:-4]
-    return re.sub(r'(?<=[a-z])([A-Z])', r'_\1', name).lower()
-
-
-def _derive_content_validators(model: Type[BaseModel]) -> list:
-    """从 Pydantic model 的 Field 元数据自动派生内容校验器。
-
-    Pydantic 内建的 min_length/max_length/pattern 等约束由 model_validate
-    在校验阶段直接处理，无需在此重复。此函数扫描 json_schema_extra 等
-    Pydantic 不校验的元数据，生成对应的 content validator，用于覆盖
-    字符数以外的业务约束（正则、语义规则、跨字段校验等）。
-
-    当前返回空列表；未来可按需扩展扫描逻辑。
-    """
-    return []
-
-
-def build_collecting_registry(
-    executor_fn: Callable[[Dict[str, Any]], Awaitable[str]],
-    tool_names: list[str] | None = None,
-) -> ToolRegistry:
-    """构建结构化采集工具的新 ToolRegistry，所有工具标记为 STATE_WRITE。
-
-    Args:
-        executor_fn: 统一的收集型 executor，签名 async (args: dict) -> str。
-                     由调用方提供（如包装 DB 写入或闭包收集）。
-        tool_names: 限定注册的工具名列表；None 表示注册全部。
-
-    Returns:
-        新 ToolRegistry，包含指定的 STATE_WRITE 工具。
-    """
-    reg = ToolRegistry()
-
-    for model in _COLLECTING_MODELS:
-        name = _model_to_tool_name(model)
-        if tool_names is not None and name not in tool_names:
-            continue
-        async def _exec(**kwargs: Any) -> str:
-            return await executor_fn(kwargs)
-
-        spec = ToolSpec(
-            name=name,
-            description=model.__doc__ or "",
-            args_schema=model,
-            effect=EffectKind.STATE_WRITE,
-            executor=_exec,
-            content_validators=_derive_content_validators(model),
-        )
-        reg.register(spec)
-
-    return reg
-
-
-async def run_structured_collect(
-    router,
-    store,
-    messages: list,
-    *,
-    user_id: str = "",
-    group_id: str = "",
-    required_tools: list | None = None,
-    tools: Optional[list[dict]] = None,
-    temperature: float = 0.7,
-    timeout: int | None = None,
-    selection=None,
-    max_rounds: int = 1,
-    extra_registry: Optional[ToolRegistry] = None,
-) -> tuple[list, Any, list]:
-    """运行 structured_collect 模式，返回 (collected_args, runtime_result, final_messages)。
-
-    Args:
-        required_tools: 必需工具名列表，也用于限定注册的工具。
-        tools: OpenAI 格式工具定义列表。提供时 LLM 看到这些定义（含自定义 description），
-              否则使用从 registry 自动生成的 schema。
-        extra_registry: 可选，附加的工具注册表（如只读查询工具），
-            其工具不与 required_tools 冲突，作为可选工具提供给 LLM。
-    """
-    from .runtime import AgentRuntime
-    from .request import AgentRunLimits
-
-    collected: list = []
-
-    async def _collect(args: dict) -> str:
-        collected.append(args)
-        return "ok"
-
-    runtime = AgentRuntime(
-        router=router,
-        store=store,
-        limits=AgentRunLimits(max_rounds=max_rounds),
-    )
-    tool_registry = build_collecting_registry(_collect, tool_names=required_tools)
-
-    if extra_registry is not None:
-        for spec in extra_registry.list_tools():
-            if required_tools and spec.name in required_tools:
-                continue
-            tool_registry.register(spec)
-
-    result = await runtime.run(
-        messages=messages,
-        user_id=user_id,
-        group_id=group_id,
-        tool_registry=tool_registry,
-        required_tools=required_tools,
-        tools=tools,
-        temperature=temperature,
-        timeout=timeout,
-        selection=selection,
-        mode="structured_collect",
-    )
-    return collected, result, list(result.final_messages)
 
 
 def _dynamic_model(name: str, parameters: dict) -> Type[BaseModel]:

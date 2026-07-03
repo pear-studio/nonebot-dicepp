@@ -6,17 +6,12 @@ import json
 import pytest
 from plugins.DicePP.module.persona.life.character_agent import CharacterAgent
 from plugins.DicePP.module.persona.life.types import AgentResult, EventReactionResult
+from plugins.DicePP.module.persona.life.conversation import RunResult
 from plugins.DicePP.module.persona.data.models import CharacterState
 
-def _mock_run_result():
-    """构建 mock run_result（带 log_if_failed 方法）"""
-    r = MagicMock()
-    r.log_if_failed = MagicMock()
-    return r
 
-
-_RUN_STRUCTURED_COLLECT_PATH = (
-    'plugins.DicePP.module.persona.agent.tool_bridge.run_structured_collect'
+_CONV_RUN_PATH = (
+    'plugins.DicePP.module.persona.life.conversation.Conversation.run'
 )
 
 
@@ -40,11 +35,22 @@ class TestCharacterAgentReact:
 
     @pytest.mark.asyncio
     async def test_react_parses_valid_reaction(self, agent):
-        """mock run_structured_collect 返回合法 reaction JSON"""
-        valid_args = {'content': '我刚才好像听到什么声音...', 'has_follow_up': True}
-        with patch(_RUN_STRUCTURED_COLLECT_PATH, new_callable=AsyncMock) as mock_collect:
-            mock_collect.return_value = ([valid_args], _mock_run_result(), [])
-            result = await agent.react({'event': '远处传来一阵奇怪的声音。', 'character_name': '测试角色', 'character_description': '谨慎的冒险者', 'energy': 50, 'mood': 50, 'health': 50})
+        """mock conv.run 返回合法 reaction"""
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = RunResult(
+                final_text="",
+                final_reason="stop",
+                terminated_by="",
+            )
+            # 模拟 Conversation 中有 say 工具调用的消息
+            with patch('plugins.DicePP.module.persona.life.agent._parse_tool_inputs',
+                       return_value=[{'content': '我刚才好像听到什么声音...', 'has_follow_up': True}]):
+                result = await agent.react({
+                    'event': '远处传来一阵奇怪的声音。',
+                    'character_name': '测试角色',
+                    'character_description': '谨慎的冒险者',
+                    'energy': 50, 'mood': 50, 'health': 50,
+                })
         assert result.success is True
         assert isinstance(result.data, EventReactionResult)
         assert '声音' in result.data.reaction
@@ -52,11 +58,21 @@ class TestCharacterAgentReact:
     @pytest.mark.asyncio
     async def test_react_fallback_on_empty_collected(self, agent):
         """mock 空收集，验证回退"""
-        with patch(_RUN_STRUCTURED_COLLECT_PATH, new_callable=AsyncMock) as mock_collect:
-            mock_collect.return_value = ([], _mock_run_result(), [])
-            result = await agent.react({'event': 'test', 'character_name': '测试角色', 'character_description': '', 'energy': 50, 'mood': 50, 'health': 50})
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = RunResult(
+                final_text="",
+                final_reason="stop",
+                terminated_by="",
+            )
+            with patch('plugins.DicePP.module.persona.life.agent._parse_tool_inputs',
+                       return_value=[]):
+                result = await agent.react({
+                    'event': 'test', 'character_name': '测试角色',
+                    'character_description': '', 'energy': 50, 'mood': 50, 'health': 50,
+                })
         assert result.success is False
         assert 'LLM 未调用' in result.error
+
 
 class TestCharacterAgentDiary:
     """测试 CharacterAgent.diary()"""
@@ -80,12 +96,22 @@ class TestCharacterAgentDiary:
     async def test_diary_truncates_long_text(self, agent):
         """验证日记 >300 字时截断"""
         long_diary = '日' * 350
-        with patch(_RUN_STRUCTURED_COLLECT_PATH, new_callable=AsyncMock) as mock_collect:
-            mock_collect.return_value = ([{'diary': long_diary}], _mock_run_result(), [])
-            result = await agent.diary({'events': [], 'character_name': '测试角色', 'character_description': ''})
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = RunResult(
+                final_text="",
+                final_reason="stop",
+                terminated_by="",
+            )
+            with patch('plugins.DicePP.module.persona.life.agent._parse_tool_inputs',
+                       return_value=[{'diary': long_diary}]):
+                result = await agent.diary({
+                    'events': [], 'character_name': '测试角色',
+                    'character_description': '',
+                })
         assert result.success is True
         assert len(result.data) <= 300
         assert result.data.endswith('...')
+
 
 class TestCharacterAgentShare:
     """测试 CharacterAgent.share() — 已禁用，验证返回空结果"""
@@ -112,6 +138,7 @@ class TestCharacterAgentShare:
         assert result.success is True
         assert result.data is None
 
+
 class TestCharacterAgentContract:
     """测试 CharacterAgent.run() 统一入口"""
 
@@ -133,26 +160,46 @@ class TestCharacterAgentContract:
     @pytest.mark.asyncio
     async def test_run_dispatches_to_react(self, agent):
         """run(context) 应分派到 react()"""
-        valid_args = {'reaction': '测试反应', 'content': '测试反应', 'has_follow_up': False}
-        with patch(_RUN_STRUCTURED_COLLECT_PATH, new_callable=AsyncMock) as mock_collect:
-            mock_collect.return_value = ([valid_args], _mock_run_result(), [])
-            result = await agent.run({'mode': 'reaction', 'event': 'test', 'character_name': '测试角色', 'character_description': '', 'energy': 50, 'mood': 50, 'health': 50})
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = RunResult(
+                final_text="",
+                final_reason="stop",
+                terminated_by="",
+            )
+            with patch('plugins.DicePP.module.persona.life.agent._parse_tool_inputs',
+                       return_value=[{'content': '测试反应', 'has_follow_up': False}]):
+                result = await agent.run({
+                    'mode': 'reaction', 'event': 'test',
+                    'character_name': '测试角色', 'character_description': '',
+                    'energy': 50, 'mood': 50, 'health': 50,
+                })
         assert result.success is True
         assert isinstance(result.data, EventReactionResult)
 
     @pytest.mark.asyncio
     async def test_run_dispatches_to_diary(self, agent):
         """run(context) 应分派到 diary()"""
-        with patch(_RUN_STRUCTURED_COLLECT_PATH, new_callable=AsyncMock) as mock_collect:
-            mock_collect.return_value = ([{'diary': '今天天气真好。'}], _mock_run_result(), [])
-            result = await agent.run({'mode': 'diary', 'events': [], 'character_name': '测试角色', 'character_description': ''})
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = RunResult(
+                final_text="",
+                final_reason="stop",
+                terminated_by="",
+            )
+            with patch('plugins.DicePP.module.persona.life.agent._parse_tool_inputs',
+                       return_value=[{'diary': '今天天气真好。'}]):
+                result = await agent.run({
+                    'mode': 'diary', 'events': [],
+                    'character_name': '测试角色', 'character_description': '',
+                })
         assert result.success is True
         assert '天气真好' in result.data
 
     @pytest.mark.asyncio
     async def test_run_share_mode_disabled(self, agent):
         """share mode 已禁用，应返回空结果"""
-        result = await agent.run({'mode': 'share', 'character_name': '测试角色', 'character_description': ''})
+        result = await agent.run({
+            'mode': 'share', 'character_name': '测试角色', 'character_description': '',
+        })
         assert result.success is True
         assert result.data is None
 
@@ -165,7 +212,10 @@ class TestCharacterAgentContract:
             mock_runtime = MagicMock()
             mock_runtime.run = AsyncMock(return_value=mock_result)
             mock_runtime_cls.return_value = mock_runtime
-            result = await agent.run({'mode': 'opening', 'character_name': '测试角色', 'character_description': '', 'summary': '冒险了一天'})
+            result = await agent.run({
+                'mode': 'opening', 'character_name': '测试角色',
+                'character_description': '', 'summary': '冒险了一天',
+            })
         assert result.success is True
         assert '过得还不错' in result.data
 

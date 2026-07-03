@@ -354,7 +354,7 @@ def _build_tooling(
     Phase 1: 创建 DM / Character / SA 三个 Agent 实例。
     """
     tool_registry = ToolRegistry()
-    # say 工具统一替代 record_event / record_reaction（通过 _run_life_collect_loop → build_collecting_registry）
+    # say 工具统一替代 record_event / record_reaction（通过 ToolLoop._build_collect_registry）
     # SAY_TOOL_DM 和 SAY_TOOL_CHARACTER 共享 name="say" — 只注册 DM 版本
     # Character 版本仅通过 to_openai_format() 使用，不经 registry
     tool_registry.register(ToolDomain.LIFE, SAY_TOOL_DM, life_collecting_executor)

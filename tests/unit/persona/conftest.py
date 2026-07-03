@@ -122,12 +122,23 @@ def make_mock_runtime(monkeypatch):
     from plugins.DicePP.module.persona.agent.loop import AgentRunResult
 
     async def fake_run(self, messages, user_id, group_id, tool_registry, **kwargs):
+        import json
         router = self._router
         pending_args = getattr(router, '_pending_tool_args', None)
+        final_messages = list(messages)
         if pending_args is not None and tool_registry is not None:
             specs = tool_registry.list_tools()
             if specs:
                 await specs[0].executor(**pending_args)
+                # 模拟 LLM 返回 tool_use 消息（Anthropic 格式）
+                final_messages.append({
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "name": specs[0].name,
+                        "input": pending_args,
+                    }],
+                })
         final_output = getattr(router, '_pending_final_output', 'ok')
         return AgentRunResult(
             run_id="test",
@@ -135,6 +146,7 @@ def make_mock_runtime(monkeypatch):
             status="completed",
             final_reason="direct_content",
             final_text=final_output,
+            final_messages=final_messages,
             delivery_performed=True,
         )
 

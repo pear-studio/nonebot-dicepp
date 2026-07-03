@@ -6,6 +6,7 @@ from plugins.DicePP.module.persona.life.tool_loop import (
     ToolLoop,
     ToolResult,
     _filter_corrections,
+    _build_collect_registry,
 )
 from plugins.DicePP.module.persona.life.conversation import RunConfig
 
@@ -94,3 +95,27 @@ class TestToolLoopExecute:
             call_kwargs = mock_runtime.run_chat.call_args.kwargs
             assert call_kwargs["image_data_urls"] == ["data:image/png;base64,abc123"]
             assert result.final_text == "收到图片"
+
+
+class TestBuildCollectRegistry:
+    """R1: _build_collect_registry 工具注册测试"""
+
+    def test_includes_say_and_end_conversation(self):
+        """say 和 end_conversation 应被注册到 collect registry 中"""
+        from plugins.DicePP.module.persona.tools.collecting import (
+            SAY_TOOL_DM,
+            END_CONVERSATION_TOOL,
+        )
+        tools = [
+            SAY_TOOL_DM.to_openai_format(),
+            END_CONVERSATION_TOOL.to_openai_format(),
+        ]
+        reg = _build_collect_registry(tools)
+        assert reg.get("say") is not None, (
+            "say 工具未注册到 collect registry —— "
+            "_ARGS_SCHEMA_MAP 可能缺少 'say' 条目"
+        )
+        assert reg.get("end_conversation") is not None, (
+            "end_conversation 工具未注册到 collect registry —— "
+            "_ARGS_SCHEMA_MAP 可能缺少 'end_conversation' 条目"
+        )

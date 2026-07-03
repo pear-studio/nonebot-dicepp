@@ -55,21 +55,6 @@ class Agent(ABC):
         self._system_prompt: Optional[str] = None
         self._last_terminated_by: str = ""  # 上轮 _process() 的终止工具名
 
-    def _check_terminated(self, default_data: Any = None) -> "Optional[AgentResult]":
-        """检查上轮 _process() 是否由终止工具结束。若是，返回封装好的 AgentResult。
-
-        子类（DMAgent, CharacterAgent）在解析 collected 数据前调用此方法，
-        避免重复的 end_conversation 检测逻辑。
-        """
-        if self._last_terminated_by == "end_conversation":
-            from .types import AgentResult
-            return AgentResult(
-                success=True,
-                data=default_data,
-                terminated_by="end_conversation",
-            )
-        return None
-
     async def load_state(self) -> Optional[BaseModel]:
         """加载状态，子类可覆盖。默认返回 state_model 实例或 None。"""
         if self.state_model is None:
@@ -154,12 +139,21 @@ class Agent(ABC):
     # ── Conversation 支持 ─────────────────────────────────────
 
     def _init_conversation(self, system_prompt: str) -> "Conversation":
-        """创建 Conversation 并设置 system_prompt。
+        """创建带 ToolLoop 的 Conversation。
 
         子类（如 CharacterAgent）可调用此方法以统一 Conversation 创建路径。
         """
         from .conversation import Conversation as _Conv
-        self._conversation = _Conv()
+        from .tool_loop import ToolLoop
+        from ..agent.request import AgentRunLimits
+
+        tool_loop = ToolLoop(
+            router=self.router,
+            store=self.store,
+            tool_registry=self._tool_registry,
+            limits=AgentRunLimits(max_rounds=self._max_rounds),
+        )
+        self._conversation = _Conv(tool_loop=tool_loop)
         self._system_prompt = system_prompt
         return self._conversation
 
@@ -202,80 +196,6 @@ class Agent(ABC):
 
         return self._conversation
 
-    async def _process(
-        self,
-        context: dict,
-        initial_system_prompt: str,
-        user_prompt: str,
-        tools: list,
-        temperature: float,
-        selection: SelectionPolicy,
-        extra_registry: Optional[Any] = None,
-        required_tool: Optional[str] = None,
-    ) -> "tuple[list, Conversation]":
-        """通过 Conversation 执行一轮 LLM 收集（fetch → build → call → commit）。
-
-        LLM 调用前不改变 Conversation 状态——失败自动安全，无需回滚。
-
-        Args:
-            context: 传入 _ensure_conversation 的上下文
-            initial_system_prompt: 首次 Conversation 创建时的 system_prompt
-            user_prompt: 本轮 user message
-            tools: OpenAI 格式工具定义列表
-            temperature: 采样温度
-            selection: 模型选择策略
-            extra_registry: 只读查询工具注册表（DM 用，CharacterAgent 传 None）
-            required_tool: 必调工具名；None 时从 tools[0] 推导
-
-        Returns:
-            (collected_args, conversation)
-        """
-        from ..agent.tool_bridge import run_structured_collect
-
-        conv = await self._ensure_conversation(context, system_prompt_override=initial_system_prompt)
-
-        # ── fetch：纯读，不改变 Conversation 状态 ──
-        notifs, new_cursors = await conv.fetch_notifications()
-
-        # ── build：拼装发送给 LLM 的完整消息列表 ──
-        assert self._system_prompt is not None
-        msgs = conv.render(self._system_prompt)
-        for n in notifs:
-            msgs.append(n.to_message())
-        msgs.append({"role": "user", "content": user_prompt})
-        sent_len = len(msgs)
-
-        # ── LLM call ──
-        if required_tool is None and tools:
-            first = tools[0]
-            if isinstance(first, dict):
-                func = first.get("function", first)
-                required_tool = func.get("name", "")
-
-        collected, run_result, final_msgs = await run_structured_collect(
-            router=self.router,
-            store=self.store,
-            messages=msgs,
-            temperature=temperature,
-            timeout=self._bg_timeout,
-            selection=selection,
-            required_tools=[required_tool] if required_tool else None,
-            max_rounds=self._max_rounds,
-            extra_registry=extra_registry,
-            tools=tools,
-        )
-        run_result.log_if_failed(required_tool or "")
-
-        # 记录终止工具（供调用方检查是否由 end_conversation 终止）
-        self._last_terminated_by = run_result.terminated_by
-
-        # ── commit：一次性落盘（通知 + 用户消息 + LLM 响应）──
-        conv.apply_notifications(notifs, new_cursors)
-        conv.add_message("user", user_prompt)
-        conv.add_messages(final_msgs[sent_len:])
-
-        return collected, conv
-
     async def compact_conversation(self) -> None:
         """每日收尾：清空 conversation 并重置状态。
 
@@ -293,13 +213,11 @@ class Agent(ABC):
     async def run(self, context: dict) -> AgentResult:
         """一站式执行：加载状态 → 拼 prompt → LLM 执行 → 返回结果
 
-        使用 Conversation 管理消息线程（fetch → build → LLM call → commit）。
-
-        DMAgent 使用此模板方法（通过 tool-bridge 收集结构化输出）。
-        CharacterAgent 覆盖 run() 按 mode 分派到 react()/diary()/share()/opening()。
-        SAAgent 覆盖 run() 委托到 plan()，使用 AgentRuntime.run() 获取纯文本输出。
-        子类可覆盖此方法以添加解析逻辑。
+        使用 conv.run() 统一入口执行 collect 模式。
+        DMAgent 使用此模板方法。CharacterAgent/SAAgent 覆盖 run()。
         """
+        from .conversation import RunConfig
+
         # 加载状态（如果尚未缓存且 state_model 不为 None）
         if self.state_model is not None:
             if self._cached_state is None:
@@ -318,17 +236,81 @@ class Agent(ABC):
             )
         user_prompt = self._build_user_prompt(context)
 
-        collected, _conv = await self._process(
-            context=context,
-            initial_system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            tools=self._get_openai_tools(),
-            temperature=0.9,
-            selection=self._get_selection_policy(),
-            extra_registry=self._build_extra_registry(),
+        conv = await self._ensure_conversation(
+            context, system_prompt_override=system_prompt,
         )
 
+        dm_tools = list(self._get_openai_tools())
+        first_tool_name = ""
+        if dm_tools:
+            first = dm_tools[0]
+            if isinstance(first, dict):
+                func = first.get("function", first)
+                first_tool_name = func.get("name", "")
+
+        result = await conv.run(
+            user_prompt,
+            RunConfig(
+                mode="collect",
+                tools=dm_tools,
+                required_tools=[first_tool_name] if first_tool_name else None,
+                temperature=0.9,
+                selection=self._get_selection_policy(),
+                max_rounds=self._max_rounds,
+                timeout=self._bg_timeout,
+                tool_registry=self._build_extra_registry(),
+            ),
+        )
+        self._last_terminated_by = result.terminated_by
+
+        # 从消息中提取工具调用参数
+        collected = _parse_tool_inputs(result.new_messages, dm_tools)
         if not collected:
             return AgentResult(success=False, data=None, error="LLM 未调用工具")
 
         return AgentResult(success=True, data=collected)
+
+
+def _parse_tool_inputs(messages: list[dict], tools: list[dict]) -> list[dict]:
+    """从消息列表中提取工具调用的参数。
+
+    扫描给定的 messages，提取 assistant 消息中 tool_use 块的 input 字段。
+    兼容 Anthropic 格式（content 为 list 含 tool_use 块）和 OpenAI 格式（tool_calls）。
+    不修改传入的 dict。
+    """
+    import json
+
+    tool_names = set()
+    for t in tools:
+        func = t.get("function", t) if isinstance(t, dict) else t
+        name = func.get("name", "") if isinstance(func, dict) else ""
+        if name:
+            tool_names.add(name)
+
+    collected: list[dict] = []
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        # Anthropic 格式: content 为 list，含 type="tool_use" 块
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    name = block.get("name", "")
+                    if name in tool_names or not tool_names:
+                        inp = block.get("input", {})
+                        if isinstance(inp, dict):
+                            collected.append({"_tool_name": name, **inp})
+        # OpenAI 格式: tool_calls 字段
+        elif isinstance(msg.get("tool_calls"), list):
+            for tc in msg["tool_calls"]:
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                if name in tool_names or not tool_names:
+                    try:
+                        args = json.loads(func.get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    if isinstance(args, dict):
+                        collected.append({"_tool_name": name, **args})
+    return collected

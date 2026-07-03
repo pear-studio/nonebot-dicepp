@@ -71,8 +71,11 @@ class RunConfig:
     ToolLoop 根据 mode 分派执行路径（chat / collect / react）。
     """
 
-    mode: Literal["chat", "collect", "react"] = "chat"
+    mode: Literal["chat", "collect"] = "chat"
     tools: list[dict] | None = None
+    required_tools: list[str] | None = None
+    tool_registry: Any | None = None
+    selection: Any | None = None
     temperature: float = 0.9
     timeout: int = 60
     max_rounds: int = 10
@@ -86,6 +89,8 @@ class RunResult:
     final_text: str = ""
     final_reason: str = ""  # "stop" | "max_rounds" | "error"
     delivery_performed: bool = False
+    terminated_by: str = ""  # 终止工具名，如 "end_conversation"
+    new_messages: list[dict] = field(default_factory=list)  # 本轮增量消息
 
 
 class ToolLoop(Protocol):
@@ -283,6 +288,8 @@ class Conversation:
 
         # 5. extend — 追加本轮增量（new_messages 只含 LLM 产出的新消息）
         self.add_message("user", user_input)
+        # 快照本轮增量消息（add_messages 前捕获，供调用方提取工具调用参数）
+        round_new_messages = list(tool_result.new_messages)
         self.add_messages(tool_result.new_messages)
 
         # 6. save — 自动持久化
@@ -292,6 +299,8 @@ class Conversation:
             final_text=tool_result.final_text,  # type: ignore[attr-defined]
             final_reason=tool_result.final_reason,  # type: ignore[attr-defined]
             delivery_performed=tool_result.delivery_performed,  # type: ignore[attr-defined]
+            terminated_by=tool_result.terminated_by,  # type: ignore[attr-defined]
+            new_messages=round_new_messages,
         )
 
     def get_messages(self) -> List[dict]:
