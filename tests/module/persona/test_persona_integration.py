@@ -281,6 +281,49 @@ class TestUserConfigCRUD:
             success = await store.save_user_llm_config(config)
             assert success is False
 
+    @pytest.mark.asyncio
+    async def test_get_config_decrypt_failed_without_secret(self, tmp_path):
+        """配置已存在但加密数据无效或无密钥时 decrypt_failed=True"""
+        import aiosqlite
+        from plugins.DicePP.utils.time import wall_now
+
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
+            await store.ensure_tables()
+
+            # 直接插入无效的加密数据（模拟有密钥时写入但现无密钥或数据损坏）
+            await store._core_db.execute(
+                """
+                INSERT INTO persona_user_llm_config
+                (user_id, primary_api_key_encrypted, primary_base_url, primary_model,
+                 auxiliary_api_key_encrypted, auxiliary_base_url, auxiliary_model, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("u1", "garbage_encrypted_data", "", "gpt-4o",
+                 None, "", "", wall_now().isoformat()),
+            )
+            await store._core_db.commit()
+
+            fetched = await store.get_user_llm_config("u1")
+            assert fetched is not None
+            assert fetched.decrypt_failed is True
+
+    @pytest.mark.asyncio
+    async def test_clear_nonexistent_config_returns_true(self, tmp_path):
+        """不存在的配置清除 → clear_user_llm_config 返回 True"""
+        import aiosqlite
+
+        async with aiosqlite.connect(":memory:") as persona_db, \
+             aiosqlite.connect(":memory:") as core_db:
+            store = PersonaDataStore(":memory:", core_db, timezone="Asia/Shanghai")
+            store._persona_db = persona_db
+            await store.ensure_tables()
+
+            result = await store.clear_user_llm_config("u_unknown")
+            assert result is True
+
 
 # ── Roll Dice Tool Tests ─────────────────────────────────────────────────────
 

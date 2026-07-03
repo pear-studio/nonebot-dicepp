@@ -54,13 +54,6 @@ def test_consecutive_failures_trigger_unhealthy(monitor):
     assert monitor.fault_trigger == FaultTrigger.SEND_FAILURE
 
 
-def test_single_success_resets_counter(monitor):
-    """未达到阈值的成功应重置计数器（当前设计不重置，只计数）。"""
-    # 当前设计：仅在 recover 时重置计数器。发送成功本身不重置。
-    # 这是正确的——需要连续的失败才触发 UNHEALTHY。
-    pass
-
-
 # ── 恢复判定：发送失败路径 ──────────────────────────────────────────────────
 
 def test_send_failure_recovery(monitor, mock_status):

@@ -110,19 +110,20 @@ def _make_tool_registry():
     return registry
 
 
-def make_mock_runtime(monkeypatch):
-    """为 AgentRuntime.run 挂载 mock，通过 router 属性动态控制行为。
+def make_fake_runtime_run():
+    """返回一个 fake AgentRuntime.run 实现，通过 router 属性控制行为。
 
     测试设置 router._pending_tool_args (dict) 来模拟工具收集路径；
     设置 router._pending_final_output (str) 来控制回退路径的 final_text。
 
-    供 test_scoring.py / test_event_agent.py / test_generate_share_message.py 使用。
+    纯工厂函数，无副作用。调用方通过 monkeypatch.setattr 显式挂载，
+    利用 pytest monkeypatch 机制在 fixture teardown 时自动恢复。
+
+    供 test_scoring.py 的 agent fixture 使用。
     """
-    from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
     from plugins.DicePP.module.persona.agent.loop import AgentRunResult
 
     async def fake_run(self, messages, user_id, group_id, tool_registry, **kwargs):
-        import json
         router = self._router
         pending_args = getattr(router, '_pending_tool_args', None)
         final_messages = list(messages)
@@ -150,7 +151,7 @@ def make_mock_runtime(monkeypatch):
             delivery_performed=True,
         )
 
-    monkeypatch.setattr(AgentRuntime, "run", fake_run)
+    return fake_run
 
 
 @pytest.fixture

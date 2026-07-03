@@ -12,6 +12,7 @@ import pytest
 
 from module.bot_health.monitor import HealthMonitor, BotHealth
 from module.bot_health.classifier import FaultTrigger
+from adapter.client_proxy import ClientProxy
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -100,7 +101,7 @@ def test_send_msg_success_calls_on_send_success():
     all_bots["123"] = mock_bot
     try:
         proxy = NoneBotClientProxy(mock_nonebot)
-        with patch.object(type(proxy).__bases__[0], 'process_bot_command',
+        with patch.object(ClientProxy, 'process_bot_command',
                           new_callable=AsyncMock):
             cmd = BotSendMsgCommand("test_bot", "hello", [])
             asyncio.run(proxy.process_bot_command(cmd))
@@ -134,7 +135,7 @@ def test_action_failed_calls_on_send_failure():
     all_bots["123"] = mock_bot
     try:
         proxy = NoneBotClientProxy(mock_nonebot)
-        with patch.object(type(proxy).__bases__[0], 'process_bot_command',
+        with patch.object(ClientProxy, 'process_bot_command',
                           side_effect=ActionFailed(
                               retcode=1006514,
                               wording="网络连接异常",

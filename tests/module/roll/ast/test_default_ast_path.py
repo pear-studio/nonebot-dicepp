@@ -105,3 +105,37 @@ class TestComputeExpAstPath:
         assert 3 <= result.get_val() <= 8
 
 
+@pytest.mark.unit
+class TestIsRollExp:
+    """验证 is_roll_exp() 对各种输入的正确判定。"""
+
+    def test_plain_text_returns_false(self):
+        """普通文本如 'hello' 不是有效的掷骰表达式。"""
+        from module.roll.ast_engine.adapter import is_roll_exp
+        assert is_roll_exp("hello") is False
+        assert is_roll_exp("some random text") is False
+        assert is_roll_exp("你好") is False
+
+    def test_pure_number_returns_true(self):
+        """纯数字是有效的掷骰表达式（求值为常量）。"""
+        from module.roll.ast_engine.adapter import is_roll_exp
+        assert is_roll_exp("42") is True
+        assert is_roll_exp("0") is True
+        assert is_roll_exp("-5") is True
+
+    def test_valid_dice_expression_returns_true(self):
+        """有效的掷骰表达式如 '1d20+5' 返回 True。"""
+        from module.roll.ast_engine.adapter import is_roll_exp
+        assert is_roll_exp("1D20+5") is True
+        assert is_roll_exp("3d6") is True
+        assert is_roll_exp("D20") is True
+        assert is_roll_exp("(1+2)*3") is True
+        assert is_roll_exp("2d20k1+5") is True
+
+    def test_invalid_expression_returns_false(self):
+        """无效表达式如 '@@@' 返回 False。"""
+        from module.roll.ast_engine.adapter import is_roll_exp
+        assert is_roll_exp("@@@") is False
+        assert is_roll_exp("1+") is False
+        assert is_roll_exp("(1+2") is False
+        assert is_roll_exp("a+b") is False

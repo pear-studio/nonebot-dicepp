@@ -74,29 +74,6 @@ class TestLogRepository:
         assert result.recording is True
 
     @pytest.mark.asyncio
-    async def test_add_record(self, log_repo):
-        session = LogSession(
-            id="session1",
-            group_id="group1",
-            name="Test",
-            recording=True,
-            created_at=datetime(2026, 5, 27, 12, 0, 0),
-            updated_at=datetime(2026, 5, 27, 12, 0, 0),
-        )
-        await log_repo.save_session(session)
-
-        record = LogRecord(
-            log_id="session1",
-            time=datetime(2026, 5, 27, 12, 0, 0),
-            user_id="user1",
-            nickname="User One",
-            content="Hello world",
-            source="user",
-        )
-        record_id = await log_repo.add_record(record)
-        assert record_id > 0
-
-    @pytest.mark.asyncio
     async def test_get_records(self, log_repo):
         session = LogSession(
             id="session1",
@@ -184,7 +161,7 @@ class TestLogRepository:
         assert deleted == 1
 
     @pytest.mark.asyncio
-    async def test_insert_record(self, log_repo):
+    async def test_add_record(self, log_repo):
         session = LogSession(
             id="session1",
             group_id="group1",

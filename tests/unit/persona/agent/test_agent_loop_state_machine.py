@@ -754,3 +754,165 @@ class TestStructuredCollectCompletion:
         assert result.status == "max_tool_corrections"
         assert result.final_reason == "tool_corrections_exhausted"
         assert mock_llm.complete.call_count == 5
+
+
+@pytest.mark.unit
+class TestAgentLoopMaxToolsPerRound:
+    """Q16: max_tools_per_round 截断 — 工具调用超限时截断而非报错"""
+
+    @pytest.mark.asyncio
+    async def test_max_tools_per_round_truncates(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """工具调用数超过 max_tools_per_round(1) 时，多余工具被截断，只执行前 1 个"""
+        loop._limits = AgentRunLimits(max_rounds=1, max_output_corrections=0, max_tools_per_round=1)
+        mock_llm.complete.return_value = _make_gateway_result(
+            content="",
+            tool_calls=[
+                _make_tool_call("search", '{"query":"x"}', "tc_1"),
+                _make_tool_call("read", '{"id":1}', "tc_2"),
+            ],
+        )
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", "search result"),
+        ]
+        state = _make_state()
+
+        await loop.run(
+            messages=[{"role": "user", "content": "test"}],
+            state=state,
+        )
+
+        # 只执行了 tc_1（前 1 个），tc_2 被截断
+        mock_executor.execute_many.assert_called_once()
+        executed_calls = mock_executor.execute_many.call_args[0][0]
+        assert len(executed_calls) == 1
+        assert executed_calls[0]["id"] == "tc_1"
+
+
+@pytest.mark.unit
+class TestAgentLoopLookAtPastImage:
+    """Q17: look_at_past_image — AgentLoop 正确传递 past_image 参数给 LLM"""
+
+    @pytest.mark.asyncio
+    async def test_look_at_past_image_injects_observation(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """look_at_past_image 工具调用时，图片 data_url 被注入为 pending image 消息"""
+        mock_llm.complete.side_effect = [
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("look_at_past_image", json.dumps({
+                    "data_url": "data:image/png;base64,abc123",
+                    "image_hash": "hash_xyz",
+                }), "tc_1")],
+            ),
+            _make_gateway_result(content="我看到了一张历史图片"),
+        ]
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", json.dumps({
+                "data_url": "data:image/png;base64,abc123",
+                "image_hash": "hash_xyz",
+            }), _action_id="act_1"),
+        ]
+        state = _make_state()
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "看看以前的图片"}],
+            state=state,
+        )
+
+        assert result.status == "completed"
+        assert result.final_text == "我看到了一张历史图片"
+        # 验证图片消息被注入到 final_messages 中
+        assert any(
+            isinstance(m.get("content"), list)
+            and any(
+                isinstance(part, dict) and part.get("type") == "image_url"
+                for part in m["content"]
+            )
+            for m in result.final_messages
+        )
+
+
+@pytest.mark.unit
+class TestAgentLoopEndConversation:
+    """Q18: end_conversation 终止 — final_reason='end_conversation' 时正常终止"""
+
+    @pytest.mark.asyncio
+    async def test_end_conversation_terminates(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """end_conversation 工具调用成功时，AgentLoop 正常终止并返回"""
+        mock_llm.complete.return_value = _make_gateway_result(
+            content="",
+            tool_calls=[_make_tool_call("end_conversation", '{}', "tc_1")],
+        )
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", "ok"),
+        ]
+        state = _make_state()
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "结束对话"}],
+            state=state,
+        )
+
+        assert result.status == "completed"
+        assert result.final_reason == "end_conversation_called"
+        assert result.terminated_by == "end_conversation"
+        assert result.delivery_performed is False
+
+    @pytest.mark.asyncio
+    async def test_end_conversation_with_error_status_does_not_terminate(self, loop, mock_llm, mock_executor, mock_event_bus):
+        """end_conversation 工具 status=error 时不触发终止，继续循环"""
+        loop._limits = AgentRunLimits(max_rounds=3, max_output_corrections=0)
+        mock_llm.complete.side_effect = [
+            _make_gateway_result(
+                content="",
+                tool_calls=[_make_tool_call("end_conversation", '{}', "tc_1")],
+            ),
+            _make_gateway_result(content="继续回复"),
+        ]
+        mock_executor.execute_many.return_value = [
+            _make_tool_result("tc_1", "执行失败", status="error"),
+        ]
+        state = _make_state()
+
+        result = await loop.run(
+            messages=[{"role": "user", "content": "结束对话"}],
+            state=state,
+        )
+
+        # error 不终止，继续循环后得到 direct_content
+        assert result.status == "completed"
+        assert result.final_reason == "direct_content"
+        assert result.final_text == "继续回复"
+
+
+@pytest.mark.unit
+class TestToolSortKey:
+    """Q19: _tool_sort_key 排序规则 — 按 priority/category 排序的一致性"""
+
+    def test_vision_tool_first(self):
+        """generate_image 返回 0（vision 工具优先）"""
+        from plugins.DicePP.module.persona.agent.loop import _tool_sort_key
+        assert _tool_sort_key({"name": "generate_image"}) == 0
+
+    def test_other_tool_middle(self):
+        """普通工具（search、read 等）返回 1"""
+        from plugins.DicePP.module.persona.agent.loop import _tool_sort_key
+        assert _tool_sort_key({"name": "search"}) == 1
+        assert _tool_sort_key({"name": "read"}) == 1
+        assert _tool_sort_key({"name": "record_score"}) == 1
+
+    def test_send_reply_segment_last(self):
+        """send_reply_segment 返回 2（最后执行）"""
+        from plugins.DicePP.module.persona.agent.loop import _tool_sort_key
+        assert _tool_sort_key({"name": "send_reply_segment"}) == 2
+
+    def test_sorted_tools_consistent_order(self):
+        """混合工具列表按 priority 升序排列"""
+        from plugins.DicePP.module.persona.agent.loop import _tool_sort_key
+        tool_calls = [
+            {"name": "send_reply_segment", "id": "tc_1"},
+            {"name": "generate_image", "id": "tc_2"},
+            {"name": "search", "id": "tc_3"},
+        ]
+        sorted_calls = sorted(tool_calls, key=_tool_sort_key)
+        names = [tc["name"] for tc in sorted_calls]
+        assert names == ["generate_image", "search", "send_reply_segment"]

@@ -136,6 +136,15 @@ class TestParserArithmetic:
         assert isinstance(ast.right, BinaryOpNode)
         assert ast.right.op == BinaryOp.MUL
 
+    def test_double_operator_is_valid(self):
+        """1++2 is actually valid (1 + (+2)) due to unary + support."""
+        ast = parse_expression("1++2")
+        # This parses as 1 + (+2) = 1 + 2 = 3
+        assert isinstance(ast, BinaryOpNode)
+        assert ast.op == BinaryOp.ADD
+        assert isinstance(ast.right, UnaryOpNode)
+        assert ast.right.op == UnaryOp.PLUS
+
 
 @pytest.mark.unit
 class TestParserUnary:
@@ -275,6 +284,37 @@ class TestParserModifiers:
         assert isinstance(ast, DiceNode)
         assert len(ast.modifiers) == 2
 
+    # ── Fortune modifier ──────────────────────────────────────────────
+
+    def test_fortune(self):
+        """3D6F parses to DiceNode with FORTUNE modifier."""
+        ast = parse_expression("3D6F")
+        assert isinstance(ast, DiceNode)
+        assert ast.count == 3
+        assert ast.sides == 6
+        assert len(ast.modifiers) == 1
+        mod = ast.modifiers[0]
+        assert mod.modifier_type == ModifierType.FORTUNE
+        assert mod.value is None  # no explicit threshold
+
+    def test_fortune_with_value(self):
+        """3D6F50 parses to FORTUNE modifier with explicit threshold value."""
+        ast = parse_expression("1D100F50")
+        assert isinstance(ast, DiceNode)
+        assert len(ast.modifiers) == 1
+        mod = ast.modifiers[0]
+        assert mod.modifier_type == ModifierType.FORTUNE
+        assert mod.value == 50
+
+    def test_fortune_lowercase(self):
+        """3d6f (lowercase) parses identically to 3D6F."""
+        ast = parse_expression("3d6f")
+        assert isinstance(ast, DiceNode)
+        assert ast.count == 3
+        assert ast.sides == 6
+        assert len(ast.modifiers) == 1
+        assert ast.modifiers[0].modifier_type == ModifierType.FORTUNE
+
 
 @pytest.mark.unit
 class TestParserSyntaxErrors:
@@ -296,16 +336,7 @@ class TestParserSyntaxErrors:
     def test_unmatched_close_paren(self):
         with pytest.raises(RollSyntaxError):
             parse_expression("1+2)")
-    
-    def test_double_operator_is_valid(self):
-        """1++2 is actually valid (1 + (+2)) due to unary + support."""
-        ast = parse_expression("1++2")
-        # This parses as 1 + (+2) = 1 + 2 = 3
-        assert isinstance(ast, BinaryOpNode)
-        assert ast.op == BinaryOp.ADD
-        assert isinstance(ast.right, UnaryOpNode)
-        assert ast.right.op == UnaryOp.PLUS
-    
+
     def test_trailing_operator(self):
         with pytest.raises(RollSyntaxError):
             parse_expression("1+")
@@ -362,3 +393,69 @@ class TestParserComplexExpressions:
         assert isinstance(ast, BinaryOpNode)
         assert ast.op == BinaryOp.MUL
         assert isinstance(ast.left, ParenNode)
+
+
+@pytest.mark.unit
+class TestFortuneEvaluation:
+    """Fortune modifier evaluation with deterministic dice."""
+
+    # Helper: mock dice roller yielding predetermined values
+    class _MockRoller:
+        def __init__(self, values):
+            self._values = list(values)
+            self._index = 0
+
+        def __call__(self, sides):
+            if self._index >= len(self._values):
+                self._index = 0
+            v = self._values[self._index]
+            self._index += 1
+            return v
+
+    def test_fortune_rolls_unaffected(self):
+        """Fortune modifier does not alter roll values."""
+        from module.roll.ast_engine.evaluator import evaluate
+        ast = parse_expression("3D6F")
+        roller = self._MockRoller([2, 5, 3])
+        result = evaluate(ast, dice_roller=roller)
+        assert result.value == 10  # 2+5+3 (unchanged by fortune)
+
+    def test_fortune_with_threshold_parses_and_evaluates(self):
+        """1D100F50 evaluates without error and returns raw roll."""
+        from module.roll.ast_engine.evaluator import evaluate
+        ast = parse_expression("1D100F50")
+        roller = self._MockRoller([42])
+        result = evaluate(ast, dice_roller=roller)
+        assert result.value == 42
+
+    def test_fortune_d100_critical_success(self):
+        """d100 fortune roll: value=1 is critical success in legacy system."""
+        from module.roll.ast_engine.evaluator import evaluate
+        ast = parse_expression("1D100F50")
+        roller = self._MockRoller([1])
+        result = evaluate(ast, dice_roller=roller)
+        assert result.value == 1
+        # verify the dice result is kept correctly
+        assert len(result.dice_results) == 1
+        assert result.dice_results[0].rolls[0].value == 1
+
+    def test_fortune_d100_critical_failure(self):
+        """d100 fortune roll: value=100 is critical failure in legacy system."""
+        from module.roll.ast_engine.evaluator import evaluate
+        ast = parse_expression("1D100F50")
+        roller = self._MockRoller([100])
+        result = evaluate(ast, dice_roller=roller)
+        assert result.value == 100
+
+    def test_fortune_build_roll_result_d100_success_failure(self):
+        """Full pipeline: fortune d100 maps to success/fail through build_roll_result."""
+        from module.roll.ast_engine import exec_roll_exp_unified
+        # d100=1 → success=1 (critical success)
+        roller = self._MockRoller([1])
+        result = exec_roll_exp_unified("1D100F50", dice_roller=roller)
+        assert result.get_val() == 1
+
+        # d100=100 → fail=1 (critical failure)
+        roller = self._MockRoller([100])
+        result = exec_roll_exp_unified("1D100F50", dice_roller=roller)
+        assert result.get_val() == 100

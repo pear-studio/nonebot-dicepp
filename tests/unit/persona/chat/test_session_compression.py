@@ -67,6 +67,7 @@ class TestShouldCompress:
         assert should_compress(95, 100) is True
 
 
+@pytest.mark.unit
 class TestEnsureToolPairs:
     """ensure_tool_pairs 各类场景"""
 
@@ -154,3 +155,84 @@ class TestEnsureToolPairs:
         assert "tool" in roles_in_recent
         # tool 的配对 assistant 应在 recent 中
         assert roles_in_recent.count("assistant") >= 2
+
+    def _make_msgs_with_content(self, *roles_spec):
+        """根据 (role, tool_call_id?, tool_calls_json?) 生成完整内容的消息。
+
+        与 _make_msgs 相同，返回格式兼容的 dict 列表。
+        """
+        return self._make_msgs(*roles_spec)
+
+    def test_multiple_tool_pairs_preserved_in_list_format(self):
+        """多组 tool_use + tool_result 成对保留——各 assistant 的 tool_calls 和对应 tool 在同一分区"""
+        msgs = self._make_msgs_with_content(
+            ("user",), ("assistant",),                    # round 1
+            ("user",), ("assistant", ("call_1",)),        # round 2 - tool use
+            ("tool", "call_1"),                            # round 2 - tool result
+            ("user",), ("assistant", ("call_2",)),        # round 3 - tool use
+            ("tool", "call_2"),                            # round 3 - tool result
+        )
+        # KEEP_RECENT=4 → recent 包含 round 3 的完整交换 + round 2 部分
+        old, recent = ensure_tool_pairs(msgs, 4)
+        # recent 中每个 tool 消息都应能找到其对应的 assistant（同一 tool_call_id）
+        recent_tools = {m["tool_call_id"] for m in recent if m["role"] == "tool"}
+        recent_assistant_ids = set()
+        for m in recent:
+            if m["role"] == "assistant":
+                tc_raw = m.get("tool_calls", "[]")
+                import json
+                try:
+                    tcs = json.loads(tc_raw) if isinstance(tc_raw, str) else tc_raw
+                    for tc in tcs:
+                        recent_assistant_ids.add(tc.get("id", ""))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        # recent 中的每个 tool 的 tool_call_id 都应在 recent 的 assistant 中存在
+        for tc_id in recent_tools:
+            assert tc_id in recent_assistant_ids, (
+                f"工具调用 {tc_id} 没有对应的 assistant 在 recent 分区中"
+            )
+
+    def test_tool_pairs_are_paired_across_partition_boundary(self):
+        """压缩后 tool_use + tool_result 成对保留：即使跨越 old/recent 边界也保证配对"""
+        msgs = self._make_msgs_with_content(
+            ("user",), ("assistant", ("call_1",)),         # round 1 - tool use
+            ("tool", "call_1"),                            # round 1 - tool result
+            ("user",), ("assistant",),                     # round 2
+            ("user",), ("assistant", ("call_2",)),         # round 3 - tool use
+            ("tool", "call_2"),                            # round 3 - tool result
+        )
+        # KEEP_RECENT=2 → 仅保留最后 2 条: assistant(call_2), tool(call_2)
+        # 但它们的配对在 old 中不存在，所以应扩展
+        old, recent = ensure_tool_pairs(msgs, 2)
+        # call_1 + call_2 都应在同一分区
+        paired = True
+        for m in recent:
+            if m["role"] == "tool":
+                # 对应 assistant 必须在 recent 中
+                tc_id = m["tool_call_id"]
+                found = any(
+                    m2["role"] == "assistant" and tc_id in m2.get("tool_calls", "")
+                    for m2 in recent
+                )
+                if not found:
+                    paired = False
+        assert paired, "所有 tool 消息在压缩后的 recent 分区中都有对应的 assistant"
+        # old 中不应包含孤立 tool 消息
+        old_tool_ids = {m["tool_call_id"] for m in old if m["role"] == "tool"}
+        old_assistant_ids = set()
+        for m in old:
+            if m["role"] == "assistant":
+                tc_raw = m.get("tool_calls", "[]")
+                import json
+                try:
+                    tcs = json.loads(tc_raw) if isinstance(tc_raw, str) else tc_raw
+                    for tc in tcs:
+                        old_assistant_ids.add(tc.get("id", ""))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        for tc_id in old_tool_ids:
+            assert tc_id in old_assistant_ids, (
+                f"old 分区中有孤立 tool 消息 {tc_id}"
+            )
+

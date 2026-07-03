@@ -19,6 +19,7 @@ from module.roll.ast_engine.errors import (
 )
 from module.roll.ast_engine.limits import (
     SafetyLimits,
+    LimitChecker,
     check_expression_length,
     check_dice_count,
     check_dice_sides,
@@ -125,6 +126,60 @@ class TestSafetyLimits:
         with pytest.raises(RollLimitError) as exc_info:
             check_explosion_limit(15, limits)
         assert exc_info.value.code == RollErrorCode.EXPLOSION_LIMIT_EXCEEDED
+
+
+@pytest.mark.unit
+class TestMaxTotalRollsLimit:
+    """Test max_total_rolls enforcement via LimitChecker."""
+
+    def test_max_total_rolls_exceeded_raises_limit_error(self):
+        """Exceeding max_total_rolls raises RollLimitError with LIMIT_EXCEEDED."""
+        limits = SafetyLimits(max_total_rolls=5)
+        checker = LimitChecker(limits)
+        for _ in range(5):
+            checker.check_and_increment_rolls()
+        with pytest.raises(RollLimitError) as exc_info:
+            checker.check_and_increment_rolls()
+        assert exc_info.value.code == RollErrorCode.LIMIT_EXCEEDED
+        assert "总骰子数过多" in str(exc_info.value)
+
+    def test_max_total_rolls_exact_limit_ok(self):
+        """Rolling exactly max_total_rolls should not raise."""
+        limits = SafetyLimits(max_total_rolls=5)
+        checker = LimitChecker(limits)
+        for _ in range(5):
+            checker.check_and_increment_rolls()  # should not raise
+        # After 5 increments, total_rolls == 5, and > 5 triggers. So 5 is OK.
+
+    def test_max_total_rolls_configurable(self):
+        """The max_total_rolls limit is configurable via SafetyLimits."""
+        low = SafetyLimits(max_total_rolls=3)
+        high = SafetyLimits(max_total_rolls=100)
+
+        low_checker = LimitChecker(low)
+        low_checker.check_and_increment_rolls()
+        low_checker.check_and_increment_rolls()
+        low_checker.check_and_increment_rolls()
+        with pytest.raises(RollLimitError):
+            low_checker.check_and_increment_rolls()
+
+        high_checker = LimitChecker(high)
+        for _ in range(50):
+            high_checker.check_and_increment_rolls()  # should not raise
+
+    def test_max_total_rolls_default_is_10000(self):
+        """Default SafetyLimits should have max_total_rolls=10000."""
+        limits = SafetyLimits()
+        assert limits.max_total_rolls == 10000
+
+    def test_multiple_rolls_per_check_increment(self):
+        """check_and_increment_rolls(count) supports multi-roll increments."""
+        limits = SafetyLimits(max_total_rolls=10)
+        checker = LimitChecker(limits)
+        checker.check_and_increment_rolls(count=6)
+        checker.check_and_increment_rolls(count=4)  # total=10, exactly equal — OK
+        with pytest.raises(RollLimitError):
+            checker.check_and_increment_rolls(count=1)  # total=11 > 10
 
 
 @pytest.mark.unit

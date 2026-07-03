@@ -3,7 +3,7 @@ JRRP 共享函数和工具的单元测试
 """
 import pytest
 import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, PropertyMock
 
 from module.misc.jrrp_utils import (
     compute_jrrp,
@@ -66,27 +66,49 @@ class TestComputeJrrp:
         assert not (r.is_min and r.is_max)
 
     def test_direction_up(self):
-        """jrrp > zrrp 时 direction='up'"""
-        # 通过大量迭代找到 direction='up' 的 case（概率较高）
-        for i in range(50):
-            r = compute_jrrp(f"up_test_{i}", datetime.datetime(2024, 6, 15))
-            if r.jrrp > r.zrrp:
-                assert r.direction == 'up'
-                assert r.delta > 0
-                assert r.delta_percent >= 0
-                return
-        pytest.skip("未找到 direction='up' 的测试用例")
+        """jrrp > zrrp 时 direction='up'（通过 mock 控制 randint 返回值）"""
+        with patch("module.misc.jrrp_utils.random.Random") as mock_random_cls:
+            mock_zrrp_rng = MagicMock()
+            mock_jrrp_rng = MagicMock()
+            mock_random_cls.side_effect = [mock_zrrp_rng, mock_jrrp_rng]
+            mock_zrrp_rng.randint.return_value = 30  # zrrp
+            mock_jrrp_rng.randint.return_value = 70   # jrrp
+
+            r = compute_jrrp("test_user", datetime.datetime(2024, 6, 15))
+            assert r.jrrp > r.zrrp
+            assert r.direction == 'up'
+            assert r.delta == 40
+            assert r.delta_percent == pytest.approx(133.33, rel=1e-2)
 
     def test_direction_down(self):
-        """jrrp < zrrp 时 direction='down'"""
-        for i in range(50):
-            r = compute_jrrp(f"down_test_{i}", datetime.datetime(2024, 6, 15))
-            if r.jrrp < r.zrrp:
-                assert r.direction == 'down'
-                assert r.delta < 0
-                assert r.delta_percent >= 0
-                return
-        pytest.skip("未找到 direction='down' 的测试用例")
+        """jrrp < zrrp 时 direction='down'（通过 mock 控制 randint 返回值）"""
+        with patch("module.misc.jrrp_utils.random.Random") as mock_random_cls:
+            mock_zrrp_rng = MagicMock()
+            mock_jrrp_rng = MagicMock()
+            mock_random_cls.side_effect = [mock_zrrp_rng, mock_jrrp_rng]
+            mock_zrrp_rng.randint.return_value = 70   # zrrp
+            mock_jrrp_rng.randint.return_value = 30   # jrrp
+
+            r = compute_jrrp("test_user", datetime.datetime(2024, 6, 15))
+            assert r.jrrp < r.zrrp
+            assert r.direction == 'down'
+            assert r.delta == -40
+            assert r.delta_percent == pytest.approx(57.14, rel=1e-2)
+
+    def test_direction_same(self):
+        """jrrp == zrrp 时 direction='same'"""
+        with patch("module.misc.jrrp_utils.random.Random") as mock_random_cls:
+            mock_zrrp_rng = MagicMock()
+            mock_jrrp_rng = MagicMock()
+            mock_random_cls.side_effect = [mock_zrrp_rng, mock_jrrp_rng]
+            mock_zrrp_rng.randint.return_value = 50   # zrrp
+            mock_jrrp_rng.randint.return_value = 50   # jrrp
+
+            r = compute_jrrp("test_user", datetime.datetime(2024, 6, 15))
+            assert r.jrrp == r.zrrp
+            assert r.direction == 'same'
+            assert r.delta == 0
+            assert r.delta_percent == 0.0
 
 
 class TestFormatJrrpInfoLine:

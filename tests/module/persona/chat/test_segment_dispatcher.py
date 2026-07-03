@@ -266,3 +266,73 @@ class TestWorkerExitRace:
 
         # 清理，避免 event loop 关闭时残留 task 导致 warning
         await dispatcher.shutdown()
+
+
+@pytest.mark.unit
+class TestBuildMsg:
+    """Q20: _build_msg image_url — image_url 非空时消息格式包含 image 类型 content block"""
+
+    def test_image_url_present_adds_cq_prefix(self):
+        """image_url 非空时消息以 [CQ:image,...] 开头"""
+        from plugins.DicePP.module.persona.chat.segment_dispatcher import _build_msg, SegmentItem
+        msg = _build_msg(SegmentItem(content="看这张图片", delay_before=0, user_id="u1", group_id="g1", image_url="https://example.com/img.png"))
+        assert msg.startswith("[CQ:image,file=https://example.com/img.png]")
+        assert "看这张图片" in msg
+
+    def test_image_url_only_no_content(self):
+        """仅有 image_url 无 content 时只返回 CQ 码"""
+        from plugins.DicePP.module.persona.chat.segment_dispatcher import _build_msg, SegmentItem
+        msg = _build_msg(SegmentItem(content="", delay_before=0, user_id="u1", group_id="g1", image_url="https://example.com/img.png"))
+        assert msg == "[CQ:image,file=https://example.com/img.png]"
+
+    def test_no_image_url_returns_content_only(self):
+        """image_url 为空时只返回 content"""
+        from plugins.DicePP.module.persona.chat.segment_dispatcher import _build_msg, SegmentItem
+        msg = _build_msg(SegmentItem(content="纯文本", delay_before=0, user_id="u1", group_id="g1", image_url=""))
+        assert msg == "纯文本"
+
+    def test_image_url_with_empty_content(self):
+        """image_url 非空且 content 仅空白时只返回 CQ 码"""
+        from plugins.DicePP.module.persona.chat.segment_dispatcher import _build_msg, SegmentItem
+        msg = _build_msg(SegmentItem(content="   ", delay_before=0, user_id="u1", group_id="g1", image_url="https://example.com/img.png"))
+        assert msg == "[CQ:image,file=https://example.com/img.png]"
+
+    def test_image_and_content_joined_by_newline(self):
+        """image_url 和 content 同时存在时用换行连接"""
+        from plugins.DicePP.module.persona.chat.segment_dispatcher import _build_msg, SegmentItem
+        msg = _build_msg(SegmentItem(content="描述文字", delay_before=0, user_id="u1", group_id="g1", image_url="https://example.com/img.png"))
+        assert msg == "[CQ:image,file=https://example.com/img.png]\n描述文字"
+
+
+@pytest.mark.unit
+class TestNotifyDuringShutdown:
+    """Q21: shutdown 期间 notify 静默丢弃 — _shutdown=True 时 notify 不发送消息且不抛异常"""
+
+    @pytest.mark.asyncio
+    async def test_notify_after_shutdown_is_silent(self, mock_port):
+        """shutdown 后 notify 被静默丢弃，不发送消息"""
+        dispatcher = SegmentDispatcher(
+            message_port=mock_port,
+            idle_seconds=1,
+            max_per_run=5,
+        )
+        await dispatcher.shutdown()
+        # 此时 _shutting_down=True
+        dispatcher.notify("group:1", SegmentItem("after shutdown", 0, "u1", "g1"))
+        # 没有 worker 被创建，消息未被发送
+        assert "group:1" not in dispatcher._workers
+        mock_port.send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_notify_during_shutdown_does_not_raise(self, mock_port):
+        """shutdown 期间 notify 不抛异常"""
+        dispatcher = SegmentDispatcher(
+            message_port=mock_port,
+            idle_seconds=1,
+            max_per_run=5,
+        )
+        await dispatcher.shutdown()
+        # 多次 notify 不应抛异常
+        for _ in range(10):
+            dispatcher.notify("group:1", SegmentItem("x", 0, "u1", "g1"))
+        # 测试通过即可（无异常）

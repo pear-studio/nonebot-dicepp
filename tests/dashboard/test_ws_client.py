@@ -1,6 +1,7 @@
 """Tests for Control Channel client runtime configuration and recovery."""
 
 import asyncio
+import random
 
 import pytest
 
@@ -117,3 +118,145 @@ async def test_auth_rejection_is_a_connection_failure(monkeypatch):
 
     with pytest.raises(ConnectionError, match="auth rejected: bad token"):
         await _client()._connect_and_loop()
+
+
+# ── WS reconnection loop contract tests ──────────────────────────────────────
+# These tests verify that _run() retries with exponential backoff, caps the
+# delay at _RECONNECT_MAX, and resets the attempt counter after a connection
+# that reached the authenticated state.
+
+@pytest.mark.asyncio
+class TestWSReconnection:
+    """契约测试：WS 重连循环（断线自动重连、指数退避、上限封顶）"""
+
+    async def test_auto_reconnect_on_disconnect(self, monkeypatch):
+        """连接断开后应自动重连（重试次数 > 1）。"""
+        client = _client()
+        client._running = True
+        connect_calls = []
+
+        async def failing_connect(_self):
+            connect_calls.append(1)
+            if len(connect_calls) >= 3:
+                _self._running = False  # 停止主循环
+            raise ConnectionError("connection lost")
+
+        monkeypatch.setattr(
+            ws_client.ControlChannelClient, "_connect_and_loop", failing_connect
+        )
+
+        async def _pass(*_a, **_kw):
+            pass
+
+        monkeypatch.setattr(asyncio, "sleep", _pass)
+        monkeypatch.setattr(ws_client.random, "random", lambda: 0.5)
+
+        await client._run()
+
+        assert len(connect_calls) >= 2, (
+            f"应自动重连至少 2 次，实际：{len(connect_calls)}"
+        )
+
+    async def test_reconnect_backoff_exponential(self, monkeypatch):
+        """重连间隔应呈指数递增（attempt 0→1→2→… 对应 base 1→2→4→…）。"""
+        client = _client()
+        client._running = True
+
+        async def always_fail(_self):
+            raise ConnectionError("disconnected")
+
+        monkeypatch.setattr(
+            ws_client.ControlChannelClient, "_connect_and_loop", always_fail
+        )
+
+        slept: list[float] = []
+
+        async def record_sleep(delay, result=None):
+            slept.append(delay)
+            if len(slept) >= 5:
+                client._running = False
+
+        monkeypatch.setattr(asyncio, "sleep", record_sleep)
+        monkeypatch.setattr(ws_client.random, "random", lambda: 0.5)
+
+        await client._run()
+
+        assert len(slept) >= 3, f"应记录至少 3 次休眠，实际：{len(slept)}"
+        for i in range(1, min(len(slept), 6)):
+            assert slept[i] > slept[i - 1], (
+                f"第 {i} 次休眠 ({slept[i]:.1f}s) 应大于第 {i - 1} 次 ({slept[i - 1]:.1f}s)"
+            )
+
+    async def test_reconnect_backoff_caps_at_max(self, monkeypatch):
+        """重连间隔达到 _RECONNECT_MAX (60s) 后不再增长。"""
+        client = _client()
+        client._running = True
+
+        async def always_fail(_self):
+            raise ConnectionError("disconnected")
+
+        monkeypatch.setattr(
+            ws_client.ControlChannelClient, "_connect_and_loop", always_fail
+        )
+
+        slept: list[float] = []
+
+        async def record_sleep(delay, result=None):
+            slept.append(delay)
+            if len(slept) >= 12:
+                client._running = False
+
+        monkeypatch.setattr(asyncio, "sleep", record_sleep)
+        monkeypatch.setattr(ws_client.random, "random", lambda: 0.5)
+
+        await client._run()
+
+        assert len(slept) >= 7, f"至少需要 7 次才能涨到上限，实际：{len(slept)}"
+        max_delay = max(slept)
+        assert abs(max_delay - 60.0) < 1.0, (
+            f"最大重连间隔应接近 60s，实际：{max_delay}"
+        )
+        # 最后几次都应该稳定在 ~60s
+        for d in slept[-3:]:
+            assert abs(d - 60.0) < 1.0, f"末尾休眠应接近 60s，实际：{d}"
+
+    async def test_successful_auth_resets_backoff(self, monkeypatch):
+        """成功认证后的断线应重置重试计数，间隔从初始值重新开始。"""
+        client = _client()
+        client._running = True
+        call_n = 0
+
+        async def reset_on_second_fail(_self):
+            nonlocal call_n
+            call_n += 1
+            if call_n == 1:
+                raise ConnectionError("first fail")
+            # 第二次连接模拟认证成功后再断开
+            _self._connection_authenticated = True  # noqa
+            raise ConnectionError("disconnected after auth")
+
+        monkeypatch.setattr(
+            ws_client.ControlChannelClient, "_connect_and_loop", reset_on_second_fail
+        )
+
+        slept: list[float] = []
+
+        async def record_sleep(delay, result=None):
+            slept.append(delay)
+            if len(slept) >= 2:
+                client._running = False
+
+        monkeypatch.setattr(asyncio, "sleep", record_sleep)
+        monkeypatch.setattr(ws_client.random, "random", lambda: 0.5)
+
+        await client._run()
+
+        assert len(slept) == 2, f"应记录 2 次休眠，实际：{len(slept)}"
+        # 第一次: attempt=0 → base=1.0
+        assert abs(slept[0] - 1.0) < 0.1, (
+            f"第 1 次间隔应接近 1.0s (attempt=0)，实际：{slept[0]}"
+        )
+        # 第二次：auth 后 attempt 已重置为 0 → base=1.0（不是 2.0）
+        assert abs(slept[1] - 1.0) < 0.1, (
+            f"认证断线后间隔应重新从 1.0s 开始 (attempt 已重置)，实际：{slept[1]}"
+        )

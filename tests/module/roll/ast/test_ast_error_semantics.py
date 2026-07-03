@@ -70,12 +70,6 @@ class TestASTErrorSemantics:
             exec_roll_exp_ast(long_expr)
         assert exc_info.value.code == RollErrorCode.EXPRESSION_TOO_LONG
 
-    def test_error_code_is_stable_attribute(self):
-        """RollEngineError.code must be a RollErrorCode enum instance."""
-        with pytest.raises(RollEngineError) as exc_info:
-            exec_roll_exp_ast("1001D20")
-        assert isinstance(exc_info.value.code, RollErrorCode)
-
     def test_error_info_is_nonempty_string(self):
         """RollEngineError.info must be a non-empty string (user-visible message)."""
         with pytest.raises(RollEngineError) as exc_info:
@@ -99,21 +93,20 @@ class TestDefaultPathErrorSemantics:
             exec_roll_exp("1+")
 
     def test_limit_error_becomes_roll_dice_error(self):
-        """Limit errors from AST path must surface as RollDiceError."""
-        with pytest.raises(RollDiceError):
+        """Limit errors from AST path must surface as RollDiceError with info containing '骰子数量'."""
+        with pytest.raises(RollDiceError) as exc_info:
             exec_roll_exp("1001D20")
+        info = exc_info.value.info
+        assert isinstance(info, str)
+        assert info.strip()
+        assert "骰子数量" in info, (
+            f"Expected '骰子数量' in error info for DICE_COUNT_EXCEEDED, got: {info}"
+        )
 
     def test_unmatched_paren_becomes_roll_dice_error(self):
         """Unmatched parens from AST path must surface as RollDiceError."""
         with pytest.raises(RollDiceError):
             exec_roll_exp("(1+2")
-
-    def test_error_message_is_nonempty(self):
-        """RollDiceError.info must be a non-empty string."""
-        with pytest.raises(RollDiceError) as exc_info:
-            exec_roll_exp("1001D20")
-        assert isinstance(exc_info.value.info, str)
-        assert exc_info.value.info.strip()
 
 
 # ===========================================================================

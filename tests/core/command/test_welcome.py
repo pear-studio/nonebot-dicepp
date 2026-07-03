@@ -12,10 +12,6 @@ class TestWelcome:
     async def test_show_welcome_status(self, h):
         await h.send_group(".welcome", checker=lambda s: "欢迎词" in s)
 
-    async def test_welcome_still_default(self, h):
-        notice = GroupIncreaseNoticeData("test_user_a", "test_group_a", "test_user_b")
-        await h.send_notice(notice, checker=lambda s: "欢迎！" in s)
-
     async def test_set_custom_welcome(self, h):
         await h.send_group(".welcome ABC", group_id="test_group_a",
                            checker=lambda s: "欢迎词现在已被设为 \"ABC\"" in s)

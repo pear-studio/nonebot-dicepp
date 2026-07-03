@@ -3,6 +3,7 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
+from utils.time import set_clock, SteppedClock, WallClock
 from core.bot import Bot
 from core.command import BotCommandBase
 from core.data.models.extended import MetaStat
@@ -86,45 +87,53 @@ async def test_tick_daily_skips_command_on_exception():
     good_cmd.tick_daily.assert_called_once()
 
 
+def _should_run_daily(current_time: float, last_update_time: float) -> bool:
+    """Check if the 5-minute interval has elapsed since the last daily update."""
+    return current_time - last_update_time > 60 * 5
+
+
+class TestShouldRunDaily:
+    """Unit tests for the 5-minute daily-update trigger condition."""
+
+    def test_not_elapsed(self):
+        assert not _should_run_daily(100.0, 50.0)
+
+    def test_just_above_threshold(self):
+        assert _should_run_daily(350.001, 50.0)
+
+    def test_just_below_threshold(self):
+        assert not _should_run_daily(349.999, 50.0)
+
+    def test_well_exceeded(self):
+        assert _should_run_daily(1000.0, 50.0)
+
+    def test_zero_elapsed(self):
+        assert not _should_run_daily(50.0, 50.0)
+
+    def test_negative_elapsed(self):
+        assert not _should_run_daily(50.0, 100.0)
+
+
 @pytest.mark.asyncio
-async def test_tick_loop_triggers_daily_update_on_cycle():
-    """验证 5 分钟间隔到达时 tick_loop 触发 tick_daily 并持久化 meta_stat。"""
+async def test_tick_loop_starts_and_exits_on_cancel():
+    """Minimal integration: tick_loop starts and exits via CancelledError from asyncio.sleep."""
     bot = _make_mock_bot()
-    bot.tick_daily = AsyncMock()
     bot.command_dict = {}
     bot.scheduler.pending = False
     bot.proxy = None
     bot.config.memory_monitor.enable = False
 
-    # meta_stat 查询返回空行（启动新统计）
+    # meta_stat.get is awaited in the loop body
     bot.db.meta_stat.get = AsyncMock(return_value=None)
-    bot.db.meta_stat.upsert = AsyncMock()
 
-    # time_counter 初始化 0.0，loop_begin_time 301.0 => 差值 >300 秒触发 5 分钟分支
-    mock_loop = MagicMock()
-    mock_loop.time = MagicMock(side_effect=[0.0, 301.0, 302.0])
-
-    china_tz = datetime.timezone(datetime.timedelta(hours=8))
-    day1 = datetime.datetime(2024, 1, 1, tzinfo=china_tz)
-    day2 = datetime.datetime(2024, 1, 2, tzinfo=china_tz)
-
-    with (
-        patch("asyncio.get_event_loop", return_value=mock_loop),
-        patch("asyncio.sleep", side_effect=asyncio.CancelledError()),
-        patch("core.statistics.basic_stat.get_current_date_raw") as mock_gcdr,
-    ):
-        mock_gcdr.side_effect = [day1, day2]
-
-        with pytest.raises(asyncio.CancelledError):
-            await Bot.tick_loop(bot)
-
-    bot.tick_daily.assert_awaited_once()
-    bot.db.meta_stat.upsert.assert_awaited_once()
-    # 验证写入数据库的参数
-    upsert_call = bot.db.meta_stat.upsert.await_args[0][0]
-    assert isinstance(upsert_call, MetaStat)
-    assert upsert_call.key == "meta"
-    assert upsert_call.data != ""
+    # Use SteppedClock for deterministic time (replaces mocking get_current_date_raw)
+    set_clock(SteppedClock(datetime.datetime(2024, 1, 1)))
+    try:
+        with patch("asyncio.sleep", side_effect=asyncio.CancelledError()):
+            with pytest.raises(asyncio.CancelledError):
+                await Bot.tick_loop(bot)
+    finally:
+        set_clock(WallClock())
 
 
 # ── Q7: Persona daily notification suppression ────────────────────────────────

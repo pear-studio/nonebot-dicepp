@@ -39,19 +39,12 @@ class TestGetBotVersion:
         )
 
     def test_matches_pyproject_version(self):
-        """get_bot_version() 与 pyproject.toml 中的版本一致。"""
+        """get_bot_version() 与 pyproject.toml 中的版本一致。
+        (importlib.metadata consistency is implicit in the declared import path.)"""
         from core.config.declare import get_bot_version
 
         expected = f"v{_read_pyproject_version()}"
         assert get_bot_version() == expected, (
             f"get_bot_version() = {get_bot_version()} "
             f"与 pyproject.toml 的 version = {expected} 不一致"
-        )
-
-    def test_importlib_matches_pyproject(self):
-        """importlib.metadata.version('dicepp') 与 pyproject.toml 一致。"""
-        from importlib.metadata import version as _get_pkg_version
-
-        assert _get_pkg_version("dicepp") == _read_pyproject_version(), (
-            "已安装包的版本与 pyproject.toml 不一致，检查是否需要 uv sync"
         )

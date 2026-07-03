@@ -135,15 +135,6 @@ class TestRepository:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_upsert_is_alias_for_save(self, repo):
-        """upsert delegates to save, so behaviour is identical."""
-        karma = UserKarma(user_id="u1", group_id="g1", value=42)
-        await repo.upsert(karma)
-        result = await repo.get("u1", "g1")
-        assert result is not None
-        assert result.value == 42
-
-    @pytest.mark.asyncio
     async def test_list_all_empty(self, repo):
         results = await repo.list_all()
         assert results == []

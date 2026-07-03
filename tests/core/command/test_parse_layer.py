@@ -16,6 +16,7 @@ from core.command.cq_extractor import extract_segments, extract_mentions, enrich
 # CommandParseResult 数据结构测试
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestCommandParseResult:
     def test_empty_result(self):
         r = CommandParseResult(command_name="r")
@@ -73,6 +74,7 @@ class TestCommandParseResult:
 # CommandTextParser 解析测试
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestCommandTextParser:
     def setup_method(self):
         self.roll_parser = CommandTextParser(
@@ -151,6 +153,7 @@ class TestCommandTextParser:
 # CqExtractor 提取测试
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestCqExtractor:
     def test_plain_text(self):
         segs = extract_segments("d20+4 攻击")
@@ -199,6 +202,7 @@ class TestCqExtractor:
 # CompatMapper 映射测试
 # ---------------------------------------------------------------------------
 
+@pytest.mark.unit
 class TestCompatMapper:
     def test_global_quiet_rule(self):
         """--quiet 应在 parser 词法层直接归一为规范 key 'q'（不经过 compat mapper）"""

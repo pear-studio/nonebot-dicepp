@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 from plugins.DicePP.module.persona.llm.router import LLMRouter
 from plugins.DicePP.module.persona.llm.selection import SelectionPolicy, CHAT, SCORING
+from plugins.DicePP.utils.time import wall_now
+from conftest import make_mock_providers, MockDataStore, MockQuotaConfig
 
 
 def _make_provider_config(enabled=True):
@@ -259,3 +261,27 @@ class TestLexicographicTieBreak:
         ])
         candidates = router.build_candidates(CHAT)
         assert candidates[0] == ("provider_a", "m1")
+
+
+class TestIncrementUsage:
+    """LLMRouter.increment_usage 用量计数单元测试"""
+
+    @pytest.mark.asyncio
+    async def test_increment_usage(self):
+        router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
+        mock_store = MockDataStore()
+        router.data_store = mock_store
+        router.config = MockQuotaConfig()
+        today = wall_now().strftime("%Y-%m-%d")
+        await router.increment_usage("u1")
+        assert await mock_store.get_daily_usage("u1", today) == 1
+
+    @pytest.mark.asyncio
+    async def test_increment_usage_no_data_store(self):
+        router = LLMRouter(providers=make_mock_providers(), global_max_concurrent=1)
+        router.data_store = None
+        stats_before = dict(router.stats)
+        await router.increment_usage("u1")
+        assert router.stats == stats_before, (
+            "data_store=None 时 increment_usage 不应修改 router.stats"
+        )

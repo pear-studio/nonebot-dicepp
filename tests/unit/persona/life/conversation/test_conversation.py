@@ -632,3 +632,52 @@ class TestConversationRun:
 
 
 FakeSource = FakeChangeSource  # alias for brevity
+
+
+class TestConversationCompact:
+    """Q39: compact 行为契约"""
+
+    @pytest.mark.asyncio
+    async def test_compact_reduces_message_count(self):
+        """compact 后 _messages 数 ≤ keep_recent + 1（摘要消息）"""
+        conv = Conversation()
+        # 添加超过 keep_recent 的消息
+        for i in range(10):
+            conv.add_message("user", f"msg_{i}")
+
+        assert conv.length == 10
+        # compact 保留最近 3 条，前面 7 条被摘要为一条
+        summary = await conv.compact(keep_recent=3)
+
+        # 有旧消息被摘要，返回非空文本
+        assert summary != ""
+        # 消息数 = 1 (摘要) + 3 (最近保留) = 4
+        assert conv.length == 4
+
+    @pytest.mark.asyncio
+    async def test_compact_preserves_system_in_render(self):
+        """compact 后 render() 仍正确前置 system prompt"""
+        conv = Conversation()
+        for i in range(5):
+            conv.add_message("user", f"msg_{i}")
+
+        await conv.compact(keep_recent=2)
+        msgs = conv.render("system prompt")
+        # 第一条始终是 system prompt
+        assert msgs[0] == {"role": "system", "content": "system prompt"}
+        # 消息结构为: system + (summary) + recent
+        assert msgs[1]["role"] == "user"  # summary msg has role "user"
+        assert "摘要" in msgs[1]["content"]
+        assert msgs[2]["content"] == "msg_3"
+        assert msgs[3]["content"] == "msg_4"
+
+    @pytest.mark.asyncio
+    async def test_compact_noop_when_under_threshold(self):
+        """消息数 ≤ keep_recent 时 compact 不操作"""
+        conv = Conversation()
+        conv.add_message("user", "a")
+        conv.add_message("user", "b")
+
+        summary = await conv.compact(keep_recent=10)
+        assert summary == ""  # 无操作
+        assert conv.length == 2

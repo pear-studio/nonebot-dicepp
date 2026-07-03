@@ -1172,3 +1172,147 @@ class TestIsCommandGateBypass:
         result = await session.chat("u1", "", ".jrrp", ctx=ChatCallContext(is_command=True))
         assert result == "reply"
         session._scoring_trigger.on_interaction.assert_not_called()
+
+
+# ── Q27: _build_messages legacy fallback ─────────────────────────────────────
+
+
+class TestBuildMessagesLegacyFallback:
+    """Q27: _build_messages legacy fallback — 旧格式消息（dict 而非 Message 对象）仍可正确处理"""
+
+    def _make_session_for_legacy(self):
+        """构造 session_manager=None 的 ChatSession（触发 _build_messages_legacy）"""
+        from plugins.DicePP.module.persona.data.models import UnifiedMessage
+        from plugins.DicePP.core.message_types import MessageType
+
+        store = AsyncMock()
+        store.get_recent_messages = AsyncMock(return_value=[
+            UnifiedMessage(user_id="u1", role="user", content="你好", created_at=None, type=MessageType.CHAT),
+            UnifiedMessage(user_id="u1", role="assistant", content="你好！", created_at=None, type=MessageType.CHAT),
+        ])
+        store.get_group_messages = AsyncMock(return_value=[])
+        store.add_message_stream = AsyncMock(return_value=1)
+        store._retain_message_stream = AsyncMock()
+        store.add_score_event = AsyncMock()
+        store.update_relationship = AsyncMock()
+        store.init_relationship = AsyncMock()
+        store.get_relationship = AsyncMock(return_value=None)
+        store.get_user_profile = AsyncMock(return_value=None)
+        store.save_user_profile = AsyncMock()
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.get_diary = AsyncMock(return_value=None)
+
+        router = MagicMock()
+        router.increment_usage = AsyncMock()
+        router.data_store = None
+        router.quota_check_enabled = False
+        router.daily_limit = 20
+        router.trace_enabled = False
+        router.trace_max_age_days = 7
+        router.config = None
+
+        character = MagicMock()
+        character.name = "Test"
+        character.extensions = MagicMock()
+        character.get_relation_labels = MagicMock(return_value=["冷淡", "陌生", "熟识", "亲密"])
+
+        config = MagicMock()
+        config.timezone = "Asia/Shanghai"
+        config.max_messages = 50
+        config.max_history_turns = 20
+        config.max_history_tokens = 2000
+        config.max_diary_context_chars = 500
+        config.group_max_age_minutes = 60
+        config.group_context_budget_tokens = 2000
+        config.group_max_messages = 100
+        config.group_single_message_max_tokens = 500
+
+        context_builder = MagicMock()
+        context_builder.build = MagicMock(return_value=[{"role": "user", "content": "你好"}, {"role": "assistant", "content": "你好！"}])
+        context_builder.build_debug_info = MagicMock(return_value="")
+        context_builder.format_history = MagicMock(side_effect=lambda h, is_group: h)
+        context_builder.truncate_by_turns = MagicMock(side_effect=lambda h, *a, **kw: h)
+        context_builder.build_lore_text = MagicMock(return_value={})
+
+        scoring_trigger = MagicMock()
+        scoring_trigger.effective_relationship = MagicMock(side_effect=lambda rel: rel)
+        scoring_trigger.on_interaction = AsyncMock()
+        scoring_trigger.update_character = MagicMock()
+
+        response_handler = MagicMock()
+        response_handler.port = None
+        response_handler.persist = AsyncMock(return_value=1)
+        response_handler.send = AsyncMock(return_value=True)
+        response_handler.persist_and_send = AsyncMock(return_value=1)
+
+        session = ChatSession(
+            store=store,
+            router=router,
+            tool_registry=MagicMock(),
+            coordinator=LLMCallCoordinator(),
+            character=character,
+            config=config,
+            scoring_trigger=scoring_trigger,
+            response_handler=response_handler,
+            context_builder=context_builder,
+            session_manager=None,  # 触发 legacy 路径
+        )
+        return session, context_builder, store
+
+    @pytest.mark.asyncio
+    async def test_legacy_fallback_processes_dict_messages(self):
+        """旧格式 dict 消息通过 _build_messages_legacy 正常处理"""
+        session, context_builder, store = self._make_session_for_legacy()
+
+        result = await session._build_messages("u1", "", ctx=ChatCallContext())
+
+        # 走 legacy 路径：format_history 和 truncate_by_turns 被调用
+        context_builder.format_history.assert_called_once()
+        context_builder.truncate_by_turns.assert_called_once()
+        # 结果由 context_builder.build 返回
+        assert len(result) == 2
+        assert result[0]["role"] == "user"
+        assert result[1]["role"] == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_legacy_fallback_handles_transient_message(self):
+        """legacy 路径正确处理 transient_message"""
+        session, context_builder, store = self._make_session_for_legacy()
+        # 覆盖 build 返回以包含 transient 格式后的结果
+        context_builder.build = MagicMock(return_value=[
+            {"role": "user", "content": "你好"},
+            {"role": "assistant", "content": "你好！"},
+            {"role": "user", "content": "[系统通知] 今日运势"},
+        ])
+
+        result = await session._build_messages("u1", "", ctx=ChatCallContext(transient_message="今日运势"))
+
+        context_builder.build.assert_called_once()
+        assert len(result) >= 2
+
+    @pytest.mark.asyncio
+    async def test_legacy_fallback_empty_history(self):
+        """legacy 路径空历史时正常处理（仅 transient_message）"""
+        session, context_builder, store = self._make_session_for_legacy()
+        store.get_recent_messages = AsyncMock(return_value=[])
+        context_builder.build = MagicMock(return_value=[
+            {"role": "user", "content": "[系统] hello"},
+        ])
+
+        result = await session._build_messages("u1", "", ctx=ChatCallContext(transient_message="hello"))
+
+        assert len(result) == 1
+        assert "[系统]" in result[0]["content"] or "hello" in result[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_legacy_fallback_calls_build_with_correct_args(self):
+        """legacy 路径调用 context_builder.build 时传递正确的参数"""
+        session, context_builder, store = self._make_session_for_legacy()
+
+        await session._build_messages("u1", "", ctx=ChatCallContext())
+
+        # _build_messages_legacy 调用 context_builder.build
+        # 由于 session_manager=None，走 _build_messages_legacy
+        context_builder.format_history.assert_called_once()
+        # verify that build is called (not the new _build_messages path that would call session_manager.get_or_create)
+        context_builder.build.assert_called_once()

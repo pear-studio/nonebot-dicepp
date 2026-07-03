@@ -154,6 +154,14 @@ class TestDMAgentRun:
             "story_deck 注入文本未出现在 Conversation 中"
         )
 
+    @pytest.mark.asyncio
+    async def test_dm_run_exception_propagates(self, dm_agent, base_context):
+        """conv.run 抛出异常时从 run() 向上传播（try 块无 except，仅 finally 清理）"""
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.side_effect = RuntimeError("provider unavailable")
+            with pytest.raises(RuntimeError, match="provider unavailable"):
+                await dm_agent.run(base_context)
+
 
 class TestStoryDeckInjection:
     """测试 DMAgent._build_story_deck_injection() 纯辅助方法"""
