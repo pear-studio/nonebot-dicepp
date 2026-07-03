@@ -204,33 +204,75 @@ jobs:
       - name: Assemble and smoke test package
         shell: pwsh
         run: |
-          Copy-Item dist/DicePPDashboard.exe dist/DicePP/DicePPDashboard.exe
+          Copy-Item dist/DicePP.exe dist/DicePP/DicePP.exe
+          if (-not (Test-Path dist/DicePP/DicePP.exe)) {
+            throw "Copy failed: dist/DicePP/DicePP.exe does not exist"
+          }
+          Remove-Item dist/DicePP.exe
+          if (Test-Path dist/DicePP.exe) {
+            throw "Temporary root dist/DicePP.exe still exists"
+          }
           New-Item -ItemType Directory -Force dist/DicePP/config/bots | Out-Null
           Copy-Item config/global.json dist/DicePP/config/global.json
           Copy-Item config/bots/_template.json dist/DicePP/config/bots/_template.json
 
+          function Invoke-PackagedExe {
+            param(
+              [Parameter(Mandatory = $true)][string]$Path,
+              [string[]]$Arguments = @()
+            )
+            $stdout = New-TemporaryFile
+            $stderr = New-TemporaryFile
+            try {
+              $process = Start-Process `
+                -FilePath (Resolve-Path $Path) `
+                -ArgumentList $Arguments `
+                -Wait `
+                -PassThru `
+                -RedirectStandardOutput $stdout `
+                -RedirectStandardError $stderr `
+                -WindowStyle Hidden
+              $out = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+              $err = Get-Content $stderr -Raw -ErrorAction SilentlyContinue
+              if ($null -eq $out) {
+                $out = ""
+              } else {
+                $out = $out.Trim()
+              }
+              if ($null -eq $err) {
+                $err = ""
+              } else {
+                $err = $err.Trim()
+              }
+              if ($process.ExitCode -ne 0) {
+                throw "$Path $($Arguments -join ' ') exited $($process.ExitCode). stdout: '$out' stderr: '$err'"
+              }
+              return $out
+            } finally {
+              Remove-Item $stdout, $stderr -ErrorAction SilentlyContinue
+            }
+          }
+
           $versionLine = (Get-Content pyproject.toml | Select-String '^version =').Line
           $version = [regex]::Match($versionLine, '"([^"\r\n]+)"').Groups[1].Value
           $expectedBot = "DicePP v$version"
-          $actualBot = (& dist/DicePP/DicePP.exe --version).Trim()
+          $actualBot = Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--version")
           if ($actualBot -ne $expectedBot) {
             throw "Bot version mismatch: expected '$expectedBot', got '$actualBot'"
           }
-          & dist/DicePP/DicePP.exe --smoke-check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--smoke-check") | Out-Null
 
           $expectedDashboard = $expectedBot.Replace("DicePP v", "DicePP Dashboard v")
-          $actualDashboard = (& dist/DicePP/DicePPDashboard.exe --version).Trim()
+          $actualDashboard = Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--version")
           if ($actualDashboard -ne $expectedDashboard) {
             throw "Dashboard version mismatch: expected '$expectedDashboard', got '$actualDashboard'"
           }
-          & dist/DicePP/DicePPDashboard.exe --smoke-check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check") | Out-Null
       - name: Run Windows Dashboard UI smoke
         env:
           DICEPP_REQUIRE_PLAYWRIGHT: "1"
           DICEPP_WINDOWS_PACKAGE_SMOKE: "1"
-          DICEPP_DASHBOARD_EXE: dist/DicePP/DicePPDashboard.exe
+          DICEPP_DASHBOARD_EXE: dist/DicePP/DicePP.exe
         run: |
           uv run pytest tests/dashboard/test_windows_package_playwright.py --tb=short -q
       - name: Package artifact

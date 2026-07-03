@@ -2,7 +2,7 @@
 """
 DicePP PyInstaller Spec 文件
 
-用于将 DicePP 骰子机器人打包为 Windows EXE。
+用于将 DicePP 骰子机器人 runtime 打包为 Windows EXE。
 使用方法: pyinstaller dicepp.spec
 
 打包模式: 目录模式 (--onedir)
@@ -204,7 +204,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,  # 目录模式
-    name='DicePP',
+    name='DicePP-Runtime',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -150,7 +150,6 @@ dmypy.json
 # DicePP
 config/secrets.json
 config/user.json
-!config/user.json.example
 config/nonebot.env
 config/bots/*.json
 !config/bots/_template.json

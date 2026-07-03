@@ -1,12 +1,12 @@
 @echo off
 REM ============================================================
 REM DicePP Build Script
-REM 使用 PyInstaller 打包 DicePP 为 Windows EXE
+REM Package DicePP as a Windows EXE with PyInstaller.
 REM ============================================================
 
 setlocal enabledelayedexpansion
 
-REM 切换到项目根目录 (从 scripts/build/ 向上两级)
+REM Switch to the project root from scripts/build.
 cd /d "%~dp0..\.."
 
 echo ============================================================
@@ -14,7 +14,7 @@ echo DicePP Build Script
 echo ============================================================
 echo.
 
-REM 检查 uv 是否可用
+REM Check that uv is available.
 where uv >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] uv not found. Please install uv first:
@@ -22,7 +22,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM 同步依赖（包括 dev 依赖中的 pyinstaller）
+REM Sync dependencies, including PyInstaller from dev dependencies.
 echo [INFO] Syncing dependencies with uv...
 uv sync --dev
 if errorlevel 1 (
@@ -34,13 +34,25 @@ echo [INFO] PyInstaller version:
 uv run pyinstaller --version
 echo.
 
-REM 清理旧的 dist 目录
+REM Clean the old dist directory.
 echo [INFO] Cleaning old dist artifacts...
-if exist "dist" rmdir /s /q "dist"
+if exist "dist" (
+    rmdir /s /q "dist"
+    if errorlevel 1 (
+        echo [ERROR] Failed to remove old dist directory.
+        echo [ERROR] Please close any running DicePP.exe / DicePP-Runtime.exe processes or tools holding files under dist, then retry.
+        exit /b 1
+    )
+)
+if exist "dist" (
+    echo [ERROR] Failed to remove old dist directory: dist still exists.
+    echo [ERROR] Please close any running DicePP.exe / DicePP-Runtime.exe processes or tools holding files under dist, then retry.
+    exit /b 1
+)
 echo [INFO] Clean complete
 echo.
 
-REM 执行打包
+REM Build the runtime executable.
 echo [INFO] Building DicePP...
 echo [INFO] This may take several minutes...
 echo.
@@ -55,48 +67,48 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [INFO] Building DicePP Dashboard...
+echo [INFO] Building DicePP Windows launcher...
 uv run pyinstaller scripts\build\dashboard.spec --clean --noconfirm
 if errorlevel 1 (
-    echo [ERROR] Dashboard build failed!
+    echo [ERROR] Windows launcher build failed!
     exit /b 1
 )
 
 echo.
-echo [INFO] Relocating user-accessible files...
-REM 将用户需要访问的文件从 _internal 移动到 EXE 同级目录
+echo [INFO] Preparing user-accessible files...
 set "DIST_DIR=dist\DicePP"
-set "INTERNAL_DIR=%DIST_DIR%\_internal"
 
-copy /y "dist\DicePPDashboard.exe" "%DIST_DIR%\DicePPDashboard.exe" >nul
+copy /y "dist\DicePP.exe" "%DIST_DIR%\DicePP.exe" >nul
+if errorlevel 1 (
+    echo [ERROR] Failed to copy launcher to %DIST_DIR%\DicePP.exe
+    exit /b 1
+)
+del /f /q "dist\DicePP.exe" >nul 2>&1
+if exist "dist\DicePP.exe" (
+    echo [ERROR] Failed to remove temporary launcher: dist\DicePP.exe
+    exit /b 1
+)
 if not exist "%DIST_DIR%\config\bots" mkdir "%DIST_DIR%\config\bots"
 copy /y "config\global.json" "%DIST_DIR%\config\global.json" >nul
-copy /y "config\schema.json" "%DIST_DIR%\config\schema.json" >nul
 copy /y "config\bots\_template.json" "%DIST_DIR%\config\bots\_template.json" >nul
 
-REM 移动 Data 目录（用户数据）
-if exist "%INTERNAL_DIR%\Data" (
-    move "%INTERNAL_DIR%\Data" "%DIST_DIR%\" >nul
-    echo [INFO] Moved Data directory to application root
-)
+REM pyproject.toml can stay in _internal; users do not need direct access.
 
-REM pyproject.toml 可以留在 _internal，不需要用户访问
-
-REM 清理 build 缓存目录
+REM Clean the build cache directory.
 echo [INFO] Cleaning build cache...
 if exist "build" rmdir /s /q "build"
 
-REM 冒烟测试
+REM Run smoke tests.
 echo.
 echo [INFO] Running smoke test...
-"%DIST_DIR%\DicePP.exe" --smoke-check
+"%DIST_DIR%\DicePP-Runtime.exe" --smoke-check
 if errorlevel 1 (
-    echo [ERROR] Smoke test failed! See output above.
+    echo [ERROR] Runtime smoke test failed! See output above.
     exit /b 1
 )
-"%DIST_DIR%\DicePPDashboard.exe" --smoke-check
+"%DIST_DIR%\DicePP.exe" --smoke-check
 if errorlevel 1 (
-    echo [ERROR] Dashboard smoke test failed! See output above.
+    echo [ERROR] Launcher smoke test failed! See output above.
     exit /b 1
 )
 echo [INFO] Smoke test passed
@@ -112,7 +124,7 @@ echo Contents:
 dir /b "dist\DicePP\"
 echo.
 echo To run: dist\DicePP\DicePP.exe
-echo Dashboard: dist\DicePP\DicePPDashboard.exe
+echo Runtime: dist\DicePP\DicePP-Runtime.exe
 echo ============================================================
 
 endlocal

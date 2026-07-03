@@ -2,22 +2,22 @@
 
 本页面向想在 Windows 上部署 DicePP 的普通用户。
 
-当前 Windows 正式部署将改为 exe 包；exe 发布前，本页先保留 DicePP 部署占位，并写清 LLOneBot 连接 DicePP 时必须配置的部分。
+Windows 发布包采用单入口：普通用户只启动 `DicePP.exe`。它会启动 Dashboard、Manager、托盘，并由 Manager 管理实际机器人 runtime。发布包里的 `DicePP-Runtime.exe` 只供 `DicePP.exe`/Manager 启停，不要手动双击或直接运行。
 
 需要源码开发时，请看 [dev/guide.md](./dev/guide.md)。
 
-## 当前状态
+## 快速开始
 
-TODO：等待 Windows exe 发布后补充完整步骤。
-
-计划中的小白部署流程会尽量保持为：
+推荐部署流程：
 
 1. 下载 DicePP Windows 发布包。
 2. 解压到固定目录。
-3. 启动 DicePP 和 Dashboard（`DicePP.exe` + `DicePPDashboard.exe`）。
-4. 等 LLOneBot 连接后生成账号配置。
-5. 通过浏览器访问 `http://127.0.0.1:4090/dashboard` 或手动编辑 JSON 填写 master、昵称等。
+3. 启动 `DicePP.exe`。
+4. 通过自动打开的 Dashboard 初始化管理员密码；也可以手动访问 `http://127.0.0.1:4090/dashboard`。
+5. 按本文配置 LLOneBot，等 LLOneBot 连接后生成账号配置。
 6. 发送 `.help` 验证。
+
+`DicePP.exe` 启动后会留在托盘。需要退出时通过托盘菜单退出，退出会关闭 Dashboard 和由 Manager 拉起的 runtime。
 
 ## 准备
 
@@ -56,11 +56,9 @@ LLOneBot 官方入口：
 
 ## DicePP 配置
 
-TODO：exe 发布后补充配置文件位置。
-
 推荐流程是：先启动 DicePP，等 LLOneBot 连接上来后，让 DicePP 根据机器人 QQ 号生成账号配置，再回来填写 master 和昵称。
 
-默认配置会出现在类似位置：
+发布包解压目录就是 DicePP 项目目录。默认配置会出现在：
 
 ```text
 config/bots/{机器人QQ号}.json
@@ -84,7 +82,7 @@ config/bots/{机器人QQ号}.json
 
 ## 初始化 Dashboard
 
-首次启动 `DicePPDashboard.exe` 后，通过以下任一地址设置管理员密码：
+首次启动 `DicePP.exe` 后，会自动打开 Dashboard。通过以下任一地址设置管理员密码：
 
 - Dashboard 所在电脑：`http://127.0.0.1:4090/dashboard`
 - 同一局域网的其他电脑：`http://局域网IP:4090/dashboard`，例如 `http://192.168.1.20:4090/dashboard`
@@ -94,10 +92,30 @@ config/bots/{机器人QQ号}.json
 如果网页初始化不方便，也可以在 Dashboard 所在目录运行：
 
 ```powershell
-.\DicePPDashboard.exe admin init
+.\DicePP.exe admin init
 ```
 
 管理员密码设置完成后，可以正常通过公网域名访问。直接使用 HTTP 会暴露登录密码和会话信息，建议通过反向代理开启 HTTPS。
+
+## 从旧版手动升级
+
+Windows 自动 update/rollback 目前不支持。迁移旧目录时按手动流程处理：
+
+1. 在旧版 Dashboard 中创建存档。
+2. 将旧目录的 `data/backups/*.zip` 复制到新目录的 `data/backups/`。
+3. 启动新目录的 `DicePP.exe`，进入 Dashboard 后从存档恢复。
+4. `dashboard/data` 可以按需复制；如果不复制，需要重新初始化 Dashboard 管理员密码。
+5. 如果旧目录里有自定义 `content/` 内容，请手动复制到新目录。
+
+普通升级不需要手动启动 `DicePP-Runtime.exe`；恢复完成后仍由 `DicePP.exe` 的 Manager/托盘管理 runtime。
+
+运行日志默认写入：
+
+```text
+data/logs/dicepp-runtime.log
+```
+
+每次 `DicePP.exe` 启动时，会先把已有日志按时间戳轮转为 `dicepp-runtime-YYYYMMDD-HHMMSS.log`，再创建新的 `dicepp-runtime.log`。Dashboard 的“运行监控”页可读取这份全局运行日志；它不是单个 bot 的业务日志。
 
 ## 验证
 

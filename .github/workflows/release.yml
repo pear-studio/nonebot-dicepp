@@ -6,7 +6,7 @@
 #       ghcr.io/pear-studio/dicepp-dashboard:<tag>；正式版额外推送 :latest
 #       DicePP-<tag>-win64.zip
 #       GitHub Release / Prerelease（body 来自 docs/releases/<tag>.md）
-#       docker-compose.yml 和 Windows zip 作为 release assets
+#       docs/releases/<tag>.md、docs/linux.md、docker-compose.yml 和 Windows zip 作为 release assets
 
 name: Release
 
@@ -142,28 +142,71 @@ jobs:
       - name: Assemble Windows directory
         shell: pwsh
         run: |
-          Copy-Item dist/DicePPDashboard.exe dist/DicePP/DicePPDashboard.exe
+          Copy-Item dist/DicePP.exe dist/DicePP/DicePP.exe
+          if (-not (Test-Path dist/DicePP/DicePP.exe)) {
+            throw "Copy failed: dist/DicePP/DicePP.exe does not exist"
+          }
+          Remove-Item dist/DicePP.exe
+          if (Test-Path dist/DicePP.exe) {
+            throw "Temporary root dist/DicePP.exe still exists"
+          }
           New-Item -ItemType Directory -Force dist/DicePP/config/bots | Out-Null
           Copy-Item config/global.json dist/DicePP/config/global.json
           Copy-Item config/bots/_template.json dist/DicePP/config/bots/_template.json
 
       - name: Smoke test
-        shell: bash
+        shell: pwsh
         run: |
-          EXPECTED="DicePP v${{ steps.version.outputs.version }}"
-          ACTUAL="$(./dist/DicePP/DicePP.exe --version | tr -d '\r')"
-          if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
-            exit 1
-          fi
-          ./dist/DicePP/DicePP.exe --smoke-check
-          DASHBOARD_ACTUAL="$(./dist/DicePP/DicePPDashboard.exe --version | tr -d '\r')"
-          DASHBOARD_EXPECTED="DicePP Dashboard v${{ steps.version.outputs.version }}"
-          if [ "$DASHBOARD_ACTUAL" != "$DASHBOARD_EXPECTED" ]; then
-            echo "Dashboard version mismatch: expected '$DASHBOARD_EXPECTED', got '$DASHBOARD_ACTUAL'"
-            exit 1
-          fi
-          ./dist/DicePP/DicePPDashboard.exe --smoke-check
+          function Invoke-PackagedExe {
+            param(
+              [Parameter(Mandatory = $true)][string]$Path,
+              [string[]]$Arguments = @()
+            )
+            $stdout = New-TemporaryFile
+            $stderr = New-TemporaryFile
+            try {
+              $process = Start-Process `
+                -FilePath (Resolve-Path $Path) `
+                -ArgumentList $Arguments `
+                -Wait `
+                -PassThru `
+                -RedirectStandardOutput $stdout `
+                -RedirectStandardError $stderr `
+                -WindowStyle Hidden
+              $out = Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+              $err = Get-Content $stderr -Raw -ErrorAction SilentlyContinue
+              if ($null -eq $out) {
+                $out = ""
+              } else {
+                $out = $out.Trim()
+              }
+              if ($null -eq $err) {
+                $err = ""
+              } else {
+                $err = $err.Trim()
+              }
+              if ($process.ExitCode -ne 0) {
+                throw "$Path $($Arguments -join ' ') exited $($process.ExitCode). stdout: '$out' stderr: '$err'"
+              }
+              return $out
+            } finally {
+              Remove-Item $stdout, $stderr -ErrorAction SilentlyContinue
+            }
+          }
+
+          $expected = "DicePP v${{ steps.version.outputs.version }}"
+          $actual = Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--version")
+          if ($actual -ne $expected) {
+            throw "Version mismatch: expected '$expected', got '$actual'"
+          }
+          Invoke-PackagedExe "dist/DicePP/DicePP-Runtime.exe" @("--smoke-check") | Out-Null
+
+          $dashboardExpected = "DicePP Dashboard v${{ steps.version.outputs.version }}"
+          $dashboardActual = Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--version")
+          if ($dashboardActual -ne $dashboardExpected) {
+            throw "Dashboard version mismatch: expected '$dashboardExpected', got '$dashboardActual'"
+          }
+          Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check") | Out-Null
 
       - name: Package artifact
         shell: pwsh
@@ -288,20 +331,39 @@ jobs:
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           RELEASE_MD="docs/releases/${TAG}.md"
-          ZIP=$(ls DicePP-*-win64.zip 2>/dev/null || echo "")
-          RELEASE_FLAGS=""
+          RELEASE_FLAGS=()
           if [ "${{ steps.version.outputs.is_prerelease }}" = "true" ]; then
-            RELEASE_FLAGS="--prerelease"
+            RELEASE_FLAGS+=(--prerelease)
+          fi
+
+          ASSETS=(docker-compose.yml)
+          if [ -f "docs/linux.md" ]; then
+            ASSETS+=(docs/linux.md)
+          else
+            echo "::warning::docs/linux.md 不存在，跳过上传"
           fi
           if [ -f "$RELEASE_MD" ]; then
-            gh release create "$TAG" $RELEASE_FLAGS \
+            ASSETS+=("$RELEASE_MD")
+          fi
+
+          shopt -s nullglob
+          ZIP_ASSETS=(DicePP-*-win64.zip)
+          shopt -u nullglob
+          if [ "${#ZIP_ASSETS[@]}" -gt 0 ]; then
+            ASSETS+=("${ZIP_ASSETS[@]}")
+          else
+            echo "::warning::Windows zip asset 不存在，跳过上传"
+          fi
+
+          if [ -f "$RELEASE_MD" ]; then
+            gh release create "$TAG" "${RELEASE_FLAGS[@]}" \
               --title "DicePP ${TAG}" \
               --notes-file "$RELEASE_MD" \
-              docker-compose.yml $ZIP
+              "${ASSETS[@]}"
           else
             echo "::warning::Release metadata 文件 $RELEASE_MD 不存在，使用默认 body"
-            gh release create "$TAG" $RELEASE_FLAGS \
+            gh release create "$TAG" "${RELEASE_FLAGS[@]}" \
               --title "DicePP ${TAG}" \
               --notes "DicePP ${TAG}" \
-              docker-compose.yml $ZIP
+              "${ASSETS[@]}"
           fi
