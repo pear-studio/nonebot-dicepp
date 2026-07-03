@@ -1,4 +1,4 @@
-"""Windows package-level Playwright smoke tests for DicePPDashboard.exe."""
+"""Windows package-level Playwright smoke tests for DicePP.exe."""
 
 import json
 import os
@@ -52,7 +52,7 @@ def dashboard_exe_url(tmp_path: Path) -> str:
     exe = Path(
         os.environ.get(
             "DICEPP_DASHBOARD_EXE",
-            "dist/DicePP/DicePPDashboard.exe",
+            "dist/DicePP/DicePP.exe",
         )
     ).resolve()
     if not exe.exists():
@@ -71,8 +71,10 @@ def dashboard_exe_url(tmp_path: Path) -> str:
     env["DICEPP_PROJECT_ROOT"] = str(project_root)
     env["DASHBOARD_HOST"] = "127.0.0.1"
     env["DASHBOARD_PORT"] = str(port)
+    env["DICEPP_DASHBOARD_OPEN_BROWSER"] = "0"
+    env["DICEPP_MANAGER_RUNTIME"] = "unavailable"
 
-    log_path = tmp_path / "DicePPDashboard.log"
+    log_path = tmp_path / "DicePP.log"
     with log_path.open("w", encoding="utf-8") as log_file:
         proc = subprocess.Popen(
             [str(exe)],

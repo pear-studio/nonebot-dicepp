@@ -168,6 +168,38 @@ http://服务器IP:4090/dashboard
 
 如果从外网访问，直接使用 HTTP 会暴露登录密码和会话信息，建议配置反向代理并开启 HTTPS。
 
+### Dashboard Manager 运行管理
+
+Dashboard 的“运行管理”能力默认不会直接操作宿主机运行时。Linux Docker Compose 部署如需让 Dashboard Manager 管理 Bot 服务，需要在 `dashboard` service 中显式启用 Docker Compose runtime：
+
+```yaml
+environment:
+  - DICEPP_MANAGER_RUNTIME=docker-compose
+  - DICEPP_MANAGER_DOCKER_COMMAND=docker
+  - DICEPP_MANAGER_DOCKER_SERVICE=bot
+  - DICEPP_MANAGER_DOCKER_CWD=/你的/compose/工作目录
+  - DICEPP_MANAGER_DOCKER_TIMEOUT=30
+```
+
+其中 `DICEPP_MANAGER_DOCKER_COMMAND` 是 Manager 执行的 Docker 命令前缀，通常为 `docker`；Manager 会在后面追加 `compose ...`。`DICEPP_MANAGER_DOCKER_SERVICE` 是要管理的 compose service 名称，Release compose 中通常是 `bot`。`DICEPP_MANAGER_DOCKER_CWD` 和 `DICEPP_MANAGER_DOCKER_TIMEOUT` 可按实际部署环境调整。
+
+启用后，Dashboard Manager 可以通过受限 runtime backend 执行状态查询、启动、停止、重启和日志读取。它不会替你同步目标 Release 的 `docker-compose.yml` 拓扑；如果目标版本调整了 service、volume、network 或环境变量，仍需先按 Release 说明手动同步 compose。
+
+### 手动更新和回滚
+
+DicePP 3.0 不提供 Dashboard Manager 自动 update/rollback。无论 Windows 还是 Linux，版本切换都走人工流程：先阅读目标 Release 的 metadata / 发布说明，确认数据、配置和部署拓扑风险；必要时在 Dashboard 创建并校验存档；再由运维人员手动同步 `docker-compose.yml`、镜像 tag 或发行目录。
+
+Linux Docker Compose 更新到指定版本时，推荐先备份或创建 Dashboard 存档，再执行：
+
+```bash
+DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
+DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
+```
+
+回滚时同样选择目标历史版本的 tag，阅读对应 Release 说明，确认是否需要恢复升级前存档，然后以相同方式重新 `pull` 和 `up -d`。如果目标版本的 Release 说明提到 service、volume、network 或环境变量变化，先手动同步该版本附带的 `docker-compose.yml`，再启动服务。
+
+Release metadata 仍作为人工风险阅读材料保留，不由 Dashboard Manager 自动消费。Dashboard Manager 只负责本地运行管理：状态查询、启动、停止、重启和日志读取；不会执行版本切换、不会同步 compose 拓扑、不会自动创建升级前存档，也不会在版本操作后生成 post-action health 摘要。
+
 ### 确认 Dashboard 部署形态
 
 Linux Docker 部署推荐使用 Release 附带的 `docker-compose.yml`。这份 compose 会把 DicePP 拆成两个服务：
@@ -224,6 +256,8 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 ```
 
 如果目标版本的 Release 说明提到部署结构变化，先同步该版本附带的 `docker-compose.yml`，再执行 `pull` 和 `up -d`。
+
+Dashboard Manager 不参与版本切换。更新或回滚前请自行确认目标 Release 的 compose 拓扑已经同步，并根据 release metadata 和现场情况决定是否创建或恢复存档。
 
 版本风险说明见 [releases/](./releases/)。
 

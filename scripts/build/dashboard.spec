@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Build DicePPDashboard.exe as a transitional standalone onefile binary."""
+"""Build DicePP.exe as the Windows single-entry launcher."""
 
 import os
 
@@ -13,6 +13,8 @@ hiddenimports += collect_submodules("uvicorn")
 hiddenimports += collect_submodules("fastapi")
 hiddenimports += collect_submodules("starlette")
 hiddenimports += collect_submodules("websockets")
+hiddenimports += collect_submodules("pystray")
+hiddenimports += collect_submodules("PIL")
 
 datas = [
     (
@@ -31,7 +33,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["matplotlib", "numpy", "pandas", "scipy", "PIL", "cv2", "torch"],
+    excludes=["matplotlib", "numpy", "pandas", "scipy", "cv2", "torch"],
     noarchive=False,
 )
 
@@ -43,12 +45,12 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="DicePPDashboard",
+    name="DicePP",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
