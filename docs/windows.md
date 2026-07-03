@@ -1,23 +1,24 @@
 # Windows 部署
 
-本页面向想在 Windows 上部署 DicePP 的普通用户。
+本页面面向想在 Windows 上部署 DicePP 的骰主。
 
-Windows 发布包采用单入口：普通用户只启动 `DicePP.exe`。它会启动 Dashboard、Manager、托盘，并由 Manager 管理实际机器人 runtime。发布包里的 `DicePP-Runtime.exe` 只供 `DicePP.exe`/Manager 启停，不要手动双击或直接运行。
+Windows 发布包采用单入口：普通用户只启动 `DicePP.exe`。它会启动网页管理面板、托盘和实际机器人运行时；发布包里的 `DicePP-Runtime.exe` 只供 `DicePP.exe` 管理，不要手动双击或直接运行。
 
-需要源码开发时，请看 [dev/guide.md](./dev/guide.md)。
+需要源码开发时，请回到项目仓库查看开发文档。
 
 ## 快速开始
 
 推荐部署流程：
 
-1. 下载 DicePP Windows 发布包。
+1. 下载 DicePP Windows 发布包。安装包可以从发布页或交流群获取。
 2. 解压到固定目录。
 3. 启动 `DicePP.exe`。
-4. 通过自动打开的 Dashboard 初始化管理员密码；也可以手动访问 `http://127.0.0.1:4090/dashboard`。
-5. 按本文配置 LLOneBot，等 LLOneBot 连接后生成账号配置。
-6. 发送 `.help` 验证。
+4. 在自动打开的网页管理面板中初始化管理员密码；也可以手动访问 `http://127.0.0.1:4090/dashboard`。
+5. 配置 LLOneBot 连接 DicePP。
+6. 等 LLOneBot 连接后，在网页管理面板中确认机器人状态，并填写账号配置。
+7. 在 QQ 中向机器人发送 `.help` 验证。
 
-`DicePP.exe` 启动后会留在托盘。需要退出时通过托盘菜单退出，退出会关闭 Dashboard 和由 Manager 拉起的 runtime。
+`DicePP.exe` 启动后会留在托盘。需要退出时通过托盘菜单退出，退出会关闭网页管理面板和机器人运行时。
 
 ## 准备
 
@@ -34,6 +35,23 @@ LLOneBot 官方入口：
 - [LuckyLilliaBot GitHub](https://github.com/LLOneBot/LuckyLilliaBot)
 
 先确认 QQNT 能正常登录机器人 QQ，再安装 LLOneBot。
+
+## 初始化网页管理面板
+
+首次启动 `DicePP.exe` 后，会自动打开网页管理面板。通过以下任一地址设置管理员密码：
+
+- 本机访问：`http://127.0.0.1:4090/dashboard`
+- 同一局域网的其他电脑访问：`http://局域网IP:4090/dashboard`，例如 `http://192.168.1.20:4090/dashboard`
+
+首次网页初始化只接受本机或局域网 IP 的直接访问，不接受公网 IP、公网域名或反向代理访问。请先完成初始化，再开放公网入口。
+
+如果网页初始化不方便，也可以在 DicePP 所在目录运行：
+
+```powershell
+.\DicePP.exe admin init
+```
+
+管理员密码设置完成后，可以正常通过公网域名访问。直接使用 HTTP 会暴露登录密码和会话信息，建议通过反向代理开启 HTTPS。
 
 ## 配置 LLOneBot
 
@@ -54,9 +72,9 @@ LLOneBot 官方入口：
 
 如果 DicePP 还没启动，LLOneBot 日志里出现连接失败或重连是正常的。等 DicePP 启动后，它会自动重连。
 
-## DicePP 配置
+## 配置机器人账号
 
-推荐流程是：先启动 DicePP，等 LLOneBot 连接上来后，让 DicePP 根据机器人 QQ 号生成账号配置，再回来填写 master 和昵称。
+推荐流程是：先启动 DicePP，等 LLOneBot 连接上来后，让 DicePP 根据机器人 QQ 号生成账号配置，再回到网页管理面板填写主人、昵称等常用配置。
 
 发布包解压目录就是 DicePP 项目目录。默认配置会出现在：
 
@@ -64,7 +82,7 @@ LLOneBot 官方入口：
 config/bots/{机器人QQ号}.json
 ```
 
-如果没有生成，就手动创建这个文件。内容可以先写成：
+如果没有生成，可以手动创建这个文件。内容可以先写成：
 
 ```json
 {
@@ -72,50 +90,13 @@ config/bots/{机器人QQ号}.json
   "admin": [],
   "friend_token": ["添加好友口令"],
   "persona": "default",
-  "nickname": "骰娘"
+  "nickname": "DicePP"
 }
 ```
 
-保存后重启 DicePP。
+保存后重启 DicePP，或在网页管理面板中保存配置并让机器人重新加载。
 
 配置字段说明见 [configuration.md](./configuration.md)。
-
-## 初始化 Dashboard
-
-首次启动 `DicePP.exe` 后，会自动打开 Dashboard。通过以下任一地址设置管理员密码：
-
-- Dashboard 所在电脑：`http://127.0.0.1:4090/dashboard`
-- 同一局域网的其他电脑：`http://局域网IP:4090/dashboard`，例如 `http://192.168.1.20:4090/dashboard`
-
-首次网页初始化只接受本机或局域网 IP 的直接访问，不接受公网 IP、公网域名或反向代理访问。请先完成初始化，再开放公网入口。
-
-如果网页初始化不方便，也可以在 Dashboard 所在目录运行：
-
-```powershell
-.\DicePP.exe admin init
-```
-
-管理员密码设置完成后，可以正常通过公网域名访问。直接使用 HTTP 会暴露登录密码和会话信息，建议通过反向代理开启 HTTPS。
-
-## 从旧版手动升级
-
-Windows 自动 update/rollback 目前不支持。迁移旧目录时按手动流程处理：
-
-1. 在旧版 Dashboard 中创建存档。
-2. 将旧目录的 `data/backups/*.zip` 复制到新目录的 `data/backups/`。
-3. 启动新目录的 `DicePP.exe`，进入 Dashboard 后从存档恢复。
-4. `dashboard/data` 可以按需复制；如果不复制，需要重新初始化 Dashboard 管理员密码。
-5. 如果旧目录里有自定义 `content/` 内容，请手动复制到新目录。
-
-普通升级不需要手动启动 `DicePP-Runtime.exe`；恢复完成后仍由 `DicePP.exe` 的 Manager/托盘管理 runtime。
-
-运行日志默认写入：
-
-```text
-data/logs/dicepp-runtime.log
-```
-
-每次 `DicePP.exe` 启动时，会先把已有日志按时间戳轮转为 `dicepp-runtime-YYYYMMDD-HHMMSS.log`，再创建新的 `dicepp-runtime.log`。Dashboard 的“运行监控”页可读取这份全局运行日志；它不是单个 bot 的业务日志。
 
 ## 验证
 
@@ -125,7 +106,31 @@ DicePP 和 LLOneBot 都启动后，给机器人发送：
 .help
 ```
 
-收到帮助信息即基本部署成功。
+收到帮助信息即基本部署成功。具体群内指令以机器人内置 `.help` 为准。
+
+## 运行日志和存档
+
+运行日志默认写入：
+
+```text
+data/logs/dicepp-runtime.log
+```
+
+每次 `DicePP.exe` 启动时，会先把已有日志按时间戳轮转为 `dicepp-runtime-YYYYMMDD-HHMMSS.log`，再创建新的 `dicepp-runtime.log`。网页管理面板可以查看这份全局运行日志；它不是单个 bot 的业务日志。
+
+升级或迁移前，建议先在网页管理面板中创建存档。
+
+## 从旧版手动升级
+
+Windows 自动 update/rollback 目前不支持。迁移旧目录时按手动流程处理：
+
+1. 在旧版网页管理面板中创建存档。
+2. 将旧目录的 `data/backups/*.zip` 复制到新目录的 `data/backups/`。
+3. 启动新目录的 `DicePP.exe`，进入网页管理面板后从存档恢复。
+4. `dashboard/data` 可以按需复制；如果不复制，需要重新初始化管理员密码。
+5. 如果旧目录里有自定义 `content/` 内容，请手动复制到新目录。
+
+普通升级不需要手动启动 `DicePP-Runtime.exe`；恢复完成后仍由 `DicePP.exe` 管理运行时。
 
 ## 常见问题
 
@@ -178,11 +183,11 @@ ws://127.0.0.1:8090/onebot/v11/ws
 
 1. 确认 LLOneBot 已经成功连接 DicePP。
 2. 确认 DicePP 发布包里有配置模板。
-3. 如果仍没有生成，按本文 “DicePP 配置” 手动创建账号配置。
+3. 如果仍没有生成，按本文“配置机器人账号”手动创建账号配置。
 
 ### 修改配置后没有生效
 
-重启 DicePP。
+优先在网页管理面板中保存配置并让机器人重新加载。手动编辑 JSON 后，可以重启 DicePP。
 
 如果 JSON 写错，DicePP 可能启动失败。检查最近的启动日志，重点看 JSON 解析错误、字段名拼写和逗号。
 

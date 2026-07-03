@@ -1,8 +1,20 @@
 # Linux 部署
 
-本页面向想在 Linux 服务器上部署 DicePP 的普通用户。
+本页面面向想在 Linux 服务器上部署 DicePP 的骰主。
 
-这里推荐使用 GitHub Release 发布的 Docker 镜像部署。源码构建只作为无法拉取镜像时的备用方案，见本文末尾附录。需要开发时请看 [dev/guide.md](./dev/guide.md)。
+推荐使用 GitHub Release 发布的 Docker 镜像部署。源码构建只作为无法拉取镜像时的备用方案，见本文末尾附录。需要开发时请看 [dev/guide.md](./dev/guide.md)。
+
+## 快速开始
+
+核心流程：
+
+1. 准备 Linux 服务器、Docker 和 Docker Compose。
+2. 创建部署目录，下载 Release 附带的 `docker-compose.yml`。
+3. 创建 Docker 网络并启动 DicePP。
+4. 初始化网页管理面板管理员密码。
+5. 配置 LLOneBot，让 QQ 机器人账号连接 DicePP。
+6. 在网页管理面板中确认机器人状态，并完成账号配置。
+7. 在 QQ 中向机器人发送 `.help` 验证。
 
 ## 准备
 
@@ -11,7 +23,7 @@
 - 一台 Linux 服务器
 - Docker 和 Docker Compose
 - 一个可登录的 QQ 机器人账号
-- （可选）浏览器，用于访问 Web 管理面板
+- 浏览器，用于访问网页管理面板
 
 先检查服务器是否已经有 Docker：
 
@@ -37,7 +49,7 @@ docker --version
 docker compose version
 ```
 
-如果 `docker --version` 有输出，但 `docker compose version` 报错，先继续看本文末尾“docker compose 不存在”。
+如果 `docker --version` 有输出，但 `docker compose version` 报错，先看本文末尾“docker compose 不存在”。
 
 ## 创建部署目录
 
@@ -61,36 +73,6 @@ ghcr.io/pear-studio/dicepp-dashboard:latest
 ```bash
 DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
 DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
-```
-
-## 配置账号
-
-推荐流程是：先启动 DicePP，等 LLOneBot 连接上来后，让 DicePP 根据机器人 QQ 号生成账号配置，再回来填写 master 和昵称。
-
-这个自动生成依赖 `config/bots/_template.json`。如果 release 包里已经带了这个模板，首次连接后会生成：
-
-```text
-config/bots/{机器人QQ号}.json
-```
-
-如果没有生成，就手动创建这个文件。内容可以先写成：
-
-```json
-{
-  "master": ["你的QQ号"],
-  "admin": [],
-  "friend_token": ["添加好友口令"],
-  "persona": "default",
-  "nickname": "骰娘"
-}
-```
-
-更多配置见 [configuration.md](./configuration.md)。
-
-保存后重启 DicePP：
-
-```bash
-docker compose restart
 ```
 
 ## 启动 DicePP
@@ -117,7 +99,27 @@ docker compose up -d
 docker compose logs -f
 ```
 
-## 安装并配置 LLOneBot
+## 初始化网页管理面板
+
+首次启动前，先在部署目录通过命令行设置管理员密码：
+
+```bash
+docker compose run --rm --no-deps dashboard python -m dashboard admin init
+```
+
+输入内容不会显示在终端中；按提示输入两次即可。Linux 不允许通过网页初始化，以免尚未设置密码的面板被公网访问者抢先初始化。
+
+然后启动服务，并通过浏览器访问：
+
+```text
+http://服务器IP:4090/dashboard
+```
+
+网页管理面板用于配置编辑、运行状态查看、日志、数据浏览和存档管理。具体功能进入页面后按需要使用即可。
+
+如果从外网访问，直接使用 HTTP 会暴露登录密码和会话信息，建议配置反向代理并开启 HTTPS。
+
+## 配置 LLOneBot
 
 LLOneBot 可以单独部署在同一台服务器上，并和 DicePP 放在同一个 Docker 网络中。
 
@@ -140,95 +142,41 @@ LLOneBot 可以单独部署在同一台服务器上，并和 DicePP 放在同一
 
 容器部署时 URL 使用 `dicepp`，不要写 `127.0.0.1`。
 
+## 配置机器人账号
+
+推荐流程是：先启动 DicePP，等 LLOneBot 连接上来后，让 DicePP 根据机器人 QQ 号生成账号配置，再回到网页管理面板填写主人、昵称等常用配置。
+
+这个自动生成依赖 `config/bots/_template.json`。如果 Release 包里已经带了这个模板，首次连接后会生成：
+
+```text
+config/bots/{机器人QQ号}.json
+```
+
+如果没有生成，可以手动创建这个文件。内容可以先写成：
+
+```json
+{
+  "master": ["你的QQ号"],
+  "admin": [],
+  "friend_token": ["添加好友口令"],
+  "persona": "default",
+  "nickname": "DicePP"
+}
+```
+
+保存后重启 DicePP，或在网页管理面板中保存配置并让机器人重新加载。
+
+更多配置见 [configuration.md](./configuration.md)。
+
+## 验证
+
 登录 QQ 后，给机器人发送：
 
 ```text
 .help
 ```
 
-收到帮助信息即部署成功。
-
-## Web 管理面板
-
-DicePP 附带一个 Web 管理面板。首次启动前，先在部署目录通过命令行设置管理员密码：
-
-```bash
-docker compose run --rm --no-deps dashboard python -m dashboard admin init
-```
-
-输入内容不会显示在终端中；按提示输入两次即可。Linux 不允许通过网页初始化，以免尚未设置密码的面板被公网访问者抢先初始化。
-
-然后启动服务，并通过浏览器访问：
-
-```text
-http://服务器IP:4090/dashboard
-```
-
-面板提供配置编辑、Bot 运行监控、数据浏览和内容管理等功能。
-
-如果从外网访问，直接使用 HTTP 会暴露登录密码和会话信息，建议配置反向代理并开启 HTTPS。
-
-### Dashboard Manager 运行管理
-
-Dashboard 的“运行管理”能力默认不会直接操作宿主机运行时。Linux Docker Compose 部署如需让 Dashboard Manager 管理 Bot 服务，需要在 `dashboard` service 中显式启用 Docker Compose runtime：
-
-```yaml
-environment:
-  - DICEPP_MANAGER_RUNTIME=docker-compose
-  - DICEPP_MANAGER_DOCKER_COMMAND=docker
-  - DICEPP_MANAGER_DOCKER_SERVICE=bot
-  - DICEPP_MANAGER_DOCKER_CWD=/你的/compose/工作目录
-  - DICEPP_MANAGER_DOCKER_TIMEOUT=30
-```
-
-其中 `DICEPP_MANAGER_DOCKER_COMMAND` 是 Manager 执行的 Docker 命令前缀，通常为 `docker`；Manager 会在后面追加 `compose ...`。`DICEPP_MANAGER_DOCKER_SERVICE` 是要管理的 compose service 名称，Release compose 中通常是 `bot`。`DICEPP_MANAGER_DOCKER_CWD` 和 `DICEPP_MANAGER_DOCKER_TIMEOUT` 可按实际部署环境调整。
-
-启用后，Dashboard Manager 可以通过受限 runtime backend 执行状态查询、启动、停止、重启和日志读取。它不会替你同步目标 Release 的 `docker-compose.yml` 拓扑；如果目标版本调整了 service、volume、network 或环境变量，仍需先按 Release 说明手动同步 compose。
-
-### 手动更新和回滚
-
-DicePP 3.0 不提供 Dashboard Manager 自动 update/rollback。无论 Windows 还是 Linux，版本切换都走人工流程：先阅读目标 Release 的 metadata / 发布说明，确认数据、配置和部署拓扑风险；必要时在 Dashboard 创建并校验存档；再由运维人员手动同步 `docker-compose.yml`、镜像 tag 或发行目录。
-
-Linux Docker Compose 更新到指定版本时，推荐先备份或创建 Dashboard 存档，再执行：
-
-```bash
-DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
-DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
-```
-
-回滚时同样选择目标历史版本的 tag，阅读对应 Release 说明，确认是否需要恢复升级前存档，然后以相同方式重新 `pull` 和 `up -d`。如果目标版本的 Release 说明提到 service、volume、network 或环境变量变化，先手动同步该版本附带的 `docker-compose.yml`，再启动服务。
-
-Release metadata 仍作为人工风险阅读材料保留，不由 Dashboard Manager 自动消费。Dashboard Manager 只负责本地运行管理：状态查询、启动、停止、重启和日志读取；不会执行版本切换、不会同步 compose 拓扑、不会自动创建升级前存档，也不会在版本操作后生成 post-action health 摘要。
-
-### 确认 Dashboard 部署形态
-
-Linux Docker 部署推荐使用 Release 附带的 `docker-compose.yml`。这份 compose 会把 DicePP 拆成两个服务：
-
-- `bot` service 的 `DPP_ADMIN_HOST=dashboard` 和 `DPP_ADMIN_PORT=4090` 环境变量；
-- 独立 `dashboard` service；
-- `dashboard/data` 持久化目录；
-- Dashboard 对外端口 `4090:4090`。
-
-如果你的 `docker-compose.yml` 来自当前 Release，通常不需要手动调整。若你使用的是自己维护过的 compose，或 Dashboard 容器没有启动，可以先对照上面的部署形态检查。
-
-如果当前 compose 没有本地改动，推荐直接使用目标 Release 附带的 `docker-compose.yml`。替换前可以先备份：
-
-```bash
-cp docker-compose.yml docker-compose.yml.bak
-```
-
-如果当前 compose 有自定义网络、端口或镜像源，不要盲目覆盖；只按目标 Release compose 合并必要的标准块。
-
-确认 compose 后执行：
-
-```bash
-mkdir -p dashboard/data
-DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
-DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
-docker compose exec dashboard python -m dashboard admin init
-```
-
-这里的初始化命令必须在 `dashboard` service 内执行，不是在 `dicepp` / `bot` 容器内执行。
+收到帮助信息即基本部署成功。具体群内指令以机器人内置 `.help` 为准。
 
 ## 日常操作
 
@@ -257,9 +205,22 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 
 如果目标版本的 Release 说明提到部署结构变化，先同步该版本附带的 `docker-compose.yml`，再执行 `pull` 和 `up -d`。
 
-Dashboard Manager 不参与版本切换。更新或回滚前请自行确认目标 Release 的 compose 拓扑已经同步，并根据 release metadata 和现场情况决定是否创建或恢复存档。
+更新或回滚前，建议先在网页管理面板中创建并验证存档。版本风险说明见 [releases/](./releases/)。
 
-版本风险说明见 [releases/](./releases/)。
+### 运行管理
+
+Linux Docker Compose 部署如需让网页管理面板直接管理 Bot 服务，需要在 `dashboard` service 中显式启用 Docker Compose runtime：
+
+```yaml
+environment:
+  - DICEPP_MANAGER_RUNTIME=docker-compose
+  - DICEPP_MANAGER_DOCKER_COMMAND=docker
+  - DICEPP_MANAGER_DOCKER_SERVICE=bot
+  - DICEPP_MANAGER_DOCKER_CWD=/你的/compose/工作目录
+  - DICEPP_MANAGER_DOCKER_TIMEOUT=30
+```
+
+启用后，网页管理面板可以执行状态查询、启动、停止、重启和日志读取。它不会替你同步目标 Release 的 `docker-compose.yml` 拓扑；如果目标版本调整了 service、volume、network 或环境变量，仍需先按 Release 说明手动同步 compose。
 
 ### 国内拉取镜像很慢
 
@@ -356,12 +317,7 @@ docker compose logs -f
 
 ### 修改配置后没有生效
 
-现象：
-
-- 改了 JSON，但机器人行为没变化
-- Persona 仍然使用旧角色或旧配置
-
-重启 DicePP：
+优先在网页管理面板中保存配置并让机器人重新加载。手动编辑 JSON 后，可以重启 DicePP：
 
 ```bash
 docker compose restart

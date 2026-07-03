@@ -78,19 +78,11 @@ echo.
 echo [INFO] Preparing user-accessible files...
 set "DIST_DIR=dist\DicePP"
 
-copy /y "dist\DicePP.exe" "%DIST_DIR%\DicePP.exe" >nul
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\build\assemble_windows_package.ps1" -DistDir "%DIST_DIR%" -LauncherSource "dist\DicePP.exe"
 if errorlevel 1 (
-    echo [ERROR] Failed to copy launcher to %DIST_DIR%\DicePP.exe
+    echo [ERROR] Failed to assemble Windows package
     exit /b 1
 )
-del /f /q "dist\DicePP.exe" >nul 2>&1
-if exist "dist\DicePP.exe" (
-    echo [ERROR] Failed to remove temporary launcher: dist\DicePP.exe
-    exit /b 1
-)
-if not exist "%DIST_DIR%\config\bots" mkdir "%DIST_DIR%\config\bots"
-copy /y "config\global.json" "%DIST_DIR%\config\global.json" >nul
-copy /y "config\bots\_template.json" "%DIST_DIR%\config\bots\_template.json" >nul
 
 REM pyproject.toml can stay in _internal; users do not need direct access.
 

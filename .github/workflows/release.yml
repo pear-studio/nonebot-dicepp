@@ -142,17 +142,7 @@ jobs:
       - name: Assemble Windows directory
         shell: pwsh
         run: |
-          Copy-Item dist/DicePP.exe dist/DicePP/DicePP.exe
-          if (-not (Test-Path dist/DicePP/DicePP.exe)) {
-            throw "Copy failed: dist/DicePP/DicePP.exe does not exist"
-          }
-          Remove-Item dist/DicePP.exe
-          if (Test-Path dist/DicePP.exe) {
-            throw "Temporary root dist/DicePP.exe still exists"
-          }
-          New-Item -ItemType Directory -Force dist/DicePP/config/bots | Out-Null
-          Copy-Item config/global.json dist/DicePP/config/global.json
-          Copy-Item config/bots/_template.json dist/DicePP/config/bots/_template.json
+          ./scripts/build/assemble_windows_package.ps1
 
       - name: Smoke test
         shell: pwsh
