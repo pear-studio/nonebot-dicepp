@@ -31,9 +31,15 @@ class TestCommandSplit:
         assert command_split("#tag word") == ["#tag", "word"]
 
     def test_double_quoted_phrase(self):
-        # Current behavior: quoted content appended at closing quote AND at end-of-loop
-        # (collect_words is not cleared after closing quote)
-        assert command_split('"hello world"') == ["hello world", "hello world"]
+        assert command_split('"hello world"') == ["hello world"]
+
+    def test_empty_quotes(self):
+        """空引号不产生 token"""
+        assert command_split('""') == []
+
+    def test_multiple_quoted_phrases(self):
+        """多个引号短语"""
+        assert command_split('"a" "b"') == ["a", "b"]
 
     def test_forward_slash_or(self):
         assert command_split("a/b") == ["a/b"]
@@ -50,8 +56,9 @@ class TestCommandSplit:
         assert "&cat" in result
 
     def test_unterminated_quote(self):
+        """未闭合引号：将引号视为普通字符，收集到末尾"""
         result = command_split('"unterminated')
-        assert result == ["unterminated"] or 'unterminated' in result[0]
+        assert result == ['unterminated']
 
     def test_multiple_hashtags(self):
         result = command_split("#foo #bar")

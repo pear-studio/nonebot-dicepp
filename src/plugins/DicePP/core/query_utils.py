@@ -30,6 +30,7 @@ def command_split(keywords: str) -> List[str]:
             if collect_words != "":
                 result_list.append(prefix + collect_words)
                 prefix = ""
+                collect_words = ""
         elif not fine_mode and key in ["#", "&"]:
             if collect_words.strip():
                 result_list.append(prefix + collect_words.strip())
