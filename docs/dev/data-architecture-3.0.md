@@ -83,9 +83,21 @@ load raw JSON
   -> write canonical JSON
 ```
 
+当前实现状态：
+
+- `ConfigLoader` 在加载 `config/global.json`、存在的 `config/user.json`、以及当前 bot 的 `config/bots/<account>.json` 后执行 canonical rewrite。
+- rewrite 先规范化每个 JSON layer，再合并与应用环境变量；只有最终 `BotConfig` 校验成功才写回文件。
+- `global.json` 作为默认快照补齐普通字段默认值；`user.json` 和 account config 保持 override layer 语义，不写入完整 merged config。
+- 普通未知字段会被丢弃；普通字段类型错误在字段有 Pydantic 默认值时默认化。
+- 身份/权限、路径、外部入口、密钥/凭据、危险行为相关字段使用保守策略：缺失时不合成默认值写回；已存在但无效，或看起来像关键字段的未知字段，不会被静默丢弃或默认化，当前直接保留验证失败行为。
+- 环境变量覆盖仍为最高优先级，但不会写回 JSON。
+- rewrite 使用 `.tmp` + atomic replace，不生成 `.bak`。
+
 ## DB Migration Model
 
 迁移是 forward-only。生产 downgrade 不作为标准能力；数据回退依赖存档/备份。没有备份时属于 emergency repair，不进入常规 migration contract。
+
+3.0.0 Data Foundation 第一批采用破坏性切换：当前没有真实用户数据需要兼容，旧 `schema_version`、旧 core migration 链与旧 persona runtime migration 链不再兼容，不提供 legacy bridge。旧 runtime migration 文件已退役，避免后台继续运行未验证的兼容逻辑。
 
 每个 SQLite 文件自持版本与迁移历史。共享框架，不共享一个全局 schema version。
 
@@ -103,16 +115,27 @@ persona   -> data/bots/<bot_id>/personas_data_*.db
 - `core/data` 维护 `instance`、`bot_core`、`bot_log`。
 - `module/persona/data` 维护 `persona`。
 
-新 DB 不从 v1 跑完整迁移链。新 DB 直接创建 latest schema，并记录当前版本。已有 DB 走 forward migration：
+`module/persona/data/schema_sql.py` 只保存 latest schema SQL fragments，供 `SchemaTarget.create_latest_schema` 创建新 Persona DB 使用；它不是旧 runtime migration 链。后续真实版本升级必须挂到对应 target 的 `migrations` / `async_migrations`，并配套 forward migration 测试。
+
+新 DB 不从 v1 跑完整迁移链。新 DB 直接创建 latest schema，并记录当前版本。已有 DB 的处理规则：
 
 ```text
-current_version == 0:
+no schema_metadata and no user tables:
   create_latest_schema()
   set current_version = latest
+  record schema_migrations(version=latest, name='create_latest_schema')
 
-current_version > 0:
-  require current_version >= min_supported_schema_version
-  run migrations current+1 ... latest
+no schema_metadata and any user table:
+  reject as unmanaged existing DB
+
+schema_metadata exists and current_version == latest:
+  noop
+
+schema_metadata exists and current_version < latest:
+  run target migrations current+1 ... latest
+
+schema_metadata exists and current_version > latest:
+  reject as unsupported future DB
 ```
 
 最小元数据：
@@ -124,7 +147,8 @@ CREATE TABLE IF NOT EXISTS schema_metadata (
 );
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
-  version INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version INTEGER NOT NULL UNIQUE,
   name TEXT NOT NULL,
   applied_at TEXT NOT NULL
 );
@@ -132,35 +156,29 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 先不做 checksum、dependency graph、down migration、复杂 baseline generation。
 
-所有 migration 必须 retry-safe。简单 migration 推荐 idempotent，但不强制所有 migration 完全幂等。
+第一批 target migration 可以为空；后续新增版本时，缺失或不连续 migration 必须报错。所有 migration 必须 retry-safe。简单 migration 推荐 idempotent，但不强制所有 migration 完全幂等。
 
-migration 不应依赖当前业务模型或 Repository。允许依赖 aiosqlite、标准库、migration helper，以及 migration 文件内定义的旧格式快照。用 import whitelist 测试防止历史迁移引用当前业务层。
+migration 不应依赖当前业务模型或 Repository。允许依赖标准库、schema lifecycle helper，以及 migration 文件内定义的旧格式快照。第一批不再维护旧 core migration import whitelist，也不保留 persona 旧表 runtime rename/drop 后台路径。
 
 测试规则：
 
 - fresh DB -> latest schema。
-- supported legacy fixture -> latest。
 - already latest -> noop。
-- fresh latest schema 与 migrated schema 等价。
-- 数据搬迁 migration 必须有 legacy fixture。
-- legacy fixture 生命周期绑定 `min_supported_schema_version`；低于支持窗口后可删除对应测试。
+- unmanaged existing DB 拒绝启动，错误需能定位到目标和表名。
+- current > latest 拒绝。
+- current < latest 且缺失或不连续 migration 拒绝，且不得产生副作用。
+- forward migration 成功时记录 `schema_migrations` 并更新 `schema_metadata.current_version` / `updated_at`。
+- forward migration 失败时整批回滚，不能留下部分版本记录或半成品表。
+- fresh latest schema 与 v1 -> v2 migrated schema 应能用 fixture helper 比较用户表、列和索引等价。
+- target schema 落在正确物理 DB。
 
-baseline/squash 第一版只写规则，不实现复杂 squash。未来需要压缩时，baseline 只服务新环境，旧环境仍按支持窗口内的 migration chain 升级。
+baseline/squash 第一版只写规则，不实现复杂 squash。未来需要压缩时，baseline 只服务新环境；是否重新引入旧版本支持窗口由发布策略另行决定。
 
 ## DicePPDatabase 与本地控制凭据
 
 新增 `DicePPDatabase`，文件为 `data/dicepp.db`。
 
-第一批真实用途是 local control token。旧 `data/runtime/local-control.token` 只作为一次性迁移输入：
-
-```text
-if old token file exists:
-  read token
-  insert into data/dicepp.db
-  delete old token file
-```
-
-不保留长期双来源兼容。Bot 和 Dashboard 必须同时切到新来源。
+第一批真实用途是 local control token。当前策略是破坏性切换：新 token 只存在 `data/dicepp.db` 的 `local_control_token` 表；不读取、不迁移旧 `data/runtime/local-control.token`。旧文件可忽略，不作为兼容来源。Bot 和 Dashboard 必须同时切到新来源。
 
 token 建专表，不使用通用 KV：
 
@@ -173,7 +191,7 @@ CREATE TABLE local_control_token (
 );
 ```
 
-Dashboard 不直接获得通用 `DicePPDatabase` 访问能力。短期提供 narrow shared accessor，例如 `core/security/local_control_token.py`：
+Dashboard 不直接获得通用 `DicePPDatabase` 访问能力。短期由 narrow shared accessor 暴露 token 读写能力：
 
 - Bot 调用 ensure。
 - Dashboard 调用 read。
@@ -189,9 +207,9 @@ Manager 落地后应以受控配对/授权流程替代 Dashboard 共享读取本
 
 - Manager 常驻层。
 - Dashboard 通过 Manager 管理 Bot/Dashboard 生命周期。
-- Manager Core：操作状态机、鉴权、审计、健康检查、并发控制、版本兼容、失败恢复。
+- Manager Core：本地生命周期状态机、鉴权、审计、健康检查、并发控制、手动升级边界所需的状态可见性。
 - Runtime Backend：Linux `DockerRuntime`、Windows `ProcessRuntime`，共享 contract。
-- 本地启停、重启、更新、版本切换、回滚和存档恢复所需能力。
+- 本地启停、重启、Linux Docker 运行状态管理、Windows 手动升级边界和存档恢复所需能力。
 
 不纳入：
 
@@ -221,7 +239,8 @@ data/backups/2026-06-24T153000Z-v3.0.0rc3-before-upgrade.zip
 
 包含：
 
-- `config/`
+- `config/user.json`
+- `config/bots/<bot_id>.json`
 - `data/dicepp.db`
 - `data/bots/**/bot_data.db`
 - `data/bots/**/log.db`
@@ -230,6 +249,8 @@ data/backups/2026-06-24T153000Z-v3.0.0rc3-before-upgrade.zip
 
 不包含：
 
+- `config/global.json`
+- `config/bots/_template.json`
 - `dashboard/data/dashboard.db`
 - `content/`
 - `data/backups/`
@@ -246,8 +267,8 @@ manifest 第一版记录：
   "dicepp_version": "v3.0.0rc3",
   "description": "before upgrade",
   "scope": {
-    "included": ["config", "data/dicepp.db", "data/bots", "data/local_images"],
-    "excluded": ["dashboard/data/dashboard.db", "content", "data/backups", "data/runtime", "data/bots/*/logs"]
+    "included": ["config/user.json", "config/bots/*.json", "data/dicepp.db", "data/bots/*/bot_data.db", "data/bots/*/log.db", "data/bots/*/personas_data_*.db", "data/local_images"],
+    "excluded": ["config/global.json", "config/bots/_template.json", "dashboard/data/dashboard.db", "content", "data/backups", "data/runtime", "data/bots/*/logs"]
   },
   "databases": [
     {
@@ -285,7 +306,7 @@ select archive
 
 - 显示失败原因。
 - 保留 pre-restore 存档。
-- 提供恢复到 pre-restore 存档的入口。
+- 提供基于恢复前备份存档继续预览和恢复的入口。
 - 不做复杂自动多次回滚。
 
 跨版本规则：
@@ -294,7 +315,7 @@ select archive
 - 不承诺 Dashboard 3.0.0 完整编排“程序回退到旧版本 + 恢复旧存档”。
 - 存档 manifest 记录 DicePP 版本和 schema 信息，为未来回退路径保留证据。
 
-release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级流程必须强提示或门禁创建存档。存档功能本身仍可独立使用。
+release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级流程必须强提示，并要求选择已验证的既有存档或显式跳过存档。存档功能本身仍可独立使用。
 
 ## 实施阶段
 
@@ -304,15 +325,19 @@ release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级
 
 范围：
 
+已完成第一批：
+
 - `data/dicepp.db` 与 `DicePPDatabase`。
-- local control token 入库，旧文件一次性导入后删除。
-- config canonical rewrite。
-- SchemaTarget。
+- local control token 入库；不读取、不迁移旧 token 文件。
+- `SchemaTarget` lifecycle。
 - fresh DB create latest schema。
-- existing DB forward-only migration。
+- unmanaged existing DB 拒绝启动。
 - `schema_metadata` + `schema_migrations`。
-- `bot_core`、`bot_log`、`instance`、`persona` targets。
-- migration import whitelist、schema equivalence、legacy fixture 生命周期规则。
+- `bot_core`、`bot_log`、`instance` targets。
+- persona bot 级 schema fragment 由 `bot_core` target 创建。
+- persona 角色 DB target 化。
+- config canonical rewrite。
+- forward migration 护栏测试已建立：缺失/不连续版本拒绝、成功记录 metadata/history、失败回滚、fresh latest 与 migrated schema 等价比较。
 
 ### 阶段 B：Manager Foundation
 
@@ -327,21 +352,63 @@ release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级
 - Bot/Dashboard 接入 Manager。
 - DiceHub 远程控制仅保留 TODO。
 
-### 阶段 C：Local Update And Rollback
+已完成第一批本地 Dashboard Manager：
 
-目标：3.0.0 前让 Dashboard 通过 Manager 完成本地生命周期、更新和失败恢复。
+- Dashboard 内嵌 Manager Core，提供 `/api/manager/status`、`/api/manager/operations`、`/api/manager/bots/{bot_id}/{action}` 与全局运行日志 `/api/manager/logs`。
+- Manager API 复用 Dashboard session 鉴权；生命周期操作写入审计日志。
+- 操作状态机支持 queued/running/succeeded/failed/rejected，并按 bot 限制同一时刻只允许一个 in-flight 操作。
+- `manager_operations` 写入 `dashboard.db`，Dashboard/Manager 重启后仍可查看历史；重启遗留的 queued/running 操作恢复为 failed。
+- Manager health 暴露 runtime backend、Manager API version、operation schema version 和 DicePP package version。
+- 默认 `UnavailableRuntimeBackend` 不伪造启停或日志；`ProcessRuntimeBackend` 与 `DockerComposeRuntimeBackend` 需显式 opt-in 环境变量配置后才启用。
+- Linux Docker Compose 与 Windows/local Process runtime 共用 contract tests，不访问真实项目 data，不默认调用真实 Docker。
+- Dashboard 运行监控页合并展示连接状态、Manager/runtime 状态、最近操作，支持启停/重启；运行日志入口读取全局 runtime log，不挂在单个 bot 行上。
+
+仍留给后续阶段：
+
+- 阶段 C 负责本地生命周期、Windows 单入口和手动升级边界；自动版本切换、自动回滚与失败恢复编排另行设计，不纳入 3.0。
+- 阶段 D 负责存档创建、恢复、pre-restore 和恢复失败入口。
+- DiceHub 远程控制、云端触发和 device-code 授权仍不纳入 3.0.0 本地 Manager Foundation。
+
+### 阶段 C：Local Lifecycle And Manual Upgrade Boundary
+
+目标：3.0.0 前让 Dashboard 通过 Manager 完成本地生命周期、Windows 单入口和手动升级边界；版本切换统一走人工流程。
 
 范围：
 
 - 启停、重启、状态、日志。
-- Windows staging 更新与失败恢复。
-- Linux 镜像 tag 更新与回滚。
-- 版本兼容检查。
+- Windows 单入口托盘与 `ProcessRuntime` 启停/日志能力。
+- Linux Docker Compose 本地生命周期管理。
 - Dashboard 不直接访问 Docker socket 或替换进程/文件。
+- Windows 和 Linux 3.0.0 均不提供 Dashboard 自动 update/rollback；手动升级通过阅读 Release metadata、创建存档、替换镜像 tag / zip / 发行目录、必要时恢复存档完成。
+
+已完成 Dashboard Manager 本地生命周期管理，并移除自动版本操作链路：
+
+- `DockerComposeRuntimeBackend` 继续保持 opt-in：需要 `DICEPP_MANAGER_RUNTIME=docker-compose`、`DICEPP_MANAGER_DOCKER_COMMAND` 和 `DICEPP_MANAGER_DOCKER_SERVICE`，可选 `DICEPP_MANAGER_DOCKER_CWD` / `DICEPP_MANAGER_DOCKER_TIMEOUT`。
+- Docker Compose runtime 只支持 `status`、`start`、`stop`、`restart` 和 `logs`，不会执行 `pull`、版本 tag 注入或 `up -d` 版本切换。
+- Manager action 白名单只包含 `start`、`stop`、`restart`；`update` / `rollback` 在 API 边界作为非法 action 拒绝，不创建 operation、不调用 runtime、不写 manager audit。
+- 已删除 `DICEPP_MANAGER_DOCKER_VERSION_ENV`、`DICEPP_MANAGER_RELEASE_METADATA_ROOT`、Manager release metadata preview endpoint、compatibility gate、deployment gate、archive gate、post-action health 与 failure guidance 等自动版本操作后端链路。
+- Release metadata 文档继续保留为 GitHub Release body / asset 和人工升级风险阅读材料，不进入 Docker 镜像，也不由 Manager 自动消费。
+- GitHub Release 发布侧 metadata 输出已接入：`docs/releases/vX.Y.Z.md` 作为 Release body 和 release asset 提供，`docs/linux.md` 也作为 release asset 提供；release metadata 仍不进入 Docker 镜像。
+
+已完成 Windows 单入口与手动升级边界：
+
+- Windows 发布包提供 `DicePP.exe` 作为用户主入口，负责启动 Dashboard/托盘体验。
+- `DicePP-Runtime.exe` 作为 runtime 进程入口，由 Manager `ProcessRuntime` 编排，不作为普通用户直接入口。
+- `ProcessRuntime` 已支持 start/stop/restart、状态查询和 console log 捕获；Dashboard 运行监控页通过 Manager 展示与操作这些能力。
+- Windows update/rollback 在 3.0.0 不由 Dashboard Manager 提供，不做自动 staging 替换、失败恢复或自动版本切换。
+- Windows 手动升级路径依赖存档能力：升级前创建存档，退出旧版本，解压/复制新版发行包，启动 `DicePP.exe`，必要时通过 Dashboard 恢复既有存档。
+
+3.0.0 不纳入，后续另行设计：
+
+- Windows 自动 staging update/rollback、版本切换和失败恢复。
+- Linux Docker Compose 自动 update/rollback、镜像 tag 注入、compatibility gate、archive gate、post-action health 和失败恢复。
+- Manager runtime 自动联网抓取或消费 GitHub Release body / release asset。
+- 自动同步真实目标 Release compose / deployment 文件。
+- 更完整的跨版本健康检查、自动恢复与失败后交互式用户指引。
 
 ### 阶段 D：Dashboard Save Archives
 
-目标：3.0.0 前提供 Dashboard 存档/恢复能力，并与升级风险门禁联动。
+目标：3.0.0 前提供 Dashboard 存档/恢复能力，支持人工升级前的存档验证与恢复准备。
 
 范围：
 
@@ -350,8 +417,28 @@ release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级
 - `data/backups/` 默认存储。
 - pre-restore 存档。
 - 恢复失败处理。
-- 升级前存档门禁。
+- 升级/恢复前存档能力。
 - 明确不包含 Dashboard DB、content、LLOneBot 数据。
+
+已完成 Dashboard Save Archives 基础：
+
+- 新增 Dashboard 本地存档创建与列表 API：`GET /api/archives`、`POST /api/archives`，复用 Dashboard session 鉴权。
+- 存档默认写入 `data/backups/`，格式为 zip + `manifest.json`，manifest `format_version=1` 并记录创建时间、DicePP 版本、描述、scope 和每个 payload 文件的 sha256。
+- 当前包含真实用户配置 `config/user.json`、真实 bot 配置 `config/bots/<bot_id>.json`、`data/dicepp.db`、`data/bots/**/bot_data.db`、`log.db`、`personas_data_*.db` 与 `data/local_images/` 普通文件；跳过 symlink、不存在路径和目录。
+- 当前排除版本随附配置 `config/global.json`、`config/bots/_template.json`，以及 Dashboard DB、`content/`、`data/backups/`、`data/runtime/`、`data/bots/*/logs/` 及未在白名单中的 LLOneBot 数据。
+- 新增存档详情与删除 API：`GET /api/archives/{filename}`、`DELETE /api/archives/{filename}`；只允许管理 `data/backups/` 下的普通 `.zip` 文件名，拒绝路径穿越、子目录、非 zip 与 symlink。
+- 新增恢复前只读 verify 基础：`POST /api/archives/{filename}/verify` 校验 manifest 格式、payload sha256、缺失文件、危险 archive path 与额外未声明 payload。
+- 新增只读恢复预览 API：`POST /api/archives/{filename}/restore-plan` 复用 verify 结果，将白名单 payload 映射为逻辑目标路径并报告 create/overwrite/blocked；API 名称保留 `restore-plan`，用户界面显示为“恢复预览”。
+- 实际恢复 API 第一版已完成：`POST /api/archives/{filename}/restore` 要求显式确认，恢复前自动创建 pre-restore 存档，然后仅将已验证、计划允许的白名单 payload 写回目标路径。
+- Manager 停写/启动编排 API 已完成：`POST /api/archives/{filename}/restore` 可在 `quiesce_runtime: true` 时先通过 Manager stop 已发现 bot，恢复后再 start 已 stop 成功的 bot，并在响应中返回编排诊断信息。
+- Dashboard UI 恢复联动已完成：用户可查看“存档信息”、执行“检查存档”、打开“恢复预览”；详情、检查、恢复预览面板互斥。UI 默认只展示用户向汇总、问题和提醒，不默认展示 raw `arcname`、`target_path`、checksum、scope、pre-restore、`restored_entries` 或 `failed_entries` 等工程字段。
+- Dashboard UI 恢复失败入口已完成：恢复失败时，可直接基于恢复前自动创建的备份存档继续查看恢复预览，无需手动回列表查找。
+- Manager quiesce 的 Dashboard UI 开关接入已完成：恢复确认区默认开启“恢复前暂停 Bot（推荐）”，默认发送 `quiesce_runtime: true`；用户取消勾选时才走 direct restore。
+- Dashboard 自动 update/rollback 存档门禁、版本操作面板、post-action health 与失败指引已移除；升级前存档改为人工流程，由用户在更新或回滚前主动创建并验证。
+
+3.0.0 不纳入，后续另行设计：
+
+- 在线一致性快照和更完整的一致性策略。当前 3.0.0 只承诺普通存档、恢复前 pre-restore、默认 Manager 停写、人工升级前存档提醒/验证流程和恢复失败入口。
 
 ## 参考
 

@@ -1,6 +1,6 @@
 ---
 name: review4-execute
-description: "[Defender] Read a finalized review document, implement 已共识·实施 items directly (no confirmation needed — scope already agreed in review3-confirm), and skip 已共识·存档 items. Refuse to proceed if any 需补充回复 or 待裁决 items exist. Part of a 5-stage adversarial ping-pong review: raise(R) → reply(D) → confirm(R) → execute(D) → accept(R). Requires the user to explicitly provide the document path."
+description: "[Defender] Read a finalized review document, implement 已共识·实施 items after explicit user confirmation, and skip 已共识·存档 items. Refuse to proceed if any 需补充回复 or 待裁决 items exist. Part of a 5-stage adversarial ping-pong review: raise(R) → reply(D) → confirm(R) → execute(D) → accept(R). Requires the user to explicitly provide the document path."
 ---
 
 # review4-execute — 达成共识后实施
@@ -43,23 +43,26 @@ raise(R) → reply(D) → confirm(R) → execute(D) → accept(R)
    - `已共识·存档`（旧状态，兼容）：同 `已共识·否决`，跳过
    - `需补充回复`：**拒绝实施**，提示用户先完成 review2-reply → review3-confirm
    - `待裁决`（异常）：**拒绝实施**，提示用户先完成 review3-confirm
-3. 若存在拒绝条目（`需补充回复` / `待裁决`），停止并告知用户；否则直接进入实施（范围已在 review3-confirm 中达成共识，无需再次确认）
-4. **实施优先级**：除非条目间存在依赖关系（如某条修改必须先完成另一条），否则优先实施重要程度和复杂程度高的修改。简单修改可以放在后面处理，但不得遗漏
-5. 修改代码，**严重问题的修复遵循 TDD 顺序**：
+3. 若存在拒绝条目，停止并告知用户；若全部可处理，与用户确认实施范围（逐条或批量均可）
+4. **门禁**：仅当用户明确授权后才动手
+5. **实施优先级**：除非条目间存在依赖关系（如某条修改必须先完成另一条），否则优先实施重要程度和复杂程度高的修改。简单修改可以放在后面处理，但不得遗漏
+6. 修改代码，**严重问题的修复遵循 TDD 顺序**：
    - 对 `已共识·实施` 的严重问题，若 Confirm/Reply 中约定了回归测试（未明确否决即视为约定），按以下顺序实施：
      1. **先写失败的测试**：根据约定的测试场景编写测试用例，确认测试**因 bug 存在而失败**
      2. **再修复代码**：修改业务代码使测试通过
      3. **确认测试通过**：运行该测试确认修复有效
    - 若 Defender 在 Reply 中已说明不适合添加测试且 Reviewer 在 Confirm 中已确认，跳过测试编写，直接修复代码
    - 非严重问题及未涉及测试约定的条目，直接修改代码即可
-6. 跑项目配套的测试命令验证（如构建验证、单元测试等，依项目实际情况而定），确保不引入回归
-7. 向用户汇报完成情况和测试结果
-8. 标记阶段 4 完成：
+7. 跑项目配套的测试命令验证（如构建验证、单元测试等，依项目实际情况而定），确保不引入回归
+8. 向用户汇报完成情况和测试结果
+9. 标记阶段 4 完成：
    ```bash
    python .claude/skills/review1-raise/review_record.py set-stage <filename> 4
    ```
 
 ## 约束
 
+- 未获明确授权前禁止改代码
+- 实施范围不得超过用户确认的子集
 - **实施完成后禁止提交代码**，必须等待 review5-accept 验收通过后再 commit——提前提交会导致改动脱离 `git diff HEAD` 的追踪范围，review5-accept 将无法正确验收
 - 修改后必须跑测试

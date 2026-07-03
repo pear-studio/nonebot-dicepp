@@ -22,7 +22,7 @@ metadata:
 - 生产部署/回退以 'vX.Y.Z' release 为单位。
 - 目标 release 必须由开发环境 'version-release' 创建。
 - 生产使用 GHCR 镜像: 'ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z'；包含 Dashboard 的版本还会使用 'ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z'。
-- 生产更新风险摘要的唯一源头是 GitHub Release body, 由开发环境 'docs/releases/vX.Y.Z.md' 生成并同步。
+- 生产更新风险摘要的唯一源头是 GitHub Release body 或同内容 release metadata asset, 由开发环境 'docs/releases/vX.Y.Z.md' 生成, 仅用于人工部署/回退风险核对。
 - 'DICEPP_IMAGE_TAG' 通过命令环境变量传递, 不写入任何配置文件。
 - 默认只读。修改运行配置、pull 镜像、重启/更新容器等写操作必须先展示影响、命令和回滚方式, 等待用户明确确认。
 
@@ -56,6 +56,8 @@ metadata:
    b. 'git show vX.Y.Z:docs/releases/vX.Y.Z.md' (如本地有仓库)
 
    如果两种方式都不可用, 将风险视为 'unknown', 要求用户明确确认。
+
+   release metadata / release body 只作为人工部署或回退前的风险阅读材料, 不写入本地同步目录, 不驱动自动部署流程。
 
 4. 读取目标部署说明与 compose
 
