@@ -9,11 +9,12 @@ Priority (high → low):
 """
 import json
 import os
+import re
 import shutil
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, get_args, get_origin
 
-from pydantic import ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from utils.logger import logger
 from core.config.pydantic_models import BotConfig
@@ -23,6 +24,45 @@ _BOTS_DIR = "bots"
 _GLOBAL_CONFIG = "global.json"
 _GLOBAL_USER = "user.json"
 _ACCOUNT_TEMPLATE = "_template.json"
+
+_CRITICAL_FIELD_NAMES = {
+    "master",
+    "admin",
+    "friend_token",
+    "white_list_group",
+    "white_list_user",
+    "character_path",
+    "data_path",
+    "api_url",
+    "webchat_url",
+    "base_url",
+    "upload_endpoint",
+    "api_key",
+    "upload_token",
+}
+_CRITICAL_FIELD_MARKERS = (
+    "api_key",
+    "token",
+    "secret",
+    "password",
+    "credential",
+    "auth",
+    "master",
+    "admin",
+    "permission",
+    "endpoint",
+    "url",
+    "path",
+    "remote",
+    "delete",
+    "restore",
+    "exec",
+)
+_CRITICAL_MARKER_PATTERN = re.compile(
+    r"(?:^|_)("
+    + "|".join(re.escape(marker) for marker in _CRITICAL_FIELD_MARKERS)
+    + r")(?:_|$)"
+)
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -38,17 +78,246 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
 
 def _load_json_file(path: Path) -> Dict[str, Any]:
     """Load a JSON file, returning empty dict on missing or parse error."""
+    data, _ = _load_json_file_for_rewrite(path)
+    return data
+
+
+def _load_json_file_for_rewrite(path: Path) -> tuple[Dict[str, Any], bool]:
+    """Load a JSON object and report whether it is safe to rewrite."""
     if not path.exists():
-        return {}
+        return {}, False
     try:
         text = path.read_text(encoding="utf-8")
-        return json.loads(text)
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            logger.error(f"[Config] [Load] JSON root must be an object in {path}.")
+            return {}, False
+        return data, True
     except json.JSONDecodeError as exc:
         logger.error(f"[Config] [Load] JSON parse error in {path}: {exc}")
-        return {}
+        return {}, False
     except OSError as exc:
         logger.error(f"[Config] [Load] Cannot read {path}: {exc}")
-        return {}
+        return {}, False
+
+
+def _write_json_file_atomic(path: Path, data: Dict[str, Any]) -> None:
+    """Atomically write canonical JSON without creating backup files."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def _is_model_type(annotation: Any) -> bool:
+    return isinstance(annotation, type) and issubclass(annotation, BaseModel)
+
+
+def _dict_value_model_type(annotation: Any) -> Optional[type[BaseModel]]:
+    origin = get_origin(annotation)
+    if origin not in (dict, Dict):
+        return None
+    args = get_args(annotation)
+    if len(args) != 2:
+        return None
+    value_type = args[1]
+    return value_type if _is_model_type(value_type) else None
+
+
+def _list_item_model_type(annotation: Any) -> Optional[type[BaseModel]]:
+    origin = get_origin(annotation)
+    if origin not in (list,):
+        return None
+    args = get_args(annotation)
+    if len(args) != 1:
+        return None
+    item_type = args[0]
+    return item_type if _is_model_type(item_type) else None
+
+
+def _field_default_value(field: Any) -> Any:
+    return field.get_default(call_default_factory=True)
+
+
+def _field_has_default(field: Any) -> bool:
+    return not field.is_required()
+
+
+def _field_input_keys(name: str, field: Any) -> list[str]:
+    keys = [name]
+    alias = getattr(field, "validation_alias", None)
+    if isinstance(alias, str):
+        keys.append(alias)
+    choices = getattr(alias, "choices", None)
+    if choices:
+        keys.extend(str(choice) for choice in choices)
+    return list(dict.fromkeys(keys))
+
+
+def _field_output_key(name: str, field: Any) -> str:
+    alias = getattr(field, "serialization_alias", None)
+    return alias if isinstance(alias, str) else name
+
+
+def _is_critical_path(path: tuple[str, ...]) -> bool:
+    leaf = path[-1] if path else ""
+    lowered = leaf.lower()
+    if lowered in _CRITICAL_FIELD_NAMES:
+        return True
+    return _CRITICAL_MARKER_PATTERN.search(lowered) is not None
+
+
+def _config_validation_error(path: Path, message: str) -> "ConfigValidationError":
+    return ConfigValidationError(f"[Config] Canonical rewrite rejected {path}: {message}")
+
+
+def _dump_json_value(annotation: Any, value: Any) -> Any:
+    adapter = TypeAdapter(annotation)
+    validated = adapter.validate_python(value)
+    return adapter.dump_python(validated, mode="json")
+
+
+def _canonicalize_default_value(
+    annotation: Any,
+    value: Any,
+    *,
+    path: Path,
+    field_path: tuple[str, ...],
+) -> Any:
+    if _is_model_type(annotation):
+        return _canonicalize_model_dict(
+            annotation,
+            {},
+            path=path,
+            field_path=field_path,
+            fill_missing_defaults=True,
+        )
+    return _dump_json_value(annotation, value)
+
+
+def _canonicalize_model_dict(
+    model_type: type[BaseModel],
+    raw: Dict[str, Any],
+    *,
+    path: Path,
+    field_path: tuple[str, ...] = (),
+    fill_missing_defaults: bool,
+) -> Dict[str, Any]:
+    canonical: Dict[str, Any] = {}
+    consumed: set[str] = set()
+
+    for name, field in model_type.model_fields.items():
+        input_key = next((key for key in _field_input_keys(name, field) if key in raw), None)
+        output_key = _field_output_key(name, field)
+
+        if input_key is None:
+            current_path = field_path + (name,)
+            if fill_missing_defaults and _field_has_default(field) and not _is_critical_path(current_path):
+                default = _field_default_value(field)
+                canonical[output_key] = _canonicalize_default_value(
+                    field.annotation,
+                    default,
+                    path=path,
+                    field_path=current_path,
+                )
+            continue
+
+        consumed.add(input_key)
+        current_path = field_path + (name,)
+        value = raw[input_key]
+        try:
+            canonical[output_key] = _canonicalize_field_value(
+                field.annotation,
+                value,
+                path=path,
+                field_path=current_path,
+                fill_missing_defaults=fill_missing_defaults,
+            )
+        except ValidationError as exc:
+            if _is_critical_path(current_path) or not _field_has_default(field):
+                raise _config_validation_error(
+                    path,
+                    f"critical or required field '{'.'.join(current_path)}' is invalid: {exc}",
+                ) from exc
+            default = _field_default_value(field)
+            canonical[output_key] = _dump_json_value(field.annotation, default)
+
+    for key in raw:
+        if key in consumed:
+            continue
+        current_path = field_path + (key,)
+        if _is_critical_path(current_path):
+            raise _config_validation_error(
+                path,
+                f"unknown critical-looking field '{'.'.join(current_path)}' must be migrated explicitly",
+            )
+        logger.warning(
+            "[Config] Dropping unknown field {!r} from {}",
+            ".".join(current_path),
+            path,
+        )
+
+    return canonical
+
+
+def _canonicalize_field_value(
+    annotation: Any,
+    value: Any,
+    *,
+    path: Path,
+    field_path: tuple[str, ...],
+    fill_missing_defaults: bool,
+) -> Any:
+    if _is_model_type(annotation):
+        if not isinstance(value, dict):
+            return _dump_json_value(annotation, value)
+        return _canonicalize_model_dict(
+            annotation,
+            value,
+            path=path,
+            field_path=field_path,
+            fill_missing_defaults=fill_missing_defaults,
+        )
+
+    dict_value_model = _dict_value_model_type(annotation)
+    if dict_value_model is not None:
+        if not isinstance(value, dict):
+            return _dump_json_value(annotation, value)
+        canonical: Dict[str, Any] = {}
+        for key, item in value.items():
+            item_path = field_path + (str(key),)
+            if not isinstance(item, dict):
+                canonical[str(key)] = _dump_json_value(dict_value_model, item)
+            else:
+                canonical[str(key)] = _canonicalize_model_dict(
+                    dict_value_model,
+                    item,
+                    path=path,
+                    field_path=item_path,
+                    fill_missing_defaults=fill_missing_defaults,
+                )
+        return canonical
+
+    list_item_model = _list_item_model_type(annotation)
+    if list_item_model is not None and isinstance(value, list):
+        canonical_items = []
+        for index, item in enumerate(value):
+            if isinstance(item, dict):
+                item = _canonicalize_model_dict(
+                    list_item_model,
+                    item,
+                    path=path,
+                    field_path=field_path + (str(index),),
+                    fill_missing_defaults=fill_missing_defaults,
+                )
+            canonical_items.append(item)
+        return _dump_json_value(annotation, canonical_items)
+
+    return _dump_json_value(annotation, value)
 
 
 def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -131,14 +400,41 @@ class ConfigLoader:
     # ── internals ───────────────────────────────────────────────────────────
 
     def _build_config(self) -> BotConfig:
+        rewrites: list[tuple[Path, Dict[str, Any], Dict[str, Any]]] = []
+
         # Layer 4 (lowest): global defaults
-        raw = _load_json_file(self._data_path / _GLOBAL_CONFIG)
+        global_path = self._data_path / _GLOBAL_CONFIG
+        global_raw, global_can_rewrite = _load_json_file_for_rewrite(global_path)
+        raw = self._canonicalize_layer(
+            global_path,
+            global_raw,
+            can_rewrite=global_can_rewrite,
+            fill_missing_defaults=True,
+            rewrites=rewrites,
+        )
 
         # Layer 3: global user overrides (replaces old secrets.json)
-        raw = _deep_merge(raw, _load_json_file(self._data_path / _GLOBAL_USER))
+        user_path = self._data_path / _GLOBAL_USER
+        user_raw, user_can_rewrite = _load_json_file_for_rewrite(user_path)
+        user_cfg = self._canonicalize_layer(
+            user_path,
+            user_raw,
+            can_rewrite=user_can_rewrite,
+            fill_missing_defaults=False,
+            rewrites=rewrites,
+        )
+        raw = _deep_merge(raw, user_cfg)
 
         # Layer 2: account config
-        account_cfg = self._ensure_account_config()
+        self._ensure_account_config()
+        account_raw, account_can_rewrite = _load_json_file_for_rewrite(self._account_config_path)
+        account_cfg = self._canonicalize_layer(
+            self._account_config_path,
+            account_raw,
+            can_rewrite=account_can_rewrite,
+            fill_missing_defaults=False,
+            rewrites=rewrites,
+        )
         raw = _deep_merge(raw, account_cfg)
 
         # Layer 1 (highest): environment variables
@@ -152,10 +448,34 @@ class ConfigLoader:
                 f"[Config] Configuration validation failed for account '{self._account}':\n{exc}"
             ) from exc
 
+        for path, original, canonical in rewrites:
+            if original != canonical:
+                _write_json_file_atomic(path, canonical)
+
         if not cfg.master:
             logger.warning(f"[Config] [Warn] No master configured for account '{self._account}'. "
                            f"Edit {self._account_config_path} to set master IDs.")
         return cfg
+
+    def _canonicalize_layer(
+        self,
+        path: Path,
+        raw: Dict[str, Any],
+        *,
+        can_rewrite: bool,
+        fill_missing_defaults: bool,
+        rewrites: list[tuple[Path, Dict[str, Any], Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        if not can_rewrite:
+            return raw
+        canonical = _canonicalize_model_dict(
+            BotConfig,
+            raw,
+            path=path,
+            fill_missing_defaults=fill_missing_defaults,
+        )
+        rewrites.append((path, raw, canonical))
+        return canonical
 
     @property
     def _account_config_path(self) -> Path:

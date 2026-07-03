@@ -3,7 +3,9 @@
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timedelta
+from datetime import timedelta
+
+from utils.time import wall_now
 
 from plugins.DicePP.module.persona.life.change_sources import (
     DateChangeSource,
@@ -124,7 +126,7 @@ class TestDailyEventChangeSource:
     async def test_first_call_marks_seen_no_injection(self):
         from plugins.DicePP.module.persona.data.models import DailyEvent
         store = MagicMock()
-        naive_now = datetime.now()
+        naive_now = wall_now()
         events = [
             DailyEvent(id=1, date="2026-07-02", event_type="system",
                        description="事件1", created_at=naive_now),
@@ -139,8 +141,8 @@ class TestDailyEventChangeSource:
     async def test_new_event_injected(self):
         from plugins.DicePP.module.persona.data.models import DailyEvent
         store = MagicMock()
-        old = datetime.now() - timedelta(minutes=10)
-        new = datetime.now()
+        old = wall_now() - timedelta(minutes=10)
+        new = wall_now()
         cursor = {
             "date": new.strftime("%Y-%m-%d"),
             "event_ids": [1],

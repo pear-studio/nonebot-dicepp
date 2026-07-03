@@ -130,7 +130,6 @@ class TestDailyReportGenerator:
 
         seg2 = mock_bot.proxy.process_bot_command.await_args_list[1].args[0].msg
         assert "活跃用户" in seg2
-        assert "新用户" in seg2
         assert "用户消息" in seg2
         assert "指令合计" in seg2
         assert "指令分布" in seg2
@@ -261,28 +260,31 @@ class TestDailyReportGenerator:
 
     @pytest.mark.asyncio
     async def test_core_stats_aggregates_with_dimension_split(self):
-        """核心统计正确聚合群聊/私聊维度拆分"""
+        """核心统计按新模型聚合总量，并从 group_stat 推导群/私消息量"""
         bot = _make_mock_bot()
 
-        # 用户 1：群聊活跃
+        # user_stat 只保留用户总量
         info1 = UserStatInfo()
         info1.msg.inc(10)
         info1.msg.update()  # last_day=10
-        info1.msg_group.inc(10)
-        info1.msg_group.update()  # last_day=10
 
-        # 用户 2：私聊活跃
         info2 = UserStatInfo()
         info2.msg.inc(7)
         info2.msg.update()  # last_day=7
-        info2.msg_private.inc(7)
-        info2.msg_private.update()  # last_day=7
 
         mock_users = [
             MagicMock(user_id="u1", data=info1.serialize()),
             MagicMock(user_id="u2", data=info2.serialize()),
         ]
         bot.db.user_stat.list_all = AsyncMock(return_value=mock_users)
+
+        # group_stat 可可靠表示群聊总量，私聊量由用户总量 - 群聊总量推导。
+        group_info = GroupStatInfo()
+        group_info.msg.inc(10)
+        group_info.msg.update()
+        bot.db.group_stat.list_all = AsyncMock(
+            return_value=[MagicMock(group_id="g1", data=group_info.serialize())]
+        )
 
         port, _mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port)
@@ -293,8 +295,7 @@ class TestDailyReportGenerator:
         assert stats["msg"]["group"] == 10
         assert stats["msg"]["private"] == 7
         assert stats["active_users"]["total"] == 2
-        assert stats["active_users"]["group"] == 1
-        assert stats["active_users"]["private"] == 1
+        assert stats["active_groups"] == 1
 
     @pytest.mark.asyncio
     async def test_core_stats_per_flag_user_count(self):
@@ -320,15 +321,19 @@ class TestDailyReportGenerator:
         info2.cmd.flag_dict[DPP_COMMAND_FLAG_FUN] = StatElementBase()
         info2.cmd.flag_dict[DPP_COMMAND_FLAG_FUN].inc(1)
         info2.cmd.flag_dict[DPP_COMMAND_FLAG_FUN].update()  # last_day=1
-        # cmd_group/private for dimension split
-        info2.cmd_group.inc(1)
-        info2.cmd_group.update()
-
         mock_users = [
             MagicMock(user_id="u1", data=info1.serialize()),
             MagicMock(user_id="u2", data=info2.serialize()),
         ]
         bot.db.user_stat.list_all = AsyncMock(return_value=mock_users)
+
+        group_info = GroupStatInfo()
+        group_info.cmd.flag_dict[DPP_COMMAND_FLAG_FUN] = StatElementBase()
+        group_info.cmd.flag_dict[DPP_COMMAND_FLAG_FUN].inc(1)
+        group_info.cmd.flag_dict[DPP_COMMAND_FLAG_FUN].update()
+        bot.db.group_stat.list_all = AsyncMock(
+            return_value=[MagicMock(group_id="g1", data=group_info.serialize())]
+        )
 
         port, _mock_bot = _make_mock_port()
         gen = DailyReportGenerator(bot=bot, port=port)
@@ -342,34 +347,21 @@ class TestDailyReportGenerator:
         assert stats["flag_breakdown"][DPP_COMMAND_FLAG_FUN]["count"] == 1
         assert stats["flag_breakdown"][DPP_COMMAND_FLAG_FUN]["users"] == 1
 
-        # cmd_group 维度拆分
-        assert stats["cmd"]["group"] > 0
+        # group_stat 维度拆分
+        assert stats["cmd"]["group"] == 1
+        assert stats["cmd"]["private"] == 5
 
     @pytest.mark.asyncio
-    async def test_core_stats_new_user_detection(self):
-        """新用户检测基于 created_at 日期范围判断"""
+    async def test_core_stats_new_user_detection_is_zero_without_created_at(self):
+        """新统计模型不再存储可靠 created_at，因此新增用户保持 0"""
         bot = _make_mock_bot()
-        from utils.time import int_to_datetime, wall_now
 
-        tz = "Asia/Shanghai"
-        yesterday = (wall_now(tz) - timedelta(days=1))
-        yesterday_int = int(yesterday.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
-
-        # 昨天创建的 user
-        info_new = UserStatInfo()
-        info_new.msg.inc(1)
-        info_new.msg.update()
-        info_new.created_at = yesterday_int
-
-        # 更早创建的 user（created_at = 0）
-        info_old = UserStatInfo()
-        info_old.msg.inc(1)
-        info_old.msg.update()
-        info_old.created_at = 0
+        info = UserStatInfo()
+        info.msg.inc(1)
+        info.msg.update()
 
         mock_users = [
-            MagicMock(user_id="new_user", data=info_new.serialize()),
-            MagicMock(user_id="old_user", data=info_old.serialize()),
+            MagicMock(user_id="active_user", data=info.serialize()),
         ]
         bot.db.user_stat.list_all = AsyncMock(return_value=mock_users)
 
@@ -377,8 +369,7 @@ class TestDailyReportGenerator:
         gen = DailyReportGenerator(bot=bot, port=port)
 
         stats = await gen._collect_core_stats()
-        # 只有 created_at 在昨天范围内的才计数
-        assert stats["new_users"] == 1
+        assert stats["new_users"] == 0
 
     @pytest.mark.asyncio
     async def test_core_stats_broken_data_returns_empty_structure(self):

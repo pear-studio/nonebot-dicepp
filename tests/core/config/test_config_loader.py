@@ -30,6 +30,10 @@ def _write(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
+def _read(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 class _DataDir:
     """Thin wrapper around a tmp directory mimicking the config/ layout."""
 
@@ -200,25 +204,29 @@ def test_no_template_no_account_still_loads(dd):
 
 
 def test_malformed_global_config_ignored(dd):
-    dd.global_cfg.write_text("{ this is not json }", encoding="utf-8")
+    malformed = "{ this is not json }"
+    dd.global_cfg.write_text(malformed, encoding="utf-8")
     cfg = dd.loader().load()
     assert cfg.mode.default == "DND5E2024"
     assert cfg.chat_interval == 20
+    assert dd.global_cfg.read_text(encoding="utf-8") == malformed
 
 
 def test_malformed_account_config_ignored(dd):
     _write(dd.account_cfg("bot1"), {})  # write empty first to create file
-    dd.account_cfg("bot1").write_text("BAD JSON", encoding="utf-8")
+    malformed = "BAD JSON"
+    dd.account_cfg("bot1").write_text(malformed, encoding="utf-8")
     cfg = dd.loader("bot1").load()
     assert cfg.mode.default == "DND5E2024"
     assert cfg.chat_interval == 20
+    assert dd.account_cfg("bot1").read_text(encoding="utf-8") == malformed
 
 
 # ── 9.2: Pydantic validation errors ──────────────────────────────────────────
 
 
-def test_invalid_type_raises_config_validation_error(dd):
-    _write(dd.global_cfg, {"chat_interval": "not-a-number"})
+def test_critical_invalid_type_raises_config_validation_error(dd):
+    _write(dd.global_cfg, {"master": "not-a-list"})
     with pytest.raises(ConfigValidationError):
         dd.loader().load()
 
@@ -228,6 +236,180 @@ def test_valid_bool_string_accepted(dd):
     _write(dd.global_cfg, {"persona_ai": {"enabled": 'true'}})
     cfg = dd.loader().load()
     assert cfg.persona_ai.enabled is True
+
+
+# ── canonical rewrite ────────────────────────────────────────────────────────
+
+
+def test_global_config_rewrites_new_default_fields(dd):
+    _write(dd.global_cfg, {"chat_interval": 99})
+
+    cfg = dd.loader().load()
+    saved = _read(dd.global_cfg)
+
+    assert cfg.chat_interval == 99
+    assert saved["chat_interval"] == 99
+    assert saved["roll"]["enable"] is True
+    assert saved["persona_ai"]["max_history_turns"] == 10
+
+
+def test_global_config_does_not_default_missing_critical_fields(dd):
+    _write(dd.global_cfg, {"chat_interval": 99})
+
+    dd.loader().load()
+    saved = _read(dd.global_cfg)
+
+    assert saved["chat_interval"] == 99
+    assert saved["roll"]["enable"] is True
+    assert "master" not in saved
+    assert "admin" not in saved
+    assert "friend_token" not in saved
+    assert "white_list_group" not in saved
+    assert "white_list_user" not in saved
+    assert "character_path" not in saved["persona_ai"]
+    assert "api_url" not in saved["dicehub"]
+    assert "api_key" not in saved["dicehub"]
+    assert "upload_endpoint" not in saved["log"]
+    assert "upload_token" not in saved["log"]
+    assert "data_path" not in saved["deck"]
+
+
+def test_canonical_rewrite_drops_unknown_ordinary_fields(dd):
+    _write(dd.global_cfg, {
+        "chat_interval": 99,
+        "old_plain_field": True,
+        "persona_ai": {
+            "enabled": True,
+            "max_short_term_chars": 1500,
+        },
+    })
+
+    dd.loader().load()
+    saved = _read(dd.global_cfg)
+
+    assert "old_plain_field" not in saved
+    assert "max_short_term_chars" not in saved["persona_ai"]
+    assert saved["persona_ai"]["enabled"] is True
+
+
+def test_canonical_rewrite_defaultizes_recoverable_ordinary_field_error(dd):
+    _write(dd.global_cfg, {"chat_interval": "not-a-number"})
+
+    cfg = dd.loader().load()
+    saved = _read(dd.global_cfg)
+
+    assert cfg.chat_interval == 20
+    assert saved["chat_interval"] == 20
+
+
+def test_canonical_rewrite_keeps_critical_field_errors_hard(dd):
+    original = {"master": "not-a-list"}
+    _write(dd.global_cfg, original)
+
+    with pytest.raises(ConfigValidationError):
+        dd.loader().load()
+
+    assert _read(dd.global_cfg) == original
+    assert list(dd.root.rglob("*.bak")) == []
+
+
+def test_unknown_fields_with_critical_sounding_substrings_are_not_rejected(dd):
+    """Fields like 'executive_summary' contain markers ('exec') but are NOT
+    critical because the marker must appear as a whole underscore-delimited
+    token.
+
+    'evaluation_url' IS critical ('url' is a whole token) and tested
+    separately.
+    """
+    _write(dd.global_cfg, {
+        "chat_interval": 42,
+        "executive_summary": "should be dropped not rejected",
+        "pathological_case": 123,
+    })
+
+    cfg = dd.loader().load()
+
+    assert cfg.chat_interval == 42
+    saved = _read(dd.global_cfg)
+    assert "executive_summary" not in saved
+    assert "pathological_case" not in saved
+
+
+def test_unknown_fields_with_url_token_are_still_critical(dd):
+    """'url' as a standalone underscore-delimited token is critical
+    (e.g. 'evaluation_url' splits into ['evaluation', 'url'])."""
+    _write(dd.global_cfg, {
+        "chat_interval": 42,
+        "evaluation_url": "https://example.com",
+    })
+
+    with pytest.raises(ConfigValidationError):
+        dd.loader().load()
+
+
+def test_unknown_fields_with_token_as_boundary_word_still_critical(dd):
+    """'token' as a whole underscore-delimited token IS critical (e.g. 'my_token',
+    'token_type')."""
+    _write(dd.global_cfg, {
+        "chat_interval": 42,
+        "my_token": "secret-value",
+    })
+
+    with pytest.raises(ConfigValidationError):
+        dd.loader().load()
+
+
+def test_unknown_fields_are_dropped_without_crashing(dd):
+    """Dropping an unknown non-critical field must not crash startup."""
+    _write(dd.global_cfg, {
+        "chat_interval": 42,
+        "old_plain_field": True,
+        "another_unknown": {"nested": "value"},
+    })
+
+    cfg = dd.loader().load()
+    saved = _read(dd.global_cfg)
+
+    assert cfg.chat_interval == 42
+    assert "old_plain_field" not in saved
+    assert "another_unknown" not in saved
+
+
+def test_canonical_rewrite_does_not_write_env_overrides(dd):
+    _write(dd.account_cfg("bot1"), {"nickname": "file_nick"})
+
+    with patch.dict(os.environ, {"DICE_NICKNAME": "env_nick"}):
+        cfg = dd.loader("bot1").load()
+
+    assert cfg.nickname == "env_nick"
+    assert _read(dd.account_cfg("bot1"))["nickname"] == "file_nick"
+    assert list(dd.root.rglob("*.bak")) == []
+
+
+def test_canonical_rewrite_keeps_user_and_account_layers_partial(dd):
+    _write(dd.global_cfg, {"chat_interval": 44})
+    _write(dd.user_config, {"nickname": "user_nick"})
+    _write(dd.account_cfg("bot1"), {"master": ["account_master"]})
+
+    cfg = dd.loader("bot1").load()
+
+    assert cfg.chat_interval == 44
+    assert cfg.nickname == "user_nick"
+    assert cfg.master == ["account_master"]
+    assert _read(dd.user_config) == {"nickname": "user_nick"}
+    assert _read(dd.account_cfg("bot1")) == {"master": ["account_master"]}
+
+
+def test_canonical_rewrite_keeps_nested_user_and_account_layers_partial(dd):
+    _write(dd.user_config, {"persona_ai": {"enabled": True}})
+    _write(dd.account_cfg("bot1"), {"roll": {"enable": False}})
+
+    cfg = dd.loader("bot1").load()
+
+    assert cfg.persona_ai.enabled is True
+    assert cfg.roll.enable is False
+    assert _read(dd.user_config) == {"persona_ai": {"enabled": True}}
+    assert _read(dd.account_cfg("bot1")) == {"roll": {"enable": False}}
 
 
 # ── 9.5: Atomic update / reload ──────────────────────────────────────────────
@@ -250,7 +432,7 @@ def test_reload_keeps_old_config_on_validation_failure(dd):
     loader = dd.loader()
     cfg_before = loader.load()
 
-    _write(dd.global_cfg, {"chat_interval": "bad-type"})
+    _write(dd.global_cfg, {"master": "bad-type"})
     with pytest.raises(ConfigValidationError):
         loader.reload()
 

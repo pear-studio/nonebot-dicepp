@@ -14,7 +14,6 @@ import re
 from utils.logger import logger
 import os
 import base64
-import sqlite3
 import aiosqlite
 from pydantic import ValidationError
 
@@ -31,18 +30,9 @@ from .models import (
     DEFAULT_SESSION_TOKEN_BUDGET,
     StoryDeckEntry, VALID_ENTRY_TYPES,
 )
-from .migrations import (
-    PERSONA_DB_MIGRATIONS, CORE_DB_MIGRATIONS,
-    RENAME_LEGACY_TABLE,
-    DROP_LEGACY_USER_INDEX, DROP_LEGACY_GROUP_INDEX,
-    ALTER_MESSAGE_STREAM_COLUMNS,
-    ALTER_LLM_TRACES_COLUMNS,
-    ALTER_USER_RELATIONSHIPS_COLUMNS,
-    ALTER_SCORE_HISTORY_COLUMNS,
-    ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE,
-    DROP_DM_STATE_TABLE,
-    ALTER_PERSONA_SESSION_CURSORS_JSON,
-)
+from core.data.schema import ensure_schema_async
+from core.data.schema.lifecycle import execute_many_async
+from .schema import BOT_CORE_SCHEMA_SQL, PERSONA_TARGET
 
 
 class PersonaDataStore:
@@ -134,67 +124,12 @@ class PersonaDataStore:
         return not (group_id and group_id.strip())
 
     async def ensure_tables(self) -> None:
-        """确保所有表已创建，并对旧表名做透明迁移。"""
+        """确保 persona 角色库 schema 已由统一 lifecycle 管理。"""
         persona_db = self.db
+        await ensure_schema_async(persona_db, PERSONA_TARGET)
         persona_db.row_factory = lambda cur, row: {col[0]: row[i] for i, col in enumerate(cur.description)}
-        core_db = self._core_db
-        # 如果旧表 persona_unified_messages 存在，先重命名到 message_stream（persona_db 侧）
-        try:
-            await persona_db.execute(RENAME_LEGACY_TABLE)
-            await persona_db.execute(DROP_LEGACY_USER_INDEX)
-            await persona_db.execute(DROP_LEGACY_GROUP_INDEX)
-            await persona_db.commit()
-        except Exception:
-            pass  # 旧表不存在或已迁移，无需处理
-        # persona_db 侧：14 张角色表 + 索引
-        for migration in PERSONA_DB_MIGRATIONS:
-            await persona_db.execute(migration)
-        # core_db 侧：4 张 bot 级表
-        for migration in CORE_DB_MIGRATIONS:
-            await core_db.execute(migration)
-        await core_db.commit()
-        # Phase M1: message_stream 扩展列（幂等 ALTER TABLE）
-        for alter_sql in ALTER_MESSAGE_STREAM_COLUMNS:
-            try:
-                await persona_db.execute(alter_sql)
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e):
-                    raise
-        # Phase 1: persona_llm_traces 扩展列（幂等 ALTER TABLE）
-        for alter_sql in ALTER_LLM_TRACES_COLUMNS:
-            try:
-                await persona_db.execute(alter_sql)
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e):
-                    raise
-        # persona_user_relationships 扩展列（四维→三维模型迁移，幂等 ALTER TABLE）
-        for alter_sql in ALTER_USER_RELATIONSHIPS_COLUMNS:
-            try:
-                await persona_db.execute(alter_sql)
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e):
-                    raise
-        # persona_score_history 扩展列（四维→三维模型迁移，幂等 ALTER TABLE）
-        for alter_sql in ALTER_SCORE_HISTORY_COLUMNS:
-            try:
-                await persona_db.execute(alter_sql)
-            except sqlite3.OperationalError as e:
-                if "duplicate column" not in str(e):
-                    raise
-        # share_desire 列清理（Phase 3 业务逻辑已全部移除）
-        try:
-            await persona_db.execute(ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE)
-        except sqlite3.OperationalError:
-            pass  # 列已不存在或 DB 为全新创建
-        # DM 状态表清理（被 story_deck 取代）
-        await persona_db.execute(DROP_DM_STATE_TABLE)
-        # Phase 2: Conversation 持久化 — cursors JSON 列（幂等 ALTER TABLE）
-        try:
-            await persona_db.execute(ALTER_PERSONA_SESSION_CURSORS_JSON)
-        except sqlite3.OperationalError as e:
-            if "duplicate column" not in str(e):
-                raise
-        await persona_db.commit()
+        await execute_many_async(self._core_db, BOT_CORE_SCHEMA_SQL)
+        await self._core_db.commit()
 
     async def switch_persona_db(self, new_character_name: str) -> None:
         """关闭当前 persona_db，打开新角色的 persona_db（先开后关策略）"""

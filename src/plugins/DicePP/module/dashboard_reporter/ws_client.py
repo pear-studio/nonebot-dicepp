@@ -59,7 +59,7 @@ class ControlChannelClient:
         client = ControlChannelClient(
             bot_id="123456",
             dashboard_url="ws://dashboard:4090/ws/control",
-            token_path=Path("/app/data/runtime/local-control.token"),
+            token="token-from-data-dicepp-db",
             on_reload=bot.reload_config,
         )
         await client.connect()

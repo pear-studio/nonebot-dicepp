@@ -107,6 +107,7 @@ class PersonaConfig(BaseModel):
     enabled: bool = Field(default=False, title="启用 Persona")
     daily_report_enabled: bool = Field(default=True, title="日报")
     daily_report_voice_enabled: bool = Field(default=True, title="日报语音")
+    character_name: str = Field(default="default", title="角色名")
     character_path: str = Field(default="./content/characters", title="角色路径")
 
     whitelist_enabled: bool = Field(default=True, title="白名单")
@@ -198,8 +199,8 @@ class PersonaConfig(BaseModel):
         default=5, title="工具最大轮次",
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
-    background_llm_max_rounds: int = Field(
-        default=10, title="后台 LLM 最大轮次",
+    background_llm_max_tool_rounds: int = Field(
+        default=1, title="后台工具最大轮次",
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
 
@@ -411,13 +412,12 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "life_sim"},
     )
     character_life_chain_max_depth: int = Field(
-        default=5, title="事件链最大深度",
-        description="DM-Character 多轮对话的最大轮数，硬上限兜底",
+        default=3, title="事件链最大深度",
         json_schema_extra={"dashboard_section": "life_sim"},
     )
     character_life_chain_force_extend_once_prob: float = Field(
-        default=0.0, title="保底续写概率 [已弃用]",
-        description="已弃用，由 want_to_end + end_conversation 共识结束协议替代。保留字段以兼容旧配置。",
+        default=0.0, title="保底续写概率",
+        description="仅在当天首次事件后、action_tendency 为空时触发一次保底续写的概率，保证链深度至少为 2",
         json_schema_extra={"dashboard_section": "life_sim"},
     )
     character_life_min_event_interval_minutes: int = Field(
@@ -438,38 +438,6 @@ class PersonaConfig(BaseModel):
     )
     character_life_default_health: int = Field(
         default=50, title="默认健康",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-
-    # Story Deck 配置
-    story_deck_max_injection: int = Field(
-        default=3, title="DM 注入上限",
-        description="DM 每次最多注入的 story deck 条目数",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    story_deck_max_entries: int = Field(
-        default=100, title="条目总量上限",
-        description="story_deck 条目总数上限",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    front_max_campaign: int = Field(
-        default=1, title="Campaign Front 上限",
-        description="SA 最多持有的 campaign front 数量",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    front_max_adventure: int = Field(
-        default=2, title="Adventure Front 上限",
-        description="SA 最多持有的 adventure front 数量",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    threads_per_front: int = Field(
-        default=3, title="每条 Front 线程上限",
-        description="每个 front 内最多 threads 数量",
-        json_schema_extra={"dashboard_section": "life_sim"},
-    )
-    sa_max_rounds: int = Field(
-        default=100, title="SA 多轮对话上限",
-        description="SA 单次规划的最大 LLM tool-call 轮数。100 轮支持多 front/thread 创建 + 错误重试。降低可控制 API 成本",
         json_schema_extra={"dashboard_section": "life_sim"},
     )
 
@@ -724,7 +692,7 @@ class BotConfig(BaseModel):
     friend_token: List[str] = Field(default_factory=list, title="好友令牌")
     group_invite: bool = Field(default=True, title="群邀请")
     nickname: str = Field(default="", title="Bot 昵称")
-    persona: Optional[str] = Field(default=None, title="当前角色", description="角色卡目录名，对应 content/characters/{name}。为 None 时不启用 Persona")
+    persona: str = Field(default="default", title="当前角色")
     white_list_group: List[str] = Field(default_factory=list, title="群白名单")
     white_list_user: List[str] = Field(default_factory=list, title="用户白名单")
 

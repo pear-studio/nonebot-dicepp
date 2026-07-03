@@ -48,11 +48,7 @@ def wall_now(timezone_name: str = "Asia/Shanghai") -> datetime.datetime:
 
 @runtime_checkable
 class Clock(Protocol):
-    """时间源抽象 — 生产用 WallClock，调试用 SteppedClock。
-
-    now() 返回 naive datetime（与 SQLite / fromisoformat 兼容），
-    与 wall_now() 的行为保持一致。
-    """
+    """时间源抽象 — 生产用 WallClock，调试用 SteppedClock。"""
 
     def now(self) -> datetime.datetime:
         ...
@@ -69,10 +65,7 @@ class WallClock:
 
 
 class SteppedClock:
-    """步进时钟 — 时间冻结，手动推进。用于调试/测试。
-
-    now() 是纯 getter，不带自动推进副作用。
-    """
+    """步进时钟 — 时间冻结，手动推进。用于调试/测试。"""
 
     def __init__(self, start: datetime.datetime):
         self._current = start
@@ -87,24 +80,16 @@ class SteppedClock:
         self._current += datetime.timedelta(**kwargs)
 
 
-# 模块级单例 — 默认 WallClock
 _clock: Clock = WallClock()
 
 
 def get_clock() -> Clock:
-    """返回当前注入的 Clock 实例（默认 WallClock）。
-
-    全局 Clock 固定使用 Asia/Shanghai 时区，忽略各模块级的 timezone 配置。
-    DicePP 面向中文用户，单一东八区，无多时区需求。
-    """
+    """返回当前注入的 Clock 实例（默认 WallClock）。"""
     return _clock
 
 
 def set_clock(c: Clock) -> None:
-    """注入 Clock 实例（仅调试/测试使用）。
-
-    生产环境从不调用此函数，行为等价于始终使用 wall_now()。
-    """
+    """注入 Clock 实例（仅调试/测试使用）。"""
     global _clock
     _clock = c
 

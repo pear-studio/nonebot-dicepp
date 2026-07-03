@@ -33,6 +33,10 @@ else:
     _plugin_root = os.path.join(dir_path, "src", "plugins", "DicePP")
     sys.path.insert(0, _plugin_root)
 
+from utils.stdio import configure_redirected_stdio_utf8
+
+configure_redirected_stdio_utf8()
+
 # ============================================================
 # Bootstrap CLI — 在 nonebot.init() 之前解析
 # ============================================================
@@ -55,7 +59,9 @@ if _bootstrap_args.smoke_check:
 
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBot_V11_Adapter
-from utils.logger import logger
+from utils.logger import logger, restore_runtime_logging
+
+restore_runtime_logging()
 
 # 初始化 NoneBot。DicePP 不依赖根目录 .env；这些是当前 OneBot 运行形态的默认值。
 nonebot.init(
@@ -65,6 +71,7 @@ nonebot.init(
     command_start={""},
     command_sep={""},
 )
+restore_runtime_logging()
 
 # 显示启动信息
 @nonebot.get_driver().on_startup

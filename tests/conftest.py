@@ -69,9 +69,6 @@ _PROTECTED_FILES = [
 _PROTECTED_FILE_BASELINE = {path: _hash_file(path) for path in _PROTECTED_FILES}
 _GENERATED_DIR_BASELINE = {
     _real_project / "data": _snapshot_files(_real_project / "data"),
-    _real_project / "src" / "plugins" / "DicePP" / "Data": _snapshot_files(
-        _real_project / "src" / "plugins" / "DicePP" / "Data"
-    ),
 }
 _TEST_BOT_CONFIG_BASELINE = _snapshot_files(
     _real_project / "config" / "bots",
