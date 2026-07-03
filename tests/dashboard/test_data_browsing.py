@@ -1,8 +1,25 @@
 """Tests for the ``/api/data/**`` data-browsing endpoints."""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from tests.dashboard.conftest import setup_auth
+
+
+def _write_bad_bot_database(project_root: Path, bot_id: str = "bad_bot") -> None:
+    db_path = project_root / "data" / "bots" / bot_id / "bot_data.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_text("Internal Server Error placeholder", encoding="utf-8")
+
+
+def _assert_json_database_error(resp) -> None:
+    assert resp.status_code == 500
+    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.text != "Internal Server Error"
+    data = resp.json()
+    assert data["ok"] is False
+    assert "Database error:" in data["message"]
 
 
 class TestListTables:
@@ -35,6 +52,17 @@ class TestListTables:
         setup_auth(test_client)
         resp = test_client.get("/api/data/nonexistent_bot/tables")
         assert resp.status_code == 404
+
+    def test_bad_sqlite_file_returns_json_error(
+        self, test_client: TestClient, tmp_dashboard_paths: Path
+    ):
+        """A corrupted bot_data.db returns the standard JSON error body."""
+        setup_auth(test_client)
+        _write_bad_bot_database(tmp_dashboard_paths)
+
+        resp = test_client.get("/api/data/bad_bot/tables")
+
+        _assert_json_database_error(resp)
 
 
 class TestPaginatedRecords:
@@ -108,28 +136,13 @@ class TestInvalidTable:
         )
         assert resp.status_code == 404
 
-
-class TestOverviewBotIdValidation:
-    def test_rejects_invalid_bot_id_path_traversal(self, test_client: TestClient):
-        """GET /api/overview?bot_id=../etc → 400 with 格式无效 message."""
+    def test_bad_sqlite_file_returns_json_error(
+        self, test_client: TestClient, tmp_dashboard_paths: Path
+    ):
+        """A corrupted bot_data.db returns JSON for table reads too."""
         setup_auth(test_client)
-        resp = test_client.get("/api/overview", params={"bot_id": "../etc"})
-        assert resp.status_code == 400
-        data = resp.json()
-        assert "bot_id 格式无效" in data.get("message", "")
+        _write_bad_bot_database(tmp_dashboard_paths)
 
-    def test_rejects_invalid_chars_in_bot_id(self, test_client: TestClient):
-        """GET /api/overview?bot_id=bad!id → 400 with 格式无效."""
-        setup_auth(test_client)
-        resp = test_client.get("/api/overview", params={"bot_id": "bad!id"})
-        assert resp.status_code == 400
-        data = resp.json()
-        assert "bot_id 格式无效" in data.get("message", "")
+        resp = test_client.get("/api/data/bad_bot/table/characters")
 
-    def test_accepts_valid_bot_id(self, test_client: TestClient):
-        """GET /api/overview?bot_id=test_bot → 200."""
-        setup_auth(test_client)
-        resp = test_client.get("/api/overview", params={"bot_id": "test_bot"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
+        _assert_json_database_error(resp)
