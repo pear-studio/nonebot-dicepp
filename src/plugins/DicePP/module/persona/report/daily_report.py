@@ -11,11 +11,11 @@ from core.bot import Bot
 from core.command.const import DPP_COMMAND_FLAG_DICT, DPP_COMMAND_FLAG_ROLL, DPP_COMMAND_FLAG_CHAR, \
     DPP_COMMAND_FLAG_QUERY, DPP_COMMAND_FLAG_FUN, DPP_COMMAND_FLAG_CHAT, DPP_COMMAND_FLAG_MANAGE, \
     DPP_COMMAND_FLAG_DRAW, DPP_COMMAND_FLAG_DND, DPP_COMMAND_FLAG_HELP, DPP_COMMAND_FLAG_INFO, \
-    DPP_COMMAND_FLAG_HUB, DPP_COMMAND_FLAG_BATTLE
+    DPP_COMMAND_FLAG_HUB, DPP_COMMAND_FLAG_BATTLE, DPP_COMMAND_FLAG_MACRO
 from core.statistics import UserStatInfo, GroupStatInfo
 from ..data.models import MessageType
 from ..gateway.port import MessagePort
-from utils.time import wall_now, int_to_datetime
+from utils.time import wall_now
 from utils.logger import logger
 
 _DIARY_UNAVAILABLE = "今日日记未生成"
@@ -31,6 +31,7 @@ _FLAG_DISPLAY_ORDER = [
     DPP_COMMAND_FLAG_DRAW,
     DPP_COMMAND_FLAG_DND,
     DPP_COMMAND_FLAG_HELP,
+    DPP_COMMAND_FLAG_MACRO,
     DPP_COMMAND_FLAG_INFO,
     DPP_COMMAND_FLAG_HUB,
     DPP_COMMAND_FLAG_BATTLE,
@@ -108,10 +109,7 @@ class DailyReportGenerator:
         lines = ["=== 即时快照（今天到目前为止） ===", ""]
 
         au = core_stats["active_users"]
-        lines.append(f"活跃用户 {au['total']} 人 (群聊 {au['group']} / 私聊 {au['private']}) · "
-                     f"活跃于 {core_stats['active_groups']} 个群")
-        lines.append("")
-        lines.append(f"新用户 +{core_stats['new_users']} · 新群 +{core_stats['new_groups']}")
+        lines.append(f"活跃用户 {au['total']} 人 · 活跃于 {core_stats['active_groups']} 个群")
         lines.append("")
 
         msg = core_stats["msg"]
@@ -167,13 +165,8 @@ class DailyReportGenerator:
         # 活跃用户与群
         au = stats["active_users"]
         lines.append(
-            f"活跃用户 {au['total']} 人 (群聊 {au['group']} / 私聊 {au['private']})"
-            f" · 活跃于 {stats['active_groups']} 个群"
+            f"活跃用户 {au['total']} 人 · 活跃于 {stats['active_groups']} 个群"
         )
-        lines.append("")
-
-        # 新用户与新群
-        lines.append(f"新用户 +{stats['new_users']} · 新群 +{stats['new_groups']}")
         lines.append("")
 
         # 消息与命令总数
@@ -218,15 +211,7 @@ class DailyReportGenerator:
         try:
             all_users = await self._bot.db.user_stat.list_all()
             all_groups = await self._bot.db.group_stat.list_all()
-            tz = self._config.timezone if self._config else "Asia/Shanghai"
-
             val = "cur_day_val" if use_cur_day else "last_day_val"
-
-            # 计算新用户检测的日期范围
-            if use_cur_day:
-                target_date = wall_now(tz).date()
-            else:
-                target_date = (wall_now(tz) - timedelta(days=1)).date()
 
             # 用户维度聚合
             total_msg = group_msg = private_msg = 0
@@ -248,21 +233,13 @@ class DailyReportGenerator:
                     continue
 
                 u_msg = max(0, getattr(info.msg, val))
-                u_msg_g = max(0, getattr(info.msg_group, val))
-                u_msg_p = max(0, getattr(info.msg_private, val))
 
                 if u_msg > 0:
                     active_users_total += 1
-                    if u_msg_g > 0:
-                        active_users_group += 1
-                    if u_msg_p > 0:
-                        active_users_private += 1
 
                 total_msg += u_msg
-                group_msg += u_msg_g
-                private_msg += u_msg_p
 
-                # 命令统计（per-flag + 维度拆分）
+                # 命令统计（per-flag）
                 for flag in DPP_COMMAND_FLAG_DICT:
                     elem = info.cmd.flag_dict.get(flag)
                     if elem:
@@ -270,18 +247,7 @@ class DailyReportGenerator:
                         if c_val > 0:
                             flag_counts[flag] += c_val
                             flag_users[flag].add(row.user_id)
-
-                u_cmd_g = max(0, getattr(info.cmd_group, val))
-                u_cmd_p = max(0, getattr(info.cmd_private, val))
-                group_cmd += u_cmd_g
-                private_cmd += u_cmd_p
-                total_cmd += u_cmd_g + u_cmd_p
-
-                # 新用户检测
-                if info.created_at and info.created_at != 0:
-                    dt = int_to_datetime(info.created_at)
-                    if dt.date() == target_date:
-                        new_users += 1
+                            total_cmd += c_val
 
             # 群维度聚合
             active_groups = 0
@@ -295,10 +261,14 @@ class DailyReportGenerator:
                 g_msg = max(0, getattr(info.msg, val))
                 if g_msg > 0:
                     active_groups += 1
-                if info.created_at and info.created_at != 0:
-                    dt = int_to_datetime(info.created_at)
-                    if dt.date() == target_date:
-                        new_groups += 1
+                group_msg += g_msg
+                for flag in DPP_COMMAND_FLAG_DICT:
+                    elem = info.cmd.flag_dict.get(flag)
+                    if elem:
+                        group_cmd += max(0, getattr(elem, val))
+
+            private_msg = max(0, total_msg - group_msg)
+            private_cmd = max(0, total_cmd - group_cmd)
 
             # 构建 flag_breakdown
             flag_breakdown = {}
@@ -439,9 +409,8 @@ class DailyReportGenerator:
         msg = core_stats["msg"]
         cmd = core_stats["cmd"]
         parts.append(
-            f"活跃用户 {au['total']} 人（群聊 {au['group']} / 私聊 {au['private']}），"
+            f"活跃用户 {au['total']} 人，"
             f"活跃于 {core_stats['active_groups']} 个群，"
-            f"新用户 +{core_stats['new_users']}，"
             f"用户消息 {msg['total']} 条，指令 {cmd['total']} 次。"
         )
         return " ".join(parts)

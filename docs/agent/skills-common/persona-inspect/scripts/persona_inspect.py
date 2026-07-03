@@ -174,22 +174,21 @@ def cmd_user(persona_conn: sqlite3.Connection, core_conn: sqlite3.Connection, ar
     _section("好感度")
     if table_exists(persona_conn, "persona_user_relationships"):
         rel = persona_conn.execute(
-            "SELECT intimacy, passion, trust, secureness, peak_stage, "
+            "SELECT familiarity, peak_familiarity, intimacy, peak_intimacy, reputation, "
             "last_interaction_at, updated_at "
             "FROM persona_user_relationships WHERE user_id=?",
             (uid,)
         ).fetchone()
         if rel:
             composite = round(
-                rel["intimacy"] * 0.3 + rel["passion"] * 0.2
-                + rel["trust"] * 0.3 + rel["secureness"] * 0.2, 2
+                rel["familiarity"] * 0.6 + rel["intimacy"] * 0.4, 2
             )
+            _key_val("familiarity", round(rel["familiarity"], 2))
+            _key_val("peak_familiarity", round(rel["peak_familiarity"], 2))
             _key_val("intimacy", round(rel["intimacy"], 2))
-            _key_val("passion", round(rel["passion"], 2))
-            _key_val("trust", round(rel["trust"], 2))
-            _key_val("secureness", round(rel["secureness"], 2))
+            _key_val("peak_intimacy", round(rel["peak_intimacy"], 2))
             _key_val("composite", composite)
-            _key_val("peak_stage", rel["peak_stage"])
+            _key_val("reputation", round(rel["reputation"], 2))
             _key_val("last_interaction", rel["last_interaction_at"])
         else:
             print("  (无关系记录)")
@@ -233,12 +232,21 @@ def cmd_user(persona_conn: sqlite3.Connection, core_conn: sqlite3.Connection, ar
     _section(f"评分变化 (最近 {limit} 条)")
     if table_exists(persona_conn, "persona_score_history"):
         digest_ok = col_exists(persona_conn, "persona_score_history", "conversation_digest")
-        cols = (
-            "intimacy_delta, passion_delta, trust_delta, secureness_delta, "
-            "composite_before, composite_after, reason" +
-            (", conversation_digest" if digest_ok else "") +
-            ", created_at"
-        )
+        latest_schema = col_exists(persona_conn, "persona_score_history", "familiarity_delta")
+        if latest_schema:
+            cols = (
+                "familiarity_delta, intimacy_delta, reputation_delta, "
+                "composite_before, composite_after, reason" +
+                (", conversation_digest" if digest_ok else "") +
+                ", created_at"
+            )
+        else:
+            cols = (
+                "intimacy_delta, passion_delta, trust_delta, secureness_delta, "
+                "composite_before, composite_after, reason" +
+                (", conversation_digest" if digest_ok else "") +
+                ", created_at"
+            )
         scores = persona_conn.execute(
             f"SELECT {cols} FROM persona_score_history "
             "WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
@@ -246,10 +254,16 @@ def cmd_user(persona_conn: sqlite3.Connection, core_conn: sqlite3.Connection, ar
         ).fetchall()
         if scores:
             for s in reversed(scores):
-                delta = (
-                    f"i={s['intimacy_delta']:+.2f} p={s['passion_delta']:+.2f} "
-                    f"t={s['trust_delta']:+.2f} s={s['secureness_delta']:+.2f}"
-                )
+                if latest_schema:
+                    delta = (
+                        f"f={s['familiarity_delta']:+.2f} i={s['intimacy_delta']:+.2f} "
+                        f"r={s['reputation_delta']:+.2f}"
+                    )
+                else:
+                    delta = (
+                        f"i={s['intimacy_delta']:+.2f} p={s['passion_delta']:+.2f} "
+                        f"t={s['trust_delta']:+.2f} s={s['secureness_delta']:+.2f}"
+                    )
                 comp = f"{s['composite_before']:.1f}→{s['composite_after']:.1f}"
                 reason = s["reason"] or ""
                 if len(reason) > 60:

@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Callable, Set, Awaitable, Protocol, run
 from random import choice
 
 from utils.logger import logger, get_exception_info, configure_log_level
-from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime, get_current_date_int
+from utils.time import str_to_datetime, get_current_date_str, get_current_date_raw, int_to_datetime
 from core.localization import LocalizationManager, LOC_GROUP_ONLY_NOTICE, LOC_PERMISSION_DENIED_NOTICE, LOC_FRIEND_ADD_NOTICE, LOC_GROUP_EXPIRE_WARNING
 from core.config import Paths
 from core.config.loader import ConfigLoader, ConfigValidationError
@@ -35,6 +35,8 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
+
+NICKNAME_ERROR = "UNDEF_NAME"
 
 
 @runtime_checkable
@@ -201,15 +203,7 @@ class Bot:
     def start_up(self, readonly: bool = False):
         self.register_command()
         # Apply persona overrides after commands have registered their loc keys
-        if self.config.persona:
-            self.loc_helper.set_persona(self.config.persona)
-        else:
-            logger.debug("[Bot] persona 未配置，跳过 persona 本地化覆写")
-        if not self.config.persona:
-            logger.warning(
-                "[Bot] bot.config.persona 未设置，Persona 子系统禁用"
-                "（每个 bot 需在 config/bots/{账号}.json 顶层配置 persona 字段）"
-            )
+        self.loc_helper.set_persona(self.config.persona)
 
     async def _safe_update_user_stat(self, user_id: str, updater) -> None:
         """原子更新 user_stat，失败时仅记录日志不抛异常。"""
@@ -393,7 +387,7 @@ class Bot:
         # 检查 PersonaCommand 实例的实际运行状态，而非 config 静态值：
         # config.enabled=True 但 PersonaApp 初始化失败时，实例 enabled=False，
         # 此处应与实例状态同步，避免日报和旧通知双双缺失。
-        from module.persona.command import PersonaCommand
+        from plugins.DicePP.module.persona.command import PersonaCommand
         persona_running = any(
             isinstance(cmd, PersonaCommand) and cmd.enabled
             for cmd in self.command_dict.values()
@@ -535,10 +529,7 @@ class Bot:
         # Refresh subsystems that capture config at construction time
         self._persona_loader.reload()
         self.loc_helper.reset_to_default()
-        if new_cfg.persona:
-            self.loc_helper.set_persona(new_cfg.persona)
-        else:
-            logger.debug("[Bot] persona 未配置，跳过 persona 本地化覆写")
+        self.loc_helper.set_persona(new_cfg.persona)
 
         # Health monitor thresholds
         hc = new_cfg.health_monitor
@@ -671,44 +662,16 @@ class Bot:
         if not self._delay_init_done:
             await self.delay_init_command()
 
-        # 记录昵称
-        # origin: QQ 原始昵称，空值跳过防止覆盖已有记录
-        if self._valid_name(meta.nickname):
-            await self.update_nickname(meta.user_id, "origin", meta.nickname)
-        # card: QQ 群名片，存 {group_id}.card（仅群聊）
-        if meta.group_id:
-            card_key = self._card_key(meta.group_id)
-            card_val = meta.sender.card or ""
-            _existing = await self.db.nickname.get(meta.user_id, card_key)
-            if card_val.strip():
-                if _existing is None or _existing.nickname != card_val:
-                    await self.db.nickname.upsert(
-                        UserNickname(user_id=meta.user_id, group_id=card_key, nickname=card_val)
-                    )
-            elif _existing is not None and meta.sender.card is not None:
-                await self.db.nickname.delete(meta.user_id, card_key)
+        await self.update_nickname(meta.user_id, "origin", meta.nickname)
 
         msg = preprocess_msg(msg)  # 转换中文符号, 转换小写等等
 
         bot_commands: List[BotCommandBase] = []
 
         # 统计收到的消息数量 —— 通过 StatManager 原子更新（写入失败不中断消息处理）
-        def _record_msg(s):
-            if s.created_at == 0:
-                s.created_at = get_current_date_int()
-            s.msg.inc()
-            if meta.group_id:
-                s.msg_group.inc()
-            else:
-                s.msg_private.inc()
-
-        await self._safe_update_user_stat(meta.user_id, _record_msg)
+        await self._safe_update_user_stat(meta.user_id, lambda s: s.msg.inc())
         if meta.group_id:
-            def _record_group_msg(s):
-                if s.created_at == 0:
-                    s.created_at = get_current_date_int()
-                s.msg.inc()
-            await self._safe_update_group_stat(meta.group_id, _record_group_msg)
+            await self._safe_update_group_stat(meta.group_id, lambda s: s.msg.inc())
 
         # 修改meta的permission参数
         # 4:骰主 3:骰管理 2:群主 1:群管理 0:普通人 -1:黑名单
@@ -756,7 +719,7 @@ class Bot:
                     continue
                 # 入站记录（逐 msg_cur 去重）
                 if not recorded and self._inbound_message_hooks:
-                    display_name = await self.get_nickname(meta.user_id, meta.group_id)
+                    display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
                     msg_type = getattr(command, "message_type", None)
                     msg_type_val = msg_type.value if hasattr(msg_type, "value") else str(msg_type or msg_type_default)
                     for hook in self._inbound_message_hooks:
@@ -802,29 +765,16 @@ class Bot:
 
                 # 统计处理的指令情况 —— 写入失败不中断消息处理
                 if command.flag and res_commands:
-                    def _record_cmd(s):
-                        if s.created_at == 0:
-                            s.created_at = get_current_date_int()
-                        s.cmd.record(command)
-                        if meta.group_id:
-                            s.cmd_group.inc()
-                        else:
-                            s.cmd_private.inc()
-
-                    await self._safe_update_user_stat(meta.user_id, _record_cmd)
+                    await self._safe_update_user_stat(meta.user_id, lambda s: s.cmd.record(command))
                     if meta.group_id:
-                        def _record_group_cmd(s):
-                            if s.created_at == 0:
-                                s.created_at = get_current_date_int()
-                            s.cmd.record(command)
-                        await self._safe_update_group_stat(meta.group_id, _record_group_cmd)
+                        await self._safe_update_group_stat(meta.group_id, lambda s: s.cmd.record(command))
 
                 if not should_pass:  # 已经处理过, 不需要再传递给后面的指令
                     break
 
             # 未匹配任何命令的消息：以 ambient 类型记录（不参与 persona 上下文）
             if not recorded and self._inbound_message_hooks:
-                display_name = await self.get_nickname(meta.user_id, meta.group_id)
+                display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
                 for hook in self._inbound_message_hooks:
                     try:
                         await hook(
@@ -928,54 +878,25 @@ class Bot:
         if master_list:
             await self.proxy.process_bot_command(BotSendMsgCommand(self.account, msg, [PrivateMessagePort(master_list[0])]))
 
-    @staticmethod
-    def _valid_name(name: Optional[str]) -> bool:
-        """检查昵称是否非空、非纯空白。"""
-        return name is not None and name.strip() != ""
-
-    @staticmethod
-    def _card_key(group_id: str) -> str:
-        """返回群名片在 nickname 表中的 group_id 键（{group_id}.card）。"""
-        return f"{group_id}.card"
-
     async def get_nickname(self, user_id: str, group_id: str = "") -> str:
         """
         获取用户昵称
         Args:
             user_id: 账号
             group_id: 群号, 为空代表默认
-
-        Fallback 链：群特定 → 全局自定义 → 群名片(card) → QQ昵称(origin) → user_id
         """
-        orig_group_id = group_id
+        if not group_id:
+            group_id = "default"
 
-        # 1. 群特定昵称 (.nn in group) — 仅当有实际群号时
-        if orig_group_id:
-            _nick_row = await self.db.nickname.get(user_id, orig_group_id)
-            if _nick_row and self._valid_name(_nick_row.nickname):
-                return _nick_row.nickname.strip()
-
-        # 2. 全局自定义昵称 (.nn in private)
+        _nick_row = await self.db.nickname.get(user_id, group_id)
+        if _nick_row:
+            return _nick_row.nickname
         _nick_row = await self.db.nickname.get(user_id, "default")
-        if _nick_row and self._valid_name(_nick_row.nickname):
-            return _nick_row.nickname.strip()
-
-        # 3. 群名片 (card, 仅群聊)
-        if orig_group_id:
-            _nick_row = await self.db.nickname.get(user_id, self._card_key(orig_group_id))
-            if _nick_row and self._valid_name(_nick_row.nickname):
-                return _nick_row.nickname.strip()
-
-        # 4. QQ 原始昵称 (origin)
+        if _nick_row:
+            return _nick_row.nickname
         _nick_row = await self.db.nickname.get(user_id, "origin")
-        if _nick_row and self._valid_name(_nick_row.nickname):
-            return _nick_row.nickname.strip()
-
-        # 5. 兜底：QQ号
-        logger.warning(
-            f"[get_nickname] 所有 fallback 均未命中，回退到 user_id"
-            f" (user_id={user_id}, group_id={orig_group_id!r})"
-        )
+        if _nick_row:
+            return _nick_row.nickname
         return user_id
 
     async def update_nickname(self, user_id: str, group_id: str = "", nickname: str = ""):

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 # ── 依赖声明（供 uv sync / pip install 使用）──────────────────────────────────
 [project]
 name = "dicepp"
-version = "3.0.0rc5"
+version = "3.0.0rc4"
 description = "DicePP NoneBot2 Plugin"
 requires-python = ">=3.10"
 dependencies = [
@@ -35,6 +35,8 @@ dependencies = [
     "lark>=1.1.0",
     "websockets>=15.0.1",
     "loguru>=0.7.0",
+    "pystray>=0.19",
+    "pillow>=10.0",
 ]
 
 [project.scripts]
@@ -115,7 +117,6 @@ commit = true
 tag = true
 message = "Bump version: {current_version} → {new_version}"
 tag_name = "v{new_version}"
-pre_commit_hooks = ["uv lock", "git add uv.lock"]
 parse = """(?P<major>0|[1-9]\\d*)\\.(?P<minor>0|[1-9]\\d*)\\.(?P<patch>0|[1-9]\\d*)
 """
 serialize = ["{major}.{minor}.{patch}"]

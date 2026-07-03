@@ -4,12 +4,12 @@
   "_comment3": "  - master: 超级管理员QQ号列表，拥有最高权限",
   "_comment4": "  - admin: 管理员QQ号列表",
   "_comment5": "  - friend_token: 添加好友时的验证口令",
-  "_comment6": "  - persona: 角色卡目录名，对应 content/characters/{name}/。不设置或 null 时不启用 Persona。示例: \"default\", \"qiqi\"",
+  "_comment6": "  - persona: 人设目录名，对应 content/characters/{name}/ 目录下的 character.yaml",
   "_comment7": "  - nickname: 机器人昵称",
 
   "master": [],
   "admin": [],
   "friend_token": [],
-  "persona": null,
+  "persona": "default",
   "nickname": ""
 }

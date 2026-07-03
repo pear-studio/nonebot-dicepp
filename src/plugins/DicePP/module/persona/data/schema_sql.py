@@ -1,10 +1,10 @@
 """
-数据库迁移脚本
+Latest schema SQL fragments for Persona-owned SQLite targets.
 
-创建 Persona 模块所需的表。
-
-所有列定义直接包含在 CREATE TABLE 语句中，不再需要运行时 ALTER 补丁。
-新增索引通过 ``_ensure_indexes`` 幂等补全。
+These constants are not a legacy runtime migration chain. New Persona DBs are
+created directly from the latest schema through SchemaTarget lifecycle.
+Forward migrations for future versions belong on SchemaTarget.migrations or
+SchemaTarget.async_migrations.
 """
 
 # 白名单表
@@ -168,14 +168,19 @@ CREATE TABLE IF NOT EXISTS persona_user_mute (
 # 统一消息流表 (替代 persona_messages + persona_group_conversations)
 CREATE_MESSAGE_STREAM_TABLE = """
 CREATE TABLE IF NOT EXISTS message_stream (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      TEXT NOT NULL,
-    group_id     TEXT NOT NULL DEFAULT '',
-    role         TEXT NOT NULL,
-    type         TEXT NOT NULL DEFAULT 'chat',
-    content      TEXT NOT NULL,
-    display_name TEXT NOT NULL DEFAULT '',
-    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       TEXT NOT NULL,
+    group_id      TEXT NOT NULL DEFAULT '',
+    role          TEXT NOT NULL,
+    type          TEXT NOT NULL DEFAULT 'chat',
+    content       TEXT NOT NULL,
+    display_name  TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    agent_run_id  TEXT DEFAULT '',
+    turn_id       TEXT DEFAULT '',
+    segment_index INTEGER DEFAULT -1,
+    segment_phase TEXT DEFAULT '',
+    image_meta    TEXT DEFAULT ''
 );
 """
 
@@ -187,19 +192,6 @@ ON message_stream(user_id, created_at DESC);
 CREATE_MESSAGE_STREAM_GROUP_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_msgstream_group_time
 ON message_stream(group_id, created_at DESC);
-"""
-
-# 旧表迁移: persona_unified_messages → message_stream
-RENAME_LEGACY_TABLE = """
-ALTER TABLE persona_unified_messages RENAME TO message_stream;
-"""
-
-DROP_LEGACY_USER_INDEX = """
-DROP INDEX IF EXISTS idx_umsgs_user_time;
-"""
-
-DROP_LEGACY_GROUP_INDEX = """
-DROP INDEX IF EXISTS idx_umsgs_group_time;
 """
 
 # 用户 LLM 配置表 (Phase 4) — core_db 侧
@@ -325,15 +317,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_type
 ON persona_agent_events(event_type);
 """
 
-# DM 状态表 (Phase 1 Agent 框架)
-CREATE_DM_STATE_TABLE = """
-CREATE TABLE IF NOT EXISTS persona_dm_state (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    text TEXT DEFAULT '',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
 # SA 状态表 (Phase 1 Agent 框架)
 CREATE_SA_STATE_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_sa_state (
@@ -351,30 +334,6 @@ CREATE TABLE IF NOT EXISTS persona_story_deck (
     type TEXT NOT NULL,
     content TEXT NOT NULL
 );
-"""
-
-# 首次部署前执行，无可保留生产数据。
-# 若后续 DM 状态模型再次变更且生产已有数据，应先添加迁移步骤
-# （如将旧 scratchpad 转为 story_deck 条目）再 DROP。
-DROP_DM_STATE_TABLE = """
-DROP TABLE IF EXISTS persona_dm_state;
-"""
-
-# message_stream 扩展列（Phase M1），用 ALTER TABLE 以避免影响已有 schema
-ALTER_MESSAGE_STREAM_ADD_AGENT_RUN_ID = """
-ALTER TABLE message_stream ADD COLUMN agent_run_id TEXT DEFAULT '';
-"""
-
-ALTER_MESSAGE_STREAM_ADD_TURN_ID = """
-ALTER TABLE message_stream ADD COLUMN turn_id TEXT DEFAULT '';
-"""
-
-ALTER_MESSAGE_STREAM_ADD_SEGMENT_INDEX = """
-ALTER TABLE message_stream ADD COLUMN segment_index INTEGER DEFAULT -1;
-"""
-
-ALTER_MESSAGE_STREAM_ADD_SEGMENT_PHASE = """
-ALTER TABLE message_stream ADD COLUMN segment_phase TEXT DEFAULT '';
 """
 
 # Session 表
@@ -424,8 +383,8 @@ ON persona_session_message(session_id, sequence);
 """
 
 
-# ── 跟角色走 → persona_db（14 张表 + 索引） ──────────────────────
-PERSONA_DB_MIGRATIONS = [
+# 跟角色走 -> persona_db
+PERSONA_SCHEMA_SQL = [
     CREATE_PERSONA_SESSION_TABLE,
     CREATE_PERSONA_SESSION_INDEX,
     CREATE_PERSONA_SESSION_MESSAGE_TABLE,
@@ -457,108 +416,16 @@ PERSONA_DB_MIGRATIONS = [
     CREATE_AGENT_EVENTS_TABLE,
     CREATE_AGENT_EVENTS_RUN_INDEX,
     CREATE_AGENT_EVENTS_TYPE_INDEX,
-    # Phase 1: Agent 框架 — DM / SA 状态表
-    CREATE_DM_STATE_TABLE,
+    # Phase 1: Agent 框架 — SA 状态表
     CREATE_SA_STATE_TABLE,
     # Story Deck 叙事条目图
     CREATE_STORY_DECK_TABLE,
 ]
 
-# ── 留主库 → core_db（4 张表） ──────────────────────────────────
-CORE_DB_MIGRATIONS = [
+# 留主库 -> core_db
+BOT_CORE_SCHEMA_SQL = [
     CREATE_WHITELIST_TABLE,
     CREATE_USER_MUTE_TABLE,
     CREATE_USER_LLM_CONFIG_TABLE,
     CREATE_GLOBAL_SETTINGS_TABLE,
 ]
-
-# Phase 3: message_stream 图片元信息列
-ALTER_MESSAGE_STREAM_ADD_IMAGE_META = """
-ALTER TABLE message_stream ADD COLUMN image_meta TEXT DEFAULT '';
-"""
-
-# message_stream 扩展列 ALTER TABLE（独立列表，因 SQLite 的 ADD COLUMN 非幂等）
-ALTER_MESSAGE_STREAM_COLUMNS = [
-    ALTER_MESSAGE_STREAM_ADD_AGENT_RUN_ID,
-    ALTER_MESSAGE_STREAM_ADD_TURN_ID,
-    ALTER_MESSAGE_STREAM_ADD_SEGMENT_INDEX,
-    ALTER_MESSAGE_STREAM_ADD_SEGMENT_PHASE,
-    ALTER_MESSAGE_STREAM_ADD_IMAGE_META,
-]
-
-# persona_llm_traces 扩展列（Phase 1: reasoning_content 通用化）
-ALTER_LLM_TRACES_ADD_RUN_ID = """
-ALTER TABLE persona_llm_traces ADD COLUMN run_id TEXT DEFAULT '';
-"""
-
-ALTER_LLM_TRACES_ADD_REASONING_CONTENT = """
-ALTER TABLE persona_llm_traces ADD COLUMN reasoning_content TEXT DEFAULT '';
-"""
-
-ALTER_LLM_TRACES_ADD_CACHE_READ = """
-ALTER TABLE persona_llm_traces ADD COLUMN cache_read INTEGER DEFAULT 0;
-"""
-
-ALTER_LLM_TRACES_ADD_CACHE_CREATION = """
-ALTER TABLE persona_llm_traces ADD COLUMN cache_creation INTEGER DEFAULT 0;
-"""
-
-ALTER_LLM_TRACES_ADD_REASONING_TOKENS = """
-ALTER TABLE persona_llm_traces ADD COLUMN reasoning_tokens INTEGER DEFAULT 0;
-"""
-
-ALTER_LLM_TRACES_COLUMNS = [
-    ALTER_LLM_TRACES_ADD_RUN_ID,
-    ALTER_LLM_TRACES_ADD_REASONING_CONTENT,
-    ALTER_LLM_TRACES_ADD_CACHE_READ,
-    ALTER_LLM_TRACES_ADD_CACHE_CREATION,
-    ALTER_LLM_TRACES_ADD_REASONING_TOKENS,
-]
-
-# persona_user_relationships 扩展列（四维→三维模型迁移，幂等 ALTER TABLE）
-ALTER_USER_RELATIONSHIPS_ADD_FAMILIARITY = """
-ALTER TABLE persona_user_relationships ADD COLUMN familiarity REAL DEFAULT 0.0;
-"""
-
-ALTER_USER_RELATIONSHIPS_ADD_PEAK_FAMILIARITY = """
-ALTER TABLE persona_user_relationships ADD COLUMN peak_familiarity REAL DEFAULT 0.0;
-"""
-
-ALTER_USER_RELATIONSHIPS_ADD_PEAK_INTIMACY = """
-ALTER TABLE persona_user_relationships ADD COLUMN peak_intimacy REAL DEFAULT 0.0;
-"""
-
-ALTER_USER_RELATIONSHIPS_ADD_REPUTATION = """
-ALTER TABLE persona_user_relationships ADD COLUMN reputation REAL DEFAULT 100.0;
-"""
-
-ALTER_USER_RELATIONSHIPS_ADD_RECOVERY_DATE = """
-ALTER TABLE persona_user_relationships ADD COLUMN last_reputation_recovery_date TIMESTAMP;
-"""
-
-ALTER_USER_RELATIONSHIPS_COLUMNS = [
-    ALTER_USER_RELATIONSHIPS_ADD_FAMILIARITY,
-    ALTER_USER_RELATIONSHIPS_ADD_PEAK_FAMILIARITY,
-    ALTER_USER_RELATIONSHIPS_ADD_PEAK_INTIMACY,
-    ALTER_USER_RELATIONSHIPS_ADD_REPUTATION,
-    ALTER_USER_RELATIONSHIPS_ADD_RECOVERY_DATE,
-]
-
-# persona_score_history 扩展列（四维→三维模型迁移，幂等 ALTER TABLE）
-ALTER_SCORE_HISTORY_ADD_REPUTATION_DELTA = """
-ALTER TABLE persona_score_history ADD COLUMN reputation_delta REAL DEFAULT 0;
-"""
-
-ALTER_SCORE_HISTORY_ADD_FAMILIARITY_DELTA = """
-ALTER TABLE persona_score_history ADD COLUMN familiarity_delta REAL DEFAULT 0;
-"""
-
-ALTER_SCORE_HISTORY_COLUMNS = [
-    ALTER_SCORE_HISTORY_ADD_REPUTATION_DELTA,
-    ALTER_SCORE_HISTORY_ADD_FAMILIARITY_DELTA,
-]
-
-# share_desire 列清理（Phase 3 业务逻辑已全部移除）
-ALTER_DAILY_EVENTS_DROP_SHARE_DESIRE = """
-ALTER TABLE persona_daily_events DROP COLUMN share_desire;
-"""

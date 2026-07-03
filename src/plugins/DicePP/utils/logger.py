@@ -1,13 +1,16 @@
 import os
 import sys
 import re
-import warnings
 import contextvars
 import traceback
 from pathlib import Path
 from typing import List
 
 from loguru import logger
+
+from utils.stdio import configure_redirected_stdio_utf8
+
+configure_redirected_stdio_utf8()
 
 LOG_FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
@@ -70,86 +73,81 @@ def _patch_extra(record: dict) -> None:
     所有 handler 在格式化前都能拿到安全的默认值。
     """
     record["extra"].setdefault("request_id", "--------")
-    _warn_percent_format(record)
 
 
-_PERCENT_WARNED: set = set()
+def _stderr_colorize() -> bool:
+    isatty = getattr(sys.stderr, "isatty", None)
+    if isatty is None:
+        return False
+    try:
+        return bool(isatty())
+    except Exception:
+        return False
 
-def _warn_percent_format(record: dict) -> None:
-    """检测 Loguru 不支持的 %-格式化字符串，发现时发出一次 Python Warning。
 
-    Loguru 使用 {} 而非 %s/%d/%r，含 % 格式符的消息会把 %s 原样输出。
-    此检查在 patcher 阶段运行（格式化前），访问的是原始消息模板。
-    """
-    msg = record.get("message", "")
-    if not isinstance(msg, str):
-        return
-    if "%" not in msg:
-        return
-    # 检测常见的 Python logging %-格式符
-    if not re.search(r"%[sdr]", msg):
-        return
+_STDERR_HANDLER_ID: int | None = None
 
-    key = (record["file"].name, record["line"], msg[:80])
-    if key in _PERCENT_WARNED:
-        return
-    _PERCENT_WARNED.add(key)
 
-    warnings.warn(
-        f"Loguru 不支持 %-格式化，%%s/%%d/%%r 会被原样输出，请改用 {{}}: "
-        f"{record['file'].name}:{record['line']} — {msg[:120]}",
-        category=UserWarning,
-        stacklevel=2,
+def _add_stderr_handler(level: str) -> int:
+    return logger.add(
+        sys.stderr,
+        format=_safe_format(LOG_FORMAT),
+        level=level.upper(),
+        colorize=_stderr_colorize(),
     )
 
 
-# 移除默认 handler
-logger.remove()
+def _add_file_handlers() -> None:
+    # 全级别持久化日志文件（按天轮转，保留 30 天，压缩归档）
+    # 写入 data/logs/ 目录（挂载的 volume），容器重建后日志不丢失
+    logger.add(
+        os.path.join(_logs_dir, "dicepp.log"),
+        rotation="00:00",
+        retention="30 days",
+        compression="gz",
+        diagnose=False,
+        level="DEBUG",
+        format=_safe_format(FILE_LOG_FORMAT),
+        encoding="utf-8",
+        delay=True,
+    )
 
-# stderr handler（默认 DEBUG 级别，运行时可通过 configure_log_level 调整）
-_STDERR_HANDLER_ID = logger.add(
-    sys.stderr, format=_safe_format(LOG_FORMAT), level="DEBUG", colorize=True,
-)
+    # error 级别独立日志文件（10MB 轮转，方便快速定位错误）
+    logger.add(
+        os.path.join(_logs_dir, "error.log"),
+        rotation="10 MB",
+        diagnose=False,
+        level="ERROR",
+        format=_safe_format(FILE_LOG_FORMAT),
+        encoding="utf-8",
+        delay=True,
+    )
 
-# 全级别持久化日志文件（按天轮转，保留 30 天，压缩归档）
-# 写入 data/logs/ 目录（挂载的 volume），容器重建后日志不丢失
-logger.add(
-    os.path.join(_logs_dir, "dicepp.log"),
-    rotation="00:00",
-    retention="30 days",
-    compression="gz",
-    diagnose=False,
-    level="DEBUG",
-    format=_safe_format(FILE_LOG_FORMAT),
-    encoding="utf-8",
-    delay=True,
-)
 
-# error 级别独立日志文件（10MB 轮转，方便快速定位错误）
-logger.add(
-    os.path.join(_logs_dir, "error.log"),
-    rotation="10 MB",
-    diagnose=False,
-    level="ERROR",
-    format=_safe_format(FILE_LOG_FORMAT),
-    encoding="utf-8",
-    delay=True,
-)
+def restore_runtime_logging(level: str = "DEBUG") -> None:
+    """Restore DicePP handlers after framework logging reconfiguration."""
+    global _STDERR_HANDLER_ID
+    configure_redirected_stdio_utf8()
+    logger.remove()
+    _STDERR_HANDLER_ID = _add_stderr_handler(level)
+    _add_file_handlers()
+    # 配置默认 extra + 全局 patcher，确保所有 handler 都能安全格式化
+    logger.configure(extra={"request_id": "--------"}, patcher=_patch_extra)
 
-# 配置默认 extra + 全局 patcher，确保所有 handler 都能安全格式化
-logger.configure(extra={"request_id": "--------"}, patcher=_patch_extra)
+
+restore_runtime_logging()
 
 
 def configure_log_level(level: str) -> None:
     """运行时调整 stderr handler 日志级别（启动后从 config 读取）。"""
     global _STDERR_HANDLER_ID
     try:
-        logger.remove(_STDERR_HANDLER_ID)
+        if _STDERR_HANDLER_ID is not None:
+            logger.remove(_STDERR_HANDLER_ID)
     except ValueError:
         pass
-    _STDERR_HANDLER_ID = logger.add(
-        sys.stderr, format=_safe_format(LOG_FORMAT), level=level.upper(), colorize=True,
-    )
+    configure_redirected_stdio_utf8()
+    _STDERR_HANDLER_ID = _add_stderr_handler(level)
 
 
 def get_exception_info() -> List[str]:

@@ -4,7 +4,14 @@ from typing import Optional
 import aiosqlite
 
 from core.config.basic import Paths
-from core.data.migrations import MigrationExecutionError, MigrationRunner, default_registry
+from core.data.schema import (
+    BOT_CORE_TARGET,
+    BOT_LOG_TARGET,
+    SchemaLifecycleError,
+    apply_schema_target,
+    current_version,
+    pending_versions,
+)
 from .repository import Repository
 from .log_repository import LogRepository
 from .query_store import QueryStore
@@ -52,7 +59,6 @@ class BotDatabase:
         self._npc_health: Optional[Repository[NPCHealth]] = None
         self._user_config: Optional[Repository[UserConfig]] = None
         self.query: QueryStore = QueryStore()
-        self._migration_runner: Optional[MigrationRunner] = None
 
     @property
     def karma(self) -> Repository[UserKarma]:
@@ -150,6 +156,9 @@ class BotDatabase:
             return
         os.makedirs(self._bot_dir, exist_ok=True)
 
+        apply_schema_target(self._db_path, BOT_CORE_TARGET)
+        apply_schema_target(self._log_db_path, BOT_LOG_TARGET)
+
         self._db = await aiosqlite.connect(self._db_path)
         await self._db.execute("PRAGMA journal_mode=WAL;")
         await self._db.execute("PRAGMA synchronous=NORMAL;")
@@ -160,12 +169,6 @@ class BotDatabase:
         await self._log_db.execute("PRAGMA synchronous=NORMAL;")
         await self._log_db.execute("PRAGMA foreign_keys=ON;")
 
-        self._migration_runner = MigrationRunner(
-            db=self._db,
-            log_db=self._log_db,
-            registry=default_registry(),
-        )
-        await self._migration_runner.migrate_up()
         await self._init_repositories()
 
     async def close(self) -> None:
@@ -191,33 +194,24 @@ class BotDatabase:
         self._group_stat = None
         self._meta_stat = None
         self._npc_health = None
-        self._migration_runner = None
 
         # 关闭 query 数据库连接
         await self.query.close_all()
 
     async def schema_version(self) -> int:
-        if self._migration_runner is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return await self._migration_runner.current_version()
+        return current_version(self._db_path)
 
     async def target_schema_version(self) -> int:
-        if self._migration_runner is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        return await self._migration_runner.latest_version()
+        return BOT_CORE_TARGET.latest_version
 
     async def pending_schema_versions(self) -> list[int]:
-        if self._migration_runner is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
-        pending = await self._migration_runner.pending_migrations()
-        return [migration.version for migration in pending]
+        return pending_versions(self._db_path, BOT_CORE_TARGET)
 
     async def run_migrations(self) -> None:
-        if self._migration_runner is None:
-            raise RuntimeError("Database not connected. Call connect() first.")
         try:
-            await self._migration_runner.migrate_up()
-        except MigrationExecutionError:
+            apply_schema_target(self._db_path, BOT_CORE_TARGET)
+            apply_schema_target(self._log_db_path, BOT_LOG_TARGET)
+        except SchemaLifecycleError:
             raise
 
     async def hub_get(self, key: str) -> Optional[str]:
