@@ -118,8 +118,7 @@ class ToolLoop:
 
         # 提取增量消息
         all_msgs = result.final_messages if result.final_messages else []
-        # 过滤纠正注入（[系统指令] 前缀）
-        new_msgs = _filter_corrections(all_msgs[sent_len:])
+        new_msgs = all_msgs[sent_len:]
 
         return ToolResult(
             new_messages=new_msgs,
@@ -128,25 +127,6 @@ class ToolLoop:
             delivery_performed=result.delivery_performed or False,
             terminated_by=getattr(result, "terminated_by", "") or "",
         )
-
-
-_CORRECTION_PREFIX = "[系统指令]"
-
-
-def _filter_corrections(msgs: list[dict]) -> list[dict]:
-    """过滤掉内部纠正注入消息。"""
-    filtered = [
-        m for m in msgs
-        if not (
-            m.get("role") == "user"
-            and isinstance(m.get("content"), str)
-            and m["content"].startswith(_CORRECTION_PREFIX)
-        )
-    ]
-    removed = len(msgs) - len(filtered)
-    if removed > 0:
-        logger.debug(f"_filter_corrections: removed {removed} correction message(s)")
-    return filtered
 
 
 def _build_collect_registry(

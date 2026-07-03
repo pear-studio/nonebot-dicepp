@@ -238,10 +238,11 @@ class Conversation:
         self._messages.append({"role": role, "content": content})
 
     def add_messages(self, new_messages: List[dict]) -> None:
-        """追加一批消息（纯追加，无过滤）。
+        """追加一批消息至 _messages。
 
-        过滤逻辑（system 角色、[系统指令] 前缀等）由 ToolLoop
-        在返回结果前自净，不进 Conversation。
+        system 角色消息不进 _messages——由 Agent 单独持有，render() 时拼接。
+        [系统指令] 前缀的纠正消息会进入 _messages（有意保留，
+        LLM 通过 system prompt 中的 SYS_INSTRUCTION_NOTICE 理解其含义）。
         """
         for msg in new_messages:
             self._messages.append(msg)

@@ -30,6 +30,7 @@ from .loop import AgentLoop, AgentRunResult
 from .request import AgentRunLimits, ToolUseMode
 from .sinks import DeliverySink, ImageGenerationSink, UsageSink, RunSummarySink
 from .state import AgentRunState
+from .sys_instruction import inject_sys_notice
 from .tool_executor import ToolExecutor, ToolRegistry
 from .tool_bridge import build_registry
 from ..llm.selection import SelectionPolicy, CHAT, CHAT_WITH_IMAGE, SCORING
@@ -209,6 +210,9 @@ class AgentRuntime:
         # T3: 当前消息带图 → 将图片嵌入最后一条 user 消息
         if image_data_urls:
             messages = _embed_images_in_last_user_message(messages, image_data_urls)
+
+        # 统一注入 [系统指令] 说明到 system prompt
+        inject_sys_notice(messages)
 
         return await loop.run(
             messages=messages, state=state, tools=tool_defs,

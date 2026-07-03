@@ -301,9 +301,6 @@ class TestContextBuilderSegmentGuide:
         assert "100" in system
         assert "120" in system
         assert "delay_before" in system
-        assert "【系统消息说明】" in system
-        assert "[系统指令]" in system
-        assert "不是用户输入" in system
 
     def test_segment_guide_reflects_custom_values(self):
         char = self._make_character()

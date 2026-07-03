@@ -47,14 +47,6 @@
     - 影响面：仅限 MiniMax 图生模型的探针路径
     - 风险点：httpx 异常类型与 OpenAI SDK 不同，需确认分类兼容性后再动手
 
-### [B-260702-7b8fc3] AgentRuntime 纠正注入改为元数据标记（非内容匹配），解除 ToolLoop 字符串耦合
-- 创建: 2026-07-02
-- 优先级: P2
-- 类型: refactor
-- 改动量: S
-- 问题表现: _filter_corrections 依赖硬编码 [系统指令] 字符串前缀识别纠正消息，与 AgentRuntime 注入侧字符串耦合。若注入格式变化过滤静默失效。
-- 开发备忘: 在 AgentRuntime 层为纠正消息添加元数据标记（如特殊 role 或 _internal flag），使 ToolLoop._filter_corrections 不依赖内容匹配。影响面: agent/loop.py（注入侧）+ life/tool_loop.py（过滤侧）。
-
 ### [B-260630-1f9286] 工具定义与传入规则梳理 — 统一 required_tool 语义和传递路径
 - 创建: 2026-06-30
 - 优先级: P2
@@ -77,6 +69,14 @@
     - 调用一次轻量 LLM 将 _messages 压缩为叙事摘要，保留关键信息
     - 需评估压缩 LLM 的 token 消耗和延时
     - 影响面: life/agent.py compact_conversation()
+
+### [B-260703-dbcfa2] ToolLoop 统一入口：收口所有 AgentRuntime 直接调用方
+- 创建: 2026-07-03
+- 优先级: P2
+- 类型: refactor
+- 改动量: M
+- 问题表现: chat/session.py、character_agent.py、sa_agent.py、daily_report.py 均绕过 ToolLoop 直接调用 AgentRuntime.run()，与 ToolLoop 的设计定位（统一入口）不一致
+- 开发备忘: 所有调用方改为走 ToolLoop（或 Conversation），notice 注入从 _run_internal() 提升到 ToolLoop 层
 
 ### [B-260630-38ec7f] share_desire 概念重新设计及 share_threshold 死配置清理
 - 创建: 2026-06-30

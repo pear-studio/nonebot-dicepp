@@ -38,6 +38,7 @@ from .request import AgentRunLimits, ToolUseMode
 from .sinks import DeliverySink, ImageGenerationSink
 from .state import AgentRunState
 from .tool_executor import ToolExecutor, ToolRegistry
+from .sys_instruction import make_sys_msg, SYS_INSTRUCTION_PREFIX
 from ..llm.selection import SelectionPolicy, CHAT
 
 def _l1_correction_msg(required_tools: Optional[List[str]] = None) -> dict:
@@ -47,16 +48,11 @@ def _l1_correction_msg(required_tools: Optional[List[str]] = None) -> dict:
         tool_hint = f"必须调用 {tools_str} 工具来输出。"
     else:
         tool_hint = "必须调用工具来完成任务。"
-    return {
-        "role": "user",
-        "content": (
-            f"[系统指令] 你必须调用工具来输出结果，不要直接回复文本。{tool_hint}"
-        ),
-    }
+    return make_sys_msg(f"你必须调用工具来输出结果，不要直接回复文本。{tool_hint}")
 
 _CORRECTION_INTERIM_REASON = "final_required_after_interim"
-_CORRECTION_INTERIM_MSG = (
-    "[系统指令] 你已经发送了中间回复（phase=interim），但还没有给出最终回复。"
+_CORRECTION_INTERIM_TEXT = (
+    "你已经发送了中间回复（phase=interim），但还没有给出最终回复。"
     "请继续完成任务；如果可以答复，请调用 send_reply_segment 并设置 phase=final。"
 )
 
@@ -95,7 +91,11 @@ class AgentRunResult:
     provider: str = ""
     model: str = ""
     final_messages: list = field(default_factory=list)
-    """runtime.run() 结束时 state.messages 的副本，不含内部纠正注入（由调用方过滤）"""
+    """runtime.run() 结束时 state.messages 的完整副本（含内部纠正注入）。
+
+    纠正消息带 [系统指令] 前缀，由 SYS_INSTRUCTION_NOTICE 告知 LLM 其含义，
+    有意保留在历史中以供上下文学习。
+    """
     terminated_by: str = ""  # 终止工具名（"end_conversation" 或空）
 
     def log_if_failed(self, component: str) -> None:
@@ -455,7 +455,7 @@ class AgentLoop:
                         _pending_image_msgs.append({
                             "role": "user",
                             "content": [
-                                {"type": "text", "text": "[系统指令] 以下是你要查看的历史图片内容："},
+                                {"type": "text", "text": f"{SYS_INSTRUCTION_PREFIX} 以下是你要查看的历史图片内容："},
                                 {"type": "image_url", "image_url": {"url": data_url}},
                             ],
                         })
@@ -482,17 +482,15 @@ class AgentLoop:
             if interim_found:
                 # 只有 interim 没有 observation 和 final：注入 correction
                 if state.output_correction_count < self._limits.max_output_corrections:
-                    state.messages.append({
-                        "role": "user",
-                        "content": _CORRECTION_INTERIM_MSG,
-                    })
+                    corr_msg = make_sys_msg(_CORRECTION_INTERIM_TEXT)
+                    state.messages.append(corr_msg)
                     state.output_correction_count += 1
                     await self._event_bus.emit(
                         "CorrectionInjected",
                         CorrectionInjectedPayload(
                             reason=_CORRECTION_INTERIM_REASON,
                             round_index=round_idx,
-                            message=_CORRECTION_INTERIM_MSG,
+                            message=corr_msg["content"],
                         ),
                         state,
                     )
@@ -534,14 +532,11 @@ class AgentLoop:
                     and not _required_succeeded
                     and state.output_correction_count < self._limits.max_output_corrections):
                 missing = [t for t in required_tools if t not in _required_succeeded]
-                hint = {
-                    "role": "user",
-                    "content": (
-                        f"[系统指令] 你还没有调用以下必需工具: {', '.join(missing)}。"
-                        f"请调用这些工具来完成任务。"
-                    ),
-                }
-                state.messages.append(dict(hint))
+                hint = make_sys_msg(
+                    f"你还没有调用以下必需工具: {', '.join(missing)}。"
+                    f"请调用这些工具来完成任务。"
+                )
+                state.messages.append(hint)
                 state.output_correction_count += 1
                 await self._event_bus.emit(
                     "CorrectionInjected",
