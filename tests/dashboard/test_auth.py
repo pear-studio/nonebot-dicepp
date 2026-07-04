@@ -241,7 +241,8 @@ class TestSessionExpiry:
         assert _count_sessions(test_client) == 2  # one valid + one expired
 
         # Attempt to use the expired token via cookie
-        resp = test_client.get("/api/bots", cookies={"session": "expired_token"})
+        test_client.cookies = {"session": "expired_token"}
+        resp = test_client.get("/api/bots")
         assert resp.status_code == 401
 
         # The expired session should have been pruned during get_session

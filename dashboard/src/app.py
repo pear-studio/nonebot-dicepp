@@ -7,7 +7,7 @@ import sqlite3
 import sys
 import time
 import uuid
-from contextlib import closing
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Optional, cast
 
@@ -58,7 +58,31 @@ logger = logging.getLogger("dashboard")
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
-app = FastAPI(title="DicePP Dashboard", version="1.0.0")
+# ── FastAPI app ───────────────────────────────────────────────────────────────
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: initialize DB, state, and ManagerService."""
+    db_path = str(DashboardPaths.DASHBOARD_DB)
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    _init_db(db_path)
+    app.state.dashboard_db = db_path
+    app.state.dashboard_paths = DashboardPaths
+    app.state.login_failures = {}
+    # SSE 订阅者列表是进程内结构。
+    # 多 worker 部署 (uvicorn --workers > 1) 时，
+    # broadcast_status 仅推送给同一 worker 上的 SSE 客户端。
+    app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
+    app.state.manager_service = ManagerService(
+        bot_status_provider=lambda: _compute_bot_statuses(app.state.dashboard_db),
+        db_path=db_path,
+    )
+    app.state.manager_db_path = db_path
+    yield
+
+
+app = FastAPI(title="DicePP Dashboard", version="1.0.0", lifespan=lifespan)
 
 _LOGIN_FAILURE_LIMIT = 5
 _LOGIN_FAILURE_COOLDOWN_SECONDS = 30
@@ -291,28 +315,6 @@ async def _notify_reload(db_path: str, bot_id: Optional[str] = None) -> list[dic
         results.append({"bot_id": bid, "status": "error", "error": "Bot offline"})
 
     return results
-
-
-# ── Startup event ─────────────────────────────────────────────────────────────
-
-
-@app.on_event("startup")
-async def _startup():
-    db_path = str(DashboardPaths.DASHBOARD_DB)
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    _init_db(db_path)
-    app.state.dashboard_db = db_path
-    app.state.dashboard_paths = DashboardPaths
-    app.state.login_failures = {}
-    # SSE 订阅者列表是进程内结构。
-    # 多 worker 部署 (uvicorn --workers > 1) 时，
-    # broadcast_status 仅推送给同一 worker 上的 SSE 客户端。
-    app.state.status_subscribers = []  # list[asyncio.Queue] for SSE push
-    app.state.manager_service = ManagerService(
-        bot_status_provider=lambda: _compute_bot_statuses(app.state.dashboard_db),
-        db_path=db_path,
-    )
-    app.state.manager_db_path = db_path
 
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────

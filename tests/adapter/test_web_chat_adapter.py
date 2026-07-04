@@ -65,7 +65,7 @@ class TestRecvErrorPaths:
             async def recv(self):
                 MockWs.call_count += 1
                 if MockWs.call_count == 1:
-                    raise websockets.exceptions.PayloadTooBig("too big")
+                    raise websockets.exceptions.PayloadTooBig(0, 0)
                 # 第二次调用时退出循环
                 adapter._stop_event.set()
                 return '{"type":"pong"}'
