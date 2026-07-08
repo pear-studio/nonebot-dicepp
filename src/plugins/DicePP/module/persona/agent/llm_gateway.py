@@ -25,17 +25,12 @@ from .events import (
     ModelResponseReceivedPayload,
 )
 from .state import AgentRunState
-from .request import ToolUseMode
-
-
 @dataclass
 class LLMRequest:
     """AgentLoop 向 LLMGateway 发送的单次请求"""
 
     messages: List[dict]
     tools: Optional[List[dict]] = None
-    tool_use_mode: ToolUseMode = ToolUseMode.AUTO
-    required_tools: Optional[List[str]] = None
     temperature: Optional[float] = None
     selection: SelectionPolicy = CHAT
 
@@ -82,7 +77,7 @@ class LLMGateway:
         """核心调用入口。
 
         Args:
-            request: LLMRequest 包含 messages, tools, tool_use_mode 等
+            request: LLMRequest 包含 messages, tools 等
             state: 当前 run state（用于写入事件）
             timeout: 可覆盖超时
             run_id: 关联 agent_runs 表
@@ -240,6 +235,9 @@ class LLMGateway:
                     cache_read=resp.usage.cache_read,
                     cache_creation=resp.usage.cache_creation,
                     reasoning_tokens=resp.usage.reasoning,
+                    usage_status=resp.usage.usage_status,
+                    usage_raw_json=resp.usage.usage_raw_json,
+                    usage_note=resp.usage.usage_note,
                 )
 
                 return LLMGatewayResult(
@@ -274,15 +272,18 @@ class LLMGateway:
         cache_creation: int = 0,
         reasoning_tokens: int = 0,
         error: str = "",
+        usage_status: str = "",
+        usage_raw_json: str = "",
+        usage_note: str = "",
     ) -> None:
         """写入 persona_llm_traces 记录（成功/失败统一入口）。"""
         if not self._router.data_store or not self._router.trace_enabled:
             return
         try:
             trace = LLMTraceRecord(
-                session_id=run_id,
-                user_id=state.user_id,
-                group_id=state.group_id,
+                interaction_id=state.interaction_id or run_id,
+                user_id=getattr(state, "user_id", "") or "",
+                group_id=getattr(state, "group_id", "") or "",
                 run_id=run_id,
                 model=model_name,
                 tier=request.selection.category,
@@ -307,14 +308,13 @@ class LLMGateway:
                 cache_read=cache_read,
                 cache_creation=cache_creation,
                 reasoning_tokens=reasoning_tokens,
+                usage_status=usage_status,
+                usage_raw_json=usage_raw_json,
+                usage_note=usage_note,
             )
             await self._router.data_store.add_llm_trace(trace)
         except Exception as e:
             logger.warning(f"写入 LLM trace 失败: {e}")
-
-    async def increment_usage(self, user_id: str) -> None:
-        """增加用量计数（由 UsageSink 调用）。"""
-        await self._router.increment_usage(user_id)
 
 
 def _normalize_tool_calls(resp: LLMResponse) -> List[dict]:

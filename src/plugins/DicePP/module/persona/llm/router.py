@@ -266,6 +266,26 @@ class LLMRouter:
         ).strftime("%Y-%m-%d")
         await self.data_store.increment_daily_usage(user_id, today)
 
+    async def check_daily_quota(self, user_id: str) -> None:
+        """检查每日配额，超限时 raise QuotaExceeded。
+
+        仅在 quota_check_enabled 且 data_store 可用时检查。
+        """
+        if not self.quota_check_enabled:
+            return
+        if not self.data_store:
+            return
+        from utils.time import wall_now
+        today = wall_now(
+            self.config.timezone if self.config else "Asia/Shanghai"
+        ).strftime("%Y-%m-%d")
+        current = await self.data_store.get_daily_usage(user_id, today)
+        if current >= self.daily_limit:
+            raise QuotaExceeded(
+                f"今日 LLM 调用次数已达上限 ({self.daily_limit})，"
+                f"请明天再试或配置自己的 API Key"
+            )
+
     def get_stats(self) -> Dict[str, Any]:
         return {k: v.copy() for k, v in self.stats.items()}
 

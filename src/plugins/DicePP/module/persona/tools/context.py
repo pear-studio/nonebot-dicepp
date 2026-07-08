@@ -1,6 +1,5 @@
-"""工具执行上下文 — 运行时注入的依赖"""
+"""工具执行上下文 — 运行时注入的依赖 (T6: 仅保留 SendPort 协议)"""
 from typing import Any, Optional, Protocol
-from dataclasses import dataclass
 
 
 class SendPort(Protocol):
@@ -20,19 +19,3 @@ class SendPort(Protocol):
         *,
         skip_history_record: Optional[bool] = None,
     ) -> bool: ...
-
-
-@dataclass
-class ToolContext:
-    """工具执行上下文 — 运行时注入的依赖"""
-
-    user_id: str = ""
-    group_id: str = ""              # 私聊时为 ""
-    store: Any = None
-    send: Optional[SendPort] = None
-    segment_dispatcher: Optional[Any] = None
-    segment_state: Optional[Any] = None
-    query: Any = None          # QueryStore 实例
-    resolve_db: Any = None     # Callable[[str, str], Awaitable[str]]
-    collected_args: Optional[list] = None  # life 工具收集型 executor 写入
-    timezone: str = "Asia/Shanghai"  # 配置时区，供工具确定"今天"

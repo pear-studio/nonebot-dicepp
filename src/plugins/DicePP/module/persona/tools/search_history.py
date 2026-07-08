@@ -1,67 +1,53 @@
 """关键词搜索聊天记录 — search_history"""
-from .context import ToolContext
-from .registry import ToolDef
+from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
+from pydantic import BaseModel, Field
 
 LIMIT_MIN = 1
 LIMIT_MAX = 50
 
-SEARCH_HISTORY_TOOL = ToolDef(
+class _SearchHistoryArgs(BaseModel):
+    """关键词搜索聊天记录参数"""
+    keyword: str = Field(..., description="搜索关键词（必填）")
+    limit: int | None = Field(default=10, ge=LIMIT_MIN, le=LIMIT_MAX, description=f"返回条数（{LIMIT_MIN}-{LIMIT_MAX}）")
+    days: int | None = Field(default=30, ge=1, le=365, description="搜索最近 N 天的记录（1-365）")
+    user_id: str | None = Field(default=None, description="按用户 ID 过滤（可选）")
+
+
+async def _search_history_handler(parsed: BaseModel, ctx: ToolExecutionContext) -> ToolResult:
+    return ToolResult(observation="ok")
+
+
+SEARCH_HISTORY_TOOL = ToolSpec(
     name="search_history",
     description=(
         "按关键词搜索聊天记录。类似 grep 命令，keyword 必填。"
         "私聊和群聊均可使用。"
     ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "keyword": {
-                "type": "string",
-                "description": "搜索关键词（必填）",
-            },
-            "limit": {
-                "type": "integer",
-                "description": f"返回条数（{LIMIT_MIN}-{LIMIT_MAX}）",
-                "default": 10,
-                "minimum": LIMIT_MIN,
-                "maximum": LIMIT_MAX,
-            },
-            "days": {
-                "type": "integer",
-                "description": "搜索最近 N 天的记录（1-365）",
-                "default": 30,
-                "minimum": 1,
-                "maximum": 365,
-            },
-            "user_id": {
-                "type": "string",
-                "description": "按用户 ID 过滤（可选）",
-            },
-        },
-        "required": ["keyword"],
-    },
+    args_schema=_SearchHistoryArgs,
+    handler=_search_history_handler,
 )
 
 
-def make_search_history_executor(search_max_chars: int):
-    """创建 search_history 执行器"""
+def build_search_history_tool(store, user_id="", group_id="", search_max_chars: int = 2000) -> ToolSpec:
+    """构建 search_history 工具 (T6 新路径)"""
 
     from .formatter import format_message_results
 
-    async def executor(args: dict, ctx: ToolContext) -> str:
-        if ctx.store is None:
-            return "搜索功能不可用"
+    async def handler(parsed: BaseModel, ctx: ToolExecutionContext) -> ToolResult:
+        if store is None:
+            return ToolResult(observation="搜索功能不可用")
 
-        keyword = (args.get("keyword") or "").strip()
+        keyword = (parsed.keyword or "").strip()
         if not keyword:
-            return "请提供搜索关键词"
+            return ToolResult(observation="请提供搜索关键词")
 
-        limit = max(LIMIT_MIN, min(LIMIT_MAX, args.get("limit", 10)))
-        days = max(1, min(365, args.get("days", 30)))
-        filter_user_id = args.get("user_id") or None
+        limit = max(LIMIT_MIN, min(LIMIT_MAX, parsed.limit or 10))
+        days = max(1, min(365, parsed.days or 30))
+        filter_user_id = parsed.user_id or None
 
-        results = await ctx.store.search_messages(
-            group_id=ctx.group_id,
-            user_id=ctx.user_id,
+        results = await store.search_messages(
+            group_id=group_id,
+            user_id=user_id,
             filter_user_id=filter_user_id,
             keyword=keyword,
             hours_back=days * 24,
@@ -69,8 +55,13 @@ def make_search_history_executor(search_max_chars: int):
         )
 
         if not results:
-            return f"未找到包含 '{keyword}' 的聊天记录"
+            return ToolResult(observation=f"未找到包含 '{keyword}' 的聊天记录")
 
-        return format_message_results(results, max_chars=search_max_chars)
+        return ToolResult(observation=format_message_results(results, max_chars=search_max_chars))
 
-    return executor
+    return ToolSpec(
+        name="search_history",
+        description="按关键词搜索聊天记录。类似 grep 命令，keyword 必填。私聊和群聊均可使用。",
+        args_schema=_SearchHistoryArgs,
+        handler=handler,
+    )

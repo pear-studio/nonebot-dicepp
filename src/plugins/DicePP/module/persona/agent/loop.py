@@ -4,7 +4,7 @@
 - 维护 messages、round、tool round、correction count
 - 调 LLMGateway.complete()
 - 处理 tool_calls
-- 调 ToolExecutor.execute_many()
+- 调 ToolExecutor.execute_many()（旧路径）/ 直接执行 ToolKit handler（新路径）
 - 根据 tool/action 结果决定继续、纠正、结束或失败
 - 产生 agent-level events
 
@@ -17,97 +17,41 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
+from pydantic import BaseModel, ValidationError
 from utils.logger import logger
 
-from .actions import EffectKind, SendMessageAction, GenerateImageAction
 from .event_bus import AgentEventBus
 from .events import (
-    AgentRunFinishedPayload,
     AgentWarningPayload,
-    CorrectionInjectedPayload,
-    ModelRequestPreparedPayload,
-    ModelResponseReceivedPayload as ModelRespPayload,
 )
 from .llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
-from .request import AgentRunLimits, ToolUseMode
-from .sinks import DeliverySink, ImageGenerationSink
-from .state import AgentRunState
-from .tool_executor import ToolExecutor, ToolRegistry
-from .sys_instruction import make_sys_msg, SYS_INSTRUCTION_PREFIX
-from ..llm.selection import SelectionPolicy, CHAT
-
-def _l1_correction_msg(required_tools: Optional[List[str]] = None) -> dict:
-    """构建 L1 纠正消息，可选指名具体必需工具。"""
-    if required_tools:
-        tools_str = "、".join(required_tools)
-        tool_hint = f"必须调用 {tools_str} 工具来输出。"
-    else:
-        tool_hint = "必须调用工具来完成任务。"
-    return make_sys_msg(f"你必须调用工具来输出结果，不要直接回复文本。{tool_hint}")
-
-_CORRECTION_INTERIM_REASON = "final_required_after_interim"
-_CORRECTION_INTERIM_TEXT = (
-    "你已经发送了中间回复（phase=interim），但还没有给出最终回复。"
-    "请继续完成任务；如果可以答复，请调用 send_reply_segment 并设置 phase=final。"
+from .message_buffer import MessageBuffer
+from .output_collector import OutputCollector
+from .runtime_types import (
+    AgentRunResult as RunResult,
+    BillingEntry,
+    BillingSummary,
+    LoopLimits,
+    OutputSpec,
+    RunCompletion,
+    RunOutput,
+    ToolExecutionContext,
+    ToolKit,
+    ToolResult,
+    UsageReport,
 )
 
-# 工具排序常量：vision 工具 > 其他 > send_reply_segment
-_VISION_TOOLS = frozenset({"generate_image"})
+from .state import AgentRunState
+from .sys_instruction import make_sys_msg
+from ..llm.selection import SelectionPolicy
 
-# 终止工具：即使不在 required_tools 中也允许调用，调用后立即终止循环
-_TERMINATION_TOOLS: frozenset[str] = frozenset({"end_conversation"})
-
-
-def _tool_sort_key(tc: dict) -> int:
-    name = tc["name"]
-    if name in _VISION_TOOLS:
-        return 0
-    if name == "send_reply_segment":
-        return 2
-    return 1
-
-
-@dataclass
-class AgentRunResult:
-    """AgentLoop.run() 的返回值 — 替代旧 LoopResult"""
-
-    run_id: str
-    turn_id: str
-    status: str
-    final_reason: str
-    final_text: str
-    delivery_performed: bool
-    tokens_input: int = 0
-    tokens_output: int = 0
-    tool_rounds: int = 0
-    warning_count: int = 0
-    sink_failure_count: int = 0
-    error: str = ""
-    provider: str = ""
-    model: str = ""
-    final_messages: list = field(default_factory=list)
-    """runtime.run() 结束时 state.messages 的完整副本（含内部纠正注入）。
-
-    纠正消息带 [系统指令] 前缀，由 SYS_INSTRUCTION_NOTICE 告知 LLM 其含义，
-    有意保留在历史中以供上下文学习。
-    """
-    terminated_by: str = ""  # 终止工具名（"end_conversation" 或空）
-
-    def log_if_failed(self, component: str) -> None:
-        """若非正常完成，打一条自包含的 warning 日志。"""
-        if self.status == "completed":
-            return
-        logger.warning(
-            f"[{component}] AgentLoop 未正常完成: status={self.status}, "
-            f"reason={self.final_reason}, error={self.error}, "
-            f"tokens=({self.tokens_input}/{self.tokens_output}), "
-            f"rounds={self.tool_rounds}, warnings={self.warning_count}"
-        )
 
 
 class AgentLoop:
@@ -116,520 +60,436 @@ class AgentLoop:
     def __init__(
         self,
         llm_gateway: LLMGateway,
-        tool_executor: ToolExecutor,
-        event_bus: AgentEventBus,
-        delivery_sink: Optional[DeliverySink] = None,
-        image_sink: Optional[ImageGenerationSink] = None,
-        limits: Optional[AgentRunLimits] = None,
+        event_bus: Optional[AgentEventBus] = None,
+        limits: Optional[LoopLimits] = None,
     ) -> None:
         self._llm = llm_gateway
-        self._executor = tool_executor
         self._event_bus = event_bus
-        self._delivery = delivery_sink
-        self._image = image_sink
-        self._limits = limits or AgentRunLimits()
+
+        self._limits = limits or LoopLimits()
+
+
+
+    # ── 新路径：ToolKit + OutputSpec ──────────────────────────────
 
     async def run(
         self,
-        messages: List[dict],
+        *,
+        buffer: MessageBuffer,
         state: AgentRunState,
-        tools: Optional[List[dict]] = None,
-        tool_use_mode: ToolUseMode = ToolUseMode.AUTO,
-        required_tools: Optional[List[str]] = None,
-        temperature: Optional[float] = None,
-        timeout: Optional[int] = None,
-        selection: Optional[SelectionPolicy] = None,
-    ) -> AgentRunResult:
-        """执行一次 Agent run。
+        toolkit: ToolKit,
+        output_spec: OutputSpec | None,
+        limits: LoopLimits,
+        selection: SelectionPolicy,
+        interaction_id: str,
+    ) -> RunResult:
+        """ToolKit + OutputSpec 分流执行。
 
         Args:
-            messages: 初始消息列表
-            state: 运行时状态（会被修改）
-            tools: OpenAI 格式的工具定义列表
-            tool_use_mode: 工具使用策略
-            required_tools: REQUIRED_ONE_OF 模式下的必需工具名列表
-            temperature: 模型温度
-            timeout: 超时秒数
-
-        Returns:
-            AgentRunResult
+            buffer: 消息缓冲区（含 initial messages）
+            state: 运行时状态
+            toolkit: 普通工具集
+            output_spec: 最终输出协议（None 时允许直接文本完成）
+            limits: 循环约束
+            selection: 模型选择策略
+            interaction_id: caller-owned orchestration id
         """
-        state.messages = list(messages)
+        output_collector = OutputCollector(output_spec) if output_spec else None
+        billing = BillingSummary()
+        correction_streak = 0
+        final_output: RunOutput | None = None
         round_idx = 0
-        total_tokens_in = 0
-        total_tokens_out = 0
         provider = ""
         model = ""
-        # 跟踪本轮 run 中哪些 required 工具执行成功过（用于出口软检查）
-        _required_succeeded: set = set()
-        # 工具错误计数: {(tool_name, round): count}
-        _tool_err: dict = {}
 
-        while round_idx < self._limits.max_rounds:
-            effective_selection = selection
+        # 组装 LLM schemas
+        llm_tools: list[dict] = list(toolkit.get_openai_schemas())
+        if output_collector is not None:
+            llm_tools.append(output_collector.get_openai_schema())
 
-            # ── 构造 LLM 请求 ──
+        while round_idx < limits.max_rounds:
+            messages = buffer.get_messages()
             req = LLMRequest(
-                messages=state.messages,
-                tools=tools,
-                tool_use_mode=tool_use_mode,
-                required_tools=required_tools,
-                temperature=temperature,
-                selection=effective_selection or CHAT,
+                messages=messages,
+                tools=llm_tools if llm_tools else None,
+                temperature=None,
+                selection=selection,
             )
 
-            await self._event_bus.emit(
-                "ModelRequestPrepared",
-                ModelRequestPreparedPayload(
-                    round_index=round_idx,
-                    tool_use_mode=tool_use_mode.value,
-                    required_tools=required_tools or [],
-                    message_count=req.message_count,
-                    tool_count=req.tool_count,
-                ),
-                state,
-            )
-
-            # ── 调用 LLM ──
+            # LLM 调用
             try:
                 result = await self._llm.complete(
-                    request=req,
-                    state=state,
-                    timeout=timeout,
-                    run_id=state.run_id,
+                    request=req, state=state, timeout=None, run_id=state.run_id,
                 )
             except Exception as e:
-                logger.debug(f"[AgentLoop] LLM 调用失败: {type(e).__name__}: {e}")
-                logger.error(f"AgentLoop LLM 调用失败: {e}")
-                return await self._finish(state, "failed", "llm_error", total_tokens_in, total_tokens_out, is_error=True)
+                logger.warning(f"[AgentLoop] LLM 调用失败: {e}")
+                return RunResult(
+                    run_id=state.run_id,
+                    interaction_id=interaction_id,
+                    completion=RunCompletion(kind="failed", code="llm_error", message=str(e)),
+                    output=final_output,
+                    message_delta=buffer.get_delta(),
+                    billing=billing,
+                )
 
-            total_tokens_in += result.usage.get("input", 0)
-            total_tokens_out += result.usage.get("output", 0)
+            # 累计 billing
+            self._accumulate_billing(billing, result, provider, model)
             provider = result.provider
             model = result.model
 
-            # ── 处理响应 ──
             content = result.content or ""
             tool_calls = result.tool_calls
 
-            required_tool_output = (
-                bool(tools)
-                and tool_use_mode == ToolUseMode.REQUIRED_ONE_OF
-            )
+            # ── 无工具调用时的处理 ──
+            if not tool_calls:
+                if output_spec is None:
+                    if content.strip():
+                        # 允许直接文本完成
+                        final_output = RunOutput(text=content.strip(), call_index=None)
+                        return RunResult(
+                            run_id=state.run_id,
+                            interaction_id=interaction_id,
+                            completion=RunCompletion(kind="completed", code="direct_content"),
+                            output=final_output,
+                            message_delta=buffer.get_delta(),
+                            billing=billing,
+                        )
+                    else:
+                        # 空响应 → failed
+                        return RunResult(
+                            run_id=state.run_id,
+                            interaction_id=interaction_id,
+                            completion=RunCompletion(
+                                kind="failed", code="empty_response",
+                                message="模型返回空响应",
+                            ),
+                            output=None,
+                            message_delta=buffer.get_delta(),
+                            billing=billing,
+                        )
+                else:
+                    # output 必需但模型给了直接文本/空响应 → correction
+                    if correction_streak < limits.max_corrections:
+                        correction_streak += 1
+                        self._inject_correction(
+                            buffer, correction_streak,
+                            f"你必须调用 {output_spec.name} 来提交最终结果，不要直接回复文本。",
+                        )
+                        continue
+                    else:
+                        return RunResult(
+                            run_id=state.run_id,
+                            interaction_id=interaction_id,
+                            completion=RunCompletion(
+                                kind="limit_reached", code="max_corrections",
+                                message="output correction 耗尽",
+                            ),
+                            output=final_output,
+                            message_delta=buffer.get_delta(),
+                            billing=billing,
+                        )
 
-            # ── L1 纠正：要求工具输出时，不能直接输出文本或空响应 ──
-            if (state.output_correction_count < self._limits.max_output_corrections
-                    and not tool_calls
-                    and tools
-                    and (not content.strip() or required_tool_output)):
-                correction_msg = _l1_correction_msg(required_tools)
-                state.messages.append(correction_msg)
-                state.output_correction_count += 1
-                await self._event_bus.emit(
-                    "CorrectionInjected",
-                    CorrectionInjectedPayload(
-                        reason="tool_required",
-                        round_index=round_idx,
-                        message=correction_msg["content"],
-                    ),
-                    state,
-                )
-                continue
+            # ── 截断工具调用数 ──
+            if len(tool_calls) > limits.max_tools_per_round:
+                tool_calls = tool_calls[:limits.max_tools_per_round]
 
-            if required_tool_output and not tool_calls:
-                state.warning_count += 1
-                logger.warning(
-                    f"AgentLoop L1 纠正耗尽: 模型在 REQUIRED_ONE_OF 模式下"
-                    f" 连续 {state.output_correction_count} 次未调用工具"
-                )
-                await self._event_bus.emit(
-                    "AgentWarning",
-                    AgentWarningPayload(
-                        code="required_tool_missing",
-                        message="模型在强制工具输出模式下未调用工具",
-                        round_index=round_idx,
-                    ),
-                    state,
-                )
-                return await self._finish(state, "max_output_corrections",
-                                          "required_tool_missing",
-                                          total_tokens_in, total_tokens_out,
-                                          provider, model)
-
-            # ── 无工具 + 有内容 → 直接返回 ──
-            if not tool_calls and content.strip():
-                final_text = content
-                state.final_text = final_text
-                state.delivery_performed = True
-                state.final_reason = "direct_content"
-                return await self._finish(state, "completed", "direct_content",
-                                          total_tokens_in, total_tokens_out, provider, model)
-
-            # ── 无工具 + 无内容（不应发生，兜底返回） ──
-            if not tool_calls and not content.strip():
-                return await self._finish(state, "completed", "empty_response",
-                                          total_tokens_in, total_tokens_out, provider, model)
-
-            # ── structured_collect：只执行 required_tools 中的工具，防止同轮混入非目标工具数据 ──
-            # 终止工具（如 end_conversation）豁免过滤，允许在任何模式下调用
-            if state.mode == "structured_collect" and required_tools:
-                tool_calls = [tc for tc in tool_calls
-                              if tc["name"] in required_tools or tc["name"] in _TERMINATION_TOOLS]
-                if not tool_calls:
-                    continue
-
-            # ── 有限工具轮次：截断 ──
-            if len(tool_calls) > self._limits.max_tools_per_round:
-                logger.warning(
-                    f"工具超限 {len(tool_calls)} > {self._limits.max_tools_per_round}"
-                )
-                tool_calls = tool_calls[:self._limits.max_tools_per_round]
-
-            # ── 工具执行 ──
-            assistant_msg = {
+            # ── 追加 assistant 消息 ──
+            assistant_msg: dict[str, Any] = {
                 "role": "assistant",
-                "content": content or "",
+                "content": content,
                 "tool_calls": [
                     {"id": tc["id"], "type": "function",
                      "function": {"name": tc["name"], "arguments": tc["arguments"]}}
                     for tc in tool_calls
                 ],
             }
-            if result.reasoning_content is not None:
-                assistant_msg["reasoning_content"] = result.reasoning_content
-            state.messages.append(assistant_msg)
+            buffer.add_message(assistant_msg)
 
-            # ── 工具排序：vision 工具 > 其他 > send_reply_segment ──
-            tool_calls = sorted(tool_calls, key=_tool_sort_key)
+            # ── call_index 分配 ──
+            call_index_map: dict[str, int] = {}
+            for i, tc in enumerate(tool_calls):
+                call_index_map[tc["id"]] = i
 
-            tool_results = await self._executor.execute_many(tool_calls, state)
+            # ── same_name_index 计算 ──
+            name_counter: Counter[str] = Counter()
+            same_name_map: dict[str, int] = {}
+            for tc in tool_calls:
+                name_counter[tc["name"]] += 1
+                same_name_map[tc["id"]] = name_counter[tc["name"]] - 1
 
-            state.tool_rounds += 1
-            round_idx += 1
+            # ── 分流：output vs 普通工具（并发执行普通工具）──
+            tool_results: list[dict] = []  # [{tool_call_id, content, status, _is_output, _call_index}]
+            # 同轮多次 output 时，最后一个成功 output 是 candidate
+            candidate_output_idx: int | None = None
+            any_tool_error = False
 
-            # ── 追踪 required 工具成功、工具错误计数 ──
-            tool_errors_this_round: list = []
-            for tc, tr in zip(tool_calls, tool_results):
-                if tr.get("status") == "success":
-                    if required_tools and tc["name"] in required_tools:
-                        _required_succeeded.add(tc["name"])
-                else:
-                    tool_errors_this_round.append((tc, tr))
+            # 第一遍：分类为 output 或普通工具；output 本地解析，普通工具收集执行任务
+            output_tasks: list[dict] = []
+            normal_tasks: list[tuple[dict, "ToolSpec"]] = []
 
-            # ── 检测终止工具（end_conversation）：任一方调用即终止循环 ──
-            if any(tc["name"] == "end_conversation" and tr.get("status") == "success"
-                   for tc, tr in zip(tool_calls, tool_results)):
-                state.final_reason = "end_conversation_called"
-                return await self._finish(state, "completed", "end_conversation_called",
-                                          total_tokens_in, total_tokens_out, provider, model)
-
-            # ── 工具错误纠正 ──
-            if tool_errors_this_round:
-                exceeded = False
-                for tc, tr in tool_errors_this_round:
-                    key = tc["name"]
-                    _tool_err[key] = _tool_err.get(key, 0) + 1
-                    if _tool_err[key] > self._limits.max_tool_corrections:
-                        exceeded = True
-                        logger.warning(
-                            f"工具 {tc['name']} 在第 {round_idx} 轮连续错误超过 "
-                            f"{self._limits.max_tool_corrections} 次: {tr['content']}"
-                        )
-                if exceeded:
-                    state.warning_count += 1
-                    state.error = "tool_corrections_exhausted"
-                    err_tool_names = ", ".join(
-                        sorted(set(tc["name"] for tc, _ in tool_errors_this_round))
-                    )
-                    await self._event_bus.emit(
-                        "AgentWarning",
-                        AgentWarningPayload(
-                            code="tool_corrections_exhausted",
-                            message=(
-                                f"工具 {err_tool_names} 执行错误超过 "
-                                f"{self._limits.max_tool_corrections} 次，已退出"
-                            ),
-                            round_index=round_idx,
-                        ),
-                        state,
-                    )
-                    return await self._finish(state, "max_tool_corrections",
-                                              "tool_corrections_exhausted",
-                                              total_tokens_in, total_tokens_out,
-                                              provider, model)
-
-            # ── 按调用顺序处理 EXTERNAL_ACTION 结果 ──
-            delivery_performed_this_round = False
-            interim_found = False
-            skip_rest = False
-            ordered_results: List[dict] = []
-            _pending_image_msgs: List[dict] = []
-
-            for idx, (tc, tr) in enumerate(zip(tool_calls, tool_results)):
+            for tc in tool_calls:
+                tc_id = tc["id"]
                 tc_name = tc["name"]
-                result_content = tr["content"]
-                action_id = tr.get("_action_id")
+                call_idx = call_index_map[tc_id]
+                same_idx = same_name_map[tc_id]
 
-                if skip_rest:
-                    tr["content"] = "跳过：前面的工具已产生最终输出"
-                    ordered_results.append(tr)
-                    continue
+                if output_collector is not None and tc_name == output_collector.name:
+                    output_tasks.append({
+                        "tc": tc, "call_idx": call_idx, "same_idx": same_idx,
+                    })
+                else:
+                    spec = toolkit.tools.get(tc_name)
+                    normal_tasks.append(({
+                        "tc": tc, "call_idx": call_idx, "same_idx": same_idx,
+                    }, spec))
 
-                # send_reply_segment → DeliverySink
-                if tc_name == "send_reply_segment":
-                    # 从 result_content 解析 phase（executor 返回的 JSON）
-                    try:
-                        action_data = json.loads(result_content)
-                    except (json.JSONDecodeError, TypeError):
-                        action_data = {}
+            # 处理 output（同步，本地解析/校验）
+            for task in output_tasks:
+                tc = task["tc"]
+                call_idx = task["call_idx"]
 
-                    phase = action_data.get("phase", "final")
-                    seg_content = action_data.get("content", result_content)
-
-                    if not action_id or not self._delivery:
-                        ordered_results.append(tr)
-                        continue
-
-                    send_action = SendMessageAction(
-                        content=seg_content,
-                        phase=phase,
-                        delay_before=action_data.get("delay_before", 1.0),
-                        segment_index=idx,
-                        action_id=action_id,
+                tr, parsed = output_collector.collect(tc["arguments"])
+                if tr.status == "success" and parsed is not None:
+                    candidate_output_idx = call_idx
+                    final_output = RunOutput(
+                        arguments=output_collector.build_args_dict(parsed),
+                        call_index=call_idx,
                     )
+                    tool_results.append({
+                        "tool_call_id": tc["id"], "content": tr.observation,
+                        "status": "success", "_is_output": True,
+                        "_call_index": call_idx,
+                    })
+                else:
+                    any_tool_error = True
+                    tool_results.append({
+                        "tool_call_id": tc["id"], "content": tr.observation,
+                        "status": "error", "_is_output": True,
+                        "_call_index": call_idx,
+                    })
 
-                    delivery_ok = await self._delivery.handle_send(
-                        send_action,
-                        state.user_id,
-                        state.group_id,
-                        state.run_id,
-                        state.turn_id,
-                    )
+            # 并发执行普通工具（handler 可能含网络/IO 操作）
+            async def _exec_one(tc_info: dict, spec: "ToolSpec") -> dict:
+                tc = tc_info["tc"]
+                call_idx = tc_info["call_idx"]
+                same_idx = tc_info["same_idx"]
 
-                    if delivery_ok:
-                        delivery_performed_this_round = True
-                        state.delivery_performed = True
-                    else:
-                        state.sink_failures.append(f"send_reply_segment:{send_action.action_id}")
+                if spec is None:
+                    return {
+                        "tool_call_id": tc["id"],
+                        "content": f"工具 {tc['name']} 未注册",
+                        "status": "error", "_is_output": False,
+                        "_call_index": call_idx,
+                    }
 
-                    if phase == "interim":
-                        interim_found = True
-                        state.interim_segment_count += 1
-                    elif phase == "final":
-                        state.final_text = seg_content
-                        state.final_reason = "terminal_final_segment"
+                tr = await self._execute_toolkit_tool(
+                    spec, tc["arguments"], state.run_id,
+                    tc["id"], call_idx, same_idx,
+                )
+                return {
+                    "tool_call_id": tc["id"], "content": tr.observation,
+                    "status": tr.status, "_is_output": False,
+                    "_call_index": call_idx,
+                }
 
-                    # send_reply_segment 不回填模型
-                    tr["content"] = "已发送"
+            if normal_tasks:
+                normal_results: list[dict] = await asyncio.gather(
+                    *[_exec_one(tc_info, spec) for tc_info, spec in normal_tasks],
+                )
+                for nr in normal_results:
+                    if nr["status"] == "error":
+                        any_tool_error = True
+                tool_results.extend(normal_results)
 
-                    if phase == "final":
-                        skip_rest = True
+            # ── output 候选校验：只检查 candidate（最后一个成功 output）后面有无普通工具 ──
+            output_accepted_this_round = False
+            output_invalidated_by_ordering = False
+            if candidate_output_idx is not None:
+                regular_after_candidate = any(
+                    not tr.get("_is_output") and tr["_call_index"] > candidate_output_idx
+                    for tr in tool_results
+                )
+                if regular_after_candidate:
+                    # candidate 后面还有普通工具 → 仅把 candidate 标为无效
+                    output_invalidated_by_ordering = True
+                    for tr in tool_results:
+                        if (tr.get("_is_output")
+                                and tr["_call_index"] == candidate_output_idx
+                                and tr["status"] == "success"):
+                            tr["status"] = "error"
+                            tr["content"] = (
+                                f"输出 {output_spec.name} 无效："
+                                f"后面还有普通工具调用，请先完成所有工具调用后再提交最终输出。"
+                            )
+                    final_output = None
+                else:
+                    output_accepted_this_round = True
 
-                # generate_image → ImageGenerationSink
-                elif tc_name == "generate_image" and action_id and self._image:
-                    try:
-                        action_data = json.loads(result_content)
-                    except (json.JSONDecodeError, TypeError):
-                        action_data = {}
-
-                    gen_action = GenerateImageAction(
-                        prompt=action_data.get("prompt", result_content),
-                        action_id=action_id,
-                    )
-
-                    observation = await self._image.handle_generate(gen_action)
-                    tr["content"] = observation
-
-                # look_at_past_image → 注入图片到上下文
-                elif tc_name == "look_at_past_image":
-                    try:
-                        action_data = json.loads(result_content)
-                    except (json.JSONDecodeError, TypeError):
-                        action_data = {}
-
-                    data_url = action_data.get("data_url")
-                    image_hash = action_data.get("image_hash", "")
-
-                    if data_url:
-                        tr["content"] = f"图片 {image_hash} 已获取"
-                        _pending_image_msgs.append({
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": f"{SYS_INSTRUCTION_PREFIX} 以下是你要查看的历史图片内容："},
-                                {"type": "image_url", "image_url": {"url": data_url}},
-                            ],
-                        })
-
-                ordered_results.append(tr)
-
-            # ── 回填 tool messages ──
-            for tr in ordered_results:
-                state.messages.append({
+            # ── 按 call_index 排序后回填 tool messages ──
+            tool_results.sort(key=lambda tr: tr["_call_index"])
+            for tr in tool_results:
+                content = tr["content"]
+                # list[dict] 多模态 observation 原样保留，不做字符串化
+                if isinstance(content, list):
+                    tool_content: str | list[dict] = content
+                else:
+                    tool_content = str(content)
+                buffer.add_message({
                     "role": "tool",
                     "tool_call_id": tr["tool_call_id"],
-                    "content": tr["content"],
+                    "content": tool_content,
                 })
 
-            # ── 注入 look_at_past_image 图片消息（tool 消息之后，LLM 可见图片）──
-            for img_msg in _pending_image_msgs:
-                state.messages.append(img_msg)
+            round_idx += 1
 
-            # ── 判断下一步 ──
-            if state.final_reason == "terminal_final_segment":
-                return await self._finish(state, "completed", "terminal_final_segment",
-                                          total_tokens_in, total_tokens_out, provider, model)
+            # ── correction streak 管理 ──
+            if any_tool_error or output_invalidated_by_ordering:
+                if not output_accepted_this_round:
+                    correction_streak += 1
+            elif not any_tool_error and not output_invalidated_by_ordering:
+                # 成功推动上下文的工具调用 → 清零
+                correction_streak = 0
 
-            if interim_found:
-                # 只有 interim 没有 observation 和 final：注入 correction
-                if state.output_correction_count < self._limits.max_output_corrections:
-                    corr_msg = make_sys_msg(_CORRECTION_INTERIM_TEXT)
-                    state.messages.append(corr_msg)
-                    state.output_correction_count += 1
-                    await self._event_bus.emit(
-                        "CorrectionInjected",
-                        CorrectionInjectedPayload(
-                            reason=_CORRECTION_INTERIM_REASON,
-                            round_index=round_idx,
-                            message=corr_msg["content"],
-                        ),
-                        state,
-                    )
-                    continue
-                else:
-                    # correction 耗尽
-                    state.warning_count += 1
-                    await self._event_bus.emit(
-                        "AgentWarning",
-                        AgentWarningPayload(
-                            code="interim_limit_exceeded",
-                            message="interim 后 correction 已耗尽",
-                            round_index=round_idx,
-                        ),
-                        state,
-                    )
-                    return await self._finish(state, "max_output_corrections",
-                                              "interim_corrections_exhausted",
-                                              total_tokens_in, total_tokens_out,
-                                              provider, model)
-
-            # ── structured_collect：required 工具执行成功 → 完成 ──
-            if (state.mode == "structured_collect"
-                    and required_tools
-                    and any(
-                        tr.get("status") == "success"
-                        for tc, tr in zip(tool_calls, tool_results)
-                        if tc["name"] in required_tools
-                    )):
-                state.final_reason = "structured_collect_completed"
-                return await self._finish(state, "completed", "structured_collect_completed",
-                                          total_tokens_in, total_tokens_out, provider, model)
-
-            # ── 出口软检查：REQUIRED_ONE_OF 不再在每轮拦截非 required 工具。
-            # LLM 可以自由调用可选工具探索，仅在接近 max_rounds（最后 2 轮）
-            # 且 required 工具从未成功时注入一次性纠正提示。 ──
-            if (required_tools
-                    and round_idx >= max(1, self._limits.max_rounds - 2)
-                    and not _required_succeeded
-                    and state.output_correction_count < self._limits.max_output_corrections):
-                missing = [t for t in required_tools if t not in _required_succeeded]
-                hint = make_sys_msg(
-                    f"你还没有调用以下必需工具: {', '.join(missing)}。"
-                    f"请调用这些工具来完成任务。"
+            # ── output 成功（candidate 后面无普通工具）→ 完成 ──
+            if output_accepted_this_round:
+                return RunResult(
+                    run_id=state.run_id,
+                    interaction_id=interaction_id,
+                    completion=RunCompletion(kind="completed", code="output_collected"),
+                    output=final_output,
+                    message_delta=buffer.get_delta(),
+                    billing=billing,
                 )
-                state.messages.append(hint)
-                state.output_correction_count += 1
-                await self._event_bus.emit(
-                    "CorrectionInjected",
-                    CorrectionInjectedPayload(
-                        reason="required_tool_not_called",
-                        round_index=round_idx,
-                        message=hint["content"],
+
+            # ── 最后一轮前 output reminder（方案 B）──
+            if (output_spec is not None
+                    and round_idx >= limits.max_rounds - 1
+                    and not output_accepted_this_round
+                    and correction_streak < limits.max_corrections):
+                self._inject_correction(
+                    buffer, correction_streak + 1,
+                    f"这是最后一轮，你必须调用 {output_spec.name} 提交最终结果。",
+                )
+                correction_streak += 1
+
+            # ── correction streak 耗尽 ──
+            if correction_streak >= limits.max_corrections and output_spec is not None and final_output is None:
+                return RunResult(
+                    run_id=state.run_id,
+                    interaction_id=interaction_id,
+                    completion=RunCompletion(
+                        kind="limit_reached", code="max_corrections",
+                        message="连续纠错预算耗尽",
                     ),
-                    state,
+                    output=final_output,
+                    message_delta=buffer.get_delta(),
+                    billing=billing,
                 )
-                continue
 
-            # ── 达到最大轮次 ──
-            if round_idx >= self._limits.max_rounds:
-                logger.warning(
-                    "max_rounds(%d) 耗尽: model=%s, output_corrections=%d, "
-                    "required_succeeded=%s, mode=%s",
-                    self._limits.max_rounds, model or "?",
-                    state.output_correction_count,
-                    sorted(_required_succeeded) if _required_succeeded else [],
-                    state.mode,
-                )
-                return await self._finish(state, "max_rounds", "max_rounds",
-                                          total_tokens_in, total_tokens_out, provider, model)
-
-            # 一般继续
-            continue
-
-        # ── 循环结束（max_rounds 耗尽） ──
-        return await self._finish(state, "max_rounds", "max_rounds",
-                                  total_tokens_in, total_tokens_out, provider, model)
-
-    # ── 终止路径 ────────────────────────────────────────────────
-
-    async def _finish(
-        self,
-        state: AgentRunState,
-        status: str,
-        reason: str,
-        tokens_in: int,
-        tokens_out: int,
-        provider: str = "",
-        model: str = "",
-        is_error: bool = False,
-    ) -> AgentRunResult:
-        """统一终止路径：emit terminal event + build result。所有 return 必须走此方法。"""
-        event_type = "AgentRunFailed" if is_error else "AgentRunFinished"
-        event_status = status
-        await self._event_bus.emit(
-            event_type,
-            AgentRunFinishedPayload(
-                status=event_status,
-                reason=reason,
-                delivery_performed=state.delivery_performed,
-                final_text=state.final_text,
-                tokens_input=tokens_in,
-                tokens_output=tokens_out,
-                provider=provider,
-                model=model,
-            ),
-            state,
+        # ── max_rounds 耗尽 ──
+        return RunResult(
+            run_id=state.run_id,
+            interaction_id=interaction_id,
+            completion=RunCompletion(kind="limit_reached", code="max_rounds"),
+            output=final_output,
+            message_delta=buffer.get_delta(),
+            billing=billing,
         )
-        return self._build_result(state, status, reason, tokens_in, tokens_out, provider, model)
 
-    # ── 工具方法 ────────────────────────────────────────────────
+    # ── 辅助方法 ────────────────────────────────────────────────
 
     @staticmethod
-    def _build_result(
-        state: AgentRunState,
-        status: str,
-        reason: str,
-        tokens_in: int,
-        tokens_out: int,
-        provider: str = "",
-        model: str = "",
-    ) -> AgentRunResult:
-        return AgentRunResult(
-            run_id=state.run_id,
-            turn_id=state.turn_id,
-            status=status,
-            final_reason=reason,
-            final_text=state.final_text,
-            delivery_performed=state.delivery_performed,
-            tokens_input=tokens_in,
-            tokens_output=tokens_out,
-            tool_rounds=state.tool_rounds,
-            warning_count=state.warning_count,
-            sink_failure_count=len(state.sink_failures),
-            error=state.error,
-            provider=provider,
-            model=model,
-            final_messages=list(state.messages),
-            terminated_by="end_conversation" if reason == "end_conversation_called" else "",
+    async def _execute_toolkit_tool(
+        spec: "ToolSpec",
+        raw_arguments: str,
+        run_id: str,
+        tool_call_id: str,
+        call_index: int,
+        same_name_index: int,
+    ) -> ToolResult:
+        """执行 ToolKit 中的单个工具。
+
+        完成 JSON parse → Pydantic validation → handler 调用。
+        """
+        # JSON parse
+        try:
+            raw = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
+        except json.JSONDecodeError as e:
+            return ToolResult(observation=f"参数解析失败: {e}", status="error")
+
+        # Pydantic validation
+        try:
+            parsed = spec.args_schema.model_validate(raw)
+        except ValidationError as e:
+            return ToolResult(observation=f"参数校验失败: {e}", status="error")
+
+        # handler 执行
+        ctx = ToolExecutionContext(
+            run_id=run_id,
+            tool_call_id=tool_call_id,
+            call_index=call_index,
+            same_name_index=same_name_index,
         )
+        try:
+            return await spec.handler(parsed, ctx)
+        except Exception as e:
+            logger.warning(f"[AgentLoop] 工具 {spec.name} 执行失败: {e}")
+            return ToolResult(observation=f"工具执行失败: {e}", status="error")
 
+    @staticmethod
+    def _inject_correction(
+        buffer: MessageBuffer, streak: int, text: str,
+    ) -> None:
+        """注入纠正消息到 buffer"""
+        msg = make_sys_msg(text)
+        buffer.add_message(msg)
 
+    @staticmethod
+    def _accumulate_billing(
+        billing: BillingSummary,
+        llm_result: LLMGatewayResult,
+        provider: str,
+        model: str,
+    ) -> None:
+        """从 LLMGatewayResult 累计 BillingEntry。
+
+        临时桥接：从 LLMResult 的 usage dict 提取字段，
+        填充 UsageReport.status / raw_usage / note。
+        后续 provider 层应直接产出 UsageReport。
+        """
+        usage = llm_result.usage
+        if not usage:
+            status: Literal["reported", "missing", "partial"] = "missing"
+            tokens_in = tokens_out = cached_in = cache_create = reasoning = 0
+            raw_usage: dict = {}
+            note = "usage dict 为空，标记为 missing"
+        else:
+            tokens_in = usage.get("input", 0)
+            tokens_out = usage.get("output", 0)
+            cached_in = usage.get("cache_read", 0)
+            cache_create = usage.get("cache_creation", 0)
+            reasoning = usage.get("reasoning", 0)
+            raw_usage = dict(usage)
+            # 全 0 的 usage dict 不可靠，标记为 missing
+            if tokens_in == 0 and tokens_out == 0:
+                status = "missing"
+                note = "usage dict 全 0，不可靠，标记为 missing"
+            else:
+                status = "reported"
+                note = ""
+
+        entry = BillingEntry(
+            provider=llm_result.provider or provider,
+            model=llm_result.model or model,
+            usage=UsageReport(
+                status=status,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cached_tokens_in=cached_in,
+                cache_creation_tokens=cache_create,
+                reasoning_tokens=reasoning,
+                raw_usage=raw_usage,
+                note=note,
+            ),
+        )
+        billing.entries.append(entry)

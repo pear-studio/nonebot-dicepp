@@ -14,9 +14,6 @@ import re
 from typing import Any, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field
 
-from ..agent.tool_executor import ToolSpec, ToolRegistry
-from ..agent.actions import EffectKind
-
 if TYPE_CHECKING:
     from ..data.store import PersonaDataStore
     from ..data.models import Front, Thread
@@ -168,25 +165,34 @@ def parse_injection_key(line: str) -> Optional[str]:
     return key_part if key_part else None
 
 
-# ── 共享工具注册 ────────────────────────────────────────────────
 
+def build_search_story_deck_tool(store: "PersonaDataStore") -> "ToolSpec":
+    """构建 search_story_deck 工具 (T6 新路径，替代 register_search_story_deck)"""
+    from ..agent.runtime_types import (
+        ToolSpec as NewToolSpec,
+        ToolResult as NewToolResult,
+        ToolExecutionContext,
+    )
 
-def register_search_story_deck(registry: ToolRegistry, store: "PersonaDataStore") -> None:
-    """向 registry 注册 search_story_deck 工具。
+    _exec = make_search_story_deck_executor(store)
 
-    DM (_build_extra_registry) 和 SA (build_sa_tool_registry) 共享此注册逻辑，
-    确保 description 和参数模式在两处一致。
-    """
-    registry.register(ToolSpec(
+    async def _handler(args: SearchStoryDeckArgs, ctx: ToolExecutionContext) -> NewToolResult:
+        try:
+            kwargs = args.model_dump()
+            result = await _exec(**kwargs)
+            return NewToolResult(observation=result)
+        except Exception as e:
+            return NewToolResult(observation=f"查询失败: {e}", status="error")
+
+    return NewToolSpec(
         name="search_story_deck",
         description=(
             "查询叙事条目库，以 query 匹配条目的名称和内容。"
             "返回匹配条目列表，精确命中时会附带直接关联的其他条目。"
         ),
         args_schema=SearchStoryDeckArgs,
-        effect=EffectKind.PURE,
-        executor=make_search_story_deck_executor(store),
-    ))
+        handler=_handler,
+    )
 
 
 # ── 工具工厂 ───────────────────────────────────────────────────
@@ -521,46 +527,67 @@ def make_edit_fronts_executor(
     return executor
 
 
-# ── ToolRegistry 构建 ──────────────────────────────────────────
+# ── ToolKit 构建（新路径 T5）───────────────────────────────────
 
 
-def build_sa_tool_registry(
+def build_sa_toolkit(
     store: "PersonaDataStore",
     fronts: list,
     max_entries: int = 100,
     front_max_campaign: int = 1,
     front_max_adventure: int = 2,
     threads_per_front: int = 3,
-) -> ToolRegistry:
-    """为 SA Agent 构建包含所有 story_deck 工具的 ToolRegistry"""
+):
+    """为 SA Agent 构建包含所有 story_deck 工具的新 ToolKit。
 
-    registry = ToolRegistry()
+    T6: 返回 ToolKit（包含 ToolSpec + ToolHandler）。
+    """
+    from ..agent.runtime_types import ToolKit as NewToolKit
+    from ..agent.runtime_types import ToolSpec as NewToolSpec
+    from ..agent.runtime_types import ToolResult as NewToolResult
+    from ..agent.runtime_types import ToolExecutionContext
 
-    register_search_story_deck(registry, store)
+    tools: dict[str, "NewToolSpec"] = {}
 
-    registry.register(ToolSpec(
+    # search_story_deck（DM + SA 共享）
+    _search_exec = make_search_story_deck_executor(store)
+    tools["search_story_deck"] = NewToolSpec(
+        name="search_story_deck",
+        description=(
+            "查询叙事条目库，以 query 匹配条目的名称和内容。"
+            "返回匹配条目列表，精确命中时会附带直接关联的其他条目。"
+        ),
+        args_schema=SearchStoryDeckArgs,
+        handler=_make_sa_handler(_search_exec),
+    )
+
+    # list_story_deck
+    _list_exec = make_list_story_deck_executor(store)
+    tools["list_story_deck"] = NewToolSpec(
         name="list_story_deck",
         description=(
             "分页列出叙事条目库中的所有条目。可按 type 过滤（entity/detail/plot）。"
             "返回 key + type + content 列表。默认 limit=50。"
         ),
         args_schema=ListStoryDeckArgs,
-        effect=EffectKind.PURE,
-        executor=make_list_story_deck_executor(store),
-    ))
+        handler=_make_sa_handler(_list_exec),
+    )
 
-    registry.register(ToolSpec(
+    # read_past_events
+    _read_exec = make_read_past_events_executor(store)
+    tools["read_past_events"] = NewToolSpec(
         name="read_past_events",
         description=(
             "查询最近 N 天的每日事件。返回事件列表（date + description + reaction）。"
             "按日期倒序排列。SA 用它追溯某条 thread 的发展历史。"
         ),
         args_schema=ReadPastEventArgs,
-        effect=EffectKind.PURE,
-        executor=make_read_past_events_executor(store),
-    ))
+        handler=_make_sa_handler(_read_exec),
+    )
 
-    registry.register(ToolSpec(
+    # edit_story_deck（副作用：直接写 store）
+    _edit_sd_exec = make_edit_story_deck_executor(store, max_entries)
+    tools["edit_story_deck"] = NewToolSpec(
         name="edit_story_deck",
         description=(
             "批量编辑叙事条目库。支持三种操作：\n"
@@ -574,11 +601,14 @@ def build_sa_tool_registry(
             "返回 {applied: [...], errors: [{change, reason}]}。"
         ),
         args_schema=EditStoryDeckArgs,
-        effect=EffectKind.STATE_WRITE,
-        executor=make_edit_story_deck_executor(store, max_entries),
-    ))
+        handler=_make_sa_handler(_edit_sd_exec),
+    )
 
-    registry.register(ToolSpec(
+    # edit_fronts（副作用：修改 builder 闭包捕获的 fronts_dicts）
+    _edit_f_exec = make_edit_fronts_executor(
+        fronts, front_max_campaign, front_max_adventure, threads_per_front,
+    )
+    tools["edit_fronts"] = NewToolSpec(
         name="edit_fronts",
         description=(
             "增量编辑你的叙事规划前线。支持三种操作：\n"
@@ -596,8 +626,22 @@ def build_sa_tool_registry(
             "逐条处理，部分成功部分失败不影响其他条目。"
         ),
         args_schema=EditFrontsArgs,
-        effect=EffectKind.STATE_WRITE,
-        executor=make_edit_fronts_executor(fronts, front_max_campaign, front_max_adventure, threads_per_front),
-    ))
+        handler=_make_sa_handler(_edit_f_exec),
+    )
 
-    return registry
+    return NewToolKit(tools=tools)
+
+
+def _make_sa_handler(old_executor):
+    """将旧式 executor(**kwargs) -> str 转为新式 handler(BaseModel, ctx) -> ToolResult"""
+    from ..agent.runtime_types import ToolResult as NewToolResult
+
+    async def handler(parsed, ctx) -> NewToolResult:
+        try:
+            kwargs = parsed.model_dump() if hasattr(parsed, "model_dump") else {}
+            result = await old_executor(**kwargs)
+            return NewToolResult(observation=result)
+        except Exception as e:
+            return NewToolResult(observation=f"工具执行失败: {e}", status="error")
+
+    return handler

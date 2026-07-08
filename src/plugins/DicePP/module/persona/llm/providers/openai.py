@@ -4,6 +4,7 @@ OpenAI Provider — 实现 LLMProvider 协议，封装 OpenAI API 调用。
 指数退避重试、供应商特定错误分类、缓存 token 提取。
 """
 import asyncio
+import json
 import time
 from typing import List, Dict, Optional, Any
 
@@ -245,47 +246,63 @@ class OpenAIProvider:
 
     def _extract_usage(self, response) -> TokenUsage:
         if not response.usage:
-            return TokenUsage()
+            return TokenUsage(
+                usage_status="missing",
+                usage_note="provider 未返回 usage",
+            )
 
-        input_tokens = response.usage.prompt_tokens or 0
+        # 尝试序列化原始 usage
+        try:
+            raw_usage = response.usage.model_dump() if hasattr(response.usage, "model_dump") else {}
+            usage_raw_json = json.dumps(raw_usage, ensure_ascii=False)
+        except Exception:
+            usage_raw_json = ""
 
-        # reasoning_tokens
-        reasoning_tokens = 0
-        if hasattr(response.usage, "completion_tokens_details"):
-            details = response.usage.completion_tokens_details
-            if details and hasattr(details, "reasoning_tokens"):
-                reasoning_tokens = details.reasoning_tokens or 0
+        try:
+            input_tokens = response.usage.prompt_tokens or 0
 
-        # 缓存字段（兼容三家 API，优先级：OpenAI > Anthropic > DeepSeek）
-        # elif 链: 三家 API 互斥，同一 response 只会命中一种格式
-        cache_read = 0
-        cache_creation = 0
-        if hasattr(response.usage, "prompt_tokens_details"):
-            pt = response.usage.prompt_tokens_details
-            if pt and hasattr(pt, "cached_tokens"):
-                cache_read = pt.cached_tokens or 0
-        elif hasattr(response.usage, "cache_read_input_tokens"):
-            cache_read = response.usage.cache_read_input_tokens or 0
-            if hasattr(response.usage, "cache_creation_input_tokens"):
-                cache_creation = response.usage.cache_creation_input_tokens or 0
-        elif hasattr(response.usage, "prompt_cache_hit_tokens"):
-            cache_read = response.usage.prompt_cache_hit_tokens or 0
+            # reasoning_tokens
+            reasoning_tokens = 0
+            if hasattr(response.usage, "completion_tokens_details"):
+                details = response.usage.completion_tokens_details
+                if details and hasattr(details, "reasoning_tokens"):
+                    reasoning_tokens = details.reasoning_tokens or 0
 
-        # output 与 reasoning 互斥处理
-        # DeepSeek/MiMo 的 completion_tokens 包含 reasoning_tokens，需减去
-        # OpenAI 的 completion_tokens 不含 reasoning_tokens，直接使用
-        # 风险：OpenAI o1/o3 的 completion_tokens 不含 reasoning_tokens，当前全局减法会错误扣减。
-        output_tokens = response.usage.completion_tokens or 0
-        if reasoning_tokens > 0 and output_tokens >= reasoning_tokens:
-            output_tokens -= reasoning_tokens
+            # 缓存字段（兼容三家 API，优先级：OpenAI > Anthropic > DeepSeek）
+            cache_read = 0
+            cache_creation = 0
+            if hasattr(response.usage, "prompt_tokens_details"):
+                pt = response.usage.prompt_tokens_details
+                if pt and hasattr(pt, "cached_tokens"):
+                    cache_read = pt.cached_tokens or 0
+            elif hasattr(response.usage, "cache_read_input_tokens"):
+                cache_read = response.usage.cache_read_input_tokens or 0
+                if hasattr(response.usage, "cache_creation_input_tokens"):
+                    cache_creation = response.usage.cache_creation_input_tokens or 0
+            elif hasattr(response.usage, "prompt_cache_hit_tokens"):
+                cache_read = response.usage.prompt_cache_hit_tokens or 0
 
-        return TokenUsage(
-            input=input_tokens,
-            output=output_tokens,
-            cache_read=cache_read,
-            cache_creation=cache_creation,
-            reasoning=reasoning_tokens,
-        )
+            # output 与 reasoning 互斥处理
+            output_tokens = response.usage.completion_tokens or 0
+            if reasoning_tokens > 0 and output_tokens >= reasoning_tokens:
+                output_tokens -= reasoning_tokens
+
+            return TokenUsage(
+                input=input_tokens,
+                output=output_tokens,
+                cache_read=cache_read,
+                cache_creation=cache_creation,
+                reasoning=reasoning_tokens,
+                usage_status="ok",
+                usage_raw_json=usage_raw_json,
+                usage_note="",
+            )
+        except Exception as e:
+            return TokenUsage(
+                usage_status="malformed",
+                usage_raw_json=usage_raw_json,
+                usage_note=f"usage 解析异常: {e}",
+            )
 
     async def probe(self) -> bool:
         """Health check: 发送 max_tokens=1 的 completion 请求。"""

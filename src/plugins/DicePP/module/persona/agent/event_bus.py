@@ -39,17 +39,21 @@ class EventStore:
     def __init__(self, data_store: Optional[PersonaDataStore] = None) -> None:
         self._store = data_store
 
-    async def write_run(self, run_id: str, turn_id: str, user_id: str,
-                        group_id: str, mode: str) -> None:
+    async def write_run(self, run_id: str, interaction_id: str, user_id: str,
+                        group_id: str, agent_name: str, run_tag: str = "") -> None:
         if not self._store:
             logger.debug("EventStore: store is None, skipping write_run")
             return
         await self._store.insert_agent_run(
-            run_id=run_id, turn_id=turn_id, user_id=user_id,
-            group_id=group_id, mode=mode,
+            run_id=run_id, interaction_id=interaction_id, user_id=user_id,
+            group_id=group_id, agent_name=agent_name, run_tag=run_tag,
         )
 
     async def update_run(self, run_id: str, **updates: Any) -> None:
+        """更新 agent run 记录。支持字段：status, finished_at,
+        completion_kind, completion_code, completion_message,
+        provider, model, tokens_in, tokens_out, tool_rounds,
+        warning_count, sink_failure_count, error。"""
         if not self._store:
             logger.debug("EventStore: store is None, skipping update_run")
             return

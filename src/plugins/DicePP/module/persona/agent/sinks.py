@@ -1,138 +1,16 @@
-"""Sinks — Agent Runtime 的事件消费者和 action 执行器
+"""Sinks — Agent Runtime 的事件消费者
 
-Sink 分类：
-- Action Sinks: 执行 EXTERNAL_ACTION 副作用，由 AgentLoop 直接调用
-- Event Sinks: 观察事件流，由 AgentEventBus 分发
+Event Sinks: 观察事件流，由 AgentEventBus 分发
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from utils.logger import logger
 
-from ..data.models import MessageType
-from ..data.store import PersonaDataStore
-from ..gateway.port import MessagePort
-from ..llm.providers.protocol import ImageGenProvider
-from ..llm.router import LLMRouter
-
-from .actions import GenerateImageAction, SendMessageAction
-from .event_bus import EventSink, EventStore
+from .event_bus import EventStore
 from .events import AgentEvent
 from .state import AgentRunState
-
-
-# ── DeliverySink ────────────────────────────────────────────────
-
-
-@dataclass
-class DeliverySink:
-    """消费 SendMessageAction，发送消息，成功后写 persona_messages。
-
-    由 AgentLoop 在处理 EXTERNAL_ACTION 的 send_reply_segment 结果时调用。
-    """
-
-    port: MessagePort
-    store: PersonaDataStore
-
-    async def handle_send(self, action: SendMessageAction,
-                          user_id: str, group_id: str,
-                          run_id: str, turn_id: str) -> bool:
-        """发送消息，写 persona_messages。
-
-        Returns:
-            True 表示投递成功，False 表示投递失败。
-        """
-        # 发送消息 (MessagePort.send 负责 NoneBot 投递)
-        success = await self.port.send(
-            user_id=user_id,
-            group_id=group_id,
-            content=action.content,
-            skip_history_record=True,
-        )
-
-        if success:
-            # 成功 → 写 persona_messages
-            try:
-                msg_id = await self.store.add_message_stream(
-                    user_id="assistant" if group_id else user_id,
-                    group_id=group_id or "",
-                    role="assistant",
-                    type=MessageType.CHAT,
-                    content=action.content,
-                    display_name="我",
-                    agent_run_id=run_id,
-                    turn_id=turn_id,
-                    segment_index=action.segment_index,
-                    segment_phase=action.phase,
-                )
-            except Exception as e:
-                logger.warning(f"DeliverySink 写 persona_messages 失败: {e}")
-            return True
-        else:
-            logger.warning(f"DeliverySink 发送失败: run={run_id}, phase={action.phase}")
-            return False
-
-
-# ── ImageGenerationSink ─────────────────────────────────────────
-
-
-@dataclass
-class ImageGenerationSink:
-    """消费 GenerateImageAction，调用图片 provider，结果回填给模型。
-
-    由 AgentLoop 在处理 EXTERNAL_ACTION 的 generate_image 结果时调用。
-    """
-
-    router: LLMRouter
-
-    async def handle_generate(self, action: GenerateImageAction) -> str:
-        """生成图片。
-
-        Returns:
-            observation 文本（回填给模型）
-        """
-        provider: Optional[ImageGenProvider] = self.router.get_gen_provider()
-        if provider is None:
-            return "图片生成失败: 没有可用的图片生成模型"
-
-        try:
-            image_url = await provider.generate_image(prompt=action.prompt)
-            if image_url:
-                return f"图片生成成功: {image_url}"
-            return "图片生成失败: 返回空 URL"
-        except Exception as e:
-            logger.warning(f"ImageGenerationSink 生成失败: {e}")
-            self.router.handle_model_error(provider, e)
-            return f"图片生成失败: {e}"
-
-
-# ── UsageSink ───────────────────────────────────────────────────
-
-
-class UsageSink:
-    """消费 ModelResponseReceived 事件，best effort 增加用量。
-
-    只处理第一次 ModelResponseReceived，后续轮次不重复扣费。
-    失败不终止 run。
-    """
-
-    def __init__(self, router: LLMRouter) -> None:
-        self._router = router
-        self._done = False
-
-    async def on_event(self, event: AgentEvent, state: AgentRunState) -> None:
-        if self._done:
-            return
-        if event.event_type != "ModelResponseReceived":
-            return
-
-        self._done = True
-        try:
-            await self._router.increment_usage(state.user_id)
-        except Exception as e:
-            logger.warning(f"UsageSink 用量记录失败 (best effort): {e}")
 
 
 # ── RunSummarySink ──────────────────────────────────────────────
@@ -148,7 +26,6 @@ class RunSummarySink:
     def __init__(self, event_store: EventStore) -> None:
         self._event_store = event_store
         self._warning_count = 0
-        self._sink_failure_count = 0
 
     async def on_event(self, event: AgentEvent, state: AgentRunState) -> None:
         evt_type = event.event_type
@@ -175,9 +52,20 @@ class RunSummarySink:
                 "tool_rounds": state.tool_rounds,
             }
 
-            final_reason = payload.get("reason", "")
-            if final_reason:
-                updates["final_reason"] = final_reason
+            # completion_kind / completion_code / completion_message 从 payload 字段映射
+            # AgentRunFinishedPayload 字段: status, reason, output_text
+            completion_kind = payload.get("status", "")
+            if completion_kind:
+                updates["completion_kind"] = completion_kind
+
+            completion_code = payload.get("reason", "")
+            if completion_code:
+                updates["completion_code"] = completion_code
+
+            # output_text 作为 completion_message 的降级来源
+            completion_message = payload.get("output_text", "")
+            if completion_message:
+                updates["completion_message"] = completion_message[:500]
 
             error = payload.get("error", "")
             if error:

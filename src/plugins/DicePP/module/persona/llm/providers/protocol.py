@@ -38,6 +38,9 @@ class TokenUsage:
     # DeepSeek/MiMo 的 completion_tokens 包含 reasoning_tokens，需做减法；
     # OpenAI 的 completion_tokens 只算非推理 tokens，直接赋值。
     # 因此 output = 纯文本输出，reasoning = 推理 tokens，两者互斥。
+    usage_status: str = ""      # "ok" / "missing" / "malformed"
+    usage_raw_json: str = ""    # 原始 usage JSON
+    usage_note: str = ""        # 异常说明
 
 
 @dataclass

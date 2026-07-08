@@ -30,18 +30,18 @@ class AgentEvent:
 @dataclass
 class AgentRunStartedPayload:
     run_id: str
-    turn_id: str
+    interaction_id: str
     user_id: str
     group_id: str
-    mode: str
+    agent_name: str
+    run_tag: str
 
 
 @dataclass
 class AgentRunFinishedPayload:
     status: str
     reason: str
-    delivery_performed: bool
-    final_text: str
+    output_text: str
     tokens_input: int = 0
     tokens_output: int = 0
     provider: str = ""
@@ -62,8 +62,6 @@ class AgentWarningPayload:
 @dataclass
 class ModelRequestPreparedPayload:
     round_index: int
-    tool_use_mode: str
-    required_tools: List[str] = field(default_factory=list)
     message_count: int = 0
     tool_count: int = 0
 
@@ -155,80 +153,10 @@ class ToolExecutionFailedPayload:
 
 
 @dataclass
-class DeclaredActionProducedPayload:
-    tool_call_id: str
-    tool_name: str
-    action_type: str
-    action_id: str
-
-
-@dataclass
 class ToolCallSkippedPayload:
     tool_call_id: str
     tool_name: str
     reason: str
-
-
-# ── Structured collection payloads ────────────────────────────────
-
-
-@dataclass
-class StructuredOutputCollectedPayload:
-    """结构化采集工具完成事件 — 标记一条 STATE_WRITE 采集记录。"""
-    tool_call_id: str
-    tool_name: str
-    arguments: dict
-
-
-# ── Delivery / action payloads ──────────────────────────────────
-
-
-@dataclass
-class ResponseSegmentRequestedPayload:
-    action_id: str
-    content: str
-    phase: str
-    delay_before: float
-    segment_index: int
-
-
-@dataclass
-class ResponseSegmentDeliveredPayload:
-    action_id: str
-    message_id: int
-    segment_index: int
-    phase: str
-
-
-@dataclass
-class ResponseSegmentFailedPayload:
-    action_id: str
-    error: str
-    segment_index: int
-
-
-@dataclass
-class ImageGenerationRequestedPayload:
-    action_id: str
-    prompt: str
-
-
-@dataclass
-class ImageGenerationStartedPayload:
-    action_id: str
-    prompt: str
-
-
-@dataclass
-class ImageGeneratedPayload:
-    action_id: str
-    image_url: str
-
-
-@dataclass
-class ImageGenerationFailedPayload:
-    action_id: str
-    error: str
 
 
 # ── Correction payloads ─────────────────────────────────────────
