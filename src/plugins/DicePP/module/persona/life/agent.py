@@ -40,11 +40,7 @@ class Agent(ABC):
         self.config = config
         self._cached_state = None  # DMAgent 专用：在 super().run() 前设置以跳过 load_state()
         self._cached_system_prompt: Optional[str] = None  # DMAgent 专用：在 super().run() 前设置以跳过重复构建
-        self._max_rounds = (
-            getattr(config, "background_llm_max_rounds", 10)
-            if config
-            else 10
-        )
+        self._max_rounds = config.background_llm_max_rounds if config else 10
         self._conversation: Optional["Conversation"] = None
         self._system_prompt: Optional[str] = None
 
