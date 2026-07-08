@@ -162,6 +162,74 @@ class TestPersonaConfig:
         config = PersonaConfig(decay_rate_per_hour=0.5, decay_daily_cap=5.0, relationship_refuse_prob_base=0.5, relationship_refuse_prob_max=0.9)
         assert config.enabled == False
 
+    # ── from_persona 消费端字段完整性 ──
+    # 每个 from_persona 方法直接访问 persona.<field>，若字段未在 PersonaConfig
+    # 中声明，pydantic 不会生成对应属性，导致 AttributeError。
+    # 这些测试确保新增字段不会因 PersonaConfig 遗漏而崩溃。
+
+    _FROMPERSONA_FIELDS = [
+        # DecayConfig.from_persona
+        "decay_enabled", "decay_grace_period_hours", "decay_familiarity_half_life_days",
+        "decay_intimacy_half_life_days", "decay_floor_ratio",
+        # ChatConfig.from_persona
+        "max_history_turns", "max_history_tokens", "max_diary_context_chars",
+        "timezone", "lore_token_budget", "tools_max_rounds",
+        "relationship_refuse_enabled", "reputation_refuse_threshold",
+        "scoring_interval", "max_messages", "group_max_age_minutes",
+        "group_context_budget_tokens", "group_max_messages",
+        "group_single_message_max_tokens", "segment_target_chars",
+        "segment_max_chars", "segment_soft_limit", "segment_hard_limit",
+        "segment_count_max", "segment_max_delay", "segment_round_callbacks_max",
+        "private_session_gap_seconds", "group_session_gap_seconds",
+        "private_session_token_budget", "group_session_token_budget",
+        # ProactiveConfig.from_persona
+        "proactive_enabled", "proactive_min_interval_hours", "proactive_max_shares",
+        "proactive_share_time_window_minutes", "proactive_event_share_threshold",
+        "proactive_miss_enabled", "proactive_miss_min_hours", "proactive_miss_min_score",
+        "proactive_share_message_concurrent", "proactive_share_max_chars",
+        "proactive_share_context_history_limit",
+        # CharacterLifeConfig.from_persona
+        "character_life_enabled", "character_life_jitter_minutes",
+        "character_life_min_event_interval_minutes", "character_life_chain_max_depth",
+        "character_life_chain_force_extend_once_prob", "character_life_default_energy",
+        "character_life_default_mood", "character_life_default_health",
+        "character_life_recovery_energy",
+        "story_deck_max_injection", "story_deck_max_entries",
+        "front_max_campaign", "front_max_adventure", "threads_per_front",
+        "sa_max_rounds",
+        # LifeConfig.from_persona
+        "proactive_event_share_delay_min", "proactive_event_share_delay_max",
+        "trace_enabled", "trace_max_age_days", "score_history_max_age_days",
+        "scoring_failures_max_age_days", "daily_events_keep_days", "diary_keep_days",
+    ]
+
+    def test_from_persona_fields_exist(self):
+        """PersonaConfig 必须声明所有 from_persona 消费端访问的字段"""
+        config = PersonaConfig()
+        missing = []
+        for field in self._FROMPERSONA_FIELDS:
+            if not hasattr(config, field):
+                missing.append(field)
+        assert missing == [], (
+            f"PersonaConfig 缺少 {len(missing)} 个 from_persona 消费端需要的字段: {missing}"
+        )
+
+    def test_from_persona_no_attribute_error(self):
+        """所有 from_persona 调用 PersonaConfig() 不应抛 AttributeError"""
+        from plugins.DicePP.module.persona.life.character_life import CharacterLifeConfig
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+        from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
+        from plugins.DicePP.module.persona.life.simulator import LifeConfig
+        from plugins.DicePP.module.persona.game.decay import DecayConfig
+
+        cfg = PersonaConfig()
+        for factory in [CharacterLifeConfig, ChatConfig, ProactiveConfig, LifeConfig, DecayConfig]:
+            try:
+                result = factory.from_persona(cfg)
+                assert result is not None, f"{factory.__name__}.from_persona() returned None"
+            except AttributeError as e:
+                pytest.fail(f"{factory.__name__}.from_persona(PersonaConfig()) raised AttributeError: {e}")
+
 class TestRelationLevel:
     """测试关系等级判定"""
 

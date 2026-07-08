@@ -441,6 +441,32 @@ class PersonaConfig(BaseModel):
         json_schema_extra={"dashboard_section": "life_sim"},
     )
 
+    # Story Deck / Front / SA 配置（CharacterLifeConfig.from_persona 消费）
+    story_deck_max_injection: int = Field(
+        default=3, title="叙事条目每轮最大注入量",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    story_deck_max_entries: int = Field(
+        default=100, title="叙事条目最大保存数",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    front_max_campaign: int = Field(
+        default=1, title="最大战役 Front 数",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    front_max_adventure: int = Field(
+        default=2, title="最大冒险 Front 数",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    threads_per_front: int = Field(
+        default=3, title="每个 Front 最大 Thread 数",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+    sa_max_rounds: int = Field(
+        default=100, title="SA agent 最大轮次",
+        json_schema_extra={"dashboard_section": "life_sim"},
+    )
+
     # Phase 2: 信誉拒绝机制配置
     relationship_refuse_enabled: bool = Field(
         default=True, title="信誉拒绝",

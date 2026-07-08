@@ -7,6 +7,9 @@ create_persona 在 Phase 2 之后用具名异常 PersonaInitError 报告初始�
 3. 数据库未连接 → PersonaStorageError
 
 模块禁用（config.enabled=False）仍返回 None，不抛异常——这是合法状态。
+
+注意：_make_bot() 使用真实的 PersonaConfig() 而非 MagicMock()，
+确保 from_persona 等配置映射路径不会因 MagicMock 的宽容性掩盖 AttributeError。
 """
 
 import pytest
@@ -19,6 +22,7 @@ from plugins.DicePP.module.persona.exceptions import (
     PersonaCharacterLoadError,
     PersonaStorageError,
 )
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 class FakeLoaderReturnsNone:
@@ -42,20 +46,16 @@ class FakeLoaderReturnsChar:
 
 
 def _make_providers_config():
-    """最小有效的 providers 配置"""
-    provider = MagicMock()
-    provider.api_key = "sk-test"
-    provider.base_url = "https://api.openai.com/v1"
-    provider.models = []
-    model = MagicMock()
-    model.name = "gpt-4o"
-    model.category = "llm"
-    model.capabilities = ["text", "tool_calls"]
-    model.quality = 0.9
-    model.cost = 0.5
-    model.circuit_breaker = None
-    provider.models = [model]
-    return {"openai": provider}
+    """最小有效的 providers 配置（真实 PersonaConfig 子字段）"""
+    from plugins.DicePP.core.config.pydantic_models import ProviderConfig, ModelConfig
+    model = ModelConfig(
+        name="gpt-4o",
+        category="llm",
+        capabilities=["text", "tool_calls"],
+        quality=0.9,
+        cost=0.5,
+    )
+    return {"openai": ProviderConfig(api_key="sk-test", base_url="https://api.openai.com/v1", models=[model])}
 
 
 def _make_bot(
@@ -65,12 +65,18 @@ def _make_bot(
     has_providers: bool = True,
     db_connected: bool = True,
 ) -> MagicMock:
-    """构造最小可走 create_persona 前 3 步的 Bot mock"""
+    """构造最小可走 create_persona 前 3 步的 Bot mock
+
+    config.persona_ai 使用真实 PersonaConfig() 替代 MagicMock，
+    确保 CharacterLifeConfig.from_persona() 等配置映射路径不会
+    因 MagicMock 的宽容性掩盖 AttributeError（rc6 生产 bug）。
+    """
     bot = MagicMock()
-    cfg = MagicMock()
-    cfg.enabled = enabled
-    cfg.character_path = "/tmp/chars"
-    cfg.providers = _make_providers_config() if has_providers else {}
+    cfg = PersonaConfig(
+        enabled=enabled,
+        character_path="/tmp/chars",
+        providers=_make_providers_config() if has_providers else {},
+    )
     bot.config.persona_ai = cfg
     bot.config.persona = "test"
 
