@@ -102,6 +102,7 @@ class PersonaDataStore:
         self._persona_db = await aiosqlite.connect(self._persona_db_path)
         await self._init_connection(self._persona_db)
         await self.ensure_tables()
+        await self._migrate_schema_t6()
 
     async def close(self) -> None:
         """关闭 persona_db 连接。core_db 由 Bot 生命周期管理，不在此关闭。"""
@@ -130,6 +131,59 @@ class PersonaDataStore:
         persona_db.row_factory = lambda cur, row: {col[0]: row[i] for i, col in enumerate(cur.description)}
         await execute_many_async(self._core_db, BOT_CORE_SCHEMA_SQL)
         await self._core_db.commit()
+
+    async def _migrate_schema_t6(self) -> None:
+        """T6 schema 迁移：新增列以匹配新命名。
+
+        SQLite 的 CREATE TABLE IF NOT EXISTS 不修改已存在的表，
+        因此需要 ALTER TABLE 迁移已有数据库。
+
+        新 schema 直接使用 interaction_id。保留 session_id → interaction_id
+        重命名（persona_llm_traces 表）。
+
+        迁移内容:
+        - persona_llm_traces: session_id → interaction_id, 新增 usage 列
+        - persona_agent_runs: 新增 agent_name/run_tag/completion 列
+        """
+        db = self._persona_db
+
+        # 辅助函数：检查列是否存在
+        async def _has_column(table: str, column: str) -> bool:
+            rows = await db.execute_fetchall(
+                f"PRAGMA table_info({table})"
+            )
+            return any(row["name"] == column for row in rows)
+
+        # 辅助函数：安全添加列（列不存在时才添加）
+        async def _add_column_if_missing(table: str, column: str, col_def: str) -> None:
+            if not await _has_column(table, column):
+                try:
+                    await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
+                except Exception:
+                    pass  # 列可能已存在（SQLite 报错即忽略）
+
+        # ── persona_llm_traces: session_id → interaction_id + 新增 usage 列 ──
+        if await _has_column("persona_llm_traces", "session_id"):
+            try:
+                await db.execute(
+                    "ALTER TABLE persona_llm_traces RENAME COLUMN session_id TO interaction_id"
+                )
+            except Exception:
+                pass
+        await _add_column_if_missing("persona_llm_traces", "usage_status", "TEXT NOT NULL DEFAULT ''")
+        await _add_column_if_missing("persona_llm_traces", "usage_raw_json", "TEXT NOT NULL DEFAULT ''")
+        await _add_column_if_missing("persona_llm_traces", "usage_note", "TEXT NOT NULL DEFAULT ''")
+
+        # ── persona_agent_runs: 新增 agent_name/run_tag/completion 列 ──
+        if await _has_column("persona_agent_runs", "mode"):
+            await _add_column_if_missing("persona_agent_runs", "agent_name", "TEXT NOT NULL DEFAULT ''")
+            await _add_column_if_missing("persona_agent_runs", "run_tag", "TEXT NOT NULL DEFAULT ''")
+        if await _has_column("persona_agent_runs", "final_reason"):
+            await _add_column_if_missing("persona_agent_runs", "completion_kind", "TEXT NOT NULL DEFAULT ''")
+            await _add_column_if_missing("persona_agent_runs", "completion_code", "TEXT NOT NULL DEFAULT ''")
+            await _add_column_if_missing("persona_agent_runs", "completion_message", "TEXT NOT NULL DEFAULT ''")
+
+        await db.commit()
 
     async def switch_persona_db(self, new_character_name: str) -> None:
         """关闭当前 persona_db，打开新角色的 persona_db（先开后关策略）"""
@@ -170,7 +224,7 @@ class PersonaDataStore:
             display_name=row.get("display_name") or "",
             created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
             agent_run_id=row.get("agent_run_id", ""),
-            turn_id=row.get("turn_id", ""),
+            interaction_id=row.get("interaction_id", ""),
             segment_index=row.get("segment_index", -1),
             segment_phase=row.get("segment_phase", ""),
             image_meta=image_meta,
@@ -186,7 +240,7 @@ class PersonaDataStore:
         display_name: str = "",
         *,
         agent_run_id: str = "",
-        turn_id: str = "",
+        interaction_id: str = "",
         segment_index: int = -1,
         segment_phase: str = "",
         image_meta: Optional[List[dict]] = None,
@@ -195,7 +249,7 @@ class PersonaDataStore:
 
         新增参数 (Phase M1):
             agent_run_id: 所属 Agent run ID
-            turn_id: 所属 turn ID
+            interaction_id: 所属 interaction ID
             segment_index: 分段序号 (>=0)
             segment_phase: 分段阶段 ("interim" / "final")
 
@@ -208,11 +262,11 @@ class PersonaDataStore:
             """
             INSERT INTO message_stream
             (user_id, group_id, role, type, content, display_name, created_at,
-             agent_run_id, turn_id, segment_index, segment_phase, image_meta)
+             agent_run_id, interaction_id, segment_index, segment_phase, image_meta)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (user_id, group_id, role, type.value, content, display_name, now_iso,
-             agent_run_id, turn_id, segment_index, segment_phase, image_meta_json),
+             agent_run_id, interaction_id, segment_index, segment_phase, image_meta_json),
         )
         await self.db.commit()
         rowid = cursor.lastrowid
@@ -229,7 +283,7 @@ class PersonaDataStore:
         async with self.db.execute(
             f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
+                   agent_run_id, interaction_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE user_id = ? AND group_id = ?
               AND {PersonaDataStore._PERSONA_SCOPE}
@@ -338,7 +392,7 @@ class PersonaDataStore:
         if limit is None:
             sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
+                   agent_run_id, interaction_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._PERSONA_SCOPE}
             ORDER BY created_at DESC, id DESC
@@ -347,7 +401,7 @@ class PersonaDataStore:
         else:
             sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
+                   agent_run_id, interaction_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._PERSONA_SCOPE}
             ORDER BY created_at DESC, id DESC
@@ -383,7 +437,7 @@ class PersonaDataStore:
         where_clause = " AND ".join(conditions)
         sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
+                   agent_run_id, interaction_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE {where_clause}
             ORDER BY created_at DESC, id DESC
@@ -453,7 +507,7 @@ class PersonaDataStore:
         where_clause = " AND ".join(conditions)
         sql = f"""
             SELECT id, user_id, group_id, role, type, content, display_name, created_at,
-                   agent_run_id, turn_id, segment_index, segment_phase, image_meta
+                   agent_run_id, interaction_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE {where_clause}
             ORDER BY created_at DESC
@@ -727,17 +781,18 @@ class PersonaDataStore:
         await self.db.execute(
             """
             INSERT INTO persona_llm_traces (
-                session_id, user_id, group_id, run_id, model, tier,
+                interaction_id, user_id, group_id, run_id, model, tier,
                 messages, response, tool_calls, round_messages,
                 selected_provider, selected_model, selection_policy, candidate_count,
                 latency_ms,
                 tokens_in, tokens_out, temperature, status, error,
                 reasoning_content, cache_read, cache_creation, reasoning_tokens,
+                usage_status, usage_raw_json, usage_note,
                 created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                trace.session_id,
+                trace.interaction_id,
                 trace.user_id,
                 trace.group_id,
                 trace.run_id,
@@ -761,6 +816,9 @@ class PersonaDataStore:
                 trace.cache_read,
                 trace.cache_creation,
                 trace.reasoning_tokens,
+                trace.usage_status,
+                trace.usage_raw_json,
+                trace.usage_note,
                 created_at_str,
             ),
         )
@@ -773,12 +831,13 @@ class PersonaDataStore:
     ) -> List[LLMTraceRecord]:
         async with self.db.execute(
             """
-            SELECT id, session_id, user_id, group_id, run_id, model, tier,
+            SELECT id, interaction_id, user_id, group_id, run_id, model, tier,
                    messages, response, tool_calls, round_messages,
                    selected_provider, selected_model, selection_policy, candidate_count,
                    latency_ms,
                    tokens_in, tokens_out, temperature, status, error,
                    reasoning_content, cache_read, cache_creation, reasoning_tokens,
+                   usage_status, usage_raw_json, usage_note,
                    created_at
             FROM persona_llm_traces
             WHERE user_id = ?
@@ -792,7 +851,7 @@ class PersonaDataStore:
             for row in rows:
                 traces.append(LLMTraceRecord(
                     id=row["id"],
-                    session_id=row["session_id"],
+                    interaction_id=row["interaction_id"] or "",
                     user_id=row["user_id"],
                     group_id=row["group_id"],
                     run_id=row["run_id"] or "",
@@ -816,6 +875,9 @@ class PersonaDataStore:
                     cache_read=row["cache_read"] or 0,
                     cache_creation=row["cache_creation"] or 0,
                     reasoning_tokens=row["reasoning_tokens"] or 0,
+                    usage_status=row.get("usage_status", ""),
+                    usage_raw_json=row.get("usage_raw_json", ""),
+                    usage_note=row.get("usage_note", ""),
                     created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
                 ))
             return traces
@@ -2667,10 +2729,11 @@ class PersonaDataStore:
     async def insert_agent_run(
         self,
         run_id: str,
-        turn_id: str,
+        interaction_id: str,
         user_id: str,
         group_id: str,
-        mode: str,
+        agent_name: str = "",
+        run_tag: str = "",
         *,
         started_at: Optional[str] = None,
     ) -> None:
@@ -2679,10 +2742,10 @@ class PersonaDataStore:
         await self.db.execute(
             """
             INSERT INTO persona_agent_runs
-                (run_id, turn_id, user_id, group_id, mode, started_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (run_id, interaction_id, user_id, group_id, agent_name, run_tag, started_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, turn_id, user_id, group_id, mode, now),
+            (run_id, interaction_id, user_id, group_id, agent_name, run_tag, now),
         )
         await self.db.commit()
 
@@ -2691,11 +2754,13 @@ class PersonaDataStore:
         run_id: str,
         **updates: Any,
     ) -> None:
-        """更新 agent run 记录。支持字段：status, finished_at, final_reason,
+        """更新 agent run 记录。支持字段：status, finished_at,
+        completion_kind, completion_code, completion_message,
         provider, model, tokens_in, tokens_out, tool_rounds,
         warning_count, sink_failure_count, error。"""
         allowed = {
-            "status", "finished_at", "final_reason",
+            "status", "finished_at",
+            "completion_kind", "completion_code", "completion_message",
             "provider", "model",
             "tokens_in", "tokens_out", "tool_rounds",
             "warning_count", "sink_failure_count", "error",
@@ -2721,8 +2786,9 @@ class PersonaDataStore:
         """获取 agent run 记录，返回 dict 或 None。"""
         async with self.db.execute(
             """
-            SELECT run_id, turn_id, user_id, group_id, mode,
-                   status, started_at, finished_at, final_reason,
+            SELECT run_id, interaction_id, user_id, group_id, agent_name, run_tag,
+                   status, started_at, finished_at,
+                   completion_kind, completion_code, completion_message,
                    provider, model, tokens_in, tokens_out, tool_rounds,
                    warning_count, sink_failure_count, error
             FROM persona_agent_runs WHERE run_id = ?

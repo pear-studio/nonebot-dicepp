@@ -2,7 +2,7 @@
 SA Agent — Story Architect 长期叙事规划
 
 每天日记生成后触发。多轮 tool-call 操作 story_deck 条目和 fronts 规划。
-使用 AgentRuntime.run() 获取多轮 tool-call 结果。
+通过 Agent 基类 AgentRunSpec 新路径执行。
 """
 from typing import Any, Optional
 from utils.logger import logger
@@ -10,6 +10,7 @@ from ..data.models import SAState
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter
 from ..llm.selection import SUMMARIZE
+from ..agent.runtime_types import AgentRunSpec, FinishPlanArgs, LoopLimits, OutputSpec
 from .agent import Agent
 from .types import AgentResult
 
@@ -27,9 +28,10 @@ class SAAgent(Agent):
         store: PersonaDataStore,
         router: LLMRouter,
         config=None,
-        tool_registry=None,
     ):
-        super().__init__(store, router, config, tool_registry=tool_registry)
+        super().__init__(store, router, config)
+        self._sa_fronts_dicts: list = []  # build_run_spec → interpret_result 间传递
+        self._sa_state: Optional[SAState] = None
 
     async def load_state(self) -> SAState:
         """从 store 加载 SA 叙事规划"""
@@ -72,25 +74,21 @@ class SAAgent(Agent):
         return SUMMARIZE
 
     def _get_openai_tools(self) -> list:
-        """SA 使用 AgentRuntime 多轮 tool-call，不在此返回工具"""
+        """SA 通过 ToolKit + OutputSpec 执行，不在此返回工具"""
         return []
 
-    async def run(self, context: dict) -> AgentResult:
-        """统一入口 — 委托到 plan()。"""
-        return await self.plan(context)
+    # ── T5: AgentRunSpec 路径 ─────────────────────────────────
 
-    async def plan(self, context: dict) -> AgentResult:
-        """SA 规划入口
+    async def build_run_spec(self, context: dict) -> AgentRunSpec:
+        """构建 SA run 规格：加载 state → 构建 ToolKit + finish_plan OutputSpec。
 
-        加载 fronts → 构建 user prompt → AgentRuntime 多轮 tool-call →
-        保存 fronts → 返回结果。
-
-        max_rounds=100，允许 SA 进行多轮探索和修正。
-
-        Returns:
-            AgentResult(data=SAState)
+        将 fronts_dicts 存入 self._sa_fronts_dicts，供 interpret_result 使用。
         """
+        from ..tools.story_deck import build_sa_toolkit
+
+        # 加载状态
         state = await self.load_state()
+        self._sa_state = state
 
         # 将 Pydantic Front 模型转为 dict 列表（便于 tool 修改）
         fronts_dicts = []
@@ -110,104 +108,123 @@ class SAAgent(Agent):
                 ],
             }
             fronts_dicts.append(fd)
+        self._sa_fronts_dicts = fronts_dicts
 
-        # 构建 system prompt（固定部分）
+        # 构建 system / user prompt
         system_prompt = self.build_system_prompt(state, context)
-
-        # 构建 user prompt（动态部分：角色信息 + fronts + 日记 + 事件 + 规则）
         user_prompt = self._build_user_prompt(context, fronts_dicts)
 
-        # 延迟导入避免循环依赖（sa_agent → story_deck → store）
-        from ..agent.runtime import AgentRuntime
-        from ..agent.request import AgentRunLimits, ToolUseMode
-        from ..tools.story_deck import build_sa_tool_registry
+        # 获取配置参数
+        max_entries = self.config.story_deck_max_entries if self.config else 100
+        front_max_campaign = self.config.front_max_campaign if self.config else 1
+        front_max_adventure = self.config.front_max_adventure if self.config else 2
+        threads_per_front = self.config.threads_per_front if self.config else 3
+        sa_max_rounds = self.config.sa_max_rounds if self.config else 100
 
-        try:
-            # 获取配置参数
-            max_entries = self.config.story_deck_max_entries if self.config else 100
-            front_max_campaign = self.config.front_max_campaign if self.config else 1
-            front_max_adventure = self.config.front_max_adventure if self.config else 2
-            threads_per_front = self.config.threads_per_front if self.config else 3
-            # 默认 100 轮：SA 需在单次规划中创建 campaign front + ≤2 adventure
-            # fronts + 多条 entity/plot 条目，且工具返回 errors 时需修正重试。
-            sa_max_rounds = self.config.sa_max_rounds if self.config else 100
+        # 构建 ToolKit（新路径）
+        toolkit = build_sa_toolkit(
+            store=self.store,
+            fronts=fronts_dicts,
+            max_entries=max_entries,
+            front_max_campaign=front_max_campaign,
+            front_max_adventure=front_max_adventure,
+            threads_per_front=threads_per_front,
+        )
 
-            # 构建工具注册表（传入 fronts 可变引用）
-            tool_registry = build_sa_tool_registry(
-                store=self.store,
-                fronts=fronts_dicts,
-                max_entries=max_entries,
-                front_max_campaign=front_max_campaign,
-                front_max_adventure=front_max_adventure,
-                threads_per_front=threads_per_front,
+        # finish_plan OutputSpec — SA 必须调用此输出标记规划完成
+        finish_plan_spec = OutputSpec(
+            name="finish_plan",
+            description=(
+                "提交规划结果，标记本次规划完成。"
+                "即使无需修改，也必须调用此工具。"
+                "summary 简短说明做了什么或为什么无需调整。"
+                "changed 表示是否修改了 story_deck 或 fronts。"
+            ),
+            args_schema=FinishPlanArgs,
+        )
+
+        return AgentRunSpec(
+            system_prompt=system_prompt,
+            user_input=user_prompt,
+            tools=toolkit,
+            output=finish_plan_spec,
+            selection=SUMMARIZE,
+            limits=LoopLimits(max_rounds=sa_max_rounds),
+            run_tag="sa_plan",
+        )
+
+    async def interpret_result(
+        self, result: "ConversationRunResult", context: dict
+    ) -> AgentResult:
+        """解释 Conversation.run() 结果：fronts_dicts 转回 Pydantic → 保存 state。
+
+        无论 run 是否成功（finish_plan 是否被调用），都保存 fronts
+        （edit_fronts 可能在 run 中途已通过 handler 修改 fronts_dicts）。
+        """
+        fronts_dicts = self._sa_fronts_dicts
+        state = self._sa_state
+        if state is None:
+            return AgentResult(success=False, data=None, error="SA state 未加载")
+
+        # 检查 completion
+        if result.completion_kind == "completed" and result.output_arguments:
+            summary = result.output_arguments.get("summary", "")
+            changed = result.output_arguments.get("changed", False)
+            logger.info(f"SA finish_plan: changed={changed} summary={summary[:100]}")
+        elif result.completion_kind != "completed":
+            logger.warning(
+                f"SA 规划未完成: completion={result.completion_kind} "
+                f"final_reason={result.final_reason}"
             )
 
-            runtime = AgentRuntime(
-                router=self.router,
-                store=self.store,
-                limits=AgentRunLimits(max_rounds=sa_max_rounds),
-            )
-
-            result = await runtime.run(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                user_id="",
-                group_id="",
-                tool_registry=tool_registry,
-                tools=tool_registry.get_openai_schemas(),
-                tool_use_mode=ToolUseMode.AUTO,
-                temperature=0.85,
-                timeout=None,
-                selection=SUMMARIZE,
-            )
-
-            # 将 fronts_dicts 转回 Pydantic Front 模型
-            # 使用 .get() 防御 LLM 产生的非法字典（缺少必填字段）
-            from ..data.models import Front, Thread
-            new_fronts = []
-            for fd in fronts_dicts:
-                fd_name = fd.get("name", "").strip()
-                fd_type = fd.get("type", "").strip()
-                if not fd_name or not fd_type:
-                    logger.warning(f"front dict 缺少必填字段 (name/type)，跳过: {fd}")
+        # fronts_dicts 转回 Pydantic Front 模型
+        from ..data.models import Front, Thread
+        new_fronts = []
+        for fd in fronts_dicts:
+            fd_name = fd.get("name", "").strip()
+            fd_type = fd.get("type", "").strip()
+            if not fd_name or not fd_type:
+                logger.warning(f"front dict 缺少必填字段 (name/type)，跳过: {fd}")
+                continue
+            if fd_type not in ("campaign", "adventure"):
+                logger.warning(f"front type 无效 '{fd_type}'，跳过: {fd}")
+                continue
+            threads = []
+            for t in fd.get("threads", []):
+                t_name = t.get("name", "").strip()
+                if not t_name:
+                    logger.warning(f"thread dict 缺少必填字段 name，跳过: {t}")
                     continue
-                if fd_type not in ("campaign", "adventure"):
-                    logger.warning(f"front type 无效 '{fd_type}'（合法值: campaign/adventure），跳过: {fd}")
-                    continue
-                threads = []
-                for t in fd.get("threads", []):
-                    t_name = t.get("name", "").strip()
-                    if not t_name:
-                        logger.warning(f"thread dict 缺少必填字段 name，跳过: {t}")
-                        continue
-                    threads.append(Thread(
-                        name=t_name,
-                        direction=t.get("direction", ""),
-                        milestones=t.get("milestones", []),
-                        outcome=t.get("outcome", ""),
-                        related=t.get("related", []),
-                    ))
-                new_fronts.append(Front(
-                    name=fd_name,
-                    type=fd_type,
-                    threads=threads,
+                threads.append(Thread(
+                    name=t_name,
+                    direction=t.get("direction", ""),
+                    milestones=t.get("milestones", []),
+                    outcome=t.get("outcome", ""),
+                    related=t.get("related", []),
                 ))
-            state.fronts = new_fronts
+            new_fronts.append(Front(
+                name=fd_name,
+                type=fd_type,
+                threads=threads,
+            ))
+        state.fronts = new_fronts
 
-            await self.save_state(state)
-            final_text = getattr(result, "final_text", "") or ""
-            logger.info(f"SA 叙事规划完成: {len(state.fronts)} fronts, {sum(len(f.threads) for f in state.fronts)} threads")
-            return AgentResult(success=True, data=state, raw_response=final_text)
+        await self.save_state(state)
+        logger.info(
+            f"SA 叙事规划完成: {len(state.fronts)} fronts, "
+            f"{sum(len(f.threads) for f in state.fronts)} threads"
+        )
 
-        except Exception as e:
-            logger.exception("SA 规划执行失败")
-            return AgentResult(
-                success=False,
-                data=state,
-                error=f"SA 执行异常: {e}",
-            )
+        success = result.completion_kind == "completed" and result.output_arguments is not None
+        return AgentResult(
+            success=success,
+            data=state,
+            raw_response=(
+                result.output_arguments.get("summary", "")
+                if result.output_arguments
+                else ""
+            ),
+        )
 
     def _build_user_prompt(self, context: dict, fronts_dicts: list) -> str:
         """构建 SA user prompt：角色信息 + fronts 现状 + 日记 + 事件 + _FRONT_RULES"""

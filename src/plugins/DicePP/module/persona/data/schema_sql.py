@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS message_stream (
     display_name  TEXT NOT NULL DEFAULT '',
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     agent_run_id  TEXT DEFAULT '',
-    turn_id       TEXT DEFAULT '',
+    interaction_id TEXT DEFAULT '',
     segment_index INTEGER DEFAULT -1,
     segment_phase TEXT DEFAULT '',
     image_meta    TEXT DEFAULT ''
@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS persona_global_settings (
 CREATE_LLM_TRACES_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_llm_traces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
+    interaction_id TEXT NOT NULL DEFAULT '',
     user_id TEXT DEFAULT '',
     group_id TEXT DEFAULT '',
     run_id TEXT DEFAULT '',
@@ -244,13 +244,16 @@ CREATE TABLE IF NOT EXISTS persona_llm_traces (
     cache_read INTEGER DEFAULT 0,
     cache_creation INTEGER DEFAULT 0,
     reasoning_tokens INTEGER DEFAULT 0,
+    usage_status TEXT DEFAULT '',
+    usage_raw_json TEXT DEFAULT '',
+    usage_note TEXT DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
 # 为未来按 session 调试预留的索引
-CREATE_LLM_TRACES_INDEX_SESSION = """
-CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_session ON persona_llm_traces(session_id, created_at DESC);
+CREATE_LLM_TRACES_INDEX_INTERACTION = """
+CREATE INDEX IF NOT EXISTS idx_persona_llm_traces_interaction ON persona_llm_traces(interaction_id, created_at DESC);
 """
 
 CREATE_LLM_TRACES_INDEX_USER = """
@@ -275,14 +278,17 @@ ON persona_daily_events(date);
 CREATE_AGENT_RUNS_TABLE = """
 CREATE TABLE IF NOT EXISTS persona_agent_runs (
     run_id TEXT PRIMARY KEY,
-    turn_id TEXT NOT NULL,
+    interaction_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     group_id TEXT NOT NULL DEFAULT '',
-    mode TEXT NOT NULL,
+    agent_name TEXT NOT NULL DEFAULT '',
+    run_tag TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'running',
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     finished_at TIMESTAMP,
-    final_reason TEXT DEFAULT '',
+    completion_kind TEXT DEFAULT '',
+    completion_code TEXT DEFAULT '',
+    completion_message TEXT DEFAULT '',
     provider TEXT DEFAULT '',
     model TEXT DEFAULT '',
     tokens_in INTEGER DEFAULT 0,
@@ -403,7 +409,7 @@ PERSONA_SCHEMA_SQL = [
     CREATE_FAMILIARITY_DAILY_TABLE,
     CREATE_GROUP_ACTIVITY_TABLE,
     CREATE_LLM_TRACES_TABLE,
-    CREATE_LLM_TRACES_INDEX_SESSION,
+    CREATE_LLM_TRACES_INDEX_INTERACTION,
     CREATE_LLM_TRACES_INDEX_USER,
     CREATE_LLM_TRACES_INDEX_CREATED_AT,
     CREATE_SCORING_FAILURES_TABLE,

@@ -609,12 +609,11 @@ class PersonaCommand(UserCommandBase):
             )
             if commentary:
                 await self._send(user_id, group_id, commentary)
-            elif self.app.segment_dispatcher is None:
-                # 非 segment 模式下 LLM 返回空串，回退到模板确保用户可见
+            else:
+                # LLM 返回空串时，回退到模板确保用户可见
                 fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
                                             result.delta_percent, result.direction)
                 await self._send(user_id, group_id, fallback)
-            # segment 模式下 chat() 返回空串表示 dispatcher 已发送，不额外回退
         except Exception as e:
             # LLM 调用失败时，回退到模板
             logger.warning(f"[Persona] _handle_jrrp LLM 调用失败，回退到模板: {e}")
@@ -874,8 +873,6 @@ class PersonaCommand(UserCommandBase):
 
     async def shutdown(self) -> None:
         """Bot 关闭时清理资源"""
-        if self.app and self.app.segment_dispatcher:
-            await self.app.segment_dispatcher.shutdown()
         if self.app and self.app.store:
             await self.app.store.close()
 

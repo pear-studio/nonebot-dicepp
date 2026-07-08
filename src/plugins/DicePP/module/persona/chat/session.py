@@ -1,11 +1,8 @@
 """对话会话管理器
 
 负责构造 LLM 上下文、调用 router、处理工具回调、执行评分。
-通过依赖注入接收 store/router/tool_registry 等，零外部 import。
-
-计费统一走 ``BillingPolicy.charge()``，由 ``_coordinator_on_result``
-（中间轮）与 ``_chat_via_coordinator``（最终轮）两处调用，
-避免注释不变量依赖人工维护。
+通过依赖注入接收 store/router 等，零外部 import。
+T6: 已废弃 — chat() 方法抛出 NotImplementedError，请使用 ChatOrchestrator。
 """
 from typing import List, Dict, Optional, Any, Tuple, TYPE_CHECKING
 import asyncio
@@ -31,8 +28,6 @@ from ..chat.context import ContextBuilder
 from ..chat.chat_config import ChatConfig
 from ..game.decay import DecayCalculator
 from utils.time import wall_now, DEFAULT_EPOCH, format_timestamp, format_relative_time
-from ..tools.registry import ToolRegistry, ToolDomain
-from ..tools.context import ToolContext
 from ..life.protocols import SleepGate
 from ..llm.coordinator import LLMCallCoordinator
 from ..gateway.port import MessagePort
@@ -79,7 +74,6 @@ class ChatSession:
         self,
         store: PersonaDataStore,
         router: LLMRouter,
-        tool_registry: ToolRegistry,
         coordinator: LLMCallCoordinator,
         character: Character,
         config: ChatConfig,
@@ -96,7 +90,6 @@ class ChatSession:
         # _build_messages 开头保留 `if self.session_manager is None` 防御检查。
         self.store = store
         self.router = router
-        self.tool_registry = tool_registry
         self.coordinator = coordinator
         self.character = character
         self.config = config
@@ -158,72 +151,10 @@ class ChatSession:
         for k in expired:
             self._last_messages.pop(k, None)
 
-        response: Optional[str] = None
-        try:
-            should_apply_gates = not is_command and (not message.startswith(".") or message.lower().startswith(".ai"))
-
-            # 睡眠门控（仅拦截聊天消息，jrrp 等 is_command 路径透传）
-            if should_apply_gates and self._sleep_gate is not None and not await self._sleep_gate.is_awake():
-                msgs = self.character.extensions.sleep_messages
-                if msgs is None:
-                    msgs = _DEFAULT_SLEEP_MESSAGES
-                if msgs:
-                    msg = random.choice(msgs)
-                    logger.info(f"睡眠门控触发: user={user_id}, character={self.character.name}")
-                    response = msg
-                    return response
-
-            if self.config.relationship_refuse_enabled and should_apply_gates:
-                if group_id:
-                    history = await self.store.get_group_messages(group_id, limit=1)
-                else:
-                    history = await self.store.get_recent_messages(user_id, group_id="", limit=1)
-                is_first = len(history) == 0
-                if not is_first:
-                    rel = await self.store.get_relationship(user_id)
-                    # reputation 每日恢复（在拒绝门控之前，通过 store 原子方法持久化）
-                    if rel:
-                        await self.store.try_daily_reputation_recovery(rel, wall_now(self.config.timezone))
-                    if rel and rel.reputation < self.config.reputation_refuse_threshold:
-                        default_refuse_messages = [
-                            "...（对方似乎没有兴趣理你）",
-                            "...（已读不回）",
-                            "嗯。",
-                        ]
-                        char_refuse = self.character.extensions.refuse_messages
-                        refuse_messages = char_refuse if char_refuse is not None else default_refuse_messages
-
-                        if refuse_messages:
-                            refuse_response = random.choice(refuse_messages)
-                            logger.info(
-                                f"信誉拒绝触发: user={user_id}, reputation={rel.reputation:.1f}"
-                            )
-                            response = refuse_response
-                            return response
-
-            target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
-
-            logger.debug(
-                f"[Persona] ChatSession.chat enter: user={user_id} group={group_id}"
-                f" message_len={len(message) if message else 0}"
-                f" image_count={len(image_data_urls) if image_data_urls else 0}"
-                f" target_key={target_key}"
-            )
-            response = await self._chat_via_coordinator(user_id, group_id, message, target_key, ctx=ctx)
-            return response
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.exception("对话处理失败")
-            response = "抱歉，我出错了，请稍后再试..."
-            return response
-        finally:
-            logger.debug(
-                f"[Persona] ChatSession.chat return: user={user_id}"
-                f" return_type={type(response).__name__}"
-                f" return_len={len(response) if response else 0}"
-            )
+        # ChatSession.chat() 已废弃 — 请使用 ChatOrchestrator.chat()
+        raise NotImplementedError(
+            "ChatSession.chat() 已废弃，请使用 ChatOrchestrator.chat()"
+        )
 
     async def clear_history(self, user_id: str, group_id: str) -> None:
         """清空对话历史（message_stream + session）"""
@@ -243,228 +174,6 @@ class ChatSession:
         调用点：_coordinator_chat_call_fn 和 _coordinator_on_exhausted。
         """
         await self._scoring_trigger.on_interaction(user_id, group_id, user_msg, assistant_msg)
-
-    # ── coordinator 回调 ──────────────────────────────────────
-
-    async def _coordinator_chat_call_fn(
-        self, user_id: str, group_id: str, messages: List[str],
-        ctx: ChatCallContext,
-    ) -> Optional[str]:
-        """coordinator chat 路径的单轮 LLM 调用。"""
-        current_message = "\n".join(messages) if messages else ""
-
-        messages_for_llm = await self._build_messages(
-            user_id, group_id, ctx=ctx,
-        )
-
-        response, delivery_performed = await self._chat_with_tools(
-            user_id, group_id, messages_for_llm, image_data_urls=ctx.image_data_urls,
-        )
-
-        if delivery_performed:
-            logger.debug(
-                f"[Persona] _coordinator_chat_call_fn return: user={user_id}"
-                f" delivery_performed=True will_return_empty=True"
-                f" dropped_response_len={len(response) if response else 0}"
-            )
-            return ""
-
-        if not ctx.is_command:
-            await self._after_response(user_id, group_id, current_message, response)
-
-        # Session 后处理：追加 assistant 消息 + token 估算 + 压缩检查
-        if self.session_manager:
-            await self.session_manager.on_chat_complete(user_id, group_id, response, current_message, self.router)
-
-        logger.debug(
-            f"[Persona] _coordinator_chat_call_fn return: user={user_id}"
-            f" delivery_performed=False will_return_empty=False"
-            f" response_len={len(response) if response else 0}"
-        )
-        return response
-
-    async def _coordinator_on_exhausted(
-        self,
-        user_id: str,
-        group_id: str,
-        current_message: str,
-        last_exception: Optional[Exception] = None,
-        is_command: bool = False,
-    ) -> str:
-        """coordinator 耗尽时的兜底回复。"""
-        if last_exception is not None:
-            logger.error(f"[Persona] coordinator on_exhausted: exception={type(last_exception).__name__}: {last_exception}")
-        if isinstance(last_exception, QuotaExceeded):
-            fallback_response = (
-                f"{last_exception}\n\n"
-                "使用 `.ai key config` 配置自己的 API Key 可解除限制"
-            )
-        else:
-            fallback_response = "LLM服务暂时不可用，请稍后再试"
-        msg_type = MessageType.COMMAND if is_command else MessageType.CHAT
-        await self._response_handler.persist_and_send(user_id, group_id, fallback_response,
-                                                       message_type=msg_type)
-        if not is_command:
-            await self._after_response(user_id, group_id, current_message, fallback_response)
-        if self._response_handler.port is not None:
-            logger.info(
-                f"[Persona] on_exhausted: fallback sent via port user={user_id}"
-            )
-            return ""
-        else:
-            logger.warning(
-                f"_coordinator_on_exhausted: MessagePort 未注入，"
-                f"消息无法发送 (user={user_id}, group={group_id})"
-            )
-            return fallback_response
-
-    async def _coordinator_on_result(self, user_id: str, group_id: str, result: str) -> None:
-        """中间轮结果：通过 MessagePort 发送、持久化、扣减配额。
-
-        计费原则：按 coordinator 轮次算，每轮 1 次配额扣减。
-
-        - coordinator 外层循环每跑 1 轮 = 1 次扣费
-          （无论非分段/分段输出，也不论该轮内部因工具循环/分段/round callback
-           调了多少次 LLM API；内层 LLM API 调用次数与配额扣减无关）
-        - max_iterations 是外层循环上限（防刷屏），正常使用不会触及
-        - 分段路径下，本函数提前返回（消息已通过 send_reply_segment + dispatcher
-          实时发送，无需在此重发也无需写历史），但 charge 应在早返之前完成
-
-        场景对照（假设单次 LLM 调用从开始到完成耗时 5 秒）：
-
-        A. 单条消息 + 非分段输出
-           t=0 发 msg_1；之后无新消息
-           → coordinator 跑 1 轮 → 1 次扣费（仅最终轮 success）
-
-        B. 单条消息 + 分段输出
-           t=0 发 msg_1；之后无新消息
-           → coordinator 跑 1 轮 → 1 次扣费（仅最终轮 success）
-
-        C. 在第 1 轮期间发 1 条新消息 + 非分段输出
-           t=0 发 msg_1（开始 iter 1）；t=2 发 msg_2（iter 1 期间，进 buffer）；
-           t=5 iter 1 完成、发送 msg_1 的回复、开始 iter 2 处理 msg_2；
-           t=10 iter 2 完成、发送 msg_2 的回复，无新消息 → 退出
-           → coordinator 跑 2 轮 → 2 次扣费（iter 1 触发本函数 1 次 + 最终 success 1 次）
-
-        D. 在第 1 轮期间发 1 条新消息 + 分段输出
-           同 C 时间轴
-           → coordinator 跑 2 轮 → 2 次扣费
-
-        E. 连续在每轮期间发新消息 + 非分段输出
-           t=0 发 msg_1（开始 iter 1）；t=2 发 msg_2（iter 1 期间，进 buffer）；
-           t=5 iter 1 完成、发送 msg_1 的回复、开始 iter 2 处理 msg_2；
-           t=7 发 msg_3（iter 2 期间，进 buffer）；
-           t=10 iter 2 完成、发送 msg_2 的回复、开始 iter 3 处理 msg_3；
-           t=15 iter 3 完成、发送 msg_3 的回复，无新消息 → 退出
-           → coordinator 跑 3 轮 → 3 次扣费
-
-        F. 连续在每轮期间发新消息 + 分段输出
-           同 E 时间轴
-           → coordinator 跑 3 轮 → 3 次扣费
-        """
-        if not result:
-            return
-
-        await self._response_handler.persist_and_send(user_id, group_id, result)
-
-    async def _chat_via_coordinator(
-        self, user_id: str, group_id: str, message: str, target_key: str,
-        ctx: ChatCallContext,
-    ) -> Optional[str]:
-        fallback_response: Optional[str] = None
-        current_message_for_exhausted = message
-
-        async def chat_call_fn(messages: List[str]) -> Optional[str]:
-            nonlocal current_message_for_exhausted
-            current_message = "\n".join(messages) if messages else message
-            current_message_for_exhausted = current_message
-            return await self._coordinator_chat_call_fn(
-                user_id, group_id, messages, ctx=ctx,
-            )
-
-        async def on_exhausted(last_exception: Optional[Exception] = None):
-            nonlocal fallback_response
-            fallback_response = await self._coordinator_on_exhausted(
-                user_id, group_id, current_message_for_exhausted, last_exception,
-                is_command=ctx.is_command,
-            )
-
-        async def _on_result(result: str):
-            await self._coordinator_on_result(user_id, group_id, result)
-
-        result = await self.coordinator.submit(
-            target_key,
-            message,
-            chat_call_fn,
-            continue_on_buffered=True,
-            on_exhausted=on_exhausted,
-            on_result=_on_result,
-        )
-        if result.status == "success":
-            # 计费由 UsageSink 在 AgentRuntime 内 best effort 处理。
-            logger.info(
-                f"[Persona] _chat_via_coordinator return: user={user_id}"
-                f" result.status=success fallback_used={fallback_response is not None}"
-                f" value_len={len(result.value) if result.value else 0}"
-            )
-            return result.value
-        logger.info(
-            f"[Persona] _chat_via_coordinator return: user={user_id}"
-            f" result.status={result.status} fallback_used={fallback_response is not None}"
-        )
-        return fallback_response if fallback_response is not None else None
-
-    # ── 工具调用 ──────────────────────────────────────────────
-
-    async def _chat_with_tools(
-        self, user_id: str, group_id: str, messages: List[Dict],
-        image_data_urls: Optional[List[str]] = None,
-    ) -> Tuple[str, bool]:
-        from ..agent.runtime import AgentRuntime
-        from ..agent.tool_bridge import build_registry
-        from ..agent.request import AgentRunLimits
-
-        limits = AgentRunLimits(
-            max_rounds=self.config.tools_max_rounds,
-        )
-
-        runtime = AgentRuntime(
-            router=self.router,
-            store=self.store,
-            port=self._response_handler.port,
-            limits=limits,
-        )
-
-        ctx = ToolContext(
-            user_id=user_id, group_id=group_id, store=self.store,
-            send=self._response_handler.port,
-            query=self.query_store, resolve_db=self.resolve_db,
-            timezone=self.config.timezone,
-        )
-
-        new_registry = build_registry(
-            self.tool_registry, [ToolDomain.CHAT], ctx=ctx,
-        )
-
-        result = await runtime.run_chat(
-            messages=messages, user_id=user_id, group_id=group_id,
-            tool_registry=new_registry,
-            image_data_urls=image_data_urls,
-        )
-
-        if result.status != "completed":
-            logger.error(f"[Persona] AgentRun 失败: status={result.status}, reason={result.final_reason}")
-            return ("抱歉，我出错了，请稍后再试...", False)
-
-        delivery_performed = result.delivery_performed and result.final_reason != "direct_content"
-        if delivery_performed:
-            logger.info(
-                f"[Persona] delivery_performed=True user={user_id}"
-                f" final_reason={result.final_reason}"
-            )
-
-        return (result.final_text, delivery_performed)
-
     # ── 历史管理 ──────────────────────────────────────────────
 
     async def _fetch_short_term_history(
@@ -488,7 +197,7 @@ class ChatSession:
                     "speaker_name": "你" if msg.role == "user" else "我",
                     "created_at": msg.created_at,
                     "agent_run_id": msg.agent_run_id,
-                    "turn_id": msg.turn_id,
+                    "interaction_id": msg.interaction_id,
                     "segment_index": msg.segment_index,
                     "segment_phase": msg.segment_phase,
                     "image_meta": msg.image_meta,
@@ -555,7 +264,7 @@ class ChatSession:
                 "speaker_name": speaker_name,
                 "created_at": msg.created_at,
                 "agent_run_id": msg.agent_run_id,
-                "turn_id": msg.turn_id,
+                "interaction_id": msg.interaction_id,
                 "segment_index": msg.segment_index,
                 "segment_phase": msg.segment_phase,
                 "image_meta": msg.image_meta,

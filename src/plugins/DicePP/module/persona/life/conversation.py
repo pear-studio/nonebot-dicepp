@@ -8,22 +8,41 @@ truncate() 仅在日终 compact 时调用一次，是显式的 cache-reset 点�
 核心约束：
 - _messages 私有，外部不可直接赋值
 - 只暴露追加型接口：add_message()、add_messages()、truncate()
-- system prompt 不进 _messages——由 Agent 单独持有，render() 时拼接
+- system prompt 不进 _messages——每次 run() 时由调用方显式传入
 
-变更通知订阅：
+变更通知事务性：
 - Conversation 持有 ChangeSource 列表和 opaque cursor
 - fetch_notifications() 拉取通知（纯读，不突变 _messages / _cursors）
-- apply_notifications() 更新 cursor 标记通知已消费（通知不进入 _messages——由 run() 模板在 LLM 消息流中临时注入）
+- run() 成功后将通知 context 持久化到 _messages 并 apply cursor
+- run() 失败时不提交通知 context，不推进 cursor
 - 调用方在 fetch → LLM call → apply 之间获得事务性保障
+
+T3 重构：
+- system_prompt 不再持久化到 Snapshot，每次 run() 由调用方显式传入
+- Conversation.run() 走新 AgentRuntime.run(AgentRunRequest) 路径
+- message_delta 不含 user_input，Conversation 自己负责追加
+- transient_context_messages 仅本轮可见，不持久化
 """
 
+from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Literal, Optional, Protocol, runtime_checkable
-import json
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+import uuid
 
 from utils.logger import logger
 from utils.string import estimate_tokens
+
+from ..agent.runtime_types import (
+    AgentRunRequest,
+    AgentRunResult,
+    LoopLimits,
+    OutputSpec,
+    RunCompletion,
+    RunMetadata,
+    ToolKit,
+)
+from ..llm.selection import CHAT, SelectionPolicy
 
 
 # 通知消息 content 前缀
@@ -34,11 +53,13 @@ NOTIFICATION_PREFIX = "[通知]"
 
 @dataclass
 class Snapshot:
-    """Conversation 状态的完整序列化表示。"""
+    """Conversation 状态的完整序列化表示。
+
+    T3: system_prompt 不再持久化，每次 run() 由调用方显式传入。
+    """
 
     messages: list[dict] = field(default_factory=list)
     cursors: dict[str, Any] = field(default_factory=dict)
-    system_prompt: str | None = None
 
 
 class Store(Protocol):
@@ -48,8 +69,12 @@ class Store(Protocol):
     生产 SQLite 适配在 Phase 2 (ChatSession 替换) 中引入。
     """
 
-    async def put(self, conv_id: str, snapshot: Snapshot) -> None:
-        """写入（全量覆盖）。首次写入时存储层分配 conv_id。"""
+    async def put(self, conv_id: str, snapshot: Snapshot) -> str:
+        """写入（全量覆盖）。首次写入时存储层分配 conv_id。
+
+        Returns:
+            写入后的 conv_id（首次创建时返回新分配的 id，更新时返回原 id）。
+        """
         ...
 
     async def get(self, conv_id: str) -> Snapshot | None:
@@ -61,46 +86,24 @@ class Store(Protocol):
         ...
 
 
-# ── Run Config & Result ──────────────────────────────────
+# ── Run Result (new) ──────────────────────────────────
 
 
 @dataclass
-class RunConfig:
-    """单轮执行配置。
-
-    ToolLoop 根据 mode 分派执行路径（chat / collect / react）。
-    """
-
-    mode: Literal["chat", "collect"] = "chat"
-    tools: list[dict] | None = None
-    required_tools: list[str] | None = None
-    tool_registry: Any | None = None
-    selection: Any | None = None
-    temperature: float = 0.9
-    timeout: int = 60
-    image_data_urls: list[str] | None = None
-
-
-@dataclass
-class RunResult:
-    """Conversation.run() 返回值"""
+class ConversationRunResult:
+    """Conversation.run() 返回值 — T3 新结构"""
 
     final_text: str = ""
-    final_reason: str = ""  # "stop" | "max_rounds" | "error"
+    final_reason: str = ""  # "stop" | "max_rounds" | "error" | "empty_response" | ...
     delivery_performed: bool = False
-    terminated_by: str = ""  # 终止工具名，如 "end_conversation"
-    new_messages: list[dict] = field(default_factory=list)  # 本轮增量消息
+    new_messages: list[dict] = field(default_factory=list)  # 本轮增量消息（message_delta）
+    run_id: str = ""
+    interaction_id: str = ""
+    completion_kind: str = ""  # "completed" | "limit_reached" | "failed"
+    output_arguments: dict | None = None  # T4: AgentRunResult.output.arguments 透传
+    output_call_index: int | None = None  # T5: output 对应的 tool call index，chat final 保序用
 
 
-class ToolLoop(Protocol):
-    """LLM 执行器协议 — 与 Store 风格一致的类型安全接口。
-
-    Conversation.run() 依赖此协议，不耦合具体实现。
-    """
-
-    async def execute(self, messages: list[dict], config: RunConfig) -> "ToolResult":
-        """执行一次 LLM + 工具循环，返回增量消息和结果。"""
-        ...
 
 
 # ── Notification & ChangeSource ──────────────────────────────────
@@ -153,7 +156,7 @@ class ChangeSource(Protocol):
 class Conversation:
     """纯追加的消息线程。
 
-    system prompt 不进 _messages——由 Agent 单独持有，render() 时拼接。
+    system prompt 不进 _messages——每次 run() 时由调用方显式传入。
 
     持久化：
     - save() / open() / delete() 通过 Store 协议操作
@@ -163,33 +166,37 @@ class Conversation:
     变更通知事务性：
     - register() 注册 ChangeSource
     - fetch_notifications() 拉取通知（纯读）
-    - apply_notifications() 提交通知到 _messages 并更新 cursor
-    - fetch → LLM call → apply 之间自动获得事务性保障
+    - run() 成功后将通知 context 持久化到 _messages 并 apply cursor
+    - run() 失败时不提交通知 context，不推进 cursor
+
+    T3 重构：
+    - system_prompt 不再持久化；每次 run() 由调用方显式传入
+    - run() 走 AgentRuntime.run(AgentRunRequest) 新路径
+    - _runtime 替代旧 _tool_loop
     """
 
     def __init__(self, store: Optional[Store] = None,
-                 tool_loop: Optional[ToolLoop] = None) -> None:
+                 runtime: Optional[Any] = None) -> None:
         self._store = store
         self._id: str | None = None
         self._messages: List[dict] = []
         self._change_sources: List[ChangeSource] = []
         self._cursors: dict[str, Any] = {}
-        self._system_prompt: str | None = None
-        self._tool_loop = tool_loop  # ToolLoop | None，注入的 LLM 执行器
+        self._runtime = runtime  # AgentRuntime | None — T3 新路径
 
     # ── ChangeSource 管理 ───────────────────────────────────────
 
     def register(self, source: ChangeSource) -> None:
         """注册变更来源。
 
-        按 source_id 幂等：同 id 重复注册会替换之前的。
+        按 source_id 幂等：同 id 重复注册会替换 source 对象，但保留已有 cursor
+        （避免破坏 Conversation.open() 恢复的 cursor 状态）。
         注册后按 (priority, source_id) 排序，保证通知注入顺序稳定。
         """
-        # 幂等：移除同 source_id 的旧条目
+        # 幂等：移除同 source_id 的旧条目（替换 source 对象，保留 cursor）
         self._change_sources = [
             s for s in self._change_sources if s.source_id != source.source_id
         ]
-        self._cursors.pop(source.source_id, None)
         self._change_sources.append(source)
         self._change_sources.sort(key=lambda s: (s.priority, s.source_id))
 
@@ -233,8 +240,8 @@ class Conversation:
         """
         self._cursors.update(new_cursors)
 
-    def add_message(self, role: str, content: str) -> None:
-        """追加一条消息。"""
+    def add_message(self, role: str, content: str | list[dict]) -> None:
+        """追加一条消息。支持纯文本和多模态 content parts。"""
         self._messages.append({"role": role, "content": content})
 
     def add_messages(self, new_messages: List[dict]) -> None:
@@ -247,61 +254,139 @@ class Conversation:
         for msg in new_messages:
             self._messages.append(msg)
 
-    # ── 执行模板 ───────────────────────────────────────
+    # ── 执行模板（新路径 T3）───────────────────────────────────────
 
     async def run(
-        self, user_input: str, config: Optional[RunConfig] = None,
-        transient: str | None = None,
-    ) -> RunResult:
-        """单轮执行模板：fetch → build → tool_loop → apply → add_messages → save。
+        self,
+        *,
+        system_prompt: str,
+        user_input: str | list[dict],
+        interaction_id: str,
+        tools: ToolKit | None = None,
+        output: OutputSpec | None = None,
+        selection: SelectionPolicy = CHAT,
+        limits: LoopLimits | None = None,
+        run_tag: str = "",
+        agent_name: str = "",
+        user_id: str = "",
+        group_id: str = "",
+        transient_context_messages: list[dict] | None = None,
+    ) -> ConversationRunResult:
+        """T3 新执行模板：fetch → render → AgentRuntime.run() → commit/save。
 
-        tool_loop 未注入时返回 RunResult(error)。
+        system_prompt 是每次 run 的显式输入，不持久化到 Conversation。
 
-        NOTE: render() 不依赖 self._system_prompt——运行时以参数传入的 external system_prompt
-        为准。self._system_prompt 仅用于 Snapshot 持久化/恢复（Conversation.open() 路径）。
-        与 Agent._process() 的执行模式重复将在 Phase 3（Agent 基类统一）时消除，
-        届时 Agent._process() 委托给 Conversation.run()。
-        transient 参数是过渡方案，多源注入需求出现时迁移至 RunConfig.transient_messages。
+        职责顺序：
+        1. fetch notifications（纯读）
+        2. render messages: system_prompt + history + pending context + user_input + transient
+        3. 组装 AgentRunRequest
+        4. 调用 AgentRuntime.run(request)
+        5. runtime 成功后：
+           - append pending notification context 到 _messages
+           - apply notification cursors
+           - append user_input 到 _messages
+           - append result.message_delta 到 _messages
+           - save conversation
+        6. runtime 失败时：
+           - 不提交 pending notification context
+           - 不 apply cursor
+           - 不保存本轮 user_input / message_delta
+
+        message_delta 语义：
+        - Runtime 返回的 message_delta 不包含本轮 user_input
+        - Conversation 自己负责追加 user_input，再追加 result.message_delta
+
+        transient_context_messages：
+        - 只用于本轮 LLM 输入，不保存进 Conversation 历史
+
+        limit_reached 处理策略：
+        - limit_reached 视为未完成，不提交任何状态变更。
+          对于 collect 模式（必须调用指定工具），这防止了不完整结果被持久化。
+          对于 chat 模式（未来），可能需要单独评估部分输出的保留策略。
         """
-        if config is None:
-            config = RunConfig()
+        _runtime = self._runtime
+        if _runtime is None:
+            return ConversationRunResult(
+                final_reason="error: no runtime",
+                completion_kind="failed",
+            )
+
+        _limits = limits or LoopLimits()
 
         # 1. fetch — 纯读，不改变状态
-        notifs, cursors = await self.fetch_notifications()
+        notifs, pending_cursors = await self.fetch_notifications()
 
-        # 2. build — 拼装完整消息
-        messages = self.render(self._system_prompt or "")
-        for n in notifs:
-            messages.append(n.to_message())
+        # 2. render — 拼装完整消息
+        messages = self.render(system_prompt)
+        # pending notification context 作为持久上下文注入（成功后保存）
+        pending_persistent: list[dict] = [n.to_message() for n in notifs]
+        messages.extend(pending_persistent)
         messages.append({"role": "user", "content": user_input})
-        if transient:
-            messages.append({"role": "user", "name": "系统", "content": transient})
+        if transient_context_messages:
+            messages.extend(transient_context_messages)
 
-        # 3. execute — 委托给 ToolLoop
-        if self._tool_loop is None:
-            return RunResult(final_text="", final_reason="error: no tool_loop")
-
-        tool_result = await self._tool_loop.execute(messages, config)
-
-        # 4. apply — 提交 cursor
-        self.apply_notifications(notifs, cursors)
-
-        # 5. extend — 追加本轮增量（new_messages 只含 LLM 产出的新消息）
-        self.add_message("user", user_input)
-        # 快照本轮增量消息（add_messages 前捕获，供调用方提取工具调用参数）
-        round_new_messages = list(tool_result.new_messages)
-        self.add_messages(tool_result.new_messages)
-
-        # 6. save — 自动持久化
-        await self.save()
-
-        return RunResult(
-            final_text=tool_result.final_text,  # type: ignore[attr-defined]
-            final_reason=tool_result.final_reason,  # type: ignore[attr-defined]
-            delivery_performed=tool_result.delivery_performed,  # type: ignore[attr-defined]
-            terminated_by=tool_result.terminated_by,  # type: ignore[attr-defined]
-            new_messages=round_new_messages,
+        # 3. 组装 AgentRunRequest
+        request = AgentRunRequest(
+            interaction_id=interaction_id,
+            messages=messages,
+            tools=tools or ToolKit(),
+            output=output,
+            selection=selection,
+            limits=_limits,
+            metadata=RunMetadata(agent_name=agent_name, run_tag=run_tag, user_id=user_id, group_id=group_id),
         )
+
+        # 4. 调用 AgentRuntime.run(request)
+        result: AgentRunResult = await _runtime.run(request)
+
+        # 5. 成功 → 提交 notification context、apply cursor、保存消息
+        if result.completion.kind == "completed":
+            # append pending notification context（持久化到 _messages）
+            for msg in pending_persistent:
+                self._messages.append(msg)
+            # apply cursor
+            self.apply_notifications(notifs, pending_cursors)
+            # append user_input
+            self.add_message("user", user_input)
+            # append result.message_delta（不含 user_input）
+            delta = list(result.message_delta)
+            self.add_messages(delta)
+            # save
+            await self.save()
+
+
+            return ConversationRunResult(
+                final_text=result.output.text if result.output else "",
+                final_reason=result.completion.code,
+                delivery_performed=False,
+                new_messages=delta,
+                run_id=result.run_id,
+                interaction_id=result.interaction_id,
+                completion_kind=result.completion.kind,
+                output_arguments=(
+                    dict(result.output.arguments)
+                    if result.output and result.output.arguments
+                    else None
+                ),
+                output_call_index=(
+                    result.output.call_index
+                    if result.output
+                    else None
+                ),
+            )
+        else:
+            # 6. 失败 → 不提交 notification context，不 apply cursor，
+            #    不保存本轮 user_input / message_delta
+            return ConversationRunResult(
+                final_text="",
+                final_reason=result.completion.code,
+                delivery_performed=False,
+                new_messages=[],
+                run_id=result.run_id,
+                interaction_id=result.interaction_id,
+                completion_kind=result.completion.kind,
+            )
+
 
     def get_messages(self) -> List[dict]:
         """返回内部消息列表的副本（不含 system prompt）。
@@ -317,20 +402,13 @@ class Conversation:
         """当前 conversation 的唯一标识（由 Store 分配）。"""
         return self._id
 
-    @property
-    def system_prompt(self) -> str | None:
-        """外部管理的 system prompt，render() 时拼接在消息列表头部。"""
-        return self._system_prompt
-
-    @system_prompt.setter
-    def system_prompt(self, value: str) -> None:
-        self._system_prompt = value
-
     async def save(self) -> None:
         """持久化当前快照。
 
         store 为 None 时跳过（纯内存模式）。首次 save 由 Store 分配 conv_id。
         cursor 序列化由 json.dumps 校验——不可序列化的 cursor 会在此时抛出 TypeError。
+
+        T3: system_prompt 不再持久化。
         """
         if self._store is None:
             return
@@ -338,17 +416,20 @@ class Conversation:
             # 当前所有 messages 的 content 均为 str；若未来支持多模态 list content，改用 copy.deepcopy
             messages=[dict(m) for m in self._messages],
             cursors=dict(self._cursors),
-            system_prompt=self._system_prompt,
         )
-        await self._store.put(self._id or "", snapshot)
-        # Store 实现层可能分配新 id；这里不做假设
+        returned_id = await self._store.put(self._id or "", snapshot)
+        # Store 实现层分配或确认 id；写回以保证后续操作使用同一 id
+        if returned_id is not None:
+            self._id = returned_id
 
     @classmethod
     async def open(cls, conv_id: str, store: Store) -> "Conversation":
         """从存储恢复 Conversation。不存在时创建新的空实例。
 
-        创建后调用方可注册 ChangeSource、设置 system_prompt，然后首次 run()
+        创建后调用方可注册 ChangeSource，然后首次 run()
         将触发懒恢复从 store 加载消息和 cursor。
+
+        T3: system_prompt 不再从 DB 恢复——每次 run() 由调用方显式传入。
         """
         conv = cls(store=store)
         conv._id = conv_id
@@ -356,8 +437,6 @@ class Conversation:
         if snapshot is not None:
             conv._messages = snapshot.messages
             conv._cursors = snapshot.cursors
-            if snapshot.system_prompt is not None:
-                conv._system_prompt = snapshot.system_prompt
         return conv
 
     async def delete(self) -> None:

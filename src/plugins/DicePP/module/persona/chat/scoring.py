@@ -44,11 +44,12 @@ class ScoringAgent:
         *,
         warn_pending: bool = False,
     ) -> ScoringAnalysisResult:
-        from ..life.tool_loop import ToolLoop, _parse_tool_args
-        from ..life.conversation import RunConfig
-        from ..agent.request import AgentRunLimits
+        import uuid
+        from ..agent.runtime import AgentRuntime
+        from ..agent.runtime_types import AgentRunRequest, ToolKit, OutputSpec, RunMetadata, LoopLimits
+        from ..tools.collecting import RecordScoreArgs
 
-        tool_name = "record_score"
+        tool_name = "submit_score"
 
         prompt = self._build_analysis_prompt(
             messages,
@@ -59,31 +60,37 @@ class ScoringAgent:
         )
 
         try:
-            tool_loop = ToolLoop(
+            runtime = AgentRuntime(
                 router=self.llm_router,
                 store=self._store,
-                limits=AgentRunLimits(max_rounds=self.max_rounds),
+                limits=LoopLimits(max_rounds=self.max_rounds),
             )
-            tool_result = await tool_loop.execute(
+            output_spec = OutputSpec(
+                name=tool_name,
+                description="记录评分结果：亲密度变化、信誉标记和用户事实提取",
+                args_schema=RecordScoreArgs,
+            )
+            request = AgentRunRequest(
+                interaction_id=uuid.uuid4().hex[:24],
                 messages=[{"role": "user", "content": prompt}],
-                config=RunConfig(
-                    mode="collect",
-                    required_tools=["record_score"],
-                    temperature=0.7,
-                    timeout=60,
-                    selection=SCORING,
-                ),
+                tools=ToolKit(),
+                output=output_spec,
+                selection=SCORING,
+                limits=LoopLimits(max_rounds=self.max_rounds),
+                metadata=RunMetadata(agent_name="scoring", run_tag="scoring"),
             )
-            if tool_result.final_reason and tool_result.final_reason not in ("stop", "max_rounds", "direct_content"):
+            result = await runtime.run(request)
+
+            if result.completion.kind != "completed":
                 logger.warning(
-                    f"评分: LLM 执行异常 reason={tool_result.final_reason}"
+                    f"评分: LLM 执行异常 reason={result.completion.code}"
                 )
                 return ScoringAnalysisResult(
                     deltas=ScoreDeltas(), facts={},
                     parse_error="LLM 协议错误",
                 )
-            collected_args = _parse_tool_args(tool_result.new_messages, tool_name)
-            content = tool_result.final_text or ""
+            data = dict(result.output.arguments) if result.output and result.output.arguments else None
+            content = result.output.text or ""
 
         except ServiceUnavailableError as e:
             logger.error(f"评分: 无可用 LLM provider: {e}")
@@ -98,7 +105,7 @@ class ScoringAgent:
                 parse_error=f"LLM 调用失败: {type(e).__name__}: {e}",
             )
 
-        if not collected_args:
+        if not data:
             raw_response = content if content else ""
             deltas, facts, parse_error = self._parse_response(raw_response)
             return ScoringAnalysisResult(
@@ -106,7 +113,6 @@ class ScoringAgent:
                 raw_response=raw_response, parse_error=parse_error,
             )
 
-        data = collected_args[0]
         raw_args = json.dumps(data, ensure_ascii=False)
         if not isinstance(data, dict):
             return ScoringAnalysisResult(
@@ -136,7 +142,7 @@ class ScoringAgent:
         messages: List[Dict[str, str]],
         profile: UserProfile,
         relationship: Optional[RelationshipState] = None,
-        tool_name: str = "record_score",
+        tool_name: str = "submit_score",
         *,
         warn_pending: bool = False,
     ) -> str:
@@ -227,8 +233,8 @@ class ScoringAgent:
         """从解析的数据中提取结果
 
         兼容两种输入格式：
-        - 新格式 (record_score): 扁平字段 {intimacy, reputation_delta, facts}
-        - 旧格式 (score_relationship): 嵌套 {deltas: {...}, facts: {...}}
+        - 新格式: 扁平字段 {intimacy, reputation_delta, facts}
+        - 旧格式: 嵌套 {deltas: {...}, facts: {...}}
         """
         # 判断格式：有 "deltas" 键 → 旧格式；否则 → 新格式
         if "deltas" in data and isinstance(data["deltas"], dict):

@@ -14,7 +14,6 @@ class AgentResult:
     data: Any
     error: Optional[str] = None
     raw_response: str = ""
-    terminated_by: str = ""  # 终止工具名（"end_conversation" 或空）
 
 
 @dataclass

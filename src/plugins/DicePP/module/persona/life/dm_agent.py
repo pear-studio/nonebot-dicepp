@@ -70,9 +70,8 @@ class DMAgent(Agent):
         store: PersonaDataStore,
         router: LLMRouter,
         config=None,
-        tool_registry=None,
     ):
-        super().__init__(store, router, config, tool_registry=tool_registry)
+        super().__init__(store, router, config)
 
     def build_system_prompt(self, state: None, context: dict) -> str:
         """构建 DM 系统提示词
@@ -118,7 +117,7 @@ class DMAgent(Agent):
    - 角色只是表达感受或做日常事务 → 可自然收束（设置 want_to_end=true），也可引入推动故事的新信息
 3. 自然收束场景
    - 当前场景已到自然停顿点时 → 设置 want_to_end=true 提议结束
-   - 收到角色的结束提议且你也同意时 → 调用 end_conversation 优雅收束
+   - 收到角色的结束提议且你也同意时 → 调用 say 并设置 want_to_end=true
    - 如果你有重要的新信息要补充，可以继续 say（会覆盖结束提议）
 
 不要做的事:
@@ -132,7 +131,7 @@ class DMAgent(Agent):
 1. 第三人称客观叙述
 2. context_summary 为事件摘要，不超过 60 字
 3. 给出该事件对角色体力/心情/健康的影响（delta，可选，-20~+20）
-4. 必须通过调用 say 工具输出。同意对方的结束提议时调用 end_conversation。"""
+4. 必须通过调用 say 工具输出。同意对方的结束提议时，调用 say 并设置 want_to_end=true。"""
 
         return system_prompt
 
@@ -166,7 +165,7 @@ class DMAgent(Agent):
                 f"- 如果有需要裁决的行动（风险/难度），暗骰裁决后叙述结果（不展示DC和骰值）\n"
                 f"- 如果角色在观察/回忆/辨别，可直接补充合理细节\n"
                 f"- 如果角色只是日常表达、没有需要你介入的内容，可以自然收束（设置 want_to_end=true）\n"
-                f"- 如果角色已提议结束且你也同意，调用 end_conversation"
+                f"- 如果角色已提议结束且你也同意，调用 say 并设置 want_to_end=true"
             )
 
         user_prompt = (
@@ -180,34 +179,19 @@ class DMAgent(Agent):
         if char_want_to_end:
             user_prompt += (
                 "\n\n[提示] 角色认为当前场景可以收束了。"
-                "如果你也同意，调用 end_conversation 工具。"
+                "如果你也同意，调用 say 并设置 want_to_end=true。"
                 "如果你还有需要补充的信息，正常 say 即可（会覆盖结束提议）。"
             )
 
         return user_prompt
 
     def _get_openai_tools(self) -> list:
-        """返回 say 工具（DM 版本 description）+ end_conversation"""
-        from ..tools.collecting import SAY_TOOL_DM, END_CONVERSATION_TOOL
+        """返回 say 工具（DM 版本 description）"""
+        from ..tools.collecting import SAY_TOOL_DM
 
         return [
             SAY_TOOL_DM.to_openai_format(),
-            END_CONVERSATION_TOOL.to_openai_format(),
         ]
-
-    def _build_extra_registry(self) -> Any:
-        """构建只读工具注册表，额外注册 search_story_deck"""
-        registry = super()._build_extra_registry()
-        if registry is None:
-            from ..agent.tool_executor import ToolRegistry as NewTR
-            registry = NewTR()
-        # 注册 search_story_deck（DM 只读查询 story_deck）
-        try:
-            from ..tools.story_deck import register_search_story_deck
-            register_search_story_deck(registry, self.store)
-        except Exception:
-            logger.warning("search_story_deck 注册失败，DM 叙事条目查询将不可用", exc_info=True)
-        return registry
 
     @staticmethod
     def _slot_type_hint(slot_type: str) -> str:
@@ -290,29 +274,134 @@ class DMAgent(Agent):
 
     # ── 核心执行 ──────────────────────────────────────────────
 
-    async def run(self, context: dict) -> AgentResult:
+    async def build_run_spec(self, context: dict) -> "AgentRunSpec":
+        """T6: 直接构建 AgentRunSpec — say 作为 OutputSpec，普通工具进 ToolKit。"""
+        from ..agent.runtime_types import (
+            AgentRunSpec, LoopLimits, ToolKit, OutputSpec,
+        )
+        from ..tools.collecting import SayArgs, SAY_TOOL_DM
+        from ..tools.roll_dice import build_roll_dice_tool
+        from ..tools.read_events import build_read_events_tool
+        from ..tools.search_events import build_search_events_tool
+        from ..tools.story_deck import build_search_story_deck_tool
+
+        system_prompt = (
+            self._cached_system_prompt
+            if self._cached_system_prompt is not None
+            else self.build_system_prompt(None, context)
+        )
+        user_prompt = self._build_user_prompt(context)
+
+        # T6: 直接构建 ToolKit
+        timezone = getattr(self.config, "timezone", "Asia/Shanghai") if self.config else "Asia/Shanghai"
+        toolkit = ToolKit(tools={
+            "roll_dice": build_roll_dice_tool(),
+            "read_events": build_read_events_tool(self.store, timezone),
+            "search_events": build_search_events_tool(self.store),
+            "search_story_deck": build_search_story_deck_tool(self.store),
+        })
+
+        # say 作为 OutputSpec，结束语义由 say.want_to_end 表达
+        output_spec = OutputSpec(
+            name="say",
+            description=SAY_TOOL_DM.description,
+            args_schema=SayArgs,
+        )
+
+        return AgentRunSpec(
+            system_prompt=system_prompt,
+            user_input=user_prompt,
+            tools=toolkit,
+            output=output_spec,
+            selection=self._get_selection_policy(),
+            limits=LoopLimits(max_rounds=self._max_rounds),
+            run_tag="dm_event",
+        )
+
+    async def interpret_result(
+        self, result: "ConversationRunResult", context: dict
+    ) -> AgentResult:
+        """T4: 从 output_arguments 读取 say 结构化输出，不再从 messages 反解析。"""
+        args = result.output_arguments
+
+        # 优先从 output_arguments 获取 say 内容
+        if args is not None:
+            if "content" in args:
+                return self._build_event_result(args)
+            # output_arguments 存在但缺少 content：退化为默认描述
+            # （模型调用了 say 但参数不全，或调用了其他工具体现在 output 中）
+            return self._build_event_result({})
+
+        # LLM 未调用工具（output_arguments 为 None）
+        logger.warning("DM 事件生成失败: LLM 未调用工具")
+        return AgentResult(
+            success=False,
+            data=EventGenerationResult(
+                description="我正在房间里休息。",
+                context_summary="在房间里休息",
+            ),
+            error="LLM 未调用工具",
+        )
+
+    def _build_event_result(self, args: dict) -> AgentResult:
+        """从 say 结构化参数构建 EventGenerationResult。"""
+        description = str(args.get("content", "")).strip().strip('"').strip("'")
+        if not description:
+            description = "我正在房间里休息。"
+
+        duration_minutes = max(0, min(2880, int(args.get("duration_minutes", 0))))
+
+        context_summary = (
+            str(args.get("context_summary", "")).strip().strip('"').strip("'")
+        )
+        if not context_summary:
+            context_summary = description[:60]
+
+        def _parse_delta(val) -> Optional[int]:
+            if val is None:
+                return None
+            try:
+                return max(-20, min(20, int(val)))
+            except (TypeError, ValueError):
+                return None
+
+        return AgentResult(
+            success=True,
+            data=EventGenerationResult(
+                description=description,
+                context_summary=context_summary,
+                duration_minutes=duration_minutes,
+                energy_delta=_parse_delta(args.get("energy_delta")),
+                mood_delta=_parse_delta(args.get("mood_delta")),
+                health_delta=_parse_delta(args.get("health_delta")),
+                want_to_end=bool(args.get("want_to_end", False)),
+                raw_response=json.dumps(args, ensure_ascii=False),
+                system_prompt_digest=self._cached_system_prompt,
+            ),
+            raw_response=json.dumps(args, ensure_ascii=False),
+        )
+
+    async def run(
+        self, context: dict, *, interaction_id: str,
+    ) -> AgentResult:
         """DM 生成生活事件（通过 say 工具）
 
         chain_depth==0 时：先注入 story_deck 叙事条目，再执行正常事件生成。
+        通过 build_run_spec() + interpret_result() 模板方法，走 AgentRunSpec 新路径。
         """
         chain_depth = context.get("chain_depth", 0)
 
-        # 提前构建 system_prompt 并缓存，避免在基类 run() 和 system_prompt_digest
-        # 中重复构建（每次构建 ~50 行字符串拼接）
+        # 提前构建 system_prompt 并缓存
         self._cached_system_prompt = self.build_system_prompt(None, context)
 
         # chain_depth==0 时：注入 story_deck 条目
-        # 契约假设（依赖基类 Agent 行为）：
-        #   (1) _ensure_conversation 在 _conversation 已设置时幂等 no-op
-        #   (2) super().run() 中再次调用 _ensure_conversation 不覆盖已注入消息
-        #   (3) _cached_system_prompt 在两次调用间不变
-        # 若上述任一假设被破坏，改为直接调用 _process 替代 super().run()
         if chain_depth == 0:
             try:
                 injection_text = await self._build_story_deck_injection(context)
                 if injection_text:
-                    # 确保 Conversation 存在
-                    conv = await self._ensure_conversation(context, system_prompt_override=self._cached_system_prompt)
+                    conv = await self._ensure_conversation(
+                        context, system_prompt_override=self._cached_system_prompt,
+                    )
                     n, c = await conv.fetch_notifications()
                     conv.apply_notifications(n, c)
                     conv.add_message("user", injection_text)
@@ -321,136 +410,7 @@ class DMAgent(Agent):
                 logger.warning("story_deck 注入失败，继续正常事件生成", exc_info=True)
 
         try:
-            result = await super().run(context)
-
-            # 检查是否由 end_conversation 终止
-            if self._last_terminated_by == "end_conversation":
-                # 同轮可能同时调用了 say + end_conversation，优先提取 say 数据
-                collected = result.data
-                if isinstance(collected, list):
-                    for item in collected:
-                        if item and "content" in item:
-                            # 有 say 内容：解析并正常返回，不含 terminated_by（say 已保存）
-                            say_args = item
-                            description = str(say_args.get("content", "")).strip().strip('"').strip("'")
-                            if description:
-                                duration_minutes = max(0, min(2880, int(say_args.get("duration_minutes", 0))))
-                                context_summary = str(say_args.get("context_summary", "")).strip().strip('"').strip("'") or description[:60]
-                                def _parse_delta(val) -> Optional[int]:
-                                    if val is None: return None
-                                    try: return max(-20, min(20, int(val)))
-                                    except (TypeError, ValueError): return None
-                                return AgentResult(
-                                    success=True,
-                                    data=EventGenerationResult(
-                                        description=description,
-                                        context_summary=context_summary,
-                                        duration_minutes=duration_minutes,
-                                        energy_delta=_parse_delta(say_args.get("energy_delta")),
-                                        mood_delta=_parse_delta(say_args.get("mood_delta")),
-                                        health_delta=_parse_delta(say_args.get("health_delta")),
-                                        want_to_end=bool(say_args.get("want_to_end", False)),
-                                        raw_response=json.dumps(say_args, ensure_ascii=False),
-                                        system_prompt_digest=self._cached_system_prompt,
-                                    ),
-                                    raw_response=json.dumps(say_args, ensure_ascii=False),
-                                )
-                # 无 say 内容：返回空结果，标记 terminated_by
-                return AgentResult(
-                    success=True,
-                    data=EventGenerationResult(),
-                    terminated_by="end_conversation",
-                )
-
-            if not result.success:
-                logger.warning("DM 事件生成失败: LLM 未调用工具")
-                return AgentResult(
-                    success=False,
-                    data=EventGenerationResult(
-                        description="我正在房间里休息。",
-                        context_summary="在房间里休息",
-                    ),
-                    error="LLM 未调用工具",
-                )
-
-            collected = result.data
-            if not collected or not isinstance(collected, list):
-                return AgentResult(
-                    success=False,
-                    data=EventGenerationResult(
-                        description="我正在房间里休息。",
-                        context_summary="在房间里休息",
-                    ),
-                    error="LLM 返回空数据",
-                )
-
-            try:
-                # 在 collected 中查找 say 工具的参数（可能混有 end_conversation 的空 dict）
-                say_args = None
-                for item in collected:
-                    if item and "content" in item:
-                        say_args = item
-                        break
-                if say_args is None:
-                    say_args = collected[0] if collected else {}
-
-                args = say_args
-                # 从 SayArgs 字段构建 EventGenerationResult
-                description = str(args.get("content", "")).strip().strip('"').strip("'")
-                if not description:
-                    description = "我正在房间里休息。"
-
-                duration_minutes = max(0, min(2880, int(args.get("duration_minutes", 0))))
-
-                context_summary = (
-                    str(args.get("context_summary", "")).strip().strip('"').strip("'")
-                )
-                if not context_summary:
-                    context_summary = description[:60]
-
-                def _parse_delta(val) -> Optional[int]:
-                    if val is None:
-                        return None
-                    try:
-                        return max(-20, min(20, int(val)))
-                    except (TypeError, ValueError):
-                        return None
-
-                energy_delta = _parse_delta(args.get("energy_delta"))
-                mood_delta = _parse_delta(args.get("mood_delta"))
-                health_delta = _parse_delta(args.get("health_delta"))
-                want_to_end = bool(args.get("want_to_end", False))
-
-                return AgentResult(
-                    success=True,
-                    data=EventGenerationResult(
-                        description=description,
-                        context_summary=context_summary,
-                        duration_minutes=duration_minutes,
-                        energy_delta=energy_delta,
-                        mood_delta=mood_delta,
-                        health_delta=health_delta,
-                        want_to_end=want_to_end,
-                        raw_response=json.dumps(args, ensure_ascii=False),
-                        system_prompt_digest=self._cached_system_prompt,
-                    ),
-                    raw_response=json.dumps(args, ensure_ascii=False),
-                )
-
-            except Exception as e:
-                logger.error(f"DM 事件生成解析失败: {e}", exc_info=True)
-                return AgentResult(
-                    success=False,
-                    data=EventGenerationResult(
-                        description="我正在房间里休息。",
-                        context_summary="在房间里休息",
-                        duration_minutes=0,
-                        energy_delta=0,
-                        mood_delta=None,
-                        health_delta=None,
-                    ),
-                    error=str(e),
-                )
+            return await super().run(context, interaction_id=interaction_id)
         finally:
             self._cached_state = None
             self._cached_system_prompt = None

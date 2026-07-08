@@ -5,17 +5,14 @@ Character Agent — 角色第一人称
 Phase 1: 真实 LLM 调用，根据 context.mode 使用不同 prompt 模板。
 """
 import asyncio
-from typing import Any, List, Optional, TYPE_CHECKING
 import json
+from typing import Any, List, Optional, TYPE_CHECKING
 from utils.logger import logger
 from ..data.models import CharacterState
 from ..data.store import PersonaDataStore
 from ..llm.router import LLMRouter, ServiceUnavailableError
 from ..llm.selection import EVENT_GEN, DIARY, SUMMARIZE
 from ..tools.collecting import (
-    END_CONVERSATION_TOOL,
-    RECORD_DIARY_ENTRY_TOOL,
-    RECORD_SHARE_MESSAGE_TOOL,
     SAY_TOOL_CHARACTER,
 )
 from utils.time import format_timestamp, format_relative_time
@@ -61,9 +58,8 @@ class CharacterAgent(Agent):
         store: PersonaDataStore,
         router: LLMRouter,
         config=None,
-        tool_registry=None,
     ):
-        super().__init__(store, router, config, tool_registry=tool_registry)
+        super().__init__(store, router, config)
 
     async def load_state(self) -> CharacterState:
         """从 store 加载角色状态"""
@@ -164,7 +160,7 @@ class CharacterAgent(Agent):
 - "亲近" / "亲密"：放松、可撒娇、可调侃、可分享糗事
 
 输出方式：
-你必须调用 record_share_message 工具来输出消息，不要直接回复文本。
+你必须通过结构化输出工具来发送消息，不要直接回复文本。
 {few_shot_block}"""
         return system_prompt
 
@@ -237,14 +233,14 @@ class CharacterAgent(Agent):
             f"\n你想做什么就说什么——DM 会根据你的行动决定是否需要裁决并叙述结果。"
             f"\n\n结束场景:"
             f"\n- 如果你觉得场景可以自然收束了，设置 want_to_end=true"
-            f"\n- 收到 DM 的结束提议时，同意则调用 end_conversation，不同意则继续 say"
+            f"\n- 收到 DM 的结束提议时，同意则调用 say 并设置 want_to_end=true，不同意则继续 say"
         )
 
         # 注入 DM 的 want_to_end 信号
         if dm_want_to_end:
             user_prompt += (
                 "\n\n[提示] DM 认为当前场景可以收束了。"
-                "如果你也同意，调用 end_conversation 工具。"
+                "如果你也同意，调用 say 并设置 want_to_end=true。"
                 "如果你还有想说的或想做的，继续正常 say 即可（会覆盖结束提议）。"
             )
 
@@ -294,7 +290,7 @@ class CharacterAgent(Agent):
 2. 语气符合角色性格
 3. 不需要提及今天发生的所有事——选你真正想写的来写
 
-你必须通过调用 record_diary_entry 工具来输出日记内容，不要直接回复文本。"""
+你必须通过调用 submit_diary 来输出日记内容，不要直接回复文本。"""
         return user_prompt
 
     def _build_share_user_prompt(self, context: dict) -> str:
@@ -358,33 +354,41 @@ class CharacterAgent(Agent):
 消息类型: {message_type}
 当前环境: {environment}
 
-请调用 record_share_message 工具，传入你要发给对方的消息。"""
+请通过结构化输出工具，传入你要发给对方的消息。"""
         return user_prompt
 
     def _build_opening_user_prompt(self, context: dict) -> str:
         return "请用第一人称写2-3句日报开场白："
 
 
-    async def run(self, context: dict) -> AgentResult:
+    async def run(
+        self, context: dict, *, interaction_id: str,
+    ) -> AgentResult:
         """统一入口 — 根据 context["mode"] 分派到专用方法。
 
         mode: "reaction" | "diary" | "share" | "opening"
         """
         mode = context.get("mode", "reaction")
         if mode == "reaction":
-            return await self.react(context)
+            return await self.react(context, interaction_id=interaction_id)
         elif mode == "diary":
-            return await self.diary(context)
+            return await self.diary(context, interaction_id=interaction_id)
         # TODO: share 重构中，暂时禁用
         elif mode == "share":
             return await self.share(context)
         elif mode == "opening":
-            return await self.opening(context)
+            return await self.opening(context, interaction_id=interaction_id)
         else:
-            return await self.react(context)
+            return await self.react(context, interaction_id=interaction_id)
 
-    async def react(self, context: dict) -> AgentResult:
+    # TODO(T5): 收口到 Agent.build_run_spec()/interpret_result()，走 super().run() 模板方法
+    async def react(
+        self, context: dict, *, interaction_id: str,
+    ) -> AgentResult:
         """角色对事件做出反应（通过 Conversation 管理消息线程）
+
+        T4: 使用 AgentRunSpec + say OutputSpec 新路径，
+        从 result.output_arguments 读取结构化输出，不再从 messages 反解析。
 
         context 字段:
             event: str — 事件描述
@@ -400,65 +404,67 @@ class CharacterAgent(Agent):
             AgentResult(data=EventReactionResult)
         """
         context["mode"] = "reaction"
-        from .conversation import RunConfig
-        from .agent import _parse_tool_inputs
 
-        # load_state() 用于验证状态存在性
+        spec = await self._build_reaction_spec(context)
+
+        conv = await self._ensure_conversation(
+            context, system_prompt_override=spec.system_prompt,
+        )
+        result = await conv.run(
+            system_prompt=spec.system_prompt,
+            user_input=spec.user_input,
+            interaction_id=interaction_id,
+            tools=spec.tools,
+            output=spec.output,
+            selection=spec.selection,
+            limits=spec.limits,
+            run_tag=spec.run_tag,
+        )
+        return self._interpret_reaction_result(result, context)
+
+    async def _build_reaction_spec(self, context: dict) -> "AgentRunSpec":
+        """T4: 构建 reaction 的 AgentRunSpec — say 作为 OutputSpec。
+
+
+        """
+        from ..agent.runtime_types import (
+            AgentRunSpec, LoopLimits, ToolKit, OutputSpec,
+        )
+        from ..tools.collecting import SayArgs, SAY_TOOL_CHARACTER
+
         state = await self.load_state()
         system_prompt = self.build_system_prompt(state, context)
         user_prompt = self._build_reaction_user_prompt(context)
 
-        tools = [
-            SAY_TOOL_CHARACTER.to_openai_format(),
-            END_CONVERSATION_TOOL.to_openai_format(),
-        ]
-        conv = await self._ensure_conversation(context, system_prompt_override=system_prompt)
-        result = await conv.run(
-            user_prompt,
-            RunConfig(
-                mode="collect",
-                tools=tools,
-                required_tools=["say"],
-                temperature=0.9,
-                selection=EVENT_GEN,
-                timeout=self._bg_timeout,
-            ),
+        output_spec = OutputSpec(
+            name="say",
+            description=SAY_TOOL_CHARACTER.description,
+            args_schema=SayArgs,
         )
-        self._last_terminated_by = result.terminated_by
-        collected = _parse_tool_inputs(result.new_messages, tools)
 
-        # 检查是否由 end_conversation 终止
-        if self._last_terminated_by == "end_conversation":
-            # 同轮可能同时调用了 say + end_conversation，优先提取 say 数据
-            say_args = None
-            for item in collected:
-                if item and "content" in item:
-                    say_args = item
-                    break
-            if say_args is not None:
-                reaction = str(say_args.get("content", "")).strip().strip('"').strip("'")
-                if reaction:
-                    if len(reaction) > 200:
-                        reaction = reaction[:197] + "..."
-                    return AgentResult(
-                        success=True,
-                        data=EventReactionResult(
-                            reaction=reaction,
-                            has_follow_up=bool(say_args.get("has_follow_up", False)),
-                            want_to_end=bool(say_args.get("want_to_end", False)),
-                            last_say_content=reaction,
-                            raw_response=json.dumps(say_args, ensure_ascii=False),
-                        ),
-                        raw_response=json.dumps(say_args, ensure_ascii=False),
-                    )
-            # 无 say 内容：返回空结果，标记 terminated_by
-            return AgentResult(
-                success=True,
-                data=EventReactionResult(reaction=""),
-                terminated_by="end_conversation",
-            )
+        return AgentRunSpec(
+            system_prompt=system_prompt,
+            user_input=user_prompt,
+            tools=ToolKit(),
+            output=output_spec,
+            selection=EVENT_GEN,
+            limits=LoopLimits(max_rounds=self._max_rounds),
+            run_tag="reaction",
+            user_id=context.get("user_id", ""),
+            group_id=context.get("group_id", ""),
+        )
 
-        if not collected:
+    def _interpret_reaction_result(
+        self, result: "ConversationRunResult", context: dict
+    ) -> AgentResult:
+        """T4: 从 output_arguments 读取 say 结构化输出。
+
+
+        """
+        args = result.output_arguments
+
+        # args 为 None：LLM 未调用 say 工具
+        if args is None:
             logger.warning("反应生成: LLM 未调用 say 工具")
             return AgentResult(
                 success=False,
@@ -466,31 +472,16 @@ class CharacterAgent(Agent):
                 error="LLM 未调用 say 工具",
             )
 
+        # 正常路径：从 output_arguments 解析
         try:
-            # 在 collected 中查找 say 工具的参数（可能混有 end_conversation 的空 dict）
-            say_args = None
-            for item in collected:
-                if item and "content" in item:
-                    say_args = item
-                    break
-            if say_args is None:
-                say_args = collected[0] if collected else {}
-
-            args = say_args
             character_name = context.get("character_name", "")
-
-            # 从 SayArgs 的 content 字段获取角色反应
             reaction = str(args.get("content", "")).strip().strip('"').strip("'")
             if not reaction:
                 reaction = f"（{character_name}默默地想着这件事）"
-
-            # has_follow_up: deprecated，保留解析但不再用于链控
             has_follow_up = bool(args.get("has_follow_up", False))
             want_to_end = bool(args.get("want_to_end", False))
-
             if len(reaction) > 200:
                 reaction = reaction[:197] + "..."
-
             return AgentResult(
                 success=True,
                 data=EventReactionResult(
@@ -502,7 +493,6 @@ class CharacterAgent(Agent):
                 ),
                 raw_response=json.dumps(args, ensure_ascii=False),
             )
-
         except Exception as e:
             logger.error(f"反应生成解析失败: {e}", exc_info=True)
             return AgentResult(
@@ -515,8 +505,14 @@ class CharacterAgent(Agent):
                 error=str(e),
             )
 
-    async def diary(self, context: dict) -> AgentResult:
+    # TODO(T5): 收口到 Agent.build_run_spec()/interpret_result()，走 super().run() 模板方法
+    async def diary(
+        self, context: dict, *, interaction_id: str,
+    ) -> AgentResult:
         """生成日记（通过 Conversation 复用天内 reaction 上下文）
+
+        使用 AgentRunSpec + submit_diary OutputSpec 新路径，
+        从 result.output_arguments 读取结构化输出。
 
         context 字段:
             events: List[dict] — 当天事件列表
@@ -529,38 +525,70 @@ class CharacterAgent(Agent):
             AgentResult(data=str) — 日记文本
         """
         context["mode"] = "diary"
-        from .conversation import RunConfig
-        from .agent import _parse_tool_inputs
 
-        # load_state() 用于验证状态存在性
+        spec = await self._build_diary_spec(context)
+
+        conv = await self._ensure_conversation(
+            context, system_prompt_override=spec.system_prompt,
+        )
+        result = await conv.run(
+            system_prompt=spec.system_prompt,
+            user_input=spec.user_input,
+            interaction_id=interaction_id,
+            tools=spec.tools,
+            output=spec.output,
+            selection=spec.selection,
+            limits=spec.limits,
+            run_tag=spec.run_tag,
+        )
+        return self._interpret_diary_result(result)
+
+    async def _build_diary_spec(self, context: dict) -> "AgentRunSpec":
+        """T4: 构建 diary 的 AgentRunSpec — submit_diary 作为 OutputSpec。
+
+        submit_diary 复用 RecordDiaryEntryArgs schema，日记文本由外层 DiaryGenerator 保存。
+        """
+        from ..agent.runtime_types import (
+            AgentRunSpec, LoopLimits, OutputSpec, ToolKit,
+        )
+        from ..tools.collecting import RecordDiaryEntryArgs
+
         state = await self.load_state()
         system_prompt = self.build_system_prompt(state, context)
         user_prompt = self._build_diary_user_prompt(context)
 
-        tools = [RECORD_DIARY_ENTRY_TOOL.to_openai_format()]
-        conv = await self._ensure_conversation(context, system_prompt_override=system_prompt)
-        result = await conv.run(
-            user_prompt,
-            RunConfig(
-                mode="collect",
-                tools=tools,
-                required_tools=["record_diary_entry"],
-                temperature=0.9,
-                selection=DIARY,
-                timeout=self._bg_timeout,
-            ),
+        output_spec = OutputSpec(
+            name="submit_diary",
+            description="记录日记内容",
+            args_schema=RecordDiaryEntryArgs,
         )
-        collected = _parse_tool_inputs(result.new_messages, tools)
 
-        if not collected:
-            logger.warning("日记生成: LLM 未调用 record_diary_entry 工具")
+        return AgentRunSpec(
+            system_prompt=system_prompt,
+            user_input=user_prompt,
+            tools=ToolKit(),
+            output=output_spec,
+            selection=DIARY,
+            limits=LoopLimits(max_rounds=self._max_rounds),
+            run_tag="diary",
+            user_id=context.get("user_id", ""),
+            group_id=context.get("group_id", ""),
+        )
+
+    def _interpret_diary_result(
+        self, result: "ConversationRunResult"
+    ) -> AgentResult:
+        """T4: 从 output_arguments 读取日记结构化输出。"""
+        args = result.output_arguments
+        if args is None:
+            logger.warning("日记生成: LLM 未调用 submit_diary")
             return AgentResult(
-                success=True,
+                success=False,
                 data="今天发生了一些事，但我太累了，简单记录一下。",
+                error="LLM 未调用 submit_diary",
             )
 
         try:
-            args = collected[0]
             diary_text = str(args.get("diary", "")).strip()
             if not diary_text:
                 diary_text = "今天发生了一些事，但我太累了，简单记录一下。"
@@ -580,7 +608,9 @@ class CharacterAgent(Agent):
         logger.warning("share() 已被禁用（重构中），返回空结果")
         return AgentResult(success=True, data=None)
 
-    async def opening(self, context: dict) -> AgentResult:
+    async def opening(
+        self, context: dict, *, interaction_id: str,
+    ) -> AgentResult:
         """生成日报开场白
 
         context 字段:
@@ -593,33 +623,26 @@ class CharacterAgent(Agent):
         """
         context["mode"] = "opening"
 
-        # load_state() 用于验证状态存在性
         state = await self.load_state()
         system_prompt = self._build_opening_prompt(state, context)
         user_prompt = self._build_opening_user_prompt(context)
 
         try:
-            from ..agent.runtime import AgentRuntime
-            from ..agent.request import AgentRunLimits
-            from ..agent.tool_executor import ToolRegistry
+            from ..agent.runtime_types import LoopLimits, ToolKit
 
-            runtime = AgentRuntime(
-                router=self.router,
-                store=self.store,
-                limits=AgentRunLimits(max_rounds=1),
+            conv = await self._ensure_conversation(
+                context, system_prompt_override=system_prompt,
             )
-
-            result = await runtime.run(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                user_id="",
-                group_id="",
-                tool_registry=ToolRegistry(),
-                temperature=0.85,
-                timeout=None,
+            result = await conv.run(
+                system_prompt=system_prompt,
+                user_input=user_prompt,
+                interaction_id=interaction_id,
+                tools=ToolKit(),
+                output=None,
                 selection=SUMMARIZE,
+                limits=LoopLimits(max_rounds=1),
+                run_tag="opening",
+                agent_name=self.name,
             )
             text = (result.final_text or "").strip().strip('"').strip("'")
             if not text:

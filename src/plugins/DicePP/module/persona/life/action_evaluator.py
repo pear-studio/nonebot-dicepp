@@ -5,12 +5,20 @@ ActionEvaluator — 独立的 LLM 评估管线
 不依赖 CharacterLife 或 EventGenerationAgent，仅通过 store 读取上下文。
 """
 import re
+import uuid
 from typing import List, Optional, Tuple, TYPE_CHECKING
 
+from pydantic import BaseModel, Field
 from utils.logger import logger
 
 from ..data.store import PersonaDataStore
 from ..llm.selection import SelectionPolicy, SCORING
+
+
+class RecordEvaluationArgs(BaseModel):
+    """行动可行性评估结果"""
+    result: str = Field(..., description="approved | rejected | deferred")
+    reason: str = Field(..., description="评估原因")
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
@@ -31,7 +39,7 @@ _SYSTEM_PROMPT = """你是行为可行性评估专家。根据以下信息判断
 2. 反并发：进行中活动未结束时，不能同时做另一件事。
 3. 时间合理性：深夜不适合外出活动，体力低不适合剧烈活动。
 
-你必须通过调用 record_evaluation 工具来输出结果，不要直接回复文本。"""
+你必须通过调用 submit_evaluation 工具来输出结果，不要直接回复文本。"""
 
 
 class ActionEvaluator:
@@ -131,36 +139,39 @@ class ActionEvaluator:
 
     async def _call_llm(self, user_prompt: str, user_id: str = "") -> Tuple[str, str]:
         from ..llm.router import ServiceUnavailableError
-        from ..life.tool_loop import ToolLoop
-        from ..life.conversation import RunConfig
-        from ..agent.request import AgentRunLimits
+        from ..agent.runtime import AgentRuntime
+        from ..agent.runtime_types import (
+            AgentRunRequest, LoopLimits, OutputSpec, RunMetadata, ToolKit,
+        )
 
         try:
-            tool_loop = ToolLoop(
+            runtime = AgentRuntime(
                 router=self._router,
                 store=self._store,
-                limits=AgentRunLimits(max_rounds=1),
+                limits=LoopLimits(max_rounds=1),
             )
-            tool_result = await tool_loop.execute(
+            result = await runtime.run(AgentRunRequest(
+                interaction_id=uuid.uuid4().hex,
                 messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
                 ],
-                config=RunConfig(
-                    mode="collect",
-                    required_tools=["record_evaluation"],
-                    temperature=0.3,
-                    timeout=self._timeout,
-                    selection=SCORING,
+                tools=ToolKit(),
+                output=OutputSpec(
+                    name="submit_evaluation",
+                    description="提交行动可行性评估结果",
+                    args_schema=RecordEvaluationArgs,
                 ),
-            )
-            if tool_result.final_reason and tool_result.final_reason not in ("stop", "max_rounds", "direct_content"):
+                selection=SCORING,
+                limits=LoopLimits(max_rounds=1),
+                metadata=RunMetadata(agent_name="ActionEvaluator", run_tag="evaluation"),
+            ))
+            if not result.success:
                 logger.warning(
-                    f"[ActionEvaluator] LLM 执行异常 reason={tool_result.final_reason}"
+                    f"[ActionEvaluator] LLM 执行异常 completion={result.completion}"
                 )
                 return ("rejected", "LLM 协议错误")
-            from .tool_loop import _parse_tool_args
-            collected_args = _parse_tool_args(tool_result.new_messages, "record_evaluation")
+            collected_args = result.output.arguments if result.output else None
         except ServiceUnavailableError:
             logger.warning("[ActionEvaluator] 无可用 LLM provider")
             return ("rejected", "无可用 LLM 服务")
@@ -171,7 +182,7 @@ class ActionEvaluator:
         if not collected_args:
             return ("rejected", "LLM 未生成评估结果")
 
-        args = collected_args[0]
+        args = collected_args
         result_val = str(args.get("result", "rejected")).strip().lower()
         reason = str(args.get("reason", "评估失败")).strip()
 

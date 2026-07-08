@@ -165,7 +165,7 @@ class UnifiedMessage(BaseModel):
     display_name: str = ""
     created_at: Optional[datetime] = None
     agent_run_id: str = ""  # Phase M1: 所属 Agent run ID，用于聚合同 run segments
-    turn_id: str = ""
+    interaction_id: str = ""
     segment_index: int = -1
     segment_phase: str = ""
     image_meta: Optional[List[dict]] = None  # Phase 3: 图片元信息
@@ -336,7 +336,7 @@ class GroupActivity(BaseModel):
 class LLMTraceRecord(BaseModel):
     """LLM 调用 Trace 记录"""
     id: Optional[int] = None
-    session_id: str  # 当前等同于 run_id（历史遗留字段，语义相同）
+    interaction_id: str = ""
     user_id: str = ""
     group_id: str = ""
     run_id: str = ""
@@ -360,4 +360,7 @@ class LLMTraceRecord(BaseModel):
     cache_read: int = 0
     cache_creation: int = 0
     reasoning_tokens: int = 0
+    usage_status: str = ""
+    usage_raw_json: str = ""
+    usage_note: str = ""
     created_at: Optional[datetime] = None

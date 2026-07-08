@@ -25,12 +25,27 @@ class ConversationStore(Store):
 
     # ── Store 实现 ───────────────────────────────────────
 
-    async def put(self, conv_id: str, snapshot: Snapshot) -> None:
-        """写入（全量覆盖）。conv_id 为空时创建新 session。"""
+    async def register(self, conv_id: str, cursor_tag: str) -> None:
+        """注册 cursor tag。
+
+        当前为 no-op：cursor 在首次 fetch_notifications() 时懒初始化，
+        不需要预注册。
+        T5: 若需要持久化 cursor 注册，在此处实现 persona_session cursor 写入。
+        """
+
+    async def put(self, conv_id: str, snapshot: Snapshot) -> str:
+        """写入（全量覆盖）。conv_id 为空时创建新 session。
+
+        Returns:
+            写入后的 conv_id（首次创建时返回新分配的 id，更新时返回原 id）。
+
+        T3: system_prompt 不再由 Snapshot 携带，static_prompt 列留存空字符串
+        （DB schema 保留该列以兼容旧数据，T5 清理）。
+        """
         db = self._store._persona_db
         sid = _parse_conv_id(conv_id)
         cursors_raw = json.dumps(snapshot.cursors, ensure_ascii=False)
-        system = snapshot.system_prompt or ""
+        system = ""  # T3: system_prompt 不持久化
 
         if sid is not None:
             # 更新已有 session
@@ -58,9 +73,13 @@ class ConversationStore(Store):
                 (sid, msg.get("role", ""), msg.get("content", ""), seq),
             )
         await db.commit()
+        return str(sid)
 
     async def get(self, conv_id: str) -> Snapshot | None:
-        """读取指定 conversation 的快照。"""
+        """读取指定 conversation 的快照。
+
+        T3: static_prompt 列不再恢复到 Snapshot（system_prompt 不持久化）。
+        """
         db = self._store._persona_db
         sid = _parse_conv_id(conv_id)
         if sid is None:
@@ -74,7 +93,6 @@ class ConversationStore(Store):
         if row is None:
             return None
 
-        system_prompt = row[0] or None
         cursors_raw = row[1] or "{}"
         try:
             cursors = json.loads(cursors_raw)
@@ -88,7 +106,7 @@ class ConversationStore(Store):
         msg_rows = await msg_cursor.fetchall()
         messages = [{"role": r[0], "content": r[1]} for r in msg_rows]
 
-        return Snapshot(messages=messages, cursors=cursors, system_prompt=system_prompt)
+        return Snapshot(messages=messages, cursors=cursors)
 
     async def delete(self, conv_id: str) -> None:
         """删除指定 conversation 及其消息。"""

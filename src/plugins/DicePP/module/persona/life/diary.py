@@ -3,6 +3,7 @@
 从 CharacterLife 中提取日记生成逻辑，独立为 DiaryGenerator。
 Phase 1: 使用 CharacterAgent 替代 EventGenerationAgent。
 """
+import uuid
 from typing import Optional, List
 from dataclasses import dataclass
 from utils.logger import logger
@@ -98,7 +99,7 @@ class DiaryGenerator:
                 "health": character_state.health if character_state else None,
                 "current_intention": None,  # [DEPRECATED] 已从 CharacterState 移除
             }
-            result = await self.character_agent.diary(context)
+            result = await self.character_agent.diary(context, interaction_id=uuid.uuid4().hex)
 
             if not result.success or not result.data:
                 logger.warning("日记生成为空")

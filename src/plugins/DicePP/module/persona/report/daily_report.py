@@ -4,6 +4,7 @@
 在 tick_daily 日记生成完毕后，收集核心统计与 Persona 数据，
 以角色口吻包装开场白后分段发送给 Master。
 """
+import uuid
 from typing import Optional, List, Dict, Any
 from datetime import timedelta
 
@@ -390,7 +391,7 @@ class DailyReportGenerator:
                     "character_description": getattr(self._character, "description", "") or "",
                     "summary": summary,
                 }
-                result = await agent.opening(context)
+                result = await agent.opening(context, interaction_id=uuid.uuid4().hex)
                 if result.success and result.data:
                     return result.data
             except Exception:

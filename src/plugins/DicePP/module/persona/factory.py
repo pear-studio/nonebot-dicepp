@@ -43,30 +43,6 @@ from .life.character_agent import CharacterAgent
 from .life.sa_agent import SAAgent
 from .llm.coordinator import LLMCallCoordinator
 from .llm.router import LLMRouter
-from .tools.registry import ToolRegistry, ToolDomain
-from .tools.read_history import READ_HISTORY_TOOL, make_read_history_executor
-from .tools.search_history import SEARCH_HISTORY_TOOL, make_search_history_executor
-from .tools.read_profile import READ_PROFILE_TOOL, read_profile_executor
-from .tools.read_diary import READ_DIARY_TOOL, make_read_diary_executor
-from .tools.search_diary import SEARCH_DIARY_TOOL, make_search_diary_executor
-from .tools.read_events import READ_EVENTS_TOOL, make_read_events_executor
-from .tools.search_events import SEARCH_EVENTS_TOOL, make_search_events_executor
-from .tools.roll_dice import ROLL_DICE_TOOL, roll_dice_executor
-from .tools.send_reply_segment import make_tool_def, send_reply_segment_executor
-from .tools.list_databases import LIST_QUERY_DATABASES_TOOL, list_query_databases_executor
-from .tools.search_knowledge import SEARCH_KNOWLEDGE_TOOL, search_knowledge_executor
-from .tools.get_jrrp import GET_JRRP_TOOL, get_jrrp_executor
-from .tools.suggest_action import SUGGEST_ACTION_TOOL, make_suggest_action_executor
-from .tools.generate_image import make_generate_image_tool_def, make_generate_image_executor
-from .tools.look_at_past_image import LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor
-from .tools.collecting import (
-    RECORD_DIARY_ENTRY_TOOL,
-    RECORD_SHARE_MESSAGE_TOOL,
-    SAY_TOOL_DM,
-    life_collecting_executor,
-)
-
-from .chat.segment_dispatcher import SegmentDispatcher
 
 
 @dataclass
@@ -78,7 +54,6 @@ class PersonaApp:
     store: PersonaDataStore
     port: MessagePort
     session_manager: Any = None
-    segment_dispatcher: Optional[SegmentDispatcher] = None
     all_providers_disabled: bool = False
     current_character_name: str = ""
 
@@ -189,7 +164,6 @@ class _Infra:
     store: PersonaDataStore
     router: LLMRouter
     port: MessagePort
-    segment_dispatcher: Optional[SegmentDispatcher]
 
 
 class _StartupStatus(str, Enum):
@@ -224,13 +198,11 @@ class ChatDeps:
     profile_store: ProfileStore
     event_store: EventStore
     router: LLMRouter
-    tool_registry: ToolRegistry
     coordinator: LLMCallCoordinator
     character: Character
     config: Any
     decay_calculator: DecayCalculator
     port: MessagePort
-    segment_dispatcher: Optional[SegmentDispatcher] = None
     query_store: Any = None
     resolve_db: Any = None
     sleep_gate: Optional[SleepGate] = None
@@ -326,59 +298,28 @@ def _build_port(bot: Bot, store: PersonaDataStore) -> MessagePort:
 
 
 async def _build_infra(bot: Bot, config, character_name: str) -> _Infra:
-    """创建基础设施组件: store / router / port / segment_dispatcher"""
+    """创建基础设施组件: store / router / port"""
     store = await _build_store(bot, config, character_name)
     router = _build_router(config, store)
     port = _build_port(bot, store)
-
-    segment_dispatcher = None
-    if config.segment_enabled:
-        segment_dispatcher = SegmentDispatcher(message_port=port)
 
     return _Infra(
         store=store,
         router=router,
         port=port,
-        segment_dispatcher=segment_dispatcher,
     )
 
 
-def _build_tooling(
+def _build_agents(
     store: PersonaDataStore,
     router: LLMRouter,
     config,
     character: Character,
-) -> tuple[ToolRegistry, DMAgent, CharacterAgent, SAAgent, CharacterLife, ActionEvaluator]:
-    """创建工具注册表、Agent 实例、角色生活、动作评估器
-
-    Phase 1: 创建 DM / Character / SA 三个 Agent 实例。
-    """
-    tool_registry = ToolRegistry()
-    # say 工具统一替代 record_event / record_reaction（通过 ToolLoop._build_collect_registry）
-    # SAY_TOOL_DM 和 SAY_TOOL_CHARACTER 共享 name="say" — 只注册 DM 版本
-    # Character 版本仅通过 to_openai_format() 使用，不经 registry
-    tool_registry.register(ToolDomain.LIFE, SAY_TOOL_DM, life_collecting_executor)
-    tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
-    tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
-
-    # Phase 1: roll_dice / read_events / search_events 注册到 LIFE 域
-    # （DM Agent 运行时可访问）
-    tool_registry.register(ToolDomain.LIFE, ROLL_DICE_TOOL, roll_dice_executor)
-    tool_registry.register(
-        ToolDomain.LIFE,
-        READ_EVENTS_TOOL,
-        make_read_events_executor(),
-    )
-    tool_registry.register(
-        ToolDomain.LIFE,
-        SEARCH_EVENTS_TOOL,
-        make_search_events_executor(),
-    )
-
-    # ── 创建 Agent 实例 ──
-    dm_agent = DMAgent(store, router, config=config, tool_registry=tool_registry)
-    character_agent = CharacterAgent(store, router, config=config, tool_registry=tool_registry)
-    sa_agent = SAAgent(store, router, config=config, tool_registry=tool_registry)
+) -> tuple[DMAgent, CharacterAgent, SAAgent, CharacterLife, ActionEvaluator]:
+    """创建 Agent 实例 — 工具由各 Agent 自建。"""
+    dm_agent = DMAgent(store, router, config=config)
+    character_agent = CharacterAgent(store, router, config=config)
+    sa_agent = SAAgent(store, router, config=config)
 
     life_config = CharacterLifeConfig.from_persona(config)
     character_life = CharacterLife(
@@ -396,82 +337,8 @@ def _build_tooling(
         timezone=config.timezone,
     )
     logger.info("ActionEvaluator 已初始化")
-
-    suggest_action_executor = make_suggest_action_executor(
-        store=store,
-        action_evaluator=action_evaluator,
-        character_life=character_life,
-        min_relationship=config.suggest_action_min_relationship,
-        life_lock=character_life._state_lock,
-    )
-
-    tool_registry.register(
-        ToolDomain.CHAT,
-        READ_HISTORY_TOOL,
-        make_read_history_executor(config.search_max_chars),
-    )
-    tool_registry.register(
-        ToolDomain.CHAT,
-        SEARCH_HISTORY_TOOL,
-        make_search_history_executor(config.search_max_chars),
-    )
-    tool_registry.register(ToolDomain.CHAT, READ_PROFILE_TOOL, read_profile_executor)
-    tool_registry.register(
-        ToolDomain.CHAT,
-        READ_DIARY_TOOL,
-        make_read_diary_executor(),
-    )
-    tool_registry.register(
-        ToolDomain.CHAT,
-        SEARCH_DIARY_TOOL,
-        make_search_diary_executor(),
-    )
-    tool_registry.register(
-        ToolDomain.CHAT,
-        READ_EVENTS_TOOL,
-        make_read_events_executor(),
-    )
-    tool_registry.register(
-        ToolDomain.CHAT,
-        SEARCH_EVENTS_TOOL,
-        make_search_events_executor(),
-    )
-    tool_registry.register(ToolDomain.CHAT, ROLL_DICE_TOOL, roll_dice_executor)
-    tool_registry.register(ToolDomain.CHAT, GET_JRRP_TOOL, get_jrrp_executor)
-    tool_registry.register(ToolDomain.CHAT, LIST_QUERY_DATABASES_TOOL, list_query_databases_executor)
-    tool_registry.register(ToolDomain.CHAT, SEARCH_KNOWLEDGE_TOOL, search_knowledge_executor)
-    tool_registry.register(ToolDomain.CHAT, SUGGEST_ACTION_TOOL, suggest_action_executor)
-    if config.segment_enabled:
-        tool_registry.register(
-            ToolDomain.CHAT,
-            make_tool_def(
-                target_chars=config.segment_target_chars,
-                max_chars=config.segment_max_chars,
-                max_delay=config.segment_max_delay,
-            ),
-            send_reply_segment_executor,
-        )
-
-    base_style = (
-        character.extensions.image_gen_style
-        or config.image_gen_style
-    )
-    character_appearance = character.extensions.image_gen_appearance
-    gen_tool_def = make_generate_image_tool_def(
-        base_style=base_style,
-        character_appearance=character_appearance,
-    )
-    gen_executor = make_generate_image_executor(
-        get_gen_provider=router.get_gen_provider,
-        handle_model_error=router.handle_model_error,
-        base_style=base_style,
-        character_appearance=character_appearance,
-    )
-    tool_registry.register(ToolDomain.CHAT, gen_tool_def, gen_executor)
-    tool_registry.register(ToolDomain.CHAT, LOOK_AT_PAST_IMAGE_TOOL, look_at_past_image_executor)
-
-    logger.info("工具注册表与 Agent 实例已初始化")
-    return tool_registry, dm_agent, character_agent, sa_agent, character_life, action_evaluator
+    logger.info("Agent 实例已初始化")
+    return dm_agent, character_agent, sa_agent, character_life, action_evaluator
 
 
 def _make_resolve_query_db(bot: Bot):
@@ -534,7 +401,6 @@ def _build_chat(deps: ChatDeps) -> ChatOrchestrator:
         response_handler=response_handler,
         context_builder=context_builder,
         sleep_gate=deps.sleep_gate,
-        tool_registry=deps.tool_registry,
         decay_calculator=deps.decay_calculator,
     )
 
@@ -727,7 +593,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         )
 
     infra = await _build_infra(bot, config, character_name)
-    tool_registry, dm_agent, character_agent, sa_agent, character_life, _ = _build_tooling(
+    dm_agent, character_agent, sa_agent, character_life, _ = _build_agents(
         infra.store, infra.router, config, character,
     )
 
@@ -758,13 +624,11 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         profile_store=infra.store,
         event_store=infra.store,
         router=infra.router,
-        tool_registry=tool_registry,
         coordinator=coordinator,
         character=character,
         config=config,
         decay_calculator=decay_calculator,
         port=infra.port,
-        segment_dispatcher=infra.segment_dispatcher,
         query_store=bot.db.query,
         resolve_db=_make_resolve_query_db(bot),
         sleep_gate=character_life,
@@ -797,7 +661,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     return PersonaApp(
         chat=chat, life=life, store=infra.store, port=infra.port,
         session_manager=session_manager,
-        segment_dispatcher=infra.segment_dispatcher,
         all_providers_disabled=all_disabled,
         current_character_name=character_name,
     )
