@@ -330,76 +330,72 @@ class TestUserConfigCRUD:
 class TestRollDiceTool:
     """测试掷骰工具"""
 
+    async def _roll(self, expression: str):
+        from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
+        from plugins.DicePP.module.persona.tools.roll_dice import ROLL_DICE_TOOL
+
+        return await ROLL_DICE_TOOL.handler(
+            ROLL_DICE_TOOL.args_schema(expression=expression),
+            ToolExecutionContext("r1", "tc1", 0, 0),
+        )
+
     @pytest.mark.asyncio
     async def test_roll_dice_simple(self):
         """测试简单掷骰 — 固定 SequenceRuntime 断言精确输出"""
-        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
-        from plugins.DicePP.module.persona.tools.context import ToolContext
         from tests.helpers.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 
-        ctx = ToolContext(user_id="u1", group_id="")
         runtime = SequenceRuntime([5])  # d20 → ((5-1)%20)+1 = 5
         token = set_runtime(runtime)
         try:
-            result = await roll_dice_executor({"expression": "1d20"}, ctx)
+            result = await self._roll("1d20")
         finally:
             reset_runtime(token)
 
-        assert "掷骰" in result
-        assert "[5]" in result, f"应包含 [5]，实际: {result}"
-        assert "= 5" in result, f"应包含最终值 5，实际: {result}"
+        assert result.status == "success"
+        assert "掷骰" in result.observation
+        assert "[5]" in result.observation, f"应包含 [5]，实际: {result.observation}"
+        assert "= 5" in result.observation, f"应包含最终值 5，实际: {result.observation}"
 
     @pytest.mark.asyncio
     async def test_roll_dice_with_modifier(self):
         """测试带修饰符的掷骰 — 固定 SequenceRuntime 断言精确输出"""
-        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
-        from plugins.DicePP.module.persona.tools.context import ToolContext
         from tests.helpers.sequence_runtime import SequenceRuntime, set_runtime, reset_runtime
 
-        ctx = ToolContext(user_id="u1", group_id="")
         runtime = SequenceRuntime([4, 6])  # 2d6 → [4, 6], +3 → 13
         token = set_runtime(runtime)
         try:
-            result = await roll_dice_executor({"expression": "2d6+3"}, ctx)
+            result = await self._roll("2d6+3")
         finally:
             reset_runtime(token)
 
-        assert "掷骰" in result
-        assert "[4+6]" in result, f"应包含 [4+6]，实际: {result}"
-        assert "= 13" in result, f"应包含最终值 13，实际: {result}"
+        assert result.status == "success"
+        assert "掷骰" in result.observation
+        assert "[4+6]" in result.observation, f"应包含 [4+6]，实际: {result.observation}"
+        assert "= 13" in result.observation, f"应包含最终值 13，实际: {result.observation}"
 
     @pytest.mark.asyncio
     async def test_roll_dice_invalid_expression(self):
         """测试无效表达式"""
-        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
-        from plugins.DicePP.module.persona.tools.context import ToolContext
+        result = await self._roll("invalid")
 
-        ctx = ToolContext(user_id="u1", group_id="")
-        result = await roll_dice_executor({"expression": "invalid"}, ctx)
-
-        assert "失败" in result or "无效" in result
+        assert result.status == "error"
+        assert "失败" in result.observation or "无效" in result.observation
 
     @pytest.mark.asyncio
     async def test_roll_dice_empty_expression(self):
         """测试空表达式"""
-        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
-        from plugins.DicePP.module.persona.tools.context import ToolContext
+        result = await self._roll("")
 
-        ctx = ToolContext(user_id="u1", group_id="")
-        result = await roll_dice_executor({"expression": ""}, ctx)
-
-        assert "无效" in result or "失败" in result
+        assert result.status == "error"
+        assert "无效" in result.observation or "失败" in result.observation
 
     @pytest.mark.asyncio
     async def test_roll_dice_too_long(self):
         """测试过长的表达式"""
-        from plugins.DicePP.module.persona.tools.roll_dice import roll_dice_executor
-        from plugins.DicePP.module.persona.tools.context import ToolContext
+        result = await self._roll("1d20" * 50)
 
-        ctx = ToolContext(user_id="u1", group_id="")
-        result = await roll_dice_executor({"expression": "1d20" * 50}, ctx)
-
-        assert "过长" in result
+        assert result.status == "error"
+        assert "过长" in result.observation
 
 
 # ── R6: 补充测试覆盖 ──────────────────────────────────────────────────────────

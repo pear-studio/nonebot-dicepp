@@ -37,7 +37,7 @@ def mock_agents():
 
     class MockDMAgent:
 
-        async def run(self, context):
+        async def run(self, context, interaction_id=None):
             return mock_dm_responses.pop(0)
 
         async def load_state(self):
@@ -45,7 +45,7 @@ def mock_agents():
 
     class MockCharacterAgent:
 
-        async def react(self, context):
+        async def react(self, context, interaction_id=None):
             return mock_char_responses.pop(0)
 
         async def load_state(self):
@@ -109,7 +109,7 @@ class TestCharacterDaySimulation:
             def __init__(self, events):
                 self._events = list(events)
 
-            async def run(self, context):
+            async def run(self, context, interaction_id=None):
                 return AgentResult(success=True, data=self._events.pop(0))
 
             async def load_state(self):
@@ -120,7 +120,7 @@ class TestCharacterDaySimulation:
             def __init__(self, reactions):
                 self._reactions = list(reactions)
 
-            async def react(self, context):
+            async def react(self, context, interaction_id=None):
                 return AgentResult(success=True, data=self._reactions.pop(0))
 
             async def load_state(self):

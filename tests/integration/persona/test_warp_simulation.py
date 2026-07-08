@@ -61,7 +61,7 @@ def _make_multi_day_agents(days: int, slots_per_day: int):
             )
 
     class QueueDMAgent:
-        async def run(self, context):
+        async def run(self, context, interaction_id=None):
             return dm_results.pop(0)
 
         async def load_state(self):
@@ -71,7 +71,7 @@ def _make_multi_day_agents(days: int, slots_per_day: int):
             pass
 
     class QueueCharacterAgent:
-        async def react(self, context):
+        async def react(self, context, interaction_id=None):
             return char_results.pop(0)
 
         async def load_state(self):
@@ -318,7 +318,7 @@ class TestWarpSimulation:
         ]
 
         class ChainDMAgent:
-            async def run(self, context):
+            async def run(self, context, interaction_id=None):
                 return chain_dm.pop(0)
 
             async def load_state(self):
@@ -328,7 +328,7 @@ class TestWarpSimulation:
                 pass
 
         class ChainCharAgent:
-            async def react(self, context):
+            async def react(self, context, interaction_id=None):
                 return chain_char.pop(0)
 
             async def load_state(self):
@@ -374,7 +374,7 @@ class TestWarpSimulation:
         call_count = [0]
 
         class ErrorThenOkDMAgent:
-            async def run(self, context):
+            async def run(self, context, interaction_id=None):
                 call_count[0] += 1
                 if call_count[0] == 2:
                     raise RuntimeError("模拟 LLM 超时")
@@ -396,7 +396,7 @@ class TestWarpSimulation:
                 pass
 
         class OkCharAgent:
-            async def react(self, context):
+            async def react(self, context, interaction_id=None):
                 return AgentResult(
                     success=True,
                     data=EventReactionResult(reaction="ok", has_follow_up=False),

@@ -139,7 +139,7 @@ class TestScoringAgentAnalysisPrompt:
         assert "游戏" in prompt
 
         # 验证包含工具调用说明
-        assert "record_score" in prompt
+        assert "submit_score" in prompt
 
     def test_build_analysis_prompt_with_warn_pending(self):
         """验证 warn_pending 标记出现在 prompt 中"""

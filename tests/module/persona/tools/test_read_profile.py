@@ -1,35 +1,37 @@
-"""read_profile smoke 测试"""
-import pytest
+"""read_profile 工具测试。"""
+
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from module.persona.agent.runtime_types import ToolExecutionContext
+from module.persona.tools.read_profile import build_read_profile_tool
+
 
 pytestmark = pytest.mark.unit
 
 
-def _make_ctx(**kwargs):
-    from module.persona.tools.context import ToolContext
-    ctx = MagicMock(spec=ToolContext)
-    ctx.user_id = kwargs.get("user_id", "u1")
-    ctx.group_id = kwargs.get("group_id", "g1")
-    store = kwargs.get("store", MagicMock())
-    if store is not None:
-        store.get_user_profile = AsyncMock(return_value=None)
-    ctx.store = store
-    return ctx
+def _ctx() -> ToolExecutionContext:
+    return ToolExecutionContext("r1", "tc1", 0, 0)
+
+
+def _store(profile=None):
+    store = MagicMock()
+    store.get_user_profile = AsyncMock(return_value=profile)
+    return store
+
+
+async def _execute(tool) -> str:
+    result = await tool.handler(tool.args_schema(), _ctx())
+    return result.observation
 
 
 @pytest.mark.asyncio
 async def test_read_profile_with_facts():
-    """有档案时返回格式化内容"""
-    from module.persona.tools.read_profile import read_profile_executor
-    from unittest.mock import MagicMock
-
     profile = MagicMock()
     profile.facts = {"name": "小明", "爱好": "打游戏"}
 
-    ctx = _make_ctx()
-    ctx.store.get_user_profile = AsyncMock(return_value=profile)
-
-    result = await read_profile_executor({}, ctx)
+    result = await _execute(build_read_profile_tool(_store(profile), user_id="u1"))
 
     assert "name: 小明" in result
     assert "爱好: 打游戏" in result
@@ -37,23 +39,13 @@ async def test_read_profile_with_facts():
 
 @pytest.mark.asyncio
 async def test_read_profile_empty():
-    """无档案时返回提示"""
-    from module.persona.tools.read_profile import read_profile_executor
-
-    ctx = _make_ctx()
-    ctx.store.get_user_profile = AsyncMock(return_value=None)
-
-    result = await read_profile_executor({}, ctx)
+    result = await _execute(build_read_profile_tool(_store(None), user_id="u1"))
 
     assert "暂无" in result
 
 
 @pytest.mark.asyncio
 async def test_read_profile_store_none():
-    """store 为 None 时返回不可用提示"""
-    from module.persona.tools.read_profile import read_profile_executor
-
-    ctx = _make_ctx(store=None)
-    result = await read_profile_executor({}, ctx)
+    result = await _execute(build_read_profile_tool(None, user_id="u1"))
 
     assert "读取功能不可用" in result

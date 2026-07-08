@@ -3,9 +3,8 @@
 """
 import pytest
 from plugins.DicePP.module.persona.life.conversation import (
-    Conversation, Snapshot, Store, Notification, RunConfig, RunResult,
+    Conversation, Snapshot, Store, Notification, ConversationRunResult,
 )
-from plugins.DicePP.module.persona.life.tool_loop import ToolResult
 from unittest.mock import AsyncMock, MagicMock
 
 
@@ -321,11 +320,12 @@ class FakeStore:
         self._data: dict[str, Snapshot] = {}
         self._next_id = 1
 
-    async def put(self, conv_id: str, snapshot: Snapshot) -> None:
+    async def put(self, conv_id: str, snapshot: Snapshot) -> str:
         sid = conv_id or f"test:{self._next_id}"
         if not conv_id:
             self._next_id += 1
         self._data[sid] = snapshot
+        return sid
 
     async def get(self, conv_id: str) -> Snapshot | None:
         return self._data.get(conv_id)
@@ -344,7 +344,6 @@ class TestConversationPersistence:
         conv._id = "c1"
         conv.add_message("user", "hello")
         conv._cursors["s.state"] = "v1"
-        conv.system_prompt = "you are a bot"
 
         await conv.save()
 
@@ -354,7 +353,7 @@ class TestConversationPersistence:
         assert conv2.length == 1
         assert conv2._messages[0]["content"] == "hello"
         assert conv2._cursors == {"s.state": "v1"}
-        assert conv2.system_prompt == "you are a bot"
+        # T3: system_prompt 不再持久化
 
     @pytest.mark.asyncio
     async def test_open_nonexistent_gets_empty(self):
@@ -362,7 +361,6 @@ class TestConversationPersistence:
         conv = await Conversation.open("bad_id", store)
         assert conv.length == 0
         assert conv._cursors == {}
-        assert conv.system_prompt is None
 
     @pytest.mark.asyncio
     async def test_save_without_store_is_noop(self):
@@ -481,14 +479,13 @@ class TestConversationEstimateTokens:
         assert est > 0
         assert est < 10  # very short message
 
-    def test_estimate_excludes_system_prompt(self):
+    def test_estimate_consistent(self):
+        """estimate_tokens 只依赖 _messages（T3: system_prompt 不再作为实例属性）"""
         conv = Conversation()
         conv.add_message("user", "short msg")
-        before = conv.estimate_tokens()
-        # system_prompt doesn't affect estimate_tokens
-        conv.system_prompt = "a very long system prompt " * 100
-        after = conv.estimate_tokens()
-        assert before == after
+        est = conv.estimate_tokens()
+        assert est > 0
+        assert est < 10  # very short message
 
 
 class TestSnapshotSerialization:
@@ -502,60 +499,80 @@ class TestSnapshotSerialization:
         snap = Snapshot(
             messages=[dict(m) for m in conv._messages],
             cursors=conv._cursors,
-            system_prompt=conv.system_prompt,
         )
         # Modify conv, snapshot unaffected
         conv.add_message("user", "world")
         assert len(snap.messages) == 1
         assert snap.cursors == {"s": "v1"}
-        assert snap.system_prompt is None
 
 
-# ── run() 模板测试 ──────────────────────────────
+# ── run() 模板测试 (T3 新路径) ──────────────────────────────
 
 
 class TestConversationRun:
-    """Conversation.run() 模板测试"""
+    """Conversation.run() 模板测试 — T3 新路径"""
 
-    def _mock_tool_loop(self, final_text="回复文本", new_messages=None, delivery=False):
-        """创建返回指定结果的 mock ToolLoop"""
-        loop = MagicMock()
-        if new_messages is None:
-            new_messages = [{"role": "assistant", "content": final_text}]
-        result = ToolResult(
-            new_messages=new_messages,
-            final_text=final_text,
-            final_reason="stop",
-            delivery_performed=delivery,
+    @staticmethod
+    def _make_runtime_result(
+        final_text: str = "回复文本",
+        message_delta: list | None = None,
+        completion_kind: str = "completed",
+        completion_code: str = "output_collected",
+        run_id: str = "r_test",
+    ):
+        """创建 mock AgentRuntime.run() 的返回值。"""
+        from plugins.DicePP.module.persona.agent.runtime_types import (
+            AgentRunResult, RunCompletion, RunOutput, BillingSummary,
         )
-        loop.execute = AsyncMock(return_value=result)
-        return loop
+        if message_delta is None:
+            message_delta = [{"role": "assistant", "content": final_text}]
+        return AgentRunResult(
+            run_id=run_id,
+            interaction_id="i_test",
+            completion=RunCompletion(kind=completion_kind, code=completion_code),
+            output=RunOutput(text=final_text),
+            message_delta=message_delta,
+            billing=BillingSummary(),
+        )
+
+    @staticmethod
+    def _mock_runtime(return_value=None):
+        """创建 mock AgentRuntime。"""
+        runtime = MagicMock()
+        if return_value is None:
+            return_value = TestConversationRun._make_runtime_result()
+        runtime.run = AsyncMock(return_value=return_value)
+        return runtime
 
     @pytest.mark.asyncio
     async def test_run_basic_flow(self):
-        """基本 run() 流程：用户消息 → fetch → execute → apply → save"""
+        """基本 run() 流程：system_prompt 从参数进入 LLM messages"""
         store = FakeStore()
-        tool_loop = self._mock_tool_loop(final_text="你好呀")
-        conv = Conversation(store=store, tool_loop=tool_loop)
+        rv = self._make_runtime_result(final_text="你好呀")
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
         conv._id = "c1"
-        conv.system_prompt = "you are a bot"
 
-        result = await conv.run("hello")
+        result = await conv.run(
+            system_prompt="you are a bot",
+            user_input="hello",
+            interaction_id="i1",
+        )
         assert result.final_text == "你好呀"
         assert conv.length == 2  # user + assistant reply
-        # tool_loop.execute was called with correct messages
-        call_msgs = tool_loop.execute.call_args[0][0]
-        assert call_msgs[0] == {"role": "system", "content": "you are a bot"}
-        assert call_msgs[-1] == {"role": "user", "content": "hello"}
+        # AgentRuntime.run 被调用，messages[0] 是 system prompt
+        call_req = runtime.run.call_args[0][0]
+        assert call_req.messages[0] == {"role": "system", "content": "you are a bot"}
+        assert call_req.messages[-1] == {"role": "user", "content": "hello"}
 
     @pytest.mark.asyncio
     async def test_run_with_notification(self):
-        """run() 时 ChangeSource 产生的通知被注入 LLM 消息流"""
+        """run() 成功后 notification 持久化到 _messages 且 cursor 更新"""
         store = FakeStore()
-        tool_loop = self._mock_tool_loop(final_text="收到")
-        conv = Conversation(store=store, tool_loop=tool_loop)
+        rv = self._make_runtime_result(final_text="收到")
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
         conv._id = "c1"
-        conv.system_prompt = "sys"
 
         note = _make_notification(source_id="s.test", content="状态变化")
         source = FakeSource(
@@ -564,57 +581,81 @@ class TestConversationRun:
         )
         conv.register(source)
 
-        await conv.run("hi")
+        await conv.run(
+            system_prompt="sys",
+            user_input="hi",
+            interaction_id="i1",
+        )
 
         # 通知被注入 LLM 调用
-        call_msgs = tool_loop.execute.call_args[0][0]
-        notif_contents = [m["content"] for m in call_msgs if "通知" in m.get("content", "")]
+        call_req = runtime.run.call_args[0][0]
+        notif_contents = [m["content"] for m in call_req.messages if "通知" in m.get("content", "")]
         assert len(notif_contents) == 1
         assert "状态变化" in notif_contents[0]
         # cursor 已更新
         assert conv._cursors["s.test"] == "cursor_v1"
+        # T3: 通知 context 持久化到 _messages
+        stored = [m["content"] for m in conv.get_messages() if "通知" in m.get("content", "")]
+        assert len(stored) == 1
+        assert "状态变化" in stored[0]
 
     @pytest.mark.asyncio
-    async def test_run_no_tool_loop_returns_error(self):
-        """没有注入 tool_loop 时 run() 返回 error 结果而不崩溃"""
+    async def test_run_no_runtime_returns_error(self):
+        """没有注入 runtime 时 run() 返回 error 结果而不崩溃"""
         conv = Conversation()
-        result = await conv.run("hello")
-        assert result.final_reason.startswith("error")
+        result = await conv.run(
+            system_prompt="sys",
+            user_input="hello",
+            interaction_id="i1",
+        )
+        assert result.completion_kind == "failed"
 
     @pytest.mark.asyncio
     async def test_run_with_transient(self):
-        """transient 消息注入 LLM 但不写 _messages"""
+        """transient_context_messages 注入 LLM 但不写 _messages"""
         store = FakeStore()
-        tool_loop = self._mock_tool_loop(final_text="ok")
-        conv = Conversation(store=store, tool_loop=tool_loop)
+        rv = self._make_runtime_result(final_text="ok")
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
         conv._id = "c1"
 
-        await conv.run("hi", transient="[系统通知] 今天是周一")
+        await conv.run(
+            system_prompt="sys",
+            user_input="hi",
+            interaction_id="i1",
+            transient_context_messages=[
+                {"role": "user", "name": "系统", "content": "[系统通知] 今天是周一"},
+            ],
+        )
 
         # transient 在 LLM 消息中
-        call_msgs = tool_loop.execute.call_args[0][0]
+        call_req = runtime.run.call_args[0][0]
         assert any(
             "[系统通知] 今天是周一" in m.get("content", "")
-            for m in call_msgs
+            for m in call_req.messages
         )
         # transient 不在 _messages 中
         stored_contents = [m["content"] for m in conv.get_messages()]
         assert not any(
             "[系统通知] 今天是周一" in c for c in stored_contents
         )
-        # 只有 user input 写入
+        # user input + assistant reply
         assert conv.length == 2  # user + assistant reply
 
     @pytest.mark.asyncio
     async def test_run_persists_after_success(self):
         """run() 成功后自动 save"""
         store = FakeStore()
-        tool_loop = self._mock_tool_loop(final_text="done")
-        conv = Conversation(store=store, tool_loop=tool_loop)
+        rv = self._make_runtime_result(final_text="done")
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
         conv._id = "c1"
-        conv.system_prompt = "sp"
 
-        await conv.run("go")
+        await conv.run(
+            system_prompt="sp",
+            user_input="go",
+            interaction_id="i1",
+        )
 
         # 持久化已发生
         snap = await store.get("c1")
@@ -624,18 +665,146 @@ class TestConversationRun:
     @pytest.mark.asyncio
     async def test_run_no_store_no_save(self):
         """没 store 时 run() 不报错（纯内存模式）"""
-        tool_loop = self._mock_tool_loop(final_text="ok")
-        conv = Conversation(tool_loop=tool_loop)
+        rv = self._make_runtime_result(final_text="ok")
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(runtime=runtime)
 
-        result = await conv.run("hi")
+        result = await conv.run(
+            system_prompt="sys",
+            user_input="hi",
+            interaction_id="i1",
+        )
         assert result.final_text == "ok"
+
+    @pytest.mark.asyncio
+    async def test_run_failed_does_not_commit_notification(self):
+        """runtime 失败时不保存 notification、不 apply cursor"""
+        store = FakeStore()
+        rv = self._make_runtime_result(
+            completion_kind="failed", completion_code="llm_error",
+            final_text="",
+        )
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
+        conv._id = "c1"
+
+        note = _make_notification(source_id="s.test", content="状态变化")
+        source = FakeSource(
+            source_id="s.test", priority=10,
+            update_returns=([note], "cursor_v1"),
+        )
+        conv.register(source)
+
+        await conv.run(
+            system_prompt="sys",
+            user_input="hi",
+            interaction_id="i1",
+        )
+
+        # cursor 不推进
+        assert "s.test" not in conv._cursors
+        # notification 不持久化
+        stored = [m["content"] for m in conv.get_messages() if "通知" in m.get("content", "")]
+        assert len(stored) == 0
+        # user_input 不保存
+        assert conv.length == 0
+
+    @pytest.mark.asyncio
+    async def test_message_delta_excludes_user_input(self):
+        """message_delta 不含 user_input，Conversation 保存顺序为 user_input 后接 message_delta"""
+        store = FakeStore()
+        assistant_delta = [
+            {"role": "assistant", "content": "LLM 回复"},
+            {"role": "tool", "tool_call_id": "tc1", "content": "ok"},
+        ]
+        rv = self._make_runtime_result(
+            final_text="LLM 回复",
+            message_delta=assistant_delta,
+        )
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
+        conv._id = "c1"
+
+        await conv.run(
+            system_prompt="sys",
+            user_input="hello",
+            interaction_id="i1",
+        )
+
+        # 保存顺序：user_input 在前，message_delta 在后
+        msgs = conv.get_messages()
+        assert msgs[0]["role"] == "user"
+        assert msgs[0]["content"] == "hello"
+        assert msgs[1]["role"] == "assistant"
+        assert msgs[1]["content"] == "LLM 回复"
+        assert msgs[2]["role"] == "tool"
+
+    @pytest.mark.asyncio
+    async def test_system_prompt_not_persisted(self):
+        """T3: system_prompt 从 run 参数进入 LLM 但不保存到 Conversation"""
+        store = FakeStore()
+        rv = self._make_runtime_result(final_text="ok")
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
+        conv._id = "c1"
+
+        await conv.run(
+            system_prompt="you are a bot v1",
+            user_input="hi",
+            interaction_id="i1",
+        )
+
+        # system prompt 进入 LLM
+        call_req = runtime.run.call_args[0][0]
+        assert call_req.messages[0] == {"role": "system", "content": "you are a bot v1"}
+
+        # system prompt 不在 _messages 中
+        for msg in conv.get_messages():
+            assert msg.get("content") != "you are a bot v1"
+
+        # 持久化后也不含 system prompt
+        snap = await store.get("c1")
+        for msg in snap.messages:
+            assert msg.get("content") != "you are a bot v1"
+
+    @pytest.mark.asyncio
+    async def test_run_notification_success_path(self):
+        """notification 成功后保存并 apply cursor（完整事务）"""
+        store = FakeStore()
+        rv = self._make_runtime_result(final_text="ok")
+        runtime = self._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
+        conv._id = "c1"
+
+        note = _make_notification(source_id="s.test", content="通知内容")
+        source = FakeSource(
+            source_id="s.test", priority=10,
+            update_returns=([note], "cursor_v2"),
+        )
+        conv.register(source)
+
+        result = await conv.run(
+            system_prompt="sys",
+            user_input="hi",
+            interaction_id="i1",
+        )
+
+        assert result.completion_kind == "completed"
+        # cursor 推进
+        assert conv._cursors["s.test"] == "cursor_v2"
+        # 通知持久化
+        stored = [m for m in conv.get_messages() if "通知内容" in m.get("content", "")]
+        assert len(stored) == 1
 
 
 FakeSource = FakeChangeSource  # alias for brevity
 
 
-class TestConversationCompact:
-    """Q39: compact 行为契约"""
+# ── R1 回归测试：_merge_extra_registry 调用约定 ──────────────
+
+
+class TestConversationCompactQ39:
+    """Q39: compact 行为契约（无 router 兜底路径）"""
 
     @pytest.mark.asyncio
     async def test_compact_reduces_message_count(self):
@@ -681,3 +850,130 @@ class TestConversationCompact:
         summary = await conv.compact(keep_recent=10)
         assert summary == ""  # 无操作
         assert conv.length == 2
+
+
+# ── P3 回归测试：register() 保留已恢复 cursor ──────────────
+
+
+class TestRegisterPreservesCursor:
+    """P3: register() 不应清除 Conversation.open() 恢复的 cursor"""
+
+    def test_register_preserves_existing_cursor(self):
+        """注册新 source 时不清除已有 cursor。"""
+        conv = Conversation()
+        conv._cursors["test.source"] = "cursor_from_open"
+        source = FakeChangeSource(source_id="test.source", priority=10)
+        conv.register(source)
+        assert conv._cursors["test.source"] == "cursor_from_open"
+
+    def test_register_new_source_does_not_affect_other_cursors(self):
+        """注册不同 source_id 不影响其他 cursor。"""
+        conv = Conversation()
+        conv._cursors["existing.source"] = "cursor_v1"
+        source = FakeChangeSource(source_id="new.source", priority=5)
+        conv.register(source)
+        assert conv._cursors["existing.source"] == "cursor_v1"
+
+    def test_register_replaces_source_object_but_keeps_cursor(self):
+        """同 source_id 重复注册替换 source 对象但保留 cursor。"""
+        conv = Conversation()
+        conv._cursors["same.id"] = "saved_cursor"
+        s1 = FakeChangeSource(source_id="same.id", priority=5)
+        conv.register(s1)
+        assert conv._cursors["same.id"] == "saved_cursor"
+        # 重复注册
+        s2 = FakeChangeSource(source_id="same.id", priority=10)
+        conv.register(s2)
+        assert conv._cursors["same.id"] == "saved_cursor"
+        assert conv._change_sources[0].priority == 10  # replaced with s2
+
+
+# ── P4 回归测试：Store.put 返回 conv_id 写回 Conversation._id ──
+
+
+class TestStorePutReturnsId:
+    """P4: Store.put() 返回 conv_id, Conversation.save() 写回 self._id"""
+
+    @pytest.mark.asyncio
+    async def test_first_save_assigns_id(self):
+        """首次 save 后 conv.id 有值（由 Store 分配）。"""
+        store = FakeStore()
+        conv = Conversation(store=store)
+        assert conv.id is None
+        conv.add_message("user", "hello")
+        await conv.save()
+        assert conv.id is not None
+        assert conv.id in store._data
+
+    @pytest.mark.asyncio
+    async def test_second_save_uses_same_id(self):
+        """第二次 save 使用同一个 id，不创建第二个会话。"""
+        store = FakeStore()
+        conv = Conversation(store=store)
+        conv.add_message("user", "first")
+        await conv.save()
+        first_id = conv.id
+        assert first_id is not None
+
+        conv.add_message("assistant", "reply")
+        await conv.save()
+        assert conv.id == first_id
+        # FakeStore 中只有一个条目
+        assert len(store._data) == 1
+        assert first_id in store._data
+
+    @pytest.mark.asyncio
+    async def test_delete_uses_assigned_id(self):
+        """delete() 能使用 save 分配的 id 删除当前 conversation。"""
+        store = FakeStore()
+        conv = Conversation(store=store)
+        conv.add_message("user", "hello")
+        await conv.save()
+        assigned_id = conv.id
+        assert assigned_id is not None
+        assert assigned_id in store._data
+
+        await conv.delete()
+        assert assigned_id not in store._data
+        assert conv.length == 0
+
+    @pytest.mark.asyncio
+    async def test_open_then_save_keeps_original_id(self):
+        """open() 已有 id 的 conversation，再次 save 不改变 id。"""
+        store = FakeStore()
+        # 先创建并保存
+        conv1 = Conversation(store=store)
+        conv1._id = "pre_existing"
+        conv1.add_message("user", "existing")
+        await conv1.save()
+        assert conv1.id == "pre_existing"
+        assert "pre_existing" in store._data
+
+        # 从 store 恢复
+        conv2 = await Conversation.open("pre_existing", store)
+        assert conv2.id == "pre_existing"
+        conv2.add_message("assistant", "more")
+        await conv2.save()
+        assert conv2.id == "pre_existing"
+        assert len(store._data) == 1
+
+    @pytest.mark.asyncio
+    async def test_run_assigns_id_via_save(self):
+        """Conversation.run() 成功后 conv.id 已被分配。"""
+        store = FakeStore()
+        rv = TestConversationRun._make_runtime_result(final_text="ok")
+        runtime = TestConversationRun._mock_runtime(rv)
+        conv = Conversation(store=store, runtime=runtime)
+
+        # run 前 id 为 None
+        assert conv.id is None
+
+        await conv.run(
+            system_prompt="sys",
+            user_input="hello",
+            interaction_id="i1",
+        )
+
+        # run 成功后 save 被调用，id 已被分配
+        assert conv.id is not None
+        assert conv.id in store._data

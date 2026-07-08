@@ -289,3 +289,47 @@ class TestOpenAIProvider:
         kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert "temperature" not in kwargs
 
+    @pytest.mark.asyncio
+    async def test_usage_status_ok(self, provider):
+        """成功解析 usage 时 usage_status='ok'"""
+        mock_client = Mock()
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=self._mock_openai_response(content="ok"))
+        provider._client = mock_client
+
+        resp = await provider.generate(messages=[{"role": "user", "content": "hi"}])
+        assert resp.usage.usage_status == "ok"
+
+    def test_usage_status_missing(self, provider):
+        """无 usage 时 usage_status='missing'"""
+        from plugins.DicePP.module.persona.llm.providers.openai import OpenAIProvider
+        resp_mock = Mock()
+        resp_mock.usage = None
+        resp_mock.choices = [Mock()]
+        resp_mock.choices[0].message = Mock()
+        resp_mock.choices[0].message.content = "ok"
+        resp_mock.choices[0].message.tool_calls = None
+        resp_mock.choices[0].finish_reason = "stop"
+        resp_mock.model = "test"
+
+        usage = provider._extract_usage(resp_mock)
+        assert usage.usage_status == "missing"
+        assert "未返回" in usage.usage_note
+
+    def test_usage_status_malformed_on_bad_usage(self, provider):
+        """usage 字段无法解析时 usage_status='malformed'"""
+        resp_mock = Mock()
+        resp_mock.usage = Mock()
+        # 让 completion_tokens 抛出异常来模拟 malformed 场景
+        type(resp_mock.usage).completion_tokens = property(lambda s: (_ for _ in ()).throw(ValueError("bad format")))
+        resp_mock.choices = [Mock()]
+        resp_mock.choices[0].message = Mock()
+        resp_mock.choices[0].message.content = "ok"
+        resp_mock.choices[0].message.tool_calls = None
+        resp_mock.choices[0].finish_reason = "stop"
+        resp_mock.model = "test"
+
+        usage = provider._extract_usage(resp_mock)
+        assert usage.usage_status == "malformed"
+        assert "解析异常" in usage.usage_note
+

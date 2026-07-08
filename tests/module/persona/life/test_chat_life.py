@@ -10,6 +10,7 @@ from plugins.DicePP.module.persona.life.character_life import (
 )
 from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
 from plugins.DicePP.module.persona.data.models import CharacterState
+from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
 
 
 def _make_character(sleep_messages=None):
@@ -42,6 +43,15 @@ async def _wait_until(predicate, timeout=1.0):
             break
         await asyncio.sleep(0.01)
     assert predicate()
+
+
+def _tool_ctx() -> ToolExecutionContext:
+    return ToolExecutionContext(
+        run_id="r1",
+        tool_call_id="tc1",
+        call_index=0,
+        same_name_index=0,
+    )
 
 
 class TestSleepGate:
@@ -167,7 +177,7 @@ class TestSuggestActionRelationshipGate:
 
     @pytest.mark.asyncio
     async def test_below_threshold_skips(self):
-        from plugins.DicePP.module.persona.tools.suggest_action import make_suggest_action_executor
+        from plugins.DicePP.module.persona.tools.suggest_action import build_suggest_action_tool
 
         store = AsyncMock()
         rel = MagicMock()
@@ -176,19 +186,18 @@ class TestSuggestActionRelationshipGate:
         action_evaluator = AsyncMock()
         character_life = MagicMock()
 
-        executor = make_suggest_action_executor(
+        tool = build_suggest_action_tool(
             store=store, action_evaluator=action_evaluator,
             character_life=character_life, min_relationship=40,
-            life_lock=asyncio.Lock(),
+            life_lock=asyncio.Lock(), user_id="u1",
         )
-        ctx = MagicMock(user_id="u1")
-        result = await executor({"action_idea": "出去散步"}, ctx)
-        assert result == "action noted"
+        result = await tool.handler(tool.args_schema(action_idea="出去散步"), _tool_ctx())
+        assert result.observation == "action noted"
         action_evaluator.evaluate.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_above_threshold_proceeds(self):
-        from plugins.DicePP.module.persona.tools.suggest_action import make_suggest_action_executor
+        from plugins.DicePP.module.persona.tools.suggest_action import build_suggest_action_tool
 
         store = AsyncMock()
         rel = MagicMock()
@@ -198,14 +207,13 @@ class TestSuggestActionRelationshipGate:
         character_life = MagicMock()
         character_life.get_ongoing_activities.return_value = []
 
-        executor = make_suggest_action_executor(
+        tool = build_suggest_action_tool(
             store=store, action_evaluator=action_evaluator,
             character_life=character_life, min_relationship=40,
-            life_lock=asyncio.Lock(),
+            life_lock=asyncio.Lock(), user_id="u1",
         )
-        ctx = MagicMock(user_id="u1")
-        result = await executor({"action_idea": "出去散步"}, ctx)
-        assert result == "action noted"
+        result = await tool.handler(tool.args_schema(action_idea="出去散步"), _tool_ctx())
+        assert result.observation == "action noted"
         await _wait_until(lambda: len(action_evaluator.evaluate.await_args_list) == 1)
         action_evaluator.evaluate.assert_awaited_once_with(
             "出去散步",
@@ -215,26 +223,25 @@ class TestSuggestActionRelationshipGate:
 
     @pytest.mark.asyncio
     async def test_missing_relationship_skips(self):
-        from plugins.DicePP.module.persona.tools.suggest_action import make_suggest_action_executor
+        from plugins.DicePP.module.persona.tools.suggest_action import build_suggest_action_tool
 
         store = AsyncMock()
         store.get_relationship = AsyncMock(return_value=None)
         action_evaluator = AsyncMock()
         character_life = MagicMock()
 
-        executor = make_suggest_action_executor(
+        tool = build_suggest_action_tool(
             store=store, action_evaluator=action_evaluator,
             character_life=character_life, min_relationship=40,
-            life_lock=asyncio.Lock(),
+            life_lock=asyncio.Lock(), user_id="u1",
         )
-        ctx = MagicMock(user_id="u1")
-        result = await executor({"action_idea": "测试"}, ctx)
-        assert result == "action noted"
+        result = await tool.handler(tool.args_schema(action_idea="测试"), _tool_ctx())
+        assert result.observation == "action noted"
         action_evaluator.evaluate.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_lock_serializes_injection(self):
-        from plugins.DicePP.module.persona.tools.suggest_action import make_suggest_action_executor
+        from plugins.DicePP.module.persona.tools.suggest_action import build_suggest_action_tool
 
         life_lock = asyncio.Lock()
         store = AsyncMock()
@@ -259,16 +266,15 @@ class TestSuggestActionRelationshipGate:
         character_life.get_ongoing_activities.return_value = []
         character_life._inject_spontaneous_event_impl = AsyncMock(return_value=True)
 
-        executor = make_suggest_action_executor(
+        tool = build_suggest_action_tool(
             store=store, action_evaluator=action_evaluator,
             character_life=character_life, min_relationship=40,
-            life_lock=life_lock,
+            life_lock=life_lock, user_id="u1",
         )
-        ctx = MagicMock(user_id="u1")
 
-        await executor({"action_idea": "task1"}, ctx)
+        await tool.handler(tool.args_schema(action_idea="task1"), _tool_ctx())
         await asyncio.wait_for(first_entered.wait(), timeout=1.0)
-        await executor({"action_idea": "task2"}, ctx)
+        await tool.handler(tool.args_schema(action_idea="task2"), _tool_ctx())
 
         await asyncio.sleep(0)
         assert call_order == ["task1"]

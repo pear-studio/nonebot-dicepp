@@ -53,14 +53,6 @@ logging.getLogger("persona.event_agent").setLevel(logging.DEBUG)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "src", "plugins"))
 
 from DicePP.module.persona.llm.router import LLMRouter
-from DicePP.module.persona.tools.registry import ToolRegistry, ToolDomain
-from DicePP.module.persona.tools.collecting import (
-    RECORD_EVENT_TOOL,
-    RECORD_REACTION_TOOL,
-    RECORD_DIARY_ENTRY_TOOL,
-    RECORD_SHARE_MESSAGE_TOOL,
-    life_collecting_executor,
-)
 from DicePP.module.persona.life.dm_agent import DMAgent
 from DicePP.module.persona.life.character_agent import CharacterAgent
 from DicePP.module.persona.life.character_life import (
@@ -175,16 +167,10 @@ async def _run_full_day_lifecycle() -> dict:
             daily_limit=50,
             quota_check_enabled=False,
         )
-        tool_registry = ToolRegistry()
-        tool_registry.register(ToolDomain.LIFE, RECORD_EVENT_TOOL, life_collecting_executor)
-        tool_registry.register(ToolDomain.LIFE, RECORD_REACTION_TOOL, life_collecting_executor)
-        tool_registry.register(ToolDomain.LIFE, RECORD_DIARY_ENTRY_TOOL, life_collecting_executor)
-        tool_registry.register(ToolDomain.LIFE, RECORD_SHARE_MESSAGE_TOOL, life_collecting_executor)
-
         # Phase 1: 创建 Agent 实例
         from unittest.mock import MagicMock
-        dm_agent = DMAgent(store, router, config=MagicMock(), tool_registry=tool_registry)
-        character_agent = CharacterAgent(store, router, config=MagicMock(), tool_registry=tool_registry)
+        dm_agent = DMAgent(store, router, config=MagicMock())
+        character_agent = CharacterAgent(store, router, config=MagicMock())
 
         config = CharacterLifeConfig(
             enabled=True,

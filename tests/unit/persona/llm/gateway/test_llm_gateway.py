@@ -6,9 +6,7 @@ from unittest.mock import Mock, AsyncMock, MagicMock
 from plugins.DicePP.module.persona.agent.llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
 from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventStore
 from plugins.DicePP.module.persona.agent.state import AgentRunState
-from plugins.DicePP.module.persona.agent.request import ToolUseMode
 from plugins.DicePP.module.persona.llm.router import LLMRouter, ServiceUnavailableError
-from plugins.DicePP.module.persona.llm.selection import SelectionPolicy
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
 
 
@@ -23,7 +21,7 @@ def _make_llm_resp(content="ok", tool_calls=None) -> LLMResponse:
 
 
 def _make_state(**kwargs) -> AgentRunState:
-    defaults = dict(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+    defaults = dict(run_id="r1", interaction_id="t1")
     defaults.update(kwargs)
     return AgentRunState(**defaults)
 
@@ -31,7 +29,6 @@ def _make_state(**kwargs) -> AgentRunState:
 def _make_request(**kwargs) -> LLMRequest:
     defaults = dict(
         messages=[{"role": "user", "content": "hi"}],
-        tool_use_mode=ToolUseMode.AUTO,
     )
     defaults.update(kwargs)
     return LLMRequest(**defaults)
@@ -194,15 +191,14 @@ class TestLLMGateway:
         state = _make_state()
         req = _make_request(
             tools=[{"type": "function", "function": {"name": "search"}}],
-            tool_use_mode=ToolUseMode.AUTO,
         )
         await gateway.complete(req, state)
 
         assert provider.generate.call_args.kwargs["tool_choice"] == "auto"
 
     @pytest.mark.asyncio
-    async def test_required_tool_mode_passes_auto_choice(self, gateway, mock_router):
-        """REQUIRED_ONE_OF 也不传 "required"——thinking 模型不兼容，由 loop L1 纠正兜底"""
+    async def test_tool_choice_auto_with_tools(self, gateway, mock_router):
+        """有 tools 时 tool_choice 为 auto"""
         provider = Mock()
         provider.generate = AsyncMock(return_value=_make_llm_resp(content="hello"))
         mock_router.build_candidates.return_value = [("p1", "m1")]
@@ -212,8 +208,6 @@ class TestLLMGateway:
         state = _make_state()
         req = _make_request(
             tools=[{"type": "function", "function": {"name": "send_reply_segment"}}],
-            tool_use_mode=ToolUseMode.REQUIRED_ONE_OF,
-            required_tools=["send_reply_segment"],
         )
         await gateway.complete(req, state)
 
@@ -232,13 +226,6 @@ class TestLLMGateway:
         assert _tool_choice_for(req) is None
 
     @pytest.mark.asyncio
-    async def test_increment_usage(self, mock_router, mock_event_store):
-        bus = AgentEventBus(event_store=mock_event_store)
-        gateway = LLMGateway(router=mock_router, event_bus=bus)
-
-        await gateway.increment_usage("u1")
-        mock_router.increment_usage.assert_called_once_with("u1")
-
     @pytest.mark.asyncio
     async def test_trace_written_when_enabled(self, mock_router, mock_event_store):
         """trace_enabled=True 时应调用 add_llm_trace 写入 trace"""
@@ -271,7 +258,7 @@ class TestLLMGateway:
         mock_data_store.add_llm_trace.assert_called_once()
         trace = mock_data_store.add_llm_trace.call_args[0][0]
         assert trace.run_id == "run-123"
-        assert trace.session_id == "run-123"  # R1: session_id 使用 run_id
+        assert trace.interaction_id == "t1"  # state.interaction_id 优先于 run_id
         assert trace.reasoning_content == "thinking..."
         assert trace.latency_ms == 123
         assert trace.status == "success"
@@ -328,8 +315,8 @@ class TestLLMGateway:
         assert trace.status == "failed"
         assert trace.error == "network_error: connection refused"
         assert trace.run_id == "run-fail"
-        assert trace.user_id == "u1"
-        assert trace.group_id == "g1"
+        assert trace.user_id == ""
+        assert trace.group_id == ""
         assert trace.tokens_in == 0
         assert trace.tokens_out == 0
         assert trace.tier is not None

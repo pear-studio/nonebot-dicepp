@@ -20,16 +20,7 @@ from plugins.DicePP.module.persona.agent.events import (
     ToolExecutionStartedPayload,
     ToolExecutionCompletedPayload,
     ToolExecutionFailedPayload,
-    DeclaredActionProducedPayload,
     ToolCallSkippedPayload,
-    StructuredOutputCollectedPayload,
-    ResponseSegmentRequestedPayload,
-    ResponseSegmentDeliveredPayload,
-    ResponseSegmentFailedPayload,
-    ImageGenerationRequestedPayload,
-    ImageGenerationStartedPayload,
-    ImageGeneratedPayload,
-    ImageGenerationFailedPayload,
     CorrectionInjectedPayload,
     _dictify,
 )
@@ -49,7 +40,8 @@ class TestAgentEvent:
     def test_roundtrip(self):
         """payload → _dictify → 嵌入 AgentEvent → _dictify: 验证完整 dict 结构"""
         payload = AgentRunStartedPayload(
-            run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat",
+            run_id="r1", interaction_id="t1", user_id="u1", group_id="g1",
+            agent_name="agent_a", run_tag="chat",
         )
         event = AgentEvent(
             run_id="r1", seq=0, event_type="run_started",
@@ -62,10 +54,11 @@ class TestAgentEvent:
             "event_type": "run_started",
             "payload": {
                 "run_id": "r1",
-                "turn_id": "t1",
+                "interaction_id": "t1",
                 "user_id": "u1",
                 "group_id": "g1",
-                "mode": "chat",
+                "agent_name": "agent_a",
+                "run_tag": "chat",
             },
             "schema_version": 1,
             "created_at": "",
@@ -85,8 +78,10 @@ class TestAgentEvent:
 _KEY_CASES = [
     pytest.param(
         AgentRunStartedPayload,
-        dict(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat"),
-        dict(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat"),
+        dict(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1",
+             agent_name="agent_a", run_tag="chat"),
+        dict(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1",
+             agent_name="agent_a", run_tag="chat"),
         id="AgentRunStartedPayload",
     ),
     pytest.param(
@@ -116,13 +111,12 @@ _KEY_CASES = [
 # 其余 payload — 覆盖所有字段名的结构完整性
 _STRUCTURAL_SPECS = [
     (AgentRunFinishedPayload, dict(
-        status="ok", reason="completed", delivery_performed=True, final_text="hello",
+        status="ok", reason="completed", output_text="hello",
         tokens_input=10, tokens_output=5, provider="openai", model="gpt-4",
     )),
     (AgentWarningPayload, dict(code="TOOL_FAILED", message="tool error", round_index=1, severity="warning")),
     (ModelRequestPreparedPayload, dict(
-        round_index=0, tool_use_mode="auto",
-        required_tools=["search"], message_count=2, tool_count=1,
+        round_index=0, message_count=2, tool_count=1,
     )),
     (ModelCandidateSelectedPayload, dict(provider="openai", model="gpt-4", candidate_index=0, total_candidates=2)),
     (ModelCandidateFailedPayload, dict(provider="openai", model="gpt-4", error="timeout", candidate_index=0)),
@@ -133,16 +127,7 @@ _STRUCTURAL_SPECS = [
     (ToolArgumentsInvalidPayload, dict(tool_call_id="tc_1", tool_name="search", error="missing field")),
     (ToolExecutionStartedPayload, dict(tool_call_id="tc_1", tool_name="search")),
     (ToolExecutionFailedPayload, dict(tool_call_id="tc_1", tool_name="search", error="timeout")),
-    (DeclaredActionProducedPayload, dict(tool_call_id="tc_1", tool_name="send_reply", action_type="send_message", action_id="act_1")),
     (ToolCallSkippedPayload, dict(tool_call_id="tc_1", tool_name="search", reason="budget_exceeded")),
-    (StructuredOutputCollectedPayload, dict(tool_call_id="tc_1", tool_name="state_write", arguments={"key": "val"})),
-    (ResponseSegmentRequestedPayload, dict(action_id="act_1", content="hello", phase="final", delay_before=1.0, segment_index=0)),
-    (ResponseSegmentDeliveredPayload, dict(action_id="act_1", message_id=42, segment_index=0, phase="final")),
-    (ResponseSegmentFailedPayload, dict(action_id="act_1", error="send failed", segment_index=0)),
-    (ImageGenerationRequestedPayload, dict(action_id="act_1", prompt="a cat")),
-    (ImageGenerationStartedPayload, dict(action_id="act_1", prompt="a cat")),
-    (ImageGeneratedPayload, dict(action_id="act_1", image_url="http://example.com/cat.png")),
-    (ImageGenerationFailedPayload, dict(action_id="act_1", error="rate_limited")),
     (CorrectionInjectedPayload, dict(reason="missing_segment_tool", round_index=1, message="use send_reply_segment")),
 ]
 

@@ -587,6 +587,14 @@ class TestCharacterLifePhase2:
         result = await life.tick()
         assert len(result) == 3
         assert len(mock_event_agent.dm.run.await_args_list) == 3
+        interaction_ids = {
+            call.kwargs["interaction_id"]
+            for call in (
+                mock_event_agent.dm.run.await_args_list
+                + mock_event_agent.char.react.await_args_list
+            )
+        }
+        assert len(interaction_ids) == 1
 
     @pytest.mark.asyncio
     async def test_chain_delta_clamped(self, life, mock_data_store, mock_event_agent, monkeypatch):
@@ -693,15 +701,20 @@ class TestCharacterLifePhase2:
         set_test_clock(fake_now)
         original_dm_run = mock_event_agent.dm.run
         captured_slot_types = []
+        captured_dm_interaction_ids = []
 
-        async def tracking_dm_run(context):
+        async def tracking_dm_run(context, **kwargs):
             captured_slot_types.append(context.get('slot_type'))
-            return await original_dm_run(context)
+            captured_dm_interaction_ids.append(kwargs["interaction_id"])
+            return await original_dm_run(context, **kwargs)
         mock_event_agent.dm.run = tracking_dm_run
         await life.inject_spontaneous_event('角色正在发呆')
         assert len(captured_slot_types) > 0
         for st in captured_slot_types:
             assert st == 'system', f"expected 'system' but got {st!r}"
+        dm_iid = captured_dm_interaction_ids[-1]
+        char_iid = mock_event_agent.char.react.await_args.kwargs["interaction_id"]
+        assert dm_iid == char_iid
 
     @pytest.mark.asyncio
     async def test_inject_spontaneous_event_exception_returns_false(self, life, mock_event_agent, monkeypatch):
@@ -1075,7 +1088,7 @@ class TestMidnightEndHourJitter:
         assert 'wake_up' in types
 
 class TestEndConversationSlotConsumption:
-    """R1 回归: chain_depth==0 时 end_conversation 应消耗 slot"""
+    """R1 回归: chain_depth==0 时 want_to_end 应消耗 slot"""
 
     @pytest.fixture
     def mock_event_agent(self):
@@ -1112,21 +1125,20 @@ class TestEndConversationSlotConsumption:
         return life
 
     @pytest.mark.asyncio
-    async def test_char_end_conversation_at_depth0_consumes_slot(self, life, mock_event_agent, mock_data_store, monkeypatch):
-        """Character 在 depth==0 调用 end_conversation → event_chain 非空，slot 被消耗"""
+    async def test_char_want_to_end_at_depth0_consumes_slot(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """Character 在 depth==0 表达 want_to_end → event_chain 非空，slot 被消耗"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        # DM 正常生成事件
+        # DM 正常生成事件，同时表达 want_to_end 与角色共识结束
         mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
             success=True,
-            data=EventGenerationResult(description='DM 生成了事件', duration_minutes=30)))
-        # Character 调用 end_conversation（无 say，纯结束）
+            data=EventGenerationResult(description='DM 生成了事件', duration_minutes=30, want_to_end=True)))
+        # Character 通过 say.want_to_end 表达结束（无实质反应内容）
         mock_event_agent.char.react = AsyncMock(return_value=AgentResult(
             success=True,
-            data=EventReactionResult(reaction=''),
-            terminated_by='end_conversation'))
+            data=EventReactionResult(reaction='', want_to_end=True)))
         result = await life.tick()
         # 核心断言：event_chain 非空 → slot 被标记为 fired
         assert result is not None, 'event_chain 不应为 None'
@@ -1136,17 +1148,16 @@ class TestEndConversationSlotConsumption:
         mock_data_store.add_daily_event.assert_called()
 
     @pytest.mark.asyncio
-    async def test_dm_end_conversation_at_depth0_consumes_slot(self, life, mock_event_agent, mock_data_store, monkeypatch):
-        """DM 在 depth==0 调用 end_conversation → event_chain 非空，slot 被消耗"""
+    async def test_dm_want_to_end_at_depth0_consumes_slot(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """DM 在 depth==0 表达 want_to_end → event_chain 非空，slot 被消耗"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        # DM 直接调用 end_conversation（无 say 内容）
+        # DM 直接表达 want_to_end（无事件内容）
         mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
             success=True,
-            data=EventGenerationResult(),
-            terminated_by='end_conversation'))
+            data=EventGenerationResult(want_to_end=True)))
         result = await life.tick()
         # 核心断言：event_chain 非空 → slot 被消耗
         assert result is not None, 'event_chain 不应为 None'
@@ -1154,22 +1165,21 @@ class TestEndConversationSlotConsumption:
         assert 0 in life._fired_slot_indices, 'slot 0 应被标记为 fired'
 
     @pytest.mark.asyncio
-    async def test_dm_say_then_end_conversation_at_depth0(self, life, mock_event_agent, mock_data_store, monkeypatch):
-        """DM 在 depth==0 先 say 再 end_conversation → say 内容被保存，slot 被消耗"""
+    async def test_dm_say_then_want_to_end_at_depth0(self, life, mock_event_agent, mock_data_store, monkeypatch):
+        """DM 在 depth==0 先 say 再 want_to_end → say 内容被保存，slot 被消耗"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
         set_test_clock(fake_now)
         life._slot_minutes_today = [(10 * 60, 'system')]
         life._last_event_date = '2024-01-01'
-        # DM 同时 say + end_conversation（R2 场景——在 DMAgent.run() 内处理）
-        # 此处模拟 DMAgent.run() 已正确提取 say 并返回不含 terminated_by 的 EventGenerationResult
+        # DM 同时 say + want_to_end（R2 场景——在 DMAgent.run() 内处理）
+        # 此处模拟 DMAgent.run() 已正确提取 say 并返回包含 want_to_end 的 EventGenerationResult
         mock_event_agent.dm.run = AsyncMock(return_value=AgentResult(
             success=True,
             data=EventGenerationResult(description='DM 最后叙述了一句', duration_minutes=10,
-                                       energy_delta=-5, mood_delta=3)))
+                                       energy_delta=-5, mood_delta=3, want_to_end=True)))
         mock_event_agent.char.react = AsyncMock(return_value=AgentResult(
             success=True,
-            data=EventReactionResult(reaction='嗯'),
-            terminated_by='end_conversation'))
+            data=EventReactionResult(reaction='嗯', want_to_end=True)))
         result = await life.tick()
         assert result is not None
         assert len(result) >= 1

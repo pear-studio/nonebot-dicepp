@@ -40,34 +40,13 @@ async def test_update_character_propagates_to_all_subsystems():
 
 
 @pytest.mark.asyncio
-async def test_shutdown_with_dispatcher_awaits_both():
-    """shutdown 在有 segment_dispatcher 时同时 await dispatcher 和 store"""
+async def test_shutdown_closes_store():
+    """shutdown 关闭 Persona store。"""
     bot = MagicMock()
     bot.config.persona_ai = MagicMock()
     bot.config.persona_ai.enabled = True
 
     app = _make_app()
-    app.segment_dispatcher = AsyncMock()
-    app.store = AsyncMock()
-
-    cmd = PersonaCommand(bot)
-    cmd.app = app
-
-    await cmd.shutdown()
-
-    app.segment_dispatcher.shutdown.assert_awaited_once()
-    app.store.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_shutdown_without_dispatcher_only_closes_store():
-    """shutdown 在 segment_dispatcher=None 时仅执行 store.close()"""
-    bot = MagicMock()
-    bot.config.persona_ai = MagicMock()
-    bot.config.persona_ai.enabled = True
-
-    app = _make_app()
-    app.segment_dispatcher = None
     app.store = AsyncMock()
 
     cmd = PersonaCommand(bot)

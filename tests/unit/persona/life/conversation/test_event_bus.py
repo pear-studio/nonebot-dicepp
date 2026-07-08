@@ -11,7 +11,7 @@ from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
 
 def _make_state(**kwargs) -> AgentRunState:
-    defaults = dict(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+    defaults = dict(run_id="r1", interaction_id="t1")
     defaults.update(kwargs)
     return AgentRunState(**defaults)
 
@@ -25,10 +25,11 @@ class TestEventStore:
         store.insert_agent_run = AsyncMock()
         es = EventStore(data_store=store)
 
-        await es.write_run(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+        await es.write_run(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1", agent_name="test", run_tag="test")
 
         store.insert_agent_run.assert_called_once_with(
-            run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat",
+            run_id="r1", interaction_id="t1", user_id="u1", group_id="g1",
+            agent_name="test", run_tag="test",
         )
 
     @pytest.mark.asyncio
@@ -72,7 +73,7 @@ class TestEventStore:
     async def test_data_store_none_write_run_safe(self):
         es = EventStore(data_store=None)
         # 不应该抛出异常
-        await es.write_run(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+        await es.write_run(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1", agent_name="test", run_tag="test")
 
     @pytest.mark.asyncio
     async def test_data_store_none_update_run_safe(self):
@@ -107,7 +108,7 @@ class TestAgentEventBus:
         bus = AgentEventBus(event_store=es)
         state = _make_state()
 
-        payload = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+        payload = AgentRunStartedPayload(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1", agent_name="agent", run_tag="chat")
         event = await bus.emit("AgentRunStarted", payload, state)
 
         assert event.event_type == "AgentRunStarted"
@@ -121,10 +122,11 @@ class TestAgentEventBus:
         assert args["event_type"] == "AgentRunStarted"
         assert json.loads(args["payload_json"]) == {
             "run_id": "r1",
-            "turn_id": "t1",
+            "interaction_id": "t1",
             "user_id": "u1",
             "group_id": "g1",
-            "mode": "chat",
+            "agent_name": "agent",
+            "run_tag": "chat",
         }
         assert args["created_at"] == event.created_at
 
@@ -133,7 +135,7 @@ class TestAgentEventBus:
         es = EventStore(data_store=mock_event_store)
         bus = AgentEventBus(event_store=es)
         state = _make_state()
-        payload = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+        payload = AgentRunStartedPayload(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1", agent_name="agent", run_tag="chat")
 
         e1 = await bus.emit("e1", payload, state)
         e2 = await bus.emit("e2", payload, state)
@@ -151,7 +153,7 @@ class TestAgentEventBus:
         bus = AgentEventBus(event_store=es, sinks=[sink])
         state = _make_state()
 
-        payload = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+        payload = AgentRunStartedPayload(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1", agent_name="agent", run_tag="chat")
         event = await bus.emit("AgentRunStarted", payload, state)
 
         sink.on_event.assert_awaited_once_with(event, state)
@@ -167,7 +169,7 @@ class TestAgentEventBus:
         bus = AgentEventBus(event_store=es, sinks=[failing_sink, sink2])
         state = _make_state()
 
-        payload = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+        payload = AgentRunStartedPayload(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1", agent_name="agent", run_tag="chat")
         event = await bus.emit("AgentRunStarted", payload, state)
 
         failing_sink.on_event.assert_awaited_once_with(event, state)
@@ -182,7 +184,7 @@ class TestAgentEventBus:
         bus = AgentEventBus(event_store=es)
         state = _make_state()
 
-        payload = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+        payload = AgentRunStartedPayload(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1", agent_name="agent", run_tag="chat")
         # 存储失败不应阻止 emit 继续分发
         event = await bus.emit("AgentRunStarted", payload, state)
         assert event.event_type == "AgentRunStarted"
@@ -207,7 +209,7 @@ class TestAgentEventBus:
         bus = AgentEventBus(event_store=es, sinks=[s1, s2])
         state = _make_state()
 
-        payload = AgentRunStartedPayload(run_id="r1", turn_id="t1", user_id="u1", group_id="g1", mode="chat")
+        payload = AgentRunStartedPayload(run_id="r1", interaction_id="t1", user_id="u1", group_id="g1", agent_name="agent", run_tag="chat")
         await bus.emit("AgentRunStarted", payload, state)
 
         assert len(state.sink_failures) == 2

@@ -1,42 +1,46 @@
-"""read_history smoke 测试"""
-import pytest
+"""read_history 工具测试。"""
+
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from module.persona.agent.runtime_types import ToolExecutionContext
+from module.persona.tools.read_history import build_read_history_tool
+
 
 pytestmark = pytest.mark.unit
 
 
-def _make_ctx(**kwargs):
-    from module.persona.tools.context import ToolContext
-    ctx = MagicMock(spec=ToolContext)
-    ctx.user_id = kwargs.get("user_id", "u1")
-    ctx.group_id = kwargs.get("group_id", "g1")
-    store = kwargs.get("store", MagicMock())
-    if store is not None:
-        store.read_messages = AsyncMock(return_value=[])
-    ctx.store = store
-    return ctx
+class _FakeMsg:
+    def __init__(self, user_id, role, content, display_name):
+        self.user_id = user_id
+        self.role = role
+        self.content = content
+        self.display_name = display_name
+        self.created_at = datetime(2026, 5, 21, 15, 0, 0)
+
+
+def _ctx() -> ToolExecutionContext:
+    return ToolExecutionContext("r1", "tc1", 0, 0)
+
+
+def _store(messages=None):
+    store = MagicMock()
+    store.read_messages = AsyncMock(return_value=messages or [])
+    return store
+
+
+async def _execute(tool, **kwargs) -> str:
+    result = await tool.handler(tool.args_schema(**kwargs), _ctx())
+    return result.observation
 
 
 @pytest.mark.asyncio
 async def test_read_history_returns_formatted():
-    """基本读取返回格式化结果"""
-    from module.persona.tools.read_history import make_read_history_executor
-    from datetime import datetime
+    store = _store([_FakeMsg("u1", "user", "你好", "小王")])
 
-    class _FakeMsg:
-        def __init__(self, user_id, role, content, display_name):
-            self.user_id = user_id
-            self.role = role
-            self.content = content
-            self.display_name = display_name
-            self.created_at = datetime(2026, 5, 21, 15, 0, 0)
-
-    msgs = [_FakeMsg("u1", "user", "你好", "小王")]
-    ctx = _make_ctx()
-    ctx.store.read_messages = AsyncMock(return_value=msgs)
-
-    executor = make_read_history_executor(search_max_chars=180)
-    result = await executor({"limit": 10}, ctx)
+    result = await _execute(build_read_history_tool(store, user_id="u1", group_id="g1", search_max_chars=180), limit=10)
 
     assert "你好" in result
     assert "小王" in result
@@ -44,75 +48,36 @@ async def test_read_history_returns_formatted():
 
 @pytest.mark.asyncio
 async def test_read_history_empty():
-    """无记录时返回提示"""
-    from module.persona.tools.read_history import make_read_history_executor
-
-    ctx = _make_ctx()
-    ctx.store.read_messages = AsyncMock(return_value=[])
-
-    executor = make_read_history_executor(search_max_chars=180)
-    result = await executor({}, ctx)
+    result = await _execute(build_read_history_tool(_store(), user_id="u1", group_id="g1", search_max_chars=180))
 
     assert "暂无聊天记录" in result
 
 
 @pytest.mark.asyncio
 async def test_read_history_with_offset():
-    """offset 参数——输出中包含对应聊天内容"""
-    from module.persona.tools.read_history import make_read_history_executor
-    from datetime import datetime
+    store = _store([_FakeMsg("u1", "user", "你好", "小王")])
 
-    class _FakeMsg:
-        def __init__(self, user_id, role, content, display_name):
-            self.user_id = user_id
-            self.role = role
-            self.content = content
-            self.display_name = display_name
-            self.created_at = datetime(2026, 5, 21, 15, 0, 0)
-
-    ctx = _make_ctx()
-    msgs = [_FakeMsg("u1", "user", "你好", "小王")]
-    ctx.store.read_messages = AsyncMock(return_value=msgs)
-
-    executor = make_read_history_executor(search_max_chars=180)
-    result = await executor({"limit": 5, "offset": 10}, ctx)
+    result = await _execute(build_read_history_tool(store, user_id="u1", group_id="g1", search_max_chars=180), limit=5, offset=10)
 
     assert "你好" in result
     assert "小王" in result
+    store.read_messages.assert_awaited_once()
+    assert store.read_messages.await_args.kwargs["offset"] == 10
 
 
 @pytest.mark.asyncio
 async def test_read_history_filter_user_id():
-    """filter_user_id 参数——输出中包含对应用户消息"""
-    from module.persona.tools.read_history import make_read_history_executor
-    from datetime import datetime
+    store = _store([_FakeMsg("target", "user", "特定用户消息", "目标用户")])
 
-    class _FakeMsg:
-        def __init__(self, user_id, role, content, display_name):
-            self.user_id = user_id
-            self.role = role
-            self.content = content
-            self.display_name = display_name
-            self.created_at = datetime(2026, 5, 21, 15, 0, 0)
-
-    ctx = _make_ctx()
-    msgs = [_FakeMsg("target", "user", "特定用户消息", "目标用户")]
-    ctx.store.read_messages = AsyncMock(return_value=msgs)
-
-    executor = make_read_history_executor(search_max_chars=180)
-    result = await executor({"user_id": "target"}, ctx)
+    result = await _execute(build_read_history_tool(store, user_id="u1", group_id="g1", search_max_chars=180), user_id="target")
 
     assert "特定用户消息" in result
     assert "目标用户" in result
+    assert store.read_messages.await_args.kwargs["filter_user_id"] == "target"
 
 
 @pytest.mark.asyncio
 async def test_read_history_store_none():
-    """store 为 None 时返回不可用提示"""
-    from module.persona.tools.read_history import make_read_history_executor
-
-    ctx = _make_ctx(store=None)
-    executor = make_read_history_executor(search_max_chars=180)
-    result = await executor({}, ctx)
+    result = await _execute(build_read_history_tool(None, user_id="u1", group_id="g1", search_max_chars=180))
 
     assert "读取功能不可用" in result

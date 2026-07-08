@@ -30,11 +30,11 @@ class TestMessageCRUD:
     async def test_message_stream_segment_metadata_roundtrip(self, temp_db):
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
-        await store.add_message_stream('u1', '', 'assistant', MessageType.CHAT, 'part1', agent_run_id='run_1', turn_id='turn_1', segment_index=0, segment_phase='interim')
+        await store.add_message_stream('u1', '', 'assistant', MessageType.CHAT, 'part1', agent_run_id='run_1', interaction_id='turn_1', segment_index=0, segment_phase='interim')
         msgs = await store.get_recent_messages('u1', limit=10)
         assert len(msgs) == 1
         assert msgs[0].agent_run_id == 'run_1'
-        assert msgs[0].turn_id == 'turn_1'
+        assert msgs[0].interaction_id == 'turn_1'
         assert msgs[0].segment_index == 0
         assert msgs[0].segment_phase == 'interim'
 
@@ -1038,10 +1038,10 @@ class TestAgentRunCRUD:
         run = await store.get_agent_run('run_1')
         assert run is not None
         assert run['run_id'] == 'run_1'
-        assert run['turn_id'] == 'turn_1'
+        assert run['interaction_id'] == 'turn_1'
         assert run['user_id'] == 'u1'
         assert run['group_id'] == 'g1'
-        assert run['mode'] == 'chat'
+        assert run['agent_name'] == 'chat'
 
     @pytest.mark.asyncio
     async def test_get_agent_run_not_found(self, temp_db):
@@ -1051,11 +1051,11 @@ class TestAgentRunCRUD:
     @pytest.mark.asyncio
     async def test_update_agent_run(self, temp_db):
         store = temp_db
-        await store.insert_agent_run('run_2', 'turn_2', 'u1', 'g1', 'chat')
-        await store.update_agent_run('run_2', status='completed', final_reason='success')
+        await store.insert_agent_run('run_2', 'turn_2', 'u1', 'g1', agent_name='test', run_tag='chat')
+        await store.update_agent_run('run_2', status='completed', completion_kind='success')
         run = await store.get_agent_run('run_2')
         assert run['status'] == 'completed'
-        assert run['final_reason'] == 'success'
+        assert run['completion_kind'] == 'success'
 
     @pytest.mark.asyncio
     async def test_insert_and_get_agent_events(self, temp_db):

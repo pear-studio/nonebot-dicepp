@@ -3,7 +3,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from plugins.DicePP.module.persona.life.conversation import Conversation, Snapshot
-from plugins.DicePP.module.persona.life.tool_loop import ToolResult
 from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
@@ -130,17 +129,19 @@ class TestChatOrchestratorChat:
     @pytest.fixture
     def orch_with_mocks(self):
         """构造带 mock Conversation 和 Coordinator 的 ChatOrchestrator。"""
-        from plugins.DicePP.module.persona.life.conversation import RunResult
+        from plugins.DicePP.module.persona.life.conversation import ConversationRunResult
 
         store = _make_store()
         store.get_recent_messages = AsyncMock(return_value=[{}])
         store.get_relationship = AsyncMock()
 
         mock_conv = MagicMock(spec=Conversation)
-        mock_conv.run = AsyncMock(return_value=RunResult(
+        # conv.run() 返回 ConversationRunResult
+        mock_conv.run = AsyncMock(return_value=ConversationRunResult(
             final_text="你好！",
-            final_reason="stop",
-            delivery_performed=False,
+            final_reason="output_collected",
+            completion_kind="completed",
+            output_arguments={"content": "你好！"},
         ))
 
         orch = ChatOrchestrator(
@@ -165,7 +166,7 @@ class TestChatOrchestratorChat:
 
     @pytest.mark.asyncio
     async def test_chat_transient_injection(self, orch_with_mocks):
-        """transient_message 正确传入 conv.run()"""
+        """transient_message 正确传入 conv.run() 的 transient_context_messages"""
         orch, mock_conv, store = orch_with_mocks
 
         # 模拟 coordinator.submit 内部调用 chat_call_fn
@@ -178,11 +179,12 @@ class TestChatOrchestratorChat:
 
         await orch.chat("u1", "", "hello", transient_message="用户打了个喷嚏")
 
-        # 验证 conv.run() 被调用时 transient 参数传入正确
+        # 验证 conv.run() 被调用时 transient_context_messages 参数传入正确
         call_kwargs = mock_conv.run.call_args.kwargs
-        assert call_kwargs.get("transient") == "用户打了个喷嚏", (
-            f"transient 未正确传入 conv.run()，实际: {call_kwargs.get('transient')}"
-        )
+        transient_msgs = call_kwargs.get("transient_context_messages")
+        assert transient_msgs is not None, "transient_context_messages 应传入 conv.run()"
+        assert len(transient_msgs) == 1
+        assert transient_msgs[0]["content"] == "用户打了个喷嚏"
 
     @pytest.mark.asyncio
     async def test_chat_dedup_same_message(self, orch_with_mocks):
@@ -247,7 +249,7 @@ class TestChatOrchestratorChat:
         mock_scoring_trigger.on_interaction = AsyncMock()
         orch._scoring_trigger = mock_scoring_trigger
 
-        # 模拟 coordinator.submit 内部调用 chat_call_fn → conv.run → after_response
+        # 模拟 coordinator.submit 内部调用 chat_call_fn → after_response
         async def mock_submit(target_key, message, chat_call_fn, *,
                               continue_on_buffered, on_result, on_exhausted):
             result = await chat_call_fn([message])

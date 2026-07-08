@@ -296,11 +296,12 @@ class TestContextBuilderSegmentGuide:
         )
         system = messages[0]["content"]
         assert "send_reply_segment" in system
+        assert "finish_reply" in system
         assert "30" in system
         assert "80" in system
         assert "100" in system
         assert "120" in system
-        assert "delay_before" in system
+        assert "delay_before" not in system
 
     def test_segment_guide_reflects_custom_values(self):
         char = self._make_character()

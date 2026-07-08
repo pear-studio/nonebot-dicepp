@@ -213,29 +213,10 @@ class TestHandleJrrp:
                                   "test_user的今日人品是:75\n人品比昨天上升了25.0%！")
         assert cmd._send.await_count == 1
 
-    async def test_commentary_empty_segment_mode_no_fallback(self, mock_jrrp_result):
-        """segment 模式 LLM 返回空串时不额外回退（dispatcher 已发送）"""
+    async def test_commentary_empty_fallback(self, mock_jrrp_result):
+        """LLM 返回空串时回退到 format_jrrp_text，确保用户可见"""
         app = MagicMock()
         app.chat.chat = AsyncMock(return_value="")
-        app.segment_dispatcher = MagicMock()  # 存在 → segment 模式
-
-        cmd = _make_cmd(app=app)
-        cmd._send = AsyncMock()
-
-        meta = _make_meta()
-        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
-            with patch("utils.time.get_current_date_raw"):
-                result = await cmd._handle_jrrp("U123", "", meta)
-
-        assert result == []
-        # segment 模式下 dispatcher 已发送，不应额外回退
-        assert cmd._send.await_count == 0
-
-    async def test_commentary_empty_non_segment_fallback(self, mock_jrrp_result):
-        """非 segment 模式 LLM 返回空串时回退到 format_jrrp_text"""
-        app = MagicMock()
-        app.chat.chat = AsyncMock(return_value="")
-        app.segment_dispatcher = None  # 非 segment 模式
 
         cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
@@ -249,7 +230,25 @@ class TestHandleJrrp:
                     result = await cmd._handle_jrrp("U123", "", meta)
 
         assert result == []
-        # 非 segment 模式下 LLM 返回空串，应回退到模板确保用户可见
+        cmd._send.assert_called_once_with("U123", "", fallback_text)
+
+    async def test_commentary_empty_second_case_fallback(self, mock_jrrp_result):
+        """LLM 返回空串时回退到 format_jrrp_text"""
+        app = MagicMock()
+        app.chat.chat = AsyncMock(return_value="")
+
+        cmd = _make_cmd(app=app)
+        cmd._send = AsyncMock()
+
+        meta = _make_meta()
+        fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
+        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
+            with patch("utils.time.get_current_date_raw"):
+                with patch("module.misc.jrrp_utils.format_jrrp_text",
+                           return_value=fallback_text):
+                    result = await cmd._handle_jrrp("U123", "", meta)
+
+        assert result == []
         assert cmd._send.await_count == 1
         cmd._send.assert_called_once_with("U123", "", fallback_text)
 
@@ -301,42 +300,6 @@ class TestIsCommandPropagation:
         assert app.chat.chat.await_args.kwargs.get("ctx").is_command is True
 
 
-    async def test_chat_session_is_command_skips_sleep_gate(self):
-        """is_command=True 时绕过睡眠门控"""
-        from module.persona.chat.session import ChatSession
-
-        store = MagicMock()
-        router = MagicMock()
-        tool_registry = MagicMock()
-        coordinator = MagicMock()
-        character = MagicMock()
-        config = MagicMock()
-
-        sleep_gate = MagicMock()
-        sleep_gate.is_awake = AsyncMock(return_value=False)
-
-        scoring_trigger = MagicMock()
-        response_handler = MagicMock()
-        context_builder = MagicMock()
-
-        session = ChatSession(
-            store=store, router=router, tool_registry=tool_registry,
-            coordinator=coordinator, character=character, config=config,
-            scoring_trigger=scoring_trigger, response_handler=response_handler,
-            context_builder=context_builder, sleep_gate=sleep_gate,
-        )
-        session._chat_via_coordinator = AsyncMock(return_value="jrrp response")
-
-        # is_command=True 时即使角色睡眠也应放行
-        result = await session.chat(
-            user_id="U123", group_id="", message=".jrrp",
-            ctx=ChatCallContext(is_command=True),
-        )
-        assert result == "jrrp response"
-        # 睡眠门控不应被触发
-        sleep_gate.is_awake.assert_not_awaited()
-
-
 # ── Test: PersonaApp.is_awake ──────────────────────────────────────────────
 
 class TestPersonaAppIsAwake:
@@ -360,7 +323,6 @@ class TestPersonaAppIsAwake:
 
         store = MagicMock()
         router = MagicMock()
-        tool_registry = MagicMock()
         coordinator = MagicMock()
         character = MagicMock()
         config = MagicMock()
@@ -369,7 +331,7 @@ class TestPersonaAppIsAwake:
         context_builder = MagicMock()
 
         session = ChatSession(
-            store=store, router=router, tool_registry=tool_registry,
+            store=store, router=router,
             coordinator=coordinator, character=character, config=config,
             scoring_trigger=scoring_trigger, response_handler=response_handler,
             context_builder=context_builder, sleep_gate=None,
@@ -386,7 +348,7 @@ class TestPersonaAppIsAwake:
         sleep_gate.is_awake = AsyncMock(return_value=True)
 
         session = ChatSession(
-            store=MagicMock(), router=MagicMock(), tool_registry=MagicMock(),
+            store=MagicMock(), router=MagicMock(),
             coordinator=MagicMock(), character=MagicMock(), config=MagicMock(),
             scoring_trigger=MagicMock(), response_handler=MagicMock(),
             context_builder=MagicMock(), sleep_gate=sleep_gate,
@@ -403,7 +365,7 @@ class TestPersonaAppIsAwake:
         sleep_gate.is_awake = AsyncMock(return_value=False)
 
         session = ChatSession(
-            store=MagicMock(), router=MagicMock(), tool_registry=MagicMock(),
+            store=MagicMock(), router=MagicMock(),
             coordinator=MagicMock(), character=MagicMock(), config=MagicMock(),
             scoring_trigger=MagicMock(), response_handler=MagicMock(),
             context_builder=MagicMock(), sleep_gate=sleep_gate,
