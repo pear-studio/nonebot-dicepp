@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, AsyncMock
 
 from plugins.DicePP.module.persona.factory import PersonaApp
 from plugins.DicePP.module.persona.command import PersonaCommand
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 def _make_app() -> PersonaApp:
@@ -43,8 +44,7 @@ async def test_update_character_propagates_to_all_subsystems():
 async def test_shutdown_closes_store():
     """shutdown 关闭 Persona store。"""
     bot = MagicMock()
-    bot.config.persona_ai = MagicMock()
-    bot.config.persona_ai.enabled = True
+    bot.config.persona_ai = PersonaConfig(enabled=True)
 
     app = _make_app()
     app.store = AsyncMock()

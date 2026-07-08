@@ -15,6 +15,7 @@ from core.data.models import UserStat as UserStatModel
 from core.data.models import GroupStat as GroupStatModel
 from core.statistics.user_stat import UserStatInfo
 from core.statistics.group_stat import GroupStatInfo
+from plugins.DicePP.core.config.pydantic_models import BotConfig
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -40,7 +41,7 @@ async def test_process_msg_stat_write_failure():
     bot.stat_manager.update_group_stat = AsyncMock(
         side_effect=OSError("simulated db failure")
     )
-    bot.config = MagicMock()
+    bot.config = MagicMock(spec=BotConfig)
     bot.config.master = []
     bot.config.admin = []
     bot.config.command_split = "\n"

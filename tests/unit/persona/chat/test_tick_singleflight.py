@@ -6,14 +6,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+
 
 from plugins.DicePP.module.persona.command import PersonaCommand
 
 
 def _make_cmd():
     bot = MagicMock()
-    bot.config.persona_ai = MagicMock()
-    bot.config.persona_ai.enabled = True
+    bot.config.persona_ai = PersonaConfig(enabled=True)
     cmd = PersonaCommand(bot)
     cmd.enabled = True
     cmd.app = MagicMock()

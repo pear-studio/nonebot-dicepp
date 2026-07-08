@@ -6,6 +6,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from module.dice_hub.manager import HubManager, HUB_KEY_NICKNAME
+from plugins.DicePP.core.config.pydantic_models import BotConfig
 
 
 class _FakeBot:
@@ -48,7 +49,7 @@ class TestHubManagerConfigSetters:
         b = _FakeBot(account="test_acc")
         b.db = MagicMock()
         b.db.hub_set = AsyncMock()
-        b.config = MagicMock()
+        b.config = MagicMock(spec=BotConfig)
         b.config.master = ["master_001"]
         return b
 
@@ -134,7 +135,7 @@ class TestHubManagerRegister:
         b.db = MagicMock()
         b.db.hub_set = AsyncMock()
         b.db.hub_get = AsyncMock(return_value=None)
-        b.config = MagicMock()
+        b.config = MagicMock(spec=BotConfig)
         b.config.master = ["master_001"]
         return b
 
@@ -188,7 +189,7 @@ class TestGetOnlineRobotsCache:
         b.db = MagicMock()
         b.db.hub_get = AsyncMock(return_value=None)
         b.db.hub_set = AsyncMock()
-        b.config = MagicMock()
+        b.config = MagicMock(spec=BotConfig)
         b.config.master = ["master_001"]
         return b
 

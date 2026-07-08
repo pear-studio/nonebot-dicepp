@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from utils.time import set_clock, SteppedClock, WallClock
 from core.bot import Bot
 from core.command import BotCommandBase
+from core.config.pydantic_models import BotConfig, PersonaConfig
 from core.data.models.extended import MetaStat
 
 
@@ -26,6 +27,7 @@ class _FakePersonaCommand(BotCommandBase):
 def _make_mock_bot():
     """构造 tick_daily 所需的最小 mock Bot，集中管理 mock 表面积。"""
     bot = MagicMock()
+    bot.config = BotConfig()
     bot.db.user_stat.list_all = AsyncMock(return_value=[])
     bot.db.user_stat.upsert_many = AsyncMock()
     bot.db.group_stat.list_all = AsyncMock(return_value=[])
@@ -150,7 +152,7 @@ async def test_tick_daily_suppresses_master_notification_when_persona_running():
 
     with patch("plugins.DicePP.module.persona.command.PersonaCommand", _FakePersonaCommand):
         bot_commands = []
-        bot.config.persona_ai.daily_report_enabled = True
+        bot.config.persona_ai = PersonaConfig(daily_report_enabled=True)
         await Bot.tick_daily(bot, bot_commands)
 
     bot.send_msg_to_master.assert_not_called()
@@ -174,7 +176,7 @@ async def test_tick_daily_sends_master_notification_when_daily_report_disabled()
     """daily_report_enabled=False → Master 通知被发送（即使 PersonaCommand 存在）。"""
     bot = _make_mock_bot()
     bot.loc_helper.format_loc_text = MagicMock(return_value="每日更新")
-    bot.config.persona_ai.daily_report_enabled = False
+    bot.config.persona_ai = PersonaConfig(daily_report_enabled=False)
 
     persona_cmd = _FakePersonaCommand(enabled=True)
     bot.command_dict = {"persona": persona_cmd}
@@ -191,7 +193,7 @@ async def test_tick_daily_sends_master_notification_when_persona_not_enabled():
     """PersonaCommand 存在但 enabled=False → Master 通知被发送。"""
     bot = _make_mock_bot()
     bot.loc_helper.format_loc_text = MagicMock(return_value="每日更新")
-    bot.config.persona_ai.daily_report_enabled = True
+    bot.config.persona_ai = PersonaConfig(daily_report_enabled=True)
 
     persona_cmd = _FakePersonaCommand(enabled=False)
     bot.command_dict = {"persona": persona_cmd}

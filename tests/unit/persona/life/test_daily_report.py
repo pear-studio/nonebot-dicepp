@@ -18,6 +18,7 @@ from plugins.DicePP.module.persona.life.types import AgentResult
 from plugins.DicePP.module.persona.gateway.port import MessagePort
 from plugins.DicePP.utils.time import wall_now, get_current_date_int
 from plugins.DicePP.core.message_types import MessageType
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 def _make_mock_bot(with_master=True):
@@ -25,9 +26,9 @@ def _make_mock_bot(with_master=True):
     bot = MagicMock()
     bot.account = "test_bot"
     bot.config.master = ["master_123"] if with_master else []
-    bot.config.persona_ai.daily_report_enabled = True
-    bot.config.persona_ai.daily_report_voice_enabled = False  # 默认关闭 LLM
-    bot.config.persona_ai.timezone = "Asia/Shanghai"
+    bot.config.persona_ai = PersonaConfig(
+        daily_report_voice_enabled=False,
+    )
 
     # 模拟 db 访问
     bot.db.user_stat.list_all = AsyncMock(return_value=[])

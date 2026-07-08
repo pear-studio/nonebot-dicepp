@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 
 from core.communication import MessageMetaData
 from plugins.DicePP.module.persona.chat.session import ChatCallContext
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -44,10 +45,11 @@ def _make_cmd(app=None, data_store=None, config=None, enabled=True):
     cmd._admin_handlers = {}
 
     if config is None:
-        config = MagicMock()
-        config.jrrp_persona_enabled = True
-        config.whitelist_enabled = False
-        config.group_activity_enabled = False
+        config = PersonaConfig(
+            jrrp_persona_enabled=True,
+            whitelist_enabled=False,
+            group_activity_enabled=False,
+        )
     cmd.config = config
 
     # _check_whitelist 使用 self.bot.config.persona_ai，而非 self.config，
@@ -90,10 +92,11 @@ class TestCanProcessMsgJrrpBranching:
 
     async def test_whitelist_enabled_and_not_whitelisted_returns_false(self):
         """白名单启用但用户不在白名单时返回 False"""
-        config = MagicMock()
-        config.jrrp_persona_enabled = True
-        config.whitelist_enabled = True
-        config.group_activity_enabled = False
+        config = PersonaConfig(
+            jrrp_persona_enabled=True,
+            whitelist_enabled=True,
+            group_activity_enabled=False,
+        )
 
         app = MagicMock()
 
@@ -107,10 +110,11 @@ class TestCanProcessMsgJrrpBranching:
 
     async def test_whitelist_enabled_and_whitelisted_returns_true(self):
         """白名单启用且用户在白名单时返回 True"""
-        config = MagicMock()
-        config.jrrp_persona_enabled = True
-        config.whitelist_enabled = True
-        config.group_activity_enabled = False
+        config = PersonaConfig(
+            jrrp_persona_enabled=True,
+            whitelist_enabled=True,
+            group_activity_enabled=False,
+        )
 
         app = MagicMock()
 
@@ -124,10 +128,11 @@ class TestCanProcessMsgJrrpBranching:
 
     async def test_jrrp_persona_disabled_returns_false(self):
         """jrrp_persona_enabled=False 时 .jrrp 返回 False"""
-        config = MagicMock()
-        config.jrrp_persona_enabled = False
-        config.whitelist_enabled = False
-        config.group_activity_enabled = False
+        config = PersonaConfig(
+            jrrp_persona_enabled=False,
+            whitelist_enabled=False,
+            group_activity_enabled=False,
+        )
 
         app = MagicMock()
 
@@ -325,7 +330,7 @@ class TestPersonaAppIsAwake:
         router = MagicMock()
         coordinator = MagicMock()
         character = MagicMock()
-        config = MagicMock()
+        config = PersonaConfig()
         scoring_trigger = MagicMock()
         response_handler = MagicMock()
         context_builder = MagicMock()
@@ -349,7 +354,7 @@ class TestPersonaAppIsAwake:
 
         session = ChatSession(
             store=MagicMock(), router=MagicMock(),
-            coordinator=MagicMock(), character=MagicMock(), config=MagicMock(),
+            coordinator=MagicMock(), character=MagicMock(), config=PersonaConfig(),
             scoring_trigger=MagicMock(), response_handler=MagicMock(),
             context_builder=MagicMock(), sleep_gate=sleep_gate,
         )
@@ -366,7 +371,7 @@ class TestPersonaAppIsAwake:
 
         session = ChatSession(
             store=MagicMock(), router=MagicMock(),
-            coordinator=MagicMock(), character=MagicMock(), config=MagicMock(),
+            coordinator=MagicMock(), character=MagicMock(), config=PersonaConfig(),
             scoring_trigger=MagicMock(), response_handler=MagicMock(),
             context_builder=MagicMock(), sleep_gate=sleep_gate,
         )
