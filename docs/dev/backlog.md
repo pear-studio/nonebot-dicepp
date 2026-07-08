@@ -33,14 +33,6 @@
   - 影响面：command.py、data/store.py、llm/router.py
   - 风险点：用户 key 的安全存储与传输，key 校验机制
 
-### [B-260630-1f9286] 工具定义与传入规则梳理 — 统一 required_tool 语义和传递路径
-- 创建: 2026-06-30
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现: 当前 required_tools 从 tools[0] 隐式推导；SAY_TOOL_DM 与 SAY_TOOL_CHARACTER 共享 name=say 但通过不同路径传递（factory 只注册 DM 版，Character 版仅用 to_openai_format）；工具传递三路并行（_run_life_collect_loop / AgentRuntime.run() / run_structured_collect）；opening() 走独立 AgentRuntime 路径。整体缺乏统一的工具注册、传递与 required 语义。
-- 开发备忘: 1. 梳理所有工具定义和调用路径 2. 统一 required_tool 语义（显式传入优于从 tools[0] 推导）3. 统一工具传递路径（收敛 _run_life_collect_loop 和 AgentRuntime 两条线或明确分工）4. 考虑 SAY_TOOL 的 name 冲突解决方案（如 namespace 前缀）
-
 ### [B-260630-46af37] compact_conversation 改为 LLM 摘要压缩
 - 创建: 2026-06-30
 - 优先级: P2
@@ -55,14 +47,6 @@
     - 调用一次轻量 LLM 将 _messages 压缩为叙事摘要，保留关键信息
     - 需评估压缩 LLM 的 token 消耗和延时
     - 影响面: life/agent.py compact_conversation()
-
-### [B-260703-dbcfa2] ToolLoop 统一入口：收口所有 AgentRuntime 直接调用方
-- 创建: 2026-07-03
-- 优先级: P2
-- 类型: refactor
-- 改动量: M
-- 问题表现: chat/session.py、character_agent.py、sa_agent.py、daily_report.py 均绕过 ToolLoop 直接调用 AgentRuntime.run()，与 ToolLoop 的设计定位（统一入口）不一致
-- 开发备忘: 所有调用方改为走 ToolLoop（或 Conversation），notice 注入从 _run_internal() 提升到 ToolLoop 层
 
 ### [B-260630-38ec7f] share_desire 概念重新设计及 share_threshold 死配置清理
 - 创建: 2026-06-30
