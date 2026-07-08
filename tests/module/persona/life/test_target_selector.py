@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 from plugins.DicePP.module.persona.life.target import TargetSelector
 from plugins.DicePP.module.persona.life.models import ShareTarget
 
@@ -16,7 +17,7 @@ def mock_data_store():
 
 @pytest.fixture
 def bot_config():
-    cfg = MagicMock()
+    cfg = MagicMock(spec=PersonaConfig())
     cfg.proactive_always_send_users = []
     cfg.proactive_always_send_groups = []
     return cfg

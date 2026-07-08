@@ -2,22 +2,21 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
 from plugins.DicePP.module.persona.life.conversation import Conversation, Snapshot
 from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 
 
 def _make_config():
-    config = MagicMock()
-    config.timezone = "Asia/Shanghai"
-    config.reputation_refuse_threshold = 30
-    config.relationship_refuse_enabled = False
-    config.temperature = 0.9
-    config.llm_timeout_seconds = 60
-    config.segment_enabled = False
-    config.max_history_turns = 20
-    config.max_history_tokens = 8000
-    config.lore_token_budget = 1000
+    config = ChatConfig(
+        timezone="Asia/Shanghai",
+        reputation_refuse_threshold=30,
+        relationship_refuse_enabled=False,
+        max_history_turns=20,
+        max_history_tokens=8000,
+        lore_token_budget=1000,
+    )
     return config
 
 

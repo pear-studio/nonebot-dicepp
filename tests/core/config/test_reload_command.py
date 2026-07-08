@@ -18,6 +18,7 @@ if str(PLUGIN_ROOT) not in sys.path:
 from core.communication import MessageMetaData, MessageSender
 from core.command.bot_cmd import BotSendMsgCommand
 from core.config.loader import ConfigValidationError
+from core.config.pydantic_models import BotConfig
 from module.common.reload_config_command import ReloadConfigCommand
 
 
@@ -37,7 +38,7 @@ def _make_bot(reload_raises=None):
 
     # Loader that succeeds or raises
     cfg_loader = MagicMock()
-    new_config = MagicMock()
+    new_config = MagicMock(spec=BotConfig())
     new_config.persona = "default"
     if reload_raises:
         cfg_loader.reload.side_effect = reload_raises
@@ -117,7 +118,7 @@ async def test_process_msg_success_returns_message():
 @pytest.mark.asyncio
 async def test_process_msg_success_swaps_config():
     bot, new_cfg = _make_bot()
-    bot.config = MagicMock()  # different config before reload
+    bot.config = MagicMock(spec=BotConfig())  # different config before reload
     cmd = ReloadConfigCommand(bot)
     await cmd.process_msg(".reload", _meta("master1"), None)
     assert bot.config is new_cfg
@@ -154,7 +155,7 @@ async def test_process_msg_success_uses_ok_loc_key():
 
 @pytest.mark.asyncio
 async def test_process_msg_validation_error_keeps_old_config():
-    old_cfg = MagicMock()
+    old_cfg = MagicMock(spec=BotConfig())
     old_cfg.persona = "default"
     err = ConfigValidationError("bad config")
     bot, _ = _make_bot(reload_raises=err)
@@ -191,7 +192,7 @@ async def test_process_msg_validation_error_persona_not_called():
     """On failure, persona reload must NOT be called (abort early)."""
     err = ConfigValidationError("bad config")
     bot, _ = _make_bot(reload_raises=err)
-    old_cfg = MagicMock()
+    old_cfg = MagicMock(spec=BotConfig())
     old_cfg.persona = "default"
     bot.config = old_cfg
 

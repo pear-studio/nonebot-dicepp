@@ -12,6 +12,7 @@ LifeSimulator 是 tick / tick_daily 的薄编排层，关键行为：
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from plugins.DicePP.module.persona.life.simulator import LifeSimulator, LifeConfig
+from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 
 def _make_simulator(*, event_chain=None, proactive_msgs=None, share_threshold: float=0.5, diary: str='今天很好'):
     """构造最小可运行的 LifeSimulator"""
@@ -24,7 +25,7 @@ def _make_simulator(*, event_chain=None, proactive_msgs=None, share_threshold: f
     character_life.tick = AsyncMock(return_value=event_chain)
     scheduler = MagicMock()
     scheduler.tick = AsyncMock(return_value=proactive_msgs or [])
-    scheduler.config = MagicMock()
+    scheduler.config = MagicMock(spec=ProactiveConfig())
     scheduler.config.max_shares_per_event = 1
     scheduler.share_event_to_targets = AsyncMock(return_value=[])
     scheduler.schedule_share = MagicMock()
