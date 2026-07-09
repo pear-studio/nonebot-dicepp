@@ -8,7 +8,7 @@ dev (开发环境)                         prod (生产环境)
 version-release (skill)               version-deploy (skill)
   │                                     │
   ├─ bump version + tag vX.Y.Z          ├─ gh release view vX.Y.Z
-  ├─ write docs/releases/vX.Y.Z.md        → 从 Release body / asset 读取风险元数据
+  ├─ write docs/releases/vX.Y.Z.md        → 从 Release body 读取风险元数据
   ├─ create GitHub Release               → 展示给用户确认
   └─ tag triggers GHA → build images     └─ deploy-docker → compose sync + pull/load + up
        → nonebot-dicepp:vX.Y.Z
@@ -23,11 +23,11 @@ version-release (skill)               version-deploy (skill)
 |------|------|
 | `pyproject.toml` `[project].version` | 版本号唯一真相源 |
 | `src/.../declare.py` `get_bot_version()` | 运行时版本读取（从 importlib.metadata） |
-| `docs/releases/vX.Y.Z.md` | 每个 release 的 changelog 与风险摘要（数据变更 / 配置变更 / Risk Notes）；作为 GitHub Release body 和 asset 提供 |
+| `docs/releases/vX.Y.Z.md` | 每个 release 的 changelog 与风险摘要（数据变更 / 配置变更 / Risk Notes）；作为 GitHub Release body 提供 |
 | `docker-compose.yml` | 部署入口；包含 bot 与独立 Dashboard service；生产默认使用 `image:` 发布镜像，`build:` 仅作开发/应急构建 |
 | `docs/linux.md` | Linux Docker 部署说明；打入 Linux offline zip, 也可从 tag 内容读取 |
 | `Dockerfile` | 多阶段构建，第三方依赖层与源码层分离，`uv sync --frozen` 可复现 |
-| `.github/workflows/release.yml` | tag push 触发 GHCR 镜像构建 + Linux 离线包 + GitHub Release 创建，并上传 release metadata、compose 文件、Windows zip 和 Linux offline zip |
+| `.github/workflows/release.yml` | tag push 触发 GHCR 镜像构建 + Linux 离线包 + GitHub Release 创建，并上传 compose 文件、Windows zip 和 Linux offline zip |
 
 ## 版本号
 
@@ -45,7 +45,7 @@ version-release (skill)               version-deploy (skill)
 - **Tags**: 正式版打 `:vX.Y.Z` 和 `:latest`；RC 只打同名 `:vX.Y.ZrcN`
 - **构建触发**: push `v*.*.*` tag
 - **构建方式**: `uv sync --no-dev --frozen`，依赖由 `uv.lock` 锁定
-- **分发**: `docs/releases/vX.Y.Z.md`、`docker-compose.yml`、Windows zip、`DicePP-vX.Y.Z-linux-amd64-offline.zip` 和对应 sha256 作为 GitHub Release asset 下载；`docs/releases/vX.Y.Z.md` 同时作为 GitHub Release body；`docs/linux.md` 随 Linux offline zip 分发
+- **分发**: `docker-compose.yml`、Windows zip 和 `DicePP-vX.Y.Z-linux-amd64-offline.zip` 作为 GitHub Release asset 下载；`docs/releases/vX.Y.Z.md` 作为 GitHub Release body；`docs/linux.md` 随 Linux offline zip 分发
 
 ## Docker Compose 模式
 
@@ -55,7 +55,7 @@ version-release (skill)               version-deploy (skill)
 |------|------|------|
 | 生产部署 | `DICEPP_IMAGE_TAG=v3.0.0` | `docker compose pull` → `up -d` |
 | 回退到指定版本 | `DICEPP_IMAGE_TAG=v3.0.0` | `docker compose pull` → `up -d` |
-| 离线部署/更新 | `DICEPP_IMAGE_TAG=v3.0.0` | `sha256sum -c` → `unzip` → `sha256sum -c checksums.sha256` → `zstd -d` → `docker load` → `up -d --pull never` |
+| 离线部署/更新 | `DICEPP_IMAGE_TAG=v3.0.0` | `unzip` → `sha256sum -c checksums.sha256` → `zstd -d` → `docker load` → `up -d --pull never` |
 | 临时使用其他 registry | `DICEPP_IMAGE=registry.example.com/ns/nonebot-dicepp:v3.0.0` | `docker compose pull` → `up -d` |
 | 临时替换 Dashboard registry | `DASHBOARD_IMAGE=registry.example.com/ns/dicepp-dashboard:v3.0.0` | `docker compose pull` → `up -d` |
 | 开发/应急源码构建 | 不设镜像变量 | `docker compose build` → `up -d` |
@@ -71,7 +71,7 @@ version-release (skill)               version-deploy (skill)
 3. 创建 `docs/releases/vX.Y.Z.md`（风险元数据）
 4. `bump-my-version` 递增版本号 + 自动 commit + tag
 5. `git push origin master --tags`
-6. GHA 自动构建镜像 + 创建 GitHub Release + 上传 release metadata、compose 文件、Windows zip 和 Linux amd64 offline zip
+6. GHA 自动构建镜像 + 创建 GitHub Release + 上传 compose 文件、Windows zip 和 Linux amd64 offline zip
 
 ### 基线建立
 
@@ -101,7 +101,6 @@ DICEPP_IMAGE_TAG=v3.1.0 docker compose pull && DICEPP_IMAGE_TAG=v3.1.0 docker co
 
 # 生产环境（离线包）
 VERSION=v3.0.0
-sha256sum -c DicePP-${VERSION}-linux-amd64-offline.zip.sha256
 unzip -o DicePP-${VERSION}-linux-amd64-offline.zip
 cd DicePP-${VERSION}-linux-amd64-offline
 sha256sum -c checksums.sha256
@@ -112,7 +111,7 @@ DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
 
 # 小白部署（从零开始）
 # 1. 浏览器打开 https://github.com/pear-studio/nonebot-dicepp/releases/latest
-# 2. 下载 docker-compose.yml、Linux offline zip 和 release metadata（用于人工风险阅读）
+# 2. 下载 docker-compose.yml 和 Linux offline zip；Release 页面正文用于人工风险阅读
 # 3. docker network create dice-net
 # 4. docker compose up -d
 ```
@@ -123,4 +122,4 @@ DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
 - Prod 由 agent skill 保证不执行 build 命令
 - 生产主路径是发布镜像；源码构建只作为开发/应急 fallback
 - 镜像构建使用官方源，国内开发者通过 compose build args 可覆盖为清华源
-- Release metadata 不进 Docker 镜像；发布时通过 GitHub Release body 和 `docs/releases/vX.Y.Z.md` asset 提供，生产部署期作为人工风险阅读材料使用
+- Release metadata 不进 Docker 镜像；发布时通过 GitHub Release body 提供，生产部署期作为人工风险阅读材料使用

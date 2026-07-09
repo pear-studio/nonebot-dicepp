@@ -88,7 +88,6 @@ ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z
 
 ```text
 DicePP-v3.0.0-linux-amd64-offline.zip
-DicePP-v3.0.0-linux-amd64-offline.zip.sha256
 ```
 
 下面示例用 `v3.0.0`，实际安装时请替换成你要部署的 Release 版本。
@@ -103,7 +102,6 @@ VERSION=v3.0.0
 BASE_URL="https://github.com/pear-studio/nonebot-dicepp/releases/download/${VERSION}"
 
 curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-offline.zip"
-curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-offline.zip.sha256"
 ```
 
 `curl` 正常下载时会显示进度，结束后能看到类似文件：
@@ -116,28 +114,47 @@ ls -lh
 
 ```text
 DicePP-v3.0.0-linux-amd64-offline.zip
-DicePP-v3.0.0-linux-amd64-offline.zip.sha256
+```
+
+如果你想记录下载文件的校验值，可以执行：
+
+```bash
+sha256sum "DicePP-${VERSION}-linux-amd64-offline.zip"
+```
+
+预期会输出一行类似：
+
+```text
+780f7a2b40e9e121eded75ba0dd35cfa79c9167a437855c6230ab4c0e3f95791  DicePP-v3.0.0-linux-amd64-offline.zip
+```
+
+GitHub Release asset 本身也会记录 digest；如果你安装了 GitHub CLI，可以这样查看：
+
+```bash
+gh release view "${VERSION}" \
+  --repo pear-studio/nonebot-dicepp \
+  --json assets \
+  --jq '.assets[] | select(.name == "DicePP-'${VERSION}'-linux-amd64-offline.zip") | .digest'
 ```
 
 ### 服务器不能访问 GitHub
 
-先在自己的电脑浏览器打开目标 Release 页面，下载这两个文件：
+先在自己的电脑浏览器打开目标 Release 页面，下载这个文件：
 
 ```text
 DicePP-v3.0.0-linux-amd64-offline.zip
-DicePP-v3.0.0-linux-amd64-offline.zip.sha256
 ```
 
 然后把文件上传到服务器的 `~/dicepp` 目录。Windows PowerShell、macOS 或 Linux 终端都可以用 `scp`：
 
 ```bash
-scp DicePP-v3.0.0-linux-amd64-offline.zip* 用户名@服务器IP:~/dicepp/
+scp DicePP-v3.0.0-linux-amd64-offline.zip 用户名@服务器IP:~/dicepp/
 ```
 
 例如服务器 IP 是 `203.0.113.10`，登录用户名是 `ubuntu`：
 
 ```bash
-scp DicePP-v3.0.0-linux-amd64-offline.zip* ubuntu@203.0.113.10:~/dicepp/
+scp DicePP-v3.0.0-linux-amd64-offline.zip ubuntu@203.0.113.10:~/dicepp/
 ```
 
 如果第一次连接服务器，可能会询问是否信任主机，输入 `yes` 后回车。上传成功后，服务器上执行：
@@ -147,7 +164,7 @@ cd ~/dicepp
 ls -lh
 ```
 
-预期能看到刚上传的三个文件。
+预期能看到刚上传的离线包。
 
 ### 导入离线镜像
 
@@ -158,16 +175,16 @@ cd ~/dicepp
 VERSION=v3.0.0
 ```
 
-校验下载的 zip：
+可选：记录下载的 zip 校验值，方便与 GitHub Release asset digest 或你本地留存的校验值对照：
 
 ```bash
-sha256sum -c "DicePP-${VERSION}-linux-amd64-offline.zip.sha256"
+sha256sum "DicePP-${VERSION}-linux-amd64-offline.zip"
 ```
 
 预期输出类似：
 
 ```text
-DicePP-v3.0.0-linux-amd64-offline.zip: OK
+780f7a2b40e9e121eded75ba0dd35cfa79c9167a437855c6230ab4c0e3f95791  DicePP-v3.0.0-linux-amd64-offline.zip
 ```
 
 如果提示 `sha256sum: command not found`，先安装基础工具；大多数 Debian / Ubuntu 系统默认已经带有。

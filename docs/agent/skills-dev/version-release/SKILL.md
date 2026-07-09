@@ -22,9 +22,9 @@ metadata:
 - `pyproject.toml` 的 `[project].version` 是唯一手工维护的项目版本源。
 - Git tag 使用 `vX.Y.Z`, 由 `bump-my-version` 根据新版本号创建。
 - 发版测试可使用 `vX.Y.ZrcN` 预发布 tag（如 `v3.0.1rc1`）；RC 会创建 GitHub Prerelease 并推送同名镜像 tag，但不会更新 `latest`。
-- Release workflow 会额外生成 `DicePP-vX.Y.Z-linux-amd64-offline.zip` 和 `DicePP-vX.Y.Z-linux-amd64-offline.zip.sha256`，内含 Linux amd64 Docker 镜像、`docker-compose.yml` 和常用文档，用于国内或离线环境通过 `docker load` 导入镜像。
+- Release workflow 会额外生成 `DicePP-vX.Y.Z-linux-amd64-offline.zip`，内含 Linux amd64 Docker 镜像、`docker-compose.yml`、包内 `checksums.sha256` 和常用文档，用于国内或离线环境通过 `docker load` 导入镜像。
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
-- 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 同时把该文件作为 release asset 上传。
+- 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
 - 日常发布只处理版本递增。补建当前版本基线属于一次性迁移/修复操作, 需用户明确要求后参考本技能的检查边界手工处理。
 
 ## Preconditions
@@ -208,11 +208,11 @@ metadata:
 
    push 成功后, GitHub Actions (release.yml) 将自动：
    - 构建并推送 GHCR 镜像 (:vX.Y.Z + :latest)，运行冒烟测试
-   - 将 bot/dashboard 镜像与 Linux 部署文档打包为 DicePP-vX.Y.Z-linux-amd64-offline.zip，并生成 sha256 校验文件
+   - 将 bot/dashboard 镜像与 Linux 部署文档打包为 DicePP-vX.Y.Z-linux-amd64-offline.zip，并在包内生成 checksums.sha256
    - 在 Windows 上构建 DicePP EXE，运行冒烟测试
    - 将 EXE 打包为 DicePP-vX.Y.Z-win64.zip
    - 创建 GitHub Release（body 为 docs/releases/vX.Y.Z.md 内容）
-   - 上传 docs/releases/vX.Y.Z.md、docker-compose.yml、DicePP-vX.Y.Z-win64.zip、DicePP-vX.Y.Z-linux-amd64-offline.zip 和 DicePP-vX.Y.Z-linux-amd64-offline.zip.sha256 作为 release assets
+   - 上传 docker-compose.yml、DicePP-vX.Y.Z-win64.zip 和 DicePP-vX.Y.Z-linux-amd64-offline.zip 作为 release assets
 
 9. **验证构建产物可用**
 
@@ -220,14 +220,12 @@ metadata:
 
    - `gh release view v{new_version}` 返回 release 信息。
    - Release assets 包含:
-     - `docs/releases/vX.Y.Z.md`
      - `docker-compose.yml`
      - `DicePP-v{new_version}-win64.zip`
      - `DicePP-v{new_version}-linux-amd64-offline.zip`
-     - `DicePP-v{new_version}-linux-amd64-offline.zip.sha256`
    - 目标 tag 下部署文档可读: `git show v{new_version}:docs/linux.md` 不报错。
    - GHCR 镜像 tag 存在: `docker pull ghcr.io/pear-studio/nonebot-dicepp:v{new_version}` 不报错。
-   - Linux 离线包校验文件存在且引用 `.zip` 文件名；必要时用 `gh release download v{new_version} --pattern 'DicePP-*-linux-amd64-offline.zip.sha256'` 检查。
+   - Linux 离线包下载后可解压，包内 `checksums.sha256` 存在且可用于校验内部文件；GitHub Release asset digest 可作为外层 zip 的来源校验参考。
    - 如任一产物缺失, 查看对应 GHA run 日志排查。
 
 10. **切回原分支**

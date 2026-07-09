@@ -21,14 +21,15 @@ def _create_release_script() -> str:
     return _workflow_step(RELEASE_WORKFLOW, "publish", "Create GitHub Release")["run"]
 
 
-def test_create_release_uploads_metadata_and_package_assets():
+def test_create_release_uploads_only_user_facing_assets():
     script = _create_release_script()
 
     assert "ASSETS=(docker-compose.yml)" in script
-    assert 'ASSETS+=("$RELEASE_MD")' in script
     assert "ZIP_ASSETS=(DicePP-*-win64.zip)" in script
     assert 'ASSETS+=("${ZIP_ASSETS[@]}")' in script
-    assert "OFFLINE_IMAGE_ASSETS=(DicePP-*-linux-amd64-offline.zip DicePP-*-linux-amd64-offline.zip.sha256)" in script
+    assert "OFFLINE_IMAGE_ASSETS=(DicePP-*-linux-amd64-offline.zip)" in script
+    assert 'ASSETS+=("$RELEASE_MD")' not in script
+    assert "DicePP-*-linux-amd64-offline.zip.sha256" not in script
     assert "DicePP-*-linux-amd64-images.tar.zst" not in script
     assert "ASSETS+=(docs/linux.md)" not in script
     assert '"${ASSETS[@]}"' in script
@@ -51,7 +52,7 @@ def test_linux_offline_package_embeds_docs_and_usage_guide():
     assert 'cp docs/configuration.md "${PACKAGE_DIR}/docs/configuration.md"' in script
     assert 'cat > "${PACKAGE_DIR}/使用说明.md"' in script
     assert 'zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"' in script
-    assert 'sha256sum "${PACKAGE_ZIP}" > "${PACKAGE_SHA}"' in script
+    assert 'sha256sum "${PACKAGE_ZIP}" > "${PACKAGE_SHA}"' not in script
 
 
 def test_create_release_does_not_pass_empty_zip_argument():

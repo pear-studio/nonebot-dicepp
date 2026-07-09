@@ -93,15 +93,14 @@ metadata:
 
 当 'version-deploy' 要离线应用镜像包时, 推荐执行序列为：
 
-1. 确认目标离线包来自目标 Release: `DicePP-vX.Y.Z-linux-amd64-offline.zip` 和 `DicePP-vX.Y.Z-linux-amd64-offline.zip.sha256`。
-2. 执行 `sha256sum -c DicePP-vX.Y.Z-linux-amd64-offline.zip.sha256`。
-3. 执行 `unzip -o DicePP-vX.Y.Z-linux-amd64-offline.zip`。
-4. 进入解压目录并执行 `sha256sum -c checksums.sha256`。
-5. 执行 `zstd -d -f images/DicePP-vX.Y.Z-linux-amd64-images.tar.zst`。
-6. 执行 `docker load -i images/DicePP-vX.Y.Z-linux-amd64-images.tar`。
-7. 确认 `docker load` 输出包含 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z` 和 `ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z`。
-8. 将离线包内 `docker-compose.yml` 同步到部署目录后, 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d --pull never'。
-9. 执行 'docker compose ps' 并查看 bot/dashboard 日志。
+1. 确认目标离线包来自目标 Release: `DicePP-vX.Y.Z-linux-amd64-offline.zip`；如需外层来源校验，可对照 GitHub Release asset digest 或用户下载时留存的 `sha256sum` 输出。
+2. 执行 `unzip -o DicePP-vX.Y.Z-linux-amd64-offline.zip`。
+3. 进入解压目录并执行 `sha256sum -c checksums.sha256`。
+4. 执行 `zstd -d -f images/DicePP-vX.Y.Z-linux-amd64-images.tar.zst`。
+5. 执行 `docker load -i images/DicePP-vX.Y.Z-linux-amd64-images.tar`。
+6. 确认 `docker load` 输出包含 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z` 和 `ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z`。
+7. 将离线包内 `docker-compose.yml` 同步到部署目录后, 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d --pull never'。
+8. 执行 'docker compose ps' 并查看 bot/dashboard 日志。
 
 ## Important Notes
 

@@ -114,14 +114,6 @@ def ensure_dicepp_release_asset(version: str, filename: str) -> Path:
     url = f"https://github.com/{REPO}/releases/download/{version}/{filename}"
     print(f"[download] {url}")
     download_file(url, destination)
-
-    sha_url = f"{url}.sha256"
-    try:
-        download_file(sha_url, destination.with_name(f"{filename}.sha256"))
-    except SystemExit as exc:
-        print(f"[warn] 无法下载 {filename}.sha256，已跳过: {exc}")
-    except Exception as exc:
-        print(f"[warn] 无法下载 {filename}.sha256，已跳过: {exc}")
     return destination
 
 

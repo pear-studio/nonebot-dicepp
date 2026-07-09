@@ -22,8 +22,8 @@ metadata:
 - 生产部署/回退以 'vX.Y.Z' release 为单位。
 - 目标 release 必须由开发环境 'version-release' 创建。
 - 生产使用 GHCR 镜像: 'ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z'；包含 Dashboard 的版本还会使用 'ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z'。
-- 如果生产环境无法访问 GHCR, 可使用目标 Release asset `DicePP-vX.Y.Z-linux-amd64-offline.zip` + `DicePP-vX.Y.Z-linux-amd64-offline.zip.sha256` 作为离线输入；离线路径仍必须使用相同镜像 tag 和同一份目标 `docker-compose.yml`。
-- 生产更新风险摘要的唯一源头是 GitHub Release body 或同内容 release metadata asset, 由开发环境 'docs/releases/vX.Y.Z.md' 生成, 仅用于人工部署/回退风险核对。
+- 如果生产环境无法访问 GHCR, 可使用目标 Release asset `DicePP-vX.Y.Z-linux-amd64-offline.zip` 作为离线输入；离线路径仍必须使用相同镜像 tag 和同一份目标 `docker-compose.yml`。
+- 生产更新风险摘要的唯一源头是 GitHub Release body, 由开发环境 'docs/releases/vX.Y.Z.md' 生成, 仅用于人工部署/回退风险核对。
 - 'DICEPP_IMAGE_TAG' 通过命令环境变量传递, 不写入任何配置文件。
 - 默认只读。修改运行配置、pull/load 镜像、重启/更新容器等写操作必须先展示影响、命令和回滚方式, 等待用户明确确认。
 
@@ -131,7 +131,7 @@ metadata:
 只有当用户明确确认部署或回退目标版本后, 才允许执行：
 
 1. 如计划包含 compose 同步, 先按用户确认的方式同步 `docker-compose.yml`，并保留回滚路径。
-2. 如果使用离线镜像包, 按用户确认的路径校验 sha256、解压并 `docker load`；确认输出包含 bot/dashboard 两个目标镜像。
+2. 如果使用离线镜像包, 按用户确认的路径解压，校验包内 `checksums.sha256` 并 `docker load`；确认输出包含 bot/dashboard 两个目标镜像。
 3. 在命令中注入环境变量 'DICEPP_IMAGE_TAG=vX.Y.Z'。
 4. 按 'deploy-docker' 执行项目 Docker Compose 更新；在线路径使用 pull/up, 离线路径使用 up --pull never。
 
