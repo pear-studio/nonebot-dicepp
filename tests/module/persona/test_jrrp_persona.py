@@ -275,6 +275,76 @@ class TestHandleJrrp:
         app.chat.chat.assert_awaited_once()
         cmd._send.assert_called_once_with("U123", "", "运气不错！")
 
+    async def test_handle_jrrp_e2e_real_orchestrator(self, mock_jrrp_result):
+        """e2e: _handle_jrrp → 真实 ChatOrchestrator.chat(ctx=...) 全链路签名验证
+
+        使用真实 ChatOrchestrator（非裸 AsyncMock），确保 ctx=ChatCallContext
+        传参不会被静默吞掉。裸 AsyncMock 接受任意 kwargs 是这个 bug 逃过测试的根因。
+        """
+        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+
+        # 构造真实 ChatOrchestrator（依赖全部 mock，但 chat() 是真实方法）
+        store = MagicMock(spec=PersonaDataStore)
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.commit = AsyncMock()
+        store._persona_db = db
+        store.clear_messages = AsyncMock()
+
+        char = MagicMock()
+        char.character_id = "test_e2e"
+        char.get_relation_labels.return_value = ["陌生人"]
+        char.extensions.sleep_messages = None
+        char.extensions.refuse_messages = None
+        char.personality = ""
+        char.scenario = ""
+        char.name = "TestBot"
+        char.description = ""
+        char.mes_example = ""
+        char.tails = ""
+        char.character_book = None
+
+        config = ChatConfig(
+            timezone="Asia/Shanghai",
+            reputation_refuse_threshold=30,
+            relationship_refuse_enabled=False,
+            max_history_turns=20,
+            max_history_tokens=8000,
+            lore_token_budget=1000,
+        )
+
+        cb = MagicMock()
+        cb.build_static_prompt.return_value = "you are a test bot"
+
+        orch = ChatOrchestrator(
+            store=store, router=MagicMock(), character=char,
+            config=config, context_builder=cb,
+        )
+
+        # 短路 _coordinator.submit：不真正调 LLM，直接返回假结果
+        orch._coordinator.submit = AsyncMock(return_value=MagicMock(
+            status="success", value="今天运势不错呢！",
+        ))
+
+        # 组装 PersonaCommand，app.chat 指向真实 ChatOrchestrator
+        app = MagicMock()
+        app.chat = orch
+        app.send_message = AsyncMock()
+
+        cmd = _make_cmd(app=app)
+        cmd._send = AsyncMock()
+
+        meta = _make_meta()
+        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
+            with patch("utils.time.get_current_date_raw"):
+                result = await cmd._handle_jrrp("U123", "", meta)
+
+        # 不抛 TypeError 即为通过
+        assert result == []
+        cmd._send.assert_called_once_with("U123", "", "今天运势不错呢！")
+
 
 # ── Test: is_command=True propagation ────────────────────────────────────
 
@@ -424,4 +494,41 @@ class TestJrrpLLMContext:
         assert ctx.is_command is True
         assert app.chat.chat.await_args.kwargs["message"] == ".jrrp", \
             f"message 应为 '.jrrp'（仅用于去重/缓冲），实际: {app.chat.chat.await_args.kwargs.get('message')}"
+
+
+# ── Test: ChatOrchestrator.chat 签名契约 ───────────────────────────────────
+
+class TestChatSignatureContract:
+    """防止 ChatOrchestrator.chat() 签名变更导致调用方静默失败。
+
+    裸 AsyncMock 接受任意 kwargs，签名不匹配会被吞掉。
+    本测试通过 inspect.signature 直接验证真实方法的参数契约，
+    确保 ctx=ChatCallContext 传参方式始终被 chat() 支持。
+    """
+
+    def test_chat_accepts_ctx_parameter(self):
+        """ChatOrchestrator.chat() 签名包含 ctx 参数"""
+        import inspect
+        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
+
+        sig = inspect.signature(ChatOrchestrator.chat)
+        params = dict(sig.parameters)
+        assert "ctx" in params, (
+            f"ChatOrchestrator.chat() 必须接受 ctx 参数，"
+            f"当前签名: {sig}"
+        )
+
+    def test_chat_rejects_legacy_kwargs(self):
+        """ChatOrchestrator.chat() 不接受已废弃的独立 keyword 参数"""
+        import inspect
+        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
+
+        sig = inspect.signature(ChatOrchestrator.chat)
+        params = dict(sig.parameters)
+        legacy = ["is_command", "image_data_urls", "transient_message", "nickname"]
+        for name in legacy:
+            assert name not in params, (
+                f"ChatOrchestrator.chat() 不应再接受独立参数 '{name}'，"
+                f"应通过 ctx: ChatCallContext 传入。当前签名: {sig}"
+            )
 

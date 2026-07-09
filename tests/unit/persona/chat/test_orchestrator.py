@@ -3,6 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+from plugins.DicePP.module.persona.chat.session import ChatCallContext
 from plugins.DicePP.module.persona.life.conversation import Conversation, Snapshot
 from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
@@ -176,7 +177,7 @@ class TestChatOrchestratorChat:
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
 
-        await orch.chat("u1", "", "hello", transient_message="用户打了个喷嚏")
+        await orch.chat("u1", "", "hello", ctx=ChatCallContext(transient_message="用户打了个喷嚏"))
 
         # 验证 conv.run() 被调用时 transient_context_messages 参数传入正确
         call_kwargs = mock_conv.run.call_args.kwargs
@@ -256,7 +257,32 @@ class TestChatOrchestratorChat:
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
 
-        result = await orch.chat("u1", "", "hello", is_command=False)
+        result = await orch.chat("u1", "", "hello")
         assert result == "你好！"
         # 验证 scoring_trigger.on_interaction 被调用
         mock_scoring_trigger.on_interaction.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_chat_accepts_ctx(self, orch_with_mocks):
+        """chat() 接受 ctx=ChatCallContext 统一传参（替代独立 keyword 参数）"""
+        orch, mock_conv, store = orch_with_mocks
+
+        # 模拟 coordinator.submit 内部调用 chat_call_fn
+        async def mock_submit(target_key, message, chat_call_fn, *,
+                              continue_on_buffered, on_result, on_exhausted):
+            result = await chat_call_fn([message])
+            return MagicMock(status="success", value=result)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
+
+        result = await orch.chat("u1", "", "hello", ctx=ChatCallContext(
+            is_command=True,
+            transient_message="event: jrrp result=75",
+            nickname="tester",
+        ))
+        assert result == "你好！"
+        # 验证 transient_message 正确注入 conv.run()
+        call_kwargs = mock_conv.run.call_args.kwargs
+        transient_msgs = call_kwargs.get("transient_context_messages")
+        assert transient_msgs is not None
+        assert transient_msgs[0]["content"] == "event: jrrp result=75"

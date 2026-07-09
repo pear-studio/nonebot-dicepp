@@ -21,6 +21,7 @@ from ..llm.coordinator import LLMCallCoordinator
 from ..character.models import Character
 from ..chat.chat_config import ChatConfig
 from ..chat.context import ContextBuilder
+from .session import ChatCallContext
 from ..life.conversation import Conversation, Store
 from ..life.conversation_store import ConversationStore
 from ..life.change_sources import (
@@ -108,16 +109,20 @@ class ChatOrchestrator:
 
     async def chat(
         self, user_id: str, group_id: str, message: str,
-        is_command: bool = False,
-        image_data_urls: Optional[List[str]] = None,
-        transient_message: Optional[str] = None,
-        nickname: str = "",
+        ctx: Optional[ChatCallContext] = None,
     ) -> Optional[str]:
         """处理单条用户消息，返回回复文本。
 
         T5: 使用 Conversation.run() + send_reply_segment ToolSpec +
         finish_reply OutputSpec 新路径。
         """
+        if ctx is None:
+            ctx = ChatCallContext()
+        is_command = ctx.is_command
+        image_data_urls = ctx.image_data_urls
+        transient_message = ctx.transient_message
+        nickname = ctx.nickname
+
         # Gate: 消息去重
         dedup_key = f"{user_id}:{group_id}"
         now = time.monotonic()
