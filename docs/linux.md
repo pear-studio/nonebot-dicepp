@@ -336,32 +336,113 @@ http://服务器IP:4090/dashboard
 
 如果从外网访问，直接使用 HTTP 会暴露登录密码和会话信息，建议配置反向代理并开启 HTTPS。
 
-## 配置 LLOneBot
+## 配置 NapCat（推荐）
 
-LLOneBot 可以单独部署在同一台服务器上，并和 DicePP 放在同一个 Docker 网络中。
+当前推荐使用 NapCat 作为 QQ 协议端。NapCat 也是基于 OneBot v11 协议，与 DicePP 通过 `dice-net` Docker 网络通信。
 
-按 LLOneBot 官方文档安装 Docker 版本即可：
+NapCat 独立部署在 DicePP 以外的目录（例如 `~/dicepp/napcat/`），不耦合到 DicePP 的 `docker-compose.yml`。
 
-- [LLBot 文档站](https://luckylillia.com)
-- [LuckyLilliaBot GitHub](https://github.com/LLOneBot/LuckyLilliaBot)
+### 在线部署
 
-关键是让 LLOneBot 容器加入 `dice-net` 网络，这样它才能通过容器名访问 DicePP。
+如果服务器能访问 GitHub 和腾讯 CDN：
 
-向导里的关键选择：
+```bash
+mkdir -p ~/dicepp/napcat && cd ~/dicepp/napcat
 
-| 项目 | 选择或填写 |
-|------|------------|
-| 协议 | OneBot 11 |
-| 连接方式 | WebSocket 客户端 |
-| WebSocket URL | `ws://dicepp:8080/onebot/v11/ws` |
-| Token | 留空，除非你额外配置了访问令牌 |
-| 无头模式 | 推荐开启 |
+# 下载 NapCat 框架（约 28MB）
+NAPCAT_VER=v4.18.9
+curl -L -o NapCat.Shell.zip \
+  "https://github.com/NapNeko/NapCatQQ/releases/download/${NAPCAT_VER}/NapCat.Shell.zip"
 
-容器部署时 URL 使用 `dicepp`，不要写 `127.0.0.1`。
+# 下载模板文件（docker-compose.yml, Dockerfile, entrypoint.sh）
+# 方式一: 从 DicePP 最新 Release 的整合包中提取 napcat/ 目录
+# 方式二: 从 DicePP 仓库 docs/agent/skills-dev/full-offline-bundle/templates/napcat/ 下载
+```
+
+然后编辑 `docker-compose.yml`，将 `ACCOUNT` 改为机器人 QQ 号：
+
+```bash
+# 用你熟悉的编辑器修改这一行:
+#   - ACCOUNT=填写你的QQ号
+```
+
+构建并启动：
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+首次启动时，容器日志中会打印二维码，用手机 QQ 扫码登录。也可以浏览器访问 `http://服务器IP:6099/webui` 扫码。
+
+构建说明：
+
+- 首次构建会从腾讯 CDN 下载 QQNT（约 170MB），Docker 层缓存后不再重复下载。
+- NapCat.Shell.zip 从本地复制（28MB），全离线。
+- 首次启动自动生成 `onebot11.json`，预设连接 `ws://dicepp:8080/onebot/v11/ws`，无需手动配置。
+
+### 离线部署
+
+如果服务器不能访问外网，可以从 DicePP GitHub Release 下载 Linux 整合包（`DicePP-vX.Y.Z-linux-amd64-with-napcat.zip`）。整合包内包含 DicePP 离线镜像和 NapCat 部署文件（含预下载的 NapCat.Shell.zip）。
+
+解压后：
+
+```bash
+cd napcat
+# 编辑 docker-compose.yml，将 ACCOUNT 改为机器人 QQ 号
+docker compose build
+docker compose up -d
+```
+
+构建过程不需要联网（QQNT .deb 也支持离线：预下载到 napcat/ 目录后改为 COPY）。
+
+### 日常操作
+
+在 `~/dicepp/napcat` 目录下：
+
+```bash
+docker compose up -d
+docker compose down
+docker compose restart
+docker compose logs -f
+```
+
+更新 NapCat 版本：
+
+```bash
+# 下载新版本 Shell.zip，替换旧文件
+NAPCAT_VER=v4.x.x
+curl -L -o NapCat.Shell.zip \
+  "https://github.com/NapNeko/NapCatQQ/releases/download/${NAPCAT_VER}/NapCat.Shell.zip"
+docker compose build --no-cache
+docker compose up -d
+```
+
+### NapCat 无法连接
+
+常见现象：
+
+- NapCat 日志反复出现 WebSocket 连接失败
+- DicePP 日志没有收到连接
+- QQ 发 `.help` 没反应
+
+检查：
+
+- DicePP 容器是否叫 `dicepp`
+- DicePP 和 NapCat 是否都在 `dice-net` 网络中
+- NapCat 配置 `onebot11.json` 中 URL 是否是 `ws://dicepp:8080/onebot/v11/ws`
+
+可用命令：
+
+```bash
+docker ps
+docker network inspect dice-net
+docker compose logs -f
+```
 
 ## 配置机器人账号
 
-推荐流程是：先启动 DicePP，等 LLOneBot 连接上来后，让 DicePP 根据机器人 QQ 号生成账号配置，再回到网页管理面板填写主人、昵称等常用配置。
+推荐流程是：先启动 DicePP，等 NapCat 连接上来后，让 DicePP 根据机器人 QQ 号生成账号配置，再回到网页管理面板填写主人、昵称等常用配置。
 
 这个自动生成依赖 `config/bots/_template.json`。如果 Release 包里已经带了这个模板，首次连接后会生成：
 
@@ -540,27 +621,9 @@ Error response from daemon: network with name dice-net already exists
 
 这是正常的，说明网络已经创建过，继续启动 DicePP 即可。
 
-### LLOneBot 无法连接
+### NapCat 无法连接
 
-常见现象：
-
-- LLOneBot 日志反复出现 WebSocket 连接失败
-- DicePP 日志没有收到连接
-- QQ 发 `.help` 没反应
-
-检查：
-
-- DicePP 容器是否叫 `dicepp`
-- DicePP 和 LLOneBot 是否都在 `dice-net` 网络中
-- LLOneBot URL 是否是 `ws://dicepp:8080/onebot/v11/ws`
-
-可用命令：
-
-```bash
-docker ps
-docker network inspect dice-net
-docker compose logs -f
-```
+详见上方「配置 NapCat」一节末尾的检查清单。
 
 ### 修改配置后没有生效
 
@@ -613,3 +676,50 @@ docker compose up -d
 - 不要在生产更新时默认执行 `git pull` + 本地构建；正式发布仍以 Release 镜像 tag 为准。
 - 源码构建更适合临时避开镜像拉取问题，或给开发者验证镜像构建。
 - 如果以后恢复镜像拉取，建议切回发布镜像部署。
+
+## 备选方案：LLOneBot
+
+> ⚠️ LLOneBot 在国内网络环境下，其 Docker 镜像（`linyuchen/llbot`、`linyuchen/pmhq`）可能无法拉取。仅推荐在能正常访问 Docker Hub 且成功拉取上述镜像的环境下使用。新用户建议优先使用上方的 NapCat 方案。
+
+LLOneBot 可以单独部署在同一台服务器上，并和 DicePP 放在同一个 Docker 网络中。
+
+按 LLOneBot 官方文档安装 Docker 版本即可：
+
+- [LLBot 文档站](https://luckylillia.com)
+- [LuckyLilliaBot GitHub](https://github.com/LLOneBot/LuckyLilliaBot)
+
+关键是让 LLOneBot 容器加入 `dice-net` 网络，这样它才能通过容器名访问 DicePP。
+
+向导里的关键选择：
+
+| 项目 | 选择或填写 |
+|------|------------|
+| 协议 | OneBot 11 |
+| 连接方式 | WebSocket 客户端 |
+| WebSocket URL | `ws://dicepp:8080/onebot/v11/ws` |
+| Token | 留空，除非你额外配置了访问令牌 |
+| 无头模式 | 推荐开启 |
+
+容器部署时 URL 使用 `dicepp`，不要写 `127.0.0.1`。
+
+### LLOneBot 无法连接
+
+常见现象：
+
+- LLOneBot 日志反复出现 WebSocket 连接失败
+- DicePP 日志没有收到连接
+- QQ 发 `.help` 没反应
+
+检查：
+
+- DicePP 容器是否叫 `dicepp`
+- DicePP 和 LLOneBot 是否都在 `dice-net` 网络中
+- LLOneBot URL 是否是 `ws://dicepp:8080/onebot/v11/ws`
+
+可用命令：
+
+```bash
+docker ps
+docker network inspect dice-net
+docker compose logs -f
+```

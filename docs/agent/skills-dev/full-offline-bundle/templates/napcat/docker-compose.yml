@@ -1,0 +1,48 @@
+# NapCat Docker Compose — 独立于 DicePP，仅通过 dice-net 互通
+#
+# 使用方式:
+#   1. 修改下方 ACCOUNT 为你的 QQ 机器人号（必填，其余一般不用改）
+#   2. docker compose build
+#   3. docker compose up -d
+#   4. 手机 QQ 扫码登录:
+#      - 终端日志中会打印二维码，直接扫即可
+#      - 或者浏览器访问 http://<服务器IP>:6099/webui
+#
+# 前置条件: DicePP 已启动且 dice-net 网络已创建
+
+services:
+  napcat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        QQNT_VERSION: ${QQNT_VERSION:-3.2.23-44343}
+    container_name: napcat
+    restart: unless-stopped
+
+    networks:
+      - dice-net
+
+    ports:
+      - "6099:6099"   # WebUI 管理面板
+
+    environment:
+      - TZ=Asia/Shanghai
+      - ACCOUNT=填写你的QQ号              # ← 必填！改为机器人的 QQ 号
+      - NAPCAT_UID=1000
+      - NAPCAT_GID=1000
+      - WEBUI_TOKEN=dicepp-napcat-admin   # WebUI 登录密码，建议改成自己的
+
+    volumes:
+      - ./config:/app/napcat/config    # NapCat 配置（首次启动自动生成 onebot11.json）
+      - ./qq:/app/.config/QQ           # QQ 登录缓存（扫码后保留，重启不用重扫）
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+networks:
+  dice-net:
+    external: true

@@ -22,11 +22,14 @@ from pathlib import Path
 
 REPO = "pear-studio/nonebot-dicepp"
 LLONEBOT_REPO = "LLOneBot/LuckyLilliaBot"
+NAPCAT_REPO = "NapNeko/NapCatQQ"
 SKILL_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = SKILL_DIR / "assets"
+TEMPLATES_DIR = SKILL_DIR / "templates"
 OUT_DIR = SKILL_DIR / "out"
 DEFAULT_LLONEBOT_VERSION = "7.12.15"
 DEFAULT_PMHQ_VERSION = "7.3.2"
+DEFAULT_NAPCAT_VERSION = "4.18.9"
 
 
 def run(args: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess[str]:
@@ -323,6 +326,169 @@ def resolve_windows_llonebot_asset(args: argparse.Namespace) -> tuple[Path, str]
     return ensure_windows_llonebot_asset(DEFAULT_LLONEBOT_VERSION), normalize_v(DEFAULT_LLONEBOT_VERSION)
 
 
+# ── NapCat (Linux) ──────────────────────────────────────────────
+
+
+def cached_napcat_asset() -> Path | None:
+    """Return the latest cached NapCat.Shell.zip, or None."""
+    cached = sorted(
+        (ASSETS_DIR / "napcat").glob("NapCat.Shell-v*.zip"),
+        key=lambda item: (version_key(item.name), item.stat().st_mtime),
+        reverse=True,
+    )
+    return cached[0] if cached else None
+
+
+def download_napcat_shell(version: str) -> Path:
+    """Download NapCat.Shell.zip from GitHub to assets/napcat/.
+
+    The file is renamed to include the version for caching clarity.
+    """
+    stripped = strip_v(version)
+    asset_dir = ASSETS_DIR / "napcat"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    destination = asset_dir / f"NapCat.Shell-v{stripped}.zip"
+    if destination.exists():
+        print(f"[reuse] NapCat Shell: {destination}")
+        return destination
+
+    url = f"https://github.com/{NAPCAT_REPO}/releases/download/v{stripped}/NapCat.Shell.zip"
+    print(f"[download] {url}")
+    download_file(url, destination)
+    return destination
+
+
+def resolve_napcat_version(args: argparse.Namespace) -> str:
+    """Resolve NapCat version: explicit arg > cached asset > default."""
+    if args.napcat_version:
+        return normalize_v(args.napcat_version)
+    cached = cached_napcat_asset()
+    if cached:
+        match = re.search(r"NapCat\.Shell-v(.+)\.zip$", cached.name)
+        if match:
+            version = normalize_v(match.group(1))
+            print(f"[reuse] 默认使用已有 NapCat 资产: {cached.name}")
+            return version
+    return normalize_v(DEFAULT_NAPCAT_VERSION)
+
+
+# ── Linux bundle builders ────────────────────────────────────────
+
+
+def build_linux_bundle_with_napcat(dicepp_version: str, args: argparse.Namespace) -> Path:
+    napcat_version = resolve_napcat_version(args)
+    dicepp_zip = ensure_dicepp_offline_zip(dicepp_version)
+    napcat_zip = download_napcat_shell(napcat_version)
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    bundle_name = f"DicePP-{dicepp_version}-linux-amd64-with-napcat"
+
+    template_dir = TEMPLATES_DIR / "napcat"
+    template_files = ["docker-compose.yml", "Dockerfile", "entrypoint.sh"]
+
+    with tempfile.TemporaryDirectory(prefix="dicepp-full-offline-linux-") as tmp_dir:
+        root = Path(tmp_dir) / bundle_name
+        (root / "dicepp").mkdir(parents=True)
+        (root / "napcat").mkdir(parents=True)
+
+        # DicePP
+        shutil.copy2(dicepp_zip, root / "dicepp" / dicepp_zip.name)
+
+        # NapCat template files
+        for name in template_files:
+            src = template_dir / name
+            if not src.exists():
+                raise SystemExit(f"NapCat 模板文件缺失: {src}")
+            shutil.copy2(src, root / "napcat" / name)
+
+        # NapCat Shell (pre-downloaded)
+        shutil.copy2(napcat_zip, root / "napcat" / napcat_zip.name)
+
+        # NapCat Shell checksum
+        write_single_sha(
+            root / "napcat" / napcat_zip.name,
+            root / "napcat" / f"{napcat_zip.name}.sha256",
+        )
+
+        # source.txt
+        (root / "napcat" / "source.txt").write_text(
+            "\n".join(
+                [
+                    f"NapCat version: {napcat_version}",
+                    f"Source: {napcat_zip.name} downloaded from GitHub",
+                    f"Repo: https://github.com/{NAPCAT_REPO}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        # manifest
+        manifest = {
+            "name": "DicePP Linux offline bundle with NapCat",
+            "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "platform": "linux-amd64",
+            "dicepp": {
+                "version": dicepp_version,
+                "asset": f"dicepp/{dicepp_zip.name}",
+                "release_url": f"https://github.com/{REPO}/releases/tag/{dicepp_version}",
+            },
+            "napcat": {
+                "version": napcat_version,
+                "asset": f"napcat/{napcat_zip.name}",
+                "template_files": [f"napcat/{name}" for name in template_files],
+                "release_url": f"https://github.com/{NAPCAT_REPO}/releases/tag/{napcat_version}",
+            },
+        }
+        (root / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        write_linux_napcat_readme(root / "使用说明.md", dicepp_zip.name, napcat_zip.name)
+        return finalize_bundle(bundle_name, root)
+
+
+def write_linux_napcat_readme(path: Path, dicepp_zip_name: str, napcat_asset_name: str) -> None:
+    path.write_text(
+        f"""# DicePP Linux 整合包使用说明
+
+本整合包包含：
+
+- DicePP 官方 Linux 离线包：dicepp/{dicepp_zip_name}
+- NapCat (OneBot v11) Docker 部署文件：napcat/
+
+请按以下步骤部署：
+
+## 1. 解压 DicePP
+
+```bash
+unzip dicepp/{dicepp_zip_name}
+cd DicePP-*
+```
+参照其中的 使用说明.md 和 docs/linux.md 部署 DicePP。
+
+## 2. 配置并启动 NapCat
+
+```bash
+cd napcat
+# 编辑 docker-compose.yml，将 ACCOUNT 改为机器人 QQ 号
+# 然后:
+docker compose build
+docker compose up -d
+```
+
+首次启动时会在终端打印二维码，用手机 QQ 扫码登录。之后重启无需重扫。
+
+版本和来源见 manifest.json 与 checksums.sha256。
+""",
+        encoding="utf-8",
+    )
+
+
+# ── Legacy LLOneBot builders (Windows still active, Linux kept for reference) ──
+
+
 def write_linux_readme(path: Path, dicepp_zip_name: str, llonebot_asset_name_value: str) -> None:
     path.write_text(
         f"""# DicePP Linux 整合包使用说明
@@ -396,63 +562,8 @@ def finalize_bundle(bundle_name: str, root: Path) -> Path:
 
 
 def build_linux_bundle(dicepp_version: str, args: argparse.Namespace) -> Path:
-    dicepp_zip = ensure_dicepp_offline_zip(dicepp_version)
-    llonebot_asset, llonebot_version, pmhq_version = resolve_linux_llonebot_asset(args)
-
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    bundle_name = f"DicePP-{dicepp_version}-linux-amd64-with-llonebot"
-
-    with tempfile.TemporaryDirectory(prefix="dicepp-full-offline-linux-") as tmp_dir:
-        root = Path(tmp_dir) / bundle_name
-        (root / "dicepp").mkdir(parents=True)
-        (root / "llonebot").mkdir(parents=True)
-
-        shutil.copy2(dicepp_zip, root / "dicepp" / dicepp_zip.name)
-        shutil.copy2(llonebot_asset, root / "llonebot" / llonebot_asset.name)
-
-        llonebot_sha = llonebot_asset.with_name(f"{llonebot_asset.name}.sha256")
-        if llonebot_sha.exists():
-            shutil.copy2(llonebot_sha, root / "llonebot" / llonebot_sha.name)
-        else:
-            write_single_sha(root / "llonebot" / llonebot_asset.name, root / "llonebot" / f"{llonebot_asset.name}.sha256")
-
-        (root / "llonebot" / "source.txt").write_text(
-            "\n".join(
-                [
-                    f"LLOneBot image: linyuchen/llbot:{strip_v(llonebot_version)}",
-                    f"PMHQ image: linyuchen/pmhq:{strip_v(pmhq_version)}",
-                    "Source: Docker images pulled by the DicePP maintainer and exported with docker save.",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
-
-        manifest = {
-            "name": "DicePP Linux offline bundle with LLOneBot",
-            "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-            "platform": "linux-amd64",
-            "dicepp": {
-                "version": dicepp_version,
-                "asset": f"dicepp/{dicepp_zip.name}",
-                "release_url": f"https://github.com/{REPO}/releases/tag/{dicepp_version}",
-            },
-            "llonebot": {
-                "version": llonebot_version,
-                "pmhq_version": pmhq_version,
-                "asset": f"llonebot/{llonebot_asset.name}",
-                "images": [
-                    f"linyuchen/llbot:{strip_v(llonebot_version)}",
-                    f"linyuchen/pmhq:{strip_v(pmhq_version)}",
-                ],
-            },
-        }
-        (root / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        write_linux_readme(root / "使用说明.md", dicepp_zip.name, llonebot_asset.name)
-        return finalize_bundle(bundle_name, root)
+    """Build Linux bundle — now uses NapCat (primary)."""
+    return build_linux_bundle_with_napcat(dicepp_version, args)
 
 
 def build_windows_bundle(dicepp_version: str, args: argparse.Namespace) -> Path:
@@ -545,9 +656,10 @@ def parse_args() -> argparse.Namespace:
         help="Bundle platform to build, defaults to all",
     )
     parser.add_argument("--dicepp-version", help="DicePP release tag, defaults to latest GitHub Release")
-    parser.add_argument("--llonebot-version", help="LLOneBot version, defaults to existing cached asset")
-    parser.add_argument("--pmhq-version", help=f"PMHQ image version for Linux Docker bundle, defaults to {DEFAULT_PMHQ_VERSION}")
-    parser.add_argument("--llonebot-asset", help="Path to an existing Linux LLOneBot docker images .tar.zst asset")
+    parser.add_argument("--napcat-version", help=f"NapCat Shell version for Linux bundle, defaults to {DEFAULT_NAPCAT_VERSION}")
+    parser.add_argument("--llonebot-version", help="LLOneBot version (Windows only), defaults to existing cached asset")
+    parser.add_argument("--pmhq-version", help=f"PMHQ image version (Windows only), defaults to {DEFAULT_PMHQ_VERSION}")
+    parser.add_argument("--llonebot-asset", help="Path to an existing Linux LLOneBot docker images .tar.zst asset (legacy)")
     parser.add_argument("--llonebot-windows-asset", help="Path to an existing Windows LLBot-Desktop zip asset")
     return parser.parse_args()
 
