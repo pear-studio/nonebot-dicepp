@@ -422,23 +422,6 @@ class CharacterLife:
                     i, len(slots), slot_type, slot_m, now_m, dist,
                     sorted(self._fired_slot_indices),
                 )
-        # 所有槽位遍历完毕，无一匹配 — 记录诊断信息
-        if not any(
-            self._is_slot_matchable(i, now_m, now, win)
-            for i in range(len(slots))
-        ):
-            # 构建未匹配槽位的距离快照
-            slot_snapshots = []
-            for i, (sm, st) in enumerate(slots):
-                if i in self._fired_slot_indices:
-                    continue
-                d = min(abs(now_m - sm), 1440 - abs(now_m - sm))
-                slot_snapshots.append(f"{st}@{sm}min(dist={d})")
-            logger.warning(
-                "tick: 无槽位匹配 — now={}min win={}min fired={}/{} slots=[{}]",
-                now_m, win, len(self._fired_slot_indices), len(slots),
-                ", ".join(slot_snapshots) if slot_snapshots else "none",
-            )
         return None
 
     def _migrate_legacy_state(self, state: Any) -> None:
