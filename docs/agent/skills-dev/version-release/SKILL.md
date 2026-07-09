@@ -22,6 +22,7 @@ metadata:
 - `pyproject.toml` 的 `[project].version` 是唯一手工维护的项目版本源。
 - Git tag 使用 `vX.Y.Z`, 由 `bump-my-version` 根据新版本号创建。
 - 发版测试可使用 `vX.Y.ZrcN` 预发布 tag（如 `v3.0.1rc1`）；RC 会创建 GitHub Prerelease 并推送同名镜像 tag，但不会更新 `latest`。
+- `uv.lock` 必须与 `pyproject.toml` 的项目版本同步；tag 指向的 release commit 内不得出现 `pyproject.toml` 为新版本、`uv.lock` 仍记录旧 `dicepp` 版本的状态。
 - Release workflow 会额外生成 `DicePP-vX.Y.Z-linux-amd64-offline.zip`，内含 Linux amd64 Docker 镜像、`docker-compose.yml`、包内 `checksums.sha256` 和常用文档，用于国内或离线环境通过 `docker load` 导入镜像。
 - `.bot` / help / DiceHub 展示的运行版本应从已安装包版本派生, 不维护独立硬编码版本号。
 - 生产更新风险摘要的唯一源头是 `docs/releases/vX.Y.Z.md`。GitHub Release body 以该文件为准；发布 workflow 不把该文件作为 release asset 上传。
@@ -32,6 +33,7 @@ metadata:
 - 只在开发环境中使用。
 - Git 仓库初始化完成, 且有远程仓库写入权限。
 - `bump-my-version` 已安装, 可通过 `uv sync --group dev` 安装。
+- `uv lock` 可用且不会降级 lockfile 格式；如果本机 PATH 上的 `uv` 版本过旧或来自无关环境, 先更新或显式使用可保留当前 `uv.lock` `revision` 的 uv。
 - 目标分支为 `master` 的最新状态。
 - 工作区必须干净；存在未提交更改时拒绝执行 release。
 
@@ -193,6 +195,18 @@ metadata:
    成功后确认：
 
    - `pyproject.toml` 已更新到新版本。
+   - `uv.lock` 已同步到同一版本。运行：
+     ```bash
+     uv lock
+     ```
+     然后确认 diff 至少包含 `uv.lock` 中 `name = "dicepp"` 对应的 `version = "{new_version}"`，且没有不合理的大范围 lockfile 格式降级。如果本机 `uv` 会把 `revision` 写回旧值，先换用更新的 uv 再重新执行。
+   - 如果 `uv lock` 产生了变更, 必须让这些变更进入同一个 release commit。若 `bump-my-version` 已经因为 `commit = true` / `tag = true` 自动创建 commit 和 tag, 执行：
+     ```bash
+     git add uv.lock
+     git commit --amend --no-edit
+     git tag -f v{new_version}
+     ```
+     推送前再次确认 `git show v{new_version}:uv.lock` 中的 `dicepp` 版本等于 `{new_version}`。
    - release metadata 文件包含在版本 bump commit 中。
    - Git tag 为 `v{new_version}`。
 
@@ -271,14 +285,15 @@ metadata:
 
 1. 选择目标正式版本作为基底；如果 `3.0.0` 尚未正式发布, 测试版从 `3.0.0rc1` 开始；已有正式版后再使用下一个版本的 RC。
 2. 将 `pyproject.toml` 版本更新为目标 RC 版本, 并准备对应的 `docs/releases/vX.Y.ZrcN.md`。
-3. 创建并推送 tag:
+3. 运行 `uv lock`, 并确认 `uv.lock` 中 `dicepp` 版本等于目标 RC 版本；把 `pyproject.toml`、`uv.lock` 和 `docs/releases/vX.Y.ZrcN.md` 提交到同一个 RC release commit。
+4. 创建并推送 tag:
    ```bash
    git tag vX.Y.ZrcN
    git push origin master --tags
    ```
-4. GitHub Actions 会构建 Docker 镜像和 Windows EXE, 运行版本一致性检查和冒烟测试。
-5. RC 发布只推送 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.ZrcN`, 不更新 `:latest`。
-6. GitHub Release 会标记为 Prerelease。
+5. GitHub Actions 会构建 Docker 镜像和 Windows EXE, 运行版本一致性检查和冒烟测试。
+6. RC 发布只推送 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.ZrcN`, 不更新 `:latest`。
+7. GitHub Release 会标记为 Prerelease。
 
 RC 测试通过后, 正式发布仍使用纯数字版本 `vX.Y.Z`。
 
