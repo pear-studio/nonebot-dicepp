@@ -12,12 +12,12 @@ services:
     container_name: dicepp
     restart: unless-stopped
 
-    # 网络：使用外部 dice-net 网络与 LLOneBot 通信
+    # 网络：使用外部 dice-net 网络与协议适配器（NapCat/LLOneBot）通信
     networks:
       - dice-net
 
     # 端口：内部通信，无需暴露到宿主机
-    # LLOneBot 通过 ws://dicepp:8080/onebot/v11/ws 连接
+    # 协议适配器通过 ws://dicepp:8080/onebot/v11/ws 连接
     expose:
       - "8080"
 

@@ -27,7 +27,7 @@ DicePP 是一个面向骰主的 QQ 跑团机器人，支持 Windows 和 Linux �
 1. 准备一个可登录的 QQ 机器人账号。
 2. 启动 DicePP，并打开网页管理面板。
 3. 初始化管理员密码，完成账号和常用配置。
-4. 配置 LLOneBot 连接 DicePP。
+4. 配置协议适配器（NapCat 或 LLOneBot）连接 DicePP。
 5. 在 QQ 中向机器人发送 `.help`，收到回复即基本可用。
 
 具体群内指令以机器人内置 `.help` 为准，文档不维护完整命令百科。

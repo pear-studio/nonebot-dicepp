@@ -256,7 +256,7 @@ data/backups/2026-06-24T153000Z-v3.0.0rc3-before-upgrade.zip
 - `data/backups/`
 - `data/runtime/`
 - `data/bots/*/logs/`
-- LLOneBot 数据
+- 协议适配器数据（NapCat / LLOneBot）
 
 manifest 第一版记录：
 
@@ -418,14 +418,14 @@ release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级
 - pre-restore 存档。
 - 恢复失败处理。
 - 升级/恢复前存档能力。
-- 明确不包含 Dashboard DB、content、LLOneBot 数据。
+- 明确不包含 Dashboard DB、content、协议适配器数据（NapCat / LLOneBot）。
 
 已完成 Dashboard Save Archives 基础：
 
 - 新增 Dashboard 本地存档创建与列表 API：`GET /api/archives`、`POST /api/archives`，复用 Dashboard session 鉴权。
 - 存档默认写入 `data/backups/`，格式为 zip + `manifest.json`，manifest `format_version=1` 并记录创建时间、DicePP 版本、描述、scope 和每个 payload 文件的 sha256。
 - 当前包含真实用户配置 `config/user.json`、真实 bot 配置 `config/bots/<bot_id>.json`、`data/dicepp.db`、`data/bots/**/bot_data.db`、`log.db`、`personas_data_*.db` 与 `data/local_images/` 普通文件；跳过 symlink、不存在路径和目录。
-- 当前排除版本随附配置 `config/global.json`、`config/bots/_template.json`，以及 Dashboard DB、`content/`、`data/backups/`、`data/runtime/`、`data/bots/*/logs/` 及未在白名单中的 LLOneBot 数据。
+- 当前排除版本随附配置 `config/global.json`、`config/bots/_template.json`，以及 Dashboard DB、`content/`、`data/backups/`、`data/runtime/`、`data/bots/*/logs/` 及未在白名单中的 协议适配器数据（NapCat / LLOneBot）。
 - 新增存档详情与删除 API：`GET /api/archives/{filename}`、`DELETE /api/archives/{filename}`；只允许管理 `data/backups/` 下的普通 `.zip` 文件名，拒绝路径穿越、子目录、非 zip 与 symlink。
 - 新增恢复前只读 verify 基础：`POST /api/archives/{filename}/verify` 校验 manifest 格式、payload sha256、缺失文件、危险 archive path 与额外未声明 payload。
 - 新增只读恢复预览 API：`POST /api/archives/{filename}/restore-plan` 复用 verify 结果，将白名单 payload 映射为逻辑目标路径并报告 create/overwrite/blocked；API 名称保留 `restore-plan`，用户界面显示为“恢复预览”。

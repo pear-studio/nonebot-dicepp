@@ -1,6 +1,6 @@
 ---
 name: deploy-docker
-description: 在 Linux 生产环境执行 DicePP 相关 Docker/Compose 运维动作。当用户要求查看服务状态、日志、pull/up/restart 容器、应用镜像或管理 DicePP/LLOneBot 相关容器时使用。
+description: 在 Linux 生产环境执行 DicePP 相关 Docker/Compose 运维动作。当用户要求查看服务状态、日志、pull/up/restart 容器、应用镜像或管理 DicePP/协议适配器（NapCat / LLOneBot）容器时使用。
 license: MIT
 metadata:
   author: DicePP
@@ -15,7 +15,7 @@ metadata:
 
 - 用户要求查看 Docker/Compose 服务状态、容器日志或健康状态。
 - 用户要求 pull/load 镜像、up/restart/stop/start DicePP 服务。
-- 用户要求管理 LLOneBot 相关容器。
+- 用户要求管理 协议适配器（NapCat / LLOneBot）容器。
 - 'version-deploy' 已确认版本变更, 需要执行 Docker/Compose 更新。
 
 ## 操作范围
@@ -23,7 +23,7 @@ metadata:
 第一版只允许操作 DicePP 部署相关资源：
 
 - 当前项目 Docker Compose 中声明的 DicePP 服务, 包括 `bot` 和独立 `dashboard` service。
-- DicePP 生产链路明确依赖的 LLOneBot 相关容器/服务。
+- DicePP 生产链路明确依赖的 协议适配器（NapCat / LLOneBot）容器/服务。
 
 默认禁止：
 
@@ -45,7 +45,7 @@ metadata:
 
 - DicePP bot 服务优先使用当前项目的 'docker compose'。
 - DicePP 在线版本更新使用 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull/up`；离线镜像包更新使用 `docker load` 导入目标镜像后执行 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d --pull never`。两种方式都默认作用于当前 compose project 的 DicePP 服务整体，而不是只更新单个 `bot` service。
-- LLOneBot 操作前必须先识别其 compose 目录或容器名；无法确认时只做只读检查并要求用户提供路径。
+- 协议适配器操作前必须先识别其 compose 目录或容器名（NapCat 通常在独立 `napcat/` 目录，LLOneBot 在 `llonebot/` 目录）；无法确认时只做只读检查并要求用户提供路径。
 - 禁止使用 `git pull`、本地 build 或项目部署 wrapper 更新生产。
 
 ## Read-only Checks
@@ -56,7 +56,7 @@ metadata:
 - 'docker compose config --services'
 - 'docker compose logs --tail <N> bot'
 - 'docker compose logs --tail <N> dashboard'
-- 'docker ps' 仅用于识别 DicePP/LLOneBot 相关容器, 不对无关容器执行操作。
+- 'docker ps' 仅用于识别 DicePP/协议适配器（NapCat / LLOneBot）容器, 不对无关容器执行操作。
 
 只读检查仍应避免输出 token、cookie、session、密钥、完整敏感配置或二维码敏感内容。
 
@@ -69,7 +69,7 @@ metadata:
 - 'docker compose up -d'
 - 'docker compose restart'
 - 'docker compose stop' / 'docker compose start'
-- 对已确认 LLOneBot compose project 执行 'docker compose up/down/restart'
+- 对已确认的协议适配器 compose project（NapCat 或 LLOneBot）执行 'docker compose up/down/restart'
 - 任何会改变容器、镜像、网络或服务状态的命令
 
 确认前必须展示：

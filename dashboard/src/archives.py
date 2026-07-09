@@ -39,6 +39,7 @@ SCOPE_EXCLUDED = [
     "data/backups",
     "data/runtime",
     "data/bots/*/logs",
+    "protocol adapter data",
     "LLOneBot data",
 ]
 
