@@ -65,17 +65,51 @@ def latest_dicepp_release() -> str:
                 return tag
         except subprocess.CalledProcessError:
             pass
+        try:
+            result = run(
+                [
+                    "gh",
+                    "release",
+                    "list",
+                    "--repo",
+                    REPO,
+                    "--limit",
+                    "1",
+                    "--json",
+                    "tagName",
+                    "-q",
+                    ".[0].tagName",
+                ],
+                capture=True,
+            )
+            tag = result.stdout.strip()
+            if tag:
+                return tag
+        except subprocess.CalledProcessError:
+            pass
 
     url = f"https://api.github.com/repos/{REPO}/releases/latest"
     request = urllib.request.Request(url, headers={"User-Agent": "DicePP-full-offline-bundle"})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = json.loads(response.read().decode("utf-8"))
+        return payload["tag_name"]
+    except urllib.error.HTTPError:
+        pass
+
+    url = f"https://api.github.com/repos/{REPO}/releases?per_page=10"
+    request = urllib.request.Request(url, headers={"User-Agent": "DicePP-full-offline-bundle"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            releases = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise SystemExit(
             "无法读取最新 DicePP Release。请安装 gh 并登录，或使用 --dicepp-version 明确指定版本。"
         ) from exc
-    return payload["tag_name"]
+    for release in releases:
+        if not release.get("draft"):
+            return release["tag_name"]
+    raise SystemExit("未找到可用的 DicePP Release。请使用 --dicepp-version 明确指定版本。")
 
 
 def download_file(url: str, destination: Path) -> None:
@@ -188,7 +222,7 @@ def build_linux_llonebot_asset(llonebot_version: str, pmhq_version: str) -> Path
         zst_path = f"{tar_path}.zst"
         return "\n".join(
             [
-                "set -euo pipefail",
+                "set -eu",
                 f"mkdir -p {shell_quote(output_dir)}",
                 f"docker image inspect {shell_quote(llbot_image)} >/dev/null 2>&1 || docker pull {shell_quote(llbot_image)}",
                 f"docker image inspect {shell_quote(pmhq_image)} >/dev/null 2>&1 || docker pull {shell_quote(pmhq_image)}",
