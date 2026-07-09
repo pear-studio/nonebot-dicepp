@@ -45,17 +45,6 @@ def build_send_reply_segment_tool(
         if not parsed.content.strip():
             return ToolResult(observation="content 不能为空", status="error")
 
-        # 段数硬限
-        current_count = delivery_queue.count_interim(interaction_id)
-        if current_count >= segment_count_max:
-            return ToolResult(
-                observation=(
-                    f"已发送 {current_count} 段，达到上限 {segment_count_max} 段。"
-                    f"请调用 send_reply 提交最终内容。"
-                ),
-                status="error",
-            )
-
         # R6: 单段长度检查
         if len(parsed.content) > max_chars:
             return ToolResult(
@@ -66,6 +55,32 @@ def build_send_reply_segment_tool(
                 status="error",
             )
 
+        # 段数硬限：真实 DeliveryQueue 支持 enqueue 前同步 reserve；
+        # 测试替身缺少该方法时回退到只读计数。
+        reserve = getattr(delivery_queue, "try_reserve_interim", None)
+        if reserve is not None:
+            accepted = reserve(interaction_id, segment_count_max)
+            current_count = delivery_queue.count_interim(interaction_id)
+            if not accepted:
+                return ToolResult(
+                    observation=(
+                        f"已发送 {current_count} 段，达到上限 {segment_count_max} 段。"
+                        f"请调用 send_reply 提交最终内容。"
+                    ),
+                    status="error",
+                )
+        else:
+            count = getattr(delivery_queue, "count_interim", None)
+            current_count = count(interaction_id) if count is not None else 0
+            if current_count >= segment_count_max:
+                return ToolResult(
+                    observation=(
+                        f"已发送 {current_count} 段，达到上限 {segment_count_max} 段。"
+                        f"请调用 send_reply 提交最终内容。"
+                    ),
+                    status="error",
+                )
+
         delivery_queue.enqueue(DeliveryItem(
             content=parsed.content,
             interaction_id=interaction_id,
@@ -73,6 +88,7 @@ def build_send_reply_segment_tool(
             segment_phase="interim",
             user_id=user_id,
             group_id=group_id,
+            agent_run_id=ctx.run_id,
         ))
         return ToolResult(observation=f"第 {ctx.call_index + 1} 段已发送")
 

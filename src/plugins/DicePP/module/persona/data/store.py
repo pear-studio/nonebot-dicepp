@@ -510,7 +510,7 @@ class PersonaDataStore:
                    agent_run_id, interaction_id, segment_index, segment_phase, image_meta
             FROM message_stream
             WHERE {where_clause}
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT ?
         """
         params.append(limit)

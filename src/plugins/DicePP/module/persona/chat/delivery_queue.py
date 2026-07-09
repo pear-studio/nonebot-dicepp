@@ -16,14 +16,15 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
 
 from utils.logger import logger
+from ..data.models import MessageType
 
 if TYPE_CHECKING:
     from ..data.store import PersonaDataStore
-    from ..data.models import MessageType
     from ..gateway.port import MessagePort
 
 # 连续消息到达的最小间隔阈值（秒），小于此值视为"几乎同时到达"
@@ -52,6 +53,8 @@ class DeliveryItem:
     user_id: str
     group_id: str
     image_url: str = ""
+    message_type: MessageType = MessageType.CHAT
+    agent_run_id: str = ""
 
 
 @dataclass
@@ -87,8 +90,12 @@ class DeliveryQueue:
     _buffered_at: dict[str, dict[int, float]] = field(default_factory=dict)
     _max_seen: dict[str, int] = field(default_factory=dict)
 
-    # 已发送 interim 段计数（按 interaction_id，用于 segment_count_max 硬限）
+    # 已接受 interim 段计数（按 interaction_id，用于 segment_count_max 硬限）
     _interim_count: dict[str, int] = field(default_factory=dict)
+    _interim_count_lock: threading.Lock = field(default_factory=threading.Lock)
+    _sent_count: int = 0
+    _failed_count: int = 0
+    _sent_contents: list[str] = field(default_factory=list)
 
     # ── 公开 API ──────────────────────────────────────────
 
@@ -109,8 +116,33 @@ class DeliveryQueue:
             self._worker_task = asyncio.create_task(self._worker_loop())
 
     def count_interim(self, interaction_id: str) -> int:
-        """返回该 interaction 已发送的 interim 段数（用于 segment_count_max 硬限）。"""
+        """返回该 interaction 已接受的 interim 段数（用于 segment_count_max 硬限）。"""
         return self._interim_count.get(interaction_id, 0)
+
+    def try_reserve_interim(self, interaction_id: str, segment_count_max: int) -> bool:
+        """同步保留一个 interim 段名额。
+
+        send_reply_segment 的 handler 可能在同一轮被并发执行；硬限必须在
+        enqueue 前占位，而不是等 worker 实际发送后再计数。
+        """
+        with self._interim_count_lock:
+            current = self._interim_count.get(interaction_id, 0)
+            if current >= segment_count_max:
+                return False
+            self._interim_count[interaction_id] = current + 1
+            return True
+
+    @property
+    def sent_count(self) -> int:
+        return self._sent_count
+
+    @property
+    def failed_count(self) -> int:
+        return self._failed_count
+
+    @property
+    def sent_contents(self) -> list[str]:
+        return list(self._sent_contents)
 
     def next_call_index(self, interaction_id: str) -> int:
         """返回该 interaction 下一个可用的 call_index。
@@ -263,31 +295,35 @@ class DeliveryQueue:
         # 构建消息文本
         msg_text = _build_msg(item.content, item.image_url)
 
-        # 发送
+        sent = False
         try:
-            await self.port.send(
+            sent = await self.port.send(
                 user_id=item.user_id,
                 group_id=item.group_id,
                 content=msg_text,
                 skip_history_record=True,
+                message_type=item.message_type,
             )
         except Exception:
             logger.exception(
                 f"DeliveryQueue: 发送失败 interaction={item.interaction_id} "
                 f"call_index={item.call_index}"
             )
+        if not sent:
+            async with self._lock:
+                self._failed_count += 1
+            return
 
         # 写 message_stream
         try:
-            from ..data.models import MessageType as MT
             await self.store.add_message_stream(
                 user_id="assistant" if item.group_id else item.user_id,
                 group_id=item.group_id or "",
                 role="assistant",
-                type=MT.CHAT,
+                type=item.message_type,
                 content=item.content,
                 display_name="我",
-                agent_run_id="",
+                agent_run_id=item.agent_run_id,
                 interaction_id=item.interaction_id,
                 segment_index=item.call_index,
                 segment_phase=item.segment_phase,
@@ -300,8 +336,8 @@ class DeliveryQueue:
 
         async with self._lock:
             self._last_sent_at[iid] = time.monotonic()
-            if item.segment_phase == "interim":
-                self._interim_count[iid] = self._interim_count.get(iid, 0) + 1
+            self._sent_count += 1
+            self._sent_contents.append(item.content)
 
 
 def _build_msg(content: str, image_url: str = "") -> str:

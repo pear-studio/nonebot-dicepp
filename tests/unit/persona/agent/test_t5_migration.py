@@ -1093,8 +1093,8 @@ class TestDeliveryQueueOrdering:
         assert queue.next_call_index("i1") == 3
 
     @pytest.mark.asyncio
-    async def test_count_interim_incremented_after_send(self):
-        """count_interim 在 interim 段发送成功后递增，final 段不计数"""
+    async def test_count_interim_reserved_before_send(self):
+        """count_interim 在 interim enqueue 前 reserve，final 段不计数"""
         from plugins.DicePP.module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
@@ -1108,19 +1108,22 @@ class TestDeliveryQueueOrdering:
 
         assert queue.count_interim("i1") == 0
 
+        assert queue.try_reserve_interim("i1", segment_count_max=2) is True
         queue.enqueue(DeliveryItem(
             content="中间段1", interaction_id="i1", call_index=0,
             segment_phase="interim", user_id="u1", group_id="",
         ))
-        await queue.drain()
         assert queue.count_interim("i1") == 1
+        await queue.drain()
 
+        assert queue.try_reserve_interim("i1", segment_count_max=2) is True
         queue.enqueue(DeliveryItem(
             content="中间段2", interaction_id="i1", call_index=1,
             segment_phase="interim", user_id="u1", group_id="",
         ))
-        await queue.drain()
         assert queue.count_interim("i1") == 2
+        await queue.drain()
+        assert queue.try_reserve_interim("i1", segment_count_max=2) is False
 
         # final 段不递增 interim 计数
         queue.enqueue(DeliveryItem(
@@ -1144,21 +1147,23 @@ class TestDeliveryQueueOrdering:
 
         queue = DeliveryQueue(port=mock_port, store=mock_store)
 
+        assert queue.try_reserve_interim("A", segment_count_max=1) is True
         queue.enqueue(DeliveryItem(
             content="A-段", interaction_id="A", call_index=0,
             segment_phase="interim", user_id="u1", group_id="",
         ))
-        await queue.drain()
         assert queue.count_interim("A") == 1
         assert queue.count_interim("B") == 0
+        await queue.drain()
 
+        assert queue.try_reserve_interim("B", segment_count_max=1) is True
         queue.enqueue(DeliveryItem(
             content="B-段", interaction_id="B", call_index=0,
             segment_phase="interim", user_id="u1", group_id="",
         ))
-        await queue.drain()
         assert queue.count_interim("A") == 1
         assert queue.count_interim("B") == 1
+        await queue.drain()
 
         # 不存在的 interaction 返回 0
         assert queue.count_interim("nonexistent") == 0

@@ -15,9 +15,20 @@ pytestmark = pytest.mark.unit
 class FakeQueue:
     def __init__(self):
         self.items: list[DeliveryItem] = []
+        self.counts: dict[str, int] = {}
 
     def enqueue(self, item: DeliveryItem) -> None:
         self.items.append(item)
+
+    def count_interim(self, interaction_id: str) -> int:
+        return self.counts.get(interaction_id, 0)
+
+    def try_reserve_interim(self, interaction_id: str, segment_count_max: int) -> bool:
+        count = self.count_interim(interaction_id)
+        if count >= segment_count_max:
+            return False
+        self.counts[interaction_id] = count + 1
+        return True
 
 
 def _ctx(call_index: int = 0) -> ToolExecutionContext:
@@ -36,6 +47,16 @@ def _tool(queue: FakeQueue, max_chars: int = 10):
         user_id="u1",
         group_id="g1",
         max_chars=max_chars,
+    )
+
+
+def _limited_tool(queue: FakeQueue, segment_count_max: int):
+    return build_send_reply_segment_tool(
+        delivery_queue=queue,
+        interaction_id="i1",
+        user_id="u1",
+        group_id="g1",
+        segment_count_max=segment_count_max,
     )
 
 
@@ -80,6 +101,22 @@ async def test_valid_content_enqueues_interim_delivery_item():
     assert item.segment_phase == "interim"
     assert item.user_id == "u1"
     assert item.group_id == "g1"
+    assert item.agent_run_id == "r1"
+
+
+@pytest.mark.asyncio
+async def test_segment_count_limit_reserves_before_delivery_worker_sends():
+    queue = FakeQueue()
+    tool = _limited_tool(queue, segment_count_max=1)
+
+    first = await tool.handler(tool.args_schema(content="first"), _ctx(call_index=0))
+    second = await tool.handler(tool.args_schema(content="second"), _ctx(call_index=1))
+
+    assert first.status == "success"
+    assert second.status == "error"
+    assert "上限 1" in second.observation
+    assert len(queue.items) == 1
+    assert queue.items[0].content == "first"
 
 
 def test_schema_only_exposes_content():

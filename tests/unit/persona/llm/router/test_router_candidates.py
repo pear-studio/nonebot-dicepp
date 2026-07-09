@@ -5,7 +5,11 @@ from unittest.mock import MagicMock
 from plugins.DicePP.module.persona.llm.router import LLMRouter
 from plugins.DicePP.module.persona.llm.selection import SelectionPolicy, CHAT, SCORING
 from plugins.DicePP.utils.time import wall_now
-from conftest import make_mock_providers, MockDataStore, MockQuotaConfig
+from tests.unit.persona.conftest import (
+    MockDataStore,
+    MockQuotaConfig,
+    make_mock_providers,
+)
 
 
 def _make_provider_config(enabled=True):

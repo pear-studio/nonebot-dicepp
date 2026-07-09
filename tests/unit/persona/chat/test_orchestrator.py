@@ -51,7 +51,15 @@ def _make_store():
     db.commit = AsyncMock()
     store._persona_db = db
     store.clear_messages = AsyncMock()
+    store.add_message_stream = AsyncMock(return_value=1)
     return store
+
+
+def _make_response_handler():
+    handler = MagicMock()
+    handler.port = MagicMock()
+    handler.port.send = AsyncMock(return_value=True)
+    return handler
 
 
 class TestChatOrchestratorInit:
@@ -118,9 +126,12 @@ class TestChatOrchestratorGate:
         orch = ChatOrchestrator(
             store=store, router=MagicMock(), character=char,
             config=_make_config(), sleep_gate=sleep_gate,
+            response_handler=_make_response_handler(),
         )
         result = await orch.chat("u1", "", "hello")
-        assert result == "Zzz..."
+        assert result.status == "sent"
+        assert result.sent_count == 1
+        assert result.counts_as_interaction is False
 
 
 class TestChatOrchestratorChat:
@@ -147,6 +158,7 @@ class TestChatOrchestratorChat:
         orch = ChatOrchestrator(
             store=store, router=MagicMock(), character=_make_char(),
             config=_make_config(), context_builder=_make_context_builder(),
+            response_handler=_make_response_handler(),
         )
         orch._ensure_conversation = AsyncMock(return_value=mock_conv)
 
@@ -154,15 +166,20 @@ class TestChatOrchestratorChat:
 
     @pytest.mark.asyncio
     async def test_chat_happy_path(self, orch_with_mocks):
-        """mock coordinator.submit 返回成功文本"""
+        """chat 成功时返回已发送 outcome，不返回待发送文本"""
         orch, mock_conv, store = orch_with_mocks
 
-        orch._coordinator.submit = AsyncMock(return_value=MagicMock(
-            status="success", value="你好！",
-        ))
+        async def mock_submit(target_key, message, chat_call_fn, *,
+                              continue_on_buffered):
+            result = await chat_call_fn([message])
+            return MagicMock(status="success", value=result)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
 
         result = await orch.chat("u1", "", "hello")
-        assert result == "你好！"
+        assert result.status == "sent"
+        assert result.sent_count == 1
+        assert result.counts_as_interaction is True
 
     @pytest.mark.asyncio
     async def test_chat_transient_injection(self, orch_with_mocks):
@@ -171,7 +188,7 @@ class TestChatOrchestratorChat:
 
         # 模拟 coordinator.submit 内部调用 chat_call_fn
         async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered, on_result, on_exhausted):
+                              continue_on_buffered):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
@@ -191,17 +208,21 @@ class TestChatOrchestratorChat:
         """5s 内重复消息返回 None"""
         orch, mock_conv, store = orch_with_mocks
 
-        orch._coordinator.submit = AsyncMock(return_value=MagicMock(
-            status="success", value="你好！",
-        ))
+        async def mock_submit(target_key, message, chat_call_fn, *,
+                              continue_on_buffered):
+            result = await chat_call_fn([message])
+            return MagicMock(status="success", value=result)
+
+        orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
 
         # 第一条应正常返回
         result1 = await orch.chat("u1", "", "hello")
-        assert result1 is not None
+        assert result1.status == "sent"
 
         # 第二条相同消息应去重
         result2 = await orch.chat("u1", "", "hello")
-        assert result2 is None
+        assert result2.status == "skipped"
+        assert result2.reason == "dedup"
 
     @pytest.mark.asyncio
     async def test_chat_reputation_refused(self, orch_with_mocks):
@@ -216,9 +237,9 @@ class TestChatOrchestratorChat:
 
         result = await orch.chat("u1", "", "hello")
         # 信誉低于阈值（默认 30），应返回拒绝消息
-        assert result is not None
-        # 不是正常 LLM 回复
-        assert result != "你好！"
+        assert result.status == "sent"
+        assert result.reason == "reputation_refused"
+        assert result.counts_as_interaction is False
 
     @pytest.mark.asyncio
     async def test_chat_quota_exceeded_fallback(self, orch_with_mocks):
@@ -229,16 +250,15 @@ class TestChatOrchestratorChat:
 
         # 模拟 coordinator.submit 内部调用 on_exhausted
         async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered, on_result, on_exhausted):
-            fallback = await on_exhausted(QuotaExceeded("今日配额已用完"))
-            return MagicMock(status="success", value=fallback)
+                              continue_on_buffered):
+            return MagicMock(status="failed", value=None, error=QuotaExceeded("今日配额已用完"))
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
 
         result = await orch.chat("u1", "", "hello")
-        assert result is not None
-        # fallback 文案应包含配额相关提示
-        assert "配额" in result or "key" in result
+        assert result.status == "sent"
+        assert result.reason == "quota_exceeded"
+        assert result.counts_as_interaction is False
 
     @pytest.mark.asyncio
     async def test_chat_calls_scoring_trigger(self, orch_with_mocks):
@@ -251,14 +271,14 @@ class TestChatOrchestratorChat:
 
         # 模拟 coordinator.submit 内部调用 chat_call_fn → after_response
         async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered, on_result, on_exhausted):
+                              continue_on_buffered):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
 
         result = await orch.chat("u1", "", "hello")
-        assert result == "你好！"
+        assert result.status == "sent"
         # 验证 scoring_trigger.on_interaction 被调用
         mock_scoring_trigger.on_interaction.assert_awaited_once()
 
@@ -269,18 +289,17 @@ class TestChatOrchestratorChat:
 
         # 模拟 coordinator.submit 内部调用 chat_call_fn
         async def mock_submit(target_key, message, chat_call_fn, *,
-                              continue_on_buffered, on_result, on_exhausted):
+                              continue_on_buffered):
             result = await chat_call_fn([message])
             return MagicMock(status="success", value=result)
 
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
 
         result = await orch.chat("u1", "", "hello", ctx=ChatCallContext(
-            is_command=True,
             transient_message="event: jrrp result=75",
             nickname="tester",
         ))
-        assert result == "你好！"
+        assert result.status == "sent"
         # 验证 transient_message 正确注入 conv.run()
         call_kwargs = mock_conv.run.call_args.kwargs
         transient_msgs = call_kwargs.get("transient_context_messages")

@@ -21,6 +21,7 @@ from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FU
 
 
 from .factory import PersonaApp, create_persona
+from .chat.orchestrator import ChatOutcome
 from .exceptions import PersonaInitError
 from .llm.router import QuotaExceeded
 from .data.store import PersonaDataStore
@@ -521,8 +522,8 @@ class PersonaCommand(UserCommandBase):
                                 logger.info(
                                     f"[Persona] chat return: user={user_id}"
                                     f" response_type={type(response).__name__}"
-                                    f" response_len={len(response) if response else 0}"
-                                    f" response_preview={(response or '')[:60]!r}"
+                                    f" status={getattr(response, 'status', '')}"
+                                    f" sent_count={getattr(response, 'sent_count', '')}"
                                 )
                         except QuotaExceeded as e:
                             logger.warning(f"[Persona] 配额超限: user={user_id}, group={group_id}")
@@ -532,27 +533,31 @@ class PersonaCommand(UserCommandBase):
                 else:
                     response = self._get_introduction()
 
-                # 发送回复
-                # - response is None：去重命中或未进入 chat 路径，静默早退
-                # - response 是空字符串但非 None：分段路径已通过调度器实时发送，
-                #   仍需更新群活跃度，但跳过再次 _send
-                if response is None:
+                # ChatOutcome 表示 chat 层已完成用户可见输出；command 不再二次 _send。
+                if isinstance(response, ChatOutcome):
+                    if response.skipped:
+                        return []
+                    if (
+                        response.counts_as_interaction
+                        and group_id
+                        and self.data_store
+                        and self.config.group_activity_enabled
+                    ):
+                        try:
+                            is_whitelisted = await self.data_store.is_group_whitelisted(group_id)
+                            await self.data_store.update_group_activity(
+                                group_id=group_id,
+                                score_delta=self.config.group_activity_add_per_interaction,
+                                max_daily_add=self.config.group_activity_max_daily_add,
+                                is_whitelisted=is_whitelisted,
+                            )
+                        except Exception as e:
+                            logger.warning(f"[Persona] 群活跃度更新失败（已忽略）: {e}")
                     return []
 
-                # 更新群活跃度（群聊且是@触发或AI命令）
-                if group_id and self.data_store and self.config.group_activity_enabled:
-                    try:
-                        is_whitelisted = await self.data_store.is_group_whitelisted(group_id)
-                        await self.data_store.update_group_activity(
-                            group_id=group_id,
-                            score_delta=self.config.group_activity_add_per_interaction,
-                            max_daily_add=self.config.group_activity_max_daily_add,
-                            is_whitelisted=is_whitelisted,
-                        )
-                    except Exception as e:
-                        logger.warning(f"[Persona] 群活跃度更新失败（已忽略）: {e}")
-
-                # 分段路径下 response 是 falsy sentinel，已通过 dispatcher 发出，不再次 _send
+                # 发送非 chat outcome 回复
+                if response is None:
+                    return []
                 if response:
                     await self._send(user_id, group_id, response)
                 return []
@@ -592,8 +597,8 @@ class PersonaCommand(UserCommandBase):
         #    transient_message=event_msg：事件仅注入当前 LLM 上下文，不持久化。
         #    message=".jrrp"：仅用于去重/缓冲，不进入 LLM 上下文。
         #    参考 SillyTavern 的 injected 标记方案——若未来多源注入可考虑消息级标记字段。
-        #    segment 启用时：dispatcher 自动发送，chat() 返回空串
-        #    segment 未启用时：chat() 返回评语文本，需手动发送
+        #    角色评语由 chat_command() 通过 delivery 发送并按 CHAT 入库；
+        #    empty/failed 时回退到模板，partial_sent 不再补额外 fallback。
         from .chat.session import ChatCallContext
         ctx = ChatCallContext(
             is_command=True,
@@ -601,15 +606,13 @@ class PersonaCommand(UserCommandBase):
             nickname=user_name,
         )
         try:
-            commentary = await self.app.chat.chat(
+            outcome = await self.app.chat.chat_command(
                 user_id=user_id,
                 group_id=group_id,
                 message=".jrrp",
                 ctx=ctx,
             )
-            if commentary:
-                await self._send(user_id, group_id, commentary)
-            else:
+            if outcome.status in {"empty", "failed"}:
                 # LLM 返回空串时，回退到模板确保用户可见
                 fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
                                             result.delta_percent, result.direction)
@@ -623,14 +626,25 @@ class PersonaCommand(UserCommandBase):
 
         return []
 
-    async def _send(self, user_id: str, group_id: str, content: str, msg_id: Optional[int] = None) -> None:
+    async def _send(
+        self,
+        user_id: str,
+        group_id: str,
+        content: str,
+        msg_id: Optional[int] = None,
+        message_type: MessageType = MessageType.CHAT,
+    ) -> None:
         """通过 MessagePort 发送单条消息"""
         if self.app:
             logger.debug(
                 f"[Persona] _send call: user={user_id} group={group_id}"
                 f" content_len={len(content)} msg_id={msg_id}"
             )
-            await self.app.send_message(user_id, group_id, content, msg_id=msg_id)
+            await self.app.send_message(
+                user_id, group_id, content,
+                msg_id=msg_id,
+                message_type=message_type,
+            )
         else:
             logger.error(
                 f"[Persona] MessagePort 未初始化，丢弃消息: "

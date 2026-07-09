@@ -9,13 +9,14 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Literal
 
 from utils.logger import logger
 from utils.time import wall_now
 
 from ..data.store import PersonaDataStore
-from ..data.models import RelationshipState
+from ..data.models import MessageType, RelationshipState
 from ..llm.router import LLMRouter, QuotaExceeded
 from ..llm.coordinator import LLMCallCoordinator
 from ..character.models import Character
@@ -36,6 +37,31 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_SLEEP_MESSAGES = ("角色正在休息，请稍后再来",)
+
+
+@dataclass(frozen=True)
+class ChatOutcome:
+    """chat 调用结果。
+
+    不携带待发送文本；用户可见内容必须已经由 delivery 发送。
+    """
+
+    status: Literal["sent", "skipped", "empty", "failed", "partial_sent"]
+    sent_count: int = 0
+    reason: str = ""
+    counts_as_interaction: bool = False
+
+    @property
+    def skipped(self) -> bool:
+        return self.status == "skipped"
+
+    @property
+    def sent(self) -> bool:
+        return self.status in {"sent", "partial_sent"} and self.sent_count > 0
+
+    @property
+    def empty_reply(self) -> bool:
+        return self.status == "empty"
 
 
 def _router_has_quota(router) -> bool:
@@ -110,42 +136,46 @@ class ChatOrchestrator:
     async def chat(
         self, user_id: str, group_id: str, message: str,
         ctx: Optional[ChatCallContext] = None,
-    ) -> Optional[str]:
-        """处理单条用户消息，返回回复文本。
+    ) -> ChatOutcome:
+        """处理普通用户消息。
 
         T5: 使用 Conversation.run() + send_reply_segment ToolSpec +
         send_reply OutputSpec 新路径。
         """
         if ctx is None:
             ctx = ChatCallContext()
-        is_command = ctx.is_command
+        if ctx.is_command:
+            return await self.chat_command(user_id, group_id, message, ctx)
+
         image_data_urls = ctx.image_data_urls
         transient_message = ctx.transient_message
-        nickname = ctx.nickname
 
         # Gate: 消息去重
         dedup_key = f"{user_id}:{group_id}"
         now = time.monotonic()
         last = self._last_messages.get(dedup_key)
         if last and last[0] == message and (now - last[1]) < 5.0:
-            return None
+            return ChatOutcome("skipped", reason="dedup")
         self._last_messages[dedup_key] = (message, now)
         expired = [k for k, v in self._last_messages.items() if now - v[1] > 60]
         for k in expired:
             self._last_messages.pop(k, None)
 
         # Gate: 睡眠门控
-        should_gate = not is_command
-        if should_gate and self._sleep_gate is not None:
+        if self._sleep_gate is not None:
             if not await self._sleep_gate.is_awake():
                 msgs = self._character.extensions.sleep_messages
                 if msgs is None:
                     msgs = _DEFAULT_SLEEP_MESSAGES
                 if msgs:
-                    return random.choice(msgs)
+                    return await self._send_delivery_text(
+                        user_id, group_id, random.choice(msgs),
+                        reason="sleep_gate",
+                        counts_as_interaction=False,
+                    )
 
         # Gate: 信誉拒绝
-        if self._chat_config.relationship_refuse_enabled and should_gate:
+        if self._chat_config.relationship_refuse_enabled:
             if group_id:
                 history = await self._store.get_group_messages(group_id, limit=1)
             else:
@@ -164,7 +194,13 @@ class ChatOrchestrator:
                     char_refuse = self._character.extensions.refuse_messages
                     default = ["...（对方似乎没有兴趣理你）", "...（已读不回）", "嗯。"]
                     refuse = char_refuse if char_refuse is not None else default
-                    return random.choice(refuse) if refuse else None
+                    if refuse:
+                        return await self._send_delivery_text(
+                            user_id, group_id, random.choice(refuse),
+                            reason="reputation_refused",
+                            counts_as_interaction=False,
+                        )
+                    return ChatOutcome("skipped", reason="reputation_refused_empty")
 
         # Quota check handled by ChatOrchestrator before calling Runtime
 
@@ -173,44 +209,62 @@ class ChatOrchestrator:
 
         target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
 
-        async def chat_call_fn(messages: List[str]) -> Optional[str]:
+        async def chat_call_fn(messages: List[str]) -> ChatOutcome:
             merged = "\n".join(messages) if messages else message
             return await self._execute_chat_turn(
                 conv, user_id, group_id, merged,
-                is_command=is_command,
+                run_after_response=True,
+                message_type=MessageType.CHAT,
                 image_data_urls=image_data_urls,
                 transient_message=transient_message,
             )
 
-        async def on_segment(result_text: str) -> None:
-            # T5: DeliveryQueue 负责发送，on_segment 不再需要
-            pass
-
-        async def on_exhausted(last_error: Optional[Exception]) -> str:
-            if isinstance(last_error, QuotaExceeded):
-                return f"{last_error}\n\n使用 `.ai key config` 配置自己的 API Key 可解除限制"
-            fallback = "LLM服务暂时不可用，请稍后再试"
-            if self._response_handler:
-                from ..data.models import MessageType
-                await self._response_handler.persist_and_send(
-                    user_id, group_id, fallback,
-                    message_type=MessageType.COMMAND if is_command else MessageType.CHAT,
-                )
-            if not is_command:
-                await self._after_response(
-                    user_id, group_id, message, fallback,
-                )
-            return "" if self._response_handler and self._response_handler.port else fallback
-
         submit_result = await self._coordinator.submit(
             target_key, message, chat_call_fn,
             continue_on_buffered=True,
-            on_result=on_segment,
-            on_exhausted=on_exhausted,
         )
         if submit_result.status == "success":
             return submit_result.value
-        return None
+        if submit_result.status == "buffered":
+            return ChatOutcome("skipped", reason="buffered")
+
+        if isinstance(submit_result.error, QuotaExceeded):
+            fallback = f"{submit_result.error}\n\n使用 `.ai key config` 配置自己的 API Key 可解除限制"
+            reason = "quota_exceeded"
+        else:
+            fallback = "LLM服务暂时不可用，请稍后再试"
+            reason = "llm_failed"
+        return await self._send_delivery_text(
+            user_id, group_id, fallback,
+            reason=reason,
+            counts_as_interaction=False,
+        )
+
+    async def chat_command(
+        self, user_id: str, group_id: str, message: str,
+        ctx: Optional[ChatCallContext] = None,
+    ) -> ChatOutcome:
+        """处理命令触发的角色评语。
+
+        不走普通聊天 gate/coordinator，也不触发评分；成功回复仍按 CHAT 入库，
+        使用户可见的角色评语能进入后续上下文。
+        """
+        if ctx is None:
+            ctx = ChatCallContext()
+        conv = await self._ensure_conversation(user_id)
+        try:
+            return await self._execute_chat_turn(
+                conv, user_id, group_id, message,
+                run_after_response=False,
+                message_type=MessageType.CHAT,
+                image_data_urls=ctx.image_data_urls,
+                transient_message=ctx.transient_message,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[Persona] chat_command 调用失败: {type(e).__name__}: {e}"
+            )
+            return ChatOutcome("failed", reason=type(e).__name__)
 
     async def clear_history(self, user_id: str, group_id: str) -> None:
         """清空对话历史。"""
@@ -276,6 +330,54 @@ class ChatOrchestrator:
                 user_id, group_id, user_msg, assistant_msg,
             )
 
+    def _make_delivery(self):
+        from .delivery_queue import DeliveryQueue
+
+        port = self._response_handler.port if self._response_handler else None
+        if port is None:
+            return None
+        return DeliveryQueue(port=port, store=self._store)
+
+    async def _send_delivery_text(
+        self,
+        user_id: str,
+        group_id: str,
+        content: str,
+        *,
+        reason: str,
+        counts_as_interaction: bool,
+        message_type: MessageType = MessageType.CHAT,
+    ) -> ChatOutcome:
+        """通过 chat delivery 发送一条非 LLM-turn 文本。"""
+        import uuid
+        from .delivery_queue import DeliveryItem
+
+        if not content:
+            return ChatOutcome("empty", reason=reason)
+        delivery = self._make_delivery()
+        if delivery is None:
+            return ChatOutcome("sent", sent_count=0, reason=f"{reason}:no_port")
+
+        interaction_id = uuid.uuid4().hex
+        delivery.enqueue(DeliveryItem(
+            content=content,
+            interaction_id=interaction_id,
+            call_index=0,
+            segment_phase="final",
+            user_id=user_id,
+            group_id=group_id,
+            message_type=message_type,
+        ))
+        await delivery.drain()
+        if delivery.sent_count > 0:
+            return ChatOutcome(
+                "sent",
+                sent_count=delivery.sent_count,
+                reason=reason,
+                counts_as_interaction=counts_as_interaction,
+            )
+        return ChatOutcome("failed", reason=reason)
+
     # ── T5: Chat 新路径 ───────────────────────────────────────
 
     async def _execute_chat_turn(
@@ -285,10 +387,11 @@ class ChatOrchestrator:
         group_id: str,
         user_input: str,
         *,
-        is_command: bool = False,
+        run_after_response: bool = True,
+        message_type: MessageType = MessageType.CHAT,
         image_data_urls: Optional[List[str]] = None,
         transient_message: Optional[str] = None,
-    ) -> Optional[str]:
+    ) -> ChatOutcome:
         """T5: 使用 Conversation.run() + send_reply_segment + send_reply 执行一轮 chat。
 
         1. 构建 DeliveryQueue
@@ -307,15 +410,14 @@ class ChatOrchestrator:
         )
         from ..agent.runtime_types import ToolSpec as NewToolSpec
         from ..tools.send_reply_segment import build_send_reply_segment_tool
-        from .delivery_queue import DeliveryQueue, DeliveryItem
+        from .delivery_queue import DeliveryItem
         from ..llm.selection import CHAT, CHAT_WITH_IMAGE
         from ..agent.runtime import embed_images_in_last_user_message
 
         interaction_id = uuid.uuid4().hex
 
         # 1. 构建 DeliveryQueue（port 为 None 时跳过实际发送，仅用于测试/离线场景）
-        port = self._response_handler.port if self._response_handler else None
-        delivery = DeliveryQueue(port=port, store=self._store) if port else None
+        delivery = self._make_delivery()
 
         # 2. 构建 ToolKit（T6: 直接使用 build_xxx_tool()）
         tools: dict[str, NewToolSpec] = {}
@@ -451,18 +553,54 @@ class ChatOrchestrator:
                         segment_phase="final",
                         user_id=user_id,
                         group_id=group_id,
+                        message_type=message_type,
+                        agent_run_id=result.run_id,
                     ))
                 final_text = final_content
         elif result.final_text:
-            # 直接文本（无 output 匹配，例如 output spec 不匹配时的 fallback）
+            # 直接文本（兼容无 output 匹配的旧结果）
             final_text = result.final_text
+            if delivery is not None:
+                delivery.enqueue(DeliveryItem(
+                    content=final_text,
+                    interaction_id=interaction_id,
+                    call_index=delivery.next_call_index(interaction_id),
+                    segment_phase="final",
+                    user_id=user_id,
+                    group_id=group_id,
+                    message_type=message_type,
+                    agent_run_id=result.run_id,
+                ))
 
         # 7. 等待 delivery 完成
         if delivery is not None:
             await delivery.drain()
 
-        # 8. 回复后处理
-        if not is_command and final_text:
-            await self._after_response(user_id, group_id, user_input, final_text)
+        sent_count = delivery.sent_count if delivery is not None else (1 if final_text else 0)
 
-        return final_text
+        # 8. 回复后处理
+        if final_text:
+            visible_text = (
+                "\n".join(delivery.sent_contents)
+                if delivery is not None and delivery.sent_contents
+                else final_text
+            )
+            if run_after_response and sent_count > 0:
+                await self._after_response(user_id, group_id, user_input, visible_text)
+            return ChatOutcome(
+                "sent",
+                sent_count=sent_count,
+                reason=result.final_reason or "output_collected",
+                counts_as_interaction=run_after_response and sent_count > 0,
+            )
+
+        if delivery is not None and delivery.sent_count > 0:
+            return ChatOutcome(
+                "partial_sent",
+                sent_count=delivery.sent_count,
+                reason=result.final_reason or result.completion_kind,
+                counts_as_interaction=False,
+            )
+        if result.completion_kind == "failed":
+            return ChatOutcome("failed", reason=result.final_reason)
+        return ChatOutcome("empty", reason=result.final_reason or result.completion_kind)

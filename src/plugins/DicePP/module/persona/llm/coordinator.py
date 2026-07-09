@@ -25,6 +25,7 @@ class SubmitResult(Generic[T]):
 
     status: Literal["success", "buffered", "failed"]
     value: Optional[T] = None
+    error: Optional[Exception] = None
 
     @classmethod
     def success(cls, value: T) -> "SubmitResult[T]":
@@ -35,8 +36,8 @@ class SubmitResult(Generic[T]):
         return cls("buffered", None)
 
     @classmethod
-    def failed(cls) -> "SubmitResult[T]":
-        return cls("failed", None)
+    def failed(cls, error: Optional[Exception] = None) -> "SubmitResult[T]":
+        return cls("failed", None, error)
 
 
 class LLMCallCoordinator:
@@ -114,10 +115,14 @@ class LLMCallCoordinator:
                 self._pending_messages[target_key].append(message)
 
         try:
-            result = await self._run_loop(
+            result, last_exception = await self._run_loop(
                 target_key, call_fn, continue_on_buffered, on_exhausted, on_result
             )
-            return SubmitResult.success(result) if result is not None else SubmitResult.failed()
+            return (
+                SubmitResult.success(result)
+                if result is not None
+                else SubmitResult.failed(last_exception)
+            )
         finally:
             async with lock:
                 self._executing.pop(target_key, None)
@@ -149,7 +154,7 @@ class LLMCallCoordinator:
         continue_on_buffered: bool,
         on_exhausted: Optional[Callable[[Optional[Exception]], Awaitable[Any]]],
         on_result: Optional[Callable[[T], Awaitable[None]]],
-    ) -> Optional[T]:
+    ) -> tuple[Optional[T], Optional[Exception]]:
         """重试/合并循环。
 
         每次 call_fn 成功后重置 failures；连续失败 max_failures 次后退出。
@@ -210,12 +215,12 @@ class LLMCallCoordinator:
 
             # share 路径：成功且无缓冲时直接退出（失败走下方 on_exhausted 逻辑）
             if not continue_on_buffered and had_success:
-                return result
+                return result, last_exception
 
             # 退出循环
             if failures >= self.max_failures and not had_success:
                 await self._invoke_on_exhausted(target_key, on_exhausted, last_exception)
-            return result
+            return result, last_exception
 
         # 超过最大迭代次数（用户刷屏）
         # 若最后一轮 result 已被 on_result 消费，则不再重复返回
@@ -225,4 +230,4 @@ class LLMCallCoordinator:
         )
         if not had_success:
             await self._invoke_on_exhausted(target_key, on_exhausted, last_exception)
-        return None if pending_consumed else result
+        return (None if pending_consumed else result), last_exception

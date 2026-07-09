@@ -13,7 +13,7 @@ from core.config.basic import Paths
 
 from .character.loader import CharacterLoader
 from .character.models import Character
-from .chat.orchestrator import ChatOrchestrator
+from .chat.orchestrator import ChatOrchestrator, ChatOutcome
 from .chat.chat_config import ChatConfig
 from .chat.scoring import ScoringAgent
 from .chat.context import ContextBuilder
@@ -89,7 +89,7 @@ class PersonaApp:
     async def chat_with_user(
         self, user_id: str, group_id: str, message: str, nickname: str,
         image_data_urls: Optional[List[str]] = None,
-    ) -> Optional[str]:
+    ) -> ChatOutcome:
         from .chat.session import ChatCallContext
         ctx = ChatCallContext(
             image_data_urls=image_data_urls,
@@ -99,8 +99,19 @@ class PersonaApp:
 
     # ── 消息发送 ──
 
-    async def send_message(self, user_id: str, group_id: str, content: str, msg_id: Optional[int] = None) -> bool:
-        return await self.port.send(user_id, group_id, content, msg_id=msg_id)
+    async def send_message(
+        self,
+        user_id: str,
+        group_id: str,
+        content: str,
+        msg_id: Optional[int] = None,
+        message_type: MessageType = MessageType.CHAT,
+    ) -> bool:
+        return await self.port.send(
+            user_id, group_id, content,
+            msg_id=msg_id,
+            message_type=message_type,
+        )
 
     # ── LLM 路由器 ──
 

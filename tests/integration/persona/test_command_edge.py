@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from unittest.async_case import IsolatedAsyncioTestCase
 
 from plugins.DicePP.module.persona.command import PersonaCommand
+from plugins.DicePP.module.persona.chat.orchestrator import ChatOutcome
 from plugins.DicePP.module.persona.data.models import (
     RelationshipState,
     UserProfile,
@@ -159,7 +160,12 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
 
         self.cmd.app = MagicMock()
         self.cmd.app.chat_with_user = AsyncMock(
-            return_value=""
+            return_value=ChatOutcome(
+                status="sent",
+                sent_count=1,
+                reason="output_collected",
+                counts_as_interaction=True,
+            )
         )
 
     async def test_segmented_response_updates_activity_without_resend(self):
@@ -169,20 +175,22 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
         # @ 触发后 chat_with_user 走过一次
         self.cmd.app.chat_with_user.assert_awaited_once()
 
-        # 即便分段路径让 response 是 falsy sentinel,群活跃度仍需更新一次
+        # chat 层已通过 delivery 发送，command 只按 outcome 更新群活跃度
         self.store.update_group_activity.assert_awaited_once()
 
-        # 分段消息已由 dispatcher 实时发出,_send 不应被再次调用
+        # 消息已由 delivery 发出，_send 不应被再次调用
         self.cmd._send.assert_not_awaited()
 
     async def test_none_response_short_circuits_before_activity(self):
-        """response is None(去重命中或未进 chat 路径)应在 update_group_activity 之前早退"""
-        self.cmd.app.chat_with_user = AsyncMock(return_value=None)
+        """skipped outcome 应在 update_group_activity 之前早退"""
+        self.cmd.app.chat_with_user = AsyncMock(
+            return_value=ChatOutcome(status="skipped", reason="dedup")
+        )
         meta = self.make_group_meta("hello", to_me=True)
         await self.cmd.process_msg("hello", meta, None)
 
         self.cmd.app.chat_with_user.assert_awaited_once()
-        # response is None → 在群活跃度更新之前 return [],store 不被触达
+        # skipped → 在群活跃度更新之前 return [],store 不被触达
         self.store.update_group_activity.assert_not_awaited()
         self.cmd._send.assert_not_awaited()
 
