@@ -651,7 +651,7 @@ def test_monitor_tab_consolidates_runtime_controls_logs_and_operations(
                 "ProcessRuntimeBackend"
             )
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text(
-                "运行控制：Windows 本机进程"
+                "Manager：Windows 本机进程"
             )
             expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text(
                 "Dashboard 管理服务正常"
@@ -839,19 +839,12 @@ def test_monitor_tab_explains_unavailable_runtime_without_placeholders(
             row = page.locator('[data-testid="monitor-tab"] tbody tr', has_text="offline_bot")
             row.wait_for(timeout=10000)
 
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text(
-                "运行控制：未接入"
-            )
-            expect(page.locator('[data-testid="monitor-tab"]')).to_contain_text(
-                "当前只显示连接状态，启动、停止、重启和运行日志需要接入运行控制；接入 Windows 本机进程后可读取全局 runtime log。"
-            )
             expect(page.locator('[data-testid="monitor-tab"]')).not_to_contain_text(
                 "未接入运行时"
             )
             expect(row).to_contain_text("离线")
             expect(page.locator('[data-testid="monitor-heartbeat-offline_bot"]')).to_be_hidden()
-            expect(row).to_contain_text("未接入运行控制")
-            expect(row).to_contain_text("操作不可用")
+            expect(row).to_contain_text("—")
             expect(row).not_to_contain_text("未知")
             expect(page.locator('[data-testid="manager-log-button-offline_bot"]')).to_have_count(0)
 
@@ -859,7 +852,7 @@ def test_monitor_tab_explains_unavailable_runtime_without_placeholders(
             expect(log_button).to_be_disabled()
             expect(log_button).to_have_attribute(
                 "title",
-                "未接入运行控制，无法读取运行日志",
+                "Manager 未配置，无法读取运行日志",
             )
         finally:
             browser.close()

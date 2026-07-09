@@ -51,6 +51,7 @@ from .manager import (
     RuntimeOperationUnsupported,
     UnknownBot,
 )
+from .manager.runtime import UnavailableRuntimeBackend
 from .manager.models import VALID_ACTIONS, ManagerAction
 from .manager.store import MANAGER_OPERATIONS_TABLE_SQL
 
@@ -589,33 +590,6 @@ def _archive_runtime_operation_summary(operation: dict) -> dict:
     return summary
 
 
-def _runtime_quiesce_operation_summary(operation: dict) -> dict:
-    summary_keys = (
-        "operation_id",
-        "bot_id",
-        "action",
-        "status",
-        "message",
-        "created_at",
-        "updated_at",
-        "started_at",
-        "finished_at",
-    )
-    summary = {
-        key: operation[key]
-        for key in summary_keys
-        if key in operation
-    }
-    request_summary = _archive_runtime_request_summary(operation.get("request"))
-    if request_summary is None:
-        detail = operation.get("detail")
-        request_detail = detail.get("request") if isinstance(detail, dict) else None
-        request_summary = _archive_runtime_request_summary(request_detail)
-    if request_summary is not None:
-        summary["request"] = request_summary
-    return summary
-
-
 def _archive_runtime_request_summary(request_detail: object) -> dict | None:
     if not isinstance(request_detail, dict):
         return None
@@ -625,32 +599,6 @@ def _archive_runtime_request_summary(request_detail: object) -> dict | None:
         if isinstance(request_detail.get(key), str)
     }
     return allowed or None
-
-
-def _runtime_quiesce_summary(runtime_quiesce: object) -> dict | None:
-    if not isinstance(runtime_quiesce, dict):
-        return None
-    summary: dict = {}
-    if isinstance(runtime_quiesce.get("enabled"), bool):
-        summary["enabled"] = runtime_quiesce["enabled"]
-    bots = runtime_quiesce.get("bots")
-    if isinstance(bots, list):
-        summary["bots"] = [bot for bot in bots if isinstance(bot, str)]
-    failed_stage = runtime_quiesce.get("failed_stage")
-    if failed_stage is None or isinstance(failed_stage, str):
-        summary["failed_stage"] = failed_stage
-    for key in ("restore_started", "archive_started", "restart_attempted", "start_failed"):
-        if isinstance(runtime_quiesce.get(key), bool):
-            summary[key] = runtime_quiesce[key]
-    for key in ("stop_operations", "start_operations"):
-        operations = runtime_quiesce.get(key)
-        if isinstance(operations, list):
-            summary[key] = [
-                _runtime_quiesce_operation_summary(operation)
-                for operation in operations
-                if isinstance(operation, dict)
-            ]
-    return summary or None
 
 
 async def _archive_start_quiesced_bots(
@@ -733,6 +681,12 @@ async def _archive_stop_runtime_for_restore(
 ) -> tuple[ManagerService, list[str], JSONResponse | None]:
     service = _get_manager_service(request)
     stopped_bot_ids: list[str] = []
+
+    # Manager 未配置时跳过，不阻塞恢复流程
+    if isinstance(service.runtime_backend, UnavailableRuntimeBackend):
+        runtime_quiesce["enabled"] = False
+        return service, stopped_bot_ids, None
+
     try:
         status = await service.status()
     except Exception as exc:
