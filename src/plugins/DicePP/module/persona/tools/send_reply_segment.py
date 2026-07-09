@@ -20,6 +20,7 @@ def build_send_reply_segment_tool(
     user_id: str,
     group_id: str,
     max_chars: int = 2000,
+    segment_count_max: int = 10,
 ) -> "ToolSpec":
     """T5: 构建 send_reply_segment 普通工具。
 
@@ -27,6 +28,7 @@ def build_send_reply_segment_tool(
     handler 把中间消息交给 DeliveryQueue，segment_phase="interim"。
 
     R6: 恢复长度约束——LLM 可见 max_chars 描述，handler 超限返回 error。
+    segment_count_max: 单次交互最大分段数，超出返回 error。
     """
     from pydantic import BaseModel, Field
     from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
@@ -42,6 +44,17 @@ def build_send_reply_segment_tool(
 
         if not parsed.content.strip():
             return ToolResult(observation="content 不能为空", status="error")
+
+        # 段数硬限
+        current_count = delivery_queue.count_interim(interaction_id)
+        if current_count >= segment_count_max:
+            return ToolResult(
+                observation=(
+                    f"已发送 {current_count} 段，达到上限 {segment_count_max} 段。"
+                    f"请调用 send_reply 提交最终内容。"
+                ),
+                status="error",
+            )
 
         # R6: 单段长度检查
         if len(parsed.content) > max_chars:
@@ -66,9 +79,9 @@ def build_send_reply_segment_tool(
     return ToolSpec(
         name="send_reply_segment",
         description=(
-            "发送回复的一段内容。若有多段可多次调用本工具。"
-            "最后必须调用 finish_reply 提交最终回复。"
-        ),
+            "发送回复的前置分段内容。最多调用 {segment_count_max} 次，"
+            "最后必须调用 send_reply 提交。"
+        ).format(segment_count_max=segment_count_max),
         args_schema=SendReplySegmentArgs,
         handler=handler,
     )

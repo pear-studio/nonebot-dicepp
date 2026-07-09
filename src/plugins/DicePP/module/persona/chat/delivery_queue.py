@@ -87,6 +87,9 @@ class DeliveryQueue:
     _buffered_at: dict[str, dict[int, float]] = field(default_factory=dict)
     _max_seen: dict[str, int] = field(default_factory=dict)
 
+    # 已发送 interim 段计数（按 interaction_id，用于 segment_count_max 硬限）
+    _interim_count: dict[str, int] = field(default_factory=dict)
+
     # ── 公开 API ──────────────────────────────────────────
 
     def enqueue(self, item: DeliveryItem) -> None:
@@ -104,6 +107,10 @@ class DeliveryQueue:
         # 确保 worker 运行
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker_loop())
+
+    def count_interim(self, interaction_id: str) -> int:
+        """返回该 interaction 已发送的 interim 段数（用于 segment_count_max 硬限）。"""
+        return self._interim_count.get(interaction_id, 0)
 
     def next_call_index(self, interaction_id: str) -> int:
         """返回该 interaction 下一个可用的 call_index。
@@ -293,6 +300,8 @@ class DeliveryQueue:
 
         async with self._lock:
             self._last_sent_at[iid] = time.monotonic()
+            if item.segment_phase == "interim":
+                self._interim_count[iid] = self._interim_count.get(iid, 0) + 1
 
 
 def _build_msg(content: str, image_url: str = "") -> str:

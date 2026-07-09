@@ -24,9 +24,9 @@ class FinishPlanArgs(BaseModel):
     changed: bool = Field(..., description="本次是否修改了 story_deck 或 fronts")
 
 
-class FinishReplyArgs(BaseModel):
-    """Chat 最终回复 — finish_reply OutputSpec 的参数"""
-    content: str = Field(..., description="最终回复内容")
+class SendReplyArgs(BaseModel):
+    """Chat 回复 — send_reply OutputSpec 的参数"""
+    content: str = Field(..., description="回复内容")
 
 
 # ── ToolHandler ──────────────────────────────────────────────────

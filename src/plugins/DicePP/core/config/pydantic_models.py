@@ -267,10 +267,6 @@ class PersonaConfig(BaseModel):
         default=10.0, gt=0, title="分段最大延迟", description="单段 delay_before 上限（秒）",
         json_schema_extra={"dashboard_section": "chat_reply"},
     )
-    segment_round_callbacks_max: int = Field(
-        default=3, ge=0, title="最大纠正注入次数", description="LLM 不调用 send_reply_segment 时最大纠正注入次数",
-        json_schema_extra={"dashboard_section": "chat_reply"},
-    )
 
     @model_validator(mode="after")
     def _validate_segment_limits(self) -> "PersonaConfig":

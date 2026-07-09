@@ -34,7 +34,6 @@ class ChatConfig:
     segment_hard_limit: int = 120
     segment_count_max: int = 10
     segment_max_delay: float = 10.0
-    segment_round_callbacks_max: int = 3
     # ── Session 配置
     private_session_gap_seconds: int = 86400
     group_session_gap_seconds: int = 1800
@@ -64,7 +63,6 @@ class ChatConfig:
             segment_hard_limit=persona.segment_hard_limit,
             segment_count_max=persona.segment_count_max,
             segment_max_delay=persona.segment_max_delay,
-            segment_round_callbacks_max=persona.segment_round_callbacks_max,
             private_session_gap_seconds=persona.private_session_gap_seconds,
             group_session_gap_seconds=persona.group_session_gap_seconds,
             private_session_token_budget=persona.private_session_token_budget,

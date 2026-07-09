@@ -121,11 +121,12 @@ class ContextBuilder:
             sg = self.segment_guide
             guide = (
                 f"【回复规则】\n"
-                f"- 使用 send_reply_segment 工具发送中间段，每段只包含 content\n"
-                f"- 每段建议 {sg.target_chars} 字，单段上限 {sg.max_chars} 字\n"
-                f"- 单次回复总字数软上限 {sg.soft_limit} 字，硬上限 {sg.hard_limit} 字\n"
-                f"- 所有中间段发送完成后，必须调用 finish_reply 提交最终回复\n"
-                f"- 不要直接在 content 中输出文本，不要输出状态描述"
+                f"- 调用 send_reply 会发送回复并结束本轮对话\n"
+                f"- send_reply_segment 仅在需要分段发送较长回复时使用："
+                f"先用它发送前置段，最后调用 send_reply 提交末尾段\n"
+                f"- 多数情况下直接调用 send_reply 即可\n"
+                f"- 单段上限 {sg.max_chars} 字，总字数硬上限 {sg.hard_limit} 字\n"
+                f"- 不要直接输出文本"
             )
             parts.insert(-1, guide)
 
@@ -293,11 +294,12 @@ class ContextBuilder:
             sg = self.segment_guide
             guide = (
                 f"【回复规则】\n"
-                f"- 使用 send_reply_segment 工具发送中间段，每段只包含 content\n"
-                f"- 每段建议 {sg.target_chars} 字，单段上限 {sg.max_chars} 字\n"
-                f"- 单次回复总字数软上限 {sg.soft_limit} 字，硬上限 {sg.hard_limit} 字\n"
-                f"- 所有中间段发送完成后，必须调用 finish_reply 提交最终回复\n"
-                f"- 不要直接在 content 中输出文本，不要输出状态描述"
+                f"- 调用 send_reply 会发送回复并结束本轮对话\n"
+                f"- send_reply_segment 仅在需要分段发送较长回复时使用："
+                f"先用它发送前置段，最后调用 send_reply 提交末尾段\n"
+                f"- 多数情况下直接调用 send_reply 即可\n"
+                f"- 单段上限 {sg.max_chars} 字，总字数硬上限 {sg.hard_limit} 字\n"
+                f"- 不要直接输出文本"
             )
             parts.insert(-1, guide)
 

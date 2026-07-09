@@ -114,7 +114,7 @@ class ChatOrchestrator:
         """处理单条用户消息，返回回复文本。
 
         T5: 使用 Conversation.run() + send_reply_segment ToolSpec +
-        finish_reply OutputSpec 新路径。
+        send_reply OutputSpec 新路径。
         """
         if ctx is None:
             ctx = ChatCallContext()
@@ -289,18 +289,18 @@ class ChatOrchestrator:
         image_data_urls: Optional[List[str]] = None,
         transient_message: Optional[str] = None,
     ) -> Optional[str]:
-        """T5: 使用 Conversation.run() + send_reply_segment + finish_reply 执行一轮 chat。
+        """T5: 使用 Conversation.run() + send_reply_segment + send_reply 执行一轮 chat。
 
         1. 构建 DeliveryQueue
         2. 构建 ToolKit（send_reply_segment + 其他 chat 工具）
-        3. 组装 OutputSpec（finish_reply）
+        3. 组装 OutputSpec（send_reply）
         4. 调用 conv.run()
         5. 消费 result.output.arguments["content"]，入队 final
         6. 等待 DeliveryQueue 发送完成
         """
         import uuid
         from ..agent.runtime_types import (
-            FinishReplyArgs,
+            SendReplyArgs,
             LoopLimits,
             OutputSpec,
             ToolKit,
@@ -329,6 +329,7 @@ class ChatOrchestrator:
                 interaction_id=interaction_id,
                 user_id=user_id,
                 group_id=group_id,
+                segment_count_max=self._chat_config.segment_count_max,
             )
             tools["send_reply_segment"] = srs
 
@@ -378,14 +379,15 @@ class ChatOrchestrator:
 
         toolkit = ToolKit(tools=tools)
 
-        # 3. finish_reply OutputSpec
-        finish_reply = OutputSpec(
-            name="finish_reply",
+        # 3. send_reply OutputSpec
+        send_reply = OutputSpec(
+            name="send_reply",
             description=(
-                "提交最终回复内容。所有中间段通过 send_reply_segment 发送完成后，"
-                "必须调用此工具提交最终回复。"
+                "发送回复内容。这是唯一必须调用的输出方法。"
+                "如果之前已用 send_reply_segment 发送了前置分段，"
+                "本调用提交最后一段内容。"
             ),
-            args_schema=FinishReplyArgs,
+            args_schema=SendReplyArgs,
         )
 
         # 4. 准备 messages（处理图片嵌入）
@@ -411,7 +413,7 @@ class ChatOrchestrator:
             user_input=user_input_content,
             interaction_id=interaction_id,
             tools=toolkit,
-            output=finish_reply,
+            output=send_reply,
             selection=selection,
             limits=LoopLimits(max_rounds=self._chat_config.tools_max_rounds),
             run_tag="chat",

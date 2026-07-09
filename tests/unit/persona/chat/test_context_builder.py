@@ -296,10 +296,8 @@ class TestContextBuilderSegmentGuide:
         )
         system = messages[0]["content"]
         assert "send_reply_segment" in system
-        assert "finish_reply" in system
-        assert "30" in system
+        assert "send_reply" in system
         assert "80" in system
-        assert "100" in system
         assert "120" in system
         assert "delay_before" not in system
 
@@ -317,9 +315,7 @@ class TestContextBuilderSegmentGuide:
             history_dicts=[{"role": "user", "content": "hi"}],
         )
         system = messages[0]["content"]
-        assert "50" in system
         assert "100" in system
-        assert "200" in system
         assert "250" in system
 
     def test_segment_guide_placed_after_character_info(self):

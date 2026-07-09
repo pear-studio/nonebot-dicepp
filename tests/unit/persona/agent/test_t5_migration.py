@@ -4,8 +4,8 @@
 
 覆盖:
 - SA plan: finish_plan OutputSpec, 查询/编辑工具, 无 finish_plan 时 limit_reached
-- Chat 分段: send_reply_segment + finish_reply, interim/final phase, 顺序
-- Chat 顺序错误恢复: 先 finish_reply 后 search_knowledge, output 拒绝
+- Chat 分段: send_reply_segment + send_reply, interim/final phase, 顺序
+- Chat 顺序错误恢复: 先 send_reply 后 search_knowledge, output 拒绝
 - DeliveryQueue: 第一条不延时, 连续到达补间隔, 实际耗时 gap 不额外等待
 - 图片/多模态: look_at_past_image 返回 list[dict], generate_image 直接调用 image provider
 """
@@ -23,7 +23,7 @@ from plugins.DicePP.module.persona.agent.runtime_types import (
     AgentRunResult,
     BillingSummary,
     FinishPlanArgs,
-    FinishReplyArgs,
+    SendReplyArgs,
     LoopLimits,
     OutputSpec,
     RunCompletion,
@@ -288,15 +288,15 @@ class TestSAFinishPlan:
         assert result.output.arguments == {"summary": "无需调整", "changed": False}
 
 
-# ── Test: Chat send_reply_segment + finish_reply ─────────────
+# ── Test: Chat send_reply_segment + send_reply ─────────────
 
 
 class TestChatSegments:
-    """Chat 迁移到 send_reply_segment ToolSpec + finish_reply OutputSpec"""
+    """Chat 迁移到 send_reply_segment ToolSpec + send_reply OutputSpec"""
 
     @pytest.mark.asyncio
-    async def test_send_reply_segment_then_finish_reply(self):
-        """模型同轮调用 send_reply_segment + finish_reply"""
+    async def test_send_reply_segment_then_send_reply(self):
+        """模型同轮调用 send_reply_segment + send_reply"""
         interim_contents = []
         final_contents = []
 
@@ -317,16 +317,16 @@ class TestChatSegments:
             ),
         })
         output_spec = OutputSpec(
-            name="finish_reply",
+            name="send_reply",
             description="提交最终回复",
-            args_schema=FinishReplyArgs,
+            args_schema=SendReplyArgs,
         )
 
-        # Round 1: send_reply_segment(interim) + finish_reply
+        # Round 1: send_reply_segment(interim) + send_reply
         fake_llm = FakeLLMGateway([
             ("", [
                 _make_tc(0, "send_reply_segment", {"content": "第一段..."}),
-                _make_tc(1, "finish_reply", {"content": "最终回复内容"}),
+                _make_tc(1, "send_reply", {"content": "最终回复内容"}),
             ]),
         ])
 
@@ -359,6 +359,8 @@ class TestChatSegments:
         class FakeQueue:
             def enqueue(self, item):
                 pass
+            def count_interim(self, interaction_id):
+                return 0
 
         tool = build_send_reply_segment_tool(
             delivery_queue=FakeQueue(),
@@ -389,15 +391,15 @@ class TestChatSegments:
             ),
         })
         output_spec = OutputSpec(
-            name="finish_reply",
+            name="send_reply",
             description="最终回复",
-            args_schema=FinishReplyArgs,
+            args_schema=SendReplyArgs,
         )
 
         fake_llm = FakeLLMGateway([
             ("", [
                 _make_tc(0, "send_reply_segment", {"content": "段1"}),
-                _make_tc(1, "finish_reply", {"content": "最终"}),
+                _make_tc(1, "send_reply", {"content": "最终"}),
             ]),
         ])
 
@@ -457,9 +459,9 @@ class TestChatSegments:
             interaction_id="i1",
             tools=ToolKit(),
             output=OutputSpec(
-                name="finish_reply",
+                name="send_reply",
                 description="最终回复",
-                args_schema=FinishReplyArgs,
+                args_schema=SendReplyArgs,
             ),
         )
 
@@ -481,6 +483,8 @@ class TestChatSegments:
         class FakeQueue:
             def enqueue(self, item):
                 pass
+            def count_interim(self, interaction_id):
+                return 0
 
         tool = build_send_reply_segment_tool(
             delivery_queue=FakeQueue(),
@@ -509,6 +513,8 @@ class TestChatSegments:
         class FakeQueue:
             def enqueue(self, item):
                 pass
+            def count_interim(self, interaction_id):
+                return 0
 
         tool = build_send_reply_segment_tool(
             delivery_queue=FakeQueue(),
@@ -520,6 +526,69 @@ class TestChatSegments:
             type("Args", (BaseModel,), {
                 "__annotations__": {"content": str},
                 "content": "正常长度的回复",
+            })(),
+            ToolExecutionContext(run_id="r1", tool_call_id="t1", call_index=0, same_name_index=0),
+        )
+
+        assert result.status == "success"
+
+    @pytest.mark.asyncio
+    async def test_send_reply_segment_rejects_when_count_reaches_max(self):
+        """segment_count_max 达到上限时 handler 返回 error"""
+        from plugins.DicePP.module.persona.tools.send_reply_segment import build_send_reply_segment_tool
+
+        interim_count = {"i1": 0}
+
+        class FakeQueue:
+            def enqueue(self, item):
+                pass
+
+            def count_interim(self, interaction_id):
+                return interim_count.get(interaction_id, 0)
+
+        tool = build_send_reply_segment_tool(
+            delivery_queue=FakeQueue(),
+            interaction_id="i1", user_id="u1", group_id="",
+            segment_count_max=3,
+        )
+
+        # 模拟已有 3 段
+        interim_count["i1"] = 3
+
+        result = await tool.handler(
+            type("Args", (BaseModel,), {
+                "__annotations__": {"content": str},
+                "content": "第四段，应该被拒绝",
+            })(),
+            ToolExecutionContext(run_id="r1", tool_call_id="t1", call_index=0, same_name_index=0),
+        )
+
+        assert result.status == "error"
+        assert "3" in result.observation
+        assert "send_reply" in result.observation
+
+    @pytest.mark.asyncio
+    async def test_send_reply_segment_accepts_below_max(self):
+        """segment_count_max 未达上限时正常通过"""
+        from plugins.DicePP.module.persona.tools.send_reply_segment import build_send_reply_segment_tool
+
+        class FakeQueue:
+            def enqueue(self, item):
+                pass
+
+            def count_interim(self, interaction_id):
+                return 1  # 低于 max
+
+        tool = build_send_reply_segment_tool(
+            delivery_queue=FakeQueue(),
+            interaction_id="i1", user_id="u1", group_id="",
+            segment_count_max=3,
+        )
+
+        result = await tool.handler(
+            type("Args", (BaseModel,), {
+                "__annotations__": {"content": str},
+                "content": "正常段",
             })(),
             ToolExecutionContext(run_id="r1", tool_call_id="t1", call_index=0, same_name_index=0),
         )
@@ -549,9 +618,9 @@ class TestChatSegments:
             interaction_id="i1",
             tools=ToolKit(),
             output=OutputSpec(
-                name="finish_reply",
+                name="send_reply",
                 description="最终回复",
-                args_schema=FinishReplyArgs,
+                args_schema=SendReplyArgs,
             ),
         )
 
@@ -566,10 +635,10 @@ class TestChatSegments:
 
 
 class TestChatOrderRecovery:
-    """模型先 finish_reply 后 search_knowledge 的顺序错误恢复"""
+    """模型先 send_reply 后 search_knowledge 的顺序错误恢复"""
 
     @pytest.mark.asyncio
-    async def test_finish_reply_before_search_rejected(self):
+    async def test_send_reply_before_search_rejected(self):
         """output call 后面还有普通工具 → output 不被接受"""
         toolkit = ToolKit(tools={
             "search_knowledge": ToolSpec(
@@ -583,20 +652,20 @@ class TestChatOrderRecovery:
             ),
         })
         output_spec = OutputSpec(
-            name="finish_reply",
+            name="send_reply",
             description="最终回复",
-            args_schema=FinishReplyArgs,
+            args_schema=SendReplyArgs,
         )
 
-        # Round 1: 先 finish_reply 后 search_knowledge → output 被拒绝
-        # Round 2: finish_reply only → 成功
+        # Round 1: 先 send_reply 后 search_knowledge → output 被拒绝
+        # Round 2: send_reply only → 成功
         fake_llm = FakeLLMGateway([
             ("", [
-                _make_tc(0, "finish_reply", {"content": "应该被拒绝"}),
+                _make_tc(0, "send_reply", {"content": "应该被拒绝"}),
                 _make_tc(1, "search_knowledge", {"keyword": "test"}),
             ]),
             ("", [
-                _make_tc(0, "finish_reply", {"content": "正确的最终回复"}),
+                _make_tc(0, "send_reply", {"content": "正确的最终回复"}),
             ]),
         ])
 
@@ -614,7 +683,7 @@ class TestChatOrderRecovery:
         )
 
         assert result.success
-        # 第二轮成功 finish_reply
+        # 第二轮成功 send_reply
         assert result.output.arguments == {"content": "正确的最终回复"}
 
         # search observation 被正确回填（在 tool message 中）
@@ -627,17 +696,17 @@ class TestChatOrderRecovery:
         assert "搜索结果" in str(search_tool_msgs[0]["content"])
 
     @pytest.mark.asyncio
-    async def test_finish_reply_alone_accepted(self):
+    async def test_send_reply_alone_accepted(self):
         """output call 后面没有普通工具 → 被接受"""
         toolkit = ToolKit(tools={})
         output_spec = OutputSpec(
-            name="finish_reply",
+            name="send_reply",
             description="最终回复",
-            args_schema=FinishReplyArgs,
+            args_schema=SendReplyArgs,
         )
 
         fake_llm = FakeLLMGateway([
-            ("", [_make_tc(0, "finish_reply", {"content": "直接回复"})]),
+            ("", [_make_tc(0, "send_reply", {"content": "直接回复"})]),
         ])
 
         loop = AgentLoop(llm_gateway=fake_llm)
@@ -1022,6 +1091,77 @@ class TestDeliveryQueueOrdering:
         ))
         await asyncio.sleep(0.1)
         assert queue.next_call_index("i1") == 3
+
+    @pytest.mark.asyncio
+    async def test_count_interim_incremented_after_send(self):
+        """count_interim 在 interim 段发送成功后递增，final 段不计数"""
+        from plugins.DicePP.module.persona.chat.delivery_queue import (
+            DeliveryQueue, DeliveryItem,
+        )
+
+        mock_port = MagicMock()
+        mock_port.send = AsyncMock(return_value=True)
+        mock_store = MagicMock()
+        mock_store.add_message_stream = AsyncMock()
+
+        queue = DeliveryQueue(port=mock_port, store=mock_store)
+
+        assert queue.count_interim("i1") == 0
+
+        queue.enqueue(DeliveryItem(
+            content="中间段1", interaction_id="i1", call_index=0,
+            segment_phase="interim", user_id="u1", group_id="",
+        ))
+        await queue.drain()
+        assert queue.count_interim("i1") == 1
+
+        queue.enqueue(DeliveryItem(
+            content="中间段2", interaction_id="i1", call_index=1,
+            segment_phase="interim", user_id="u1", group_id="",
+        ))
+        await queue.drain()
+        assert queue.count_interim("i1") == 2
+
+        # final 段不递增 interim 计数
+        queue.enqueue(DeliveryItem(
+            content="最终段", interaction_id="i1", call_index=2,
+            segment_phase="final", user_id="u1", group_id="",
+        ))
+        await queue.drain()
+        assert queue.count_interim("i1") == 2
+
+    @pytest.mark.asyncio
+    async def test_count_interim_isolated_per_interaction(self):
+        """不同 interaction 的 count_interim 互相独立"""
+        from plugins.DicePP.module.persona.chat.delivery_queue import (
+            DeliveryQueue, DeliveryItem,
+        )
+
+        mock_port = MagicMock()
+        mock_port.send = AsyncMock(return_value=True)
+        mock_store = MagicMock()
+        mock_store.add_message_stream = AsyncMock()
+
+        queue = DeliveryQueue(port=mock_port, store=mock_store)
+
+        queue.enqueue(DeliveryItem(
+            content="A-段", interaction_id="A", call_index=0,
+            segment_phase="interim", user_id="u1", group_id="",
+        ))
+        await queue.drain()
+        assert queue.count_interim("A") == 1
+        assert queue.count_interim("B") == 0
+
+        queue.enqueue(DeliveryItem(
+            content="B-段", interaction_id="B", call_index=0,
+            segment_phase="interim", user_id="u1", group_id="",
+        ))
+        await queue.drain()
+        assert queue.count_interim("A") == 1
+        assert queue.count_interim("B") == 1
+
+        # 不存在的 interaction 返回 0
+        assert queue.count_interim("nonexistent") == 0
 
 
 class TestConcurrentTools:

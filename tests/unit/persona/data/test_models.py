@@ -138,7 +138,6 @@ class TestPersonaConfig:
         assert config.segment_hard_limit == 120
         assert config.segment_count_max == 10
         assert config.segment_max_delay == 10.0
-        assert config.segment_round_callbacks_max == 3
 
     def test_segment_soft_limit_must_not_exceed_hard(self):
         """soft_limit > hard_limit 时构造应抛 ValidationError"""
@@ -179,7 +178,7 @@ class TestPersonaConfig:
         "group_context_budget_tokens", "group_max_messages",
         "group_single_message_max_tokens", "segment_target_chars",
         "segment_max_chars", "segment_soft_limit", "segment_hard_limit",
-        "segment_count_max", "segment_max_delay", "segment_round_callbacks_max",
+        "segment_count_max", "segment_max_delay",
         "private_session_gap_seconds", "group_session_gap_seconds",
         "private_session_token_budget", "group_session_token_budget",
         # ProactiveConfig.from_persona
