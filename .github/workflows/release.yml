@@ -103,6 +103,28 @@ jobs:
             python /tmp/smoke_dashboard_control_channel.py
           docker rm -f dicepp-dashboard-smoke
 
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push images
+        run: |
+          docker push ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
+          docker push ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
+          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
+            docker tag ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
+              ghcr.io/pear-studio/nonebot-dicepp:latest
+            docker push ghcr.io/pear-studio/nonebot-dicepp:latest
+            docker tag ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }} \
+              ghcr.io/pear-studio/dicepp-dashboard:latest
+            docker push ghcr.io/pear-studio/dicepp-dashboard:latest
+          else
+            echo "Prerelease tag detected; skipping latest tag"
+          fi
+
   windows-build:
     name: Windows EXE
     runs-on: windows-latest
@@ -236,63 +258,10 @@ jobs:
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Build image for publishing
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          load: true
-          tags: |
-            ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
-          build-args: |
-            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
-            GIT_SHA=${{ steps.version.outputs.sha }}
-
-      - name: Build Dashboard image for publishing
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile.dashboard
-          push: false
-          load: true
-          tags: |
-            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
-          build-args: |
-            DICEPP_IMAGE_TAG=${{ steps.version.outputs.tag }}
-            GIT_SHA=${{ steps.version.outputs.sha }}
-
-      - name: Smoke test image for publishing
+      - name: Pull published images from GHCR
         run: |
-          EXPECTED="DicePP v${{ steps.version.outputs.version }}"
-          ACTUAL="$(docker run --rm ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
-            python bot.py --version)"
-          if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
-            exit 1
-          fi
-
-      - name: Smoke test Dashboard image for publishing
-        run: |
-          docker run -d --name dicepp-dashboard-publish-smoke -p 127.0.0.1:4090:4090 \
-            ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
-          ready=false
-          for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:4090/api/auth/status >/dev/null; then
-              ready=true
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != "true" ]; then
-            docker logs dicepp-dashboard-publish-smoke
-            docker rm -f dicepp-dashboard-publish-smoke
-            exit 1
-          fi
-          docker cp scripts/smoke_dashboard_control_channel.py \
-            dicepp-dashboard-publish-smoke:/tmp/smoke_dashboard_control_channel.py
-          docker exec dicepp-dashboard-publish-smoke \
-            python /tmp/smoke_dashboard_control_channel.py
-          docker rm -f dicepp-dashboard-publish-smoke
+          docker pull ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
+          docker pull ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
 
       - name: Package Linux amd64 offline bundle
         run: |
@@ -370,28 +339,6 @@ jobs:
           )
 
           zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push image
-        run: |
-          docker push ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}
-          docker push ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }}
-          if [ "${{ steps.version.outputs.is_prerelease }}" = "false" ]; then
-            docker tag ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
-              ghcr.io/pear-studio/nonebot-dicepp:latest
-            docker push ghcr.io/pear-studio/nonebot-dicepp:latest
-            docker tag ghcr.io/pear-studio/dicepp-dashboard:${{ steps.version.outputs.tag }} \
-              ghcr.io/pear-studio/dicepp-dashboard:latest
-            docker push ghcr.io/pear-studio/dicepp-dashboard:latest
-          else
-            echo "Prerelease tag detected; skipping latest tag"
-          fi
 
       - name: Create GitHub Release
         env:
