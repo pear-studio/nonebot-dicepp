@@ -59,7 +59,7 @@ cd ~/dicepp
 mkdir -p config/bots data content dashboard/data
 ```
 
-从 [DicePP 最新 Release](https://github.com/pear-studio/nonebot-dicepp/releases/latest) 下载 `docker-compose.yml`，放到 `~/dicepp/docker-compose.yml`。
+从 [DicePP Releases](https://github.com/pear-studio/nonebot-dicepp/releases) 下载目标版本附带的 `docker-compose.yml`，放到 `~/dicepp/docker-compose.yml`。
 
 默认会拉取 GHCR 镜像：
 
@@ -73,6 +73,167 @@ ghcr.io/pear-studio/dicepp-dashboard:latest
 ```bash
 DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
 DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
+```
+
+## 无法拉取镜像时使用离线包
+
+如果服务器拉取 GHCR 很慢或失败，可以下载 Release 附带的 Linux 镜像离线包。离线包只包含 DicePP 的两个 Docker 镜像：
+
+```text
+ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
+ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z
+```
+
+文件名类似：
+
+```text
+DicePP-v3.0.0-linux-amd64-images.tar.zst
+DicePP-v3.0.0-linux-amd64-images.sha256
+```
+
+下面示例用 `v3.0.0`，实际安装时请替换成你要部署的 Release 版本。
+
+### 服务器可以访问 GitHub
+
+在服务器上直接下载：
+
+```bash
+cd ~/dicepp
+VERSION=v3.0.0
+BASE_URL="https://github.com/pear-studio/nonebot-dicepp/releases/download/${VERSION}"
+
+curl -L -O "${BASE_URL}/docker-compose.yml"
+curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-images.tar.zst"
+curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-images.sha256"
+```
+
+`curl` 正常下载时会显示进度，结束后能看到类似文件：
+
+```bash
+ls -lh
+```
+
+预期能看到：
+
+```text
+docker-compose.yml
+DicePP-v3.0.0-linux-amd64-images.tar.zst
+DicePP-v3.0.0-linux-amd64-images.sha256
+```
+
+### 服务器不能访问 GitHub
+
+先在自己的电脑浏览器打开目标 Release 页面，下载这三个文件：
+
+```text
+docker-compose.yml
+DicePP-v3.0.0-linux-amd64-images.tar.zst
+DicePP-v3.0.0-linux-amd64-images.sha256
+```
+
+然后把文件上传到服务器的 `~/dicepp` 目录。Windows PowerShell、macOS 或 Linux 终端都可以用 `scp`：
+
+```bash
+scp docker-compose.yml DicePP-v3.0.0-linux-amd64-images.* 用户名@服务器IP:~/dicepp/
+```
+
+例如服务器 IP 是 `203.0.113.10`，登录用户名是 `ubuntu`：
+
+```bash
+scp docker-compose.yml DicePP-v3.0.0-linux-amd64-images.* ubuntu@203.0.113.10:~/dicepp/
+```
+
+如果第一次连接服务器，可能会询问是否信任主机，输入 `yes` 后回车。上传成功后，服务器上执行：
+
+```bash
+cd ~/dicepp
+ls -lh
+```
+
+预期能看到刚上传的三个文件。
+
+### 导入离线镜像
+
+进入部署目录：
+
+```bash
+cd ~/dicepp
+VERSION=v3.0.0
+```
+
+校验下载文件：
+
+```bash
+sha256sum -c "DicePP-${VERSION}-linux-amd64-images.sha256"
+```
+
+预期输出类似：
+
+```text
+DicePP-v3.0.0-linux-amd64-images.tar.zst: OK
+```
+
+如果提示 `sha256sum: command not found`，先安装基础工具；大多数 Debian / Ubuntu 系统默认已经带有。
+
+安装解压工具：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y zstd
+```
+
+解压：
+
+```bash
+zstd -d -f "DicePP-${VERSION}-linux-amd64-images.tar.zst"
+```
+
+解压后会得到：
+
+```text
+DicePP-v3.0.0-linux-amd64-images.tar
+```
+
+导入 Docker：
+
+```bash
+docker load -i "DicePP-${VERSION}-linux-amd64-images.tar"
+```
+
+预期输出会包含两行 `Loaded image`，类似：
+
+```text
+Loaded image: ghcr.io/pear-studio/nonebot-dicepp:v3.0.0
+Loaded image: ghcr.io/pear-studio/dicepp-dashboard:v3.0.0
+```
+
+确认镜像已经在本机：
+
+```bash
+docker image ls | grep dicepp
+```
+
+预期能看到：
+
+```text
+ghcr.io/pear-studio/nonebot-dicepp    v3.0.0
+ghcr.io/pear-studio/dicepp-dashboard  v3.0.0
+```
+
+之后启动时必须指定同一个版本，并禁止 Compose 再去联网拉取：
+
+```bash
+docker network create dice-net
+DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
+```
+
+如果 `docker network create dice-net` 提示网络已经存在，这是正常的，继续执行下一条命令即可。
+
+`docker compose up -d --pull never` 成功时会看到类似：
+
+```text
+Container dicepp-dashboard  Started
+Container dicepp            Started
 ```
 
 ## 启动 DicePP
@@ -203,6 +364,34 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose pull
 DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 ```
 
+离线更新到指定版本：
+
+```bash
+cd ~/dicepp
+VERSION=v3.0.1
+
+# 先按“无法拉取镜像时使用离线包”下载、校验、解压并导入新版本镜像
+docker load -i "DicePP-${VERSION}-linux-amd64-images.tar"
+
+# 再用新版本重建容器。config/data/content 挂载目录不会被删除。
+DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
+```
+
+如果以后网络恢复，可以从离线部署切回普通镜像更新：
+
+```bash
+DICEPP_IMAGE_TAG=v3.0.2 docker compose pull
+DICEPP_IMAGE_TAG=v3.0.2 docker compose up -d
+```
+
+回滚到旧版本时，如果旧版本镜像还在本机：
+
+```bash
+DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d --pull never
+```
+
+如果旧版本镜像已经被清理，先重新下载并 `docker load` 旧版本离线包，再执行上面的回滚命令。
+
 如果目标版本的 Release 说明提到部署结构变化，先同步该版本附带的 `docker-compose.yml`，再执行 `pull` 和 `up -d`。
 
 更新或回滚前，建议先在网页管理面板中创建并验证存档。版本风险说明见 [releases/](./releases/)。
@@ -225,6 +414,8 @@ environment:
 ### 国内拉取镜像很慢
 
 DicePP 官方发布源目前是 GHCR。国内服务器首次拉取镜像可能较慢，但后续更新会复用 Docker 层缓存，普通代码更新通常只需要拉取变化层。
+
+如果 GHCR 无法访问，优先使用 Release 附带的 `DicePP-vX.Y.Z-linux-amd64-images.tar.zst` 离线包，按前文“无法拉取镜像时使用离线包”导入镜像。
 
 如果你有自己的国内镜像仓库，可以通过完整镜像地址覆盖：
 

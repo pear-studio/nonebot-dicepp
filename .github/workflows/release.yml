@@ -5,8 +5,9 @@
 # 产物: ghcr.io/pear-studio/nonebot-dicepp:<tag>
 #       ghcr.io/pear-studio/dicepp-dashboard:<tag>；正式版额外推送 :latest
 #       DicePP-<tag>-win64.zip
+#       DicePP-<tag>-linux-amd64-images.tar.zst
 #       GitHub Release / Prerelease（body 来自 docs/releases/<tag>.md）
-#       docs/releases/<tag>.md、docs/linux.md、docker-compose.yml 和 Windows zip 作为 release assets
+#       docs/releases/<tag>.md、docs/linux.md、docker-compose.yml、Windows zip 和 Linux 镜像离线包作为 release assets
 
 name: Release
 
@@ -293,6 +294,24 @@ jobs:
             python /tmp/smoke_dashboard_control_channel.py
           docker rm -f dicepp-dashboard-publish-smoke
 
+      - name: Package Linux amd64 offline images
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zstd
+
+          TAG="${{ steps.version.outputs.tag }}"
+          ARCHIVE="DicePP-${TAG}-linux-amd64-images.tar"
+          COMPRESSED="${ARCHIVE}.zst"
+          SHA_FILE="DicePP-${TAG}-linux-amd64-images.sha256"
+
+          docker save \
+            ghcr.io/pear-studio/nonebot-dicepp:${TAG} \
+            ghcr.io/pear-studio/dicepp-dashboard:${TAG} \
+            -o "${ARCHIVE}"
+          zstd -19 -T0 --rm "${ARCHIVE}" -o "${COMPRESSED}"
+          zstd -t "${COMPRESSED}"
+          sha256sum "${COMPRESSED}" > "${SHA_FILE}"
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -343,6 +362,15 @@ jobs:
             ASSETS+=("${ZIP_ASSETS[@]}")
           else
             echo "::warning::Windows zip asset 不存在，跳过上传"
+          fi
+
+          shopt -s nullglob
+          OFFLINE_IMAGE_ASSETS=(DicePP-*-linux-amd64-images.tar.zst DicePP-*-linux-amd64-images.sha256)
+          shopt -u nullglob
+          if [ "${#OFFLINE_IMAGE_ASSETS[@]}" -gt 0 ]; then
+            ASSETS+=("${OFFLINE_IMAGE_ASSETS[@]}")
+          else
+            echo "::warning::Linux 离线镜像包不存在，跳过上传"
           fi
 
           if [ -f "$RELEASE_MD" ]; then

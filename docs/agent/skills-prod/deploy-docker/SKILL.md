@@ -14,7 +14,7 @@ metadata:
 ## 适用场景
 
 - 用户要求查看 Docker/Compose 服务状态、容器日志或健康状态。
-- 用户要求 pull 镜像、up/restart/stop/start DicePP 服务。
+- 用户要求 pull/load 镜像、up/restart/stop/start DicePP 服务。
 - 用户要求管理 LLOneBot 相关容器。
 - 'version-deploy' 已确认版本变更, 需要执行 Docker/Compose 更新。
 
@@ -44,7 +44,7 @@ metadata:
 优先使用明确的 Docker Compose 命令，不调用项目 shell wrapper 或 Makefile 部署入口：
 
 - DicePP bot 服务优先使用当前项目的 'docker compose'。
-- DicePP 版本更新只使用 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull/up`，并默认作用于当前 compose project 的 DicePP 服务整体，而不是只更新单个 `bot` service。
+- DicePP 在线版本更新使用 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull/up`；离线镜像包更新使用 `docker load` 导入目标镜像后执行 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d --pull never`。两种方式都默认作用于当前 compose project 的 DicePP 服务整体，而不是只更新单个 `bot` service。
 - LLOneBot 操作前必须先识别其 compose 目录或容器名；无法确认时只做只读检查并要求用户提供路径。
 - 禁止使用 `git pull`、本地 build 或项目部署 wrapper 更新生产。
 
@@ -65,6 +65,7 @@ metadata:
 以下操作必须等待用户明确确认：
 
 - 'docker compose pull'
+- 'docker load -i <image tar>'
 - 'docker compose up -d'
 - 'docker compose restart'
 - 'docker compose stop' / 'docker compose start'
@@ -80,7 +81,7 @@ metadata:
 
 ## Version Deploy Integration
 
-当 'version-deploy' 要应用镜像版本时, 推荐执行序列为：
+当 'version-deploy' 要在线应用镜像版本时, 推荐执行序列为：
 
 1. 确认环境变量 'DICEPP_IMAGE_TAG' 已设为目标版本。
 2. 执行 'docker compose config --services', 确认目标 compose 包含预期 DicePP 服务；v3.0.0 起通常应包含 `bot` 和 `dashboard`。
@@ -89,6 +90,16 @@ metadata:
 5. 执行 'docker compose ps'。
 6. 查看 'docker compose logs --tail 100 bot'；如果存在 `dashboard` service, 同时查看 'docker compose logs --tail 100 dashboard'。
 7. 如项目提供健康检查或机器人指令验收方式, 汇报可执行项或已执行结果。
+
+当 'version-deploy' 要离线应用镜像包时, 推荐执行序列为：
+
+1. 确认目标离线包来自目标 Release: `DicePP-vX.Y.Z-linux-amd64-images.tar.zst` 和 `DicePP-vX.Y.Z-linux-amd64-images.sha256`。
+2. 执行 `sha256sum -c DicePP-vX.Y.Z-linux-amd64-images.sha256`。
+3. 执行 `zstd -d -f DicePP-vX.Y.Z-linux-amd64-images.tar.zst`。
+4. 执行 `docker load -i DicePP-vX.Y.Z-linux-amd64-images.tar`。
+5. 确认 `docker load` 输出包含 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z` 和 `ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z`。
+6. 执行 'DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d --pull never'。
+7. 执行 'docker compose ps' 并查看 bot/dashboard 日志。
 
 ## Important Notes
 

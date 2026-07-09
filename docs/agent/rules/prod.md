@@ -20,17 +20,17 @@
 
 ## Version Deployment
 
-当用户要求部署、上线、更新代码、切换版本、回退、rollback、pull 新镜像或应用某个 release 时，必须使用 version-deploy。
+当用户要求部署、上线、更新代码、切换版本、回退、rollback、pull 新镜像、使用离线镜像包或应用某个 release 时，必须使用 version-deploy。
 
 - 生产发布/回退以 vX.Y.Z release 为单位，不默认部署分支 HEAD 或“最新代码”。
 - 目标 release 必须读取 docs/releases/vX.Y.Z.md 或 GitHub Release body 作为生产更新风险摘要；缺失时按未知风险处理。
 - DICEPP_IMAGE_TAG 通过命令环境变量传递, 不写入配置文件。不得输出 secrets。
 - 镜像回退不等于数据回退；涉及数据、配置、迁移或风险未知时，必须确认备份状态或明确接受风险。
-- 注入 DICEPP_IMAGE_TAG、pull 镜像、更新容器或重启服务前，必须展示计划并等待用户明确确认。
+- 注入 DICEPP_IMAGE_TAG、pull/load 镜像、更新容器或重启服务前，必须展示计划并等待用户明确确认。
 
 ## Docker Deployment Ops
 
-当用户要求查看或操作 Docker/Compose 服务、DicePP bot 容器、LLOneBot 容器、服务日志、pull/up/restart/stop/start 时，必须使用 deploy-docker。
+当用户要求查看或操作 Docker/Compose 服务、DicePP bot 容器、LLOneBot 容器、服务日志、pull/load/up/restart/stop/start 时，必须使用 deploy-docker。
 
 - 第一版只允许操作 DicePP 部署相关资源：当前项目 compose 服务、DicePP bot、LLOneBot 相关容器和项目文档明确关联的运维入口。
 - LLOneBot 操作只允许在识别到明确的 LLOneBot compose project 或容器后执行；不要依赖项目内安装脚本或 Makefile wrapper。
