@@ -5,9 +5,9 @@
 # 产物: ghcr.io/pear-studio/nonebot-dicepp:<tag>
 #       ghcr.io/pear-studio/dicepp-dashboard:<tag>；正式版额外推送 :latest
 #       DicePP-<tag>-win64.zip
-#       DicePP-<tag>-linux-amd64-images.tar.zst
+#       DicePP-<tag>-linux-amd64-offline.zip
 #       GitHub Release / Prerelease（body 来自 docs/releases/<tag>.md）
-#       docs/releases/<tag>.md、docs/linux.md、docker-compose.yml、Windows zip 和 Linux 镜像离线包作为 release assets
+#       docs/releases/<tag>.md、docker-compose.yml、Windows zip 和 Linux 离线包作为 release assets
 
 name: Release
 
@@ -294,15 +294,17 @@ jobs:
             python /tmp/smoke_dashboard_control_channel.py
           docker rm -f dicepp-dashboard-publish-smoke
 
-      - name: Package Linux amd64 offline images
+      - name: Package Linux amd64 offline bundle
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends zstd
+          sudo apt-get install -y --no-install-recommends zip zstd
 
           TAG="${{ steps.version.outputs.tag }}"
           ARCHIVE="DicePP-${TAG}-linux-amd64-images.tar"
           COMPRESSED="${ARCHIVE}.zst"
-          SHA_FILE="DicePP-${TAG}-linux-amd64-images.sha256"
+          PACKAGE_DIR="DicePP-${TAG}-linux-amd64-offline"
+          PACKAGE_ZIP="${PACKAGE_DIR}.zip"
+          PACKAGE_SHA="${PACKAGE_ZIP}.sha256"
 
           docker save \
             ghcr.io/pear-studio/nonebot-dicepp:${TAG} \
@@ -310,7 +312,66 @@ jobs:
             -o "${ARCHIVE}"
           zstd -19 -T0 --rm "${ARCHIVE}" -o "${COMPRESSED}"
           zstd -t "${COMPRESSED}"
-          sha256sum "${COMPRESSED}" > "${SHA_FILE}"
+
+          mkdir -p "${PACKAGE_DIR}/images" "${PACKAGE_DIR}/docs"
+          mv "${COMPRESSED}" "${PACKAGE_DIR}/images/${COMPRESSED}"
+          cp docker-compose.yml "${PACKAGE_DIR}/docker-compose.yml"
+          cp docs/linux.md "${PACKAGE_DIR}/docs/linux.md"
+          cp docs/configuration.md "${PACKAGE_DIR}/docs/configuration.md"
+          cp docs/persona.md "${PACKAGE_DIR}/docs/persona.md"
+          cp docs/persona-character-card.md "${PACKAGE_DIR}/docs/persona-character-card.md"
+
+          cat > "${PACKAGE_DIR}/使用说明.md" <<EOF
+          # DicePP Linux 离线包使用说明
+
+          请先阅读 docs/linux.md。
+
+          常用文档：
+
+          - docs/linux.md：Linux Docker 部署
+          - docs/configuration.md：配置说明
+          - docs/persona.md：Persona AI 对话
+          - docs/persona-character-card.md：Persona 角色卡
+
+          本包包含 DicePP 的 Linux amd64 Docker 离线镜像和对应版本的 docker-compose.yml。
+          EOF
+
+          cat > "${PACKAGE_DIR}/manifest.json" <<EOF
+          {
+            "name": "DicePP Linux offline package",
+            "version": "${TAG}",
+            "platform": "linux-amd64",
+            "images": [
+              "ghcr.io/pear-studio/nonebot-dicepp:${TAG}",
+              "ghcr.io/pear-studio/dicepp-dashboard:${TAG}"
+            ],
+            "image_archive": "images/${COMPRESSED}",
+            "compose": "docker-compose.yml",
+            "docs": [
+              "docs/linux.md",
+              "docs/configuration.md",
+              "docs/persona.md",
+              "docs/persona-character-card.md"
+            ]
+          }
+          EOF
+
+          (
+            cd "${PACKAGE_DIR}"
+            sha256sum \
+              "images/${COMPRESSED}" \
+              "docker-compose.yml" \
+              "docs/linux.md" \
+              "docs/configuration.md" \
+              "docs/persona.md" \
+              "docs/persona-character-card.md" \
+              "使用说明.md" \
+              "manifest.json" \
+              > checksums.sha256
+          )
+
+          zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"
+          sha256sum "${PACKAGE_ZIP}" > "${PACKAGE_SHA}"
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -346,11 +407,6 @@ jobs:
           fi
 
           ASSETS=(docker-compose.yml)
-          if [ -f "docs/linux.md" ]; then
-            ASSETS+=(docs/linux.md)
-          else
-            echo "::warning::docs/linux.md 不存在，跳过上传"
-          fi
           if [ -f "$RELEASE_MD" ]; then
             ASSETS+=("$RELEASE_MD")
           fi
@@ -365,7 +421,7 @@ jobs:
           fi
 
           shopt -s nullglob
-          OFFLINE_IMAGE_ASSETS=(DicePP-*-linux-amd64-images.tar.zst DicePP-*-linux-amd64-images.sha256)
+          OFFLINE_IMAGE_ASSETS=(DicePP-*-linux-amd64-offline.zip DicePP-*-linux-amd64-offline.zip.sha256)
           shopt -u nullglob
           if [ "${#OFFLINE_IMAGE_ASSETS[@]}" -gt 0 ]; then
             ASSETS+=("${OFFLINE_IMAGE_ASSETS[@]}")

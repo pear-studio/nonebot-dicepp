@@ -39,7 +39,6 @@ if (Test-Path -LiteralPath $LauncherSource -PathType Leaf) {
 Copy-RequiredFile -Source "config/global.json" -Destination (Join-Path $DistDir "config/global.json")
 Copy-RequiredFile -Source "config/bots/_template.json" -Destination (Join-Path $DistDir "config/bots/_template.json")
 
-Copy-RequiredFile -Source "docs/windows-package-readme.md" -Destination (Join-Path $DistDir "README.md")
 $localizedReadmeName = ([char]0x4f7f) + ([char]0x7528) + ([char]0x8bf4) + ([char]0x660e) + ".md"
 Copy-RequiredFile -Source "docs/windows-package-readme.md" -Destination (Join-Path $DistDir $localizedReadmeName)
 

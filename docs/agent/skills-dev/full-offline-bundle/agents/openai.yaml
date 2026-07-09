@@ -1,0 +1,4 @@
+interface:
+  display_name: "Full Offline Bundle"
+  short_description: "Build DicePP community offline bundles"
+  default_prompt: "Build DicePP Linux and Windows offline bundles for group distribution."

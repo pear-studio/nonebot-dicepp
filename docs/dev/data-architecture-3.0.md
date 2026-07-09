@@ -388,7 +388,7 @@ release metadata 标记 `数据变更: yes` 或 `配置变更: yes` 时，升级
 - Manager action 白名单只包含 `start`、`stop`、`restart`；`update` / `rollback` 在 API 边界作为非法 action 拒绝，不创建 operation、不调用 runtime、不写 manager audit。
 - 已删除 `DICEPP_MANAGER_DOCKER_VERSION_ENV`、`DICEPP_MANAGER_RELEASE_METADATA_ROOT`、Manager release metadata preview endpoint、compatibility gate、deployment gate、archive gate、post-action health 与 failure guidance 等自动版本操作后端链路。
 - Release metadata 文档继续保留为 GitHub Release body / asset 和人工升级风险阅读材料，不进入 Docker 镜像，也不由 Manager 自动消费。
-- GitHub Release 发布侧 metadata 输出已接入：`docs/releases/vX.Y.Z.md` 作为 Release body 和 release asset 提供，`docs/linux.md` 也作为 release asset 提供；release metadata 仍不进入 Docker 镜像。
+- GitHub Release 发布侧 metadata 输出已接入：`docs/releases/vX.Y.Z.md` 作为 Release body 和 release asset 提供；`docs/linux.md` 随 Linux offline zip 提供；release metadata 仍不进入 Docker 镜像。
 
 已完成 Windows 单入口与手动升级边界：
 

@@ -22,7 +22,7 @@ metadata:
 - 生产部署/回退以 'vX.Y.Z' release 为单位。
 - 目标 release 必须由开发环境 'version-release' 创建。
 - 生产使用 GHCR 镜像: 'ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z'；包含 Dashboard 的版本还会使用 'ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z'。
-- 如果生产环境无法访问 GHCR, 可使用目标 Release asset `DicePP-vX.Y.Z-linux-amd64-images.tar.zst` + `DicePP-vX.Y.Z-linux-amd64-images.sha256` 作为离线镜像输入；离线路径仍必须使用相同镜像 tag 和同一份目标 `docker-compose.yml`。
+- 如果生产环境无法访问 GHCR, 可使用目标 Release asset `DicePP-vX.Y.Z-linux-amd64-offline.zip` + `DicePP-vX.Y.Z-linux-amd64-offline.zip.sha256` 作为离线输入；离线路径仍必须使用相同镜像 tag 和同一份目标 `docker-compose.yml`。
 - 生产更新风险摘要的唯一源头是 GitHub Release body 或同内容 release metadata asset, 由开发环境 'docs/releases/vX.Y.Z.md' 生成, 仅用于人工部署/回退风险核对。
 - 'DICEPP_IMAGE_TAG' 通过命令环境变量传递, 不写入任何配置文件。
 - 默认只读。修改运行配置、pull/load 镜像、重启/更新容器等写操作必须先展示影响、命令和回滚方式, 等待用户明确确认。
@@ -66,7 +66,7 @@ metadata:
 
    a. 如生产目录包含本仓库 checkout, 可先执行只用于读取 release 文件的 `git fetch --tags --prune origin`；这不是生产部署方式, 不允许据此部署分支 HEAD。
    b. 优先读取 `git show vX.Y.Z:docs/linux.md` 和 `git show vX.Y.Z:docker-compose.yml`。
-   c. 如果本地没有仓库, 通过 GitHub Release asset 或远端 tag 内容读取 `docker-compose.yml`；能读取 `docs/linux.md` 时也必须读取。
+   c. 如果本地没有仓库, 通过 GitHub Release asset、Linux offline zip 内置文档或远端 tag 内容读取 `docker-compose.yml`；能读取 `docs/linux.md` 时也必须读取。
    d. 读取失败时, 在风险摘要中明确标记“部署说明/compose 未确认”, 并要求用户确认是否继续。
 
 5. 核对目标镜像
@@ -122,7 +122,7 @@ metadata:
 
    - 如需同步 compose, 展示 compose 更新来源、影响的 service 和回滚方式。
    - 在线路径: 将注入环境变量 'DICEPP_IMAGE_TAG=vX.Y.Z' 并调用 'deploy-docker' 执行 pull/up/健康检查。
-   - 离线路径: 先校验并导入 `DicePP-vX.Y.Z-linux-amd64-images.tar.zst`, 再注入 'DICEPP_IMAGE_TAG=vX.Y.Z' 并调用 'deploy-docker' 执行 `up --pull never`/健康检查。不得在离线路径中执行 `docker compose pull`。
+   - 离线路径: 先校验并解压 `DicePP-vX.Y.Z-linux-amd64-offline.zip`, 再按包内说明校验并导入镜像, 注入 'DICEPP_IMAGE_TAG=vX.Y.Z' 并调用 'deploy-docker' 执行 `up --pull never`/健康检查。不得在离线路径中执行 `docker compose pull`。
    - 如目标部署说明要求首次初始化 Dashboard, 展示需在 `dashboard` service 内执行的初始化命令, 但只有用户确认后才可执行。
    - 如需回退, 回滚方式是重新执行本技能并指定另一个已发布的 'vX.Y.Z'。
 

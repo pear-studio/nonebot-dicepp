@@ -77,7 +77,7 @@ DICEPP_IMAGE_TAG=v3.0.0 docker compose up -d
 
 ## 无法拉取镜像时使用离线包
 
-如果服务器拉取 GHCR 很慢或失败，可以下载 Release 附带的 Linux 镜像离线包。离线包只包含 DicePP 的两个 Docker 镜像：
+如果服务器拉取 GHCR 很慢或失败，可以下载 Release 附带的 Linux 离线包。离线包包含 DicePP 的两个 Docker 镜像、对应版本的 `docker-compose.yml` 和常用文档：
 
 ```text
 ghcr.io/pear-studio/nonebot-dicepp:vX.Y.Z
@@ -87,8 +87,8 @@ ghcr.io/pear-studio/dicepp-dashboard:vX.Y.Z
 文件名类似：
 
 ```text
-DicePP-v3.0.0-linux-amd64-images.tar.zst
-DicePP-v3.0.0-linux-amd64-images.sha256
+DicePP-v3.0.0-linux-amd64-offline.zip
+DicePP-v3.0.0-linux-amd64-offline.zip.sha256
 ```
 
 下面示例用 `v3.0.0`，实际安装时请替换成你要部署的 Release 版本。
@@ -102,9 +102,8 @@ cd ~/dicepp
 VERSION=v3.0.0
 BASE_URL="https://github.com/pear-studio/nonebot-dicepp/releases/download/${VERSION}"
 
-curl -L -O "${BASE_URL}/docker-compose.yml"
-curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-images.tar.zst"
-curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-images.sha256"
+curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-offline.zip"
+curl -L -O "${BASE_URL}/DicePP-${VERSION}-linux-amd64-offline.zip.sha256"
 ```
 
 `curl` 正常下载时会显示进度，结束后能看到类似文件：
@@ -116,31 +115,29 @@ ls -lh
 预期能看到：
 
 ```text
-docker-compose.yml
-DicePP-v3.0.0-linux-amd64-images.tar.zst
-DicePP-v3.0.0-linux-amd64-images.sha256
+DicePP-v3.0.0-linux-amd64-offline.zip
+DicePP-v3.0.0-linux-amd64-offline.zip.sha256
 ```
 
 ### 服务器不能访问 GitHub
 
-先在自己的电脑浏览器打开目标 Release 页面，下载这三个文件：
+先在自己的电脑浏览器打开目标 Release 页面，下载这两个文件：
 
 ```text
-docker-compose.yml
-DicePP-v3.0.0-linux-amd64-images.tar.zst
-DicePP-v3.0.0-linux-amd64-images.sha256
+DicePP-v3.0.0-linux-amd64-offline.zip
+DicePP-v3.0.0-linux-amd64-offline.zip.sha256
 ```
 
 然后把文件上传到服务器的 `~/dicepp` 目录。Windows PowerShell、macOS 或 Linux 终端都可以用 `scp`：
 
 ```bash
-scp docker-compose.yml DicePP-v3.0.0-linux-amd64-images.* 用户名@服务器IP:~/dicepp/
+scp DicePP-v3.0.0-linux-amd64-offline.zip* 用户名@服务器IP:~/dicepp/
 ```
 
 例如服务器 IP 是 `203.0.113.10`，登录用户名是 `ubuntu`：
 
 ```bash
-scp docker-compose.yml DicePP-v3.0.0-linux-amd64-images.* ubuntu@203.0.113.10:~/dicepp/
+scp DicePP-v3.0.0-linux-amd64-offline.zip* ubuntu@203.0.113.10:~/dicepp/
 ```
 
 如果第一次连接服务器，可能会询问是否信任主机，输入 `yes` 后回车。上传成功后，服务器上执行：
@@ -161,16 +158,16 @@ cd ~/dicepp
 VERSION=v3.0.0
 ```
 
-校验下载文件：
+校验下载的 zip：
 
 ```bash
-sha256sum -c "DicePP-${VERSION}-linux-amd64-images.sha256"
+sha256sum -c "DicePP-${VERSION}-linux-amd64-offline.zip.sha256"
 ```
 
 预期输出类似：
 
 ```text
-DicePP-v3.0.0-linux-amd64-images.tar.zst: OK
+DicePP-v3.0.0-linux-amd64-offline.zip: OK
 ```
 
 如果提示 `sha256sum: command not found`，先安装基础工具；大多数 Debian / Ubuntu 系统默认已经带有。
@@ -179,25 +176,67 @@ DicePP-v3.0.0-linux-amd64-images.tar.zst: OK
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y zstd
+sudo apt-get install -y unzip zstd
 ```
 
-解压：
+解压离线包：
 
 ```bash
-zstd -d -f "DicePP-${VERSION}-linux-amd64-images.tar.zst"
+unzip -o "DicePP-${VERSION}-linux-amd64-offline.zip"
+```
+
+解压后会得到一个目录：
+
+```text
+DicePP-v3.0.0-linux-amd64-offline/
+```
+
+目录中包含：
+
+```text
+使用说明.md
+docker-compose.yml
+manifest.json
+checksums.sha256
+images/DicePP-v3.0.0-linux-amd64-images.tar.zst
+docs/linux.md
+docs/configuration.md
+docs/persona.md
+docs/persona-character-card.md
+```
+
+校验离线包内部文件：
+
+```bash
+cd "DicePP-${VERSION}-linux-amd64-offline"
+sha256sum -c checksums.sha256
+```
+
+预期会看到多行 `OK`。
+
+把离线包内的 `docker-compose.yml` 复制到部署目录：
+
+```bash
+cp docker-compose.yml ..
+cd ..
+```
+
+解压镜像：
+
+```bash
+zstd -d -f "DicePP-${VERSION}-linux-amd64-offline/images/DicePP-${VERSION}-linux-amd64-images.tar.zst"
 ```
 
 解压后会得到：
 
 ```text
-DicePP-v3.0.0-linux-amd64-images.tar
+DicePP-v3.0.0-linux-amd64-offline/images/DicePP-v3.0.0-linux-amd64-images.tar
 ```
 
 导入 Docker：
 
 ```bash
-docker load -i "DicePP-${VERSION}-linux-amd64-images.tar"
+docker load -i "DicePP-${VERSION}-linux-amd64-offline/images/DicePP-${VERSION}-linux-amd64-images.tar"
 ```
 
 预期输出会包含两行 `Loaded image`，类似：
@@ -371,7 +410,7 @@ cd ~/dicepp
 VERSION=v3.0.1
 
 # 先按“无法拉取镜像时使用离线包”下载、校验、解压并导入新版本镜像
-docker load -i "DicePP-${VERSION}-linux-amd64-images.tar"
+# 完成到 docker load 成功即可
 
 # 再用新版本重建容器。config/data/content 挂载目录不会被删除。
 DICEPP_IMAGE_TAG=${VERSION} docker compose up -d --pull never
@@ -415,7 +454,7 @@ environment:
 
 DicePP 官方发布源目前是 GHCR。国内服务器首次拉取镜像可能较慢，但后续更新会复用 Docker 层缓存，普通代码更新通常只需要拉取变化层。
 
-如果 GHCR 无法访问，优先使用 Release 附带的 `DicePP-vX.Y.Z-linux-amd64-images.tar.zst` 离线包，按前文“无法拉取镜像时使用离线包”导入镜像。
+如果 GHCR 无法访问，优先使用 Release 附带的 `DicePP-vX.Y.Z-linux-amd64-offline.zip` 离线包，按前文“无法拉取镜像时使用离线包”导入镜像。
 
 如果你有自己的国内镜像仓库，可以通过完整镜像地址覆盖：
 
