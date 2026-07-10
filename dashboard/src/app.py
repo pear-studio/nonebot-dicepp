@@ -10,6 +10,7 @@ import uuid
 from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Optional, cast
+from datetime import datetime, timezone
 
 import logging
 
@@ -1758,6 +1759,190 @@ def _compute_bot_statuses(db_path: str) -> list[dict]:
         entry["online"] = online
         result.append(entry)
     return result
+
+
+_overview_logger = logging.getLogger("dashboard.overview")
+
+
+def _find_persona_db(bot_id: str) -> Optional[Path]:
+    """Scan bot data dir for personas_data_*.db, return the newest by mtime."""
+    bot_dir = DashboardPaths.DATA_BOTS_DIR / bot_id
+    if not bot_dir.exists():
+        return None
+    matches = list(bot_dir.glob("personas_data_*.db"))
+    if not matches:
+        return None
+    if len(matches) > 1:
+        newest = max(matches, key=lambda p: p.stat().st_mtime)
+        _overview_logger.warning(
+            "Multiple persona DBs found for %s, using newest: %s",
+            bot_id, newest.name,
+        )
+        return newest
+    return matches[0]
+
+
+def _compute_core_stats(bot_id: str) -> dict:
+    """Query bot_data.db for simple row counts (user_stat / group_stat)."""
+    db_path = DashboardPaths.bot_data_db_path(bot_id)
+    if not db_path.exists():
+        return {"users": 0, "groups": 0}
+
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        users = conn.execute(
+            "SELECT COUNT(*) as cnt FROM user_stat"
+        ).fetchone()["cnt"]
+        groups = conn.execute(
+            "SELECT COUNT(*) as cnt FROM group_stat"
+        ).fetchone()["cnt"]
+    except sqlite3.Error:
+        _overview_logger.warning(
+            "Core stats query failed for %s", db_path, exc_info=True,
+        )
+        return {"users": 0, "groups": 0}
+    finally:
+        conn.close()
+    return {"users": users, "groups": groups}
+
+
+def _compute_persona_stats(persona_db_path: Path, today: str) -> Optional[dict]:
+    """Query persona.db for today's chat stats, character state, and events."""
+
+    conn = sqlite3.connect(f"file:{persona_db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        # Chat stats today
+        row = conn.execute(
+            "SELECT COUNT(*) as total,"
+            " COUNT(DISTINCT user_id) as users,"
+            " COUNT(DISTINCT CASE WHEN group_id != '' THEN group_id END) as groups"
+            " FROM message_stream WHERE type = 'chat' AND date(created_at) = ?",
+            (today,),
+        ).fetchone()
+
+        chat_messages = row["total"] or 0
+        chat_users = row["users"] or 0
+        chat_groups = row["groups"] or 0
+
+        # Character state (stored as JSON in text column)
+        character_state = {}
+        row = conn.execute(
+            "SELECT text FROM persona_character_state WHERE id = 1"
+        ).fetchone()
+        if row and row["text"]:
+            try:
+                data = json.loads(row["text"])
+                if isinstance(data, dict):
+                    for key in ("energy", "mood", "health", "current_intention"):
+                        if data.get(key) is not None:
+                            character_state[key] = data[key]
+            except json.JSONDecodeError:
+                # Legacy plain-text format
+                character_state["text"] = row["text"][:200]
+
+        # Today's events (most recent 3)
+        events = []
+        cursor = conn.execute(
+            "SELECT id, event_type, description FROM persona_daily_events"
+            " WHERE date = ? ORDER BY id DESC LIMIT 3",
+            (today,),
+        )
+        for r in cursor.fetchall():
+            events.append({
+                "id": r["id"],
+                "type": r["event_type"],
+                "description": r["description"],
+            })
+
+    except sqlite3.Error:
+        _overview_logger.warning(
+            "Persona stats query failed for %s", persona_db_path, exc_info=True,
+        )
+        return None
+    finally:
+        conn.close()
+
+    return {
+        "chat_messages": chat_messages,
+        "chat_users": chat_users,
+        "chat_groups": chat_groups,
+        "character_state": character_state,
+        "events": events,
+    }
+
+
+def _compute_llm_usage(persona_db_path: Path, today: str) -> Optional[dict]:
+    """Query persona_llm_traces for today's usage, aggregated and by-model."""
+
+    conn = sqlite3.connect(f"file:{persona_db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(tokens_in + tokens_out), 0) as total_tokens,"
+            " COUNT(*) as requests,"
+            " COUNT(CASE WHEN status != 'ok' THEN 1 END) as errors"
+            " FROM persona_llm_traces WHERE date(created_at) = ?",
+            (today,),
+        ).fetchone()
+
+        total_tokens = row["total_tokens"] or 0
+        requests = row["requests"] or 0
+        errors = row["errors"] or 0
+
+        by_model = []
+        cursor = conn.execute(
+            "SELECT selected_provider, selected_model,"
+            " COUNT(*) as requests,"
+            " COALESCE(SUM(tokens_in + tokens_out), 0) as tokens"
+            " FROM persona_llm_traces WHERE date(created_at) = ?"
+            " GROUP BY selected_provider, selected_model"
+            " ORDER BY tokens DESC",
+            (today,),
+        )
+        for r in cursor.fetchall():
+            by_model.append({
+                "provider": r["selected_provider"] or "",
+                "model": r["selected_model"] or "",
+                "requests": r["requests"],
+                "tokens": r["tokens"],
+            })
+
+    except sqlite3.Error:
+        _overview_logger.warning(
+            "LLM usage query failed for %s", persona_db_path, exc_info=True,
+        )
+        return None
+    finally:
+        conn.close()
+
+    return {
+        "total_tokens": total_tokens,
+        "requests": requests,
+        "errors": errors,
+        "by_model": by_model,
+    }
+
+
+@app.get("/api/overview", dependencies=[Depends(require_auth)])
+async def overview(request: Request, bot_id: Optional[str] = Query(None)):
+    """Aggregate overview: bot status, core stats, persona stats, LLM usage."""
+    result = {
+        "bots": _compute_bot_statuses(request.app.state.dashboard_db),
+    }
+
+    if bot_id:
+        _validate_identifier(bot_id, "bot_id")
+        result["core_stats"] = _compute_core_stats(bot_id)
+
+        persona_db = _find_persona_db(bot_id)
+        if persona_db:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            result["persona_stats"] = _compute_persona_stats(persona_db, today)
+            result["llm_usage"] = _compute_llm_usage(persona_db, today)
+
+    return _ok(result)
 
 
 @app.get("/api/bots/status", dependencies=[Depends(require_auth)])

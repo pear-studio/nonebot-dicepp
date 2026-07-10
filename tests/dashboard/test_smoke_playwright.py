@@ -244,8 +244,8 @@ def test_auto_select_first_bot_after_login(dashboard_url: str, tmp_path: Path) -
                 "Bot auto-select failed: empty-state prompt is still in DOM"
             )
 
-            # Table selector appears in the data tab (confirms loadTabData was called)
-            page.wait_for_selector('[data-testid="table-select"]', timeout=5000)
+            # Overview tab heading appears (confirms loadTabData was called for overview)
+            page.wait_for_selector('[data-testid="overview-tab"]', timeout=5000)
         finally:
             browser.close()
 
@@ -266,10 +266,11 @@ def test_no_auto_select_when_no_bots(dashboard_url: str) -> None:
                 f"Expected no bot selected when none exist, but got '{value}'"
             )
 
-            # Empty-state prompt must be visible on the active (data) tab.
-            # Multiple tabs have this element (one per tab template), but only
-            # the data tab is active; .first targets the first DOM match.
-            assert page.locator("text=请先在左侧选择一个 Bot").first.is_visible(), (
+            # Empty-state prompt must be visible on the active (overview) tab.
+            assert page.locator('[data-testid="overview-tab"]').is_visible(), (
+                "Expected overview tab to be active when no bots exist"
+            )
+            assert page.locator("text=请在左侧选择一个 Bot 查看详情").is_visible(), (
                 "Expected empty-state prompt when no bots exist"
             )
         finally:

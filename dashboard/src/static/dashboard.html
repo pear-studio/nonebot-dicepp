@@ -113,6 +113,180 @@
 
     <!-- Main content area -->
     <main class="flex-1 overflow-y-auto p-6">
+      <!-- Tab: 概览 -->
+      <div x-show="currentTab === 'overview'" x-cloak data-testid="overview-tab">
+        <h2 class="text-xl font-bold mb-4">概览</h2>
+
+        <!-- Overview skeleton -->
+        <div x-show="overviewLoading" class="space-y-4">
+          <div class="animate-pulse bg-white rounded-lg shadow p-4 space-y-3">
+            <div class="bg-gray-200 rounded h-6 w-1/4"></div>
+            <div class="bg-gray-200 rounded h-4 w-3/4"></div>
+            <div class="bg-gray-200 rounded h-4 w-1/2"></div>
+          </div>
+        </div>
+
+        <div x-show="!overviewLoading">
+
+          <!-- Bot 运行状态 -->
+          <section class="mb-6">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">🤖 Bot 运行状态</h3>
+            <div x-show="overviewBots.length === 0" class="text-gray-500 text-sm">暂无 Bot 数据</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <template x-for="bot in overviewBots" :key="bot.bot_id">
+                <div class="bg-white rounded-lg shadow p-4 border-l-4" :class="bot.online ? 'border-green-500' : 'border-red-400'">
+                  <div class="flex items-center gap-2 mb-3">
+                    <span class="w-3 h-3 rounded-full inline-block flex-shrink-0" :class="bot.online ? 'bg-green-500' : 'bg-red-500'"></span>
+                    <span class="font-bold text-sm truncate" x-text="bot.bot_id"></span>
+                    <span class="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" :class="bot.online ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'" x-text="bot.online ? '在线' : '离线'"></span>
+                  </div>
+                  <div class="text-xs text-gray-500 space-y-1">
+                    <div class="flex justify-between"><span>版本</span> <span class="text-gray-700" x-text="bot.version || '-'"></span></div>
+                    <div class="flex justify-between"><span>最后心跳</span> <span class="text-gray-700" x-text="fmtRelativeTime(bot.last_heartbeat_ts)"></span></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </section>
+
+          <!-- 核心运营统计 -->
+          <section class="mb-6" x-show="overviewCoreStats">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">📊 核心运营统计</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="text-2xl font-bold text-blue-600" x-text="overviewCoreStats.users"></div>
+                <div class="text-xs text-gray-500 mt-1">累计用户</div>
+              </div>
+              <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="text-2xl font-bold text-indigo-600" x-text="overviewCoreStats.groups"></div>
+                <div class="text-xs text-gray-500 mt-1">累计群聊</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Persona 今日 -->
+          <section class="mb-6" x-show="overviewPersonaStats">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">🎭 Persona 今日</h3>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="text-2xl font-bold text-green-600" x-text="overviewPersonaStats.chat_messages"></div>
+                <div class="text-xs text-gray-500 mt-1">聊天消息</div>
+              </div>
+              <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="text-2xl font-bold text-teal-600" x-text="overviewPersonaStats.chat_users"></div>
+                <div class="text-xs text-gray-500 mt-1">参与用户</div>
+              </div>
+              <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="text-2xl font-bold text-cyan-600" x-text="overviewPersonaStats.chat_groups"></div>
+                <div class="text-xs text-gray-500 mt-1">覆盖群聊</div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="bg-white rounded-lg shadow p-4" x-show="Object.keys(overviewPersonaStats.character_state || {}).length > 0">
+                <h4 class="text-sm font-semibold text-gray-700 mb-2">角色状态</h4>
+                <div class="space-y-2 text-sm">
+                  <template x-if="overviewPersonaStats.character_state.energy != null">
+                    <div class="flex items-center gap-2">
+                      <span class="text-gray-500 w-12">体力</span>
+                      <div class="flex-1 bg-gray-200 rounded-full h-2">
+                        <div class="bg-yellow-500 rounded-full h-2" :style="'width:' + overviewPersonaStats.character_state.energy + '%'"></div>
+                      </div>
+                      <span class="text-gray-700 text-xs w-8 text-right" x-text="overviewPersonaStats.character_state.energy"></span>
+                    </div>
+                  </template>
+                  <template x-if="overviewPersonaStats.character_state.mood != null">
+                    <div class="flex items-center gap-2">
+                      <span class="text-gray-500 w-12">心情</span>
+                      <div class="flex-1 bg-gray-200 rounded-full h-2">
+                        <div class="bg-pink-500 rounded-full h-2" :style="'width:' + overviewPersonaStats.character_state.mood + '%'"></div>
+                      </div>
+                      <span class="text-gray-700 text-xs w-8 text-right" x-text="overviewPersonaStats.character_state.mood"></span>
+                    </div>
+                  </template>
+                  <template x-if="overviewPersonaStats.character_state.health != null">
+                    <div class="flex items-center gap-2">
+                      <span class="text-gray-500 w-12">健康</span>
+                      <div class="flex-1 bg-gray-200 rounded-full h-2">
+                        <div class="bg-green-500 rounded-full h-2" :style="'width:' + overviewPersonaStats.character_state.health + '%'"></div>
+                      </div>
+                      <span class="text-gray-700 text-xs w-8 text-right" x-text="overviewPersonaStats.character_state.health"></span>
+                    </div>
+                  </template>
+                  <template x-if="overviewPersonaStats.character_state.current_intention">
+                    <div class="text-xs text-gray-500 mt-2 pt-2 border-t">
+                      <span class="text-gray-400">当前意向：</span>
+                      <span x-text="overviewPersonaStats.character_state.current_intention"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div class="bg-white rounded-lg shadow p-4" x-show="overviewPersonaStats.events && overviewPersonaStats.events.length > 0">
+                <h4 class="text-sm font-semibold text-gray-700 mb-2">今日事件</h4>
+                <div class="space-y-2">
+                  <template x-for="evt in overviewPersonaStats.events" :key="evt.id">
+                    <div class="flex items-start gap-2 text-sm">
+                      <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 flex-shrink-0" x-text="evt.type"></span>
+                      <span class="text-gray-700" x-text="evt.description"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 今日 LLM 用量 -->
+          <section class="mb-6" x-show="overviewLlmUsage">
+            <h3 class="text-lg font-semibold text-gray-800 mb-3">⚡ 今日 LLM 用量</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="text-2xl font-bold text-purple-600" x-text="fmtTokens(overviewLlmUsage.total_tokens)"></div>
+                <div class="text-xs text-gray-500 mt-1">Token 消耗</div>
+              </div>
+              <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="text-2xl font-bold text-blue-600" x-text="overviewLlmUsage.requests"></div>
+                <div class="text-xs text-gray-500 mt-1">请求次数</div>
+              </div>
+              <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="text-2xl font-bold" :class="overviewLlmUsage.errors > 0 ? 'text-red-600' : 'text-gray-400'" x-text="overviewLlmUsage.errors"></div>
+                <div class="text-xs text-gray-500 mt-1">错误次数</div>
+              </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow overflow-hidden" x-show="overviewLlmUsage.by_model && overviewLlmUsage.by_model.length > 0">
+              <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">模型</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">请求</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Token</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <template x-for="m in overviewLlmUsage.by_model" :key="m.provider + '/' + m.model">
+                    <tr class="hover:bg-gray-50">
+                      <td class="px-4 py-2 text-gray-700">
+                        <span x-show="m.provider" x-text="m.provider + '/'"></span><span x-text="m.model"></span>
+                      </td>
+                      <td class="px-4 py-2 text-right text-gray-600" x-text="m.requests"></td>
+                      <td class="px-4 py-2 text-right text-gray-600" x-text="fmtTokens(m.tokens)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <div x-show="!overviewCoreStats && !overviewPersonaStats && !overviewLlmUsage && (overviewBots.length === 0 || !selectedBotId)" class="text-center text-gray-500 py-12">
+            <p class="text-lg">暂无数据</p>
+            <p class="text-sm mt-1" x-text="!selectedBotId ? '请在左侧选择一个 Bot 查看详情' : '请确保 Bot 已连接或选择一个 Bot'"></p>
+          </div>
+
+        </div>
+      </div>
+
       <!-- Tab: 数据浏览 -->
       <div x-show="currentTab === 'data'" x-cloak>
         <h2 class="text-xl font-bold mb-4">数据浏览</h2>
@@ -1266,8 +1440,9 @@ function app() {
     loginError: '',
 
     // ── Navigation ──
-    currentTab: 'data',
+    currentTab: 'overview',
     tabs: [
+      { id: 'overview', label: '概览' },
       { id: 'data', label: '数据浏览' },
       { id: 'config', label: '配置编辑' },
       { id: 'persona', label: 'Persona' },
@@ -1385,6 +1560,13 @@ function app() {
     monitorLoading: false,
     auditLoading: false,
     saving: false,
+
+    // ── Tab: Overview ──
+    overviewLoading: false,
+    overviewBots: [],
+    overviewCoreStats: null,
+    overviewPersonaStats: null,
+    overviewLlmUsage: null,
 
     // ── SSE ──
     eventSource: null,
@@ -1536,6 +1718,11 @@ function app() {
       this.managerLogsLoading = false;
       this.resetArchivesState();
       this.auditLogs = [];
+      this.overviewBots = [];
+      this.overviewCoreStats = null;
+      this.overviewPersonaStats = null;
+      this.overviewLlmUsage = null;
+      this.overviewLoading = false;
       this._mergedCache = null;
       this._lastBotId = '';
       if (this.eventSource) {
@@ -1612,6 +1799,7 @@ function app() {
 
     loadTabData(tabId) {
       switch (tabId) {
+        case 'overview': this.loadOverview(); break;
         case 'data': this.loadTables(); break;
         case 'config': this.loadConfig(); break;
         case 'persona': this.loadPersonaConfig(); break;
@@ -2574,6 +2762,27 @@ function app() {
       ]);
     },
 
+    // ── Overview ──
+    async loadOverview() {
+      this.overviewLoading = true;
+      try {
+        const params = this.selectedBotId ? `?bot_id=${this.selectedBotId}` : '';
+        const data = await this.api(`/api/overview${params}`);
+        this.overviewBots = data.bots || [];
+        this.overviewCoreStats = data.core_stats || null;
+        this.overviewPersonaStats = data.persona_stats || null;
+        this.overviewLlmUsage = data.llm_usage || null;
+      } catch (err) {
+        console?.warn('[DicePP] Failed to load overview:', err);
+        this.overviewBots = [];
+        this.overviewCoreStats = null;
+        this.overviewPersonaStats = null;
+        this.overviewLlmUsage = null;
+      } finally {
+        this.overviewLoading = false;
+      }
+    },
+
     // ── Audit ──
     async loadAudit() {
       this.auditLoading = true;
@@ -2615,6 +2824,26 @@ function app() {
     formatOptionalTimestamp(ts) {
       if (!ts && ts !== 0) return '';
       return this.formatTimestamp(ts);
+    },
+
+    fmtTokens(v) {
+      if (v == null) return '0';
+      if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M';
+      if (v >= 1_000) return (v / 1_000).toFixed(1) + 'K';
+      return String(v);
+    },
+
+    fmtRelativeTime(ts) {
+      if (!ts) return '-';
+      const tsNum = parseFloat(ts);
+      if (isNaN(tsNum)) return '-';
+      const now = Date.now() / 1000;
+      const diff = now - tsNum;
+      if (diff < 0) return '刚刚';
+      if (diff < 60) return Math.floor(diff) + '秒前';
+      if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
+      if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
+      return Math.floor(diff / 86400) + '天前';
     },
 
     formatIsoTimestamp(value) {
