@@ -63,16 +63,14 @@ ROLL_GRAMMAR = r"""
     number: INT            -> integer
           | FLOAT          -> float_num
 
-    // Dice expressions: four unambiguous forms to avoid INT ordering ambiguity.
+    // Dice expressions: only explicit forms are allowed.
     //   XDY  -> count=X, sides=Y
-    //   XD   -> count=X, sides=100 (default)
     //   DY   -> count=1, sides=Y
-    //   D    -> count=1, sides=100 (default)
+    // Bare D / XD without explicit sides are NOT valid grammar — callers must
+    // inject a default sides value via apply_default_expr() before parsing.
     // Modifiers trail the dice atom directly so they bind with highest precedence.
     dice: INT "D"i INT modifier* -> dice_xy
-        | INT "D"i     modifier* -> dice_x
         |     "D"i INT modifier* -> dice_y
-        |     "D"i     modifier* -> dice_d
 
     // Modifiers (postfix on dice only)
     ?modifier: keep_mod
@@ -163,24 +161,14 @@ class RollASTTransformer(Transformer):
     def paren(self, inner):
         return ParenNode(inner=inner)
 
-    # Dice expressions: four unambiguous transformer methods matching grammar branches
+    # Dice expressions: explicit forms only — bare D/XD are rejected by the grammar
     def dice_xy(self, count_token, sides_token, *modifiers):
         """XDY — explicit count and sides."""
         return DiceNode(count=int(count_token), sides=int(sides_token), modifiers=list(modifiers))
 
-    def dice_x(self, count_token, *modifiers):
-        """XD — explicit count, default sides (DICE_TYPE_DEFAULT)."""
-        from ..roll_config import DICE_TYPE_DEFAULT
-        return DiceNode(count=int(count_token), sides=DICE_TYPE_DEFAULT, modifiers=list(modifiers))
-
     def dice_y(self, sides_token, *modifiers):
         """DY — implicit count (1), explicit sides."""
         return DiceNode(count=1, sides=int(sides_token), modifiers=list(modifiers))
-
-    def dice_d(self, *modifiers):
-        """D — implicit count (1) and default sides (DICE_TYPE_DEFAULT)."""
-        from ..roll_config import DICE_TYPE_DEFAULT
-        return DiceNode(count=1, sides=DICE_TYPE_DEFAULT, modifiers=list(modifiers))
 
     # Comparison operators
     def lt(self):

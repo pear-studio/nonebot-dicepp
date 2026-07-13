@@ -62,14 +62,16 @@ class TestParserDice:
         assert ast.count == 1
         assert ast.sides == 20
     
-    def test_default_dice(self):
-        """D alone should use DICE_TYPE_DEFAULT (20) as sides."""
-        from module.roll.roll_config import DICE_TYPE_DEFAULT
-        ast = parse_expression("D")
-        assert isinstance(ast, DiceNode)
-        assert ast.count == 1
-        assert ast.sides == DICE_TYPE_DEFAULT
-    
+    def test_bare_d_rejected(self):
+        """Bare D without explicit sides is rejected — callers must inject default."""
+        with pytest.raises(RollSyntaxError):
+            parse_expression("D")
+
+    def test_implicit_count_without_sides_rejected(self):
+        """XD without explicit sides is rejected — callers must inject default."""
+        with pytest.raises(RollSyntaxError):
+            parse_expression("3D")
+
     def test_multiple_dice(self):
         ast = parse_expression("3D6")
         assert isinstance(ast, DiceNode)

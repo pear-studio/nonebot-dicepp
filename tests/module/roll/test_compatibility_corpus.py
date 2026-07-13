@@ -61,7 +61,6 @@ DICE_CORPUS: List[CorpusEntry] = [
     # Basic XDY patterns
     CorpusEntry("1D20", description="Standard d20 roll"),
     CorpusEntry("D20", description="Implicit 1D20"),
-    CorpusEntry("D", description="Default dice"),
     CorpusEntry("3D6", description="Multiple dice"),
     CorpusEntry("1D4", description="D4 roll"),
     CorpusEntry("1D100", description="D100 roll"),
