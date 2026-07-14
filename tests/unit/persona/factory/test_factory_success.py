@@ -194,7 +194,6 @@ class TestCreatePersonaSuccess:
         assert app.life is not None, "life 句柄不应为空"
         assert app.store is not None, "store 句柄不应为空"
         assert app.port is not None, "port 句柄不应为空"
-        assert app.session_manager is not None, "session_manager 不应为空"
         assert app.current_character_name == "test_char"
 
         # ── 8. 清理 ──────────────────────────────────────

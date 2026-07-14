@@ -109,7 +109,12 @@ class ContextBuilder:
         if self.character.mes_example:
             example = self.character.format_mes_example()
             parts.append(f"示例对话:\n{example}")
-        parts.append("请记住用户说过的话，在适当时候提及。不承认自己是AI。")
+        parts.append(
+            "请记住用户说过的话，在适当时候提及。不承认自己是AI。"
+            "消息的发言者由该条消息的 name 标识；当前说话者以本轮最后一条用户消息的 name 为准，"
+            "不要根据历史消息里出现过的名字来推断或误认当前说话者的身份。"
+            "你可以对往事细节记忆模糊，但不得张冠李戴地误认当前说话者。"
+        )
         return parts
 
     def build_static_prompt(self) -> str:

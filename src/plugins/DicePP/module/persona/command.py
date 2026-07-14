@@ -93,7 +93,6 @@ class PersonaCommand(UserCommandBase):
         self.enabled: bool = False
         self.app: Optional[PersonaApp] = None
         self.data_store: Optional[PersonaDataStore] = None
-        self._session_manager: Optional[Any] = None  # 由 factory 注入，用于群聊旁路
         self.init_error: Optional[str] = None  # create_persona 抛出的具名异常文本，供 _admin_debug 展示
         self._whitelist_confirm_pending: Dict[str, float] = {}  # user_id -> timestamp
         # 主循环在 async 中调用同步 tick() 时，单槽异步任务（避免 life.tick 慢于 1s 时堆积）
@@ -154,8 +153,6 @@ class PersonaCommand(UserCommandBase):
                 return []
             if self.app:
                 self.data_store = self.app.store
-                # 注入 SessionManager（供群聊 session 旁路写入）
-                self._session_manager = self.app.session_manager
                 # 注入 ImageCache 到 data_store（供裁剪时清理图片缓存）
                 self.data_store.image_cache = self.image_cache
                 # 注入 app 引用到日报生成器
@@ -226,6 +223,12 @@ class PersonaCommand(UserCommandBase):
         except Exception as e:
             logger.warning(f"[Persona] 出站记录器写入失败: {e}")
 
+    def _chat_registry(self):
+        """返回 orchestrator 与 hook 共享的 ConversationRegistry（未就绪时 None）。"""
+        app = self.app
+        chat = getattr(app, "chat", None) if app is not None else None
+        return getattr(chat, "registry", None) if chat is not None else None
+
     async def _inbound_message_recorder(
         self,
         user_id: str,
@@ -235,10 +238,14 @@ class PersonaCommand(UserCommandBase):
         content: str,
         display_name: str,
         raw_msg: str = "",
-    ) -> None:
-        """入站消息记录器回调（每条用户消息记录一次）"""
+    ) -> Optional[int]:
+        """入站消息记录器回调（每条用户消息记录一次）。
+
+        先记录 message_stream 权威事实，再把该消息以 ref 追加进正确 scope
+        的 Conversation（群聊旁观消息也进入活跃期，但不触发 LLM）。
+        """
         if not self.data_store:
-            return
+            return None
         try:
             msg_type = MessageType.from_str(type)
             known_types = {m.value for m in MessageType}
@@ -251,7 +258,7 @@ class PersonaCommand(UserCommandBase):
                 raw_msg, self.image_cache, force_download=is_private,
             )
 
-            await self.data_store.add_message_stream(
+            msg_id = await self.data_store.add_message_stream(
                 user_id=user_id,
                 group_id=group_id,
                 role=role,
@@ -261,27 +268,17 @@ class PersonaCommand(UserCommandBase):
                 image_meta=image_meta,
             )
 
-            # 群聊 session 旁路：非触发消息也追加到活跃 session（仅存在活跃 session 时）
-            if group_id and self._session_manager:
-                try:
-                    active = await self.data_store.get_active_session(group_id)
-                    if active:
-                        from .chat.session import _format_group_message
-                        ts_prefix = ""
-                        try:
-                            from utils.time import wall_now as _wn
-                            ts_prefix = _wn(self.config.timezone).strftime("%H:%M")
-                        except Exception:
-                            pass
-                        msg_dict = {"speaker_name": display_name, "display_name": display_name}
-                        formatted = _format_group_message(msg_dict, ts_prefix, "", content)
-                        await self._session_manager.add_bypass_message(active.session_id, formatted)
-                    else:
-                        logger.debug(f"[Persona] 群聊 session 旁路：无活跃 session (group_id={group_id})，跳过写入")
-                except Exception as e:
-                    logger.warning(f"[Persona] 群聊 session 旁路写入失败: {e}")
+            # 把用户可见消息以 ref 追加进该 scope 的 Conversation。
+            # get_or_create 会开启/延续该 scope 活跃期；旁观消息也进入，但不触发 LLM。
+            registry = self._chat_registry()
+            if registry is not None and msg_id:
+                from .life.conversation_scope import ConversationScope
+                scope = ConversationScope.from_chat(user_id, group_id)
+                await registry.append_visible(scope, msg_id, role or "user")
+                return msg_id
         except Exception as e:
-            logger.warning(f"[Persona] 入站记录器写入失败: {e}")
+            logger.warning(f"[Persona] 入站记录器写入失败: {e}", exc_info=True)
+        return None
 
     def _is_admin(self, user_id: str) -> bool:
         """检查用户是否是管理员"""
@@ -412,6 +409,7 @@ class PersonaCommand(UserCommandBase):
 
     async def process_msg(self, msg_str: str, meta: MessageMetaData, hint: Any) -> List[BotCommandBase]:
         """处理消息"""
+        inbound_message_stream_id = getattr(meta, "inbound_message_stream_id", None)
         user_id = meta.user_id
         group_id = meta.group_id or ""
         nickname = meta.nickname or ""
@@ -460,20 +458,17 @@ class PersonaCommand(UserCommandBase):
 
                 # .jrrp 路由
                 if hint == "jrrp":
-                    return await self._handle_jrrp(user_id, group_id, meta)
+                    return await self._handle_jrrp(
+                        user_id, group_id, meta,
+                        inbound_message_stream_id=inbound_message_stream_id,
+                    )
 
                 # 特殊命令处理
                 is_at_trigger = meta.to_me and not msg_str.strip().startswith(".ai")
 
                 response = None
 
-                if content == "clear":
-                    if self.app:
-                        await self.app.clear_chat_history(user_id, group_id)
-                        response = "对话历史已清空"
-                    else:
-                        response = "模块未初始化"
-                elif content == "status" or hint == "status":
+                if content == "status" or hint == "status":
                     response = await self._get_status(user_id, group_id, is_private)
                 elif content == "mute":
                     response = await self._handle_mute_toggle(user_id)
@@ -502,6 +497,7 @@ class PersonaCommand(UserCommandBase):
                                         message="[图片下载失败，请重试]",
                                         nickname=nickname,
                                         image_data_urls=None,
+                                        inbound_message_stream_id=inbound_message_stream_id,
                                     )
                                 else:
                                     # 真的没发任何内容（纯 @bot 无附带）
@@ -518,6 +514,7 @@ class PersonaCommand(UserCommandBase):
                                     message=content,
                                     nickname=nickname,
                                     image_data_urls=image_data_urls,
+                                    inbound_message_stream_id=inbound_message_stream_id,
                                 )
                                 logger.info(
                                     f"[Persona] chat return: user={user_id}"
@@ -565,7 +562,14 @@ class PersonaCommand(UserCommandBase):
             _request_id_var.reset(_trace_token)
 
 
-    async def _handle_jrrp(self, user_id: str, group_id: str, meta: MessageMetaData) -> List[BotCommandBase]:
+    async def _handle_jrrp(
+        self,
+        user_id: str,
+        group_id: str,
+        meta: MessageMetaData,
+        *,
+        inbound_message_stream_id: Optional[int] = None,
+    ) -> List[BotCommandBase]:
         """处理 .jrrp 命令：调 compute_jrrp → 事件消息注入 LLM 生成角色评语"""
         from module.misc.jrrp_utils import compute_jrrp, format_jrrp_text
         from utils.time import get_current_date_raw
@@ -599,11 +603,12 @@ class PersonaCommand(UserCommandBase):
         #    参考 SillyTavern 的 injected 标记方案——若未来多源注入可考虑消息级标记字段。
         #    角色评语由 chat_command() 通过 delivery 发送并按 CHAT 入库；
         #    empty/failed 时回退到模板，partial_sent 不再补额外 fallback。
-        from .chat.session import ChatCallContext
+        from .chat.chat_shared import ChatCallContext
         ctx = ChatCallContext(
             is_command=True,
             transient_message=event_msg,
             nickname=user_name,
+            inbound_message_stream_id=inbound_message_stream_id,
         )
         try:
             outcome = await self.app.chat.chat_command(
@@ -616,13 +621,15 @@ class PersonaCommand(UserCommandBase):
                 # LLM 返回空串时，回退到模板确保用户可见
                 fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
                                             result.delta_percent, result.direction)
-                await self._send(user_id, group_id, fallback)
+                # fallback 发送后追加为 assistant ref 到 Conversation，
+                # 与 persona 聊天路径一致（确保上下文可检索）
+                await self._send_and_record(user_id, group_id, fallback)
         except Exception as e:
             # LLM 调用失败时，回退到模板
             logger.warning(f"[Persona] _handle_jrrp LLM 调用失败，回退到模板: {e}")
             fallback = format_jrrp_text(user_name, result.jrrp, result.zrrp,
                                         result.delta_percent, result.direction)
-            await self._send(user_id, group_id, fallback)
+            await self._send_and_record(user_id, group_id, fallback)
 
         return []
 
@@ -649,6 +656,53 @@ class PersonaCommand(UserCommandBase):
             logger.error(
                 f"[Persona] MessagePort 未初始化，丢弃消息: "
                 f"user={user_id}, group={group_id}, content={content[:30]}..."
+            )
+
+    async def _send_and_record(
+        self, user_id: str, group_id: str, content: str,
+    ) -> None:
+        """发送消息并追加为 assistant ref 到当前 Conversation（R11）。
+
+        顺序：先发送，成功后再写 message_stream + 追加 ref。
+        发送失败时不落任何记录，避免 stream 残留。
+        """
+        if not self.app or not self.data_store:
+            await self._send(user_id, group_id, content)
+            return
+        try:
+            # R11(1): 先发送（skip_history_record=True 防止 hook 重复写入 stream）
+            if not await self.app.port.send(
+                user_id, group_id, content,
+                skip_history_record=True,
+            ):
+                logger.warning(
+                    f"[Persona] _send_and_record 发送失败: "
+                    f"user={user_id} group={group_id}"
+                )
+                return
+
+            # R11(2): 发送成功：写入 message_stream（获取 stream_id）
+            msg_type = MessageType.CHAT
+            display_name = self.app.get_character().name if self.app.get_character() else "bot"
+            msg_id = await self.data_store.add_message_stream(
+                user_id=user_id,
+                group_id=group_id,
+                role="assistant",
+                type=msg_type,
+                content=content,
+                display_name=display_name,
+            )
+
+            # R11(3): 追加 ref 到 Conversation
+            from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+            scope = ConversationScope.from_chat(user_id, group_id)
+            chat_registry = self.app.chat.registry if self.app.chat else None
+            if chat_registry:
+                await chat_registry.append_visible(scope, msg_id, "assistant")
+        except Exception:
+            logger.warning(
+                f"[Persona] _send_and_record 失败: "
+                f"user={user_id} group={group_id}", exc_info=True,
             )
 
     async def _handle_join(self, user_id: str, args: List[str]) -> str:
@@ -832,8 +886,7 @@ class PersonaCommand(UserCommandBase):
             f"已注册模型: {models_str}"
             f"{whitelist_status}\n"
             f"\n使用方法: @bot <消息>\n"
-            f".ai status - 查看状态\n"
-            f".ai clear - 清空对话历史"
+            f".ai status - 查看状态"
         )
 
         if self._is_admin(user_id) and self.app.get_router():
@@ -861,7 +914,6 @@ class PersonaCommand(UserCommandBase):
             lines = [
                 ".ai - 自我介绍",
                 "@bot <消息> - 与 AI 对话",
-                ".ai clear - 清空对话历史",
                 ".ai status - 查看状态",
                 ".ai profile - 查看你的档案",
                 ".ai mute - 切换主动消息开关",

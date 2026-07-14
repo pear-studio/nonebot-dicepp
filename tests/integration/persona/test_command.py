@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from unittest.async_case import IsolatedAsyncioTestCase
 
 from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.chat.session import ChatSession
 from plugins.DicePP.module.persona.data.models import (
     RelationshipState,
     UserProfile,
@@ -359,13 +358,13 @@ class TestUserCommands(IsolatedAsyncioTestCase):
         self.cmd.app.get_relation_labels.return_value = ["厌倦", "冷淡", "疏远", "友好", "亲近", "亲密"]
 
         self.cmd._get_relationship_for_display = AsyncMock(return_value=None)
-        self.cmd.app.clear_chat_history = AsyncMock()
         self.cmd.app.chat_with_user = AsyncMock(return_value="你好呀")
 
-    async def test_clear(self):
+    async def test_clear_removed(self):
+        # .ai clear 已移除：不再触发破坏性清空，也不回复"对话历史已清空"
         meta = self.make_private_meta(".ai clear")
         await self.cmd.process_msg(".ai clear", meta, None)
-        assert "对话历史已清空" in self.get_sent_content(self.cmd)
+        assert "对话历史已清空" not in self.get_sent_content(self.cmd)
 
     async def test_status(self):
         meta = self.make_private_meta(".ai status")

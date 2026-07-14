@@ -143,7 +143,8 @@ def test_action_failed_calls_on_send_failure():
                           ),
                           new_callable=AsyncMock):
             cmd = BotSendMsgCommand("test_bot", "hello", [])
-            asyncio.run(proxy.process_bot_command(cmd))
+            with pytest.raises(ActionFailed):
+                asyncio.run(proxy.process_bot_command(cmd))
 
         assert monitor._consecutive_failures == 1
         assert monitor._last_failure_info is not None
@@ -153,3 +154,22 @@ def test_action_failed_calls_on_send_failure():
     finally:
         all_bots.clear()
         all_bots.update(original)
+
+
+def test_unknown_send_exception_is_reported_to_caller():
+    """代理未知异常也必须上抛，让 MessagePort 返回投递失败。"""
+    from adapter.nonebot_adapter import NoneBotClientProxy
+    from core.command import BotSendMsgCommand
+
+    mock_nonebot = MagicMock()
+    mock_nonebot.self_id = "no-registered-bot"
+    proxy = NoneBotClientProxy(mock_nonebot)
+    with patch.object(
+        ClientProxy,
+        "process_bot_command",
+        side_effect=RuntimeError("network down"),
+        new_callable=AsyncMock,
+    ):
+        cmd = BotSendMsgCommand("test_bot", "hello", [])
+        with pytest.raises(RuntimeError, match="network down"):
+            asyncio.run(proxy.process_bot_command(cmd))
