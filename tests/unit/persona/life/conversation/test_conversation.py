@@ -330,6 +330,13 @@ class FakeStore:
     async def get(self, conv_id: str) -> Snapshot | None:
         return self._data.get(conv_id)
 
+    async def append(self, conv_id: str, messages: list[dict]) -> None:
+        snap = self._data.get(conv_id)
+        if snap is None:
+            snap = Snapshot(messages=[], cursors={})
+            self._data[conv_id] = snap
+        snap.messages.extend([dict(m) for m in messages])
+
     async def delete(self, conv_id: str) -> None:
         self._data.pop(conv_id, None)
 
@@ -797,6 +804,118 @@ class TestConversationRun:
         assert len(stored) == 1
 
 
+# ── 阶段 3b：Token 轮换测试 ──────────────────────────────
+
+
+class TestConversationTokenRotation:
+    """P1-4: Stage B 硬轮换 — conv.run() 中 token 超出 budget 返回 rotation_needed"""
+
+    @staticmethod
+    def _mock_runtime():
+        runtime = MagicMock()
+        runtime.run = AsyncMock()
+        return runtime
+
+    @pytest.mark.asyncio
+    async def test_rotation_needed_when_over_budget(self):
+        """token_budget=1 时，任何 content 都应超出，返回 rotation_needed，_runtime.run 未被调用"""
+        runtime = self._mock_runtime()
+        conv = Conversation(runtime=runtime)
+        conv.add_message("user", "this is a long message that definitely exceeds one token")
+        result = await conv.run(
+            system_prompt="sys",
+            user_input="hello",
+            interaction_id="i1",
+            token_budget=1,
+        )
+        assert result.final_reason == "rotation_needed"
+        assert result.completion_kind == "completed"
+        # _runtime.run 未被调用（token check 在它之前）
+        runtime.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_rotation_when_within_budget(self):
+        """token_budget 足够时不触发轮换"""
+        runtime = self._mock_runtime()
+        rv = TestConversationRun._make_runtime_result(final_text="ok")
+        runtime.run = AsyncMock(return_value=rv)
+        conv = Conversation(runtime=runtime)
+        conv.add_message("user", "short")
+        result = await conv.run(
+            system_prompt="sys",
+            user_input="hi",
+            interaction_id="i1",
+            token_budget=1000,
+        )
+        assert result.final_reason != "rotation_needed"
+        assert result.completion_kind == "completed"
+        runtime.run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_persistence_on_rotation(self):
+        """token 超出时没有消息被持久化到 store"""
+        store = FakeStore()
+        runtime = self._mock_runtime()
+        conv = Conversation(store=store, runtime=runtime)
+        conv._id = "c1"
+        conv.add_message("user", "some content that's fairly long")
+        await conv.run(
+            system_prompt="sys",
+            user_input="hello",
+            interaction_id="i1",
+            token_budget=1,
+        )
+        # store 中没有新的消息（原有一条已存在的 user message）
+        snap = await store.get("c1")
+        if snap is not None:
+            assert len(snap.messages) == 1  # only the pre-existing message
+        assert runtime.run.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_zero_budget_skips_check(self):
+        """token_budget=0（默认）跳过检查，正常执行"""
+        runtime = self._mock_runtime()
+        rv = TestConversationRun._make_runtime_result(final_text="ok")
+        runtime.run = AsyncMock(return_value=rv)
+        conv = Conversation(runtime=runtime)
+        result = await conv.run(
+            system_prompt="sys",
+            user_input="hello",
+            interaction_id="i1",
+        )
+        assert result.final_reason != "rotation_needed"
+        runtime.run.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_rotation_with_notifications_no_persistence(self):
+        """rotation 时通知也不持久化（无 apply cursor、无持久 notification）"""
+        store = FakeStore()
+        runtime = self._mock_runtime()
+        conv = Conversation(store=store, runtime=runtime)
+        conv._id = "c1"
+        conv.add_message("user", "A" * 500)  # long message
+
+        note = _make_notification(source_id="s.test", content="状态变化")
+        source = FakeSource(
+            source_id="s.test", priority=10,
+            update_returns=([note], "cursor_v1"),
+        )
+        conv.register(source)
+
+        await conv.run(
+            system_prompt="sys",
+            user_input="hello",
+            interaction_id="i1",
+            token_budget=1,
+        )
+        # cursor 未推进
+        assert "s.test" not in conv._cursors
+        # notification 未持久化
+        stored = [m for m in conv.get_messages() if "状态变化" in m.get("content", "")]
+        assert len(stored) == 0
+        runtime.run.assert_not_called()
+
+
 FakeSource = FakeChangeSource  # alias for brevity
 
 
@@ -977,3 +1096,68 @@ class TestStorePutReturnsId:
         # run 成功后 save 被调用，id 已被分配
         assert conv.id is not None
         assert conv.id in store._data
+
+
+class TestTokenBudget:
+    """Conversation.run token 预算检查（R2 加固）
+
+    _MESSAGE_TOKEN_OVERHEAD=4、name、tool_calls JSON 均计入估算，
+    使得纯 content 估算不超预算但加上结构开销后超预算的场景正确触发 rotation_needed。
+    """
+
+    @pytest.mark.asyncio
+    async def test_overhead_causes_rotation_when_content_alone_fits(self):
+        """仅 content 估算不超预算，但 + 结构开销后超预算 → rotation_needed。"""
+        runtime = MagicMock()
+        runtime.run = AsyncMock()
+        conv = Conversation(runtime=runtime)
+        conv._id = "test01"
+        # content 长度：estimate_tokens("hi") = 0 + 2/4 = 0.5
+        conv.add_message("user", "hi")
+
+        # token_budget=1：
+        #   不加结构开销：0 (system) + 0.5 (user) = 0.5 < 1 → 不旋转
+        #   加结构开销：4 + 0 + 4 + 0.5 = 8.5 > 1 → rotation_needed
+        result = await conv.run(
+            system_prompt="",
+            user_input="",
+            interaction_id="r2_test_a",
+            record_user_input=False,
+            token_budget=1,
+        )
+
+        assert result.final_reason == "rotation_needed", \
+            f"期望 rotation_needed，实际: {result.final_reason}"
+        runtime.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tool_calls_counted_towards_token_budget(self):
+        """带 tool_calls 的消息，其 JSON 长度计入 token 估算。"""
+        runtime = MagicMock()
+        runtime.run = AsyncMock()
+        conv = Conversation(runtime=runtime)
+        conv._id = "test02"
+        # 一条带 tool_calls 的消息（content 为空），json.dumps 后约 190 非中文字符
+        conv._messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_1", "function": {"name": "roll_dice", "arguments": '{"sides":20}'}},
+                {"id": "call_2", "function": {"name": "check_stat", "arguments": '{"stat":"str"}'}},
+            ],
+        })
+
+        # token_budget=10：
+        #   纯 content 估算：0 (system) + 0 (tool msg) = 0 < 10 → 不旋转
+        #   加结构开销 + tool_calls JSON：4 + 4 + ~48 = ~56 > 10 → rotation_needed
+        result = await conv.run(
+            system_prompt="",
+            user_input="",
+            interaction_id="r2_test_b",
+            record_user_input=False,
+            token_budget=10,
+        )
+
+        assert result.final_reason == "rotation_needed", \
+            f"期望 rotation_needed (tool_calls JSON 计入预算)，实际: {result.final_reason}"
+        runtime.run.assert_not_called()
