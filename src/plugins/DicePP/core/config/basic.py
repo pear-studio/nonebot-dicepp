@@ -5,24 +5,57 @@ from utils.logger import logger
 from frozen import get_project_root
 
 
+def _derive_paths(root: Path) -> dict[str, Path]:
+    """Single source of truth for every project-relative path.
+
+    Both the import-time initialization and configure_project_root() build the
+    Paths attributes from this map, so a new path is declared in exactly one
+    place and the two entry points can never drift out of sync.
+    """
+    config = root / "config"
+    data = root / "data"
+    content = root / "content"
+    return {
+        "PROJECT_ROOT": root,
+        "CONFIG_DIR": config,
+        "CONFIG_GLOBAL": config / "global.json",
+        "CONFIG_USER": config / "user.json",
+        "CONFIG_BOTS_DIR": config / "bots",
+        "DATA_DIR": data,
+        "DATA_BOTS_DIR": data / "bots",
+        "LOCAL_IMG_DIR": data / "local_images",
+        "CONTENT_DIR": content,
+        "CONTENT_CHARACTERS_DIR": content / "characters",
+        "CONTENT_QUERIES_DIR": content / "queries",
+        "CONTENT_DECKS_DIR": content / "decks",
+        "CONTENT_RANDOM_DIR": content / "random",
+        "CONTENT_EXCEL_DIR": content / "excel",
+    }
+
+
 class Paths:
-    PROJECT_ROOT: Path = Path(get_project_root())
+    # Declared for static visibility; the values are populated by _apply_root
+    # at import time and rebound by configure_project_root. _derive_paths is the
+    # single source of truth for what each path resolves to.
+    PROJECT_ROOT: Path
+    CONFIG_DIR: Path
+    CONFIG_GLOBAL: Path
+    CONFIG_USER: Path
+    CONFIG_BOTS_DIR: Path
+    DATA_DIR: Path
+    DATA_BOTS_DIR: Path
+    LOCAL_IMG_DIR: Path
+    CONTENT_DIR: Path
+    CONTENT_CHARACTERS_DIR: Path
+    CONTENT_QUERIES_DIR: Path
+    CONTENT_DECKS_DIR: Path
+    CONTENT_RANDOM_DIR: Path
+    CONTENT_EXCEL_DIR: Path
 
-    CONFIG_DIR:          Path = PROJECT_ROOT / "config"
-    CONFIG_GLOBAL:       Path = CONFIG_DIR / "global.json"
-    CONFIG_USER:         Path = CONFIG_DIR / "user.json"
-    CONFIG_BOTS_DIR:     Path = CONFIG_DIR / "bots"
-
-    DATA_DIR:      Path = PROJECT_ROOT / "data"
-    DATA_BOTS_DIR: Path = DATA_DIR / "bots"
-    LOCAL_IMG_DIR: Path = DATA_DIR / "local_images"
-
-    CONTENT_DIR:         Path = PROJECT_ROOT / "content"
-    CONTENT_CHARACTERS_DIR: Path = CONTENT_DIR / "characters"
-    CONTENT_QUERIES_DIR: Path = CONTENT_DIR / "queries"
-    CONTENT_DECKS_DIR:   Path = CONTENT_DIR / "decks"
-    CONTENT_RANDOM_DIR:  Path = CONTENT_DIR / "random"
-    CONTENT_EXCEL_DIR:   Path = CONTENT_DIR / "excel"
+    @classmethod
+    def _apply_root(cls, root: Path) -> None:
+        for name, path in _derive_paths(root).items():
+            setattr(cls, name, path)
 
     @classmethod
     def configure_project_root(cls, project_root: str | os.PathLike[str]) -> None:
@@ -33,21 +66,7 @@ class Paths:
         at an isolated workspace. This remains deliberately process-global:
         callers must not run Bots from different roots concurrently.
         """
-        root = Path(project_root).expanduser().resolve()
-        cls.PROJECT_ROOT = root
-        cls.CONFIG_DIR = root / "config"
-        cls.CONFIG_GLOBAL = cls.CONFIG_DIR / "global.json"
-        cls.CONFIG_USER = cls.CONFIG_DIR / "user.json"
-        cls.CONFIG_BOTS_DIR = cls.CONFIG_DIR / "bots"
-        cls.DATA_DIR = root / "data"
-        cls.DATA_BOTS_DIR = cls.DATA_DIR / "bots"
-        cls.LOCAL_IMG_DIR = cls.DATA_DIR / "local_images"
-        cls.CONTENT_DIR = root / "content"
-        cls.CONTENT_CHARACTERS_DIR = cls.CONTENT_DIR / "characters"
-        cls.CONTENT_QUERIES_DIR = cls.CONTENT_DIR / "queries"
-        cls.CONTENT_DECKS_DIR = cls.CONTENT_DIR / "decks"
-        cls.CONTENT_RANDOM_DIR = cls.CONTENT_DIR / "random"
-        cls.CONTENT_EXCEL_DIR = cls.CONTENT_DIR / "excel"
+        cls._apply_root(Path(project_root).expanduser().resolve())
 
     @classmethod
     def bot_data_dir(cls, bot_id: str) -> Path:
@@ -120,3 +139,8 @@ class Paths:
         except ValueError:
             raise ValueError(f"路径越界: {rel!r}")
         return resolved
+
+
+# Populate all derived paths from the project root at import time. Kept out of
+# the class body so the derivation logic lives only in _derive_paths.
+Paths._apply_root(Path(get_project_root()))
