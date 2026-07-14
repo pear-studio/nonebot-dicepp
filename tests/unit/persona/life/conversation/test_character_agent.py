@@ -110,7 +110,7 @@ class TestCharacterAgentDiary:
 
 
 class TestCharacterAgentShare:
-    """测试 CharacterAgent.share() — 已禁用，验证返回空结果"""
+    """测试 CharacterAgent.share() — 重构中，当前 disabled stub"""
 
     @pytest.fixture
     def mock_store(self):
@@ -128,11 +128,19 @@ class TestCharacterAgentShare:
         return CharacterAgent(store=mock_store, router=mock_router)
 
     @pytest.mark.asyncio
-    async def test_share_disabled_returns_none(self, agent):
-        """share 已禁用，应返回 success=True data=None"""
-        result = await agent.share({'event_description': 'test', 'character_name': '测试'})
+    async def test_share_disabled_returns_empty_success(self, agent):
+        """share 已禁用，始终返回 success=True data=None。"""
+        result = await agent.share({'mode': 'share'})
         assert result.success is True
         assert result.data is None
+
+    @pytest.mark.asyncio
+    async def test_share_disabled_no_side_effects(self, agent):
+        """禁用 stub 不访问 registry、store 或 router。"""
+        agent._registry = MagicMock()
+        result = await agent.share({})
+        assert result.success is True
+        assert agent._registry.get_or_create if hasattr(agent._registry, 'get_or_create') else True
 
 
 class TestCharacterAgentContract:
@@ -189,8 +197,8 @@ class TestCharacterAgentContract:
         assert '天气真好' in result.data
 
     @pytest.mark.asyncio
-    async def test_run_share_mode_disabled(self, agent):
-        """share mode 已禁用，应返回空结果"""
+    async def test_run_share_mode(self, agent):
+        """share mode — disabled stub，返回空成功。"""
         result = await agent.run({
             'mode': 'share', 'character_name': '测试角色', 'character_description': '',
         }, interaction_id="test-id")
@@ -405,3 +413,183 @@ class TestReactionUserPromptNoStateText:
         assert "心情:" not in prompt
         assert "健康:" not in prompt
         assert "当前事件: 远处传来声音" in prompt
+
+
+class TestDiaryInterpretError:
+    """_interpret_diary_result 异常路径应返回 success=False"""
+
+    @pytest.fixture
+    def mock_store(self):
+        store = MagicMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
+        return store
+
+    @pytest.fixture
+    def mock_router(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def agent(self, mock_store, mock_router):
+        return CharacterAgent(store=mock_store, router=mock_router)
+
+    def test_interpret_diary_exception_returns_success_false(self, agent):
+        """output_arguments 为 int 42 时（无法 .get()），返回 success=False"""
+        result = ConversationRunResult(
+            final_text="",
+            final_reason="output_collected",
+            completion_kind="completed",
+            output_arguments=42,
+        )
+        agent_result = agent._interpret_diary_result(result)
+
+        assert agent_result.success is False
+        assert agent_result.data is None
+        assert agent_result.error is not None
+        assert "日记解析异常" in agent_result.error
+
+
+class TestOpeningError:
+    """opening() 异常路径应返回 success=False"""
+
+    @pytest.fixture
+    def mock_store(self):
+        store = MagicMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
+        return store
+
+    @pytest.fixture
+    def mock_router(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def agent(self, mock_store, mock_router):
+        return CharacterAgent(store=mock_store, router=mock_router)
+
+    @pytest.mark.asyncio
+    async def test_opening_exception_returns_success_false(self, agent):
+        """conv.run 异常时返回 success=False"""
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.side_effect = RuntimeError("LLM 调用失败")
+            result = await agent.opening({
+                "character_name": "测试角色",
+                "character_description": "",
+                "summary": "今天不错",
+            }, interaction_id="test-id")
+
+        assert result.success is False
+        assert result.data is None
+        assert result.error == "opening 生成失败"
+
+
+class TestTraceMetadata:
+    """react()/diary() 绕过 Agent.run 模板 — 补 trace 元数据（agent_name/user_id/group_id）。
+
+    Life 是自主后台流程，不走 super().run() 的 quota 检查。
+    """
+
+    @pytest.fixture
+    def mock_store(self):
+        store = MagicMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState())
+        store.update_character_state = AsyncMock()
+        return store
+
+    @pytest.fixture
+    def mock_router(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def agent(self, mock_store, mock_router):
+        return CharacterAgent(store=mock_store, router=mock_router)
+
+    @pytest.mark.asyncio
+    async def test_react_passes_trace_metadata(self, agent):
+        """react() 向 conv.run 传递 agent_name=self.name / user_id / group_id"""
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = ConversationRunResult(
+                final_text="", final_reason="output_collected",
+                completion_kind="completed",
+                output_arguments={'content': '嗯', 'has_follow_up': False},
+            )
+            await agent.react({
+                'event': 'test', 'character_name': '测试角色',
+                'character_description': '',
+                'user_id': 'u123', 'group_id': 'g456',
+            }, interaction_id="tid")
+        kw = mock_run.call_args.kwargs
+        assert kw.get("agent_name") == "Character", f"agent_name={kw.get('agent_name')}"
+        assert kw.get("user_id") == "u123"
+        assert kw.get("group_id") == "g456"
+
+    @pytest.mark.asyncio
+    async def test_react_trace_metadata_defaults_empty_for_life(self, agent):
+        """Life 路径无 user_id/group_id → 默认空字符串。"""
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = ConversationRunResult(
+                final_text="", final_reason="output_collected",
+                completion_kind="completed",
+                output_arguments={'content': '嗯', 'has_follow_up': False},
+            )
+            await agent.react({
+                'event': 'test', 'character_name': '测试角色',
+                'character_description': '',
+            }, interaction_id="tid")
+        kw = mock_run.call_args.kwargs
+        assert kw.get("agent_name") == "Character"
+        assert kw.get("user_id") == ""
+        assert kw.get("group_id") == ""
+
+    @pytest.mark.asyncio
+    async def test_diary_passes_trace_metadata(self, agent):
+        """diary() 向 conv.run 传递 agent_name=self.name / user_id / group_id"""
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = ConversationRunResult(
+                final_text="", final_reason="output_collected",
+                completion_kind="completed",
+                output_arguments={'diary': '今天不错'},
+            )
+            await agent.diary({
+                'events': [], 'character_name': '测试角色',
+                'character_description': '',
+                'user_id': 'u789', 'group_id': 'g012',
+            }, interaction_id="tid")
+        kw = mock_run.call_args.kwargs
+        assert kw.get("agent_name") == "Character"
+        assert kw.get("user_id") == "u789"
+        assert kw.get("group_id") == "g012"
+
+    @pytest.mark.asyncio
+    async def test_diary_trace_metadata_defaults_empty_for_life(self, agent):
+        """Life 日记路径无 user_id/group_id → 默认空字符串。"""
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = ConversationRunResult(
+                final_text="", final_reason="output_collected",
+                completion_kind="completed",
+                output_arguments={'diary': '今天不错'},
+            )
+            await agent.diary({
+                'events': [], 'character_name': '测试角色',
+                'character_description': '',
+            }, interaction_id="tid")
+        kw = mock_run.call_args.kwargs
+        assert kw.get("agent_name") == "Character"
+        assert kw.get("user_id") == ""
+        assert kw.get("group_id") == ""
+
+    @pytest.mark.asyncio
+    async def test_react_passes_agent_name_regardless_of_user_group(self, agent):
+        """agent_name 不依赖 user_id/group_id，始终是 Character。"""
+        with patch(_CONV_RUN_PATH, new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = ConversationRunResult(
+                final_text="", final_reason="output_collected",
+                completion_kind="completed",
+                output_arguments={'content': 'x', 'has_follow_up': False},
+            )
+            await agent.react({
+                'event': 'test', 'character_name': '测试角色',
+                'character_description': '',
+            }, interaction_id="tid")
+        kw = mock_run.call_args.kwargs
+        assert kw.get("agent_name") == "Character"

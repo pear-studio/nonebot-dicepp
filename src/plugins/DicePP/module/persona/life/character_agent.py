@@ -113,18 +113,9 @@ class CharacterAgent(Agent):
         """订阅角色状态变更通知（体力/心情/健康三维合并为单 source，一次 DB 查询）。"""
         return [CharacterStateChangeSource(self.store)]
 
-    # TODO: 迁移到 build_system_prompt() 纯人设 + mode 特定 user prompt 分层范式
-    def _build_share_prompt(self, state: CharacterState, context: dict) -> str:
+    def _build_share_prompt(self, context: dict) -> str:
+        """构建 share-specific 系统指令（不含人设层，人设由 build_system_prompt 提供）。"""
         character_name = context.get("character_name", "")
-        character_description = context.get("character_description", "")
-        event_description = context.get("event_description", "")
-        reaction = context.get("reaction", "")
-        relationship_score = context.get("relationship_score", 0.0)
-        relation_label = context.get("relation_label", "")
-        user_profile_facts = context.get("user_profile_facts", "")
-        recent_history = context.get("recent_history", "")
-        message_type = context.get("message_type", "scheduled_event")
-        environment = context.get("environment", "private")
         share_examples = context.get("share_message_examples")
 
         # few-shot
@@ -137,12 +128,7 @@ class CharacterAgent(Agent):
             ]
             few_shot_block = "\n\n示例:\n" + "\n\n".join(replaced)
 
-        system_prompt = f"""你是{character_name}，正在给一个认识的人发消息。
-
-你的角色设定：
-{character_description}
-
-消息要求：
+        share_prompt = f"""消息要求：
 1. 用第一人称"我"说话，就像日常聊天
 2. 20-60字，约1-2句话
 3. 语气根据你和对方的关系亲密度调整
@@ -162,30 +148,9 @@ class CharacterAgent(Agent):
 输出方式：
 你必须通过结构化输出工具来发送消息，不要直接回复文本。
 {few_shot_block}"""
-        return system_prompt
+        return share_prompt
 
     # ── Opening Prompt ───────────────────────────────────────
-
-    # TODO: 迁移到 build_system_prompt() 纯人设 + mode 特定 user prompt 分层范式
-    def _build_opening_prompt(self, state: CharacterState, context: dict) -> str:
-        character_name = context.get("character_name", "")
-        character_description = context.get("character_description", "")
-        summary = context.get("summary", "")
-
-        system_prompt = f"""你是{character_name}，正在向你的主人汇报昨天的运行情况。
-
-角色设定:
-{character_description or '一个友好、尽责的AI助手'}
-
-请用第一人称"我"，以轻松自然的语气写2-3句话，作为每日报告的简短开场白。要点：
-1. 提及昨天发生了一些事（参考摘要），语气根据角色个性自然表达
-2. 不要复述具体数据，数据会由系统附加在报告中
-3. 像日常聊天一样自然，不要生硬的"汇报如下""数据汇总"等公文用语
-4. 不需要落款署名
-
-摘要信息:
-{summary}"""
-        return system_prompt
 
     # ── Build User Prompt ────────────────────────────────────
 
@@ -358,8 +323,37 @@ class CharacterAgent(Agent):
         return user_prompt
 
     def _build_opening_user_prompt(self, context: dict) -> str:
-        return "请用第一人称写2-3句日报开场白："
+        summary = context.get("summary", "")
+        return f"""请用第一人称"我"，以轻松自然的语气写2-3句话，作为每日报告的简短开场白。要点：
+1. 提及昨天发生了一些事（参考摘要），语气根据角色个性自然表达
+2. 不要复述具体数据，数据会由系统附加在报告中
+3. 像日常聊天一样自然，不要生硬的"汇报如下""数据汇总"等公文用语
+4. 不需要落款署名
 
+摘要信息:
+{summary}"""
+
+    # ── Template Method Overrides ───────────────────────────────
+
+    async def build_run_spec(self, context: dict) -> "AgentRunSpec":
+        """按 mode 分派到专用的 spec builder。"""
+        mode = context.get("mode", "reaction")
+        if mode == "reaction":
+            return await self._build_reaction_spec(context)
+        elif mode == "diary":
+            return await self._build_diary_spec(context)
+        return await self._build_reaction_spec(context)
+
+    async def interpret_result(
+        self, result: "ConversationRunResult", context: dict
+    ) -> AgentResult:
+        """按 mode 分派到专用的 result interpreter。"""
+        mode = context.get("mode", "reaction")
+        if mode == "reaction":
+            return self._interpret_reaction_result(result, context)
+        elif mode == "diary":
+            return self._interpret_diary_result(result)
+        return self._interpret_reaction_result(result, context)
 
     async def run(
         self, context: dict, *, interaction_id: str,
@@ -381,7 +375,6 @@ class CharacterAgent(Agent):
         else:
             return await self.react(context, interaction_id=interaction_id)
 
-    # TODO(T5): 收口到 Agent.build_run_spec()/interpret_result()，走 super().run() 模板方法
     async def react(
         self, context: dict, *, interaction_id: str,
     ) -> AgentResult:
@@ -404,23 +397,7 @@ class CharacterAgent(Agent):
             AgentResult(data=EventReactionResult)
         """
         context["mode"] = "reaction"
-
-        spec = await self._build_reaction_spec(context)
-
-        conv = await self._ensure_conversation(
-            context, system_prompt_override=spec.system_prompt,
-        )
-        result = await conv.run(
-            system_prompt=spec.system_prompt,
-            user_input=spec.user_input,
-            interaction_id=interaction_id,
-            tools=spec.tools,
-            output=spec.output,
-            selection=spec.selection,
-            limits=spec.limits,
-            run_tag=spec.run_tag,
-        )
-        return self._interpret_reaction_result(result, context)
+        return await super().run(context, interaction_id=interaction_id)
 
     async def _build_reaction_spec(self, context: dict) -> "AgentRunSpec":
         """T4: 构建 reaction 的 AgentRunSpec — say 作为 OutputSpec。
@@ -505,7 +482,6 @@ class CharacterAgent(Agent):
                 error=str(e),
             )
 
-    # TODO(T5): 收口到 Agent.build_run_spec()/interpret_result()，走 super().run() 模板方法
     async def diary(
         self, context: dict, *, interaction_id: str,
     ) -> AgentResult:
@@ -525,23 +501,7 @@ class CharacterAgent(Agent):
             AgentResult(data=str) — 日记文本
         """
         context["mode"] = "diary"
-
-        spec = await self._build_diary_spec(context)
-
-        conv = await self._ensure_conversation(
-            context, system_prompt_override=spec.system_prompt,
-        )
-        result = await conv.run(
-            system_prompt=spec.system_prompt,
-            user_input=spec.user_input,
-            interaction_id=interaction_id,
-            tools=spec.tools,
-            output=spec.output,
-            selection=spec.selection,
-            limits=spec.limits,
-            run_tag=spec.run_tag,
-        )
-        return self._interpret_diary_result(result)
+        return await super().run(context, interaction_id=interaction_id)
 
     async def _build_diary_spec(self, context: dict) -> "AgentRunSpec":
         """T4: 构建 diary 的 AgentRunSpec — submit_diary 作为 OutputSpec。
@@ -598,8 +558,9 @@ class CharacterAgent(Agent):
         except Exception as e:
             logger.error(f"日记生成解析失败: {e}", exc_info=True)
             return AgentResult(
-                success=True,
-                data="今天发生了一些事，但我太累了，简单记录一下。",
+                success=False,
+                data=None,
+                error=f"日记解析异常: {e}",
             )
 
     # TODO: share 重构中，暂时禁用
@@ -624,16 +585,15 @@ class CharacterAgent(Agent):
         context["mode"] = "opening"
 
         state = await self.load_state()
-        system_prompt = self._build_opening_prompt(state, context)
+        system_prompt = self.build_system_prompt(state, context)
         user_prompt = self._build_opening_user_prompt(context)
 
         try:
             from ..agent.runtime_types import LoopLimits, ToolKit
 
-            conv = await self._ensure_conversation(
-                context, system_prompt_override=system_prompt,
-            )
-            result = await conv.run(
+            result = await self._run_conversation(
+                context,
+                system_prompt_override=system_prompt,
                 system_prompt=system_prompt,
                 user_input=user_prompt,
                 interaction_id=interaction_id,
@@ -650,4 +610,4 @@ class CharacterAgent(Agent):
             return AgentResult(success=True, data=text[:200])
         except Exception:
             logger.warning("opening 生成失败", exc_info=True)
-            return AgentResult(success=True, data=None)
+            return AgentResult(success=False, data=None, error="opening 生成失败")

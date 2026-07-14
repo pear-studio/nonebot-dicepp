@@ -125,7 +125,7 @@ class TargetSelector:
                         )
                     )
         except Exception as e:
-            logger.error(f"获取高好感度用户失败: {e}")
+            logger.error(f"获取高好感度用户失败: {e}", exc_info=True)
 
         try:
             group_activities = await self.data_store.get_all_group_activities(
@@ -147,7 +147,7 @@ class TargetSelector:
                     )
                 )
         except Exception as e:
-            logger.debug(f"获取群活跃度失败: {e}")
+            logger.debug(f"获取群活跃度失败: {e}", exc_info=True)
 
         # 按优先级排序（force 已在前面，但再排一次确保稳定）
         targets.sort(key=lambda x: x.priority, reverse=True)

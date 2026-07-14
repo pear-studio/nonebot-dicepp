@@ -1371,6 +1371,51 @@ class TestSpontaneousIntentionContext:
         return life
 
 
+class TestSpontaneousDmWantToEnd:
+    """自发事件路径漏传 dm_want_to_end 修复。"""
+
+    @pytest.fixture
+    def mock_data_store(self):
+        store = MagicMock()
+        store.get_setting = AsyncMock(return_value=None)
+        store.set_setting = AsyncMock()
+        store.get_character_state = AsyncMock(return_value=CharacterState(energy=50, mood=50, health=50))
+        store.update_character_state = AsyncMock()
+        store.get_daily_events = AsyncMock(return_value=[])
+        store.add_daily_event = AsyncMock()
+        store.get_diary = AsyncMock(return_value=None)
+        return store
+
+    @pytest.fixture
+    def mock_event_agent(self):
+        return MockAgentSet()
+
+    @pytest.fixture
+    def character(self):
+        ext = PersonaExtensions(daily_events_count=1, event_day_start_hour=8, event_day_end_hour=22, event_jitter_minutes=0)
+        return Character(name='测试角色', description='探险家', extensions=ext)
+
+    @pytest.fixture
+    def life(self, mock_event_agent, mock_data_store, character):
+        config = CharacterLifeConfig(enabled=True, slot_match_window_minutes=15, timezone='Asia/Shanghai', chain_max_depth=1)
+        life = CharacterLife(config=config, data_store=mock_data_store, dm_agent=mock_event_agent.dm, character_agent=mock_event_agent.char, character=character)
+        life.boundary_receiver = MagicMock()
+        return life
+
+    @pytest.mark.asyncio
+    async def test_spontaneous_passes_dm_want_to_end_true(self, life, monkeypatch):
+        """自发事件路径 char_context 包含 dm_want_to_end=True（来自 DM 的 EventGenerationResult.want_to_end）。"""
+        fake_now = datetime(2024, 1, 1, 10, 0, 0)
+        set_test_clock(fake_now)
+        result = await life.inject_spontaneous_event('角色正在发呆')
+        assert result is True
+        call_kwargs = life.character_agent.react.call_args
+        assert call_kwargs is not None
+        char_context = call_kwargs[0][0]
+        assert char_context.get("dm_want_to_end") is True, \
+            f"自发事件路径应传递 dm_want_to_end=True, 实际={char_context.get('dm_want_to_end')}"
+
+
 class TestFirstBoot:
     """R1/R2/R7: _first_boot 生命周期 — 标记在 DM 成功后才清除，JSON 损坏视为首启"""
 
