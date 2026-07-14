@@ -186,7 +186,9 @@ class LLMCallCoordinator:
                     self._pending_messages.pop(target_key, None)
                     self._pending_call_fns.pop(target_key, None)
                     pending_futures = self._pending_result_futures.pop(target_key, [])
-                    self._locks.pop(target_key, None)
+                    # 保留 _locks 条目：若此时有等待者持有旧锁引用，pop 会导致
+                    # 后续 _get_lock 创建新锁，新旧两把锁下并发访问 _pending_*
+                    # 字典，消息丢失或重复处理。
                     for pending_future in pending_futures:
                         if pending_future is not None and not pending_future.done():
                             pending_future.cancel()
