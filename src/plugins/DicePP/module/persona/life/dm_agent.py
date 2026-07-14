@@ -245,10 +245,14 @@ class DMAgent(Agent):
         type_priority = {"plot": 0, "entity": 1, "detail": 2}
         matched.sort(key=lambda e: type_priority.get(e.type, 99))
 
-        # 去重：通过 Conversation 公共方法查询已注入的 key（不直接访问 _messages）
-        injected_keys: set[str] = set()
-        if self._conversation is not None:
-            injected_keys = self._conversation.get_keys_by_message_prefix(_STORY_DECK_INJECTION_PREFIX)
+        # 去重：通过 Conversation 公共方法查询已注入的 key（不直接访问 _messages）。
+        # 用 _ensure_conversation 取当前 conv：registry 托管路径下 self._conversation 恒
+        # 为 None，须从 registry 的 conv 查已注入 key，否则同日重复注入。内存路径下
+        # _ensure_conversation 幂等（返回/懒建 self._conversation），去重语义不变。
+        conv = await self._ensure_conversation(
+            context, system_prompt_override=self._cached_system_prompt,
+        )
+        injected_keys = conv.get_keys_by_message_prefix(_STORY_DECK_INJECTION_PREFIX)
 
         # 裁剪：≤ max_injection
         max_injection = getattr(self.config, "story_deck_max_injection", 3) if self.config else 3

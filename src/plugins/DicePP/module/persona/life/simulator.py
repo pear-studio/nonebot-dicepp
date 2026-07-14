@@ -5,6 +5,7 @@ CharacterLife 退回纯状态管理（槽位触发、数值加减）。
 """
 import asyncio
 import time
+import uuid
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from dataclasses import dataclass
 import random
@@ -17,6 +18,7 @@ from .proactive_scheduler import ProactiveScheduler
 from .protocols import EventSharePort
 from .diary import DiaryGenerator
 from .character_life import CharacterLife
+from .conversation_scope import ConversationScope
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
@@ -72,6 +74,7 @@ class LifeSimulator:
         sa_agent: Optional["SAAgent"] = None,
         port: Optional[EventSharePort] = None,
         decay_calculator: Optional[DecayCalculator] = None,
+        chat_registry: Optional[Any] = None,
     ):
         self.store = store
         self.character_life = character_life
@@ -84,6 +87,7 @@ class LifeSimulator:
         self.sa_agent = sa_agent
         self.port = port
         self.decay_calculator = decay_calculator
+        self.chat_registry = chat_registry
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用到所有子组件"""
@@ -128,19 +132,16 @@ class LifeSimulator:
                 logger.exception("tick: 主动消息调度失败")
 
     async def tick_daily(self) -> Optional[str]:
-        """每日调用 — 清理 trace、关系衰减、生成日记、SA 规划、Conversation compact"""
+        """每日调用 — 清理 trace、关系衰减、生成日记、SA 规划、Conversation compact。
+
+        R9: DM/Character 的 compact_conversation 放在 finally 块，确保即使 cleanup、
+        衰减或日记生成异常，日界 close 也会执行，避免 Conversation 跨虚构日泄漏。
+        """
+        diary = None
         try:
             await self._run_cleanup()
             await self.apply_relationship_decay_batch()
             diary = await self.diary_generator.generate_diary()
-
-            # 日终 compact Conversation（截断，释放 cache 资源）
-            for name, agent in [("DM", self.dm_agent), ("Character", self.character_agent)]:
-                if agent:
-                    try:
-                        await agent.compact_conversation()
-                    except Exception:
-                        logger.warning(f"{name} compact_conversation 失败", exc_info=True)
 
             # Phase 1: SA Agent 规划
             if diary and self.sa_agent:
@@ -148,6 +149,11 @@ class LifeSimulator:
                     await self._run_sa_planning()
                 except Exception as e:
                     logger.warning(f"SA 规划失败: {e}", exc_info=True)
+                # SA 自身 compact（finally 保证，见 SAAgent）
+                try:
+                    await self.sa_agent.compact_conversation()
+                except Exception:
+                    logger.warning("SA compact_conversation 失败", exc_info=True)
 
             if diary:
                 logger.info(f"生成日记: {len(diary)} 字")
@@ -155,6 +161,18 @@ class LifeSimulator:
         except Exception as e:
             logger.exception(f"tick_daily 失败: {e}")
             return None
+        finally:
+            # 日界 close 必须在 finally 执行——无论前序步骤是否异常，
+            # DM/Character 的 Conversation 都必须关闭，防止跨虚构日复用。
+            for name, agent in [("DM", self.dm_agent), ("Character", self.character_agent)]:
+                if agent:
+                    try:
+                        await agent.compact_conversation()
+                    except Exception:
+                        logger.warning(
+                            f"tick_daily finally: {name} compact_conversation 失败",
+                            exc_info=True,
+                        )
 
     async def _run_sa_planning(self) -> None:
         """执行 SA 叙事规划"""
@@ -171,6 +189,8 @@ class LifeSimulator:
         story_deck_count = await self.store.get_story_deck_count()
         story_deck_is_empty = story_deck_count == 0
 
+        interaction_id = uuid.uuid4().hex
+
         sa_context = {
             "character_name": self.character.name,
             "character_description": self.character.description,
@@ -180,7 +200,7 @@ class LifeSimulator:
             "story_deck_is_empty": story_deck_is_empty,
         }
 
-        result = await self.sa_agent.plan(sa_context)
+        result = await self.sa_agent.run(sa_context, interaction_id=interaction_id)
         if result.success:
             logger.info("SA 叙事规划完成")
         else:
@@ -251,6 +271,13 @@ class LifeSimulator:
             logger.warning(f"数据清理失败: {e}", exc_info=True)
 
     async def _send_msg(self, msg: Dict[str, Any]) -> None:
+        """发送主动消息。
+
+        R8: 先投递消息（port.send），成功后再写入 message_stream 和回流到 Chat
+        Conversation。投递失败则不落任何记录，确保历史中只出现实际送达的消息。
+        回流使用 append_visible（非 append_visible_if_active）：无 active session
+        时创建轻量 Conversation 记录，有 active 时走静默轮换 + append 语义。
+        """
         if not self.port:
             logger.warning("MessagePort 未注入，消息无法发送")
             return
@@ -264,6 +291,16 @@ class LifeSimulator:
                 f"_send_msg 收件人为空，丢弃消息: content={content[:30]}..."
             )
             return
+
+        # R8(a): 先投递（skip_history_record=True 防止 adapter 出站 hook 写入重复 stream），成功后再落记录
+        if not await self.port.send(user_id, group_id, content, skip_history_record=True):
+            logger.warning(
+                "_send_msg 发送失败: user_id=%s group_id=%s content=%s...",
+                user_id, group_id, content[:30],
+            )
+            return
+
+        # 投递成功：写入 message_stream（历史权威记录）
         effective_user_id = "assistant" if group_id else user_id
         msg_id = await self.store.add_message_stream(
             user_id=effective_user_id,
@@ -271,12 +308,24 @@ class LifeSimulator:
             role="assistant",
             type=MessageType.PROACTIVE,
             content=content,
-            display_name="我",
+            display_name=self.character.name,
         )
-        if not await self.port.send(user_id, group_id, content, msg_id=msg_id):
-            logger.warning(
-                "_send_msg 发送失败: user_id=%s group_id=%s content=%s...",
-                user_id,
-                group_id,
-                content[:30],
-            )
+
+        # R8(b)(c): 回流到 Chat Conversation——使用 append_visible 统一语义，
+        # 无 active session 时创建轻量 Conversation（无 ChatAgent），有 active
+        # 时走静默轮换 + append。静默过期检测由 append_visible 内部处理。
+        if self.chat_registry is not None:
+            try:
+                scope = (
+                    ConversationScope.for_group(group_id)
+                    if group_id
+                    else ConversationScope.for_private(user_id)
+                )
+                await self.chat_registry.append_visible(
+                    scope, msg_id, "assistant",
+                )
+            except Exception:
+                logger.warning(
+                    "主动消息回流失败: user_id=%s group_id=%s",
+                    user_id, group_id, exc_info=True,
+                )

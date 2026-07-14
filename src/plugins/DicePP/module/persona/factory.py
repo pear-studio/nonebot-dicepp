@@ -41,6 +41,10 @@ from .life.target import TargetSelector
 from .life.dm_agent import DMAgent
 from .life.character_agent import CharacterAgent
 from .life.sa_agent import SAAgent
+from .life.conversation_scope import ConversationScope, NS_LIFE_CHARACTER
+from .life.conversation_registry import ConversationRegistry
+from .life.conversation_summary import ProviderSummarizer
+from .life.change_sources import CharacterStateChangeSource
 from .llm.coordinator import LLMCallCoordinator
 from .llm.router import LLMRouter
 
@@ -426,11 +430,44 @@ async def _build_life(
     dm_agent: DMAgent,
     character_agent: CharacterAgent,
     sa_agent: SAAgent,
+    chat_registry: Optional[Any] = None,  # A4: Chat ConversationRegistry
 ) -> LifeSimulator:
     """组装 LifeSimulator
 
     Phase 1: Agent 引用注入到 ProactiveScheduler / DiaryGenerator / LifeSimulator。
+    A2: 创建 Life ConversationRegistry 并注入 DM / Character Agent。
     """
+    # A2: 创建 Life ConversationRegistry
+    max_rounds = config.background_llm_max_rounds if config else 10
+    from .agent.runtime_types import LoopLimits
+    from .agent.runtime import AgentRuntime
+    # router 从任一已构造的 Agent 获取（所有 Agent 共享同一 router 实例）
+    _router = dm_agent.router
+    life_registry = ConversationRegistry(
+        store,
+        runtime_factory=lambda: AgentRuntime(
+            router=_router, store=store,
+            limits=LoopLimits(max_rounds=max_rounds),
+        ),
+        change_source_factory=lambda scope: (
+            [CharacterStateChangeSource(store)]
+            if scope.namespace == NS_LIFE_CHARACTER
+            else []
+        ),
+        character_id_provider=lambda: character.character_id,
+        summarizer=ProviderSummarizer(_router),
+    )
+    dm_agent.inject_registry(
+        life_registry,
+        ConversationScope.for_life_dm(character.character_id),
+    )
+    character_agent.inject_registry(
+        life_registry,
+        ConversationScope.for_life_character(character.character_id),
+    )
+    # SA 不注入 registry（保持内存后即弃）
+    logger.info("A2: Life ConversationRegistry 已创建并注入 DM/Character Agent")
+
     target_selector = TargetSelector(
         data_store=store,
         bot_config=config,
@@ -478,6 +515,7 @@ async def _build_life(
         sa_agent=sa_agent,
         port=port,
         decay_calculator=decay_calculator,
+        chat_registry=chat_registry,
     )
 
 
@@ -642,6 +680,7 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         dm_agent=dm_agent,
         character_agent=character_agent,
         sa_agent=sa_agent,
+        chat_registry=chat.registry,
     )
 
     probe_results: Dict[tuple, bool] = {}

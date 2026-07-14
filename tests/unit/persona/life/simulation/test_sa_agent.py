@@ -265,3 +265,145 @@ class TestSABuildUserPrompt:
         }
         prompt = sa_agent._build_user_prompt(context, [])
         assert "还没有 fronts 和 story_deck 条目" not in prompt
+
+
+# ── R10: SA 自清理 — finally 块确保 Conversation 销毁 ────────
+
+
+class TestSASelfCleanup:
+    """R10: SAAgent.run() finally 块确保 Conversation 销毁。
+
+    SA 没有 registry（不使用会话聊天），Conversation 由内存 _conversation 持有。
+    run() 的 finally 块调用 compact_conversation()，不论成功/异常均清除。
+    """
+
+    @pytest.fixture
+    def store(self):
+        s = MagicMock()
+        s.get_sa_state = AsyncMock(return_value=SAState())
+        s.update_sa_state = AsyncMock()
+        s.get_story_deck_count = AsyncMock(return_value=0)
+        return s
+
+    @pytest.fixture
+    def router(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def agent(self, store, router):
+        return SAAgent(store=store, router=router)
+
+    @staticmethod
+    def _spec():
+        from plugins.DicePP.module.persona.agent.runtime_types import (
+            AgentRunSpec, ToolKit, LoopLimits,
+        )
+        from plugins.DicePP.module.persona.llm.selection import SUMMARIZE
+        return AgentRunSpec(
+            system_prompt="test", user_input="test", tools=ToolKit(),
+            output=None, selection=SUMMARIZE, limits=LoopLimits(max_rounds=5),
+        )
+
+    @pytest.mark.asyncio
+    async def test_sa_run_cleans_up_on_success(self, agent):
+        """R10(a): SA run 成功后 _conversation 已清空。"""
+        mock_conv = MagicMock()
+        mock_conv.run = AsyncMock(return_value=_make_conv_result(
+            output_arguments={"summary": "完成", "changed": True},
+        ))
+        agent._conversation = mock_conv
+        agent._system_prompt = "test prompt"
+
+        agent.build_run_spec = AsyncMock(return_value=self._spec())
+
+        async def mock_ensure(ctx, system_prompt_override=None):
+            return agent._conversation
+
+        agent._ensure_conversation = mock_ensure
+        agent.interpret_result = AsyncMock(
+            return_value=AgentResult(success=True, data={}),
+        )
+
+        result = await agent.run({}, interaction_id="r10_a")
+
+        assert result.success
+        # finally 块已清理
+        assert agent._conversation is None, "finally 应清空 _conversation"
+        assert agent._system_prompt is None, "finally 应清空 _system_prompt"
+
+    @pytest.mark.asyncio
+    async def test_sa_run_cleans_up_on_exception(self, agent):
+        """R10(b): conv.run 抛异常后 finally 仍清空 _conversation。
+
+        模拟 conv.run 抛出异常（如 LLM 调用失败），验证 finally 块仍执行清理。
+        """
+        mock_conv = MagicMock()
+        mock_conv.run = AsyncMock(side_effect=RuntimeError("LLM 失败"))
+        agent._conversation = mock_conv
+        agent._system_prompt = "test prompt"
+
+        agent.build_run_spec = AsyncMock(return_value=self._spec())
+
+        async def mock_ensure(ctx, system_prompt_override=None):
+            return agent._conversation
+
+        agent._ensure_conversation = mock_ensure
+        agent.interpret_result = AsyncMock(
+            return_value=AgentResult(success=False, data=None, error="不应走到这里"),
+        )
+
+        result = await agent.run({}, interaction_id="r10_b")
+
+        # 异常被 Agent.run() 的 except 捕获并返回失败结果
+        assert not result.success
+        # finally 块仍应清空
+        assert agent._conversation is None, "finally 应清空 _conversation"
+        assert agent._system_prompt is None, "finally 应清空 _system_prompt"
+
+    @pytest.mark.asyncio
+    async def test_sa_two_runs_create_new_conversation(self, agent):
+        """R10(c): 连续两次 SA run，第二次创建新 Conversation（不复用旧的）。
+
+        每次 run 的 finally 销毁旧 conv；第二次 _ensure_conversation
+        因 _conversation 为 None 创建新实例。
+        """
+        spec = self._spec()
+
+        conv1 = MagicMock()
+        conv1.run = AsyncMock(return_value=_make_conv_result(
+            output_arguments={"summary": "first", "changed": False},
+        ))
+        conv2 = MagicMock()
+        conv2.run = AsyncMock(return_value=_make_conv_result(
+            output_arguments={"summary": "second", "changed": False},
+        ))
+
+        call_count = 0
+
+        async def mock_ensure(ctx, system_prompt_override=None):
+            nonlocal call_count
+            call_count += 1
+            conv = conv1 if call_count == 1 else conv2
+            agent._conversation = conv
+            return conv
+
+        agent.build_run_spec = AsyncMock(return_value=spec)
+        agent._ensure_conversation = mock_ensure
+        agent.interpret_result = AsyncMock(
+            return_value=AgentResult(success=True, data={}),
+        )
+
+        # 第一次 run
+        r1 = await agent.run({}, interaction_id="r10_c_1")
+        assert r1.success
+        assert agent._conversation is None, "第一次 run 后应清空"
+
+        # 第二次 run
+        r2 = await agent.run({}, interaction_id="r10_c_2")
+        assert r2.success
+        assert agent._conversation is None, "第二次 run 后应清空"
+
+        # 两次使用了不同的 Conversation 对象（非复用）
+        assert conv1 is not conv2, "两次应使用不同 Conversation 对象"
+        assert conv1.run.call_count == 1
+        assert conv2.run.call_count == 1

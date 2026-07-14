@@ -77,6 +77,24 @@ class SAAgent(Agent):
         """SA 通过 ToolKit + OutputSpec 执行，不在此返回工具"""
         return []
 
+    # ── R10: SA 自清理 ──────────────────────────────────────
+
+    async def run(
+        self, context: dict, *, interaction_id: str,
+    ) -> AgentResult:
+        """SA 每次规划用后即弃——finally 块确保 Conversation 被销毁。
+
+        R10: 不再依赖外部调用者（LifeSimulator.tick_daily）记得清理。
+        覆盖成功、普通异常、取消三条路径。
+        """
+        try:
+            return await super().run(context, interaction_id=interaction_id)
+        finally:
+            try:
+                await self.compact_conversation()
+            except Exception:
+                logger.warning("SA compact_conversation 失败", exc_info=True)
+
     # ── T5: AgentRunSpec 路径 ─────────────────────────────────
 
     async def build_run_spec(self, context: dict) -> AgentRunSpec:

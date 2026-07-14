@@ -898,6 +898,7 @@ class CharacterLife:
             "energy": character_state.energy,
             "mood": character_state.mood,
             "health": character_state.health,
+            "dm_want_to_end": event_result.want_to_end,
         }
         char_result = await self.character_agent.react(char_context, interaction_id=interaction_id)
         if not char_result.success or not isinstance(char_result.data, EventReactionResult):

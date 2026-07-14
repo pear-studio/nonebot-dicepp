@@ -43,6 +43,21 @@ class Agent(ABC):
         self._max_rounds = config.background_llm_max_rounds if config else 10
         self._conversation: Optional["Conversation"] = None
         self._system_prompt: Optional[str] = None
+        # A2: Registry 注入 — 不为 None 时 Conversation 由 registry 托管
+        self._registry: Optional["ConversationRegistry"] = None
+        self._scope: Optional["ConversationScope"] = None
+
+    # ── Registry 注入 ─────────────────────────────────────────────
+
+    def inject_registry(self, registry: "ConversationRegistry",
+                        scope: "ConversationScope") -> None:
+        """注入 ConversationRegistry + scope，使 Conversation 由 registry 托管。
+
+        注入后 _ensure_conversation / compact_conversation 走 registry 路径。
+        子类在构造后由 factory 调用。
+        """
+        self._registry = registry
+        self._scope = scope
 
     async def load_state(self) -> Optional[BaseModel]:
         """加载状态，子类可覆盖。默认返回 state_model 实例或 None。"""
@@ -113,6 +128,10 @@ class Agent(ABC):
         不存在时加载 state、构建 system_prompt、创建 Conversation。
         system_prompt 只在 Conversation 生命周期内构建一次。
 
+        A2: 若已注入 registry，走 registry 托管（跳过内存路径）。
+        registry 路径不设 self._conversation（内存字段保持 None），
+        每个调用直接委托 registry.get_or_create（registry 内部有缓存）。
+
         Args:
             context: 用于 build_system_prompt 的上下文（若需要构建）
             system_prompt_override: 若提供，直接使用此 prompt 而非基类的
@@ -120,6 +139,10 @@ class Agent(ABC):
                                     调用方可使用此参数在首次创建 Conversation 时锁定
                                     自定义 system prompt；Conversation 已存在时忽略。
         """
+        # A2: Registry 托管路径 — 跳过内存 Conversation
+        if self._registry is not None:
+            return await self._registry.get_or_create(self._scope)
+
         if self._conversation is not None:
             return self._conversation
 
@@ -148,14 +171,41 @@ class Agent(ABC):
     async def compact_conversation(self) -> None:
         """每日收尾：清空 conversation 并重置状态。
 
-        调用 conv.clear() 清空所有消息，_conversation/_system_prompt 置 None。
+        A2: 若已注入 registry，委托 registry.close 关闭当前活跃 session，
+        跳过内存清理（registry 路径不设 self._conversation）。
+        否则走旧内存路径：调用 conv.clear() 清空所有消息，
+        _conversation/_system_prompt 置 None。
         TODO: 替换为 LLM 压缩（summarize 旧消息为一条摘要消息）
         """
+        if self._registry is not None:
+            await self._registry.close(self._scope)
+            return
         if self._conversation is None:
             return
         self._conversation.clear()
         self._conversation = None
         self._system_prompt = None
+
+    async def _run_conversation(
+        self,
+        context: dict,
+        *,
+        system_prompt_override: Optional[str] = None,
+        **run_kwargs: Any,
+    ) -> "ConversationRunResult":
+        """在 registry 生命周期 lease 内执行一轮 Conversation。
+
+        registry 托管路径必须把“定位 Conversation → run 完成”作为一个原子生命周期；
+        否则 daily/compact/Stage B 轮换可能在 LLM 尚未提交消息时关闭旧 session。
+        非 registry 的临时/旧路径保持原行为。
+        """
+        if self._registry is not None:
+            async with self._registry.run_lease(self._scope) as conv:
+                return await conv.run(**run_kwargs)
+        conv = await self._ensure_conversation(
+            context, system_prompt_override=system_prompt_override,
+        )
+        return await conv.run(**run_kwargs)
 
     # ── 核心执行 ──────────────────────────────────────────────
 
@@ -227,11 +277,9 @@ class Agent(ABC):
             if _router_has_quota(self.router):
                 await self.router.check_daily_quota(spec.user_id)
 
-            conv = await self._ensure_conversation(
-                context, system_prompt_override=spec.system_prompt,
-            )
-
-            result = await conv.run(
+            result = await self._run_conversation(
+                context,
+                system_prompt_override=spec.system_prompt,
                 system_prompt=spec.system_prompt,
                 user_input=spec.user_input,
                 interaction_id=interaction_id,

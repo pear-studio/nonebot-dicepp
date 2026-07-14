@@ -516,7 +516,8 @@ class ProactiveScheduler(BoundaryReceiver):
             raise
         except Exception as e:
             logger.warning(
-                f"构建分享上下文失败: user={target.user_id}, group={target.group_id}, error={e}"
+                f"构建分享上下文失败: user={target.user_id}, group={target.group_id}, error={e}",
+                exc_info=True,
             )
             return None
 

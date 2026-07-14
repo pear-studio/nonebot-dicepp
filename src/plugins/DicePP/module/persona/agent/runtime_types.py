@@ -197,8 +197,8 @@ class AgentRunSpec:
     selection: SelectionPolicy = CHAT
     limits: LoopLimits = field(default_factory=LoopLimits)
     run_tag: str = ""
-    user_id: str = ""
-    group_id: str = ""
+    user_id: str = ""  # Life（react/diary）路径不使用，仅作为 trace 元数据透传
+    group_id: str = ""  # 同上：Life 路径不涉及群聊会话，值恒为空字符串
 
 
 # ── AgentRunRequest ──────────────────────────────────────────────
