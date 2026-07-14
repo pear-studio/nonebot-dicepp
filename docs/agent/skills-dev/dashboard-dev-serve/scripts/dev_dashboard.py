@@ -42,11 +42,17 @@ import time
 import urllib.request
 from pathlib import Path
 
+def _find_project_root() -> Path:
+    """Walk up from this script to the nearest parent containing ``pyproject.toml``."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").exists():
+            return parent
+    raise RuntimeError("Cannot find project root (no pyproject.toml in ancestors)")
+
+
 DEFAULT_PORT = 5090
 SESSION_NAME = "dashboard-dev"
-# This script must run from the worktree root so frozen.get_project_root()
-# (used by dicepp-shell) resolves here.
-WORKTREE_ROOT = Path(__file__).resolve().parents[5]
+WORKTREE_ROOT = _find_project_root()
 WORKSPACE = WORKTREE_ROOT / ".dicepp-shell" / SESSION_NAME
 PID_FILE = WORKSPACE / "dashboard" / "data" / ".dev-pids.json"
 RUNTIME_JSON = WORKSPACE / "runtime.json"        # published by dicepp-shell serve
@@ -198,18 +204,8 @@ def _wait_serve_ready(serve_parent_pid: int,
             # this is a NEW runtime, not a leftover.
             if started_at >= launch_floor and runtime_ct != parent_create_time and _pid_alive(pid):
                 return True
+        # Parent dead → serve launch failed; no runtime.json will appear.
         if not _pid_alive(serve_parent_pid):
-            for _ in range(3):
-                if RUNTIME_JSON.exists():
-                    try:
-                        info = json.loads(RUNTIME_JSON.read_text(encoding="utf-8"))
-                        if (float(info.get("started_at", 0)) >= launch_floor
-                                and float(info.get("process_created_at", 0)) != parent_create_time
-                                and _pid_alive(int(info.get("pid", 0)))):
-                            return True
-                    except Exception:
-                        pass
-                    time.sleep(0.2)
             return False
         time.sleep(0.3)
     return False
@@ -343,6 +339,11 @@ def cmd_start(args) -> int:
         )
         # best-effort cleanup of the half-started dashboard
         _terminate_tree(uv_parent_pid)
+        print(
+            f"Hint: workspace '{WORKSPACE}' may be in an incomplete state. "
+            f"Run `{sys.argv[0]} stop` to clear stale artifacts before retrying.",
+            file=sys.stderr,
+        )
         return 2
 
     # The real listener PID (the uv worker), not the uv parent. This is what
@@ -465,6 +466,8 @@ def _serve_status_text() -> str:
         if pid and _pid_alive(int(pid)):
             host = info.get("host", "?")
             # IPv6 host (contains ':') is stored un-bracketed; bracket for URL.
+            # Deliberate duplication of utils.network.format_url_host — this
+            # script is standalone and cannot import from the DicePP package.
             host_disp = f"[{host}]" if ":" in str(host) else str(host)
             return f"running (pid={pid}, bot={info.get('bot_id', '?')}, url=http://{host_disp}:{info.get('port', '?')})"
     except (OSError, json.JSONDecodeError, ValueError, TypeError):
