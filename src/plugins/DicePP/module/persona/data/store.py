@@ -53,8 +53,9 @@ class PersonaDataStore:
     # SYSTEM_LOG 过滤条件，用于裁剪和内部逻辑
     _EXCLUDE_SYSTEM_LOG = "type != 'system_log'"
 
-    # 每个 user_id/group_id 保留的 AMBIENT 消息上限
-    _AMBIENT_MAX_PER_SCOPE = 50
+    # AMBIENT 冷数据保留期。过期行仅在未被任何 Conversation ref 引用时清理，
+    # 避免数量上限把长时间活跃 scope 中的引用裁成悬空引用。
+    _AMBIENT_RETENTION_DAYS = 30
 
     # Persona 面层查询过滤：排除系统日志，包含 ambient 以提供完整上下文
     _PERSONA_SCOPE = "type != 'system_log'"
@@ -295,6 +296,36 @@ class PersonaDataStore:
             rows = await cursor.fetchall()
             return [self._row_to_message(r) for r in reversed(list(rows))]
 
+    async def read_message_stream_batch(
+        self, ids: List[int]
+    ) -> Dict[int, UnifiedMessage]:
+        """按 id 批量读取 message_stream 记录，返回 {id: UnifiedMessage}。
+
+        供 Conversation 引用展开（render_resolved）使用：Conversation 只存
+        message_stream_id 引用，render 时批量取回权威正文。
+        不存在的 id 不出现在返回 dict 中（悬空引用由调用方 fallback 处理）。
+        """
+        if not ids:
+            return {}
+        # 去重并保持稳定；用参数占位符防注入
+        unique_ids = list(dict.fromkeys(int(i) for i in ids))
+        placeholders = ",".join("?" for _ in unique_ids)
+        result: Dict[int, UnifiedMessage] = {}
+        async with self.db.execute(
+            f"""
+            SELECT id, user_id, group_id, role, type, content, display_name, created_at,
+                   agent_run_id, interaction_id, segment_index, segment_phase, image_meta
+            FROM message_stream
+            WHERE id IN ({placeholders})
+            """,
+            unique_ids,
+        ) as cursor:
+            rows = await cursor.fetchall()
+        for r in rows:
+            msg = self._row_to_message(r)
+            result[msg.id] = msg
+        return result
+
     async def get_image_by_hash(
         self,
         user_id: str,
@@ -417,22 +448,26 @@ class PersonaDataStore:
         *, limit: int = 20, offset: int = 0,
         filter_user_id: Optional[str] = None,
     ) -> List[UnifiedMessage]:
-        """分页读取聊天记录（不需要关键词），时间降序返回（最新的在前）。"""
+        """分页读取聊天记录（不需要关键词），时间降序返回（最新的在前）。
+
+        scope 隔离（防越权）：私聊路径恒绑定 user_id（当前用户），filter_user_id
+        不能替换它、只能在群聊内按参与者收窄；跨用户私聊查询被结构性禁止。
+        """
         conditions = [PersonaDataStore._PERSONA_SCOPE]
         params: List[Any] = []
 
         if group_id:
             conditions.append("group_id = ?")
             params.append(group_id)
+            # 群聊：允许按群内参与者过滤（仍限定在本群）
+            if filter_user_id:
+                conditions.append("user_id = ?")
+                params.append(filter_user_id)
         else:
             conditions.append("group_id = ''")
-            if not filter_user_id:
-                conditions.append("user_id = ?")
-                params.append(user_id)
-
-        if filter_user_id:
+            # 私聊：查询目标恒为绑定用户，filter_user_id 无法改变（防越权读他人私聊）
             conditions.append("user_id = ?")
-            params.append(filter_user_id)
+            params.append(user_id)
 
         where_clause = " AND ".join(conditions)
         sql = f"""
@@ -477,8 +512,13 @@ class PersonaDataStore:
         if group_id:
             conditions.append("group_id = ?")
             params.append(group_id)
+            # 群聊：允许按群内参与者过滤（仍限定在本群）
+            if filter_user_id:
+                conditions.append("user_id = ?")
+                params.append(filter_user_id)
         else:
             conditions.append("group_id = ''")
+            # 私聊：查询目标恒为绑定用户，filter_user_id 无法改变（防越权读他人私聊）
             conditions.append("user_id = ?")
             params.append(user_id)
 
@@ -490,10 +530,6 @@ class PersonaDataStore:
         if type is not None:
             conditions.append("type = ?")
             params.append(type.value)
-
-        if filter_user_id is not None:
-            conditions.append("user_id = ?")
-            params.append(filter_user_id)
 
         if hours_back is not None:
             cutoff = self._wall_now() - timedelta(hours=hours_back)
@@ -595,103 +631,6 @@ class PersonaDataStore:
             ],
         }
 
-    async def _prune_message_stream_private(self, user_id: str) -> set:
-        """私聊按 user_id 维度保留最近 N 条。返回需清理的 cache_hash 集合。"""
-        async with self.db.execute(
-            f"SELECT COUNT(*) as cnt FROM message_stream WHERE user_id = ? AND group_id = '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
-            (user_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row and row["cnt"] <= self._message_stream_max_per_group:
-                return set()
-        # 收集被裁剪消息的图片缓存 hash
-        cache_hashes = await self._collect_pruned_image_cache_hashes(user_id, "")
-        await self.db.execute(
-            f"""
-            DELETE FROM message_stream
-            WHERE user_id = ? AND group_id = ''
-              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
-              AND id NOT IN (
-                SELECT id FROM message_stream
-                WHERE user_id = ? AND group_id = ''
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
-            )
-            """,
-            (user_id, user_id, self._message_stream_max_per_group),
-        )
-        await self.db.commit()
-        return cache_hashes
-
-    async def _prune_message_stream_group(self, group_id: str) -> set:
-        """群聊按 group_id 维度保留最近 N 条。返回需清理的 cache_hash 集合。"""
-        async with self.db.execute(
-            f"SELECT COUNT(*) as cnt FROM message_stream WHERE group_id = ? AND group_id != '' AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}",
-            (group_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row and row["cnt"] <= self._message_stream_max_per_group:
-                return set()
-        # 收集被裁剪消息的图片缓存 hash
-        cache_hashes = await self._collect_pruned_image_cache_hashes("", group_id)
-        await self.db.execute(
-            f"""
-            DELETE FROM message_stream
-            WHERE group_id = ? AND group_id != ''
-              AND {PersonaDataStore._EXCLUDE_SYSTEM_LOG}
-              AND id NOT IN (
-                SELECT id FROM message_stream
-                WHERE group_id = ? AND group_id != ''
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
-            )
-            """,
-            (group_id, group_id, self._message_stream_max_per_group),
-        )
-        await self.db.commit()
-        return cache_hashes
-
-    async def _collect_pruned_image_cache_hashes(self, user_id: str, group_id: str) -> set:
-        """收集即将被裁剪的消息中的图片 cache_hash 集合。"""
-        if not self.image_cache:
-            return set()
-        # 查询将被裁剪的消息（不在保留集中的消息）
-        if group_id:
-            where = "group_id = ? AND group_id != ''"
-            params = (group_id, group_id, self._message_stream_max_per_group)
-        else:
-            where = "user_id = ? AND group_id = ''"
-            params = (user_id, user_id, self._message_stream_max_per_group)
-        hashes: set = set()
-        try:
-            async with self.db.execute(
-                f"""
-                SELECT image_meta FROM message_stream
-                WHERE {where} AND image_meta IS NOT NULL AND image_meta != ''
-                  AND id NOT IN (
-                    SELECT id FROM message_stream WHERE {where}
-                    ORDER BY created_at DESC, id DESC LIMIT ?
-                  )
-                """,
-                params,
-            ) as cursor:
-                rows = await cursor.fetchall()
-            for row in rows:
-                if not row.get("image_meta"):
-                    continue
-                try:
-                    meta_list = json.loads(row["image_meta"])
-                    if isinstance(meta_list, list):
-                        for entry in meta_list:
-                            ch = entry.get("cache_hash")
-                            if ch:
-                                hashes.add(ch)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-        except Exception as e:
-            logger.warning(f"[Persona] 图片缓存裁剪扫描异常: {e}")
-        return hashes
-
     def _tick_and_check_prune(self, now: datetime) -> bool:
         """递增计数器并判断是否应触发裁剪：每 N 次写入或每 M 秒"""
         self._msg_stream_write_count += 1
@@ -704,7 +643,14 @@ class PersonaDataStore:
         return False
 
     async def _retain_message_stream(self, group_id: str, user_id: str) -> None:
-        """写入后触发保留策略：私聊按 user_id，群聊按 group_id（限频）"""
+        """写入后触发保留策略（限频）。
+
+        取消对用户可见 chat 消息的破坏性数量裁剪 —— 这些消息是
+        message_stream 权威记录、被 Conversation 以 message_stream_id 引用，
+        按固定条数删除会把引用裁成悬空引用，违背隔离/引用完整不变量。
+        仅保留 ambient（旁观）未引用冷数据与 system_log 过期淘汰；
+        图片二进制缓存、冷数据归档另行治理（见交接文档）。
+        """
         if not user_id and not group_id:
             return
         now = self._wall_now()
@@ -712,14 +658,6 @@ class PersonaDataStore:
             return
         self._msg_stream_write_count = 0
         self._last_prune_at = now
-        if group_id:
-            cache_hashes = await self._prune_message_stream_group(group_id)
-        else:
-            cache_hashes = await self._prune_message_stream_private(user_id)
-        # 清理被裁剪消息的图片缓存文件
-        if cache_hashes and self.image_cache:
-            for ch in cache_hashes:
-                self.image_cache.delete_cache(ch)
         await self._prune_ambient_messages(user_id, group_id)
         await self._prune_system_log()
 
@@ -731,42 +669,32 @@ class PersonaDataStore:
         await self.db.commit()
 
     async def _prune_ambient_messages(self, user_id: str, group_id: str) -> None:
-        """清理超出限额的 AMBIENT 消息，保留每个 scope 最近 N 条"""
+        """清理过期且未被 Conversation 引用的 AMBIENT 消息。
+
+        Conversation 的可见条目以 ``message_stream_id`` 引用权威正文。
+        因此保留策略不再按固定条数删除，且对 active/closed 等所有
+        session 的 ref 统一保护；只有超过保留期的孤儿行才可回收。
+        """
         if group_id:
             where = "group_id = ? AND group_id != ''"
             params = (group_id,)
         else:
             where = "user_id = ? AND group_id = ''"
             params = (user_id,)
-        async with self.db.execute(
-            f"SELECT COUNT(*) as cnt FROM message_stream WHERE {where} AND type = 'ambient'",
-            params,
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row and row["cnt"] <= self._AMBIENT_MAX_PER_SCOPE:
-                return
         await self.db.execute(
             f"""
             DELETE FROM message_stream
-            WHERE {where} AND type = 'ambient'
-              AND id NOT IN (
-                SELECT id FROM message_stream
-                WHERE {where} AND type = 'ambient'
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
+            WHERE {where}
+              AND type = 'ambient'
+              AND datetime(created_at) < datetime('now', ?)
+              AND NOT EXISTS (
+                SELECT 1
+                FROM persona_session_message AS conversation_message
+                WHERE conversation_message.entry_type = 'ref'
+                  AND conversation_message.message_stream_id = message_stream.id
               )
             """,
-            (*params, self._AMBIENT_MAX_PER_SCOPE),
-        )
-        await self.db.commit()
-
-    # ========== 消息相关 ==========
-
-    async def clear_messages(self, user_id: str, group_id: str) -> None:
-        """清空指定用户+群组的消息（精确匹配 user_id AND group_id）"""
-        await self.db.execute(
-            "DELETE FROM message_stream WHERE user_id = ? AND group_id = ?",
-            (user_id, group_id),
+            (*params, f"-{self._AMBIENT_RETENTION_DAYS} days"),
         )
         await self.db.commit()
 
@@ -2382,6 +2310,7 @@ class PersonaDataStore:
             token_budget=row.get("token_budget", DEFAULT_SESSION_TOKEN_BUDGET),
             token_estimate=row.get("token_estimate", 0),
             status=row["status"],
+            summary_text=row.get("summary_text") or "",
             cursors_json=row.get("cursors_json") or "{}",
             last_active_at=datetime.fromisoformat(row["last_active_at"]) if row.get("last_active_at") else None,
             created_at=datetime.fromisoformat(row["created_at"]) if row.get("created_at") else None,
@@ -2413,6 +2342,9 @@ class PersonaDataStore:
         status: str,
         last_active_at: datetime,
     ) -> "PersonaSession":
+        # 不变量：last_active_at 必须是 UTC。静默判定 _is_silence_expired 用 SQL
+        # julianday('now')（UTC）对比本列，传入本地时间会导致静默时长偏差。registry
+        # 热路径走 _create_session（依赖 DDL CURRENT_TIMESTAMP 默认，UTC），不经此方法。
         from .models import PersonaSession
         now_iso = last_active_at.isoformat()
         cursor = await self.db.execute(
@@ -2443,7 +2375,7 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT session_id, user_id, character_id, static_prompt, static_hash,
-                   token_budget, token_estimate, status, cursors_json, last_active_at, created_at
+                   token_budget, token_estimate, status, summary_text, cursors_json, last_active_at, created_at
             FROM persona_session
             WHERE user_id = ? AND status = 'active'
             ORDER BY last_active_at DESC
@@ -2460,7 +2392,7 @@ class PersonaDataStore:
         async with self.db.execute(
             """
             SELECT session_id, user_id, character_id, static_prompt, static_hash,
-                   token_budget, token_estimate, status, cursors_json, last_active_at, created_at
+                   token_budget, token_estimate, status, summary_text, cursors_json, last_active_at, created_at
             FROM persona_session
             WHERE session_id = ?
             """,
@@ -2472,6 +2404,9 @@ class PersonaDataStore:
             return self._row_to_persona_session(row)
 
     async def update_session(self, session_id: int, **updates: object) -> None:
+        # summary_text 不在 allowed 中：摘要写一次不可变，唯一合法写入走
+        # ConversationRegistry._ensure_summary_for_scope 的直 UPDATE；此处排除以在
+        # 通用更新 API 层强制 write-once，防止误经 update_session 改写摘要。
         allowed = {
             "static_prompt", "static_hash", "token_budget",
             "token_estimate", "status", "last_active_at",

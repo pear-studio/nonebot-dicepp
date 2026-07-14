@@ -46,6 +46,20 @@ async def test_search_history_with_keyword():
 
 
 @pytest.mark.asyncio
+async def test_search_history_private_ignores_llm_user_id():
+    # 越权修复：私聊 scope 下 LLM 传入的 user_id 被忽略，filter_user_id 恒为 None。
+    store = _store([_FakeMsg("u1", "user", "我的记录", "我")])
+
+    await _execute(
+        build_search_history_tool(store, user_id="u1", group_id="", search_max_chars=180),
+        keyword="记录", user_id="victim",
+    )
+
+    assert store.search_messages.await_args.kwargs["filter_user_id"] is None
+    assert store.search_messages.await_args.kwargs["user_id"] == "u1"
+
+
+@pytest.mark.asyncio
 async def test_search_history_empty_keyword():
     result = await _execute(build_search_history_tool(_store(), user_id="u1", group_id="g1", search_max_chars=180), keyword="")
 

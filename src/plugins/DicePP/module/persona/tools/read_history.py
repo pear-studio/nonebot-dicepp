@@ -9,7 +9,7 @@ class _ReadHistoryArgs(BaseModel):
     """分页读取聊天记录参数"""
     limit: int | None = Field(default=10, ge=LIMIT_MIN, le=LIMIT_MAX, description=f"返回条数（{LIMIT_MIN}-{LIMIT_MAX}）")
     offset: int | None = Field(default=0, ge=0, description="跳过前 N 条，与 limit 配合翻页")
-    user_id: str | None = Field(default=None, description="按用户 ID 过滤（可选）")
+    user_id: str | None = Field(default=None, description="仅群聊：按群内某参与者 ID 过滤（私聊忽略；不能改变查询范围）")
 
 
 async def _read_history_handler(parsed: BaseModel, ctx: ToolExecutionContext) -> ToolResult:
@@ -38,7 +38,10 @@ def build_read_history_tool(store, user_id="", group_id="", search_max_chars: in
 
         limit = max(LIMIT_MIN, min(LIMIT_MAX, parsed.limit or 10))
         offset = max(0, parsed.offset or 0)
-        filter_user_id = parsed.user_id or None
+        # scope 在构建时绑定，LLM 无法改变查询范围：
+        # 私聊恒查当前用户自己（忽略 parsed.user_id，防越权读他人私聊）；
+        # 群聊允许按群内参与者过滤（仍限定在已绑定 group_id 内）。
+        filter_user_id = (parsed.user_id or None) if group_id else None
 
         results = await store.read_messages(
             user_id=user_id,

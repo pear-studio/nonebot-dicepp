@@ -51,16 +51,8 @@ class TestMessageCRUD:
         assert msgs[2].content == 'msg4'
 
     @pytest.mark.asyncio
-    async def test_clear_messages(self, temp_db):
-        store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
-        await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
-        await store.clear_messages('u1', '')
-        msgs = await store.get_recent_messages('u1', limit=10)
-        assert len(msgs) == 0
-
-    @pytest.mark.asyncio
-    async def test_prune_message_stream(self, temp_db):
+    async def test_chat_visible_messages_not_pruned(self, temp_db):
+        # 阶段 1：用户可见 chat 消息被 Conversation 引用，取消破坏性数量裁剪。
         store = temp_db
         from plugins.DicePP.core.message_types import MessageType
         store._message_stream_max_per_group = 2
@@ -69,9 +61,105 @@ class TestMessageCRUD:
             await store.add_message_stream('u1', '', 'user', MessageType.CHAT, f'msg{i}')
         await store._retain_message_stream('', 'u1')
         msgs = await store.get_recent_messages('u1', limit=10)
-        assert len(msgs) == 2
-        assert msgs[0].content == 'msg3'
-        assert msgs[1].content == 'msg4'
+        # 5 条全部保留，不再裁成 2 条
+        assert len(msgs) == 5
+        assert [m.content for m in msgs] == ['msg0', 'msg1', 'msg2', 'msg3', 'msg4']
+
+    @pytest.mark.asyncio
+    async def test_ambient_retention_never_dangles_conversation_refs(self, temp_db):
+        """超过旧 2000 条上限的活跃 Conversation ref 仍完整。"""
+        store = temp_db
+        old_created_at = (datetime.now() - timedelta(days=31)).isoformat()
+        recent_created_at = datetime.now().isoformat()
+
+        await store.db.execute(
+            """
+            INSERT INTO persona_session
+                (user_id, character_id, status, scope_namespace, scope_key)
+            VALUES ('u1', 'char1', 'active', 'group', 'g1')
+            """
+        )
+        session_id = (await (
+            await store.db.execute("SELECT last_insert_rowid() AS id")
+        ).fetchone())["id"]
+        await store.db.executemany(
+            """
+            INSERT INTO message_stream
+                (user_id, group_id, role, type, content, created_at)
+            VALUES (?, ?, 'user', 'ambient', ?, ?)
+            """,
+            [('u1', 'g1', f'referenced-{i}', old_created_at) for i in range(2001)],
+        )
+        async with store.db.execute(
+            "SELECT id FROM message_stream ORDER BY id"
+        ) as cur:
+            referenced_ids = [row["id"] for row in await cur.fetchall()]
+        await store.db.executemany(
+            """
+            INSERT INTO persona_session_message
+                (session_id, role, content, message_stream_id, entry_type, sequence)
+            VALUES (?, 'user', '', ?, 'ref', ?)
+            """,
+            [(session_id, stream_id, sequence) for sequence, stream_id in enumerate(referenced_ids)],
+        )
+        await store.db.executemany(
+            """
+            INSERT INTO message_stream
+                (user_id, group_id, role, type, content, created_at)
+            VALUES ('u1', 'g1', 'user', 'ambient', ?, ?)
+            """,
+            [('expired-orphan', old_created_at), ('recent-orphan', recent_created_at)],
+        )
+        await store.db.commit()
+
+        await store._prune_ambient_messages('u1', 'g1')
+
+        async with store.db.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM persona_session_message AS conversation_message
+            LEFT JOIN message_stream
+              ON message_stream.id = conversation_message.message_stream_id
+            WHERE conversation_message.session_id = ?
+              AND conversation_message.entry_type = 'ref'
+              AND message_stream.id IS NULL
+            """,
+            (session_id,),
+        ) as cur:
+            dangling_count = (await cur.fetchone())["cnt"]
+        async with store.db.execute(
+            "SELECT content FROM message_stream WHERE group_id = 'g1'"
+        ) as cur:
+            remaining_contents = {row["content"] for row in await cur.fetchall()}
+
+        assert dangling_count == 0
+        assert len(referenced_ids) == 2001
+        assert 'expired-orphan' not in remaining_contents
+        assert 'recent-orphan' in remaining_contents
+
+    @pytest.mark.asyncio
+    async def test_read_message_stream_batch(self, temp_db):
+        # 供 Conversation 引用展开：按 id 批量取回权威正文。
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        id1 = await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'first', 'Alice')
+        id2 = await store.add_message_stream('u2', 'g1', 'user', MessageType.CHAT, 'second', 'Bob')
+
+        batch = await store.read_message_stream_batch([id2, id1, id1])  # 乱序+重复
+        assert set(batch.keys()) == {id1, id2}
+        assert batch[id1].content == 'first'
+        assert batch[id1].display_name == 'Alice'
+        assert batch[id2].content == 'second'
+
+    @pytest.mark.asyncio
+    async def test_read_message_stream_batch_empty_and_missing(self, temp_db):
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        assert await store.read_message_stream_batch([]) == {}
+        real = await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'x')
+        # 不存在的 id 不出现在结果中（悬空引用由调用方 fallback）
+        batch = await store.read_message_stream_batch([real, 999999])
+        assert set(batch.keys()) == {real}
 
     @pytest.mark.asyncio
     async def test_get_group_messages(self, temp_db):
@@ -105,18 +193,6 @@ class TestMessageCRUD:
         results = await store.search_messages('g1', type=MessageType.COMMAND, limit=10)
         assert len(results) == 1
         assert results[0].content == '.r 1d20'
-
-    @pytest.mark.asyncio
-    async def test_clear_messages_exact_match(self, temp_db):
-        store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
-        await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'u1 in g1')
-        await store.add_message_stream('u2', 'g1', 'user', MessageType.CHAT, 'u2 in g1')
-        await store.clear_messages('u1', 'g1')
-        msgs_u1 = await store.get_recent_messages('u1', 'g1', limit=10)
-        msgs_u2 = await store.get_recent_messages('u2', 'g1', limit=10)
-        assert len(msgs_u1) == 0
-        assert len(msgs_u2) == 1
 
     @pytest.mark.asyncio
     async def test_count_messages(self, temp_db):
@@ -435,6 +511,17 @@ class TestReadMessages:
         assert len(results) == 1
         assert results[0].content == 'from u2'
 
+    @pytest.mark.asyncio
+    async def test_read_messages_private_filter_cannot_leak_other_user(self, temp_db):
+        # 越权修复：私聊 scope 下 filter_user_id 不能改变查询目标读他人私聊。
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream('u1', '', 'user', MessageType.CHAT, '我的私聊')
+        await store.add_message_stream('victim', '', 'user', MessageType.CHAT, '受害者私聊')
+        results = await store.read_messages('u1', '', limit=10, filter_user_id='victim')
+        # 恒返回当前用户自己的私聊，绝不泄漏他人
+        assert [m.content for m in results] == ['我的私聊']
+
 class TestSearchMessagesPrivate:
     """测试 search_messages 私聊场景"""
 
@@ -447,6 +534,18 @@ class TestSearchMessagesPrivate:
         results = await store.search_messages('', keyword='奈雪', user_id='u1', limit=10)
         assert len(results) == 1
         assert results[0].content == '奈雪的茶好喝'
+
+    @pytest.mark.asyncio
+    async def test_search_messages_private_filter_cannot_leak_other_user(self, temp_db):
+        # 越权修复：私聊 scope 下 filter_user_id 不能改变查询目标搜他人私聊。
+        store = temp_db
+        from plugins.DicePP.core.message_types import MessageType
+        await store.add_message_stream('u1', '', 'user', MessageType.CHAT, '奈雪的茶好喝')
+        await store.add_message_stream('victim', '', 'user', MessageType.CHAT, '奈雪机密')
+        results = await store.search_messages(
+            '', keyword='奈雪', user_id='u1', filter_user_id='victim', limit=10,
+        )
+        assert [m.content for m in results] == ['奈雪的茶好喝']
 
 class TestRecentDiaries:
     """测试 get_recent_diaries 和 search_diaries"""
@@ -1223,6 +1322,37 @@ class TestSessionCRUD:
         assert fetched is not None
 
     @pytest.mark.asyncio
+    async def test_update_session_ignores_summary_text(self, temp_db):
+        """SP-01: summary_text 已被从 update_session 的 allowed 集合移除，更新时静默忽略。"""
+        store = temp_db
+        from datetime import datetime
+        session = await store.create_session(
+            user_id='u1', character_id='char1',
+            static_prompt='original', static_hash='h1', token_budget=64000,
+            status='active',
+            last_active_at=datetime(2026, 6, 1, 12, 0, 0),
+        )
+        # 直接写 summary_text 模拟已存在摘要的场景
+        await store.db.execute(
+            "UPDATE persona_session SET summary_text='原始摘要' WHERE session_id=?",
+            (session.session_id,),
+        )
+        await store.db.commit()
+        # 尝试通过 update_session 改写 summary_text（应被忽略）
+        await store.update_session(
+            session.session_id,
+            summary_text='新摘要',
+            status='archived',  # allowed 内字段应正常更新
+        )
+        fetched = await store.get_session_by_id(session.session_id)
+        assert fetched is not None
+        # summary_text 保持原值（未被 update_session 改写）
+        assert fetched.summary_text == '原始摘要', \
+            "summary_text 不应被 update_session 改写"
+        # allowed 内字段正常更新（防止误伤）
+        assert fetched.status == 'archived'
+
+    @pytest.mark.asyncio
     async def test_delete_session(self, temp_db):
         store = temp_db
         from datetime import datetime
@@ -1434,3 +1564,59 @@ class TestReputationRecovery:
         db_rel = await store.get_relationship('u1')
         assert db_rel is not None
         assert db_rel.reputation == 80.0
+
+
+class TestAmbientRefResolution:
+    """R3: 大量 ambient 消息写入后，Conversation ref 仍可通过 message_stream 解析。"""
+
+    @pytest.mark.asyncio
+    async def test_recent_ambient_refs_resolvable_during_retention(self, temp_db):
+        store = temp_db
+        from unittest.mock import MagicMock
+        from plugins.DicePP.core.message_types import MessageType
+        from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+        from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+
+        # 近期 ambient 不受冷数据清理影响，应始终可供 ref 展开。
+        msg_ids: list[int] = []
+        for i in range(55):
+            mid = await store.add_message_stream(
+                'u1', 'g1', 'user', MessageType.AMBIENT, f'ambient_msg_{i:03d}',
+            )
+            msg_ids.append(mid)
+
+        # 创建 ConversationRegistry 和 Conversation
+        reg = ConversationRegistry(
+            store, runtime_factory=MagicMock(return_value=MagicMock()),
+        )
+        scope = ConversationScope.for_group("g1")
+        conv = await reg.get_or_create(scope)
+
+        # 对每条 ambient 消息追加 ref 引用
+        for mid in msg_ids:
+            await conv.append_ref(mid, "user")
+
+        # 收集所有 ref 的 message_stream_id
+        ref_ids = [
+            m["message_stream_id"]
+            for m in conv.get_messages()
+            if m.get("entry_type") == "ref" and m.get("message_stream_id") is not None
+        ]
+        assert len(ref_ids) == 55, f"应收集 55 条 ref，实际 {len(ref_ids)}"
+
+        # 验证 DB 中 ambient 行数 >= ref 数量（R3: 2000 上限防止悬空引用）
+        async with store.db.execute(
+            "SELECT COUNT(*) AS cnt FROM message_stream WHERE type='ambient'"
+        ) as cur:
+            row = await cur.fetchone()
+        assert row["cnt"] >= len(ref_ids), \
+            f"ambient 行数({row['cnt']}) < ref 数({len(ref_ids)})，存在悬空引用"
+
+        # 验证所有 ref 均可通过 read_message_stream_batch 解析为有效内容
+        batch = await store.read_message_stream_batch(ref_ids)
+        assert len(batch) == len(ref_ids), \
+            f"应解析 {len(ref_ids)} 条，实际解析 {len(batch)} 条"
+        for i, mid in enumerate(msg_ids):
+            assert mid in batch, f"msg_id={mid} 未出现在 batch 中"
+            assert batch[mid].content == f'ambient_msg_{i:03d}'
+            assert batch[mid].type == MessageType.AMBIENT
