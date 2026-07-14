@@ -69,8 +69,8 @@ class TestMessageCRUD:
     async def test_ambient_retention_never_dangles_conversation_refs(self, temp_db):
         """超过旧 2000 条上限的活跃 Conversation ref 仍完整。"""
         store = temp_db
-        old_created_at = (datetime.now() - timedelta(days=31)).isoformat()
-        recent_created_at = datetime.now().isoformat()
+        old_created_at = (wall_now() - timedelta(days=31)).isoformat()
+        recent_created_at = wall_now().isoformat()
 
         await store.db.execute(
             """
