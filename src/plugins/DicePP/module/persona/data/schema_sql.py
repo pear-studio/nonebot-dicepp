@@ -353,8 +353,11 @@ CREATE TABLE IF NOT EXISTS persona_session (
     token_budget INTEGER DEFAULT 64000,
     token_estimate INTEGER DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active',
+    scope_namespace TEXT NOT NULL DEFAULT '',
+    scope_key TEXT NOT NULL DEFAULT '',
     cursors_json TEXT DEFAULT '{}',
     last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    summary_text TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -362,6 +365,20 @@ CREATE TABLE IF NOT EXISTS persona_session (
 CREATE_PERSONA_SESSION_INDEX = """
 CREATE INDEX IF NOT EXISTS idx_persona_session_user_status
 ON persona_session(user_id, status);
+"""
+
+# 同一 scope 同时最多一个 active Conversation（partial unique index 兜底防双 active）。
+# 只约束真实 scope；空 scope 是"未纳入 scope 管理"的哨兵（旧 session-manager 路径），不参与约束。
+CREATE_PERSONA_SESSION_ACTIVE_SCOPE_INDEX = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_persona_session_active_scope
+ON persona_session(scope_namespace, scope_key)
+WHERE status='active' AND scope_namespace != '' AND scope_key != '';
+"""
+
+# 按 scope 定位 Conversation（含 status 过滤）
+CREATE_PERSONA_SESSION_SCOPE_INDEX = """
+CREATE INDEX IF NOT EXISTS idx_persona_session_scope
+ON persona_session(scope_namespace, scope_key, status);
 """
 
 ALTER_PERSONA_SESSION_CURSORS_JSON = """
@@ -377,6 +394,8 @@ CREATE TABLE IF NOT EXISTS persona_session_message (
     tool_calls TEXT DEFAULT '',
     tool_call_id TEXT DEFAULT '',
     name TEXT,
+    message_stream_id INTEGER,
+    entry_type TEXT NOT NULL DEFAULT 'own',
     sequence INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES persona_session(session_id) ON DELETE CASCADE
@@ -389,10 +408,29 @@ ON persona_session_message(session_id, sequence);
 """
 
 
+# ── Schema v2 迁移：scope/引用列 + summary_text ──────────────
+# 复用 SchemaTarget.migrations 框架，语句按序执行。
+# 新建库不走这里（CREATE 语句已含新列/索引），仅升级旧库时应用。
+MIGRATE_PERSONA_V2_STATEMENTS = [
+    "ALTER TABLE persona_session ADD COLUMN scope_namespace TEXT NOT NULL DEFAULT '';",
+    "ALTER TABLE persona_session ADD COLUMN scope_key TEXT NOT NULL DEFAULT '';",
+    "ALTER TABLE persona_session_message ADD COLUMN message_stream_id INTEGER;",
+    "ALTER TABLE persona_session_message ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'own';",
+    # legacy 化：旧的无 scope active 行永不被 scope 查询命中，也不占用 active 唯一槽
+    "UPDATE persona_session SET status='legacy' "
+    "WHERE status='active' AND (scope_namespace='' OR scope_key='');",
+    CREATE_PERSONA_SESSION_ACTIVE_SCOPE_INDEX,
+    CREATE_PERSONA_SESSION_SCOPE_INDEX,
+    "ALTER TABLE persona_session ADD COLUMN summary_text TEXT NOT NULL DEFAULT '';",
+]
+
+
 # 跟角色走 -> persona_db
 PERSONA_SCHEMA_SQL = [
     CREATE_PERSONA_SESSION_TABLE,
     CREATE_PERSONA_SESSION_INDEX,
+    CREATE_PERSONA_SESSION_ACTIVE_SCOPE_INDEX,
+    CREATE_PERSONA_SESSION_SCOPE_INDEX,
     CREATE_PERSONA_SESSION_MESSAGE_TABLE,
     CREATE_PERSONA_SESSION_MESSAGE_INDEX,
     CREATE_MESSAGE_STREAM_TABLE,

@@ -188,6 +188,10 @@ class PersonaSession(BaseModel):
     token_budget: int = DEFAULT_SESSION_TOKEN_BUDGET
     token_estimate: int = 0
     status: str = "active"
+    # Conversation scope（namespace + key），DB 分列存，不拼裸串。
+    scope_namespace: str = ""
+    scope_key: str = ""
+    summary_text: str = ""
     cursors_json: str = "{}"
     last_active_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
@@ -202,6 +206,9 @@ class PersonaSessionMessage(BaseModel):
     tool_calls: str = ""  # JSON string
     tool_call_id: str = ""
     name: Optional[str] = None
+    # 可见消息引用 message_stream 权威记录；entry_type='ref' 为引用，'own' 为内部自有条目。
+    message_stream_id: Optional[int] = None
+    entry_type: str = "own"
     sequence: int = 0
     created_at: Optional[datetime] = None
 
