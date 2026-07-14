@@ -13,6 +13,12 @@ class DashboardPaths:
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     ))
 
+    # Dashboard install location / real project root — the directory the
+    # dashboard package lives in, regardless of the runtime workspace that
+    # PROJECT_ROOT may point at. Used for locating source files (e.g.
+    # pydantic_models.py) that travel with the package, not the workspace.
+    SOURCE_ROOT = Path(__file__).resolve().parents[2]
+
     # Dashboard data directory (alongside dashboard package dir)
     DATA_DIR = PROJECT_ROOT / "dashboard" / "data"
     DASHBOARD_DB = DATA_DIR / "dashboard.db"

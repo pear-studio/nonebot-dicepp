@@ -25,6 +25,31 @@ class Paths:
     CONTENT_EXCEL_DIR:   Path = CONTENT_DIR / "excel"
 
     @classmethod
+    def configure_project_root(cls, project_root: str | os.PathLike[str]) -> None:
+        """Rebind all project paths for a process-scoped runtime.
+
+        DicePP normally resolves these paths once at import time. Development
+        runtimes such as ``dicepp-shell`` need to point an already-imported Bot
+        at an isolated workspace. This remains deliberately process-global:
+        callers must not run Bots from different roots concurrently.
+        """
+        root = Path(project_root).expanduser().resolve()
+        cls.PROJECT_ROOT = root
+        cls.CONFIG_DIR = root / "config"
+        cls.CONFIG_GLOBAL = cls.CONFIG_DIR / "global.json"
+        cls.CONFIG_USER = cls.CONFIG_DIR / "user.json"
+        cls.CONFIG_BOTS_DIR = cls.CONFIG_DIR / "bots"
+        cls.DATA_DIR = root / "data"
+        cls.DATA_BOTS_DIR = cls.DATA_DIR / "bots"
+        cls.LOCAL_IMG_DIR = cls.DATA_DIR / "local_images"
+        cls.CONTENT_DIR = root / "content"
+        cls.CONTENT_CHARACTERS_DIR = cls.CONTENT_DIR / "characters"
+        cls.CONTENT_QUERIES_DIR = cls.CONTENT_DIR / "queries"
+        cls.CONTENT_DECKS_DIR = cls.CONTENT_DIR / "decks"
+        cls.CONTENT_RANDOM_DIR = cls.CONTENT_DIR / "random"
+        cls.CONTENT_EXCEL_DIR = cls.CONTENT_DIR / "excel"
+
+    @classmethod
     def bot_data_dir(cls, bot_id: str) -> Path:
         return cls.DATA_BOTS_DIR / bot_id
 

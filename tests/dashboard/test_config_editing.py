@@ -369,19 +369,24 @@ class TestFieldMetadata:
         assert m == {}
 
     @pytest.mark.skipif(not _HAVE_PYDANTIC, reason="Pydantic not installed")
-    def test_metadata_from_real_pydantic_models(self, monkeypatch, tmp_dashboard_paths):
-        """End-to-end: _get_config_field_metadata uses real BotConfig.model_json_schema().
-
-        Monkeypatch PROJECT_ROOT to the real project so pydantic_models.py is found.
-        """
-        from pathlib import Path
+    def test_metadata_loads_from_installed_source_for_isolated_workspace(
+        self,
+        tmp_dashboard_paths,
+    ):
+        """An isolated data workspace still gets the real BotConfig schema."""
         from dashboard.src.app import _get_config_field_metadata, _cached_config_layout
 
-        # Point to real project root where pydantic_models.py lives
-        real_root = Path(__file__).resolve().parent.parent.parent
-        monkeypatch.setattr("dashboard.src.config.DashboardPaths.PROJECT_ROOT", real_root)
+        assert not (
+            tmp_dashboard_paths
+            / "src"
+            / "plugins"
+            / "DicePP"
+            / "core"
+            / "config"
+            / "pydantic_models.py"
+        ).exists()
 
-        # Invalidate caches so they reload with the corrected PROJECT_ROOT
+        # Invalidate caches so the source-location fallback is exercised.
         import dashboard.src.app as app_mod
         app_mod._pydantic_module_cache = None
         app_mod._config_field_metadata_cache = None

@@ -8,21 +8,25 @@ DicePP Shell 是一个命令行工具，用于在隔离环境中测试 DicePP �
 
 ```bash
 # 查看主帮助
-python -m DicePP.shell --help
+uv run python -m DicePP.shell --help
 
 # 查看子命令帮助
-python -m DicePP.shell start --help
-python -m DicePP.shell send --help
-python -m DicePP.shell list --help
-python -m DicePP.shell rm --help
+uv run python -m DicePP.shell init --help
+uv run python -m DicePP.shell send --help
+uv run python -m DicePP.shell serve --help
+uv run python -m DicePP.shell serve --status
+uv run python -m DicePP.shell serve --stop
+uv run python -m DicePP.shell list --help
+uv run python -m DicePP.shell rm --help
 ```
 
 ## 功能特点
 
-- **会话隔离**: 每个会话拥有独立的数据库和状态
+- **工作区隔离**: 每个会话拥有独立的配置、数据库、内容目录和 Dashboard 数据
 - **骰子控制**: 可预设骰子序列，实现确定性测试
 - **多格式输出**: 支持文本和 JSON 两种输出格式
 - **多用户模拟**: 可模拟不同用户在同一群组中的交互
+- **常驻 Runtime**: 无需 QQ 即可保持真实 Bot 生命周期并接入 Dashboard
 
 ## 安装
 
@@ -37,12 +41,12 @@ uv pip install -e ".[dev]"
 ### 创建会话
 
 ```bash
-python -m DicePP.shell start <session_name> [--group <group_id>]
+python -m DicePP.shell init <session_name> [--group <group_id>]
 ```
 
 示例：
 ```bash
-python -m DicePP.shell start combat_test --group battle_01
+python -m DicePP.shell init combat_test --group battle_01
 ```
 
 ### 发送消息
@@ -76,6 +80,44 @@ python -m DicePP.shell send combat_test --user player1 --msg ".r 2d20 优势攻�
 python -m DicePP.shell send combat_test --user DM --msg ".init" --json
 ```
 
+**`send` 要求会话已通过 `serve` 常驻运行**——先在另一个终端执行
+`python -m DicePP.shell serve <会话名>`，再用 `send` 发消息。
+
+### 启动常驻测试 Runtime
+
+```bash
+python -m DicePP.shell serve combat_test --port 0
+```
+
+`--port 0` 会自动选择可用端口。Runtime 仅允许监听 `127.0.0.1` 或
+`::1`，不作为生产服务使用。
+
+接入同一工作区下的本地 Dashboard：
+
+```bash
+# 终端 1：让 Dashboard 使用 init 命令打印出的 session workspace
+DICEPP_PROJECT_ROOT=.dicepp-shell/combat_test uv run python -m dashboard
+
+# 终端 2：连接该 Dashboard
+python -m DicePP.shell serve combat_test \
+  --dashboard http://127.0.0.1:4090
+```
+
+PowerShell 中先执行
+`$env:DICEPP_PROJECT_ROOT = (Resolve-Path .dicepp-shell/combat_test)`，再启动
+Dashboard。Bot 与 Dashboard 必须指向同一 session workspace，才能共享控制 token、
+配置和数据库。
+
+默认禁用自动 tick，以保证测试确定性；需要验证 Persona、scheduler 等后台
+流程时显式添加 `--tick`。
+
+查看和停止 Runtime：
+
+```bash
+python -m DicePP.shell serve --status combat_test --json
+python -m DicePP.shell serve --stop combat_test
+```
+
 ### 列出现有会话
 
 ```bash
@@ -84,10 +126,10 @@ python -m DicePP.shell list
 
 输出示例：
 ```
-NAME             GROUP                SIZE  LAST USED
-------------------------------------------------------------
-combat_test      battle_01           2.4MB   5m ago
-test_session     test_group          1.1KB  1h ago
+NAME             GROUP                SIZE  LAST USED    STATE
+------------------------------------------------------------------------
+combat_test      battle_01           2.4MB   5m ago   running
+test_session     test_group          1.1KB  1h ago   stopped
 ```
 
 ### 删除会话
@@ -102,7 +144,7 @@ python -m DicePP.shell rm <session_name>
 
 ```bash
 # 创建会话
-python -m DicePP.shell start combat
+python -m DicePP.shell init combat
 
 # DM开启先攻
 python -m DicePP.shell send combat --user DM --msg ".init"
@@ -134,7 +176,7 @@ python -m DicePP.shell rm combat
 ### 场景2：角色卡管理
 
 ```bash
-python -m DicePP.shell start char_test
+python -m DicePP.shell init char_test
 
 # 创建角色卡
 python -m DicePP.shell send char_test --user player1 --msg ".角色卡记录
@@ -190,12 +232,15 @@ python -m DicePP.shell rm char_test
 
 ```
 .dicepp-shell/
+├── .locks/
+│   └── {session_name}.lock   # 进程生命周期锁（filelock, 在 session 目录外）
 ├── {session_name}/
 │   ├── meta.json          # 会话元数据
-│   ├── data/              # Bot 数据库
-│   │   └── bot.db
-│   └── logs/              # 群日志文件
-│       └── {group_id}/
+│   ├── config/            # 隔离配置, 不复制真实密钥
+│   ├── data/              # Bot 数据库和日志
+│   ├── content/           # 会话内容资源
+│   ├── dashboard/data/    # Dashboard 状态
+│   └── runtime.json       # 活跃 Runtime 地址（运行时存在）
 ```
 
 **注意**: `.dicepp-shell/` 目录已添加到 `.gitignore`，不会被提交到版本控制。
@@ -203,7 +248,7 @@ python -m DicePP.shell rm char_test
 ## 限制与注意事项
 
 1. **无实际网络交互**: 所有消息仅在本地处理，不会发送到真实的 QQ
-2. **单进程**: 同一时间只能运行一个 shell 命令
+2. **单 Runtime**: 每个会话同一时间只能运行一个 Bot Runtime
 3. **骰子序列**: `--dice` 只影响当前消息中的骰子投掷，不影响后续消息
 4. **状态隔离**: 不同会话之间数据完全隔离，但同一会话内所有用户共享状态
 
@@ -217,7 +262,9 @@ Windows 终端可能出现乱码，建议：
 
 ### 会话锁定
 
-如果进程异常退出，可能需要手动删除 `.dicepp-shell/{session}/` 目录。
+Runtime 使用 OS 级文件锁（filelock），进程退出（包括崩溃）后 OS 自动释放锁；
+不会出现"忘记 stop 后永久锁定"的情况。如果锁文件损坏，删除
+`.dicepp-shell/.locks/<会话名>.lock` 即可。
 
 ### 骰子序列耗尽
 

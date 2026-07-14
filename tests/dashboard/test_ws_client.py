@@ -35,6 +35,13 @@ def test_explicit_dashboard_address_overrides_runtime_default(monkeypatch):
     )
 
 
+def test_ipv6_dashboard_address_is_bracketed(monkeypatch):
+    monkeypatch.setenv("DPP_ADMIN_HOST", "::1")
+    monkeypatch.setenv("DPP_ADMIN_PORT", "4090")
+
+    assert ws_client.resolve_dashboard_url() == "ws://[::1]:4090/ws/control"
+
+
 class _FakeWebSocket:
     def __init__(self, *, auth_ok: bool = True, send_error: Exception | None = None):
         self.auth_ok = auth_ok

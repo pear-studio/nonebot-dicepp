@@ -70,7 +70,16 @@ uv run pytest tests/unit/persona/ -v
 uv run python bot.py
 ```
 
-Standalone 无 QQ 服务入口暂未作为当前运行方式维护，旧实现仅归档为 [archive/standalone_bot_legacy.py](archive/standalone_bot_legacy.py)，后续按 [backlog](backlog.md) 重写。
+无 QQ 的测试和联调使用隔离 Shell Runtime：
+
+```bash
+uv run dicepp-shell init dashboard-dev
+uv run dicepp-shell serve dashboard-dev --dashboard http://127.0.0.1:4090
+```
+
+该入口只监听本机，用于指令 E2E、Dashboard 控制通道和真实 Bot 生命周期
+验收，不作为生产部署方式。历史 standalone 实现仅归档为
+[archive/standalone_bot_legacy.py](archive/standalone_bot_legacy.py)。
 
 ## 新增命令
 

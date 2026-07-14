@@ -15,6 +15,7 @@ from typing import Callable, Optional
 import aiohttp
 
 from frozen import is_frozen
+from utils.network import format_url_host
 from module.dashboard_reporter.protocol import (
     auth as auth_msg,
     decode,
@@ -48,7 +49,8 @@ def resolve_dashboard_url() -> Optional[str]:
         host = "127.0.0.1"
 
     port = os.environ.get("DPP_ADMIN_PORT", "4090")
-    return f"ws://{host}:{port}/ws/control"
+    url_host = format_url_host(host)
+    return f"ws://{url_host}:{port}/ws/control"
 
 
 class ControlChannelClient:
