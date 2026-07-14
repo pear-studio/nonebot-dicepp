@@ -77,6 +77,21 @@ async def test_read_history_filter_user_id():
 
 
 @pytest.mark.asyncio
+async def test_read_history_private_ignores_llm_user_id():
+    # 越权修复：私聊 scope（group_id=""）下 LLM 传入的 user_id 被忽略，
+    # filter_user_id 恒为 None，查询目标锁定当前用户，无法读他人私聊。
+    store = _store([_FakeMsg("u1", "user", "我的消息", "我")])
+
+    await _execute(
+        build_read_history_tool(store, user_id="u1", group_id="", search_max_chars=180),
+        user_id="victim",
+    )
+
+    assert store.read_messages.await_args.kwargs["filter_user_id"] is None
+    assert store.read_messages.await_args.kwargs["user_id"] == "u1"
+
+
+@pytest.mark.asyncio
 async def test_read_history_store_none():
     result = await _execute(build_read_history_tool(None, user_id="u1", group_id="g1", search_max_chars=180))
 
