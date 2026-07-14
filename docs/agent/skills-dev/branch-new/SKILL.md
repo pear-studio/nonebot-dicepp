@@ -1,5 +1,5 @@
 ---
-name: start-feature
+name: branch-new
 description: 从 master 创建新的 feature 分支，基于 git worktree 实现环境隔离。
 license: MIT
 metadata:
@@ -9,7 +9,7 @@ metadata:
 
 从最新 master 创建功能分支，使用 git worktree 实现独立工作区，自动共享 `.venv` 环境。
 
-**Input**: 用户请求创建功能分支，如 "开新功能"、"/start-feature"、或提供分支名如 "feature/roll-refactor"。
+**Input**: 用户请求创建功能分支，如 "开新功能"、"/branch-new"、或提供分支名如 "feature/roll-refactor"。
 
 **Steps**
 
@@ -72,7 +72,7 @@ metadata:
    基于: origin/master
    worktree 路径: .claude/worktrees/<name>/
 
-   可以开始开发了。开发完成后用 /pr-create 创建 Pull Request。
+   可以开始开发了。提交完成后用 /branch-tidy 整理提交历史，用 /branch-polish 清理代码，最后 /pr-create 创建 Pull Request。
    ```
 
 8. **路径硬约束**
