@@ -118,8 +118,13 @@ class NoneBotClientProxy(ClientProxy):
             if isinstance(command, BotSendMsgCommand) and dice_bot is not None:
                 dice_bot.health_monitor.on_send_failure(e.info)
                 dice_bot.health_monitor.check_heartbeat()
+            # 消息投递状态是上层“成功后落历史”的事实边界，不能吞掉发送失败。
+            if isinstance(command, BotSendMsgCommand):
+                raise
         except Exception as e:
             logger.error(f"[OneBot] [UnknownException] {e}\n{traceback.format_exc()}")
+            if isinstance(command, BotSendMsgCommand):
+                raise
 
     async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
         from core.message_types import MessageType

@@ -357,7 +357,7 @@ class TestConfigMigration:
     def test_new_fields_assembled_correctly(self):
         """ChatConfig.from_persona() 装配新字段正确"""
         from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-        from plugins.DicePP.module.persona.chat.session import ChatConfig
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
         pc = PersonaConfig(
             max_history_turns=7,
             max_history_tokens=3000,
@@ -378,7 +378,7 @@ class TestDiaryContextConfig:
     def test_diary_uses_max_diary_context_chars(self):
         """_build_diary_context 使用 max_diary_context_chars"""
         from plugins.DicePP.core.config.pydantic_models import PersonaConfig
-        from plugins.DicePP.module.persona.chat.session import ChatConfig
+        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
         pc = PersonaConfig(
             max_diary_context_chars=300,
         )
@@ -905,3 +905,18 @@ class TestBuildImageMarkers:
         result = _build_image_markers(msg)
         # 标记之间无空格分隔，仅尾部有空格
         assert result == "[图片 h1][表情 h2] "
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 阶段 2：身份锚定禁止约束
+# ═══════════════════════════════════════════════════════════════════
+
+class TestAntiAnchorConstraint:
+    def test_static_prompt_contains_speaker_anti_anchor(self):
+        char = Character(name="苏晓", description="温柔的伙伴")
+        builder = ContextBuilder(char)
+        prompt = builder.build_static_prompt()
+        # 约束当前说话者以本轮 name 为准，禁止从历史名字误认
+        assert "name" in prompt
+        assert "当前说话者" in prompt
+        assert "误认" in prompt

@@ -55,24 +55,3 @@ async def test_shutdown_closes_store():
     await cmd.shutdown()
 
     app.store.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_persona_app_shutdown_delegates_to_session_manager():
-    """PersonaApp.shutdown 委托给 session_manager.shutdown"""
-    app = _make_app()
-    app.session_manager = AsyncMock()
-
-    await app.shutdown()
-
-    app.session_manager.shutdown.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_persona_app_shutdown_no_session_manager():
-    """PersonaApp.shutdown 在 session_manager=None 时安全跳过"""
-    app = _make_app()
-    app.session_manager = None
-
-    # Should not raise
-    await app.shutdown()

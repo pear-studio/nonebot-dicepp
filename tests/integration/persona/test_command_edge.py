@@ -57,12 +57,6 @@ class TestEdgeAndExceptionPaths(IsolatedAsyncioTestCase):
         await self.cmd.process_msg("你好", meta, None)
         assert "配额超限" in self.get_sent_content(self.cmd)
 
-    async def test_app_none_for_clear(self):
-        self.cmd.app = None
-        meta = self.make_private_meta(".ai clear")
-        await self.cmd.process_msg(".ai clear", meta, None)
-        assert "模块未初始化" in self.get_sent_content(self.cmd)
-
     async def test_introduction_and_empty_command(self):
         meta = self.make_private_meta(".ai unknown")
         await self.cmd.process_msg(".ai unknown", meta, None)

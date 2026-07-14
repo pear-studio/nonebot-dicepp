@@ -55,13 +55,13 @@ async def test_send_group_message_uses_group_port():
 
 
 @pytest.mark.asyncio
-async def test_send_without_proxy_drops_silently():
+async def test_send_without_proxy_reports_delivery_failure():
     bot = _make_bot(with_proxy=False)
     port = MessagePort(bot)
 
-    await port._send(user_id="u1", group_id="", content="hi")
+    delivered = await port.send(user_id="u1", group_id="", content="hi")
 
-    # 不应抛 AttributeError；测试通过即代表降级生效
+    assert delivered is False
 
 
 @pytest.mark.asyncio

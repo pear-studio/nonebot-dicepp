@@ -55,6 +55,7 @@ class DeliveryItem:
     image_url: str = ""
     message_type: MessageType = MessageType.CHAT
     agent_run_id: str = ""
+    display_name: str = "我"  # 写入 message_stream 的 assistant 说话者名（角色名）
 
 
 @dataclass
@@ -96,6 +97,9 @@ class DeliveryQueue:
     _sent_count: int = 0
     _failed_count: int = 0
     _sent_contents: list[str] = field(default_factory=list)
+    # 成功送达并写入 message_stream 的行 id（供 Conversation 以 ref 记录 assistant，
+    # 只记录实际送达的消息；发送失败不写 message_stream 故不入此列表）。
+    _sent_stream_ids: list[int] = field(default_factory=list)
 
     # ── 公开 API ──────────────────────────────────────────
 
@@ -135,6 +139,11 @@ class DeliveryQueue:
     @property
     def sent_count(self) -> int:
         return self._sent_count
+
+    @property
+    def sent_stream_ids(self) -> list[int]:
+        """成功送达并写入 message_stream 的行 id（按送达顺序）。"""
+        return self._sent_stream_ids
 
     @property
     def failed_count(self) -> int:
@@ -315,14 +324,15 @@ class DeliveryQueue:
             return
 
         # 写 message_stream
+        stream_id: Optional[int] = None
         try:
-            await self.store.add_message_stream(
+            stream_id = await self.store.add_message_stream(
                 user_id="assistant" if item.group_id else item.user_id,
                 group_id=item.group_id or "",
                 role="assistant",
                 type=item.message_type,
                 content=item.content,
-                display_name="我",
+                display_name=item.display_name or "我",
                 agent_run_id=item.agent_run_id,
                 interaction_id=item.interaction_id,
                 segment_index=item.call_index,
@@ -338,6 +348,8 @@ class DeliveryQueue:
             self._last_sent_at[iid] = time.monotonic()
             self._sent_count += 1
             self._sent_contents.append(item.content)
+            if isinstance(stream_id, int):
+                self._sent_stream_ids.append(stream_id)
 
 
 def _build_msg(content: str, image_url: str = "") -> str:

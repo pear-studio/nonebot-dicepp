@@ -66,7 +66,7 @@ class InboundMessageHook(Protocol):
         content: str,
         display_name: str,
         raw_msg: str = "",
-    ) -> None: ...
+    ) -> Optional[int]: ...
 
 
 # noinspection PyBroadException
@@ -719,12 +719,13 @@ class Bot:
                     continue
                 # 入站记录（逐 msg_cur 去重）
                 if not recorded and self._inbound_message_hooks:
+                    meta.inbound_message_stream_id = None
                     display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
                     msg_type = getattr(command, "message_type", None)
                     msg_type_val = msg_type.value if hasattr(msg_type, "value") else str(msg_type or msg_type_default)
                     for hook in self._inbound_message_hooks:
                         try:
-                            await hook(
+                            stream_id = await hook(
                                 user_id=meta.user_id,
                                 group_id=meta.group_id or "",
                                 role="user",
@@ -733,6 +734,8 @@ class Bot:
                                 display_name=display_name,
                                 raw_msg=meta.raw_msg,
                             )
+                            if stream_id is not None:
+                                meta.inbound_message_stream_id = stream_id
                         except Exception as e:
                             logger.warning(f"[InboundHook] 记录失败: {e}")
                     recorded = True
@@ -774,10 +777,11 @@ class Bot:
 
             # 未匹配任何命令的消息：以 ambient 类型记录（不参与 persona 上下文）
             if not recorded and self._inbound_message_hooks:
+                meta.inbound_message_stream_id = None
                 display_name = meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
                 for hook in self._inbound_message_hooks:
                     try:
-                        await hook(
+                        stream_id = await hook(
                             user_id=meta.user_id,
                             group_id=meta.group_id or "",
                             role="user",
@@ -786,6 +790,8 @@ class Bot:
                             display_name=display_name,
                             raw_msg=meta.raw_msg,
                         )
+                        if stream_id is not None:
+                            meta.inbound_message_stream_id = stream_id
                     except Exception as e:
                         logger.warning(f"[InboundHook] 记录失败: {e}")
 

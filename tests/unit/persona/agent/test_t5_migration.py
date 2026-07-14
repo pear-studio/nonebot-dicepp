@@ -763,6 +763,43 @@ class TestDeliveryQueue:
         mock_port.send.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_sent_stream_ids_captured_on_success(self):
+        """成功送达后记录 message_stream 行 id（供 assistant ref）。"""
+        from plugins.DicePP.module.persona.chat.delivery_queue import (
+            DeliveryQueue, DeliveryItem,
+        )
+        mock_port = MagicMock()
+        mock_port.send = AsyncMock(return_value=True)
+        mock_store = MagicMock()
+        mock_store.add_message_stream = AsyncMock(return_value=777)
+        queue = DeliveryQueue(port=mock_port, store=mock_store)
+        queue.enqueue(DeliveryItem(
+            content="回复", interaction_id="i1", call_index=0,
+            segment_phase="final", user_id="u1", group_id="",
+        ))
+        await queue.drain()
+        assert queue.sent_stream_ids == [777]
+
+    @pytest.mark.asyncio
+    async def test_sent_stream_ids_empty_on_failed_send(self):
+        """发送失败不写 message_stream，sent_stream_ids 为空（未送达不入可见历史）。"""
+        from plugins.DicePP.module.persona.chat.delivery_queue import (
+            DeliveryQueue, DeliveryItem,
+        )
+        mock_port = MagicMock()
+        mock_port.send = AsyncMock(return_value=False)
+        mock_store = MagicMock()
+        mock_store.add_message_stream = AsyncMock(return_value=1)
+        queue = DeliveryQueue(port=mock_port, store=mock_store)
+        queue.enqueue(DeliveryItem(
+            content="回复", interaction_id="i1", call_index=0,
+            segment_phase="final", user_id="u1", group_id="",
+        ))
+        await queue.drain()
+        assert queue.sent_stream_ids == []
+        mock_store.add_message_stream.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_consecutive_messages_get_jitter(self):
         """连续到达的消息应补 0.5s~1.5s 随机间隔"""
         from plugins.DicePP.module.persona.chat.delivery_queue import (

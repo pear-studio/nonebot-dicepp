@@ -21,6 +21,7 @@ def build_send_reply_segment_tool(
     group_id: str,
     max_chars: int = 2000,
     segment_count_max: int = 10,
+    display_name: str = "我",
 ) -> "ToolSpec":
     """T5: 构建 send_reply_segment 普通工具。
 
@@ -89,6 +90,7 @@ def build_send_reply_segment_tool(
             user_id=user_id,
             group_id=group_id,
             agent_run_id=ctx.run_id,
+            display_name=display_name,
         ))
         return ToolResult(observation=f"第 {ctx.call_index + 1} 段已发送")
 

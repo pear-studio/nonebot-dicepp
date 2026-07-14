@@ -74,8 +74,6 @@ class MessageStore(Protocol):
         limit: int = 5,
     ) -> List[UnifiedMessage]: ...
 
-    async def clear_messages(self, user_id: str, group_id: str) -> None: ...
-
 
 class RelationshipStore(Protocol):
     """persona_user_relationships + persona_score_history + persona_scoring_failures"""

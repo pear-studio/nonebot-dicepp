@@ -53,7 +53,6 @@ class PersonaApp:
     life: LifeSimulator
     store: PersonaDataStore
     port: MessagePort
-    session_manager: Any = None
     all_providers_disabled: bool = False
     current_character_name: str = ""
 
@@ -70,9 +69,8 @@ class PersonaApp:
         self.current_character_name = new_character_name
 
     async def shutdown(self) -> None:
-        """应用关闭时取消所有未完成的 background task。"""
-        if self.session_manager:
-            await self.session_manager.shutdown()
+        """应用关闭钩子。当前无需清理的后台资源（3b 轮换若引入定时器再在此收口）。"""
+        return None
 
     def get_character(self) -> Optional[Character]:
         return self.chat.character
@@ -83,17 +81,16 @@ class PersonaApp:
 
     # ── 对话 ──
 
-    async def clear_chat_history(self, user_id: str, group_id: str) -> None:
-        await self.chat.clear_history(user_id, group_id)
-
     async def chat_with_user(
         self, user_id: str, group_id: str, message: str, nickname: str,
         image_data_urls: Optional[List[str]] = None,
+        inbound_message_stream_id: Optional[int] = None,
     ) -> ChatOutcome:
-        from .chat.session import ChatCallContext
+        from .chat.chat_shared import ChatCallContext
         ctx = ChatCallContext(
             image_data_urls=image_data_urls,
             nickname=nickname,
+            inbound_message_stream_id=inbound_message_stream_id,
         )
         return await self.chat.chat(user_id, group_id, message, ctx=ctx)
 
@@ -622,14 +619,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     )
     logger.info("衰减计算器已初始化")
 
-    from .chat.session_manager import SessionManager
-    session_manager = SessionManager(
-        store=infra.store,
-        config=ChatConfig.from_persona(config),
-        timezone=config.timezone,
-    )
-    logger.info("SessionManager 已初始化")
-
     chat = _build_chat(ChatDeps(
         store=infra.store,
         message_store=infra.store,
@@ -646,8 +635,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         resolve_db=_make_resolve_query_db(bot),
         sleep_gate=character_life,
     ))
-
-    chat.session_manager = session_manager
 
     life = await _build_life(
         infra.store, character, config, coordinator, infra.port, decay_calculator,
@@ -673,7 +660,6 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
     logger.info("Persona 模块初始化完成")
     return PersonaApp(
         chat=chat, life=life, store=infra.store, port=infra.port,
-        session_manager=session_manager,
         all_providers_disabled=all_disabled,
         current_character_name=character_name,
     )

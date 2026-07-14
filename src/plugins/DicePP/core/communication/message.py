@@ -31,4 +31,7 @@ class MessageMetaData:
         self.permission: int = 0
         # 新增字段：消息唯一 ID（OneBot v11 为 int，统一转为 str 存）
         self.message_id: Optional[str] = None
+        # 当前入站消息写入 Persona message_stream 并 append_visible 成功后的行 ID。
+        # 每个 msg_cur 派发前由 Bot 重置，禁止用历史内容判等猜测 hook 是否成功。
+        self.inbound_message_stream_id: Optional[int] = None
 

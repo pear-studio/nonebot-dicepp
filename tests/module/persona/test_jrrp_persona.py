@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 
 from core.communication import MessageMetaData
-from plugins.DicePP.module.persona.chat.session import ChatCallContext
+from plugins.DicePP.module.persona.chat.chat_shared import ChatCallContext
 from plugins.DicePP.module.persona.chat.orchestrator import ChatOutcome
 from plugins.DicePP.core.config.pydantic_models import PersonaConfig
 
@@ -263,6 +263,30 @@ class TestHandleJrrp:
         assert cmd._send.await_count == 1
         cmd._send.assert_called_once_with("U123", "", fallback_text)
 
+    async def test_fallback_when_llm_returns_failed_status(self, mock_jrrp_result):
+        """R3: chat_command 返回 status='failed' 时回退到 format_jrrp_text 模板发送。"""
+        app = MagicMock()
+        app.chat.chat_command = AsyncMock(
+            return_value=ChatOutcome(status="failed", reason="provider_error")
+        )
+
+        cmd = _make_cmd(app=app)
+        cmd._send = AsyncMock()
+
+        meta = _make_meta()
+        fallback_text = "test_user的今日人品是:75\n人品比昨天上升了25.0%！"
+        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
+            with patch("utils.time.get_current_date_raw"):
+                with patch("module.misc.jrrp_utils.format_jrrp_text",
+                           return_value=fallback_text):
+                    result = await cmd._handle_jrrp("U123", "", meta)
+
+        assert result == []
+        # chat_command 被调用一次
+        app.chat.chat_command.assert_awaited_once()
+        # 回退时发送模板文本
+        cmd._send.assert_called_once_with("U123", "", fallback_text)
+
     async def test_works_without_data_store(self, mock_jrrp_result):
         """data_store=None 时 _handle_jrrp 仍能工作（transient_message 不依赖持久化）"""
         app = MagicMock()
@@ -299,7 +323,6 @@ class TestHandleJrrp:
         db.execute = AsyncMock()
         db.commit = AsyncMock()
         store._persona_db = db
-        store.clear_messages = AsyncMock()
 
         char = MagicMock()
         char.character_id = "test_e2e"
@@ -333,9 +356,11 @@ class TestHandleJrrp:
 
         # 短路真实 LLM turn，但保留 chat_command() 真实签名与 ctx 传递路径
         orch._ensure_conversation = AsyncMock(return_value=MagicMock())
-        orch._execute_chat_turn = AsyncMock(
+        mock_agent = MagicMock()
+        mock_agent.execute_turn = AsyncMock(
             return_value=ChatOutcome(status="sent", sent_count=1)
         )
+        orch._ensure_agent = MagicMock(return_value=mock_agent)
 
         # 组装 PersonaCommand，app.chat 指向真实 ChatOrchestrator
         app = MagicMock()
@@ -353,7 +378,7 @@ class TestHandleJrrp:
         # 不抛 TypeError 即为通过；LLM 评语由 delivery 发送，命令层不再 _send
         assert result == []
         cmd._send.assert_not_awaited()
-        orch._execute_chat_turn.assert_awaited_once()
+        mock_agent.execute_turn.assert_awaited_once()
 
 
 # ── Test: is_command=True propagation ────────────────────────────────────
@@ -403,63 +428,6 @@ class TestPersonaAppIsAwake:
         result = await app.is_awake()
         assert result is True
         chat.is_awake.assert_awaited_once()
-
-    async def test_sleep_gate_none_returns_true(self):
-        """ChatSession sleep_gate 为 None 时 is_awake 返回 True"""
-        from module.persona.chat.session import ChatSession
-
-        store = MagicMock()
-        router = MagicMock()
-        coordinator = MagicMock()
-        character = MagicMock()
-        config = PersonaConfig()
-        scoring_trigger = MagicMock()
-        response_handler = MagicMock()
-        context_builder = MagicMock()
-
-        session = ChatSession(
-            store=store, router=router,
-            coordinator=coordinator, character=character, config=config,
-            scoring_trigger=scoring_trigger, response_handler=response_handler,
-            context_builder=context_builder, sleep_gate=None,
-        )
-
-        result = await session.is_awake()
-        assert result is True
-
-    async def test_sleep_gate_awake_returns_true(self):
-        """sleep_gate.is_awake() 返回 True 时 is_awake 返回 True"""
-        from module.persona.chat.session import ChatSession
-
-        sleep_gate = MagicMock()
-        sleep_gate.is_awake = AsyncMock(return_value=True)
-
-        session = ChatSession(
-            store=MagicMock(), router=MagicMock(),
-            coordinator=MagicMock(), character=MagicMock(), config=PersonaConfig(),
-            scoring_trigger=MagicMock(), response_handler=MagicMock(),
-            context_builder=MagicMock(), sleep_gate=sleep_gate,
-        )
-
-        result = await session.is_awake()
-        assert result is True
-
-    async def test_sleep_gate_not_awake_returns_false(self):
-        """sleep_gate.is_awake() 返回 False 时 is_awake 返回 False"""
-        from module.persona.chat.session import ChatSession
-
-        sleep_gate = MagicMock()
-        sleep_gate.is_awake = AsyncMock(return_value=False)
-
-        session = ChatSession(
-            store=MagicMock(), router=MagicMock(),
-            coordinator=MagicMock(), character=MagicMock(), config=PersonaConfig(),
-            scoring_trigger=MagicMock(), response_handler=MagicMock(),
-            context_builder=MagicMock(), sleep_gate=sleep_gate,
-        )
-
-        result = await session.is_awake()
-        assert result is False
 
 
 # ── Test: event_msg → LLM context 管道验证 ─────────────────────────────────
