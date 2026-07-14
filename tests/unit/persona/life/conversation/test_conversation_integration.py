@@ -30,6 +30,13 @@ class FakeStore:
     async def get(self, conv_id: str) -> Snapshot | None:
         return self._data.get(conv_id)
 
+    async def append(self, conv_id: str, messages: list[dict]) -> None:
+        snap = self._data.get(conv_id)
+        if snap is None:
+            snap = Snapshot(messages=[], cursors={})
+            self._data[conv_id] = snap
+        snap.messages.extend([dict(m) for m in messages])
+
     async def delete(self, conv_id: str) -> None:
         self._data.pop(conv_id, None)
 

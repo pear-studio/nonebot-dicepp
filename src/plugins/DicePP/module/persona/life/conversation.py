@@ -26,8 +26,11 @@ T3 重构：
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, runtime_checkable
+import re
+import json
 import uuid
 
 from utils.logger import logger
@@ -47,6 +50,46 @@ from ..llm.selection import CHAT, SelectionPolicy
 
 # 通知消息 content 前缀
 NOTIFICATION_PREFIX = "[通知]"
+
+# Stage B token 估算：每条消息的固定结构开销（role 标签/消息分隔），
+# estimate_tokens 只算正文，补此余量使总估算不低于真实用量。
+_MESSAGE_TOKEN_OVERHEAD = 4
+
+# 引用条目相关常量
+ENTRY_TYPE_REF = "ref"
+ENTRY_TYPE_OWN = "own"
+# 悬空引用（被引用的 message_stream 已被清除）的兜底正文
+DANGLING_REF_FALLBACK = "[对话历史已被清除]"
+
+# stream_loader：按 message_stream_id 批量取回权威消息记录。
+# 返回 {id: obj}，obj 需提供 .role 与 .content（如 UnifiedMessage）。
+StreamLoader = Callable[[List[int]], Awaitable[Dict[int, Any]]]
+
+
+# 说话者名（OpenAI 原生 name 字段）净化。display_name 源自用户可控的 QQ 群名片/
+# 昵称，注入前须净化：控制字符可破坏 HTTP/JSON 框架或触发严格端点校验，空白为历史
+# OpenAI name 禁用项（QQ 昵称常含空格），超长可被端点拒绝。保留 CJK/emoji 等可见字符
+# ——现网 CJK name 已稳定工作，证明端点容忍非 ASCII，无需剔除（剔除反而抹掉说话者身份）。
+_NAME_MAX_LEN = 64
+_WHITESPACE_RUN_RE = re.compile(r"\s+")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _sanitize_speaker_name(raw: str) -> str:
+    """净化说话者名以安全注入 OpenAI name 字段。
+
+    步骤：空白（含 \\n\\t）折叠为单下划线 → 剔除其余控制字符 → 去首尾下划线 →
+    截断到安全长度。净化后为空（如全控制字符）返回空串，调用方据此省略 name。
+    """
+    if not raw:
+        return ""
+    cleaned = _WHITESPACE_RUN_RE.sub("_", raw)
+    cleaned = _CONTROL_CHARS_RE.sub("", cleaned)
+    cleaned = cleaned.strip("_")
+    if len(cleaned) > _NAME_MAX_LEN:
+        cleaned = cleaned[:_NAME_MAX_LEN]
+    return cleaned
+
 
 # ── Snapshot & Store ──────────────────────────────────
 
@@ -79,6 +122,15 @@ class Store(Protocol):
 
     async def get(self, conv_id: str) -> Snapshot | None:
         """读取指定 conversation 的快照。"""
+        ...
+
+    async def append(self, conv_id: str, messages: list[dict]) -> None:
+        """增量追加消息（不触碰已有行）。
+
+        取消破坏性裁剪后消息只增，全量 put 在群聊高频下退化为 O(n²)。
+        append 仅 INSERT 新行（sequence 续 max+1），写 message_stream_id/entry_type 列。
+        全量 put 保留给"新建 session"和未来"摘要重写"。
+        """
         ...
 
     async def delete(self, conv_id: str) -> None:
@@ -176,13 +228,22 @@ class Conversation:
     """
 
     def __init__(self, store: Optional[Store] = None,
-                 runtime: Optional[Any] = None) -> None:
+                 runtime: Optional[Any] = None,
+                 stream_loader: Optional[StreamLoader] = None) -> None:
         self._store = store
         self._id: str | None = None
         self._messages: List[dict] = []
         self._change_sources: List[ChangeSource] = []
         self._cursors: dict[str, Any] = {}
         self._runtime = runtime  # AgentRuntime | None — T3 新路径
+        # 引用展开器：按 message_stream_id 批量取回权威正文。
+        # Life 路径无 ref 条目 → 永不触发，行为不变。
+        self._stream_loader = stream_loader
+        # 把「内存追加 + 对应增量落盘」视为一次提交。run() 与
+        # append_ref() 可以并发；若两者分别在内存追加后竞争 Store
+        # 锁，DB sequence 可能与 _messages 顺序不同。此锁只覆盖成功后的短
+        # 提交段，不覆盖 LLM 调用，因此旁观消息仍可在 run 期间进入。
+        self._commit_lock = asyncio.Lock()
 
     # ── ChangeSource 管理 ───────────────────────────────────────
 
@@ -254,6 +315,84 @@ class Conversation:
         for msg in new_messages:
             self._messages.append(msg)
 
+    # ── 引用条目与增量持久化──────────────────────────
+
+    async def append_ref(self, message_stream_id: int, role: str) -> None:
+        """追加一条对 message_stream 的可见引用条目并增量落盘。
+
+        用于消息接入（群聊/私聊用户消息、送达的 assistant 消息）：正文由
+        message_stream 权威保存，Conversation 只存引用，render 时展开。
+        """
+        entry = {
+            "role": role,
+            "entry_type": ENTRY_TYPE_REF,
+            "message_stream_id": int(message_stream_id),
+        }
+        async with self._commit_lock:
+            self._messages.append(entry)
+            await self._persist_new([entry])
+
+    async def _persist_new(self, new_entries: list[dict]) -> None:
+        """增量持久化本次新增条目。
+
+        - store 为 None（纯内存 Life 路径）→ 跳过。
+        - 尚未分配 conv_id（session 未创建）→ 退回全量 save() 创建并写全部。
+        - 已有 conv_id → 仅 append 新行，避免全量 DELETE+INSERT 的 O(n²)。
+        """
+        if self._store is None:
+            return
+        if self._id is None:
+            await self.save()
+            return
+        if new_entries:
+            await self._store.append(self._id, new_entries)
+
+    async def render_resolved(self, system_prompt: str) -> List[dict]:
+        """render 的引用展开版：ref 条目按 message_stream_id 取回正文后拼装。
+
+        展开时把 message_stream 的 display_name 注入 OpenAI 原生 `name`
+        字段来标识说话者（每条 ref 独立携带自己的说话者，非全局锚点；正文 content
+        不含名字，避免"首个名字锚定"）。display_name 为空时不加 name。
+        悬空引用（正文已被清除）兜底为 DANGLING_REF_FALLBACK。
+        内部自有条目（通知/工具/摘要）原样保留。
+        """
+        ref_ids = [
+            m["message_stream_id"]
+            for m in self._messages
+            if m.get("entry_type") == ENTRY_TYPE_REF and m.get("message_stream_id") is not None
+        ]
+        loaded: Dict[int, Any] = {}
+        if ref_ids and self._stream_loader is not None:
+            try:
+                loaded = await self._stream_loader(ref_ids)
+            except Exception:
+                logger.warning(
+                    "Conversation.render_resolved: stream_loader 失败，引用条目将兜底",
+                    exc_info=True,
+                )
+                loaded = {}
+
+        rendered: List[dict] = [{"role": "system", "content": system_prompt}]
+        for m in self._messages:
+            if m.get("entry_type") == ENTRY_TYPE_REF:
+                msid = m.get("message_stream_id")
+                record = loaded.get(msid) if msid is not None else None
+                content = getattr(record, "content", None) if record is not None else None
+                if content is None:
+                    content = DANGLING_REF_FALLBACK
+                msg: dict = {"role": m.get("role", "user"), "content": content}
+                display_name = getattr(record, "display_name", "") if record is not None else ""
+                if display_name:
+                    # 说话者身份走 OpenAI 原生 name 字段，不进 content 正文；
+                    # display_name 不可信（用户可控昵称），注入前净化，净化后为空则省略。
+                    safe_name = _sanitize_speaker_name(display_name)
+                    if safe_name:
+                        msg["name"] = safe_name
+                rendered.append(msg)
+            else:
+                rendered.append(dict(m))
+        return rendered
+
     # ── 执行模板（新路径 T3）───────────────────────────────────────
 
     async def run(
@@ -271,6 +410,8 @@ class Conversation:
         user_id: str = "",
         group_id: str = "",
         transient_context_messages: list[dict] | None = None,
+        record_user_input: bool = True,
+        token_budget: int = 0,
     ) -> ConversationRunResult:
         """T3 新执行模板：fetch → render → AgentRuntime.run() → commit/save。
 
@@ -279,15 +420,16 @@ class Conversation:
         职责顺序：
         1. fetch notifications（纯读）
         2. render messages: system_prompt + history + pending context + user_input + transient
-        3. 组装 AgentRunRequest
-        4. 调用 AgentRuntime.run(request)
-        5. runtime 成功后：
+        3. token 预算检查（Stage B 硬轮换）— 在 _runtime.run 前判定
+        4. 组装 AgentRunRequest
+        5. 调用 AgentRuntime.run(request)
+        6. runtime 成功后：
            - append pending notification context 到 _messages
            - apply notification cursors
            - append user_input 到 _messages
            - append result.message_delta 到 _messages
            - save conversation
-        6. runtime 失败时：
+        7. runtime 失败时：
            - 不提交 pending notification context
            - 不 apply cursor
            - 不保存本轮 user_input / message_delta
@@ -299,10 +441,25 @@ class Conversation:
         transient_context_messages：
         - 只用于本轮 LLM 输入，不保存进 Conversation 历史
 
+        record_user_input：
+        - True（默认，Life 路径）：user_input 注入本轮 render，成功后作为 own 条目
+          追加到 _messages 并落盘。
+        - False（chat 路径）：user_input 已由消息接入 hook 写入 message_stream 并
+          以 ref 条目 append 进本 Conversation（在 run 之前），render_resolved 已包含它。
+          故本轮不再重复注入 user_input，成功后也不再追加，避免重复与 few-shot 锚点。
+          此时序由入站 hook（`command._inbound_message_recorder`，经
+          `add_inbound_message_hook` 注册）早于命令派发触发保证；Conversation 自身
+          无法校验该跨组件不变量，阶段 2 调整 hook 注册时机或 chat_command 路径时须维持它。
+
         limit_reached 处理策略：
         - limit_reached 视为未完成，不提交任何状态变更。
           对于 collect 模式（必须调用指定工具），这防止了不完整结果被持久化。
           对于 chat 模式（未来），可能需要单独评估部分输出的保留策略。
+
+        token_budget：
+        - >0 时在 _runtime.run 前逐 content estimate_tokens 累加。
+        - 超出 token_budget 时立即返回 rotation_needed，不持久化本轮任何内容。
+        - =0 时跳过检查（兼容 Life 路径）。
         """
         _runtime = self._runtime
         if _runtime is None:
@@ -316,14 +473,44 @@ class Conversation:
         # 1. fetch — 纯读，不改变状态
         notifs, pending_cursors = await self.fetch_notifications()
 
-        # 2. render — 拼装完整消息
-        messages = self.render(system_prompt)
+        # 2. render — 拼装完整消息（引用条目按 message_stream_id 展开）
+        messages = await self.render_resolved(system_prompt)
         # pending notification context 作为持久上下文注入（成功后保存）
         pending_persistent: list[dict] = [n.to_message() for n in notifs]
         messages.extend(pending_persistent)
-        messages.append({"role": "user", "content": user_input})
+        # chat 路径 user_input 已在 render_resolved 历史末尾（ref），不重复注入
+        if record_user_input:
+            messages.append({"role": "user", "content": user_input})
         if transient_context_messages:
             messages.extend(transient_context_messages)
+
+        # Stage B 硬轮换 — _runtime.run 前 token 预算检查
+        # 逐消息累加 content 的 estimate_tokens，并计入 role/name/tool_calls 的结构开销
+        # （每条消息固定 +4 token 的角色/分隔开销 + tool_calls 的 JSON 长度估算），
+        # 使估算不低于真实用量，避免边界配置下软超窗。
+        # 此时 _runtime.run 尚未调用，无 LLM 调用、无持久化、幂等安全。
+        if token_budget > 0:
+            messages_total = 0
+            for m in messages:
+                messages_total += _MESSAGE_TOKEN_OVERHEAD
+                content = m.get("content", "")
+                if isinstance(content, str):
+                    messages_total += estimate_tokens(content)
+                elif isinstance(content, list):
+                    for p in content:
+                        if isinstance(p, dict):
+                            messages_total += estimate_tokens(p.get("text", ""))
+                name = m.get("name")
+                if isinstance(name, str) and name:
+                    messages_total += estimate_tokens(name)
+                tool_calls = m.get("tool_calls")
+                if tool_calls:
+                    messages_total += estimate_tokens(json.dumps(tool_calls, ensure_ascii=False))
+            if messages_total > token_budget:
+                return ConversationRunResult(
+                    final_reason="rotation_needed",
+                    completion_kind="completed",
+                )
 
         # 3. 组装 AgentRunRequest
         request = AgentRunRequest(
@@ -339,20 +526,30 @@ class Conversation:
         # 4. 调用 AgentRuntime.run(request)
         result: AgentRunResult = await _runtime.run(request)
 
-        # 5. 成功 → 提交 notification context、apply cursor、保存消息
+        # 5. 成功 → 提交 notification context、apply cursor、增量保存消息
         if result.completion.kind == "completed":
-            # append pending notification context（持久化到 _messages）
-            for msg in pending_persistent:
-                self._messages.append(msg)
-            # apply cursor
-            self.apply_notifications(notifs, pending_cursors)
-            # append user_input
-            self.add_message("user", user_input)
-            # append result.message_delta（不含 user_input）
             delta = list(result.message_delta)
-            self.add_messages(delta)
-            # save
-            await self.save()
+            async with self._commit_lock:
+                new_entries: list[dict] = []
+                # append pending notification context（持久化到 _messages）
+                for msg in pending_persistent:
+                    self._messages.append(msg)
+                    new_entries.append(msg)
+                # apply cursor
+                self.apply_notifications(notifs, pending_cursors)
+                # append user_input（仅 record_user_input=True；chat 路径已由 hook 追加 ref）
+                if record_user_input:
+                    ui_entry = {"role": "user", "content": user_input}
+                    self._messages.append(ui_entry)
+                    new_entries.append(ui_entry)
+                # 完整保存 Runtime 的因果历史，包括送达/输出类工具的调用与结果。
+                # 实际成功送达的正文还会由 ChatAgent 追加 assistant ref；两者分别表达
+                # Agent 的执行意图与外部世界实际观察到的消息，不能互相替代。
+                for m in delta:
+                    self._messages.append(m)
+                    new_entries.append(m)
+                # 内存追加与增量落盘同处 commit 临界区，保证重载顺序一致。
+                await self._persist_new(new_entries)
 
 
             return ConversationRunResult(
@@ -423,15 +620,18 @@ class Conversation:
             self._id = returned_id
 
     @classmethod
-    async def open(cls, conv_id: str, store: Store) -> "Conversation":
+    async def open(cls, conv_id: str, store: Store, *,
+                   runtime: Optional[Any] = None,
+                   stream_loader: Optional[StreamLoader] = None) -> "Conversation":
         """从存储恢复 Conversation。不存在时创建新的空实例。
 
         创建后调用方可注册 ChangeSource，然后首次 run()
         将触发懒恢复从 store 加载消息和 cursor。
 
         T3: system_prompt 不再从 DB 恢复——每次 run() 由调用方显式传入。
+        阶段 1: 可注入 runtime / stream_loader（供 ConversationRegistry 复用活跃期）。
         """
-        conv = cls(store=store)
+        conv = cls(store=store, runtime=runtime, stream_loader=stream_loader)
         conv._id = conv_id
         snapshot = await store.get(conv_id)
         if snapshot is not None:
@@ -451,6 +651,11 @@ class Conversation:
         """原地压缩：LLM 摘要旧消息 + 保留近期消息 → 替换 _messages → save。
 
         保留 cursors 不变——compact 是内存管理操作，不重新触发已有通知。
+
+        .. deprecated::
+            引入不可变摘要（Summarizer 协议 + _ensure_summary_for_scope），
+            compact 的破坏性原地替换与不可变摘要冲突。保留方法本体供阶段 3c
+            Life 全面接管前使用； 将删除并替换为 registry.close + 摘要。
 
         Returns:
             生成的摘要文本（用于日志/调试）。
@@ -504,13 +709,21 @@ class Conversation:
         return [{"role": "system", "content": system_prompt}, *self.get_messages()]
 
     def truncate(self, keep_recent: int) -> None:
-        """截断旧消息，保留最近 N 条。
+        """截断旧消息，保留最近 N 条，并保持 tool_call/result 配对完整。
 
-        当前实现为朴素尾部截取——从尾部向前保留最近 keep_recent 条消息，
-        不验证 tool_call_id 或消息角色配对关系。
+        从尾部向前保留最近 keep_recent 条消息。
+        如果边界消息是 tool role，向前展开截取以包含其配对的 assistant 消息
+        （通过 tool_call_id 匹配 assistant.tool_calls[].id），确保同一轮
+        assistant 发起的 tool_call ↔ tool_result 不被打断。
 
-        TODO: 实现配对感知截断（确保 assistant(tool_call) ↔ tool_result 不被打断）
-        或替换为 LLM compact（summarize 旧消息为一条摘要消息）。
+        配对保护只做一步检查——因为 tool 消息连续排列，边界至多
+        跨越一个 tool_result，其配对的 assistant 消息必然在边界之前。
+
+        Edge cases:
+        - 边界消息不是 tool role → 朴素截取，不做配对检查
+        - 边界 tool 消息缺少 tool_call_id → 跳过（无法配对）
+        - 未找到配对 assistant → 保持朴素截取（孤立的 tool 结果）
+        - 截取边界为 0（保留全部）→ 跳过，无需截取
         """
         if keep_recent <= 0:
             self._messages.clear()
@@ -518,18 +731,27 @@ class Conversation:
         if keep_recent >= len(self._messages):
             return
 
-        # 朴素尾部截取：从尾部向前取 keep_recent 条
-        # TODO: 实现配对感知截断
-        result: List[dict] = []
-        count = 0
-        for msg in reversed(self._messages):
-            result.append(msg)
-            count += 1
-            if count >= keep_recent:
-                break
+        # 朴素尾部截取起始索引 = 保留部分的首条位置
+        start = len(self._messages) - keep_recent
 
-        result.reverse()
-        self._messages = result
+        # 配对保护：如果边界消息是 tool role，展开以包含配对的 assistant
+        if start < len(self._messages) and self._messages[start].get("role") == "tool":
+            tool_call_id = self._messages[start].get("tool_call_id")
+            if tool_call_id:
+                # 向前查找含匹配 tool_call_id 的 assistant 消息
+                for i in range(start - 1, -1, -1):
+                    msg = self._messages[i]
+                    if msg.get("role") == "assistant":
+                        tool_calls = msg.get("tool_calls", [])
+                        if isinstance(tool_calls, list) and any(
+                            tc.get("id") == tool_call_id
+                            for tc in tool_calls
+                            if isinstance(tc, dict)
+                        ):
+                            start = i  # 展开截取边界至配对 assistant
+                            break
+
+        self._messages = list(self._messages[start:])
 
     def clear(self) -> None:
         """清空所有消息（用于跨天重置）。"""
