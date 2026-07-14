@@ -77,6 +77,16 @@ _TEST_BOT_CONFIG_BASELINE = _snapshot_files(
 
 
 def _cleanup_test_app_dir() -> None:
+    # The test process owns a project-scoped Loguru file sink. Linux permits
+    # unlinking an open file, while Windows correctly exposes the leaked
+    # handle. Close all process-lifetime handlers before removing the isolated
+    # pytest project root.
+    try:
+        from loguru import logger as loguru_logger
+
+        loguru_logger.remove()
+    except (ImportError, ValueError):
+        pass
     rmtree_retry(_TEST_APP_DIR)
 
 

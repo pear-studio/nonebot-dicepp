@@ -1,21 +1,28 @@
 """Bot 运行包装器 - 管理 Bot 实例、捕获输出、控制骰子"""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from ..core.bot import Bot
-from ..core.communication import MessageMetaData, MessageSender, GroupInfo, GroupMemberInfo
-from ..utils.logger import logger
-from ..adapter import ClientProxy
-from ..core.command import BotCommandBase, BotSendMsgCommand
-from ..utils.sequence_runtime import SequenceRuntime
+# Shell bot_runner 全部使用裸绝对导入 (core.X / utils.X / module.X / adapter)，
+# 与核心模块一致。不要改回 ..core.bot 相对导入： shell 以
+# plugins.DicePP.shell.bot_runner 路径被导入时会触发 sys.modules 双副本，
+# 导致 ContextVar 读写分离。
+from core.bot import Bot
+from core.config import Paths
+from core.communication import MessageMetaData, MessageSender, GroupInfo, GroupMemberInfo
+from utils.logger import logger, restore_runtime_logging
+from adapter import ClientProxy
+from core.command import BotCommandBase, BotSendMsgCommand
+from utils.sequence_runtime import SequenceRuntime
 # 注意：必须使用裸绝对导入 `module.roll.karma_runtime`，
 # 因为 Bot 内部大量使用该路径导入此模块。
 # 若使用相对导入 (`..module.roll.karma_runtime`)，会导致
 # `sys.modules` 中出现两个副本，ContextVar 的读写将分离，
 # 从而使 `--dice` 序列控制完全失效。
 from module.roll.karma_runtime import set_runtime, reset_runtime
+from .session import bot_id_for_session
 
 
 class CaptureProxy(ClientProxy):
@@ -91,29 +98,37 @@ class CaptureProxy(ClientProxy):
 class BotRunner:
     """管理单个 Bot 实例的生命周期和交互"""
 
-    TODO_MAX_WAIT_ITERATIONS = 30
-    TODO_POLL_INTERVAL = 0.5
+    _MAX_WAIT_ITERATIONS = 30
+    _POLL_INTERVAL = 0.5
 
-    def __init__(self, session_dir: Path):
+    def __init__(self, session_dir: Path, *, tick: bool = False):
         self.session_dir = session_dir
+        self.tick = tick
         self.bot: Optional[Bot] = None
         self.proxy = CaptureProxy()
         self._started = False
+
+    @property
+    def started(self) -> bool:
+        """Whether the Bot lifecycle is currently active."""
+        return self._started
+
+    @property
+    def dashboard_control_enabled(self) -> bool:
+        """Whether the running Bot has an open dashboard control channel."""
+        return self.bot is not None and self.bot._control_channel is not None
 
     async def start(self) -> None:
         """启动 Bot 实例"""
         if self._started:
             return
 
-        # 设置环境变量，让 Bot 使用 session_dir 作为数据目录
-        import os
-        original_data_dir = os.environ.get("DICEPP_APP_DIR")
-        os.environ["DICEPP_APP_DIR"] = str(self.session_dir)
-
         try:
+            self._activate_workspace()
+
             # 创建 Bot 实例
-            account = f"shell_{self.session_dir.name}"
-            self.bot = Bot(account=account, no_tick=True)
+            account = bot_id_for_session(self.session_dir.name)
+            self.bot = Bot(account=account, no_tick=not self.tick)
 
             # 配置
             self.bot.config.master = ["shell_master"]
@@ -125,31 +140,48 @@ class BotRunner:
             # no_tick=True 时 tick_loop 不运行，需要手动处理待办任务（如 persona 异步初始化）
             if self.bot._no_tick and self.bot.scheduler.pending:
                 completed = False
-                for _ in range(BotRunner.TODO_MAX_WAIT_ITERATIONS):  # 最多等待 30 秒
-                    await self.bot.scheduler.process(BotRunner.TODO_POLL_INTERVAL)
+                for _ in range(BotRunner._MAX_WAIT_ITERATIONS):  # 最多等待 30 秒
+                    await self.bot.scheduler.process(BotRunner._POLL_INTERVAL)
                     if not self.bot.scheduler.pending:
                         completed = True
                         break
-                    await asyncio.sleep(BotRunner.TODO_POLL_INTERVAL)
+                    await asyncio.sleep(BotRunner._POLL_INTERVAL)
                 if completed:
                     logger.info("pending tasks 处理完成")
                 else:
                     logger.warning("pending tasks 等待超时（30s），仍有未完成任务")
 
             self._started = True
-        finally:
-            # 恢复环境变量
-            if original_data_dir is not None:
-                os.environ["DICEPP_APP_DIR"] = original_data_dir
-            elif "DICEPP_APP_DIR" in os.environ:
-                del os.environ["DICEPP_APP_DIR"]
+        except BaseException:
+            if self.bot is not None:
+                try:
+                    await self.bot.shutdown_async()
+                except Exception:
+                    logger.exception("Shell Bot startup cleanup failed")
+                self.bot = None
+            raise
 
     async def stop(self) -> None:
         """停止 Bot 实例"""
-        if self.bot and self._started:
-            await self.bot.shutdown_async()
+        try:
+            if self.bot and self._started:
+                await self.bot.shutdown_async()
+        finally:
             self.bot = None
             self._started = False
+
+    def _activate_workspace(self) -> None:
+        """Point Paths, env vars, and loguru sinks at the session workspace.
+
+        serve_session is the process terminus — the process exits when the
+        server shuts down — so there is no need to save and restore the
+        previous state. The redirect is one-way and permanent for this process.
+        """
+        workspace = str(self.session_dir.resolve())
+        os.environ["DICEPP_PROJECT_ROOT"] = workspace
+        os.environ["DICEPP_APP_DIR"] = workspace
+        Paths.configure_project_root(workspace)
+        restore_runtime_logging()
 
     async def warp(
         self,

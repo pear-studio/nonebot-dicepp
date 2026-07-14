@@ -60,8 +60,6 @@ logger = logging.getLogger("dashboard")
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 
-# ── FastAPI app ───────────────────────────────────────────────────────────────
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1288,12 +1286,20 @@ def _load_pydantic_models_module():
 
     import importlib.util
 
-    _pydantic_path = DashboardPaths.PROJECT_ROOT / "src" / "plugins" / "DicePP" / "core" / "config" / "pydantic_models.py"
-    if not _pydantic_path.exists():
+    relative_path = Path("src/plugins/DicePP/core/config/pydantic_models.py")
+    candidates = (
+        DashboardPaths.PROJECT_ROOT / relative_path,
+        DashboardPaths.SOURCE_ROOT / relative_path,
+    )
+    _pydantic_path = next((path for path in candidates if path.exists()), None)
+    if _pydantic_path is None:
         return None
 
     try:
-        spec = importlib.util.spec_from_file_location("dicepp_pydantic_models", str(_pydantic_path))
+        spec = importlib.util.spec_from_file_location(
+            "dicepp_pydantic_models",
+            str(_pydantic_path),
+        )
         if spec is None:
             return None
         mod = importlib.util.module_from_spec(spec)
@@ -1707,8 +1713,6 @@ async def persona_character_save(name: str, request: Request):
               ip=request.client.host if request.client else "")
 
     return _ok({"saved": True})
-
-
 
 
 # ── Shared bot status computation ──────────────────────────────────────────────

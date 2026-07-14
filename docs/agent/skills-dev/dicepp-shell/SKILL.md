@@ -16,12 +16,18 @@ metadata:
 在项目根目录运行：
 
 ```bash
-uv run dicepp-shell start <session> [--group <group_id>]
+# 1. Create an isolated session workspace
+uv run dicepp-shell init <session> [--group <group_id>]
+# 2. Start the runtime (blocks the terminal; use a second terminal or background)
+uv run dicepp-shell serve <session> [--tick]
+# 3. Send messages to the running bot
 uv run dicepp-shell send <session> --user <user_id> --msg "<message>" [--dice <seq>] [--json]
+# 4. Stop the runtime and clean up
+uv run dicepp-shell serve --stop <session>
 uv run dicepp-shell rm <session>
 ```
 
-多步骤流程使用同一个 session 顺序发送消息。需要稳定骰子结果时使用 `--dice`，需要机器可读输出时使用 `--json`。
+多步骤流程使用同一个 session，在 serve 运行时反复 send。需要稳定骰子结果时使用 `--dice`，需要机器可读输出时使用 `--json`。send 必须依赖一个正在运行的 serve（不再自动创建临时 Bot）。
 
 ## 常用选项
 
@@ -40,7 +46,7 @@ uv run dicepp-shell rm <session>
 uv run dicepp-shell warp <session> --days <N> [--start <ISO>] [--dry-run] [--json]
 ```
 
-**执行前必须新建 session**（`dicepp-shell start <new-session>`），不要复用已有 session。复用会导致新旧 warp 的 `persona_story_deck`、`persona_daily_events`、`persona_sa_state` 等数据混在同一 DB 中，故事条目跨叙事污染，分析结果不可靠。
+**执行前必须新建 session**（`dicepp-shell init <new-session>`），不要复用已有 session。复用会导致新旧 warp 的 `persona_story_deck`、`persona_daily_events`、`persona_sa_state` 等数据混在同一 DB 中，故事条目跨叙事污染，分析结果不可靠。
 
 **常用选项：**
 
@@ -53,7 +59,7 @@ uv run dicepp-shell warp <session> --days <N> [--start <ISO>] [--dry-run] [--jso
 
 ```bash
 # 1. 新建独立 session
-uv run dicepp-shell start warp-qiqi-test
+uv run dicepp-shell init warp-qiqi-test
 
 # 2. 先 dry-run 确认成本
 uv run dicepp-shell warp warp-qiqi-test --days 2 --dry-run
@@ -83,8 +89,11 @@ uv run dicepp-shell rm warp-qiqi-test
 ## 示例
 
 ```bash
-uv run dicepp-shell start roll-check
+uv run dicepp-shell init roll-check
+uv run dicepp-shell serve roll-check &
+sleep 3
 uv run dicepp-shell send roll-check --user player1 --msg ".r 1d20 攻击" --dice 20 --json
+uv run dicepp-shell serve --stop roll-check
 uv run dicepp-shell rm roll-check
 ```
 
@@ -92,8 +101,8 @@ uv run dicepp-shell rm roll-check
 
 ```powershell
 # Windows
-.venv\Scripts\dicepp-shell.exe start <session>
+.venv\Scripts\dicepp-shell.exe init <session>
 
 # Unix/macOS/Linux
-.venv/bin/dicepp-shell start <session>
+.venv/bin/dicepp-shell init <session>
 ```

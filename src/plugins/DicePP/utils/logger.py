@@ -60,11 +60,6 @@ def _get_logs_dir() -> str:
     return os.path.join(project_root, "data", "logs")
 
 
-# 确保日志目录存在
-_logs_dir = _get_logs_dir()
-os.makedirs(_logs_dir, exist_ok=True)
-
-
 def _patch_extra(record: dict) -> None:
     """为每条 log record 补全缺失的 extra 字段。
 
@@ -98,10 +93,12 @@ def _add_stderr_handler(level: str) -> int:
 
 
 def _add_file_handlers() -> None:
+    logs_dir = _get_logs_dir()
+    os.makedirs(logs_dir, exist_ok=True)
     # 全级别持久化日志文件（按天轮转，保留 30 天，压缩归档）
     # 写入 data/logs/ 目录（挂载的 volume），容器重建后日志不丢失
     logger.add(
-        os.path.join(_logs_dir, "dicepp.log"),
+        os.path.join(logs_dir, "dicepp.log"),
         rotation="00:00",
         retention="30 days",
         compression="gz",
@@ -114,7 +111,7 @@ def _add_file_handlers() -> None:
 
     # error 级别独立日志文件（10MB 轮转，方便快速定位错误）
     logger.add(
-        os.path.join(_logs_dir, "error.log"),
+        os.path.join(logs_dir, "error.log"),
         rotation="10 MB",
         diagnose=False,
         level="ERROR",
@@ -124,13 +121,23 @@ def _add_file_handlers() -> None:
     )
 
 
-def restore_runtime_logging(level: str = "DEBUG") -> None:
-    """Restore DicePP handlers after framework logging reconfiguration."""
+def restore_runtime_logging(
+    level: str = "DEBUG",
+    *,
+    file_logging: bool = True,
+) -> None:
+    """Restore DicePP handlers after framework logging reconfiguration.
+
+    In the shell scenario, BotRunner calls this repeatedly (activate/restore),
+    so _STDERR_HANDLER_ID is rebuilt on every call — callers must not cache
+    that value across calls.
+    """
     global _STDERR_HANDLER_ID
     configure_redirected_stdio_utf8()
     logger.remove()
     _STDERR_HANDLER_ID = _add_stderr_handler(level)
-    _add_file_handlers()
+    if file_logging:
+        _add_file_handlers()
     # 配置默认 extra + 全局 patcher，确保所有 handler 都能安全格式化
     logger.configure(extra={"request_id": "--------"}, patcher=_patch_extra)
 
