@@ -300,11 +300,22 @@ class Agent(ABC):
 
             return await self.interpret_result(result, context)
         except Exception as e:
-            logger.exception(f"Agent {self.name} run 失败")
+            from ..llm.errors import classify
+            kind = classify(e)
+            if kind.is_retryable:
+                logger.warning(
+                    f"Agent {self.name} run 失败 ({kind.value})，等待重试"
+                )
+            else:
+                logger.error(
+                    f"Agent {self.name} run 失败 ({kind.value})，不可恢复",
+                    exc_info=True,
+                )
             return AgentResult(
                 success=False,
                 data=None,
                 error=f"{self.name} 执行异常: {e}",
+                error_kind=kind,
             )
 
 

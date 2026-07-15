@@ -260,6 +260,8 @@ class LLMRouter:
         """增加用量计数"""
         if not self.data_store:
             return
+        if not user_id:  # 系统调用（bot 自身运作）不计入用量
+            return
         from utils.time import wall_now
         today = wall_now(
             self.config.timezone if self.config else "Asia/Shanghai"
@@ -274,6 +276,8 @@ class LLMRouter:
         if not self.quota_check_enabled:
             return
         if not self.data_store:
+            return
+        if not user_id:  # 系统调用（bot 自身运作）不限配额
             return
         from utils.time import wall_now
         today = wall_now(

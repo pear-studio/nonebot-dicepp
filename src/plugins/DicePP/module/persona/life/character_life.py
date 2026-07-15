@@ -20,7 +20,7 @@ from ..data.store import PersonaDataStore
 from ..data.persist_keys import PERSONA_SK_CHARACTER_LIFE
 from ..data.models import CharacterState
 from utils.time import format_timestamp
-from .types import EventGenerationResult, EventReactionResult
+from .types import EventGenerationResult, EventReactionResult, UnrecoverableAgentError
 from .protocols import BoundaryReceiver
 
 if TYPE_CHECKING:
@@ -131,6 +131,7 @@ class CharacterLife:
         self._today_jittered_end: Optional[int] = None
         self._chain_triggered_today: bool = False  # deprecated: 保底续写逻辑已移除，仅保留序列化兼容，后续大版本清理
         self._last_good_night_fired_at: Optional[datetime] = None
+        self._slot_cooldown_until: Dict[int, float] = {}  # slot index → time.monotonic() 冷却截止
         self.boundary_receiver: Optional[BoundaryReceiver] = None
         self._boundaries_loaded = False
         self._state_lock = asyncio.Lock()
@@ -174,6 +175,7 @@ class CharacterLife:
 
     def _regenerate_slots_for_today(self) -> None:
         start, end, rng = self._compute_daily_boundaries()
+        self._slot_cooldown_until.clear()  # 新一天的槽位可能不同，旧冷却记录无意义
         self._today_jittered_start = start
         self._today_jittered_end = end
         if self.boundary_receiver is not None:
@@ -369,6 +371,10 @@ class CharacterLife:
             return False
         if i in self._fired_slot_indices:
             return False
+        # 单槽冷却检查：失败后 1 分钟内不重试，同时允许 tick 继续扫描后续槽位
+        cooldown_until = self._slot_cooldown_until.get(i)
+        if cooldown_until is not None and time.monotonic() < cooldown_until:
+            return False
         _slot_m, slot_type = slots[i]
         if (slot_type == "good_night"
                 and self._last_good_night_fired_at is not None
@@ -377,6 +383,9 @@ class CharacterLife:
             return False
         dist = min(abs(now_m - _slot_m), 1440 - abs(now_m - _slot_m))
         return dist <= win
+
+    # 可恢复错误后单槽冷却时间（秒），防止同一槽位每秒重试
+    _SLOT_COOLDOWN_SECONDS: float = 60.0
 
     async def tick(self) -> Optional[List[Dict[str, Any]]]:
         if not self.config.enabled:
@@ -398,9 +407,22 @@ class CharacterLife:
                 f"tick 槽位触发: slot={i}/{len(slots)} type={slot_type} "
                 f"plan={slot_m}min now={now_m}min remaining={remaining}"
             )
-            event_chain = await self.generate_daily_event(slot_type)
+            try:
+                event_chain = await self.generate_daily_event(slot_type)
+            except UnrecoverableAgentError as e:
+                # 不可恢复错误：放弃该槽位，避免无限重试
+                self._fired_slot_indices.add(i)
+                self._slot_cooldown_until.pop(i, None)
+                await self.save_persistent_state()
+                logger.error(
+                    f"tick: 槽位因不可恢复错误被放弃 — slot={i}/{len(slots)} "
+                    f"type={slot_type} error={e.error_kind.value}"
+                )
+                continue
+
             if event_chain:
                 self._fired_slot_indices.add(i)
+                self._slot_cooldown_until.pop(i, None)
                 if self._spans_midnight and len(self._fired_slot_indices) == len(slots):
                     logger.info(
                         "tick: 所有槽位已触发 (fired={}/{}), 跨夜模式再生槽位 "
@@ -415,12 +437,12 @@ class CharacterLife:
                 await self.save_persistent_state()
                 return event_chain
             else:
-                # 槽位匹配成功但事件生成失败 — 记录诊断信息
+                # 可恢复失败：加冷却，继续扫描后续槽位（防止单槽饥饿）
+                self._slot_cooldown_until[i] = time.monotonic() + self._SLOT_COOLDOWN_SECONDS
                 logger.warning(
-                    "tick: 槽位匹配但事件生成返回空 — slot={}/{} type={} "
-                    "plan={}min now={}min dist={}min fired={}",
-                    i, len(slots), slot_type, slot_m, now_m, dist,
-                    sorted(self._fired_slot_indices),
+                    "tick: 槽位匹配但事件生成返回空（可恢复）— slot={}/{} type={} "
+                    "plan={}min now={}min dist={}min 冷却至下一tick",
+                    i, len(slots), slot_type, slot_m, now_m,
                 )
         return None
 
@@ -462,6 +484,8 @@ class CharacterLife:
                     f"generate_daily_event 耗时 {elapsed_ge:.1f}s (>30s) slot_type={slot_type}"
                 )
             return result
+        except UnrecoverableAgentError:
+            raise
         except Exception as e:
             logger.exception("生成生活事件失败: {}", e)
             return []
@@ -596,7 +620,12 @@ class CharacterLife:
                 dm_result = await self.dm_agent.run(dm_context, interaction_id=interaction_id)
 
                 if not dm_result.success or not isinstance(dm_result.data, EventGenerationResult):
-                    logger.warning("DM 生成事件失败，终止链")
+                    if dm_result.error_kind is not None and not dm_result.error_kind.is_retryable:
+                        raise UnrecoverableAgentError(
+                            f"DM agent 不可恢复错误: {dm_result.error_kind.value}",
+                            error_kind=dm_result.error_kind,
+                        )
+                    logger.warning("DM 生成事件失败（可恢复），终止链等待重试")
                     break
 
                 # 首次注入后清空，避免泄漏到后续链迭代（R3）
@@ -639,7 +668,12 @@ class CharacterLife:
                 char_result = await self.character_agent.react(char_context, interaction_id=interaction_id)
 
                 if not char_result.success or not isinstance(char_result.data, EventReactionResult):
-                    logger.warning("Character 反应生成失败，终止链")
+                    if char_result.error_kind is not None and not char_result.error_kind.is_retryable:
+                        raise UnrecoverableAgentError(
+                            f"Character agent 不可恢复错误: {char_result.error_kind.value}",
+                            error_kind=char_result.error_kind,
+                        )
+                    logger.warning("Character 反应生成失败（可恢复），终止链等待重试")
                     break
 
                 reaction_result: EventReactionResult = char_result.data
@@ -713,6 +747,8 @@ class CharacterLife:
                 )
             return event_chain
 
+        except UnrecoverableAgentError:
+            raise
         except Exception as e:
             logger.exception("生成生活事件失败 (impl): {}", e)
             return []

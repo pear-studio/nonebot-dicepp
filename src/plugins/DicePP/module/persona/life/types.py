@@ -3,8 +3,20 @@ Life 域共享数据类型
 
 包含 Agent 框架的公共类型以及从 event_agent.py 迁移的数据类型
 """
+from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from ..llm.errors import ErrorKind
+
+
+class UnrecoverableAgentError(Exception):
+    """Agent 返回不可恢复错误，调用方应放弃当前操作并标记槽位已触发。"""
+
+    def __init__(self, message: str, error_kind: "ErrorKind") -> None:
+        super().__init__(message)
+        self.error_kind = error_kind
 
 
 @dataclass
@@ -13,6 +25,7 @@ class AgentResult:
     success: bool
     data: Any
     error: Optional[str] = None
+    error_kind: Optional["ErrorKind"] = None
     raw_response: str = ""
 
 
