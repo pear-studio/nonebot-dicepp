@@ -92,50 +92,27 @@ class ChatAgent:
             return []
         return [{"role": "user", "name": "系统", "content": "[通知] " + "\n".join(notes)}]
 
-    async def execute_turn(
+    def _build_chat_toolkit(
         self,
+        delivery,
+        interaction_id: str,
         user_id: str,
         group_id: str,
-        user_input: str,
-        *,
-        run_after_response: bool = True,
-        message_type: MessageType = MessageType.CHAT,
-        image_data_urls: Optional[List[str]] = None,
-        transient_message: Optional[str] = None,
-        inbound_message_stream_id: Optional[int] = None,
-    ) -> ChatOutcome:
-        """执行一轮 chat：Conversation.run() + send_reply_segment + send_reply。
+        char_name: str,
+    ):
+        """构建 Chat 工具集（ToolKit + OutputSpec），供 execute_turn / trigger_proactive 复用。
 
-        1. 构建 DeliveryQueue
-        2. 构建 ToolKit（send_reply_segment + 其他 chat 工具）
-        3. 组装 OutputSpec（send_reply）
-        4. 调用 conv.run()
-        5. 消费 result.output.arguments["content"]，入队 final
-        6. 等待 DeliveryQueue 发送完成
+        Returns:
+            (toolkit, send_reply) 元组
         """
-        import uuid
         from ..agent.runtime_types import (
             SendReplyArgs,
-            LoopLimits,
             OutputSpec,
             ToolKit,
         )
         from ..agent.runtime_types import ToolSpec as NewToolSpec
         from ..tools.send_reply_segment import build_send_reply_segment_tool
-        from .delivery_queue import DeliveryItem
-        from ..llm.selection import CHAT, CHAT_WITH_IMAGE
-        from ..agent.runtime import embed_images_in_last_user_message
 
-        conv = self._conversation
-        interaction_id = uuid.uuid4().hex
-        # assistant 写入 message_stream 的说话者名用角色名（而非泛称"我"），
-        # 使其历史消息在 render/read_history 中被正确归属（阶段 2）。
-        char_name = getattr(self._character, "name", "") or "我"
-
-        # 1. 构建 DeliveryQueue（port 为 None 时跳过实际发送，仅用于测试/离线场景）
-        delivery = self._make_delivery()
-
-        # 2. 构建 ToolKit（直接使用 build_xxx_tool()）
         tools: dict[str, NewToolSpec] = {}
         tz = self._config.timezone
         search_max_chars = getattr(self._config, "search_max_chars", 2000)
@@ -197,7 +174,6 @@ class ChatAgent:
 
         toolkit = ToolKit(tools=tools)
 
-        # 3. send_reply OutputSpec
         send_reply = OutputSpec(
             name="send_reply",
             description=(
@@ -206,6 +182,136 @@ class ChatAgent:
                 "本调用提交最后一段内容。"
             ),
             args_schema=SendReplyArgs,
+        )
+
+        return toolkit, send_reply
+
+    async def _finalize_turn(
+        self,
+        conv,
+        delivery,
+        interaction_id: str,
+        user_id: str,
+        group_id: str,
+        message_type: MessageType,
+        char_name: str,
+        final_text: str,
+        result,
+        run_after_response: bool = True,
+        user_input: str = "",
+    ) -> ChatOutcome:
+        """消费 result 输出、入队 DeliveryItem、等待 delivery 完成、追加 ref、回复后处理。"""
+        from .delivery_queue import DeliveryItem
+
+        # DeliveryItem enqueue（output_arguments 或 final_text 路径）
+        if final_text and delivery is not None:
+            if result.output_arguments:
+                call_index = (
+                    result.output_call_index
+                    if result.output_call_index is not None
+                    else delivery.next_call_index(interaction_id)
+                )
+            else:
+                call_index = delivery.next_call_index(interaction_id)
+            delivery.enqueue(DeliveryItem(
+                content=final_text,
+                interaction_id=interaction_id,
+                call_index=call_index,
+                segment_phase="final",
+                user_id=user_id,
+                group_id=group_id,
+                message_type=message_type,
+                agent_run_id=result.run_id,
+                display_name=char_name,
+            ))
+
+        # 等待 delivery 完成
+        if delivery is not None:
+            await delivery.drain()
+            # 成功送达的段以 ref 追加进 Conversation
+            for stream_id in delivery.sent_stream_ids:
+                try:
+                    await conv.append_ref(stream_id, "assistant")
+                except Exception:
+                    logger.warning(
+                        "ChatAgent: 追加 assistant ref 失败 stream_id=%s（正文已在 message_stream）",
+                        stream_id, exc_info=True,
+                    )
+
+        sent_count = delivery.sent_count if delivery is not None else (1 if final_text else 0)
+
+        # 回复后处理
+        if final_text:
+            visible_text = (
+                "\n".join(delivery.sent_contents)
+                if delivery is not None and delivery.sent_contents
+                else final_text
+            )
+            if run_after_response and sent_count > 0:
+                await self._after_response(user_id, group_id, user_input, visible_text)
+            return ChatOutcome(
+                "sent",
+                sent_count=sent_count,
+                reason=result.final_reason or "output_collected",
+                counts_as_interaction=run_after_response and sent_count > 0,
+            )
+
+        if delivery is not None and delivery.sent_count > 0:
+            return ChatOutcome(
+                "partial_sent",
+                sent_count=delivery.sent_count,
+                reason=result.final_reason or result.completion_kind,
+                counts_as_interaction=False,
+            )
+        if result.completion_kind == "failed":
+            return ChatOutcome("failed", reason=result.final_reason)
+        return ChatOutcome("empty", reason=result.final_reason or result.completion_kind)
+
+    async def execute_turn(
+        self,
+        user_id: str,
+        group_id: str,
+        user_input: str,
+        *,
+        run_after_response: bool = True,
+        message_type: MessageType = MessageType.CHAT,
+        image_data_urls: Optional[List[str]] = None,
+        transient_message: Optional[str] = None,
+        inbound_message_stream_id: Optional[int] = None,
+    ) -> ChatOutcome:
+        """执行一轮 chat：Conversation.run() + send_reply_segment + send_reply。
+
+        1. 构建 DeliveryQueue
+        2. 构建 ToolKit（send_reply_segment + 其他 chat 工具）
+        3. 组装 OutputSpec（send_reply）
+        4. 调用 conv.run()
+        5. 消费 result.output.arguments["content"]，入队 final
+        6. 等待 DeliveryQueue 发送完成
+        """
+        import uuid
+        from ..agent.runtime_types import (
+            SendReplyArgs,
+            LoopLimits,
+            OutputSpec,
+            ToolKit,
+        )
+        from ..agent.runtime_types import ToolSpec as NewToolSpec
+        from ..tools.send_reply_segment import build_send_reply_segment_tool
+        from ..llm.selection import CHAT, CHAT_WITH_IMAGE
+        from ..agent.runtime import embed_images_in_last_user_message
+
+        conv = self._conversation
+        interaction_id = uuid.uuid4().hex
+        # assistant 写入 message_stream 的说话者名用角色名（而非泛称"我"），
+        # 使其历史消息在 render/read_history 中被正确归属（阶段 2）。
+        char_name = getattr(self._character, "name", "") or "我"
+
+        # 1. 构建 DeliveryQueue（port 为 None 时跳过实际发送，仅用于测试/离线场景）
+        delivery = self._make_delivery()
+
+        # 2. 构建 ToolKit
+        toolkit, send_reply = self._build_chat_toolkit(
+            delivery, interaction_id, user_id, group_id, char_name,
         )
 
         # 4. 准备 transient（本轮可见、不持久化）内容
@@ -283,85 +389,118 @@ class ChatAgent:
         if _router_has_quota(self._router):
             await self._router.increment_usage(user_id)
 
-        # 7. 消费 result.output
+        # 7. 消费 result.output → final_text
         final_text = ""
         if result.output_arguments:
             final_content = result.output_arguments.get("content", "")
             if final_content:
-                if delivery is not None:
-                    final_call_index = (
-                        result.output_call_index
-                        if result.output_call_index is not None
-                        else delivery.next_call_index(interaction_id)
-                    )
-                    delivery.enqueue(DeliveryItem(
-                        content=final_content,
-                        interaction_id=interaction_id,
-                        call_index=final_call_index,
-                        segment_phase="final",
-                        user_id=user_id,
-                        group_id=group_id,
-                        message_type=message_type,
-                        agent_run_id=result.run_id,
-                        display_name=char_name,
-                    ))
                 final_text = final_content
         elif result.final_text:
             final_text = result.final_text
-            if delivery is not None:
-                delivery.enqueue(DeliveryItem(
-                    content=final_text,
-                    interaction_id=interaction_id,
-                    call_index=delivery.next_call_index(interaction_id),
-                    segment_phase="final",
-                    user_id=user_id,
-                    group_id=group_id,
-                    message_type=message_type,
-                    agent_run_id=result.run_id,
-                    display_name=char_name,
-                ))
 
-        # 7. 等待 delivery 完成
-        if delivery is not None:
-            await delivery.drain()
-            # 成功送达（已写 message_stream）的段以 ref 追加进 Conversation，
-            # 供下一轮 render_resolved 展开——只记录实际送达，失败段不进入可见历史。
-            # best-effort：正文已在 message_stream 权威保存，追加 ref 失败只是本轮少一条
-            # 引用（下次重载仍在 message_stream），绝不因此让已送达的成功轮抛错。
-            for stream_id in delivery.sent_stream_ids:
-                try:
-                    await conv.append_ref(stream_id, "assistant")
-                except Exception:
-                    logger.warning(
-                        "ChatAgent: 追加 assistant ref 失败 stream_id=%s（正文已在 message_stream）",
-                        stream_id, exc_info=True,
-                    )
+        # 8. 交付 & 后处理
+        return await self._finalize_turn(
+            conv=conv,
+            delivery=delivery,
+            interaction_id=interaction_id,
+            user_id=user_id,
+            group_id=group_id,
+            message_type=message_type,
+            char_name=char_name,
+            final_text=final_text,
+            result=result,
+            run_after_response=run_after_response,
+            user_input=user_input,
+        )
 
-        sent_count = delivery.sent_count if delivery is not None else (1 if final_text else 0)
+    async def trigger_proactive(
+        self,
+        trigger_message: str,
+        user_id: str = "",
+        group_id: str = "",
+        message_type: MessageType = MessageType.PROACTIVE,
+    ) -> ChatOutcome:
+        """系统主动触发场景：不接收用户输入，仅以 trigger_message 作为系统通知触发一轮 LLM 回复。"""
+        import uuid
+        from ..agent.runtime_types import (
+            SendReplyArgs,
+            LoopLimits,
+            OutputSpec,
+            ToolKit,
+        )
+        from ..agent.runtime_types import ToolSpec as NewToolSpec
+        from ..tools.send_reply_segment import build_send_reply_segment_tool
+        from ..llm.selection import CHAT
 
-        # 8. 回复后处理
-        if final_text:
-            visible_text = (
-                "\n".join(delivery.sent_contents)
-                if delivery is not None and delivery.sent_contents
-                else final_text
-            )
-            if run_after_response and sent_count > 0:
-                await self._after_response(user_id, group_id, user_input, visible_text)
-            return ChatOutcome(
-                "sent",
-                sent_count=sent_count,
-                reason=result.final_reason or "output_collected",
-                counts_as_interaction=run_after_response and sent_count > 0,
-            )
+        conv = self._conversation
+        interaction_id = uuid.uuid4().hex
+        char_name = getattr(self._character, "name", "") or "我"
 
-        if delivery is not None and delivery.sent_count > 0:
-            return ChatOutcome(
-                "partial_sent",
-                sent_count=delivery.sent_count,
-                reason=result.final_reason or result.completion_kind,
-                counts_as_interaction=False,
-            )
-        if result.completion_kind == "failed":
-            return ChatOutcome("failed", reason=result.final_reason)
-        return ChatOutcome("empty", reason=result.final_reason or result.completion_kind)
+        # 1. 构建 DeliveryQueue
+        delivery = self._make_delivery()
+
+        # 2. 构建 ToolKit（与 execute_turn 共用 _build_chat_toolkit）
+        toolkit, send_reply = self._build_chat_toolkit(
+            delivery, interaction_id, user_id, group_id, char_name,
+        )
+
+        # 4. 构建 transient_list — 仅 trigger_message
+        transient_list = [
+            {"role": "user", "name": "系统", "content": trigger_message}
+        ]
+
+        # 5. SKIP quota check（不调用 check_daily_quota / increment_usage）
+
+        # 6. 计算 token_budget
+        if self._scope.is_private:
+            token_budget = self._config.private_session_token_budget
+        else:
+            token_budget = self._config.group_session_token_budget
+
+        # 7. 调用 conv.run()
+        result = await conv.run(
+            system_prompt=self._context_builder.build_static_prompt_proactive(),
+            user_input="",
+            interaction_id=interaction_id,
+            tools=toolkit,
+            output=send_reply,
+            selection=CHAT,
+            limits=LoopLimits(max_rounds=self._config.tools_max_rounds),
+            run_tag="proactive",
+            agent_name="Chat",
+            user_id=user_id,
+            group_id=group_id,
+            transient_context_messages=transient_list,
+            record_user_input=False,
+            token_budget=token_budget,
+        )
+
+        # 8. 处理 rotation_needed 信号
+        if result.final_reason == "rotation_needed":
+            return ChatOutcome("skipped", reason="rotation_needed")
+
+        # 9. SKIP R2 fallback（不追加空 user_input）
+
+        # 10. 消费 result.output → final_text
+        final_text = ""
+        if result.output_arguments:
+            final_content = result.output_arguments.get("content", "")
+            if final_content:
+                final_text = final_content
+        elif result.final_text:
+            final_text = result.final_text
+
+        # 11. 调用 _finalize_turn（不执行评分后处理）
+        return await self._finalize_turn(
+            conv=conv,
+            delivery=delivery,
+            interaction_id=interaction_id,
+            user_id=user_id,
+            group_id=group_id,
+            message_type=message_type,
+            char_name=char_name,
+            final_text=final_text,
+            result=result,
+            run_after_response=False,
+            user_input="",
+        )

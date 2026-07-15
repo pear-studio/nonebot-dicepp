@@ -36,6 +36,7 @@ from .life.diary import DiaryGenerator, DiaryConfig
 from .life.proactive_config import ProactiveConfig
 from .life.proactive_scheduler import ProactiveScheduler
 from .life.simulator import LifeSimulator, LifeConfig
+from .life.share_scheduler import ShareScheduler
 from .life.protocols import SleepGate
 from .life.target import TargetSelector
 from .life.dm_agent import DMAgent
@@ -474,6 +475,13 @@ async def _build_life(
         decay_calculator=decay_calculator,
         character=character,
     )
+    share_scheduler = ShareScheduler(
+        config=config,
+        character=character,
+        target_selector=target_selector,
+        data_store=store,
+    )
+    await share_scheduler.load_persistent_state()
     scheduler_config = ProactiveConfig.from_persona(config)
     scheduler = ProactiveScheduler(
         config=scheduler_config,
@@ -487,7 +495,8 @@ async def _build_life(
     await scheduler.load_persistent_state()
     logger.info("主动消息调度器已初始化")
 
-    character_life.set_boundary_receiver(scheduler)
+    character_life.add_boundary_receiver(scheduler)
+    character_life.add_boundary_receiver(share_scheduler)
     await character_life.load_persistent_state()
     logger.info("角色生活模拟已初始化")
 
@@ -516,6 +525,7 @@ async def _build_life(
         port=port,
         decay_calculator=decay_calculator,
         chat_registry=chat_registry,
+        share_scheduler=share_scheduler,
     )
 
 
@@ -682,6 +692,10 @@ async def create_persona(bot: Bot) -> Optional[PersonaApp]:
         sa_agent=sa_agent,
         chat_registry=chat.registry,
     )
+
+    # 注入分享日程触发回调
+    if life.share_scheduler is not None:
+        life.share_scheduler.set_trigger_callback(chat.trigger_proactive)
 
     probe_results: Dict[tuple, bool] = {}
     try:

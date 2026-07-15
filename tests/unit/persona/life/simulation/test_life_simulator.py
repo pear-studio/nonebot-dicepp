@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 from plugins.DicePP.module.persona.life.simulator import LifeSimulator, LifeConfig
 from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 
-def _make_simulator(*, event_chain=None, proactive_msgs=None, share_threshold: float=0.5, diary: str='今天很好'):
+def _make_simulator(*, event_chain=None, proactive_msgs=None, diary: str='今天很好'):
     """构造最小可运行的 LifeSimulator"""
     store = AsyncMock()
     store.list_all_relationships_raw = AsyncMock(return_value=[])
@@ -35,7 +35,7 @@ def _make_simulator(*, event_chain=None, proactive_msgs=None, share_threshold: f
     character.extensions = MagicMock()
     port = MagicMock()
     port.send = AsyncMock()
-    config = LifeConfig(proactive_event_share_threshold=share_threshold, proactive_event_share_delay_min=1, proactive_event_share_delay_max=1, trace_enabled=False)
+    config = LifeConfig(trace_enabled=False)
     sim = LifeSimulator(store=store, character_life=character_life, scheduler=scheduler, diary_generator=diary_generator, character=character, config=config, port=port, decay_calculator=None)
     return sim
 
@@ -253,3 +253,21 @@ async def test_tick_daily_close_in_finally():
     # finally 块仍调用了 compact_conversation
     dm_agent.compact_conversation.assert_awaited_once()
     character_agent.compact_conversation.assert_awaited_once()
+
+
+def test_update_character_propagates_to_share_scheduler():
+    """R1: update_character 将新角色卡同步到 share_scheduler。
+
+    CharacterLife / ProactiveScheduler / DiaryGenerator / ShareScheduler 均应收到新引用。
+    """
+    sim = _make_simulator()
+    share_scheduler = MagicMock()
+    sim.share_scheduler = share_scheduler
+
+    new_char = MagicMock()
+    sim.update_character(new_char)
+
+    sim.character_life.update_character.assert_called_once_with(new_char)
+    sim.scheduler.update_character.assert_called_once_with(new_char)
+    sim.diary_generator.update_character.assert_called_once_with(new_char)
+    share_scheduler.update_character.assert_called_once_with(new_char)

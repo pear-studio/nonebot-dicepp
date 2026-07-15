@@ -205,43 +205,16 @@ class ProactiveScheduler(BoundaryReceiver):
         """
         定时调用（60秒节流）
 
+        miss_you / share 功能已由 ShareScheduler + ChatOrchestrator.trigger_proactive 替代。
+        后续改造 miss_you 为 ChatOrchestrator 路径时恢复本方法，届时整体删除旧实现。
+
         Returns:
             待发送的消息列表
         """
+        if True:
+            return []
         if not self.config.enabled:
             return []
-
-        now = self._now()
-
-        # 节流检查
-        if self._last_tick and (now - self._last_tick) < self._tick_interval:
-            return []
-
-        self._last_tick = now
-        self._reset_daily_state()
-
-        # 非活跃时段不发送，但不清理 pending_shares
-        if not self._is_character_active():
-            await self.persist_state()
-            return []
-
-        messages = []
-
-        try:
-            # 检查想念触发
-            miss_you = await self._check_missed_users()
-            if miss_you:
-                messages.extend(miss_you)
-
-        except Exception as e:
-            logger.exception(f"调度器 tick 失败: {e}")
-        finally:
-            try:
-                await self.persist_state()
-            except Exception:
-                logger.exception("调度器状态持久化失败")
-
-        return messages
 
     async def _persist_miss_switch(self, rel: RelationshipState, now: datetime) -> None:
         """记录想念已发出，打开衰减开关；异常时回滚。"""
@@ -255,6 +228,7 @@ class ProactiveScheduler(BoundaryReceiver):
 
     async def _check_missed_users(self) -> List[Dict]:
         """检查并触发想念消息"""
+        return []
         if not self.config.miss_enabled:
             return []
 
@@ -451,6 +425,7 @@ class ProactiveScheduler(BoundaryReceiver):
         Returns:
             消息 dict，生成失败返回 None
         """
+        return None
         if not self.character_agent:
             return None
 
@@ -540,6 +515,7 @@ class ProactiveScheduler(BoundaryReceiver):
         Returns:
             成功创建的消息列表
         """
+        return []
         if not self.config.enabled:
             return []
 
@@ -605,6 +581,7 @@ class ProactiveScheduler(BoundaryReceiver):
         reaction: str,
     ) -> Optional[Dict]:
         """创建想念消息，通过 coordinator 串行化 LLM 调用。"""
+        return None
         key = self._target_key(target)
         now = self._now()
 

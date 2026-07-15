@@ -328,6 +328,68 @@ class ChatOrchestrator:
             return ChatOutcome("failed", reason="quota_exceeded")
         return ChatOutcome("failed", reason=type(submit_result.error).__name__)
 
+    async def trigger_proactive(
+        self,
+        scope: ConversationScope,
+        trigger_message: str,
+        user_id: str = "",
+        group_id: str = "",
+        message_type: MessageType = MessageType.PROACTIVE,
+    ) -> ChatOutcome:
+        """系统主动触发场景：跳过 gate/配额，通过 coordinator 串行化执行。
+
+        与 chat() 不同：
+        - 不经过 sleep gate / 信誉拒绝门控 / 消息去重 / 配额检查
+        - 失败时不发送 LLM 兜底文本
+        - coordinator continue_on_buffered=False（不合并等待，主动触发独立执行）
+
+        Args:
+            scope: 会话范围（调用方已确定，不通过 user_id/group_id 推导）
+            trigger_message: 作为系统通知触发 LLM 回复的消息
+            user_id: 可选的用户 ID（传递给 agent）
+            group_id: 可选的群 ID（传递给 agent）
+            message_type: 消息类型，默认 PROACTIVE
+
+        Returns:
+            ChatOutcome
+        """
+        # 1. 确定 target_key（与 chat()/chat_command() 一致的 coordinator 串行化键）
+        target_key = f"group:{group_id}" if group_id else f"user:{user_id}"
+
+        # 2. 定义执行闭包（含 Stage B 硬轮换重试，与 chat() 一致的 range(2)）
+        async def proactive_call_fn(messages: List[str]) -> ChatOutcome:
+            merged = "\n".join(messages) if messages else trigger_message
+            for attempt in range(2):
+                async with self._registry.run_guard(scope):
+                    conv = await self._ensure_conversation(scope)
+                    agent = self._ensure_agent(scope, conv)
+                    result = await agent.trigger_proactive(
+                        merged, user_id, group_id, message_type,
+                    )
+                if result.reason == "rotation_needed":
+                    await self._registry.rotate(scope)
+                    self._agents.pop(scope, None)
+                    continue
+                return result
+            return ChatOutcome("failed", reason="retry_limit_exceeded")
+
+        proactive_call_fn._coordinator_batch_kind = "proactive"  # type: ignore[attr-defined]
+
+        # 3. 经 coordinator 提交（主动触发不合并等待，不携带 message 用于缓冲合并）
+        submit_result = await self._coordinator.submit(
+            target_key, None, proactive_call_fn,
+            continue_on_buffered=False,
+        )
+        if submit_result.status == "success":
+            return submit_result.value
+        if submit_result.status == "buffered":
+            return ChatOutcome("skipped", reason="buffered")
+
+        # 4. 失败时不发送兜底文本（区别于 chat() 路径的统一 fallback 文案）
+        if isinstance(submit_result.error, QuotaExceeded):
+            return ChatOutcome("failed", reason="quota_exceeded")
+        return ChatOutcome("failed", reason=type(submit_result.error).__name__)
+
     async def is_awake(self) -> bool:
         """角色是否唤醒。"""
         if self._sleep_gate is not None:

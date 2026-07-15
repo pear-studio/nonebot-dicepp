@@ -71,6 +71,7 @@ def scheduler(config, mock_data_store, mock_character, mock_coordinator):
     )
 
 
+@pytest.mark.skip(reason="_build_and_generate_share_message 已禁用，后续改造为 ChatOrchestrator 路径时恢复")
 class TestBuildAndGenerateShareMessage:
     """测试 _build_and_generate_share_message"""
 

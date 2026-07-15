@@ -22,6 +22,7 @@ def _make_mock_character():
     return char
 
 
+@pytest.mark.skip(reason="miss_you 已禁用，后续改造为 ChatOrchestrator 路径时恢复")
 class TestProactiveSchedulerMissYou:
     """测试想念触发逻辑"""
 
@@ -196,6 +197,7 @@ class TestProactiveSchedulerMissYou:
         assert result == []
 
 
+@pytest.mark.skip(reason="miss_you 已禁用，后续改造为 ChatOrchestrator 路径时恢复")
 class TestProactiveSchedulerMissProbability:
     """测试想念概率阶段固定表"""
 
@@ -393,6 +395,7 @@ class TestProactiveSchedulerMissProbability:
         assert ProactiveScheduler._MISS_PROBABILITY[0] == 0.0
 
 
+@pytest.mark.skip(reason="miss_you 已禁用，后续改造为 ChatOrchestrator 路径时恢复")
 class TestProactiveSchedulerMessageCreation:
     """测试消息创建"""
 

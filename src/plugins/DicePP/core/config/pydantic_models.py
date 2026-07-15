@@ -295,19 +295,6 @@ class PersonaConfig(BaseModel):
         default=15, title="分享时间窗口",
         json_schema_extra={"dashboard_section": "proactive"},
     )
-    proactive_event_share_delay_min: int = Field(
-        default=1, title="分享延迟下限",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_event_share_delay_max: int = Field(
-        default=5, title="分享延迟上限",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
-    proactive_event_share_threshold: float = Field(
-        default=0.4, title="分享欲望阈值",
-        description="事件分享欲望阈值。基于 2026-04/05 线上 251 个事件的 share_desire 分布校准：avg≈0.305，≥0.4 占 36.7%，≥0.5 仅占 16.7%",
-        json_schema_extra={"dashboard_section": "proactive"},
-    )
     proactive_miss_enabled: bool = Field(
         default=True, title="思念消息",
         json_schema_extra={"dashboard_section": "proactive"},
@@ -340,6 +327,32 @@ class PersonaConfig(BaseModel):
     )
     proactive_share_context_history_limit: int = Field(
         default=5, ge=0, title="分享上下文轮数", description="分享消息构建时读取的最近对话轮数",
+        json_schema_extra={"dashboard_section": "proactive"},
+    )
+    proactive_share_schedule_enabled: bool = Field(
+        default=False, title="分享日程总开关",
+        description="启用后，角色按日程时间点主动分享消息（早安/晚安/自定义时段）",
+        json_schema_extra={"dashboard_section": "proactive"},
+    )
+    proactive_share_schedule_morning_enabled: bool = Field(
+        default=False, title="早安问候",
+        description="在角色起床后发送早安问候",
+        json_schema_extra={"dashboard_section": "proactive"},
+    )
+    proactive_share_schedule_evening_enabled: bool = Field(
+        default=False, title="晚间晚安",
+        description="在角色睡前发送晚间晚安",
+        json_schema_extra={"dashboard_section": "proactive"},
+    )
+    proactive_share_schedule_times: List[str] = Field(
+        default_factory=list, title="分享时间点",
+        description='自定义分享时间点，格式 HH:MM，如 ["14:00", "18:30"]。每天在这些时间点附近触发分享',
+        json_schema_extra={"dashboard_section": "proactive"},
+    )
+    proactive_share_schedule_jitter_minutes: int = Field(
+        default=15, title="时间点随机偏移",
+        description="每个分享时间点的 ±N 分钟随机偏移，避免定时感。建议不超过 60",
+        ge=0, le=120,
         json_schema_extra={"dashboard_section": "proactive"},
     )
     proactive_share_max_retries: int = Field(

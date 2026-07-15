@@ -375,6 +375,7 @@ class TestFactoryRegistryInjection:
         with patch("plugins.DicePP.module.persona.factory.ProactiveConfig") as MockPC, \
              patch("plugins.DicePP.module.persona.factory.TargetSelector") as MockTS, \
              patch("plugins.DicePP.module.persona.factory.ProactiveScheduler") as MockPS, \
+             patch("plugins.DicePP.module.persona.factory.ShareScheduler") as MockSS, \
              patch("plugins.DicePP.module.persona.factory.DiaryConfig") as MockDC, \
              patch("plugins.DicePP.module.persona.factory.DiaryGenerator") as MockDG, \
              patch("plugins.DicePP.module.persona.factory.LifeConfig") as MockLC, \
@@ -383,6 +384,10 @@ class TestFactoryRegistryInjection:
             MockPSInstance = MagicMock()
             MockPSInstance.load_persistent_state = AsyncMock()
             MockPS.return_value = MockPSInstance
+
+            MockSSInstance = MagicMock()
+            MockSSInstance.load_persistent_state = AsyncMock()
+            MockSS.return_value = MockSSInstance
 
             MockLS.return_value = "life-simulator"
 

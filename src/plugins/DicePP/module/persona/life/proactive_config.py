@@ -6,7 +6,12 @@ if TYPE_CHECKING:
 
 
 class ProactiveConfig:
-    """主动消息配置"""
+    """主动消息配置
+
+    注意：本配置仅服务于已禁用的旧 ProactiveScheduler（miss_you / share 路径）。
+    新的主动分享日程由 ShareScheduler 直接消费 PersonaConfig 的
+    proactive_share_schedule_* 字段。后续 ProactiveScheduler 拆除时本类一并移除。
+    """
 
     def __init__(
         self,
@@ -14,7 +19,6 @@ class ProactiveConfig:
         min_interval_hours: int = 4,
         max_shares_per_event: int = 10,
         share_time_window_minutes: int = 15,
-        share_threshold: float = 0.4,
         miss_enabled: bool = True,
         miss_min_hours: int = 72,
         miss_min_score: float = 20.0,
@@ -28,7 +32,6 @@ class ProactiveConfig:
         self.min_interval_hours = min_interval_hours
         self.max_shares_per_event = max_shares_per_event
         self.share_time_window_minutes = share_time_window_minutes
-        self.share_threshold = share_threshold
         self.miss_enabled = miss_enabled
         self.miss_min_hours = miss_min_hours
         self.miss_min_score = miss_min_score
@@ -45,7 +48,6 @@ class ProactiveConfig:
             min_interval_hours=persona.proactive_min_interval_hours,
             max_shares_per_event=persona.proactive_max_shares,
             share_time_window_minutes=persona.proactive_share_time_window_minutes,
-            share_threshold=persona.proactive_event_share_threshold,
             miss_enabled=persona.proactive_miss_enabled,
             miss_min_hours=persona.proactive_miss_min_hours,
             miss_min_score=persona.proactive_miss_min_score,

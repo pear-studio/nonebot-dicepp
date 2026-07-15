@@ -183,7 +183,7 @@ class TestPersonaConfig:
         "private_session_token_budget", "group_session_token_budget",
         # ProactiveConfig.from_persona
         "proactive_enabled", "proactive_min_interval_hours", "proactive_max_shares",
-        "proactive_share_time_window_minutes", "proactive_event_share_threshold",
+        "proactive_share_time_window_minutes",
         "proactive_miss_enabled", "proactive_miss_min_hours", "proactive_miss_min_score",
         "proactive_share_message_concurrent", "proactive_share_max_chars",
         "proactive_share_context_history_limit",
@@ -197,7 +197,6 @@ class TestPersonaConfig:
         "front_max_campaign", "front_max_adventure", "threads_per_front",
         "sa_max_rounds",
         # LifeConfig.from_persona
-        "proactive_event_share_delay_min", "proactive_event_share_delay_max",
         "trace_enabled", "trace_max_age_days", "score_history_max_age_days",
         "scoring_failures_max_age_days", "daily_events_keep_days", "diary_keep_days",
     ]

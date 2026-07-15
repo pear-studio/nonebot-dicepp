@@ -721,7 +721,7 @@ class TestGetDailyChatStats:
 
 @pytest.mark.asyncio
 async def test_add_and_get_daily_event_with_new_fields(temp_db):
-    """新字段（context_summary, share_desire, duration_minutes）应正确存取。"""
+    """新字段（context_summary, duration_minutes）应正确存取。"""
     store = temp_db
     await store.add_daily_event(date='2024-01-01', event_type='scheduled', description='测试中', reaction='不错', duration_minutes=30, energy_delta=3, mood_delta=-2, health_delta=1, context_summary='在酒馆喝酒')
     await store.add_daily_event(date='2024-01-01', event_type='system', description='另一件事')

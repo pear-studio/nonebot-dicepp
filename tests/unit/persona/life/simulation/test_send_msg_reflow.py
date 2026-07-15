@@ -20,7 +20,7 @@ from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
 
 
 def _make_simulator(*, event_chain=None, proactive_msgs=None,
-                     share_threshold: float = 0.5, diary: str = '今天很好',
+                     diary: str = '今天很好',
                      chat_registry=None):
     """构造最小可运行的 LifeSimulator（同 test_life_simulator._make_simulator）"""
     store = AsyncMock()
@@ -44,9 +44,6 @@ def _make_simulator(*, event_chain=None, proactive_msgs=None,
     port = MagicMock()
     port.send = AsyncMock()
     config = LifeConfig(
-        proactive_event_share_threshold=share_threshold,
-        proactive_event_share_delay_min=1,
-        proactive_event_share_delay_max=1,
         trace_enabled=False,
     )
     sim = LifeSimulator(

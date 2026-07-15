@@ -19,6 +19,7 @@ from .protocols import EventSharePort
 from .diary import DiaryGenerator
 from .character_life import CharacterLife
 from .conversation_scope import ConversationScope
+from .share_scheduler import ShareScheduler
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
@@ -31,9 +32,6 @@ if TYPE_CHECKING:
 class LifeConfig:
     """生活域配置"""
 
-    proactive_event_share_threshold: float = 0.4
-    proactive_event_share_delay_min: int = 1
-    proactive_event_share_delay_max: int = 5
     trace_enabled: bool = False
     trace_max_age_days: int = 7
     score_history_max_age_days: int = 90
@@ -45,9 +43,6 @@ class LifeConfig:
     @classmethod
     def from_persona(cls, persona: "PersonaConfig") -> "LifeConfig":
         return cls(
-            proactive_event_share_threshold=persona.proactive_event_share_threshold,
-            proactive_event_share_delay_min=persona.proactive_event_share_delay_min,
-            proactive_event_share_delay_max=persona.proactive_event_share_delay_max,
             trace_enabled=persona.trace_enabled,
             trace_max_age_days=persona.trace_max_age_days,
             score_history_max_age_days=persona.score_history_max_age_days,
@@ -75,6 +70,7 @@ class LifeSimulator:
         port: Optional[EventSharePort] = None,
         decay_calculator: Optional[DecayCalculator] = None,
         chat_registry: Optional[Any] = None,
+        share_scheduler: Optional[ShareScheduler] = None,
     ):
         self.store = store
         self.character_life = character_life
@@ -88,6 +84,7 @@ class LifeSimulator:
         self.port = port
         self.decay_calculator = decay_calculator
         self.chat_registry = chat_registry
+        self.share_scheduler = share_scheduler
 
     def update_character(self, character: Character) -> None:
         """同步新的角色卡引用到所有子组件"""
@@ -98,6 +95,8 @@ class LifeSimulator:
             self.scheduler.update_character(character)
         if self.diary_generator is not None:
             self.diary_generator.update_character(character)
+        if self.share_scheduler is not None:
+            self.share_scheduler.update_character(character)
 
     async def tick(self) -> None:
         """定时调用 — 驱动角色生活事件和主动消息调度"""
@@ -121,6 +120,13 @@ class LifeSimulator:
                 logger.warning("tick: 角色生活事件生成超时（>300s），跳过本次以避免阻塞 proactive 系统")
             except Exception:
                 logger.exception("tick: 角色生活事件生成失败")
+
+        # 分享日程
+        if self.share_scheduler:
+            try:
+                await self.share_scheduler.tick()
+            except Exception:
+                logger.exception("share_scheduler.tick 失败")
 
         # 运行主动消息调度器
         if self.scheduler:

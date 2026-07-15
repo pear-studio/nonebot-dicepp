@@ -132,7 +132,7 @@ class CharacterLife:
         self._chain_triggered_today: bool = False  # deprecated: 保底续写逻辑已移除，仅保留序列化兼容，后续大版本清理
         self._last_good_night_fired_at: Optional[datetime] = None
         self._slot_cooldown_until: Dict[int, float] = {}  # slot index → time.monotonic() 冷却截止
-        self.boundary_receiver: Optional[BoundaryReceiver] = None
+        self._boundary_receivers: List[BoundaryReceiver] = []
         self._boundaries_loaded = False
         self._state_lock = asyncio.Lock()
         self._first_boot: bool = False  # Life 首次启动标记，用于 init_scenario 一次性注入
@@ -141,10 +141,10 @@ class CharacterLife:
         """同步新的角色卡引用"""
         self.character = character
 
-    def set_boundary_receiver(self, receiver: Optional[BoundaryReceiver]) -> None:
+    def add_boundary_receiver(self, receiver: BoundaryReceiver) -> None:
         if self._boundaries_loaded:
             raise RuntimeError("必须在 load_persistent_state 之前注入 boundary_receiver")
-        self.boundary_receiver = receiver
+        self._boundary_receivers.append(receiver)
 
     def _get_today_str(self) -> str:
         return self.config.now().strftime("%Y-%m-%d")
@@ -178,8 +178,9 @@ class CharacterLife:
         self._slot_cooldown_until.clear()  # 新一天的槽位可能不同，旧冷却记录无意义
         self._today_jittered_start = start
         self._today_jittered_end = end
-        if self.boundary_receiver is not None:
-            self.boundary_receiver.set_jittered_boundaries(start, end)
+        if self._boundary_receivers:
+            for receiver in self._boundary_receivers:
+                receiver.set_jittered_boundaries(start, end)
         else:
             logger.debug("boundary_receiver 未注入，跳过波动边界同步")
         min_interval = self.config.min_event_interval_minutes

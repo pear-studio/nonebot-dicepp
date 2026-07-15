@@ -48,22 +48,6 @@
     - 需评估压缩 LLM 的 token 消耗和延时
     - 影响面: life/agent.py compact_conversation()
 
-### [B-260630-38ec7f] share_desire 概念重新设计及 share_threshold 死配置清理
-- 创建: 2026-06-30
-- 优先级: P2
-- 类型: refactor
-- 改动量: L
-- 问题表现:
-    - Phase 2+3 已将 share_desire 从数据模型/CRUD/协议/DB 列全量清理
-    - schedule_share 已移除 (Phase 4 R3)，proactive_event_share_threshold 配置（proactive_config.py / simulator.py / pydantic_models.py）变为死配置
-    - "角色对事件有分享欲望→触发主动分享"概念本身有价值，当前无替代机制
-    - 主动分享仅靠 tick 时间窗口触发，缺少事件级筛选
-- 开发备忘:
-    - share_desire 重新设计暂不启动，等 SA 条目化 (B-260629-5a1f2c) 落地后系统性设计
-    - share_threshold 配置清理: 移除 proactive_config.py 属性及 from_persona_config 映射，移除 simulator.py 传递，清理或标记 DEPRECATED pydantic_models.py 字段
-    - 新方案应与 SA 叙事产出和角色状态结合，避免回到独立数值字段旧模式
-    - 影响面: proactive_config.py、simulator.py、pydantic_models.py
-
 ## release
 
 ### [B-260617-1cc4a4] 改进 PyInstaller 打包结构以减少 hiddenimports 补丁

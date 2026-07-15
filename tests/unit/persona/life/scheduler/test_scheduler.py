@@ -140,6 +140,7 @@ class TestProactiveSchedulerBasics:
         assert scheduler._last_event_date == "2024-01-02"
 
     @pytest.mark.asyncio
+    @pytest.mark.skip(reason="miss_you 暂时注释，tick 不再调用 _check_missed_users。后续改造为 ChatOrchestrator 路径时恢复")
     async def test_tick_calls_check_missed_when_active(self, scheduler, monkeypatch):
         """满足条件（enabled + 活跃时间 + 未节流）时 tick 调用 _check_missed_users"""
         fake_now = datetime(2024, 1, 1, 10, 0, 0)
@@ -362,7 +363,6 @@ class TestScheduleShare:
             enabled=True,
             min_interval_hours=4,
             max_shares_per_event=3,
-            share_threshold=0.4,
             timezone="Asia/Shanghai",
         )
 
@@ -456,6 +456,7 @@ class TestScheduleShare:
 # ── Force 策略 ───────────────────────────────────────────────────────────
 
 
+@pytest.mark.skip(reason="share_event_to_targets 已禁用，后续改造为 ChatOrchestrator 路径时恢复")
 class TestProactiveSchedulerForcePolicy:
     """force 策略 — 绕过间隔检查但仍受 mute 等限制"""
 
