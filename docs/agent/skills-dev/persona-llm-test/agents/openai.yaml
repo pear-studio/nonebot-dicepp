@@ -1,0 +1,6 @@
+interface:
+  display_name: "Persona 真实 LLM 回归"
+  short_description: "运行 Persona 真实 LLM 客观功能回归"
+  default_prompt: "Use $persona-llm-test to prepare and run selected Persona real-LLM regression scenarios."
+policy:
+  allow_implicit_invocation: false

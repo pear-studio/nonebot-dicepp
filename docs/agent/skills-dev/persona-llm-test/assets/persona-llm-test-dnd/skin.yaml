@@ -1,0 +1,6 @@
+name: persona-llm-test-dnd
+
+localization:
+  login_notice: "艾琳娜已经整理好行装。"
+
+chat: {}

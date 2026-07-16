@@ -66,9 +66,9 @@
   },
 
   "persona_ai": {
-    "_comment_persona": "Persona AI：API 密钥写在 config/user.json 的 persona_ai.primary_api_key（勿提交）。合并顺序 global < user < config/bots/{账号}.json。",
+    "_comment_persona": "Persona AI：API 密钥写在 config/user.json 的 persona_ai.providers.<name>.api_key（勿提交）。合并顺序 global < user < config/bots/{账号}.json。",
     "_comment_timezone": "timezone 必须为 IANA 时区名，例如 Asia/Shanghai、Europe/Berlin、America/New_York；不要写 UTC+8、GMT+8、CST 等缩写。错误时启动仍可通过校验，但运行时会打 warning 并退回机器人本机时间。",
-    "_comment_character": "character_name 对应 content/characters/{name}/character.yaml。生活事件「一天几条、几点到几点、抖动」在角色卡 extensions.persona（daily_events_count、event_day_*、event_jitter_minutes），不由 persona_ai 列表指定。",
+    "_comment_character": "账号配置 persona 对应 content/characters/{name}/character.yaml。生活事件「一天几条、几点到几点、抖动」在角色卡 extensions.persona（daily_events_count、event_day_*、event_jitter_minutes），不由 persona_ai 列表指定。",
     "_comment_tables": "新手配置说明见 docs/configuration.md；Persona 使用见 docs/persona.md；角色卡写法见 docs/persona-character-card.md。",
 
     "enabled": true,
@@ -83,6 +83,7 @@
     "providers": {
       "minimax": {
         "api_key": "",
+        "enabled": true,
         "base_url": "https://api.minimaxi.com/v1",
         "models": [
           {"name": "MiniMax-M3",   "category": "llm", "capabilities": ["text", "tool_calls", "image_input"], "quality": 0.4, "cost": 0.3},
@@ -91,6 +92,7 @@
       },
       "deepseek": {
         "api_key": "",
+        "enabled": true,
         "base_url": "https://api.deepseek.com",
         "models": [
           {"name": "deepseek-v4-flash", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.5, "cost": 0.5},
@@ -100,6 +102,7 @@
       },
       "minimax_image": {
         "api_key": "",
+        "enabled": true,
         "base_url": "https://api.minimaxi.com/v1",
         "models": [
           {"name": "image-01", "category": "gen", "capabilities": ["image"], "quality": 0.5, "cost": 0.5, "max_prompt_chars": 1500}
@@ -107,6 +110,7 @@
       },
       "mimo": {
         "api_key": "",
+        "enabled": true,
         "base_url": "https://api.xiaomimimo.com/v1",
         "models": [
           {"name": "mimo-v2.5-pro", "category": "llm", "capabilities": ["text", "tool_calls"], "quality": 0.6, "cost": 0.6},
@@ -158,6 +162,13 @@
     "proactive_miss_enabled": true,
     "proactive_miss_min_hours": 72,
     "proactive_miss_min_score": 20.0,
+    "proactive_always_send_users": [],
+    "proactive_always_send_groups": [],
+    "proactive_share_schedule_enabled": false,
+    "proactive_share_schedule_morning_enabled": false,
+    "proactive_share_schedule_evening_enabled": false,
+    "proactive_share_schedule_times": [],
+    "proactive_share_schedule_jitter_minutes": 15,
 
     "group_activity_enabled": true,
     "group_activity_decay_per_day": 10.0,
