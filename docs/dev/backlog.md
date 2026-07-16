@@ -12,7 +12,70 @@
 
 ---
 
+## agent
+
+### [B-260716-bae952] persona-inspect trace 与当前数据库 schema 不兼容
+- 创建: 2026-07-16
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - 对当前 Persona 数据库执行 persona_inspect.py trace 时，脚本查询不存在的 session_id 列并抛出 sqlite3.OperationalError: no such column: session_id。
+    - state 和 llm-health 可正常使用，trace 子命令完全不可用；本次回归只能改用只读 sqlite3 手工检查 persona_llm_traces 和 persona_agent_runs。
+    - 当前 persona_llm_traces 使用 interaction_id、run_id、selected_provider、selected_model 等字段，已与 inspection 查询假设漂移。
+- 开发备忘:
+    - 按当前 DDL 更新 trace 查询和格式化字段，并检查是否还有 completion_code/provider 等同类列名漂移。
+    - 为当前 schema 增加临时 SQLite fixture 测试；如仍需兼容旧数据库，先通过 PRAGMA table_info 检测列集合再选择查询。
+    - 影响面：docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py 及其测试。
+    - 风险点：不要为了兼容单一版本而破坏旧生产数据库的只读检查能力。
+
+## dev
+
+### [B-260716-c954f7] DicePP Shell 私聊未自动模拟 to_me
+- 创建: 2026-07-16
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - 生产适配器的私聊事件保证 to_me=true，但 dicepp-shell send --private 只把 group_id 设为空，to_me 仍默认为 false，必须再显式传入 --to-me。
+    - Persona 真实 LLM 回归中，仅使用 --private 的两条消息都落入自我介绍分支，没有创建 Chat Agent Run；补充 --to-me 后才进入正常私聊。
+    - Shell 行为与生产事件语义不一致，会让私聊回归产生假失败。
+- 开发备忘:
+    - 评估让 --private 默认同时设置 to_me=true；如仍需构造 to_me=false 的合成私聊，提供明确的反向开关或底层测试入口。
+    - 更新 shell/main.py 的请求构造、Shell 单元测试和用户文档。
+    - 风险点：确认现有测试或调试流程是否依赖 private + to_me=false 的非生产组合。
+
 ## persona
+
+### [B-260716-8f8625] Proactive prompt 缺少 send_reply 输出协议
+- 创建: 2026-07-16
+- 优先级: P1
+- 类型: bug
+- 改动量: S
+- 问题表现:
+    - Persona 真实 LLM 回归的 18:00 proactive Chat Run 连续 4 轮返回有效角色正文，但 tool_calls 均为空，最终以 limit_reached / max_corrections 结束且消息未送达。
+    - build_static_prompt_proactive() 为去掉分段规则而移除了整段回复协议，其中也包括“必须调用 send_reply、不要直接输出文本”。
+    - thinking 模型使用 tool_choice=auto，API 层不会强制工具调用，因此问题具有随机复现性；同次 warp 的 morning/evening 可以成功而 18:00 失败。
+- 开发备忘:
+    - 为 proactive prompt 增加不包含分段说明的精简输出协议，明确必须调用 send_reply 且不得直接输出正文。
+    - 增加 ContextBuilder proactive prompt 测试，以及模型先返回直接文本后能经 correction 调用 send_reply 的 Agent/Chat 回归测试。
+    - 影响面：chat/context.py、chat/chat_agent.py 及相关测试。
+    - 风险点：thinking 模型不兼容 tool_choice=required，不能只依赖 API 强制参数。
+
+### [B-260716-74cf62] ShareScheduler 忽略 ChatOutcome 并误报触发成功
+- 创建: 2026-07-16
+- 优先级: P1
+- 类型: bug
+- 改动量: M
+- 问题表现:
+    - 18:00 proactive callback 返回 ChatOutcome(status="empty", reason="max_corrections")，没有 message_stream 输出，但 ShareScheduler 只要 callback 未抛异常就记录“触发成功”。
+    - 日程点在调用前已加入 _fired_times，因此生成失败和送达失败都会被当作已完成，状态、日志和用户实际收到的消息不一致。
+    - warp job 的 schedule marker 正常，但不能据此判断 proactive 功能通过。
+- 开发备忘:
+    - 调整 trigger callback 协议，使 ShareScheduler 能检查 ChatOutcome 或等价的结构化结果，区分已调度、已生成、已送达、空结果和失败。
+    - 明确 empty/failed/partial_sent 时 _fired_times 是否保留及是否允许重试，避免重复发送与永久丢失之间的摇摆。
+    - 增加 callback 返回 empty/failed/partial_sent 的调度器测试，并校验日志和持久化状态。
+    - 影响面：life/share_scheduler.py、chat/chat_agent.py、相关协议和测试。
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01
