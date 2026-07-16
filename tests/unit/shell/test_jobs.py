@@ -51,6 +51,12 @@ async def test_cancel_before_warp_task_starts_releases_runtime(tmp_path):
     manager = RuntimeJobManager(_WaitingRunner(tmp_path / "session"))
 
     submitted = await manager.submit_warp(days=1, start=None, dry_run=False)
+    assert submitted["progress"] == {
+        "hours_advanced": 0,
+        "total_hours": 24,
+        "minutes_advanced": 0,
+        "total_minutes": 1440,
+    }
     cancelled = await manager.cancel_job(submitted["id"])
 
     assert cancelled["status"] == "cancelled"

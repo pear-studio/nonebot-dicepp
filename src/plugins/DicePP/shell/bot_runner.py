@@ -1,6 +1,7 @@
 """Bot 运行包装器 - 管理 Bot 实例、捕获输出、控制骰子"""
 
 import asyncio
+import datetime as dt
 import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -107,6 +108,9 @@ class BotRunner:
         self.bot: Optional[Bot] = None
         self.proxy = CaptureProxy()
         self._started = False
+        self._runtime_started_at: dt.datetime | None = None
+        self._runtime_clock_original: Any | None = None
+        self._warp_clock: Any | None = None
 
     @property
     def started(self) -> bool:
@@ -124,6 +128,9 @@ class BotRunner:
             return
 
         try:
+            from utils.time import get_clock
+
+            self._runtime_clock_original = get_clock()
             self._activate_workspace()
 
             # 创建 Bot 实例
@@ -151,6 +158,9 @@ class BotRunner:
                 else:
                     logger.warning("pending tasks 等待超时（30s），仍有未完成任务")
 
+            # 默认 warp 起点应是 Runtime 已完成初始化、真正可接收请求的时刻，
+            # 而不是 provider probe / Persona 初始化开始之前。
+            self._runtime_started_at = self._runtime_clock_original.now()
             self._started = True
         except BaseException:
             if self.bot is not None:
@@ -159,6 +169,8 @@ class BotRunner:
                 except Exception:
                     logger.exception("Shell Bot startup cleanup failed")
                 self.bot = None
+            self._runtime_started_at = None
+            self._runtime_clock_original = None
             raise
 
     async def stop(self) -> None:
@@ -167,8 +179,15 @@ class BotRunner:
             if self.bot and self._started:
                 await self.bot.shutdown_async()
         finally:
+            if self._runtime_clock_original is not None:
+                from utils.time import set_clock
+
+                set_clock(self._runtime_clock_original)
             self.bot = None
             self._started = False
+            self._runtime_started_at = None
+            self._runtime_clock_original = None
+            self._warp_clock = None
 
     def _activate_workspace(self) -> None:
         """Point Paths, env vars, and loguru sinks at the session workspace.
@@ -190,23 +209,28 @@ class BotRunner:
         dry_run: bool = False,
         progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict:
-        """推进模拟时间，驱动角色生活模拟运行指定天数。
+        """从 Runtime 当前时间线连续推进指定天数。
 
         Args:
-            days: 模拟天数
-            start: 起始时间（ISO 格式），默认当前真实时间
+            days: 连续推进的 24 小时周期数
+            start: 首次 warp 的起始时间（ISO 格式），默认 Runtime 启动时间
             dry_run: 仅预估成本，不实际执行
-            progress: 每完成一个模拟日后接收进度快照
+            progress: 每推进一个模拟小时后接收进度快照
 
         Returns:
             包含执行结果的字典
         """
-        import datetime as dt
-        from utils.time import SteppedClock, set_clock, get_clock, WallClock
+        from utils.time import SteppedClock, set_clock
         from utils.logger import logger
 
         if not self._started or not self.bot:
             raise RuntimeError("Bot not started. Call start() first.")
+        if days < 1:
+            raise ValueError("days must be at least 1")
+        if start and self._warp_clock is not None:
+            raise RuntimeError(
+                "--start is only allowed before the Runtime timeline has advanced"
+            )
 
         # 获取 PersonaCommand → PersonaApp → LifeSimulator（与 dicebot.py 一致的 isinstance 查找）
         from module.persona.command import PersonaCommand as PCmd
@@ -229,23 +253,89 @@ class BotRunner:
 
         config = char_life.config
         character = char_life.character
+        persona_config = self.bot.config.persona_ai
 
-        # 计算槽位信息
+        if start:
+            start_dt = dt.datetime.fromisoformat(start)
+            if start_dt.tzinfo is not None:
+                start_dt = start_dt.replace(tzinfo=None)
+        elif self._warp_clock is not None:
+            start_dt = self._warp_clock.now()
+        elif self._runtime_started_at is not None:
+            start_dt = self._runtime_started_at
+        else:
+            raise RuntimeError("Runtime start time is unavailable")
+
+        total_minutes = days * 24 * 60
+        end_dt = start_dt + dt.timedelta(minutes=total_minutes)
+        last_included_dt = end_dt - dt.timedelta(minutes=1)
+        calendar_days_touched = (
+            last_included_dt.date() - start_dt.date()
+        ).days + 1
+
+        # 连续 24 小时可能覆盖两个部分日期；严格上界按半开窗口实际触及
+        # 的日历日数量计算，避免把 days * slots_per_day 误称为 max。
         daily_events_count = getattr(
             character.extensions, "daily_events_count", 3
         )
         chain_max_depth = config.chain_max_depth
-        # wake_up + good_night 两个边界槽位，加上 custom 事件槽位
         BOUNDARY_SLOTS_PER_DAY = 2
         slots_per_day = daily_events_count + BOUNDARY_SLOTS_PER_DAY
 
-        # 估算 LLM 调用次数
-        # 假设每个槽位触发满 chain_max_depth 次调用（实际 ≤ 预估值，chain 可能提前终止）
-        dm_calls = days * slots_per_day * chain_max_depth
-        char_reaction_calls = days * slots_per_day * chain_max_depth
-        char_diary_calls = days
-        sa_calls = days if life_sim.sa_agent else 0
-        total_calls = dm_calls + char_reaction_calls + char_diary_calls + sa_calls
+        # 以 Agent Run 为单位给出上界。Life 链可能提前结束，因此 DM /
+        # Character 的实际 Run 数通常低于此值。
+        life_slot_runs_max = calendar_days_touched * slots_per_day
+        dm_runs = life_slot_runs_max * chain_max_depth
+        char_reaction_runs = life_slot_runs_max * chain_max_depth
+        daily_runs_max = days
+        diary_runs_max = daily_runs_max
+        sa_runs_max = daily_runs_max if life_sim.sa_agent else 0
+
+        proactive_labels: list[str] = []
+        proactive_occurrences: set[tuple[dt.date, str]] = set()
+        share_scheduler = getattr(life_sim, "share_scheduler", None)
+        if (
+            share_scheduler is not None
+            and persona_config.proactive_share_schedule_enabled
+        ):
+            schedule: list[tuple[str, int]] = []
+            if persona_config.proactive_share_schedule_morning_enabled:
+                start_hour = character.extensions.event_day_start_hour
+                if start_hour is not None and start_hour > 0:
+                    schedule.append(("morning", (start_hour * 60 + 5) % 1440))
+            for value in persona_config.proactive_share_schedule_times:
+                try:
+                    hour, minute = map(int, value.split(":", 1))
+                except (ValueError, AttributeError):
+                    continue
+                schedule.append(
+                    (f"midday_{value}", (hour * 60 + minute) % 1440)
+                )
+            if persona_config.proactive_share_schedule_evening_enabled:
+                end_hour = character.extensions.event_day_end_hour
+                if end_hour is not None and end_hour > 0:
+                    schedule.append(("evening", (end_hour * 60 - 5) % 1440))
+
+            proactive_labels = [label for label, _ in schedule]
+            jitter = persona_config.proactive_share_schedule_jitter_minutes
+            cursor = start_dt
+            while cursor < end_dt:
+                minute_of_day = cursor.hour * 60 + cursor.minute
+                for label, center_minute in schedule:
+                    if self._minute_in_jitter_window(
+                        minute_of_day,
+                        center_minute,
+                        jitter,
+                    ):
+                        proactive_occurrences.add((cursor.date(), label))
+                cursor += dt.timedelta(minutes=1)
+
+        force_targets = len({
+            value for value in persona_config.proactive_always_send_users if value
+        }) + len({
+            value for value in persona_config.proactive_always_send_groups if value
+        })
+        proactive_runs_max = len(proactive_occurrences) * force_targets
 
         # 获取模型名
         model = "unknown"
@@ -259,146 +349,157 @@ class BotRunner:
             return {
                 "dry_run": True,
                 "model": model,
+                "start_at": start_dt.isoformat(),
+                "end_at": end_dt.isoformat(),
+                "minutes": total_minutes,
                 "estimate": {
-                    "dm_calls": dm_calls,
-                    "char_reaction_calls": char_reaction_calls,
-                    "char_diary_calls": char_diary_calls,
-                    "sa_calls": sa_calls,
-                    "total_calls": total_calls,
-                    "estimated_minutes": max(1, total_calls * 7 // 60),
-                    "token_scale": f"{max(1, total_calls * 2)}k–{max(1, total_calls * 8)}k",
+                    "calendar_days_touched": calendar_days_touched,
+                    "dm_agent_runs_max": dm_runs,
+                    "character_reaction_runs_max": char_reaction_runs,
+                    "diary_agent_runs_max": diary_runs_max,
+                    "sa_agent_runs_max": sa_runs_max,
+                    "proactive_agent_runs_max": proactive_runs_max,
+                    "proactive_schedule_windows": len(proactive_occurrences),
+                    "proactive_labels": proactive_labels,
+                    "background_max_rounds": (
+                        persona_config.background_llm_max_rounds
+                    ),
+                    "sa_max_rounds": persona_config.sa_max_rounds,
                 },
             }
 
         # ── 执行 warp ──
-        if start:
-            start_dt = dt.datetime.fromisoformat(start)
-            if start_dt.tzinfo is not None:
-                start_dt = start_dt.replace(tzinfo=None)
-        else:
-            # 默认使用随机虚构日期，避免与真实墙钟混淆
-            import random as _random
-            y = _random.randint(1000, 1500)
-            m = _random.randint(1, 12)
-            d = _random.randint(1, 28)
-            start_dt = dt.datetime(y, m, d, 8, 0, 0)
-            logger.info(f"warp: 未指定 --start，使用随机虚构日期 {start_dt.strftime('%Y-%m-%d')}")
-
-        stepped = SteppedClock(start_dt)
-        original_clock = get_clock()
+        if self._warp_clock is None:
+            self._warp_clock = SteppedClock(start_dt)
+        stepped = self._warp_clock
         set_clock(stepped)
 
-        slots_processed = 0
-        errors = 0
-        skipped = 0
-
-        import time as _time
-
-        try:
-            for day_idx in range(days):
-                day_date = stepped.now().date()
-                logger.info(f"── warp day {day_idx + 1}/{days} ({day_date}) ──")
-
-                # 获取当日活动开始小时
-                start_hour = getattr(
-                    character.extensions, "event_day_start_hour", 8
-                )
-                end_hour = getattr(
-                    character.extensions, "event_day_end_hour", 22
-                )
-
-                # 跨天重置 — advance_to_day() 返回当日槽位列表，同时重置内部状态
-                slots = char_life.advance_to_day(day_date)
-                for slot_idx, (slot_m, slot_type) in enumerate(slots):
-
-                    # step_to 槽位时间
-                    slot_hour = slot_m // 60
-                    slot_min = slot_m % 60
-                    slot_dt = dt.datetime.combine(
-                        day_date, dt.time(slot_hour, slot_min)
+        minutes_advanced = 0
+        life_slots_marked = 0
+        tick_errors = 0
+        daily_runs = 0
+        daily_errors = 0
+        fired_proactive: set[tuple[str, str]] = set()
+        preexisting_proactive: set[tuple[str, str]] = set()
+        if share_scheduler is not None:
+            existing_date = getattr(
+                share_scheduler,
+                "_last_event_date",
+                None,
+            )
+            if existing_date:
+                preexisting_proactive = {
+                    (str(existing_date), str(label))
+                    for label in getattr(
+                        share_scheduler,
+                        "_fired_times",
+                        set(),
                     )
-                    stepped.step_to(slot_dt)
+                }
 
-                    t0 = _time.monotonic()
-                    slot_label = f"{slot_hour:02d}:{slot_min:02d} {slot_type}"
-                    try:
-                        await app.tick()
-                        elapsed = _time.monotonic() - t0
-                        if elapsed < 0.5:
-                            skipped += 1
-                            # 尝试读取 character_life 内部状态辅助诊断
-                            try:
-                                cl_status = char_life.get_event_status()
-                                cl_enabled = cl_status.get("enabled", "?")
-                                cl_fired = len(cl_status.get("fired_slot_indices", []))
-                                cl_total = len(cl_status.get("slot_minutes", []))
-                            except Exception:
-                                cl_enabled, cl_fired, cl_total = "?", "?", "?"
-                            logger.warning(
-                                f"  [{slot_label}] SKIP ({elapsed:.1f}s) — "
-                                f"day={day_idx} slot={slot_idx} type={slot_type} "
-                                f"clock={slot_dt.isoformat()} "
-                                f"cl_enabled={cl_enabled} cl_fired={cl_fired}/{cl_total}"
-                            )
-                        else:
-                            slots_processed += 1
-                            logger.info(
-                                f"  [{slot_label}] OK ({elapsed:.1f}s)"
-                            )
-                    except Exception:
-                        elapsed = _time.monotonic() - t0
-                        logger.warning(
-                            f"  [{slot_label}] FAIL ({elapsed:.1f}s) — "
-                            f"day={day_idx} slot={slot_idx} type={slot_type}",
-                            exc_info=True,
-                        )
-                        errors += 1
+        for minute_idx in range(total_minutes):
+            current = stepped.now()
+            life_date_before = getattr(char_life, "_last_event_date", None)
+            fired_before = set(
+                getattr(char_life, "_fired_slot_indices", set())
+            )
+            try:
+                await app.tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                tick_errors += 1
+                logger.warning(
+                    "warp tick 失败: clock={} minute={}/{}",
+                    current.isoformat(),
+                    minute_idx + 1,
+                    total_minutes,
+                    exc_info=True,
+                )
 
-                # 日终处理
-                day_end = dt.datetime.combine(day_date, dt.time(23, 59))
-                stepped.step_to(day_end)
+            fired_after = set(
+                getattr(char_life, "_fired_slot_indices", set())
+            )
+            life_date_after = getattr(char_life, "_last_event_date", None)
+            if life_date_after != life_date_before:
+                life_slots_marked += len(fired_after)
+            else:
+                life_slots_marked += max(
+                    0,
+                    len(fired_after) - len(fired_before),
+                )
 
-                t0 = _time.monotonic()
+            if share_scheduler is not None:
+                fired_date = getattr(
+                    share_scheduler, "_last_event_date", None
+                ) or current.date().isoformat()
+                for label in getattr(share_scheduler, "_fired_times", set()):
+                    marker = (str(fired_date), str(label))
+                    if marker not in preexisting_proactive:
+                        fired_proactive.add(marker)
+
+            next_minute = current + dt.timedelta(minutes=1)
+            if next_minute.date() != current.date():
                 try:
                     await life_sim.tick_daily()
-                    elapsed = _time.monotonic() - t0
-                    logger.info(f"  tick_daily OK ({elapsed:.1f}s)")
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
-                    elapsed = _time.monotonic() - t0
+                    daily_errors += 1
                     logger.warning(
-                        f"  tick_daily FAIL ({elapsed:.1f}s) — day={day_idx}",
+                        "warp tick_daily 失败: date={}",
+                        current.date().isoformat(),
                         exc_info=True,
                     )
-                    errors += 1
+                daily_runs += 1
 
-                if progress is not None:
-                    progress({
-                        "day": day_idx + 1,
-                        "days": days,
-                        "slots_processed": slots_processed,
-                        "errors": errors,
-                        "skipped": skipped,
-                    })
+            stepped.step_to(next_minute)
+            minutes_advanced += 1
 
-                # 进入下一天
-                stepped.step_by(days=1)
-
-            logger.info(
-                f"warp 完成: {days} 天, {slots_processed} 槽位, "
-                f"{errors} 错误, {skipped} 跳过"
-            )
-
-        finally:
-            set_clock(original_clock)
+            if (
+                progress is not None
+                and minutes_advanced % 60 == 0
+            ):
+                progress({
+                    "day": minutes_advanced // (24 * 60),
+                    "days": days,
+                    "hours_advanced": minutes_advanced // 60,
+                    "total_hours": days * 24,
+                    "minutes_advanced": minutes_advanced,
+                    "total_minutes": total_minutes,
+                    "life_slots_marked": life_slots_marked,
+                    "tick_errors": tick_errors,
+                    "daily_runs": daily_runs,
+                    "daily_errors": daily_errors,
+                })
 
         return {
             "dry_run": False,
             "days": days,
-            "slots_processed": slots_processed,
-            "errors": errors,
-            "skipped": skipped,
-            "total_calls_estimate": total_calls,
+            "start_at": start_dt.isoformat(),
+            "end_at": stepped.now().isoformat(),
+            "minutes_advanced": minutes_advanced,
+            "life_slots_marked": life_slots_marked,
+            "tick_errors": tick_errors,
+            "proactive_schedule_count": len(fired_proactive),
+            "proactive_schedule_labels": sorted({
+                label for _, label in fired_proactive
+            }),
+            "daily_runs": daily_runs,
+            "daily_errors": daily_errors,
         }
+
+    @staticmethod
+    def _minute_in_jitter_window(
+        minute_of_day: int,
+        center_minute: int,
+        jitter_minutes: int,
+    ) -> bool:
+        """Return whether a minute falls in a cyclic ±jitter schedule window."""
+        if jitter_minutes <= 0:
+            return minute_of_day == center_minute
+        distance = abs(minute_of_day - center_minute)
+        return min(distance, 1440 - distance) <= jitter_minutes
 
     async def send(
         self,

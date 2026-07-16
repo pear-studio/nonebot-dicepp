@@ -95,7 +95,12 @@ class RuntimeJobManager:
                     "start": start,
                     "dry_run": dry_run,
                 },
-                "progress": {"day": 0, "days": days},
+                "progress": {
+                    "hours_advanced": 0,
+                    "total_hours": days * 24,
+                    "minutes_advanced": 0,
+                    "total_minutes": days * 24 * 60,
+                },
                 "result": None,
                 "error": None,
                 "created_at": now,

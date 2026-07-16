@@ -60,7 +60,12 @@ class FakeBotRunner:
             "dry_run": dry_run,
         })
         if progress is not None:
-            progress({"day": 1, "days": days, "slots_processed": 2})
+            progress({
+                "hours_advanced": 1,
+                "total_hours": days * 24,
+                "minutes_advanced": 60,
+                "total_minutes": days * 24 * 60,
+            })
         if self.block_warp:
             await asyncio.Event().wait()
         return {
@@ -245,9 +250,10 @@ class TestWarpJobs:
             "dry_run": True,
         }
         assert completed["progress"] == {
-            "day": 1,
-            "days": 2,
-            "slots_processed": 2,
+            "hours_advanced": 1,
+            "total_hours": 48,
+            "minutes_advanced": 60,
+            "total_minutes": 2880,
         }
         assert completed["result"]["days"] == 2
         assert runner.warp_calls == [completed["request"]]

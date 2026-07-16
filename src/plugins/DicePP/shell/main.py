@@ -227,7 +227,7 @@ def cmd_warp(args) -> None:
     job_id = job["id"]
     if not args.json:
         print(f"Warp submitted: {job_id}")
-    last_day = None
+    last_hour = None
     try:
         while job["status"] not in {
             "succeeded", "failed", "cancelled", "interrupted"
@@ -235,10 +235,13 @@ def cmd_warp(args) -> None:
             time.sleep(0.25)
             job = fetch_job(runtime, job_id)
             progress = job.get("progress") or {}
-            day = progress.get("day")
-            if not args.json and day and day != last_day:
-                print(f"Warp progress: day {day}/{progress.get('days', args.days)}")
-                last_day = day
+            hour = progress.get("hours_advanced")
+            if not args.json and hour and hour != last_hour:
+                print(
+                    "Warp progress:"
+                    f" hour {hour}/{progress.get('total_hours', args.days * 24)}"
+                )
+                last_hour = hour
     except KeyboardInterrupt:
         try:
             cancel_job(runtime, job_id)
@@ -287,7 +290,12 @@ def _print_job(job: dict[str, Any], *, as_json: bool) -> None:
         return
     print(f"Job {job['id']}: {job['status']}")
     progress = job.get("progress") or {}
-    if progress.get("days"):
+    if progress.get("total_hours"):
+        print(
+            "  Progress:"
+            f" hour {progress.get('hours_advanced', 0)}/{progress['total_hours']}"
+        )
+    elif progress.get("days"):
         print(f"  Progress: day {progress.get('day', 0)}/{progress['days']}")
     if job.get("error"):
         print(f"  Error: {job['error']}")
@@ -295,27 +303,63 @@ def _print_job(job: dict[str, Any], *, as_json: bool) -> None:
 
 def _print_dry_run(result: dict[str, Any]) -> None:
     estimate = result["estimate"]
-    print("warp cost estimate (--dry-run):")
-    print(f"  DM Agent:             {estimate['dm_calls']:>4d} calls")
-    print(f"  Character (reaction): {estimate['char_reaction_calls']:>4d} calls")
-    print(f"  Character (diary):    {estimate['char_diary_calls']:>4d} calls")
-    print(f"  SA Agent (planning):  {estimate['sa_calls']:>4d} calls")
-    print(f"  Total:                {estimate['total_calls']:>4d} LLM calls")
+    print("warp plan (--dry-run):")
+    print(f"  Timeline: {result['start_at']} -> {result['end_at']}")
+    print(f"  Simulated minutes: {result['minutes']}")
+    print(
+        "  Calendar dates touched:"
+        f" {estimate['calendar_days_touched']}"
+    )
+    print("  Agent Run upper bounds:")
+    print(f"    DM:                 {estimate['dm_agent_runs_max']:>4d}")
+    print(
+        "    Character reaction:"
+        f" {estimate['character_reaction_runs_max']:>4d}"
+    )
+    print(f"    Character diary:    {estimate['diary_agent_runs_max']:>4d}")
+    print(f"    SA planning:        {estimate['sa_agent_runs_max']:>4d}")
+    print(f"    Proactive chat:     {estimate['proactive_agent_runs_max']:>4d}")
+    labels = estimate.get("proactive_labels") or []
+    if labels:
+        print(
+            "  Proactive schedule windows in timeline:"
+            f" {estimate.get('proactive_schedule_windows', 0)}"
+            f" ({', '.join(labels)})"
+        )
+    print(
+        "  Configured max rounds:"
+        f" background={estimate['background_max_rounds']},"
+        f" SA={estimate['sa_max_rounds']}"
+    )
     print(f"  Model: {result.get('model', 'unknown')}")
-    print(f"  Estimated time: ~{estimate['estimated_minutes']} minutes")
-    print(f"  Token scale: ~{estimate['token_scale']}")
+    print("  Actual Agent Runs may be lower when a chain finishes early.")
 
 
 def _print_warp_result(result: dict[str, Any]) -> None:
     summary = (
-        f"warp completed: {result.get('days', 0)} days, "
-        f"{result.get('slots_processed', 0)} slots processed"
+        f"warp completed: {result.get('start_at', '?')} -> "
+        f"{result.get('end_at', '?')} "
+        f"({result.get('minutes_advanced', 0)} minutes)"
     )
-    if result.get("errors"):
-        summary += f", {result['errors']} errors"
-    if result.get("skipped"):
-        summary += f", {result['skipped']} skipped"
     print(summary)
+    print(
+        "  Life slots marked:"
+        f" {result.get('life_slots_marked', 0)};"
+        f" daily runs: {result.get('daily_runs', 0)}"
+    )
+    labels = result.get("proactive_schedule_labels") or []
+    if labels:
+        print(
+            "  Proactive schedule points marked:"
+            f" {result.get('proactive_schedule_count', 0)}"
+            f" ({', '.join(labels)})"
+        )
+    errors = result.get("tick_errors", 0) + result.get("daily_errors", 0)
+    if errors:
+        print(
+            f"  Errors: tick={result.get('tick_errors', 0)},"
+            f" daily={result.get('daily_errors', 0)}"
+        )
 
 
 def _print_result(result: dict[str, Any], *, as_json: bool) -> None:
@@ -395,11 +439,16 @@ def main() -> None:
     warp_parser.add_argument("name", help="Session name")
     warp_parser.add_argument(
         "--days", type=_positive_int, required=True,
-        help="Number of days to simulate (>= 1)",
+        help="Advance the runtime timeline by N x 24 hours (>= 1)",
     )
-    warp_parser.add_argument("--start", help="Starting datetime in ISO format")
     warp_parser.add_argument(
-        "--dry-run", action="store_true", help="Estimate cost without simulation"
+        "--start",
+        help="ISO start time for the first warp (default: runtime ready time)",
+    )
+    warp_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show timeline and Agent Run upper bounds without advancing",
     )
     warp_parser.add_argument(
         "--detach", action="store_true", help="Submit and return the job ID"

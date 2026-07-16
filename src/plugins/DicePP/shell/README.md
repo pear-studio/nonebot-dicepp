@@ -116,9 +116,10 @@ Dashboard。Bot 与 Dashboard 必须指向同一 session workspace，才能共�
 ### 推进 Persona 模拟时间
 
 `warp` 是由常驻 Runtime 执行的异步任务。它不会维持一个长 HTTP 请求；CLI
-提交任务后轮询状态并显示进度。运行前必须完成该 session 的 Persona、角色卡和
-provider 配置，并以默认的无 tick 模式启动 `serve`。第一版会拒绝在
-`serve --tick` Runtime 上执行 warp，避免后台 tick 混入模拟时间线。
+提交任务后轮询状态并显示进度。`--days N` 表示从 Runtime 当前时间线连续推进
+`N × 24` 小时，并在每个模拟分钟执行一次 Persona tick。运行前必须完成该
+session 的 Persona、角色卡和 provider 配置，并以默认的无 tick 模式启动
+`serve`；`serve --tick` Runtime 会被拒绝，避免真实后台 tick 混入模拟时间线。
 
 ```bash
 # 终端 1
@@ -128,6 +129,18 @@ uv run dicepp-shell serve persona-warp
 uv run dicepp-shell warp persona-warp --days 2 --dry-run
 uv run dicepp-shell warp persona-warp --days 2 --start 1351-10-26T08:00
 ```
+
+第一次 warp 未指定 `--start` 时，从 Runtime 的真实启动时间开始。模拟时钟会在
+warp 完成或取消后保留，后续 warp 从当前模拟时间继续；时间线已经推进后不能再次
+指定 `--start`。`serve --stop` 会恢复 Runtime 启动前的时钟。
+
+`--dry-run` 不推进时钟、不执行 tick、也不写 Persona 数据；它显示实际起止时间，
+并按 DM、Character、Diary、SA 和 Proactive 的 Agent Run 上界分类估算。Agent
+内部轮次仍使用正式配置，输出会同时显示 `background_llm_max_rounds` 和
+`sa_max_rounds`。
+
+完成摘要中的 proactive schedule point 只表示调度器已标记该日程点，不能据此
+断言消息已经送达；发送结果需结合捕获消息、日志或 Persona trace 验收。
 
 需要让任务脱离当前 CLI 后继续运行时：
 
@@ -140,7 +153,7 @@ uv run dicepp-shell job cancel persona-warp <job_id>
 同一 Runtime 一次只允许一个 warp。warp 期间 `send` 和普通 `serve --stop`
 返回 `runtime_busy`；取消或完成后自动恢复。任务状态保存在 session 的 `jobs/`
 目录中。Runtime 异常退出后，未完成任务会在下次启动时标记为 `interrupted`，
-不会自动断点续跑。
+不会自动断点续跑。取消会保留已经推进到的模拟时间，方便检查或从该点继续。
 
 查看和停止 Runtime：
 
