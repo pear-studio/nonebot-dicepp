@@ -36,6 +36,15 @@ def _parse_dice_sequence(dice_str: str) -> list[int]:
         )
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(
+            f"days must be >= 1, received {number}"
+        )
+    return number
+
+
 def cmd_init(args) -> None:
     try:
         existed = session_exists(args.name)
@@ -179,6 +188,136 @@ def cmd_rm(args) -> None:
         _error(f"Session '{args.name}' not found")
 
 
+def _require_running_session(name: str):
+    if not session_exists(name):
+        _error(f"Session '{name}' not found. Run 'init' first.")
+    if not load_session(name):
+        _error(f"Failed to load session '{name}'")
+    runtime = read_runtime_info(get_session_dir(name))
+    if runtime is None:
+        _error(f"Session '{name}' is not running. Run 'serve' first.")
+    return runtime
+
+
+def cmd_warp(args) -> None:
+    runtime = _require_running_session(args.name)
+    from .client import (
+        ShellRuntimeRequestError,
+        cancel_job,
+        fetch_job,
+        start_warp,
+    )
+
+    try:
+        job = start_warp(runtime, {
+            "days": args.days,
+            "start": args.start,
+            "dry_run": args.dry_run,
+        })
+    except ShellRuntimeRequestError as exc:
+        _error(str(exc))
+
+    if args.detach:
+        if args.json:
+            print(json.dumps(job, ensure_ascii=False, indent=2))
+        else:
+            print(f"Warp submitted: {job['id']}")
+        return
+
+    job_id = job["id"]
+    if not args.json:
+        print(f"Warp submitted: {job_id}")
+    last_day = None
+    try:
+        while job["status"] not in {
+            "succeeded", "failed", "cancelled", "interrupted"
+        }:
+            time.sleep(0.25)
+            job = fetch_job(runtime, job_id)
+            progress = job.get("progress") or {}
+            day = progress.get("day")
+            if not args.json and day and day != last_day:
+                print(f"Warp progress: day {day}/{progress.get('days', args.days)}")
+                last_day = day
+    except KeyboardInterrupt:
+        try:
+            cancel_job(runtime, job_id)
+        except ShellRuntimeRequestError:
+            pass
+        _error(f"Warp cancellation requested for {job_id}")
+    except ShellRuntimeRequestError as exc:
+        _error(str(exc))
+
+    if job["status"] != "succeeded":
+        _error(job.get("error") or f"Warp job ended with status {job['status']}")
+    result = job.get("result") or {}
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif result.get("dry_run"):
+        _print_dry_run(result)
+    else:
+        _print_warp_result(result)
+
+
+def cmd_job_status(args) -> None:
+    runtime = _require_running_session(args.name)
+    from .client import ShellRuntimeRequestError, fetch_job
+
+    try:
+        job = fetch_job(runtime, args.job_id)
+    except ShellRuntimeRequestError as exc:
+        _error(str(exc))
+    _print_job(job, as_json=args.json)
+
+
+def cmd_job_cancel(args) -> None:
+    runtime = _require_running_session(args.name)
+    from .client import ShellRuntimeRequestError, cancel_job
+
+    try:
+        job = cancel_job(runtime, args.job_id)
+    except ShellRuntimeRequestError as exc:
+        _error(str(exc))
+    _print_job(job, as_json=args.json)
+
+
+def _print_job(job: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(job, ensure_ascii=False, indent=2))
+        return
+    print(f"Job {job['id']}: {job['status']}")
+    progress = job.get("progress") or {}
+    if progress.get("days"):
+        print(f"  Progress: day {progress.get('day', 0)}/{progress['days']}")
+    if job.get("error"):
+        print(f"  Error: {job['error']}")
+
+
+def _print_dry_run(result: dict[str, Any]) -> None:
+    estimate = result["estimate"]
+    print("warp cost estimate (--dry-run):")
+    print(f"  DM Agent:             {estimate['dm_calls']:>4d} calls")
+    print(f"  Character (reaction): {estimate['char_reaction_calls']:>4d} calls")
+    print(f"  Character (diary):    {estimate['char_diary_calls']:>4d} calls")
+    print(f"  SA Agent (planning):  {estimate['sa_calls']:>4d} calls")
+    print(f"  Total:                {estimate['total_calls']:>4d} LLM calls")
+    print(f"  Model: {result.get('model', 'unknown')}")
+    print(f"  Estimated time: ~{estimate['estimated_minutes']} minutes")
+    print(f"  Token scale: ~{estimate['token_scale']}")
+
+
+def _print_warp_result(result: dict[str, Any]) -> None:
+    summary = (
+        f"warp completed: {result.get('days', 0)} days, "
+        f"{result.get('slots_processed', 0)} slots processed"
+    )
+    if result.get("errors"):
+        summary += f", {result['errors']} errors"
+    if result.get("skipped"):
+        summary += f", {result['skipped']} skipped"
+    print(summary)
+
+
 def _print_result(result: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -249,6 +388,37 @@ def main() -> None:
     rm_parser = subparsers.add_parser("rm", help="Remove a stopped session")
     rm_parser.add_argument("name", help="Session name")
     rm_parser.set_defaults(func=cmd_rm)
+
+    warp_parser = subparsers.add_parser(
+        "warp", help="Run a Persona life-simulation job in the active runtime"
+    )
+    warp_parser.add_argument("name", help="Session name")
+    warp_parser.add_argument(
+        "--days", type=_positive_int, required=True,
+        help="Number of days to simulate (>= 1)",
+    )
+    warp_parser.add_argument("--start", help="Starting datetime in ISO format")
+    warp_parser.add_argument(
+        "--dry-run", action="store_true", help="Estimate cost without simulation"
+    )
+    warp_parser.add_argument(
+        "--detach", action="store_true", help="Submit and return the job ID"
+    )
+    warp_parser.add_argument("--json", action="store_true", help="Output JSON")
+    warp_parser.set_defaults(func=cmd_warp)
+
+    job_parser = subparsers.add_parser("job", help="Inspect or cancel runtime jobs")
+    job_commands = job_parser.add_subparsers(dest="job_command", required=True)
+    job_status_parser = job_commands.add_parser("status", help="Show job status")
+    job_status_parser.add_argument("name", help="Session name")
+    job_status_parser.add_argument("job_id", help="Job ID")
+    job_status_parser.add_argument("--json", action="store_true", help="Output JSON")
+    job_status_parser.set_defaults(func=cmd_job_status)
+    job_cancel_parser = job_commands.add_parser("cancel", help="Cancel a job")
+    job_cancel_parser.add_argument("name", help="Session name")
+    job_cancel_parser.add_argument("job_id", help="Job ID")
+    job_cancel_parser.add_argument("--json", action="store_true", help="Output JSON")
+    job_cancel_parser.set_defaults(func=cmd_job_cancel)
 
     # ---- migration hints for old command names ----
 

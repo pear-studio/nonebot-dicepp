@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .bot_runner import BotRunner
+from .jobs import JobNotFound, RuntimeBusy, RuntimeJobManager
 from .session import SessionRuntimeLease, bot_id_for_session
 
 
@@ -29,6 +30,12 @@ class MessageRequest(BaseModel):
     request_id: str = ""
 
 
+class WarpRequest(BaseModel):
+    days: int = Field(ge=1)
+    start: str | None = None
+    dry_run: bool = False
+
+
 def create_shell_app(
     runner: BotRunner,
     *,
@@ -38,6 +45,17 @@ def create_shell_app(
 ) -> FastAPI:
     state = {"ready": False}
     message_lock = asyncio.Lock()
+    jobs = RuntimeJobManager(runner)
+
+    def busy_error(exc: RuntimeBusy) -> HTTPException:
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": "runtime_busy",
+                "mode": exc.mode,
+                "active_job_id": exc.active_job_id,
+            },
+        )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -49,9 +67,13 @@ def create_shell_app(
             yield
         finally:
             state["ready"] = False
-            await runner.stop()
+            try:
+                await jobs.shutdown()
+            finally:
+                await runner.stop()
 
     app = FastAPI(title="DicePP Shell Runtime", lifespan=lifespan)
+    app.state.jobs = jobs
 
     @app.get("/health/live")
     async def live():
@@ -73,26 +95,72 @@ def create_shell_app(
             "bot_id": bot.account if bot is not None else bot_id_for_session(session_name),
             "tick": runner.tick,
             "dashboard_control_enabled": runner.dashboard_control_enabled,
+            "mode": jobs.mode,
+            "active_job": jobs.active_job,
         }
 
     @app.post("/v1/messages")
     async def messages(request: MessageRequest):
         if not state["ready"]:
             raise HTTPException(status_code=503, detail="runtime_not_ready")
-        async with message_lock:
-            result = await runner.send(
-                user_id=request.user_id,
-                nickname=request.nickname,
-                msg=request.text,
-                group_id=request.group_id,
-                dice_sequence=request.dice,
-                to_me=request.to_me,
-            )
+        try:
+            await jobs.begin_message()
+        except RuntimeBusy as exc:
+            raise busy_error(exc) from exc
+        try:
+            async with message_lock:
+                result = await runner.send(
+                    user_id=request.user_id,
+                    nickname=request.nickname,
+                    msg=request.text,
+                    group_id=request.group_id,
+                    dice_sequence=request.dice,
+                    to_me=request.to_me,
+                )
+        finally:
+            await jobs.end_message()
         result["request_id"] = request.request_id
         return result
 
+    @app.post("/v1/warps", status_code=202)
+    async def start_warp(request: WarpRequest):
+        if not state["ready"]:
+            raise HTTPException(status_code=503, detail="runtime_not_ready")
+        try:
+            return await jobs.submit_warp(
+                days=request.days,
+                start=request.start,
+                dry_run=request.dry_run,
+            )
+        except RuntimeBusy as exc:
+            raise busy_error(exc) from exc
+
+    @app.get("/v1/jobs/{job_id}")
+    async def get_job(job_id: str):
+        try:
+            return jobs.get_job(job_id)
+        except JobNotFound as exc:
+            raise HTTPException(status_code=404, detail="job_not_found") from exc
+
+    @app.post("/v1/jobs/{job_id}/cancel", status_code=202)
+    async def cancel_job(job_id: str):
+        try:
+            return await jobs.cancel_job(job_id)
+        except JobNotFound as exc:
+            raise HTTPException(status_code=404, detail="job_not_found") from exc
+
     @app.post("/v1/runtime/stop")
     async def stop_runtime():
+        active_job = jobs.active_job
+        if active_job is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "runtime_busy",
+                    "mode": jobs.mode,
+                    "active_job_id": active_job["id"],
+                },
+            )
         request_shutdown()
         return {"ok": True, "message": "shutdown requested"}
 

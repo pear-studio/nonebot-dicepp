@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,7 +14,8 @@ from plugins.DicePP.shell.server import create_shell_app
 class FakeBotRunner:
     """Stub BotRunner that records calls without starting a real Bot."""
 
-    def __init__(self):
+    def __init__(self, session_dir):
+        self.session_dir = session_dir
         self._started = False
         self.tick = False
         self.dashboard_control_enabled = False
@@ -21,6 +23,8 @@ class FakeBotRunner:
         self._stop_called = False
         self._concurrent_sends = 0
         self._max_concurrent = 0
+        self.block_warp = False
+        self.warp_calls = []
 
     @property
     def started(self) -> bool:
@@ -47,10 +51,30 @@ class FakeBotRunner:
             "raw_command_count": 1,
         }
 
+    async def warp(self, *, days, start=None, dry_run=False, progress=None):
+        import asyncio
+
+        self.warp_calls.append({
+            "days": days,
+            "start": start,
+            "dry_run": dry_run,
+        })
+        if progress is not None:
+            progress({"day": 1, "days": days, "slots_processed": 2})
+        if self.block_warp:
+            await asyncio.Event().wait()
+        return {
+            "dry_run": dry_run,
+            "days": days,
+            "slots_processed": 2,
+            "errors": 0,
+            "skipped": 0,
+        }
+
 
 @pytest.fixture
-def client_and_runner():
-    runner = FakeBotRunner()
+def client_and_runner(tmp_path):
+    runner = FakeBotRunner(tmp_path / "session")
     shutdown_flag = {"called": False}
 
     def request_shutdown():
@@ -129,13 +153,28 @@ class TestStop:
         assert resp.json()["ok"] is True
         assert shutdown_flag["called"] is True
 
+    def test_runner_stops_when_job_shutdown_fails(self, tmp_path):
+        runner = FakeBotRunner(tmp_path / "session")
+        app = create_shell_app(
+            runner,
+            session_name="test",
+            request_shutdown=lambda: None,
+        )
+        app.state.jobs.shutdown = AsyncMock(side_effect=OSError("disk unavailable"))
+
+        with pytest.raises(OSError, match="disk unavailable"):
+            with TestClient(app):
+                pass
+
+        assert runner._stop_called is True
+
 
 class TestNotReady503:
     """Verify /health/ready returns 503 before lifespan startup."""
 
-    def test_ready_503_without_lifespan(self):
+    def test_ready_503_without_lifespan(self, tmp_path):
         """Without the lifespan running, ready endpoint returns 503."""
-        runner = FakeBotRunner()
+        runner = FakeBotRunner(tmp_path / "session")
         shutdown_flag = {"called": False}
         app = create_shell_app(
             runner, session_name="test",
@@ -176,3 +215,91 @@ class TestSerialization:
         assert runner._max_concurrent == 1, (
             f"Expected serialized (max 1), got {runner._max_concurrent}"
         )
+
+
+class TestWarpJobs:
+    @staticmethod
+    def _wait_for_status(client, job_id, expected):
+        for _ in range(50):
+            payload = client.get(f"/v1/jobs/{job_id}").json()
+            if payload["status"] == expected:
+                return payload
+            time.sleep(0.01)
+        pytest.fail(f"Job {job_id} did not reach {expected}: {payload}")
+
+    def test_warp_submits_background_job_and_persists_result(self, client_and_runner):
+        client, runner, _, _ = client_and_runner
+
+        response = client.post("/v1/warps", json={
+            "days": 2,
+            "start": "1351-10-26T08:00",
+            "dry_run": True,
+        })
+
+        assert response.status_code == 202
+        job_id = response.json()["id"]
+        completed = self._wait_for_status(client, job_id, "succeeded")
+        assert completed["request"] == {
+            "days": 2,
+            "start": "1351-10-26T08:00",
+            "dry_run": True,
+        }
+        assert completed["progress"] == {
+            "day": 1,
+            "days": 2,
+            "slots_processed": 2,
+        }
+        assert completed["result"]["days"] == 2
+        assert runner.warp_calls == [completed["request"]]
+        assert (runner.session_dir / "jobs" / f"{job_id}.json").is_file()
+
+    def test_warp_blocks_messages_and_stop_until_cancelled(self, client_and_runner):
+        client, runner, _, _ = client_and_runner
+        runner.block_warp = True
+        submitted = client.post("/v1/warps", json={"days": 1})
+        job_id = submitted.json()["id"]
+
+        message = client.post("/v1/messages", json={
+            "text": "hello",
+            "user_id": "u1",
+        })
+        stop = client.post("/v1/runtime/stop")
+
+        assert message.status_code == 409
+        assert message.json()["detail"]["code"] == "runtime_busy"
+        assert stop.status_code == 409
+
+        cancelled = client.post(f"/v1/jobs/{job_id}/cancel")
+        assert cancelled.status_code == 202
+        self._wait_for_status(client, job_id, "cancelled")
+
+        resumed = client.post("/v1/messages", json={
+            "text": "hello",
+            "user_id": "u1",
+        })
+        assert resumed.status_code == 200
+
+    def test_second_warp_is_rejected_while_one_is_active(self, client_and_runner):
+        client, runner, _, _ = client_and_runner
+        runner.block_warp = True
+        first = client.post("/v1/warps", json={"days": 1})
+
+        second = client.post("/v1/warps", json={"days": 2})
+
+        assert second.status_code == 409
+        assert second.json()["detail"]["code"] == "runtime_busy"
+        client.post(f"/v1/jobs/{first.json()['id']}/cancel")
+
+    def test_warp_rejects_tick_enabled_runtime(self, client_and_runner):
+        client, runner, _, _ = client_and_runner
+        runner.tick = True
+
+        response = client.post("/v1/warps", json={"days": 1})
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == {
+            "code": "runtime_busy",
+            "mode": "tick_enabled",
+            "active_job_id": None,
+        }
+        assert runner.warp_calls == []

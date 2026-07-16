@@ -23,6 +23,32 @@ def send_message(runtime: RuntimeInfo, payload: dict[str, Any]) -> dict[str, Any
     )
 
 
+def start_warp(runtime: RuntimeInfo, payload: dict[str, Any]) -> dict[str, Any]:
+    return _request_json(
+        f"{runtime.base_url}/v1/warps",
+        method="POST",
+        payload=payload,
+        timeout=5,
+    )
+
+
+def fetch_job(runtime: RuntimeInfo, job_id: str) -> dict[str, Any]:
+    return _request_json(
+        f"{runtime.base_url}/v1/jobs/{job_id}",
+        method="GET",
+        timeout=5,
+    )
+
+
+def cancel_job(runtime: RuntimeInfo, job_id: str) -> dict[str, Any]:
+    return _request_json(
+        f"{runtime.base_url}/v1/jobs/{job_id}/cancel",
+        method="POST",
+        payload={},
+        timeout=5,
+    )
+
+
 def fetch_status(runtime: RuntimeInfo) -> dict[str, Any]:
     return _request_json(
         f"{runtime.base_url}/v1/status",

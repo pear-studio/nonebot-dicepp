@@ -43,8 +43,13 @@ uv run dicepp-shell rm <session>
 `warp` 推进虚构时间，驱动 persona 生活模拟运行指定天数（DM 叙事 → Character 反应 → Diary → SA 叙事规划）。用于调试 LLM prompt、生活模拟逻辑和叙事质量。
 
 ```bash
-uv run dicepp-shell warp <session> --days <N> [--start <ISO>] [--dry-run] [--json]
+uv run dicepp-shell warp <session> --days <N> [--start <ISO>] [--dry-run] [--detach] [--json]
 ```
+
+`warp` 由已启动的 `serve` Runtime 作为异步 job 执行。CLI 默认提交后轮询到完成；
+使用 `--detach` 只返回 job ID，之后通过 `dicepp-shell job status/cancel` 管理。
+执行 warp 的 Runtime 必须使用默认无 tick 模式；`serve --tick` 会被明确拒绝，
+避免真实后台 tick 混入模拟时间线。
 
 **执行前必须新建 session**（`dicepp-shell init <new-session>`），不要复用已有 session。复用会导致新旧 warp 的 `persona_story_deck`、`persona_daily_events`、`persona_sa_state` 等数据混在同一 DB 中，故事条目跨叙事污染，分析结果不可靠。
 
@@ -53,6 +58,7 @@ uv run dicepp-shell warp <session> --days <N> [--start <ISO>] [--dry-run] [--jso
 - `--days <N>`：模拟天数（≥1，必填）
 - `--start <ISO>`：起始虚构时间（ISO 格式，如 `1351-10-26T08:00`）。默认随机生成 1000–1500 年间的虚构日期
 - `--dry-run`：仅预估 LLM 调用次数和 token 量级，不实际执行
+- `--detach`：提交后立即返回 job ID，不等待任务完成
 - `--json`：输出结构化结果
 
 **使用流程：**
@@ -61,13 +67,17 @@ uv run dicepp-shell warp <session> --days <N> [--start <ISO>] [--dry-run] [--jso
 # 1. 新建独立 session
 uv run dicepp-shell init warp-qiqi-test
 
-# 2. 先 dry-run 确认成本
+# 2. 在 session workspace 中配置 Persona、角色卡和 provider，然后启动 runtime
+uv run dicepp-shell serve warp-qiqi-test
+
+# 3. 在另一个终端先 dry-run 确认成本
 uv run dicepp-shell warp warp-qiqi-test --days 2 --dry-run
 
-# 3. 执行 warp
+# 4. 执行 warp
 uv run dicepp-shell warp warp-qiqi-test --days 2
 
-# 4. 分析完成后清理
+# 5. 停止 runtime，分析完成后清理
+uv run dicepp-shell serve --stop warp-qiqi-test
 uv run dicepp-shell rm warp-qiqi-test
 ```
 
@@ -75,6 +85,8 @@ uv run dicepp-shell rm warp-qiqi-test
 
 - warp 使用真实 LLM，执行前先用 `--dry-run` 确认调用次数和 token 量级
 - 每次 warp 消耗 50–200 次 LLM 调用，耗时 5–20 分钟
+- warp 期间 send 和普通 stop 会返回 runtime_busy；可用 `job cancel` 取消
+- Runtime 异常退出后，未完成 job 标记为 interrupted，不会自动续跑
 - 虚构日期默认随机生成，避免与真实墙钟混淆
 - warp 完成后，DM/Character 对话原文、SA 思考过程等原始数据在 `persona_llm_traces` 和 `persona_agent_events` 表中，可导出分析
 

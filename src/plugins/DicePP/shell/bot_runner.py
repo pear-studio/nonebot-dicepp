@@ -3,7 +3,7 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Callable, Dict, List, Optional
 
 # Shell bot_runner 全部使用裸绝对导入 (core.X / utils.X / module.X / adapter)，
 # 与核心模块一致。不要改回 ..core.bot 相对导入： shell 以
@@ -188,6 +188,7 @@ class BotRunner:
         days: int,
         start: str | None = None,
         dry_run: bool = False,
+        progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict:
         """推进模拟时间，驱动角色生活模拟运行指定天数。
 
@@ -195,6 +196,7 @@ class BotRunner:
             days: 模拟天数
             start: 起始时间（ISO 格式），默认当前真实时间
             dry_run: 仅预估成本，不实际执行
+            progress: 每完成一个模拟日后接收进度快照
 
         Returns:
             包含执行结果的字典
@@ -214,8 +216,8 @@ class BotRunner:
         )
         if persona_cmd is None or persona_cmd.app is None:
             raise RuntimeError(
-                "Persona 模块未初始化。请确保 persona 配置已启用，"
-                "并在 warp 前至少发送一条消息触发初始化。"
+                "Persona 模块未初始化。请检查该 session 的 Persona、角色卡和 "
+                "provider 配置，以及 serve 启动日志。"
             )
 
         app = persona_cmd.app
@@ -368,6 +370,15 @@ class BotRunner:
                         exc_info=True,
                     )
                     errors += 1
+
+                if progress is not None:
+                    progress({
+                        "day": day_idx + 1,
+                        "days": days,
+                        "slots_processed": slots_processed,
+                        "errors": errors,
+                        "skipped": skipped,
+                    })
 
                 # 进入下一天
                 stepped.step_by(days=1)

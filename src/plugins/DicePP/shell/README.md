@@ -16,6 +16,8 @@ uv run python -m DicePP.shell send --help
 uv run python -m DicePP.shell serve --help
 uv run python -m DicePP.shell serve --status
 uv run python -m DicePP.shell serve --stop
+uv run python -m DicePP.shell warp --help
+uv run python -m DicePP.shell job --help
 uv run python -m DicePP.shell list --help
 uv run python -m DicePP.shell rm --help
 ```
@@ -110,6 +112,35 @@ Dashboard。Bot 与 Dashboard 必须指向同一 session workspace，才能共�
 
 默认禁用自动 tick，以保证测试确定性；需要验证 Persona、scheduler 等后台
 流程时显式添加 `--tick`。
+
+### 推进 Persona 模拟时间
+
+`warp` 是由常驻 Runtime 执行的异步任务。它不会维持一个长 HTTP 请求；CLI
+提交任务后轮询状态并显示进度。运行前必须完成该 session 的 Persona、角色卡和
+provider 配置，并以默认的无 tick 模式启动 `serve`。第一版会拒绝在
+`serve --tick` Runtime 上执行 warp，避免后台 tick 混入模拟时间线。
+
+```bash
+# 终端 1
+uv run dicepp-shell serve persona-warp
+
+# 终端 2：先估算成本，再执行
+uv run dicepp-shell warp persona-warp --days 2 --dry-run
+uv run dicepp-shell warp persona-warp --days 2 --start 1351-10-26T08:00
+```
+
+需要让任务脱离当前 CLI 后继续运行时：
+
+```bash
+uv run dicepp-shell warp persona-warp --days 2 --detach
+uv run dicepp-shell job status persona-warp <job_id>
+uv run dicepp-shell job cancel persona-warp <job_id>
+```
+
+同一 Runtime 一次只允许一个 warp。warp 期间 `send` 和普通 `serve --stop`
+返回 `runtime_busy`；取消或完成后自动恢复。任务状态保存在 session 的 `jobs/`
+目录中。Runtime 异常退出后，未完成任务会在下次启动时标记为 `interrupted`，
+不会自动断点续跑。
 
 查看和停止 Runtime：
 
@@ -240,6 +271,7 @@ python -m DicePP.shell rm char_test
 │   ├── data/              # Bot 数据库和日志
 │   ├── content/           # 会话内容资源
 │   ├── dashboard/data/    # Dashboard 状态
+│   ├── jobs/              # warp 等后台任务状态和结果
 │   └── runtime.json       # 活跃 Runtime 地址（运行时存在）
 ```
 
@@ -248,7 +280,7 @@ python -m DicePP.shell rm char_test
 ## 限制与注意事项
 
 1. **无实际网络交互**: 所有消息仅在本地处理，不会发送到真实的 QQ
-2. **单 Runtime**: 每个会话同一时间只能运行一个 Bot Runtime
+2. **单 Runtime**: 每个会话同一时间只能运行一个 Bot Runtime；warp 与消息处理互斥
 3. **骰子序列**: `--dice` 只影响当前消息中的骰子投掷，不影响后续消息
 4. **状态隔离**: 不同会话之间数据完全隔离，但同一会话内所有用户共享状态
 

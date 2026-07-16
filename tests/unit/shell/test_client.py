@@ -9,10 +9,13 @@ from urllib import error as urllib_error
 import pytest
 
 from plugins.DicePP.shell.client import (
+    cancel_job,
+    fetch_job,
     ShellRuntimeRequestError,
     fetch_status,
     request_stop,
     send_message,
+    start_warp,
 )
 from plugins.DicePP.shell.session import RuntimeInfo
 
@@ -34,6 +37,33 @@ class TestSendMessage:
             m_open.return_value.__enter__.return_value.status = 200
             result = send_message(runtime, payload)
         assert result == {"text": "world"}
+
+
+class TestWarpJobs:
+    @pytest.mark.parametrize(
+        ("call", "expected_path", "expected_method"),
+        [
+            (lambda runtime: start_warp(runtime, {"days": 2}), "/v1/warps", "POST"),
+            (lambda runtime: fetch_job(runtime, "warp_123"), "/v1/jobs/warp_123", "GET"),
+            (
+                lambda runtime: cancel_job(runtime, "warp_123"),
+                "/v1/jobs/warp_123/cancel",
+                "POST",
+            ),
+        ],
+    )
+    def test_job_requests_use_short_control_calls(
+        self, runtime, call, expected_path, expected_method
+    ):
+        response = json.dumps({"id": "warp_123", "status": "running"}).encode()
+        with mock.patch("urllib.request.urlopen") as m_open:
+            m_open.return_value.__enter__.return_value.read.return_value = response
+            result = call(runtime)
+
+        request = m_open.call_args.args[0]
+        assert request.full_url.endswith(expected_path)
+        assert request.method == expected_method
+        assert result["id"] == "warp_123"
 
 
 class TestHTTPErrors:
