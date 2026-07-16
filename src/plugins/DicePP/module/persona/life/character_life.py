@@ -443,7 +443,7 @@ class CharacterLife:
                 logger.warning(
                     "tick: 槽位匹配但事件生成返回空（可恢复）— slot={}/{} type={} "
                     "plan={}min now={}min dist={}min 冷却至下一tick",
-                    i, len(slots), slot_type, slot_m, now_m,
+                    i, len(slots), slot_type, slot_m, now_m, dist,
                 )
         return None
 
