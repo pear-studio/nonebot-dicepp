@@ -47,21 +47,6 @@
 
 ## persona
 
-### [B-260716-8f8625] Proactive prompt 缺少 send_reply 输出协议
-- 创建: 2026-07-16
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - Persona 真实 LLM 回归的 18:00 proactive Chat Run 连续 4 轮返回有效角色正文，但 tool_calls 均为空，最终以 limit_reached / max_corrections 结束且消息未送达。
-    - build_static_prompt_proactive() 为去掉分段规则而移除了整段回复协议，其中也包括“必须调用 send_reply、不要直接输出文本”。
-    - thinking 模型使用 tool_choice=auto，API 层不会强制工具调用，因此问题具有随机复现性；同次 warp 的 morning/evening 可以成功而 18:00 失败。
-- 开发备忘:
-    - 为 proactive prompt 增加不包含分段说明的精简输出协议，明确必须调用 send_reply 且不得直接输出正文。
-    - 增加 ContextBuilder proactive prompt 测试，以及模型先返回直接文本后能经 correction 调用 send_reply 的 Agent/Chat 回归测试。
-    - 影响面：chat/context.py、chat/chat_agent.py 及相关测试。
-    - 风险点：thinking 模型不兼容 tool_choice=required，不能只依赖 API 强制参数。
-
 ### [B-260716-74cf62] ShareScheduler 忽略 ChatOutcome 并误报触发成功
 - 创建: 2026-07-16
 - 优先级: P1

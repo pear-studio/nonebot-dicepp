@@ -140,10 +140,16 @@ class ContextBuilder:
     def build_static_prompt_proactive(self) -> str:
         """构建用于 proactive（系统主动触发）场景的静态基座 prompt。
 
-        与 build_static_prompt 的区别在于不注入分段回复引导（segment guide），
-        因为 proactive 场景是系统主动触发，不需要分段回复规则。
+        与 build_static_prompt 的区别在于不注入分段参数（单段上限、总字数硬上限、
+        send_reply_segment），仅保留 send_reply 调用协议和"不要直接输出文本"约束。
         """
         parts = self._render_character_base()
+        guide = (
+            "【回复规则】\n"
+            "- 调用 send_reply 发送回复并结束本轮对话\n"
+            "- 不要直接输出文本"
+        )
+        parts.insert(-1, guide)
         return "\n\n".join(parts)
 
     def build(
