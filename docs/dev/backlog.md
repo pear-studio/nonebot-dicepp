@@ -29,22 +29,6 @@
     - 影响面：docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py 及其测试。
     - 风险点：不要为了兼容单一版本而破坏旧生产数据库的只读检查能力。
 
-## dev
-
-### [B-260716-c954f7] DicePP Shell 私聊未自动模拟 to_me
-- 创建: 2026-07-16
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - 生产适配器的私聊事件保证 to_me=true，但 dicepp-shell send --private 只把 group_id 设为空，to_me 仍默认为 false，必须再显式传入 --to-me。
-    - Persona 真实 LLM 回归中，仅使用 --private 的两条消息都落入自我介绍分支，没有创建 Chat Agent Run；补充 --to-me 后才进入正常私聊。
-    - Shell 行为与生产事件语义不一致，会让私聊回归产生假失败。
-- 开发备忘:
-    - 评估让 --private 默认同时设置 to_me=true；如仍需构造 to_me=false 的合成私聊，提供明确的反向开关或底层测试入口。
-    - 更新 shell/main.py 的请求构造、Shell 单元测试和用户文档。
-    - 风险点：确认现有测试或调试流程是否依赖 private + to_me=false 的非生产组合。
-
 ## persona
 
 ### [B-260716-74cf62] ShareScheduler 忽略 ChatOutcome 并误报触发成功

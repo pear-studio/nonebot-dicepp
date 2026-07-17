@@ -1,4 +1,8 @@
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
 
 class MessageSender:
     def __init__(self, user_id: str, nickname: str):
@@ -28,6 +32,12 @@ class MessageMetaData:
         self.nickname: str = sender.nickname
         self.group_id: str = group_id
         self.to_me: bool = to_me
+        # 统一语义：私聊消息 to_me 永远为 True，对齐所有生产适配器行为
+        if not self.group_id and not self.to_me:
+            logger.warning(
+                f"Private message with to_me=False from user={sender.user_id or 'unknown'}, forcing to_me=True"
+            )
+            self.to_me = True
         self.permission: int = 0
         # 新增字段：消息唯一 ID（OneBot v11 为 int，统一转为 str 存）
         self.message_id: Optional[str] = None

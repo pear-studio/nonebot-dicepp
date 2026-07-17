@@ -537,6 +537,11 @@ class BotRunner:
 
         try:
             # 构造消息元数据
+            # 私聊对齐生产适配器：私聊事件 to_me 永远为 True
+            # 注：MessageMetaData.__init__ 也包含同逻辑 auto-correction，
+            # 此处提前置位是为了避免 shell 场景下触发 constructor 的 warning 日志。
+            if not group_id:
+                to_me = True
             meta = MessageMetaData(
                 plain_msg=msg,
                 raw_msg=msg,
