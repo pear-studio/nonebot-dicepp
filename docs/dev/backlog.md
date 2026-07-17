@@ -12,23 +12,6 @@
 
 ---
 
-## agent
-
-### [B-260716-bae952] persona-inspect trace 与当前数据库 schema 不兼容
-- 创建: 2026-07-16
-- 优先级: P1
-- 类型: bug
-- 改动量: S
-- 问题表现:
-    - 对当前 Persona 数据库执行 persona_inspect.py trace 时，脚本查询不存在的 session_id 列并抛出 sqlite3.OperationalError: no such column: session_id。
-    - state 和 llm-health 可正常使用，trace 子命令完全不可用；本次回归只能改用只读 sqlite3 手工检查 persona_llm_traces 和 persona_agent_runs。
-    - 当前 persona_llm_traces 使用 interaction_id、run_id、selected_provider、selected_model 等字段，已与 inspection 查询假设漂移。
-- 开发备忘:
-    - 按当前 DDL 更新 trace 查询和格式化字段，并检查是否还有 completion_code/provider 等同类列名漂移。
-    - 为当前 schema 增加临时 SQLite fixture 测试；如仍需兼容旧数据库，先通过 PRAGMA table_info 检测列集合再选择查询。
-    - 影响面：docs/agent/skills-common/persona-inspect/scripts/persona_inspect.py 及其测试。
-    - 风险点：不要为了兼容单一版本而破坏旧生产数据库的只读检查能力。
-
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）

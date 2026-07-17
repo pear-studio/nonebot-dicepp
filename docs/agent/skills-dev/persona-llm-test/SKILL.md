@@ -38,7 +38,7 @@ uv run python docs/agent/skills-dev/persona-llm-test/scripts/prepare_session.py 
 1. 启动默认无 tick 的 `dicepp-shell serve`。
 2. 按用户选择执行场景；选择多个时必须按 `warp → private → group` 顺序，共用同一 session。
 3. warp 先运行 `--dry-run` 核对当前 Runtime 给出的估算，再用 `--detach` 提交并轮询 `job status`。
-4. 使用 `persona-inspect` 检查聚合状态和 trace；单表证据使用只读 SQLite 查询。多个 scope 共用 session 时查看实际 prompt，检查是否混入其他 scope 的对话上下文。
+4. 使用只读 SQLite 查询检查聚合状态、Agent Run 和 LLM trace。多个 scope 共用 session 时查看实际 prompt，检查是否混入其他 scope 的对话上下文。
 5. 主 provider 失败但 fallback 后完成时，功能结论可通过，但必须标记警告。job 完成与场景通过分开判断。
 
 ## 收尾
