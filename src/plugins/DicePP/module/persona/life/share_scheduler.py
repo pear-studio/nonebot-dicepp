@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import random as random_module
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 from utils.logger import logger
 from utils.time import get_clock
@@ -33,6 +33,7 @@ from .target import TargetSelector
 
 if TYPE_CHECKING:
     from core.config.pydantic_models import PersonaConfig
+    from ..chat.chat_shared import ChatOutcome
 
 
 class ShareScheduler(BoundaryReceiver):
@@ -50,7 +51,7 @@ class ShareScheduler(BoundaryReceiver):
         character: Character,
         target_selector: TargetSelector,
         data_store: PersonaDataStore,
-        get_trigger_callback: Optional[Callable[..., Awaitable[Any]]] = None,
+        get_trigger_callback: Optional[Callable[..., Awaitable[ChatOutcome]]] = None,
     ) -> None:
         """初始化 ShareScheduler。
 
@@ -77,7 +78,7 @@ class ShareScheduler(BoundaryReceiver):
         self._last_event_date: Optional[str] = None
 
         # 触发回调（由 ChatOrchestrator.trigger_proactive 注入）
-        self._trigger_callback: Optional[Callable[..., Awaitable[Any]]] = None
+        self._trigger_callback: Optional[Callable[..., Awaitable[ChatOutcome]]] = None
         if get_trigger_callback is not None:
             self._trigger_callback = get_trigger_callback
 
@@ -93,7 +94,7 @@ class ShareScheduler(BoundaryReceiver):
 
     # ── 公共接口 ──────────────────────────────────────────
 
-    def set_trigger_callback(self, callback: Callable[..., Awaitable[Any]]) -> None:
+    def set_trigger_callback(self, callback: Callable[..., Awaitable[ChatOutcome]]) -> None:
         """设置触发回调（ChatOrchestrator.trigger_proactive）。"""
         self._trigger_callback = callback
 
@@ -333,8 +334,15 @@ class ShareScheduler(BoundaryReceiver):
         high = (center + jitter) % 1440
 
         # 窗口末尾强制触发（兜底），使用 >= 防止 tick 延迟跳过 high 分钟导致丢失
-        if now_m >= high:
-            return True
+        if low <= high:
+            # 非跨午夜：窗口末尾在 high
+            if now_m >= high:
+                return True
+        else:
+            # 跨午夜：窗口末尾段为 [0, high]
+            # now_m 在 [low, 1439]（窗口前段）走概率，不强制触发
+            if now_m <= high:
+                return True
 
         # 窗口宽度（分钟数）
         if low <= high:
@@ -360,11 +368,12 @@ class ShareScheduler(BoundaryReceiver):
     async def _execute_schedule_point(self, label: str, center_minute: int) -> None:
         """执行一个日程时间点的分享逻辑。
 
-        1. 从 TargetSelector 获取 force 目标（异常时回退 fired 标记，允许重试）
-        2. 标记 label 已触发（防同一 tick 重入）
+        1. 从 TargetSelector 获取 force 目标
+        2. 提前标记 label 已触发（防同一 tick 重入）
         3. 按 ConversationScope 去重
-        4. 为每个目标构建 trigger_message 并调用回调
-           （per-target 个别失败不回退标记——其他 target 已成功发送）
+        4. 为每个目标构建 trigger_message 并调用回调，捕获 ChatOutcome
+        5. 聚合判断：任一 target 有消息送达（sent / partial_sent）则保留标记；
+           全部 empty / failed / skipped 则移除标记，允许后续 tick 重试
         """
         if self._trigger_callback is None:
             logger.warning(
@@ -374,17 +383,16 @@ class ShareScheduler(BoundaryReceiver):
             )
             return
 
-        # 读取所有候选目标（异常时回退标记，允许下个 tick 重试）
+        # 读取所有候选目标（异常时允许下个 tick 重试）
         try:
             all_targets = await self.target_selector.select_share_targets()
         except Exception:
             logger.exception(
                 "ShareScheduler(%s): target_selector.select_share_targets 异常（label=%s），"
-                "回退标记允许重试",
+                "允许下个 tick 重试",
                 self.character.name,
                 label,
             )
-            self._fired_times.discard(label)
             return
 
         # 只取 force 策略（白名单）
@@ -398,7 +406,7 @@ class ShareScheduler(BoundaryReceiver):
             )
             return
 
-        # 目标选择成功，标记已触发（防同一 tick 重入，且 per-target 失败不回退）
+        # 目标选择成功，标记已触发（防同一 tick 重入）
         self._fired_times.add(label)
 
         # 按 ConversationScope 去重
@@ -416,7 +424,8 @@ class ShareScheduler(BoundaryReceiver):
             seen_scopes.add(scope)
             unique_targets.append((scope, target))
 
-        # 为每个去重后的目标触发
+        # 为每个去重后的目标触发，收集 ChatOutcome 用于聚合判断
+        any_sent = False
         for scope, target in unique_targets:
             try:
                 trigger_msg = self._build_trigger_message(label, target)
@@ -426,20 +435,36 @@ class ShareScheduler(BoundaryReceiver):
                     target_name = await self._get_target_name(target.user_id)
                     trigger_msg = trigger_msg.replace("{name}", target_name)
 
-                await self._trigger_callback(
+                outcome = await self._trigger_callback(
                     scope,
                     trigger_msg,
                     user_id=target.user_id,
                     group_id=target.group_id,
                 )
 
-                logger.info(
-                    "ShareScheduler(%s): 日程点 %s → (user=%s, group=%s) 触发成功",
-                    self.character.name,
-                    label,
-                    target.user_id,
-                    target.group_id,
-                )
+                if outcome.sent:
+                    any_sent = True
+                    logger.info(
+                        "ShareScheduler(%s): 日程点 %s → (user=%s, group=%s) %s "
+                        "(sent_count=%d)",
+                        self.character.name,
+                        label,
+                        target.user_id,
+                        target.group_id,
+                        outcome.status,
+                        outcome.sent_count,
+                    )
+                else:
+                    logger.warning(
+                        "ShareScheduler(%s): 日程点 %s → (user=%s, group=%s) %s "
+                        "(reason=%s)",
+                        self.character.name,
+                        label,
+                        target.user_id,
+                        target.group_id,
+                        outcome.status,
+                        outcome.reason,
+                    )
             except Exception as e:
                 logger.error(
                     "ShareScheduler(%s): 日程点 %s → (user=%s, group=%s) 触发异常: %s",
@@ -450,6 +475,16 @@ class ShareScheduler(BoundaryReceiver):
                     e,
                     exc_info=True,
                 )
+
+        # 所有 target 均未成功送达 → 移除 fired 标记，允许后续 tick 重试
+        if not any_sent:
+            self._fired_times.discard(label)
+            logger.warning(
+                "ShareScheduler(%s): 日程点 %s 所有目标均未成功送达，"
+                "移除已触发标记允许重试",
+                self.character.name,
+                label,
+            )
 
     def _build_trigger_message(self, label: str, target: ShareTarget) -> str:
         """根据时间点类型和目标类型构建触发提示消息。

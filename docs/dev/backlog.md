@@ -31,21 +31,6 @@
 
 ## persona
 
-### [B-260716-74cf62] ShareScheduler 忽略 ChatOutcome 并误报触发成功
-- 创建: 2026-07-16
-- 优先级: P1
-- 类型: bug
-- 改动量: M
-- 问题表现:
-    - 18:00 proactive callback 返回 ChatOutcome(status="empty", reason="max_corrections")，没有 message_stream 输出，但 ShareScheduler 只要 callback 未抛异常就记录“触发成功”。
-    - 日程点在调用前已加入 _fired_times，因此生成失败和送达失败都会被当作已完成，状态、日志和用户实际收到的消息不一致。
-    - warp job 的 schedule marker 正常，但不能据此判断 proactive 功能通过。
-- 开发备忘:
-    - 调整 trigger callback 协议，使 ShareScheduler 能检查 ChatOutcome 或等价的结构化结果，区分已调度、已生成、已送达、空结果和失败。
-    - 明确 empty/failed/partial_sent 时 _fired_times 是否保留及是否允许重试，避免重复发送与永久丢失之间的摇摆。
-    - 增加 callback 返回 empty/failed/partial_sent 的调度器测试，并校验日志和持久化状态。
-    - 影响面：life/share_scheduler.py、chat/chat_agent.py、相关协议和测试。
-
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
 - 创建: 2026-06-01
 - 优先级: P2
