@@ -13,6 +13,8 @@ description: 管理 DicePP agent 配置同步、环境识别、首次接管、�
 - 以 `docs/agent` 为项目 agent 配置源目录，`.codex` 和 `.claude` 是同步后的工作目录。
 - 不在本技能中复制具体命令或参数细节。
 - 同步前先判断当前是首次接管、后续同步、环境切换还是故障排查。
+- 每次写入前先运行 report/doctor，明确源技能、旧同步状态与目标目录之间的新增、stale managed、broken managed、unknown 差异。
+- 每次写入后再次运行 doctor；只有目标返回 `doctor: ok` 才算同步完成。
 
 ## 场景判定
 
@@ -35,10 +37,12 @@ description: 管理 DicePP agent 配置同步、环境识别、首次接管、�
 处理重点：
 
 - 检查当前环境和同步状态是否一致。
-- 同步 `skills-common` 与当前 `skills-<env>` 中的新增、移动、删除。
-- 对 stale managed、broken managed 这类已同步项，可按脚本建议修复。
+- 同步 `skills-common` 与当前 `skills-<env>` 中的新增、移动、重命名和删除。
+- 同时出现新增与 stale managed 时，先报告为可能的重命名或拆分；可读取 Git rename 记录确认映射，但不要仅凭名称猜测多对多关系。
+- 对 stale managed、broken managed 这类已同步项，可按脚本建议修复。正式 apply 前先执行 dry-run，并确认计划明确包含所有 stale 项的删除；若缺失，停止 apply 并按同步器故障排查。
 - 对 unknown 内容不要擅自删除；先判断是否是开发者本地 skill、历史遗留或错误暴露，必要时让用户决定是否加入本地 ignore 或迁回 `docs/agent`。
-- 同步后再次检查并汇报结果。
+- 重命名源 skill 时，检查旧目录名、frontmatter `name`、相关文档/脚本引用，以及存在时的 `agents/openai.yaml` 是否一致更新。
+- 同步后再次检查并汇报结果。若 stale 在 apply 后变成 unknown，视为同步器异常而不是完成；保留现场并继续诊断，未经用户确认不要删除该 unknown 项。
 
 ### 环境切换
 
@@ -91,7 +95,7 @@ description: 管理 DicePP agent 配置同步、环境识别、首次接管、�
 - 未处理：
 
 验证：
-- doctor：
+- doctor：必须明确写出 `doctor: ok`；否则列出剩余 warning/error，并将本次同步标记为未完成。
 - 其他验证：
 
 后续建议：

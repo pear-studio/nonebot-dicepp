@@ -218,6 +218,20 @@ def ensure_inside(path: Path, parent: Path) -> None:
         raise SyncError(f"Refusing to modify path outside {rel(parent)}: {path}") from exc
 
 
+def is_windows_reparse_point(path: Path) -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        attrs = path.stat(follow_symlinks=False).st_file_attributes
+    except OSError:
+        return False
+    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def path_entry_exists(path: Path) -> bool:
+    return path.exists() or path.is_symlink() or is_windows_reparse_point(path)
+
+
 def remove_path(path: Path, dry_run: bool) -> None:
     if dry_run:
         print(f"DRY-RUN remove: {rel(path)}")
@@ -230,19 +244,9 @@ def remove_path(path: Path, dry_run: bool) -> None:
         shutil.rmtree(path)
 
 
-def is_windows_reparse_point(path: Path) -> bool:
-    if os.name != "nt":
-        return False
-    try:
-        attrs = path.stat(follow_symlinks=False).st_file_attributes
-    except OSError:
-        return False
-    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
-
-
 def replace_dir_symlink(path: Path, dry_run: bool) -> None:
-    if path.exists() or path.is_symlink():
-        if path.is_symlink():
+    if path_entry_exists(path):
+        if path.is_symlink() or is_windows_reparse_point(path):
             remove_path(path, dry_run)
         elif path.is_file():
             raise SyncError(f"Expected a directory, found file: {rel(path)}")
@@ -288,7 +292,7 @@ def create_link_or_copy(source: Path, dest: Path, mode: str, dry_run: bool) -> s
             return candidate
         except OSError as exc:
             errors.append(f"{candidate}: {exc}")
-            if dest.exists() or dest.is_symlink():
+            if path_entry_exists(dest):
                 remove_path(dest, dry_run=False)
 
     raise SyncError(f"Failed to link {rel(dest)} -> {rel(source)} ({'; '.join(errors)})")
@@ -303,7 +307,7 @@ def effective_link_mode(mode: str) -> str:
 
 
 def same_target(entry: Path, source: Path) -> bool:
-    if not (entry.exists() or entry.is_symlink()):
+    if not path_entry_exists(entry):
         return False
     try:
         return entry.resolve(strict=True) == source.resolve(strict=True)
@@ -348,8 +352,12 @@ def cleanup_legacy_rule_files(spec: TargetSpec, dry_run: bool) -> None:
         if legacy_file in spec.rule_files:
             continue
         ensure_inside(legacy_file, spec.root)
-        if legacy_file.exists() or legacy_file.is_symlink():
-            if legacy_file.is_dir() and not legacy_file.is_symlink():
+        if path_entry_exists(legacy_file):
+            if (
+                legacy_file.is_dir()
+                and not legacy_file.is_symlink()
+                and not is_windows_reparse_point(legacy_file)
+            ):
                 continue
             remove_path(legacy_file, dry_run)
 
@@ -379,7 +387,7 @@ def sync_skills(spec: TargetSpec, config: Config, dry_run: bool) -> dict[str, An
         ensure_inside(dest, spec.skills_dir)
         previously_managed = name in old_managed
 
-        if dest.exists() or dest.is_symlink():
+        if path_entry_exists(dest):
             if same_target(dest, source.path):
                 mode = old_managed.get(name, {}).get("mode") or "existing"
                 managed[name] = {"source": rel(source.path), "mode": str(mode)}
@@ -400,8 +408,12 @@ def sync_skills(spec: TargetSpec, config: Config, dry_run: bool) -> dict[str, An
             continue
         dest = spec.skills_dir / name
         ensure_inside(dest, spec.skills_dir)
-        if dest.exists() or dest.is_symlink():
-            remove_path(dest, dry_run)
+        if path_entry_exists(dest):
+            if dry_run:
+                print(f"DRY-RUN remove stale skill: {rel(dest)}")
+            else:
+                print(f"remove stale skill: {rel(dest)}")
+                remove_path(dest, dry_run=False)
 
     return managed
 
