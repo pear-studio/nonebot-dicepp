@@ -35,6 +35,7 @@ class _FakeLife:
         )
         self.share_scheduler = SimpleNamespace(
             _fired_times=set(),
+            _fired_dates={},
             _last_event_date=None,
         )
         self.sa_agent = object()
@@ -58,12 +59,14 @@ class _FakeLife:
             self.character_life._fired_slot_indices.clear()
             self.character_life._last_event_date = now.date().isoformat()
             self.share_scheduler._fired_times.clear()
+            self.share_scheduler._fired_dates.clear()
             self.share_scheduler._last_event_date = now.date().isoformat()
 
         if now.hour == self.slot_hour and now.minute == self.slot_minute:
             self.character_life._fired_slot_indices.add(0)
         if now.hour == 18 and now.minute == 0:
             self.share_scheduler._fired_times.add("midday_18:00")
+            self.share_scheduler._fired_dates["midday_18:00"] = now.date().isoformat()
 
     async def tick_daily(self) -> None:
         self.daily_times.append(get_clock().now())
@@ -301,6 +304,7 @@ async def test_warp_summary_excludes_preexisting_proactive_markers(tmp_path):
     life.character_life._last_event_date = start.date().isoformat()
     life.share_scheduler._last_event_date = start.date().isoformat()
     life.share_scheduler._fired_times = {"morning"}
+    life.share_scheduler._fired_dates = {"morning": start.date().isoformat()}
 
     result = await runner.warp(days=1)
 

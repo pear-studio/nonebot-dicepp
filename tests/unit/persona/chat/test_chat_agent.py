@@ -6,12 +6,18 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
 from plugins.DicePP.module.persona.chat.chat_agent import ChatAgent
+from plugins.DicePP.module.persona.chat.context import ContextBuilder
+from plugins.DicePP.module.persona.character.models import Character
+from plugins.DicePP.module.persona.agent.loop import AgentLoop
+from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
+from plugins.DicePP.module.persona.agent.state import AgentRunState
 from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
 from plugins.DicePP.module.persona.data.store import PersonaDataStore
 from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
@@ -158,6 +164,80 @@ class _CapDelivery:
 
     async def drain(self):
         pass
+
+
+class _FakeLLMGateway:
+    def __init__(self):
+        self.call_count = 0
+        self.requests = []
+
+    async def complete(self, *, request, state, timeout=None, run_id=""):
+        self.requests.append(request)
+        self.call_count += 1
+        response = MagicMock()
+        response.provider = "fake"
+        response.model = "fake-model"
+        response.usage = {"input": 10, "output": 20, "cache_read": 0}
+        response.reasoning_content = None
+        if self.call_count == 1:
+            response.content = "直接输出但没有调用工具"
+            response.tool_calls = []
+        else:
+            response.content = ""
+            response.tool_calls = [{
+                "id": "call_0",
+                "name": "send_reply",
+                "arguments": json.dumps(
+                    {"content": "正确的主动回复"}, ensure_ascii=False
+                ),
+            }]
+        return response
+
+
+class _LoopRuntime:
+    def __init__(self, gateway):
+        self.gateway = gateway
+
+    async def run(self, request):
+        return await AgentLoop(llm_gateway=self.gateway).run(
+            buffer=MessageBuffer.from_initial(request.messages),
+            state=AgentRunState(
+                run_id="proactive-test-run",
+                interaction_id=request.interaction_id,
+            ),
+            toolkit=request.tools,
+            output_spec=request.output,
+            limits=request.limits,
+            selection=request.selection,
+            interaction_id=request.interaction_id,
+        )
+
+
+class TestProactiveFakeLLM:
+    @pytest.mark.asyncio
+    async def test_direct_text_is_corrected_then_delivered_via_send_reply(self):
+        character = Character(name="苏晓", description="一个温柔的同伴")
+        gateway = _FakeLLMGateway()
+        conversation = Conversation(runtime=_LoopRuntime(gateway))
+        delivery = _CapDelivery()
+        agent = ChatAgent(
+            scope=ConversationScope.for_private("u1"),
+            conversation=conversation,
+            store=_make_store(),
+            router=MagicMock(),
+            character=character,
+            config=_make_config(),
+            context_builder=ContextBuilder(character, segment_guide=None),
+            make_delivery=lambda: delivery,
+            after_response=AsyncMock(),
+        )
+
+        outcome = await agent.trigger_proactive("（和用户聊聊吧。）", user_id="u1")
+
+        assert gateway.call_count == 2
+        assert outcome.sent is True
+        assert delivery.sent_contents == ["正确的主动回复"]
+        assert "不要直接输出文本" in gateway.requests[0].messages[0]["content"]
 
 
 class TestSpeakerPropagation:

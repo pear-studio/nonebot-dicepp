@@ -67,8 +67,9 @@ class ShareScheduler(BoundaryReceiver):
         self.target_selector = target_selector
         self.data_store = data_store
 
-        # 已触发的时间点标签集（同一天同一标签只触发一次）
+        # 兼容诊断/warp 的标签视图；实际去重以 _fired_dates 的 occurrence 日期为准。
         self._fired_times: set[str] = set()
+        self._fired_dates: dict[str, str] = {}
 
         # Tick 节流
         self._last_tick: Optional[datetime] = None
@@ -115,7 +116,7 @@ class ShareScheduler(BoundaryReceiver):
         流程：
           1. 检查总开关
           2. 60s 节流
-          3. 跨天重置 _fired_times
+          3. 跨天刷新并清理过期 occurrence 状态
           4. 计算今天的日程时间点
           5. 遍历日程点，检查活跃状态和 jitter 窗口
           6. 触发符合条件的日程点
@@ -133,12 +134,12 @@ class ShareScheduler(BoundaryReceiver):
         try:
             self._last_tick = now
 
-            # 3. 跨天重置
+            # 3. 跨天刷新；跨午夜 jitter occurrence 不能在零点直接清空
             today = self._get_today_str()
             if self._last_event_date != today:
-                logger.debug("ShareScheduler(%s): 跨天重置日程 %s", self.character.name, today)
+                logger.debug("ShareScheduler({}): 跨天刷新日程 {}", self.character.name, today)
                 self._last_event_date = today
-                self._fired_times.clear()
+                self._prune_fired_dates(now)
 
             # 4. 计算日程时间点
             schedule = self._compute_schedule_times()
@@ -147,8 +148,8 @@ class ShareScheduler(BoundaryReceiver):
             if not schedule:
                 if not self._empty_config_logged:
                     logger.info(
-                        "ShareScheduler(%s) 已启用但未配置日程时间点 "
-                        "(morning_enabled=%s, evening_enabled=%s, schedule_times=%s)",
+                        "ShareScheduler({}) 已启用但未配置日程时间点 "
+                        "(morning_enabled={}, evening_enabled={}, schedule_times={})",
                         self.character.name,
                         self.config.proactive_share_schedule_morning_enabled,
                         self.config.proactive_share_schedule_evening_enabled,
@@ -162,8 +163,10 @@ class ShareScheduler(BoundaryReceiver):
 
             # 6. 遍历日程点
             for label, center_minute in schedule:
-                if label in self._fired_times:
+                occurrence_date = self._schedule_occurrence_date(now, center_minute)
+                if self._fired_dates.get(label) == occurrence_date:
                     continue
+                self._fired_times.discard(label)
 
                 # 活跃检查
                 if not self._is_character_active(for_time_label=label):
@@ -179,7 +182,11 @@ class ShareScheduler(BoundaryReceiver):
 
                 # 移交 _execute_schedule_point 内部标记 fired
                 # （target selection 失败时会回退标记，避免日程点永久丢失）
-                await self._execute_schedule_point(label, center_minute)
+                await self._execute_schedule_point(
+                    label,
+                    center_minute,
+                    occurrence_date=occurrence_date,
+                )
 
         finally:
             # 7. 持久化（无论成功还是异常都落盘）
@@ -187,7 +194,7 @@ class ShareScheduler(BoundaryReceiver):
                 await self._persist_state()
             except Exception as e:
                 logger.error(
-                    "ShareScheduler(%s) 持久化异常: %s",
+                    "ShareScheduler({}) 持久化异常: {}",
                     self.character.name,
                     e,
                     exc_info=True,
@@ -202,6 +209,44 @@ class ShareScheduler(BoundaryReceiver):
     def _get_today_str(self) -> str:
         """返回今天日期字符串 YYYY-MM-DD。"""
         return self._now().strftime("%Y-%m-%d")
+
+    def _schedule_occurrence_date(self, now: datetime, center: int) -> str:
+        """返回当前 jitter 窗口所属的日程日期。
+
+        跨午夜窗口的两段必须共享同一个 occurrence 日期：中心点靠近
+        00:00 时，午夜前半段归到次日；中心点靠近 24:00 时，午夜后半段
+        归到前一日。
+        """
+        jitter = self.config.proactive_share_schedule_jitter_minutes
+        occurrence_day = now.date()
+        if jitter <= 0:
+            return occurrence_day.isoformat()
+
+        low = (center - jitter) % 1440
+        high = (center + jitter) % 1440
+        if low <= high:
+            return occurrence_day.isoformat()
+
+        now_m = now.hour * 60 + now.minute
+        if center <= high:
+            if now_m >= low:
+                occurrence_day += timedelta(days=1)
+        elif now_m <= high:
+            occurrence_day -= timedelta(days=1)
+        return occurrence_day.isoformat()
+
+    def _prune_fired_dates(self, now: datetime) -> None:
+        """只保留当前日期相邻的 occurrence，避免状态无限增长。"""
+        valid_dates = {
+            (now.date() + timedelta(days=offset)).isoformat()
+            for offset in (-1, 0, 1)
+        }
+        self._fired_dates = {
+            label: fired_date
+            for label, fired_date in self._fired_dates.items()
+            if fired_date in valid_dates
+        }
+        self._fired_times = set(self._fired_dates)
 
     # ── 日程计算 ──────────────────────────────────────────
 
@@ -223,7 +268,7 @@ class ShareScheduler(BoundaryReceiver):
                 times.append(("morning", (start_hour * 60 + 5) % 1440))
             else:
                 logger.warning(
-                    "ShareScheduler(%s): 早安已启用但 event_day_start_hour=%s，跳过早安",
+                    "ShareScheduler({}): 早安已启用但 event_day_start_hour={}，跳过早安",
                     self.character.name,
                     start_hour,
                 )
@@ -235,7 +280,7 @@ class ShareScheduler(BoundaryReceiver):
                 times.append(("evening", (end_hour * 60 - 5) % 1440))
             else:
                 logger.warning(
-                    "ShareScheduler(%s): 晚安已启用但 event_day_end_hour=%s，跳过晚安",
+                    "ShareScheduler({}): 晚安已启用但 event_day_end_hour={}，跳过晚安",
                     self.character.name,
                     end_hour,
                 )
@@ -247,7 +292,7 @@ class ShareScheduler(BoundaryReceiver):
                 times.append((f"midday_{t_str}", (h * 60 + m) % 1440))
             except (ValueError, IndexError):
                 logger.warning(
-                    "ShareScheduler(%s): 无效时间格式 %r，跳过",
+                    "ShareScheduler({}): 无效时间格式 {!r}，跳过",
                     self.character.name,
                     t_str,
                 )
@@ -365,7 +410,13 @@ class ShareScheduler(BoundaryReceiver):
 
     # ── 执行触发 ──────────────────────────────────────────
 
-    async def _execute_schedule_point(self, label: str, center_minute: int) -> None:
+    async def _execute_schedule_point(
+        self,
+        label: str,
+        center_minute: int,
+        *,
+        occurrence_date: Optional[str] = None,
+    ) -> None:
         """执行一个日程时间点的分享逻辑。
 
         1. 从 TargetSelector 获取 force 目标
@@ -377,7 +428,7 @@ class ShareScheduler(BoundaryReceiver):
         """
         if self._trigger_callback is None:
             logger.warning(
-                "ShareScheduler(%s): trigger_callback 未设置（label=%s），跳过触发",
+                "ShareScheduler({}): trigger_callback 未设置（label={}），跳过触发",
                 self.character.name,
                 label,
             )
@@ -388,7 +439,7 @@ class ShareScheduler(BoundaryReceiver):
             all_targets = await self.target_selector.select_share_targets()
         except Exception:
             logger.exception(
-                "ShareScheduler(%s): target_selector.select_share_targets 异常（label=%s），"
+                "ShareScheduler({}): target_selector.select_share_targets 异常（label={}），"
                 "允许下个 tick 重试",
                 self.character.name,
                 label,
@@ -400,14 +451,19 @@ class ShareScheduler(BoundaryReceiver):
 
         if not force_targets:
             logger.debug(
-                "ShareScheduler(%s): 日程点 %s 无 force 目标，跳过",
+                "ShareScheduler({}): 日程点 {} 无 force 目标，跳过",
                 self.character.name,
                 label,
             )
             return
 
+        occurrence_date = occurrence_date or self._schedule_occurrence_date(
+            self._now(), center_minute
+        )
+
         # 目标选择成功，标记已触发（防同一 tick 重入）
         self._fired_times.add(label)
+        self._fired_dates[label] = occurrence_date
 
         # 按 ConversationScope 去重
         seen_scopes: set[ConversationScope] = set()
@@ -445,8 +501,8 @@ class ShareScheduler(BoundaryReceiver):
                 if outcome.sent:
                     any_sent = True
                     logger.info(
-                        "ShareScheduler(%s): 日程点 %s → (user=%s, group=%s) %s "
-                        "(sent_count=%d)",
+                        "ShareScheduler({}): 日程点 {} → (user={}, group={}) {} "
+                        "(sent_count={})",
                         self.character.name,
                         label,
                         target.user_id,
@@ -456,8 +512,8 @@ class ShareScheduler(BoundaryReceiver):
                     )
                 else:
                     logger.warning(
-                        "ShareScheduler(%s): 日程点 %s → (user=%s, group=%s) %s "
-                        "(reason=%s)",
+                        "ShareScheduler({}): 日程点 {} → (user={}, group={}) {} "
+                        "(reason={})",
                         self.character.name,
                         label,
                         target.user_id,
@@ -467,7 +523,7 @@ class ShareScheduler(BoundaryReceiver):
                     )
             except Exception as e:
                 logger.error(
-                    "ShareScheduler(%s): 日程点 %s → (user=%s, group=%s) 触发异常: %s",
+                    "ShareScheduler({}): 日程点 {} → (user={}, group={}) 触发异常: {}",
                     self.character.name,
                     label,
                     target.user_id,
@@ -479,8 +535,10 @@ class ShareScheduler(BoundaryReceiver):
         # 所有 target 均未成功送达 → 移除 fired 标记，允许后续 tick 重试
         if not any_sent:
             self._fired_times.discard(label)
+            if self._fired_dates.get(label) == occurrence_date:
+                self._fired_dates.pop(label, None)
             logger.warning(
-                "ShareScheduler(%s): 日程点 %s 所有目标均未成功送达，"
+                "ShareScheduler({}): 日程点 {} 所有目标均未成功送达，"
                 "移除已触发标记允许重试",
                 self.character.name,
                 label,
@@ -524,6 +582,7 @@ class ShareScheduler(BoundaryReceiver):
         payload = {
             "date": today,
             "fired_times": sorted(self._fired_times),
+            "fired_dates": dict(sorted(self._fired_dates.items())),
         }
         blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         if blob == self._last_persisted_blob:
@@ -534,8 +593,8 @@ class ShareScheduler(BoundaryReceiver):
     async def load_persistent_state(self) -> None:
         """从 data_store 加载持久化状态。
 
-        若持久化的日期与今天相同则恢复 _fired_times；
-        否则丢弃旧状态（跨天自动重置）。
+        新格式按 label 恢复 occurrence 日期；旧格式的 date + fired_times
+        会迁移为同日 occurrence。仅保留今天前后各一天的数据。
         """
         raw = await self.data_store.get_setting(PERSONA_SK_SHARE_SCHEDULER)
         if not raw:
@@ -545,7 +604,7 @@ class ShareScheduler(BoundaryReceiver):
             data = json.loads(raw)
         except json.JSONDecodeError:
             logger.warning(
-                "ShareScheduler(%s): 持久化数据解析失败，丢弃",
+                "ShareScheduler({}): 持久化数据解析失败，丢弃",
                 self.character.name,
             )
             return
@@ -553,21 +612,26 @@ class ShareScheduler(BoundaryReceiver):
         today = self._get_today_str()
         saved_date = data.get("date", "")
 
-        if saved_date == today:
-            fired = data.get("fired_times", [])
-            self._fired_times = set(fired)
-            self._last_event_date = today
-            logger.debug(
-                "ShareScheduler(%s): 恢复持久化状态，已触发时间点: %s",
-                self.character.name,
-                fired,
-            )
-        else:
-            logger.debug(
-                "ShareScheduler(%s): 持久化日期 %s != 今天 %s，丢弃旧状态",
-                self.character.name,
-                saved_date,
-                today,
-            )
+        fired_dates = data.get("fired_dates")
+        if isinstance(fired_dates, dict):
+            self._fired_dates = {
+                str(label): str(fired_date)
+                for label, fired_date in fired_dates.items()
+                if isinstance(label, str) and isinstance(fired_date, str)
+            }
+        elif isinstance(data.get("fired_times"), list) and saved_date:
+            self._fired_dates = {
+                str(label): str(saved_date)
+                for label in data["fired_times"]
+                if isinstance(label, str)
+            }
+
+        self._last_event_date = today
+        self._prune_fired_dates(self._now())
+        logger.debug(
+            "ShareScheduler({}): 恢复持久化 occurrence: {}",
+            self.character.name,
+            self._fired_dates,
+        )
 
         self._last_persisted_blob = raw

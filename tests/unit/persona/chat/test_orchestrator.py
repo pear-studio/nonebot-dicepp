@@ -1,4 +1,5 @@
 """Phase 2 集成测试: ChatOrchestrator + Conversation + Store 完整链路"""
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -352,6 +353,43 @@ class TestChatOrchestratorChat:
         orch._coordinator.submit = AsyncMock(side_effect=mock_submit)
         await orch.chat("u1", "", "hello")
         assert mock_conv.run.call_args.kwargs.get("record_user_input") is False
+
+
+class TestProactiveSerialization:
+    @pytest.mark.asyncio
+    async def test_proactive_returns_buffered_while_same_target_is_busy(self):
+        """同一会话忙碌时 proactive 应立即跳过，让调度器稍后重试。"""
+        orch = ChatOrchestrator(
+            store=_make_store(), router=MagicMock(), character=_make_char(),
+            config=_make_config(), context_builder=_make_context_builder(),
+            response_handler=_make_response_handler(),
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocking_call(_messages):
+            entered.set()
+            await release.wait()
+            return ChatOutcome("sent", sent_count=1, reason="busy_done")
+
+        driver = asyncio.create_task(
+            orch._coordinator.submit("user:u1", "busy", blocking_call)
+        )
+        await entered.wait()
+        try:
+            outcome = await asyncio.wait_for(
+                orch.trigger_proactive(
+                    ConversationScope.for_private("u1"),
+                    "（和用户聊聊吧。）",
+                    user_id="u1",
+                ),
+                timeout=0.5,
+            )
+        finally:
+            release.set()
+            await driver
+
+        assert (outcome.status, outcome.reason) == ("skipped", "buffered")
 
 
 # ── 阶段 3b：轮换测试 ──────────────────────────────────

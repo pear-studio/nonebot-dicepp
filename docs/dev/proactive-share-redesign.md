@@ -84,14 +84,14 @@ def _compute_schedule_times(self) -> list[tuple[str, int]]:
 tick()
   → 检查 enabled；若 enabled=True 但无任何日程点则日志提示
   → 60s 节流
-  → 跨天重置 _fired 集合
+  → 跨天刷新 occurrence 状态；保留仍横跨午夜的窗口记录
   → 活跃检查：早晚时间点使用角色卡原始 start/end hour（非 jittered 边界），
      中间时段使用 jittered 边界。避免早安在 jitter 延迟后错过窗口（见 9.7）。
   → 计算当前分钟 now_m
   → 对于每个未触发的日程点：
       if now_m 进入 jitter 窗口（含午夜包裹处理）：
         if 窗口末尾 or 随机命中：
-          → _fired_times.add(label)  ← 先标记、后执行（防同一 tick 重复）
+          → _fired_dates[label] = occurrence_date  ← 先标记、后执行（防同一 tick 重复）
           → 从 TargetSelector 读 force 目标（白名单）
           → 按 scope 去重（同一 group:<id> 或 user:<id> 只触发一次）
           → 每个目标 → ChatOrchestrator.trigger_proactive(scope, trigger_msg, ...)
@@ -138,7 +138,8 @@ ShareScheduler 现阶段只用 force 目标（`policy="force"`），忽略 norma
 ```python
 payload = {
     "date": today,
-    "fired_times": list(self._fired_times),  # 已触发的时间点 label 列表
+    "fired_times": list(self._fired_times),  # 兼容诊断视图
+    "fired_dates": dict(self._fired_dates),  # label → jitter 窗口所属日程日期
 }
 ```
 
@@ -388,7 +389,7 @@ transient_list = [{
 ### 9.1 跨天边界
 
 - 角色 `event_day_end_hour ≥ 24`（活跃窗口跨午夜）：晚安时间点按 `% 1440` 计算，放在凌晨
-- ShareScheduler `_fired_times` 在新一天的第一次 tick 被清空
+- 跨午夜 jitter 窗口的前后两段共享同一个 occurrence 日期：中心靠近 00:00 时午夜前归次日，中心靠近 24:00 时午夜后归前一日，避免零点清空状态导致重复发送
 
 ### 9.2 凌晨无事件
 
@@ -404,11 +405,12 @@ transient_list = [{
 
 - `trigger_proactive` 需要与 `chat()` 走同一 `coordinator.submit()` ——同一 scope 的主动分享和用户聊天不应并发
 - coordinator key: 群聊用 `group:<id>`，私聊用 `user:<id>`
+- 同一 scope 正在执行时，proactive 立即返回 `skipped/buffered`，ShareScheduler 在当前 jitter 窗口的后续 tick 重试；不排队等待，也不与用户消息合并
 
 ### 9.5 Delivery 失败
 
 - 和 `execute_turn` 一致：最好努力发送，记录 warning，不抛异常
-- 即使发送失败，该时间点也标记为已触发（避免无限重试）
+- 任一目标已实际送达则保留 occurrence 标记；全部目标均未送达时移除标记，仅在当前 jitter 窗口的后续 tick 重试
 
 ### 9.6 早安与 Jittered 活跃边界
 
@@ -422,13 +424,13 @@ CharacterLife 给活跃边界加随机抖动后，早安时间点（`start_hour+
 
 当 `proactive_share_schedule_enabled=True` 但 `morning_enabled`、`evening_enabled`、`schedule_times` 全部关闭/为空时，ShareScheduler 不做任何事。首次 tick 时记录一条 info 日志提醒骰主。
 
-### 9.9 配置变更后 fired_times 失效
+### 9.9 配置变更后 fired occurrence 失效
 
-`_fired_times` 使用时间点 label（如 `"midday_14:00"`）作为 key。若骰主修改 `schedule_times`，旧 label 不再匹配新计算的时间点，旧时间点视为未触发。这通常符合预期（改了配置就是想要不同行为），但需在文档备注。
+`_fired_dates` 使用时间点 label（如 `"midday_14:00"`）作为 key，并记录其 occurrence 日期。若骰主修改 `schedule_times`，旧 label 不再匹配新计算的时间点，旧时间点视为未触发。这通常符合预期（改了配置就是想要不同行为）。
 
 ### 9.10 多实例
 
-当前设计仅保证单实例正确性（持久化 + 内存 `_fired_times`）。多实例部署需额外机制（DB 级排他锁或唯一约束），不在本次范围内。
+当前设计仅保证单实例正确性（持久化 + 内存 `_fired_dates`）。多实例部署需额外机制（DB 级排他锁或唯一约束），不在本次范围内。
 
 ---
 

@@ -373,8 +373,6 @@ class ChatOrchestrator:
                 return result
             return ChatOutcome("failed", reason="retry_limit_exceeded")
 
-        proactive_call_fn._coordinator_batch_kind = "proactive"  # type: ignore[attr-defined]
-
         # 3. 经 coordinator 提交（主动触发不合并等待，不携带 message 用于缓冲合并）
         submit_result = await self._coordinator.submit(
             target_key, None, proactive_call_fn,

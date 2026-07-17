@@ -381,21 +381,29 @@ class BotRunner:
         daily_errors = 0
         fired_proactive: set[tuple[str, str]] = set()
         preexisting_proactive: set[tuple[str, str]] = set()
-        if share_scheduler is not None:
-            existing_date = getattr(
-                share_scheduler,
-                "_last_event_date",
-                None,
-            )
-            if existing_date:
-                preexisting_proactive = {
-                    (str(existing_date), str(label))
-                    for label in getattr(
-                        share_scheduler,
-                        "_fired_times",
-                        set(),
-                    )
+
+        def _proactive_markers(
+            scheduler: object,
+            fallback_date: dt.date,
+        ) -> set[tuple[str, str]]:
+            fired_dates = getattr(scheduler, "_fired_dates", None)
+            if isinstance(fired_dates, dict):
+                return {
+                    (str(fired_date), str(label))
+                    for label, fired_date in fired_dates.items()
                 }
+            fired_date = getattr(
+                scheduler, "_last_event_date", None
+            ) or fallback_date.isoformat()
+            return {
+                (str(fired_date), str(label))
+                for label in getattr(scheduler, "_fired_times", set())
+            }
+
+        if share_scheduler is not None:
+            preexisting_proactive = _proactive_markers(
+                share_scheduler, start_dt.date()
+            )
 
         for minute_idx in range(total_minutes):
             current = stepped.now()
@@ -430,11 +438,9 @@ class BotRunner:
                 )
 
             if share_scheduler is not None:
-                fired_date = getattr(
-                    share_scheduler, "_last_event_date", None
-                ) or current.date().isoformat()
-                for label in getattr(share_scheduler, "_fired_times", set()):
-                    marker = (str(fired_date), str(label))
+                for marker in _proactive_markers(
+                    share_scheduler, current.date()
+                ):
                     if marker not in preexisting_proactive:
                         fired_proactive.add(marker)
 

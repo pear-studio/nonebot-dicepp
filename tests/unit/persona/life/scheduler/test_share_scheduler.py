@@ -4,8 +4,12 @@
 验证 trigger callback 返回不同 ChatOutcome 时 _fired_times 的保留/移除行为。
 """
 
+import json
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 from plugins.DicePP.module.persona.chat.chat_shared import ChatOutcome
 from plugins.DicePP.module.persona.life.models import ShareTarget
@@ -342,6 +346,133 @@ class TestShouldTriggerMidnightWrap:
         assert result is True, (
             f"now_m=15 在窗口后段末尾应强制触发，expected True, got {result}"
         )
+
+
+class TestCrossMidnightOccurrence:
+    """跨午夜 jitter 窗口属于同一个日程 occurrence。"""
+
+    @pytest.mark.asyncio
+    async def test_success_before_midnight_is_not_repeated_after_date_change(
+        self, monkeypatch
+    ):
+        config = SimpleNamespace(
+            proactive_share_schedule_enabled=True,
+            proactive_share_schedule_morning_enabled=False,
+            proactive_share_schedule_evening_enabled=False,
+            proactive_share_schedule_times=["00:00"],
+            proactive_share_schedule_jitter_minutes=15,
+        )
+        character = SimpleNamespace(
+            name="夜行角色",
+            extensions=SimpleNamespace(
+                event_day_start_hour=20,
+                event_day_end_hour=2,
+            ),
+        )
+        target_selector = SimpleNamespace(
+            select_share_targets=AsyncMock(return_value=[
+                ShareTarget(
+                    user_id="u1", group_id="", is_group=False, policy="force"
+                )
+            ])
+        )
+        data_store = SimpleNamespace(
+            set_setting=AsyncMock(),
+            get_user_profile=AsyncMock(return_value=None),
+        )
+        scheduler = ShareScheduler(
+            config=config,
+            character=character,
+            target_selector=target_selector,
+            data_store=data_store,
+        )
+
+        delivered_at = []
+
+        async def callback(*args, **kwargs):
+            delivered_at.append(current[0])
+            return ChatOutcome("sent", sent_count=1, reason="ok")
+
+        class _AlwaysTriggerRandom:
+            def __init__(self, seed):
+                pass
+
+            def random(self):
+                return 0.0
+
+        scheduler.set_trigger_callback(callback)
+        current = [datetime(2026, 7, 17, 23, 50)]
+        monkeypatch.setattr(scheduler, "_now", lambda: current[0])
+        monkeypatch.setattr(
+            "plugins.DicePP.module.persona.life.share_scheduler.random_module.Random",
+            _AlwaysTriggerRandom,
+        )
+
+        await scheduler.tick()
+        persisted_blob = data_store.set_setting.await_args.args[1]
+
+        current[0] = datetime(2026, 7, 18, 0, 0)
+        restarted_store = SimpleNamespace(
+            get_setting=AsyncMock(return_value=persisted_blob),
+            set_setting=AsyncMock(),
+            get_user_profile=AsyncMock(return_value=None),
+        )
+        restarted = ShareScheduler(
+            config=config,
+            character=character,
+            target_selector=target_selector,
+            data_store=restarted_store,
+        )
+        restarted.set_trigger_callback(callback)
+        monkeypatch.setattr(restarted, "_now", lambda: current[0])
+        await restarted.load_persistent_state()
+        await restarted.tick()
+
+        assert delivered_at == [datetime(2026, 7, 17, 23, 50)]
+
+    @pytest.mark.asyncio
+    async def test_legacy_previous_day_marker_blocks_post_midnight_duplicate(
+        self, monkeypatch
+    ):
+        config = SimpleNamespace(
+            proactive_share_schedule_enabled=True,
+            proactive_share_schedule_morning_enabled=False,
+            proactive_share_schedule_evening_enabled=False,
+            proactive_share_schedule_times=["23:55"],
+            proactive_share_schedule_jitter_minutes=15,
+        )
+        character = SimpleNamespace(
+            name="夜行角色",
+            extensions=SimpleNamespace(
+                event_day_start_hour=20,
+                event_day_end_hour=2,
+            ),
+        )
+        target_selector = SimpleNamespace(
+            select_share_targets=AsyncMock(return_value=[])
+        )
+        legacy_blob = json.dumps({
+            "date": "2026-07-17",
+            "fired_times": ["midday_23:55"],
+        })
+        data_store = SimpleNamespace(
+            get_setting=AsyncMock(return_value=legacy_blob),
+            set_setting=AsyncMock(),
+            get_user_profile=AsyncMock(return_value=None),
+        )
+        scheduler = ShareScheduler(
+            config=config,
+            character=character,
+            target_selector=target_selector,
+            data_store=data_store,
+        )
+        now = datetime(2026, 7, 18, 0, 0)
+        monkeypatch.setattr(scheduler, "_now", lambda: now)
+
+        await scheduler.load_persistent_state()
+        await scheduler.tick()
+
+        target_selector.select_share_targets.assert_not_awaited()
 
 
 # ── R3: sent_count=0 边界测试 ────────────────────────────
