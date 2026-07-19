@@ -4,7 +4,7 @@ import datetime
 import inspect
 import random
 import traceback
-from typing import List, Optional, Dict, Callable, Set, Awaitable, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, List, Optional, Dict, Callable, Set, Awaitable, Protocol, runtime_checkable
 from random import choice
 
 from utils.logger import logger, get_exception_info, configure_log_level
@@ -16,6 +16,7 @@ from core.config.pydantic_models import BotConfig
 from core.bot.task_scheduler import TaskScheduler
 from core.persona import PersonaLoader
 from core.communication import MessageMetaData, MessagePort, PrivateMessagePort, GroupMessagePort, preprocess_msg
+from core.communication import MessageRecallEvent, PostSendEvent
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import GroupInfo
@@ -24,6 +25,9 @@ from core.data.models import UserStat, GroupStat, MetaStat, BotControl, UserNick
 from core.statistics import MetaStatInfo, GroupStatInfo, UserStatInfo, StatManager
 
 import shutil
+
+if TYPE_CHECKING:
+    from module.common.log import LogRuntime
 
 # 日志清理相关常量
 LOGS_SUBDIR = "logs"
@@ -42,16 +46,21 @@ NICKNAME_ERROR = "UNDEF_NAME"
 @runtime_checkable
 class PostSendHook(Protocol):
     """post_send_hook 回调签名"""
-    async def __call__(
-        self,
-        group_id: str,
-        user_id: str,
-        role: str,
-        type: str,
-        content: str,
-        display_name: str,
-        msg_id: Optional[int] = None,
-    ) -> None: ...
+    async def __call__(self, event: PostSendEvent) -> None: ...
+
+
+@runtime_checkable
+class PlatformMessageHook(Protocol):
+    """每条原始平台消息事件只触发一次。"""
+
+    async def __call__(self, meta: MessageMetaData) -> None: ...
+
+
+@runtime_checkable
+class MessageRecallHook(Protocol):
+    """平台消息撤回事件回调。"""
+
+    async def __call__(self, event: MessageRecallEvent) -> None: ...
 
 
 @runtime_checkable
@@ -152,6 +161,15 @@ class Bot:
         # adapter 层发送消息后触发 hook，各模块通过注册 hook 实现日志记录等横切关注点。
         self._post_send_hooks: List[PostSendHook] = []
 
+        # 原始平台消息 hook；与逐 command_split 触发的 Persona inbound hook 分离。
+        self._platform_message_hooks: List[PlatformMessageHook] = []
+
+        # 消息撤回 hook；由适配器提供平台 message_id，不依赖当前日志。
+        self._message_recall_hooks: List[MessageRecallHook] = []
+
+        # 在数据库连接完成后创建；service 与 recorder 必须在 Bot 生命周期内共享。
+        self.log_runtime: Optional["LogRuntime"] = None
+
         # 消息入站记录 hook 列表
         self._inbound_message_hooks: List[InboundMessageHook] = []
 
@@ -170,7 +188,7 @@ class Bot:
     ) -> Callable[[], None]:
         """注册消息发送后跨模块通知 hook
 
-        回调签名: (group_id, user_id, role, type, content, display_name, msg_id) -> Awaitable[None]
+        回调签名: (PostSendEvent) -> Awaitable[None]
         返回注销函数，调用即可移除该 hook。
         """
         if hook not in self._post_send_hooks:
@@ -181,6 +199,49 @@ class Bot:
                 self._post_send_hooks.remove(hook)
 
         return unregister
+
+    def add_platform_message_hook(
+        self,
+        hook: PlatformMessageHook,
+    ) -> Callable[[], None]:
+        if hook not in self._platform_message_hooks:
+            self._platform_message_hooks.append(hook)
+
+        def unregister() -> None:
+            if hook in self._platform_message_hooks:
+                self._platform_message_hooks.remove(hook)
+
+        return unregister
+
+    def add_message_recall_hook(
+        self,
+        hook: MessageRecallHook,
+    ) -> Callable[[], None]:
+        if hook not in self._message_recall_hooks:
+            self._message_recall_hooks.append(hook)
+
+        def unregister() -> None:
+            if hook in self._message_recall_hooks:
+                self._message_recall_hooks.remove(hook)
+
+        return unregister
+
+    async def dispatch_post_send_event(self, event: PostSendEvent) -> None:
+        for hook in tuple(self._post_send_hooks):
+            try:
+                await hook(event)
+            except Exception as exc:
+                logger.warning(f"[PostSendHook] 处理失败: {exc}")
+
+    async def dispatch_message_recall_event(
+        self,
+        event: MessageRecallEvent,
+    ) -> None:
+        for hook in tuple(self._message_recall_hooks):
+            try:
+                await hook(event)
+            except Exception as exc:
+                logger.warning(f"[MessageRecallHook] 处理失败: {exc}")
 
     def add_inbound_message_hook(
         self,
@@ -454,6 +515,11 @@ class Bot:
         if self._control_channel is not None:
             await self._control_channel.stop()
 
+        log_runtime = self.log_runtime
+        self.log_runtime = None
+        if log_runtime is not None:
+            log_runtime.close()
+
         await self.db.close()
         # 注意如果保存时文件不存在会用当前值写入default, 如果在读取自定义设置后删掉文件再保存, 就会得到一个不是默认的default sheet
         # config is read-only at runtime; hot-reload is triggered via .reload command
@@ -578,15 +644,21 @@ class Bot:
                         await self.proxy.process_bot_command(bc)
                 raise
 
+            if self.log_runtime is None:
+                from module.common.log import LogRuntime
+
+                self.log_runtime = LogRuntime(
+                    self,
+                    self.db.log,
+                    command_split=self.config.command_split,
+                )
+            self.log_runtime.start()
+
             # Hub 配置已迁移至数据库，启动时先加载到 HubManager 缓存。
             try:
                 await self.hub_manager.load_config()
             except Exception as exc:
                 logger.warning(f"[DiceHub] 读取 Hub 配置失败，将使用内置默认值: {exc}")
-
-            # 注册日志记录 hook，消除 adapter -> log_command 反向导入
-            from module.common.log_command import register_log_hooks
-            register_log_hooks(self)
 
             init_info: List[str] = []
             for command in self.command_dict.values():
@@ -661,6 +733,14 @@ class Bot:
         # Ensure DB + per-command delay_init have been executed once.
         if not self._delay_init_done:
             await self.delay_init_command()
+
+        # 一条平台事件只在 preprocess 和 command_split 之前通知一次。Persona 的
+        # _inbound_message_hooks 仍在后续逐 msg_cur 触发，二者承担不同粒度的职责。
+        for hook in tuple(getattr(self, "_platform_message_hooks", ())):
+            try:
+                await hook(meta)
+            except Exception as exc:
+                logger.warning(f"[PlatformMessageHook] 处理失败: {exc}")
 
         await self.update_nickname(meta.user_id, "origin", meta.nickname)
 

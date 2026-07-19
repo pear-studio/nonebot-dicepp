@@ -1,5 +1,14 @@
 from .errors import LogDomainError, LogErrorCode, LogInvariantError, LogServiceError
 from .service import LogService
+from .recorder import (
+    LogRecallResult,
+    LogRecordReason,
+    LogRecordResult,
+    LogRecorder,
+    MessageRecallEvent,
+    PostSendEvent,
+)
+from .runtime import LogRuntime
 from .types import (
     ExportRequest,
     LogDeleteResult,
@@ -29,4 +38,11 @@ __all__ = [
     "LogOnResult",
     "LogService",
     "LogServiceError",
+    "LogRecorder",
+    "LogRecordResult",
+    "LogRecordReason",
+    "LogRecallResult",
+    "PostSendEvent",
+    "MessageRecallEvent",
+    "LogRuntime",
 ]

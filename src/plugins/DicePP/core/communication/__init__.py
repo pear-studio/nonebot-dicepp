@@ -5,3 +5,4 @@ from core.communication.process import preprocess_msg
 
 from core.communication.notice import NoticeData, GroupIncreaseNoticeData, FriendAddNoticeData
 from core.communication.request import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
+from core.communication.events import MessageRecallEvent, PostSendEvent

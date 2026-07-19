@@ -3,6 +3,7 @@ NoneBot API https://v2.nonebot.dev/api/plugin.html
 """
 from typing import List, Dict, Optional, Any
 import asyncio
+from datetime import datetime
 import traceback
 from fastapi import FastAPI
 
@@ -20,12 +21,11 @@ from nonebot.plugin import on_metaevent
 
 from core.bot import Bot as DicePPBot
 from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, GroupInfo
+from core.communication import MessageRecallEvent, PostSendEvent
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
 from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotSendForwardMsgCommand, BotSendFileCommand
 from utils.logger import logger
-
-from module.common.log_command import delete_log_record_by_message_id
 
 from adapter.client_proxy import ClientProxy
 
@@ -66,30 +66,22 @@ def convert_group_member_info(nb_group_member_info: Dict) -> GroupMemberInfo:
 async def _trigger_post_send_hooks(
     all_bots: dict,
     bot_self_id: str,
-    group_id: str,
-    user_id: str,
-    role: str,
-    msg_type_val: str,
-    content: str,
-    display_name: str,
-    msg_id: Optional[int],
+    event: PostSendEvent,
 ) -> None:
     """触发消息发送后跨模块通知 hook（群聊/私聊复用）"""
     bot_obj = all_bots.get(bot_self_id)
-    hooks = getattr(bot_obj, "_post_send_hooks", []) if bot_obj else []
-    for hook in hooks:
-        try:
-            await hook(
-                group_id=group_id,
-                user_id=user_id,
-                role=role,
-                type=msg_type_val,
-                content=content,
-                display_name=display_name,
-                msg_id=msg_id,
-            )
-        except Exception as e:
-            logger.error(f"[PostSendHook] 记录失败: {e}")
+    if bot_obj is not None:
+        await bot_obj.dispatch_post_send_event(event)
+
+
+def _platform_message_id(response: Any, *, operation: str) -> str | None:
+    value = response.get("message_id") if isinstance(response, dict) else None
+    if value is None:
+        logger.warning(
+            f"[OneBot][Protocol] {operation} 成功响应缺少 message_id"
+        )
+        return None
+    return str(value)
 
 
 class NoneBotClientProxy(ClientProxy):
@@ -130,7 +122,7 @@ class NoneBotClientProxy(ClientProxy):
         from core.message_types import MessageType
         raw_type = getattr(command, "message_type", None)
         msg_type_val = MessageType.from_str(raw_type).value if raw_type else "command"
-        msg_id = getattr(command, "msg_id", None)
+        history_stream_id = getattr(command, "msg_id", None)
         skip_hook = getattr(command, "skip_history_record", False)
 
         for target in command.targets:
@@ -139,22 +131,46 @@ class NoneBotClientProxy(ClientProxy):
                     f"[OneBot] send_group_msg -> group_id={target.group_id}"
                     f" msg_len={len(command.msg)}"
                 )
-                await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
+                response = await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
                 if not skip_hook:
                     await _trigger_post_send_hooks(
-                        all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
-                        "assistant", msg_type_val, command.msg, "我", msg_id,
+                        all_bots,
+                        self.bot.self_id,
+                        PostSendEvent(
+                            group_id=target.group_id,
+                            user_id=str(self.bot.self_id),
+                            role="assistant",
+                            message_type=msg_type_val,
+                            content=command.msg,
+                            display_name="我",
+                            platform_message_id=_platform_message_id(
+                                response, operation="send_group_msg"
+                            ),
+                            history_stream_id=history_stream_id,
+                        ),
                     )
             else:
                 logger.info(
                     f"[OneBot] send_private_msg -> user_id={target.user_id}"
                     f" msg_len={len(command.msg)}"
                 )
-                await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
+                response = await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
                 if not skip_hook:
                     await _trigger_post_send_hooks(
-                        all_bots, self.bot.self_id, "", target.user_id,
-                        "assistant", msg_type_val, command.msg, "我", msg_id,
+                        all_bots,
+                        self.bot.self_id,
+                        PostSendEvent(
+                            group_id=None,
+                            user_id=target.user_id,
+                            role="assistant",
+                            message_type=msg_type_val,
+                            content=command.msg,
+                            display_name="我",
+                            platform_message_id=_platform_message_id(
+                                response, operation="send_private_msg"
+                            ),
+                            history_stream_id=history_stream_id,
+                        ),
                     )
 
     async def _handle_leave_group(self, command: BotLeaveGroupCommand) -> None:
@@ -163,25 +179,47 @@ class NoneBotClientProxy(ClientProxy):
     async def _handle_send_forward_msg(self, command: BotSendForwardMsgCommand) -> None:
         try:
             for target in command.targets:
-                await self.bot.call_api("send_group_forward_msg", group_id=int(target.group_id), messages=command.msg_json_list)
-                try:
-                    for sub_msg in command.msg:
-                        await _trigger_post_send_hooks(
-                            all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
-                            "assistant", "forward", sub_msg, "我", None,
-                        )
-                except Exception:
-                    pass
+                response = await self.bot.call_api("send_group_forward_msg", group_id=int(target.group_id), messages=command.msg_json_list)
+                platform_message_id = _platform_message_id(
+                    response, operation="send_group_forward_msg"
+                )
+                await _trigger_post_send_hooks(
+                    all_bots,
+                    self.bot.self_id,
+                    PostSendEvent(
+                        group_id=target.group_id,
+                        user_id=str(self.bot.self_id),
+                        role="assistant",
+                        message_type="forward",
+                        content="\n".join(command.msg),
+                        display_name="我",
+                        platform_message_id=platform_message_id,
+                        history_stream_id=None,
+                    ),
+                )
         except Exception:
             for target in command.targets:
                 if target.group_id:
                     await self.bot.send_group_msg(group_id=int(target.group_id), message="合并转发失败！")
                     for msg in command.msg:
-                        await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(msg))
+                        response = await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(msg))
                         try:
                             await _trigger_post_send_hooks(
-                                all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
-                                "assistant", "command", msg, "我", None,
+                                all_bots,
+                                self.bot.self_id,
+                                PostSendEvent(
+                                    group_id=target.group_id,
+                                    user_id=str(self.bot.self_id),
+                                    role="assistant",
+                                    message_type="command",
+                                    content=msg,
+                                    display_name="我",
+                                    platform_message_id=_platform_message_id(
+                                        response,
+                                        operation="send_group_msg(forward fallback)",
+                                    ),
+                                    history_stream_id=None,
+                                ),
                             )
                         except Exception:
                             pass
@@ -236,8 +274,18 @@ class NoneBotClientProxy(ClientProxy):
                 if primary_done:
                     try:
                         await _trigger_post_send_hooks(
-                            all_bots, self.bot.self_id, target.group_id, str(self.bot.self_id),
-                            "assistant", "file", f"[文件]{real_name}", "我", None,
+                            all_bots,
+                            self.bot.self_id,
+                            PostSendEvent(
+                                group_id=target.group_id,
+                                user_id=str(self.bot.self_id),
+                                role="assistant",
+                                message_type="file",
+                                content=f"[文件]{real_name}",
+                                display_name="我",
+                                platform_message_id=None,
+                                history_stream_id=None,
+                            ),
                         )
                     except Exception:
                         pass
@@ -460,20 +508,8 @@ else:
             instance.health_monitor.on_bot_disconnect()
             await instance.shutdown_async()
 
-# ================= Recall Sync Support ==================
-def _remove_log_record(bot_obj, group_id: str, message_id: str):
-    """根据消息撤回删除当前活动日志中对应的记录（SQLite）。"""
-    try:
-        delete_log_record_by_message_id(bot_obj, group_id, str(message_id))
-    except Exception as e:
-        try:
-            logger.debug(f"[Recall] remove fail: {e}")
-        except Exception:
-            pass
-
-
 async def _handle_group_recall(event: GroupRecallNoticeEvent, nb_bot: NoneBot):
-    """处理群消息撤回事件，移除对应日志记录。
+    """把 OneBot 群撤回通知转换为与业务模块解耦的结构化事件。
     OneBot v11 字段: group_id, user_id(操作者?), operator_id, message_id, time
     """
     logger.debug(f"[Recall] group {event.group_id} message {getattr(event,'message_id',None)}")
@@ -483,5 +519,15 @@ async def _handle_group_recall(event: GroupRecallNoticeEvent, nb_bot: NoneBot):
     bot_obj = all_bots.get(nb_bot.self_id)
     if not bot_obj:
         return
-    _remove_log_record(bot_obj, str(event.group_id), message_id)
+    try:
+        recalled_at = datetime.fromtimestamp(float(event.time))
+    except (AttributeError, TypeError, ValueError, OSError):
+        recalled_at = datetime.now()
+    await bot_obj.dispatch_message_recall_event(
+        MessageRecallEvent(
+            group_id=str(event.group_id),
+            platform_message_id=message_id,
+            recalled_at=recalled_at,
+        )
+    )
 

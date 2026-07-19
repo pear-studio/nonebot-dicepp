@@ -110,6 +110,14 @@ class LogRepository:
         async with self.transaction() as tx:
             return await tx.mark_record_recalled(log_id, message_id, recalled_at)
 
+    async def mark_group_records_recalled(
+        self, group_id: str, message_id: str, recalled_at: datetime
+    ) -> int:
+        async with self.transaction() as tx:
+            return await tx.mark_group_records_recalled(
+                group_id, message_id, recalled_at
+            )
+
     async def add_export(self, export: LogExport) -> int:
         async with self.transaction() as tx:
             return await tx.add_export(export)
@@ -347,6 +355,20 @@ class LogRepository:
         )
         return cursor.rowcount
 
+    async def _mark_group_records_recalled(
+        self, group_id: str, message_id: str, recalled_at: datetime
+    ) -> int:
+        cursor = await self._db.execute(
+            """
+            UPDATE records SET recalled_at = ?
+            WHERE message_id = ?
+              AND recalled_at IS NULL
+              AND log_id IN (SELECT id FROM logs WHERE group_id = ?)
+            """,
+            (_iso(recalled_at), message_id, group_id),
+        )
+        return cursor.rowcount
+
     async def _add_export(self, export: LogExport) -> int:
         cursor = await self._db.execute(
             """
@@ -511,6 +533,13 @@ class LogUnitOfWork:
     ) -> int:
         return await self._repository._mark_record_recalled(
             log_id, message_id, recalled_at
+        )
+
+    async def mark_group_records_recalled(
+        self, group_id: str, message_id: str, recalled_at: datetime
+    ) -> int:
+        return await self._repository._mark_group_records_recalled(
+            group_id, message_id, recalled_at
         )
 
     async def add_export(self, export: LogExport) -> int:

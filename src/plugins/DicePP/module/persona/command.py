@@ -16,7 +16,7 @@ from datetime import timedelta
 from core.bot import Bot
 from core.command.user_cmd import UserCommandBase, custom_user_command
 from core.command.bot_cmd import BotCommandBase
-from core.communication import MessageMetaData
+from core.communication import MessageMetaData, PostSendEvent
 from core.command.const import DPP_COMMAND_PRIORITY_DEFAULT, DPP_COMMAND_FLAG_FUN
 
 
@@ -193,32 +193,26 @@ class PersonaCommand(UserCommandBase):
 
     async def _group_chat_recorder(
         self,
-        group_id: str,
-        user_id: str,
-        role: str,
-        type: str,
-        content: str,
-        display_name: str,
-        msg_id: Optional[int] = None,
+        event: PostSendEvent,
     ) -> None:
         """消息发送后记录器回调（跨模块 bot 回复统一入流）
 
-        - msg_id 非 None：persona 聊天路径已自行写入，无需处理
-        - msg_id 为 None：直接写入 message_stream（非 persona 命令回复路径）
+        - history_stream_id 非 None：persona 聊天路径已自行写入，无需处理
+        - history_stream_id 为 None：直接写入 message_stream（非 persona 命令回复路径）
         """
         if not self.data_store:
             return
         try:
-            if msg_id is not None:
+            if event.history_stream_id is not None:
                 return  # persona 聊天路径已在 ChatSession 等调用方写入
-            msg_type = MessageType.from_str(type)
+            msg_type = MessageType.from_str(event.message_type)
             await self.data_store.add_message_stream(
-                user_id=user_id,
-                group_id=group_id,
-                role=role,
+                user_id=event.user_id or "",
+                group_id=event.group_id or "",
+                role=event.role,
                 type=msg_type,
-                content=content,
-                display_name=display_name,
+                content=event.content,
+                display_name=event.display_name,
             )
         except Exception as e:
             logger.warning(f"[Persona] 出站记录器写入失败: {e}")

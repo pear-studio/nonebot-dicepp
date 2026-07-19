@@ -78,14 +78,18 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
         self.cmd.data_store = self.store
 
     async def test_records_to_store(self):
-        await self.cmd._group_chat_recorder(
+        from core.communication import PostSendEvent
+
+        await self.cmd._group_chat_recorder(PostSendEvent(
             group_id="g1",
             user_id="u1",
             role="user",
-            type="chat",
+            message_type="chat",
             content="hello",
             display_name="小明",
-        )
+            platform_message_id="platform-1",
+            history_stream_id=None,
+        ))
         self.store.add_message_stream.assert_awaited_once_with(
             user_id="u1",
             group_id="g1",
@@ -96,16 +100,36 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
         )
 
     async def test_silently_ignores_when_no_store(self):
+        from core.communication import PostSendEvent
+
         self.cmd.data_store = None
         # 不应抛异常；断言到此为止，data_store=None 时直接 return
-        await self.cmd._group_chat_recorder(
+        await self.cmd._group_chat_recorder(PostSendEvent(
             group_id="g1",
             user_id="u1",
             role="user",
-            type="chat",
+            message_type="chat",
             content="hello",
             display_name="小明",
-        )
+            platform_message_id="platform-1",
+            history_stream_id=None,
+        ))
+
+    async def test_history_stream_id_skips_duplicate_persona_write(self):
+        from core.communication import PostSendEvent
+
+        await self.cmd._group_chat_recorder(PostSendEvent(
+            group_id="g1",
+            user_id="u1",
+            role="assistant",
+            message_type="chat",
+            content="hello",
+            display_name="小明",
+            platform_message_id="platform-1",
+            history_stream_id=123,
+        ))
+
+        self.store.add_message_stream.assert_not_awaited()
 
 
 @pytest.mark.unit
