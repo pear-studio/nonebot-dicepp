@@ -214,6 +214,78 @@ async def test_empty_stop_snapshot_stays_empty_after_log_is_resumed(log_service)
 
 
 @pytest.mark.asyncio
+async def test_prepare_export_fixes_manual_snapshot_without_changing_recording(
+    log_service,
+):
+    service, repository = log_service
+    active = await service.turn_on("g1", "雾都Night", requested_by="owner")
+    upper_id = await repository.add_record(_record(active.session.id, "快照内", 1))
+
+    request = await service.prepare_export(
+        "g1",
+        "雾都night",
+        "exporter",
+        LogExportView.COMPLETE,
+        (LogExportFormat.DOCX,),
+    )
+    await repository.add_record(_record(active.session.id, "快照外", 2))
+
+    assert request.request_id == "request-1"
+    assert request.reason is LogExportReason.MANUAL
+    assert request.log_id == active.session.id
+    assert request.group_id == "g1"
+    assert request.log_name == "雾都Night"
+    assert request.view is LogExportView.COMPLETE
+    assert request.formats == (LogExportFormat.DOCX,)
+    assert request.record_upper_id == upper_id
+    assert request.requested_at == NOW
+    assert request.requested_by == "exporter"
+    assert (await repository.get_session(active.session.id)).recording is True
+    bounded = await repository.get_records(
+        active.session.id, upper_id=request.record_upper_id
+    )
+    assert [record.plain_content for record in bounded] == ["快照内"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_export_supports_empty_snapshot_and_publication_request(
+    log_service,
+):
+    service, repository = log_service
+    active = await service.turn_on("g1", "空日志", requested_by="owner")
+
+    request = await service.prepare_export(
+        "g1",
+        "空日志",
+        requested_by="publisher",
+        view=LogExportView.CURATED,
+        formats=(),
+    )
+
+    assert request.reason is LogExportReason.MANUAL
+    assert request.formats == ()
+    assert request.record_upper_id == 0
+    assert await repository.get_records(
+        active.session.id, upper_id=request.record_upper_id
+    ) == []
+    assert (await repository.get_session(active.session.id)).recording is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_export_rejects_invalid_or_unknown_name(log_service):
+    service, _ = log_service
+
+    with pytest.raises(LogDomainError) as blank:
+        await service.prepare_export("g1", "  ", requested_by="owner")
+    assert blank.value.code is LogErrorCode.INVALID_NAME
+
+    with pytest.raises(LogDomainError) as missing:
+        await service.prepare_export("g1", "不存在", requested_by="owner")
+    assert missing.value.code is LogErrorCode.LOG_NOT_FOUND
+    assert missing.value.context == {"group_id": "g1", "name": "不存在"}
+
+
+@pytest.mark.asyncio
 async def test_list_and_delete_report_persisted_history_and_clear_current(log_service):
     service, repository = log_service
     active = await service.turn_on("g1", "团A", requested_by="owner")

@@ -136,6 +136,38 @@ class LogService:
                     for summary in summaries
                 )
 
+    async def prepare_export(
+        self,
+        group_id: str,
+        name: str,
+        requested_by: str,
+        view: LogExportView = LogExportView.CURATED,
+        formats: tuple[LogExportFormat, ...] = (
+            LogExportFormat.TXT,
+            LogExportFormat.DOCX,
+        ),
+    ) -> ExportRequest:
+        """Fix an immutable manual-export request without changing log state."""
+        normalized_name = _normalize_required_name(name)
+        async with self._lock_for(group_id):
+            async with self._repository.transaction() as tx:
+                session = await tx.get_session_by_name(group_id, normalized_name)
+                if session is None:
+                    raise LogDomainError(
+                        LogErrorCode.LOG_NOT_FOUND,
+                        group_id=group_id,
+                        name=normalized_name,
+                    )
+                return await self._make_export_request(
+                    tx,
+                    session=session,
+                    reason=LogExportReason.MANUAL,
+                    requested_at=self._clock(),
+                    requested_by=requested_by,
+                    view=view,
+                    formats=tuple(formats),
+                )
+
     async def delete_log(self, group_id: str, name: str) -> LogDeleteResult:
         normalized_name = _normalize_required_name(name)
         async with self._lock_for(group_id):
@@ -335,6 +367,11 @@ class LogService:
         reason: LogExportReason,
         requested_at: datetime,
         requested_by: str,
+        view: LogExportView = LogExportView.CURATED,
+        formats: tuple[LogExportFormat, ...] = (
+            LogExportFormat.TXT,
+            LogExportFormat.DOCX,
+        ),
     ) -> ExportRequest:
         return ExportRequest(
             request_id=self._request_id_factory(),
@@ -342,8 +379,8 @@ class LogService:
             log_id=session.id,
             group_id=session.group_id,
             log_name=session.name,
-            view=LogExportView.CURATED,
-            formats=(LogExportFormat.TXT, LogExportFormat.DOCX),
+            view=view,
+            formats=formats,
             # ``None`` means "unbounded" to Repository.get_records().  An empty
             # lifecycle snapshot must therefore use the explicit lower sentinel 0.
             record_upper_id=(await tx.get_record_upper_id(session.id)) or 0,
