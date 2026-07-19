@@ -9,10 +9,24 @@ from .recorder import (
     PostSendEvent,
 )
 from .runtime import LogRuntime
+from .export_service import (
+    ArtifactResult,
+    ExportBatchResult,
+    LogExportCoordinator,
+)
+from .projection import (
+    LogProjection,
+    LogProjector,
+    ProjectedMessage,
+    ProjectedPart,
+    ProjectedReply,
+)
 from .types import (
     ExportRequest,
     LogDeleteResult,
     LogExportFormat,
+    LogDeliveryStatus,
+    LogGenerationStatus,
     LogExportReason,
     LogExportView,
     LogListItem,
@@ -28,6 +42,8 @@ __all__ = [
     "LogDomainError",
     "LogErrorCode",
     "LogExportFormat",
+    "LogDeliveryStatus",
+    "LogGenerationStatus",
     "LogExportReason",
     "LogExportView",
     "LogInvariantError",
@@ -45,4 +61,12 @@ __all__ = [
     "PostSendEvent",
     "MessageRecallEvent",
     "LogRuntime",
+    "ArtifactResult",
+    "ExportBatchResult",
+    "LogExportCoordinator",
+    "LogProjection",
+    "LogProjector",
+    "ProjectedMessage",
+    "ProjectedPart",
+    "ProjectedReply",
 ]

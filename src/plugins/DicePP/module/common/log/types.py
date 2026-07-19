@@ -36,6 +36,19 @@ class LogExportFormat(str, Enum):
     HTML = "html"
 
 
+class LogGenerationStatus(str, Enum):
+    PENDING = "pending"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class LogDeliveryStatus(str, Enum):
+    NOT_ATTEMPTED = "not_attempted"
+    PENDING = "pending"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True, slots=True)
 class ExportRequest:
     request_id: str
