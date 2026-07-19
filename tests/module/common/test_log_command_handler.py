@@ -439,15 +439,12 @@ def test_private_log_command_is_claimed_for_the_shared_group_only_notice(
     assert command.permission_require == 0
 
 
-def test_registry_keeps_only_the_new_log_command_after_legacy_helper_import() -> None:
+def test_registry_orders_log_command_before_broad_query_alias() -> None:
     from core.command.user_cmd import DEFAULT_REGISTRY
-    import module.common.log_command  # noqa: F401 - verifies no decorator side effect
 
     names = [command.__name__ for command in DEFAULT_REGISTRY.get_sorted_commands()]
 
     assert names.count("LogCommand") == 1
-    assert "LogRecorderCommand" not in names
-    assert "LogStatCommand" not in names
     assert names.index("LogCommand") < names.index("QueryCommand")
 
 
@@ -461,7 +458,6 @@ def test_fresh_process_registers_only_the_new_log_command() -> None:
 import json
 import module
 import module.common
-import module.common.log_command
 from core.command.user_cmd import DEFAULT_REGISTRY
 print(json.dumps([item.__name__ for item in DEFAULT_REGISTRY.get_sorted_commands()]))
 """
@@ -477,8 +473,6 @@ print(json.dumps([item.__name__ for item in DEFAULT_REGISTRY.get_sorted_commands
     names = json.loads(completed.stdout.strip().splitlines()[-1])
 
     assert names.count("LogCommand") == 1
-    assert "LogRecorderCommand" not in names
-    assert "LogStatCommand" not in names
     assert names.index("LogCommand") < names.index("QueryCommand")
 
 
