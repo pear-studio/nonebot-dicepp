@@ -101,6 +101,35 @@ def _load_json_file_for_rewrite(path: Path) -> tuple[Dict[str, Any], bool]:
         return {}, False
 
 
+def _migrate_legacy_log_web_config(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Move legacy flat upload settings into ``log.web`` per config layer.
+
+    ``upload_enable`` deliberately has no replacement: Web publishing is now
+    controlled exclusively by an explicit user command and a configured endpoint.
+    """
+    log_config = raw.get("log")
+    if not isinstance(log_config, dict):
+        return raw
+    legacy_keys = {"upload_enable", "upload_endpoint", "upload_token"}
+    if not legacy_keys.intersection(log_config):
+        return raw
+
+    migrated = dict(raw)
+    migrated_log = dict(log_config)
+    web_config = migrated_log.get("web")
+    migrated_web = dict(web_config) if isinstance(web_config, dict) else {}
+    if "endpoint" not in migrated_web and "upload_endpoint" in migrated_log:
+        migrated_web["endpoint"] = migrated_log["upload_endpoint"]
+    if "token" not in migrated_web and "upload_token" in migrated_log:
+        migrated_web["token"] = migrated_log["upload_token"]
+    if migrated_web:
+        migrated_log["web"] = migrated_web
+    for key in legacy_keys:
+        migrated_log.pop(key, None)
+    migrated["log"] = migrated_log
+    return migrated
+
+
 def _write_json_file_atomic(path: Path, data: Dict[str, Any]) -> None:
     """Atomically write canonical JSON without creating backup files."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -349,6 +378,10 @@ def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
         "DICE_DICEHUB_ENABLE": ["dicehub", "enable"],
         "DICE_DICEHUB_HEARTBEAT_INTERVAL": ["dicehub", "heartbeat_interval"],
         "DICE_LOG_LEVEL": ["log", "level"],
+        "DICE_LOG_WEB_PROVIDER": ["log", "web", "provider"],
+        "DICE_LOG_WEB_ENDPOINT": ["log", "web", "endpoint"],
+        "DICE_LOG_WEB_TOKEN": ["log", "web", "token"],
+        "DICE_LOG_WEB_TIMEOUT_SECONDS": ["log", "web", "timeout_seconds"],
     }
 
     for env_key, path in env_mappings.items():
@@ -404,36 +437,42 @@ class ConfigLoader:
 
         # Layer 4 (lowest): global defaults
         global_path = self._data_path / _GLOBAL_CONFIG
-        global_raw, global_can_rewrite = _load_json_file_for_rewrite(global_path)
+        global_disk_raw, global_can_rewrite = _load_json_file_for_rewrite(global_path)
+        global_raw = _migrate_legacy_log_web_config(global_disk_raw)
         raw = self._canonicalize_layer(
             global_path,
             global_raw,
             can_rewrite=global_can_rewrite,
             fill_missing_defaults=True,
             rewrites=rewrites,
+            original_raw=global_disk_raw,
         )
 
         # Layer 3: global user overrides (replaces old secrets.json)
         user_path = self._data_path / _GLOBAL_USER
-        user_raw, user_can_rewrite = _load_json_file_for_rewrite(user_path)
+        user_disk_raw, user_can_rewrite = _load_json_file_for_rewrite(user_path)
+        user_raw = _migrate_legacy_log_web_config(user_disk_raw)
         user_cfg = self._canonicalize_layer(
             user_path,
             user_raw,
             can_rewrite=user_can_rewrite,
             fill_missing_defaults=False,
             rewrites=rewrites,
+            original_raw=user_disk_raw,
         )
         raw = _deep_merge(raw, user_cfg)
 
         # Layer 2: account config
         self._ensure_account_config()
-        account_raw, account_can_rewrite = _load_json_file_for_rewrite(self._account_config_path)
+        account_disk_raw, account_can_rewrite = _load_json_file_for_rewrite(self._account_config_path)
+        account_raw = _migrate_legacy_log_web_config(account_disk_raw)
         account_cfg = self._canonicalize_layer(
             self._account_config_path,
             account_raw,
             can_rewrite=account_can_rewrite,
             fill_missing_defaults=False,
             rewrites=rewrites,
+            original_raw=account_disk_raw,
         )
         raw = _deep_merge(raw, account_cfg)
 
@@ -465,6 +504,7 @@ class ConfigLoader:
         can_rewrite: bool,
         fill_missing_defaults: bool,
         rewrites: list[tuple[Path, Dict[str, Any], Dict[str, Any]]],
+        original_raw: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         if not can_rewrite:
             return raw
@@ -474,7 +514,7 @@ class ConfigLoader:
             path=path,
             fill_missing_defaults=fill_missing_defaults,
         )
-        rewrites.append((path, raw, canonical))
+        rewrites.append((path, original_raw if original_raw is not None else raw, canonical))
         return canonical
 
     @property

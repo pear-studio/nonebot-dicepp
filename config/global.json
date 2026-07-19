@@ -54,9 +54,12 @@
 
   "log": {
     "level": "DEBUG",
-    "upload_enable": true,
-    "upload_endpoint": "https://dice.weizaima.com/dice/api/log",
-    "upload_token": "",
+    "web": {
+      "provider": "dice_log_v105",
+      "endpoint": "",
+      "token": "",
+      "timeout_seconds": 15.0
+    },
     "max_records": 5000
   },
 

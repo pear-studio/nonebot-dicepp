@@ -38,6 +38,7 @@ class ProjectedMessage:
     message_type: str
     reply: ProjectedReply | None
     parts: tuple[ProjectedPart, ...]
+    message_id: str | None = None
 
     @property
     def readable_text(self) -> str:
@@ -103,6 +104,7 @@ class LogProjector:
                     message_type=record.message_type,
                     reply=reply,
                     parts=draft.parts,
+                    message_id=record.message_id,
                 )
             )
 

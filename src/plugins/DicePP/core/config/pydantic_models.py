@@ -680,6 +680,18 @@ class QueryConfig(BaseModel):
     private_database: str = Field(default="DND5E2014", title="默认查询库")
 
 
+class LogWebConfig(BaseModel):
+    provider: str = Field(default="dice_log_v105", title="Web 日志服务")
+    endpoint: str = Field(default="", title="Web 日志地址")
+    token: str = Field(default="", title="Web 日志 Token")
+    timeout_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        le=60,
+        title="Web 日志超时（秒）",
+    )
+
+
 class LogConfig(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
@@ -689,9 +701,7 @@ class LogConfig(BaseModel):
     )
 
     level: str = Field(default="DEBUG", title="日志级别")
-    upload_enable: bool = Field(default=True, title="日志上传")
-    upload_endpoint: str = Field(default="https://dice.weizaima.com/dice/api/log", title="上传地址")
-    upload_token: str = Field(default="", title="上传 Token")
+    web: LogWebConfig = Field(default_factory=LogWebConfig, title="Web 日志发布")
     max_records: int = Field(default=5000, title="最大记录数")
 
 
