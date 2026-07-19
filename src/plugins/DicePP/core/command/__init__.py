@@ -8,3 +8,8 @@ from core.command.text_parser import CommandTextParser
 from core.command.cq_extractor import extract_segments, extract_mentions, enrich_parse_result
 from core.command.compat_mapper import CompatRule, CommandCompatMapper, apply_compat
 from core.command.context import CommandContext, CommandContextResolver
+from core.command.dispatch_result import (
+    BotCommandDispatchResult,
+    FileDeliveryOutcome,
+    FileDeliveryResult,
+)

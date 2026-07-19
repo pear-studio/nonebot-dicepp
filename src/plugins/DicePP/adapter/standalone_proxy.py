@@ -4,9 +4,13 @@ from typing import List
 from adapter.client_proxy import ClientProxy
 from core.command import (
     BotCommandBase,
+    BotCommandDispatchResult,
     BotDelayCommand,
     BotSendForwardMsgCommand,
+    BotSendFileCommand,
     BotSendMsgCommand,
+    FileDeliveryOutcome,
+    FileDeliveryResult,
 )
 from core.communication import GroupInfo, GroupMemberInfo
 from utils.logger import logger
@@ -24,6 +28,7 @@ class StandaloneClientProxy(ClientProxy):
         self._command_handlers = {
             BotSendMsgCommand: self._handle_send_msg,
             BotSendForwardMsgCommand: self._handle_send_forward_msg,
+            BotSendFileCommand: self._handle_send_file,
             BotDelayCommand: self._handle_delay,
         }
 
@@ -36,6 +41,30 @@ class StandaloneClientProxy(ClientProxy):
         logger.debug(f"[Standalone] [BotCommand] {command}")
         async with self._lock:
             self._outputs.extend(command.msg)
+
+    async def _handle_send_file(
+        self,
+        command: BotSendFileCommand,
+    ) -> BotCommandDispatchResult:
+        logger.debug(f"[Standalone] [BotCommand] {command}")
+        async with self._lock:
+            self._outputs.append(str(command))
+        requested_folder = (
+            command.display_name.split("/", 1)[0].strip() or None
+            if "/" in command.display_name
+            else None
+        )
+        return BotCommandDispatchResult(
+            command=command,
+            file_deliveries=tuple(
+                FileDeliveryResult(
+                    target=target,
+                    outcome=FileDeliveryOutcome.UNSUPPORTED,
+                    requested_folder=requested_folder,
+                )
+                for target in command.targets
+            ),
+        )
 
     async def _handle_delay(self, command: BotDelayCommand) -> None:
         logger.debug(f"[Standalone] [BotCommand] {command}")

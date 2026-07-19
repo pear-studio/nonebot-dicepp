@@ -6,8 +6,13 @@ import websockets
 
 from adapter.web_chat_adapter import SEND_QUEUE_MAX, WebChatAdapter, WebChatAuthFailed
 from adapter.web_chat_proxy import WebChatProxy
-from core.command import BotSendForwardMsgCommand, BotSendMsgCommand
-from core.communication import PrivateMessagePort
+from core.command import (
+    BotSendFileCommand,
+    BotSendForwardMsgCommand,
+    BotSendMsgCommand,
+    FileDeliveryOutcome,
+)
+from core.communication import GroupMessagePort, PrivateMessagePort
 
 pytestmark = pytest.mark.integration
 
@@ -172,6 +177,29 @@ class TestWebChatQueue:
             ("u-1", "a", "ack-1"),
             ("u-1", "b", "ack-1"),
             ("u-1", "c", "ack-1"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_file_notice_does_not_claim_delivery_support(self):
+        adapter = _DummyAdapter()
+        proxy = WebChatProxy(adapter)  # type: ignore[arg-type]
+        command = BotSendFileCommand(
+            "123",
+            "C:/tmp/log.txt",
+            "跑团log/log.txt",
+            [GroupMessagePort("100")],
+        )
+
+        result = await proxy.process_bot_command(command)
+
+        assert result.file_deliveries[0].outcome is FileDeliveryOutcome.UNSUPPORTED
+        assert result.file_deliveries[0].requested_folder == "跑团log"
+        assert adapter.sent == [
+            (
+                "u-1",
+                "[文件暂不支持网页显示，请在QQ中查看] 跑团log/log.txt",
+                "ack-1",
+            )
         ]
 
 

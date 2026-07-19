@@ -24,7 +24,17 @@ from core.communication import MessageMetaData, MessageSender, GroupMemberInfo, 
 from core.communication import MessageRecallEvent, PostSendEvent
 from core.communication import NoticeData, FriendAddNoticeData, GroupIncreaseNoticeData
 from core.communication import RequestData, FriendRequestData, JoinGroupRequestData, InviteGroupRequestData
-from core.command import BotCommandBase, BotSendMsgCommand, BotDelayCommand, BotLeaveGroupCommand, BotSendForwardMsgCommand, BotSendFileCommand
+from core.command import (
+    BotCommandBase,
+    BotCommandDispatchResult,
+    BotDelayCommand,
+    BotLeaveGroupCommand,
+    BotSendFileCommand,
+    BotSendForwardMsgCommand,
+    BotSendMsgCommand,
+    FileDeliveryOutcome,
+    FileDeliveryResult,
+)
 from utils.logger import logger
 
 from adapter.client_proxy import ClientProxy
@@ -96,14 +106,18 @@ class NoneBotClientProxy(ClientProxy):
             BotDelayCommand: self._handle_delay,
         }
 
-    async def process_bot_command(self, command: BotCommandBase) -> None:
+    async def process_bot_command(
+        self,
+        command: BotCommandBase,
+    ) -> BotCommandDispatchResult:
         logger.debug(f"[OneBot] [BotCommand] {command}")
         dice_bot = all_bots.get(self.bot.self_id)
         try:
-            await super().process_bot_command(command)
+            result = await super().process_bot_command(command)
             # 发送成功：通知健康监控
             if isinstance(command, BotSendMsgCommand) and dice_bot is not None:
                 dice_bot.health_monitor.on_send_success()
+            return result
         except ActionFailed as e:
             logger.info(f"[OneBot] [ActionFailed] {e}")
             # 转发给健康监控（仅消息发送，排除 BotLeaveGroupCommand 等非发送命令）
@@ -117,6 +131,7 @@ class NoneBotClientProxy(ClientProxy):
             logger.error(f"[OneBot] [UnknownException] {e}\n{traceback.format_exc()}")
             if isinstance(command, BotSendMsgCommand):
                 raise
+        return BotCommandDispatchResult(command=command)
 
     async def _handle_send_msg(self, command: BotSendMsgCommand) -> None:
         from core.message_types import MessageType
@@ -228,7 +243,11 @@ class NoneBotClientProxy(ClientProxy):
                     for msg in command.msg:
                         await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(msg))
 
-    async def _handle_send_file(self, command: BotSendFileCommand) -> None:
+    async def _handle_send_file(
+        self,
+        command: BotSendFileCommand,
+    ) -> BotCommandDispatchResult:
+        deliveries: list[FileDeliveryResult] = []
         for target in command.targets:
             display_name = command.display_name
             folder_name = None
@@ -237,73 +256,163 @@ class NoneBotClientProxy(ClientProxy):
                 folder_name, real_name = display_name.split('/', 1)
                 folder_name = folder_name.strip() or None
                 real_name = real_name.strip() or display_name.split('/', 1)[1]
+            if target.user_id or not target.group_id:
+                deliveries.append(
+                    FileDeliveryResult(
+                        target=target,
+                        outcome=FileDeliveryOutcome.UNSUPPORTED,
+                        requested_folder=folder_name,
+                    )
+                )
+                continue
+
             folder_id = None
+            folder_error: str | None = None
             if folder_name:
                 cache = _group_folder_cache.setdefault(target.group_id, {})
                 if folder_name in cache and cache[folder_name]:
                     folder_id = cache[folder_name]
                 else:
                     try:
-                        root_files = await self.bot.call_api("get_group_root_files", group_id=int(target.group_id))
-                        folders_list = root_files.get('folders') or []
+                        root_files = await self.bot.call_api(
+                            "get_group_root_files",
+                            group_id=int(target.group_id),
+                        )
+                        folders_list = root_files.get("folders") or []
                         for fd in folders_list:
-                            name_candidate = fd.get('folder_name') or fd.get('name') or fd.get('file_name')
+                            name_candidate = (
+                                fd.get("folder_name")
+                                or fd.get("name")
+                                or fd.get("file_name")
+                            )
                             if name_candidate == folder_name:
-                                folder_id = fd.get('folder_id') or fd.get('id')
+                                folder_id = fd.get("folder_id") or fd.get("id")
                                 break
                         if folder_id:
                             cache[folder_name] = folder_id
-                    except Exception:
-                        pass
-            try:
-                primary_done = False
-                try:
-                    if folder_id:
-                        await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name, folder=folder_id)
-                    else:
-                        await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name)
-                    primary_done = True
-                except Exception as e1:
-                    logger.info(f"[OneBot][Upload][PrimaryFail] group={target.group_id} file={real_name} err={e1}")
-                    if folder_id:
-                        try:
-                            await self.bot.call_api("upload_group_file", group_id=int(target.group_id), file=command.file, name=real_name)
-                            primary_done = True
-                        except Exception as e2:
-                            logger.info(f"[OneBot][Upload][FallbackFail] group={target.group_id} file={real_name} err={e2}")
-                if primary_done:
-                    try:
-                        await _trigger_post_send_hooks(
-                            all_bots,
-                            self.bot.self_id,
-                            PostSendEvent(
-                                group_id=target.group_id,
-                                user_id=str(self.bot.self_id),
-                                role="assistant",
-                                message_type="file",
-                                content=f"[文件]{real_name}",
-                                display_name="我",
-                                platform_message_id=None,
-                                history_stream_id=None,
-                            ),
+                        else:
+                            folder_error = "requested folder was not found"
+                    except Exception as exc:
+                        folder_error = f"{type(exc).__name__}: {exc}"
+                        logger.info(
+                            f"[OneBot][Upload][FolderLookupFail] "
+                            f"group={target.group_id} folder={folder_name} err={exc}"
                         )
-                    except Exception:
-                        pass
+
+            if folder_id:
+                try:
+                    await self.bot.call_api(
+                        "upload_group_file",
+                        group_id=int(target.group_id),
+                        file=command.file,
+                        name=real_name,
+                        folder=folder_id,
+                    )
+                except Exception as exc:
+                    folder_error = f"{type(exc).__name__}: {exc}"
+                    logger.info(
+                        f"[OneBot][Upload][FolderFail] "
+                        f"group={target.group_id} file={real_name} err={exc}"
+                    )
                 else:
-                    await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
-            except Exception as ex_outer:
-                logger.error(f"[OneBot][Upload][Unexpected] group={target.group_id} file={real_name} err={ex_outer}")
-                await self.bot.send_group_msg(group_id=int(target.group_id), message="文件发送失败！")
+                    deliveries.append(
+                        FileDeliveryResult(
+                            target=target,
+                            outcome=FileDeliveryOutcome.FOLDER_SUCCESS,
+                            requested_folder=folder_name,
+                        )
+                    )
+                    await self._dispatch_file_post_send(target.group_id, real_name)
+                    continue
+
+            try:
+                await self.bot.call_api(
+                    "upload_group_file",
+                    group_id=int(target.group_id),
+                    file=command.file,
+                    name=real_name,
+                )
+            except Exception as exc:
+                root_error = f"{type(exc).__name__}: {exc}"
+                logger.info(
+                    f"[OneBot][Upload][RootFail] "
+                    f"group={target.group_id} file={real_name} err={exc}"
+                )
+                errors = [error for error in (folder_error, root_error) if error]
+                deliveries.append(
+                    FileDeliveryResult(
+                        target=target,
+                        outcome=FileDeliveryOutcome.FAILED,
+                        requested_folder=folder_name,
+                        error="; ".join(errors),
+                    )
+                )
+                try:
+                    await self.bot.send_group_msg(
+                        group_id=int(target.group_id),
+                        message="文件发送失败！",
+                    )
+                except Exception as notice_exc:
+                    logger.info(
+                        f"[OneBot][Upload][FailureNoticeFail] "
+                        f"group={target.group_id} file={real_name} err={notice_exc}"
+                    )
+                continue
+
+            deliveries.append(
+                FileDeliveryResult(
+                    target=target,
+                    outcome=(
+                        FileDeliveryOutcome.ROOT_FALLBACK_SUCCESS
+                        if folder_name
+                        else FileDeliveryOutcome.ROOT_SUCCESS
+                    ),
+                    requested_folder=folder_name,
+                )
+            )
+            await self._dispatch_file_post_send(target.group_id, real_name)
+
+        return BotCommandDispatchResult(
+            command=command,
+            file_deliveries=tuple(deliveries),
+        )
+
+    async def _dispatch_file_post_send(self, group_id: str, real_name: str) -> None:
+        try:
+            await _trigger_post_send_hooks(
+                all_bots,
+                self.bot.self_id,
+                PostSendEvent(
+                    group_id=group_id,
+                    user_id=str(self.bot.self_id),
+                    role="assistant",
+                    message_type="file",
+                    content=f"[文件]{real_name}",
+                    display_name="我",
+                    platform_message_id=None,
+                    history_stream_id=None,
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                f"[OneBot][Upload][PostSendHookFail] "
+                f"group={group_id} file={real_name} err={exc}"
+            )
 
     async def _handle_delay(self, command: BotDelayCommand) -> None:
         await asyncio.sleep(command.seconds)
 
-    async def process_bot_command_list(self, command_list: List[BotCommandBase]):
+    async def process_bot_command_list(
+        self,
+        command_list: List[BotCommandBase],
+    ) -> List[BotCommandDispatchResult]:
         if len(command_list) > 1:
             log_str = "\n".join([str(command) for command in command_list])
             logger.info(f"[Proxy Bot Command List]\n[{log_str}]")
+        results: List[BotCommandDispatchResult] = []
         for command in command_list:
-            await self.process_bot_command(command)
+            results.append(await self.process_bot_command(command))
+        return results
 
     async def get_group_list(self) -> List[GroupInfo]:
         group_info_list: List[Dict] = await self.bot.get_group_list()

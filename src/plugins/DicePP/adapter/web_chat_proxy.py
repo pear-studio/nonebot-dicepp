@@ -6,11 +6,14 @@ from adapter.standalone_proxy import DEFAULT_GROUP_ID, DEFAULT_USER_ID
 from adapter.web_chat_adapter import WebChatAdapter
 from core.command import (
     BotCommandBase,
+    BotCommandDispatchResult,
     BotDelayCommand,
     BotLeaveGroupCommand,
     BotSendFileCommand,
     BotSendForwardMsgCommand,
     BotSendMsgCommand,
+    FileDeliveryOutcome,
+    FileDeliveryResult,
 )
 from core.communication import GroupInfo, GroupMemberInfo
 from utils.logger import logger
@@ -62,13 +65,40 @@ class WebChatProxy(ClientProxy):
         for segment in command.msg:
             await self._adapter.send_bot_message(user_id=user_id, content=segment, correlation_id=correlation_id)
 
-    async def _handle_send_file(self, command: BotSendFileCommand) -> None:
+    async def _handle_send_file(
+        self,
+        command: BotSendFileCommand,
+    ) -> BotCommandDispatchResult:
+        requested_folder = (
+            command.display_name.split("/", 1)[0].strip() or None
+            if "/" in command.display_name
+            else None
+        )
+        result = BotCommandDispatchResult(
+            command=command,
+            file_deliveries=tuple(
+                FileDeliveryResult(
+                    target=item,
+                    outcome=FileDeliveryOutcome.UNSUPPORTED,
+                    requested_folder=requested_folder,
+                )
+                for item in command.targets
+            ),
+        )
         target = self._resolve_and_check_target(command)
         if target is None:
-            return
+            return result
         user_id, correlation_id = target
         text = f"[文件暂不支持网页显示，请在QQ中查看] {command.display_name}"
-        await self._adapter.send_bot_message(user_id=user_id, content=text, correlation_id=correlation_id)
+        try:
+            await self._adapter.send_bot_message(
+                user_id=user_id,
+                content=text,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:
+            logger.warning(f"[WebChat] file unsupported notice failed: {exc}")
+        return result
 
     async def _handle_unknown(self, command: BotCommandBase) -> None:
         target = self._resolve_and_check_target(command)

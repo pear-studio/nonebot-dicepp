@@ -1,7 +1,7 @@
 import pytest
 
 from adapter.standalone_proxy import StandaloneClientProxy
-from core.command import BotSendMsgCommand
+from core.command import BotSendFileCommand, BotSendMsgCommand, FileDeliveryOutcome
 from core.communication import GroupMessagePort
 
 
@@ -30,4 +30,21 @@ async def test_consume_outputs_returns_and_clears():
     # 第二次消费: 列表已清空
     outputs = await proxy.consume_outputs()
     assert outputs == []
+
+
+@pytest.mark.asyncio
+async def test_file_capture_is_explicitly_unsupported():
+    proxy = StandaloneClientProxy()
+    command = BotSendFileCommand(
+        "bot",
+        "C:/tmp/log.txt",
+        "跑团log/log.txt",
+        [GroupMessagePort("10000")],
+    )
+
+    result = await proxy.process_bot_command(command)
+
+    assert result.file_deliveries[0].outcome is FileDeliveryOutcome.UNSUPPORTED
+    assert result.file_deliveries[0].requested_folder == "跑团log"
+    assert await proxy.consume_outputs() == [str(command)]
 

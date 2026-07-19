@@ -1,7 +1,7 @@
 import abc
 from typing import Callable, Dict, List
 
-from core.command import BotCommandBase
+from core.command import BotCommandBase, BotCommandDispatchResult
 from core.communication import GroupInfo, GroupMemberInfo
 
 
@@ -10,19 +10,34 @@ class ClientProxy(metaclass=abc.ABCMeta):
         # 使用 type() 精确匹配，无 MRO 遍历。子类必须显式注册自己的 handler。
         self._command_handlers: Dict[type, Callable] = {}
 
-    async def process_bot_command(self, command: BotCommandBase) -> None:
+    async def process_bot_command(
+        self,
+        command: BotCommandBase,
+    ) -> BotCommandDispatchResult:
         handler = self._command_handlers.get(type(command))
         if handler is not None:
-            await handler(command)
+            result = await handler(command)
         else:
-            await self._handle_unknown(command)
+            result = await self._handle_unknown(command)
+        if result is None:
+            return BotCommandDispatchResult(command=command)
+        if not isinstance(result, BotCommandDispatchResult):
+            raise TypeError(
+                f"BotCommand handler returned unsupported result: {type(result).__name__}"
+            )
+        return result
 
     async def _handle_unknown(self, command: BotCommandBase) -> None:
         raise NotImplementedError(f"未定义的BotCommand类型: {type(command).__name__}")
 
-    async def process_bot_command_list(self, command_list: List[BotCommandBase]) -> None:
+    async def process_bot_command_list(
+        self,
+        command_list: List[BotCommandBase],
+    ) -> List[BotCommandDispatchResult]:
+        results: List[BotCommandDispatchResult] = []
         for command in command_list:
-            await self.process_bot_command(command)
+            results.append(await self.process_bot_command(command))
+        return results
 
     @abc.abstractmethod
     async def get_group_list(self) -> List[GroupInfo]:
