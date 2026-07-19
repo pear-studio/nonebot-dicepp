@@ -16,6 +16,7 @@ from core.communication import (
 )
 from core.bot import Bot
 from core.data import LogRepository
+from core.data.models import LogPublication
 from core.data.schema import ensure_bot_log_schema
 from module.common.log import LogRuntime
 from module.common.log.publisher import ProviderPublishResult
@@ -186,6 +187,31 @@ async def test_close_is_idempotent_unregisters_in_reverse_and_stops_dispatch(
     assert after_results == []
     records = await repository.get_records(active.session.id)
     assert [record.message_id for record in records] == ["before-close"]
+
+
+@pytest.mark.asyncio
+async def test_latest_link_survives_unavailable_current_provider(runtime_parts):
+    bot, repository, runtime = runtime_parts
+    active = await runtime.service.turn_on("g1", "旅团", requested_by="owner")
+    await repository.add_publication(
+        LogPublication(
+            request_id="historical-link",
+            log_id=active.session.id,
+            provider="retired_web",
+            view="curated",
+            created_at=NOW,
+            published_at=NOW,
+            url="https://logs.test/historical",
+            status="success",
+        )
+    )
+    bot.config.log.web.provider = "unsupported"
+    runtime.refresh_publication_provider()
+
+    publication = await runtime.latest_link(active.session.id)
+
+    assert publication is not None
+    assert publication.url == "https://logs.test/historical"
 
 
 def test_refresh_publication_provider_uses_latest_web_config(runtime_parts):

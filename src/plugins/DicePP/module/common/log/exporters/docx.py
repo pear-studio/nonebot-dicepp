@@ -11,6 +11,7 @@ from docx.shared import Pt, RGBColor
 from ..projection import LogProjection
 from ..types import LogExportFormat
 from .base import AtomicFileExporter
+from .metadata import export_view_label
 
 
 USER_COLOR_PALETTE = (
@@ -41,7 +42,7 @@ class DocxLogExporter(AtomicFileExporter):
             f"日志 ID：{projection.log_id}\n"
             f"群 ID：{projection.group_id}\n"
             f"创建时间：{projection.created_at:%Y-%m-%d %H:%M:%S}\n"
-            f"导出视图：{projection.view.value}\n"
+            f"导出视图：{export_view_label(projection.view)}\n"
             f"记录快照：{projection.record_upper_id}"
         )
 

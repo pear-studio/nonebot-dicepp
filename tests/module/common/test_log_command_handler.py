@@ -256,7 +256,10 @@ async def test_explicit_export_html_web_and_link_have_separate_side_effects(
     assert "网页发布成功：https://logs.test/" in web
     assert len(provider.projections) == 1
 
-    link = await _send(command, ".log export 团A link")
+    bot.config.log.web.provider = "unsupported"
+    bot.log_runtime = LogRuntime(bot, repository, clock=lambda: NOW)
+    unavailable_command = LogCommand(bot)
+    link = await _send(unavailable_command, ".log export 团A link")
     assert "最近发布链接：https://logs.test/" in link
     assert len(provider.projections) == 1
 

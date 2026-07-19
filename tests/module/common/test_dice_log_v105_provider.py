@@ -12,6 +12,7 @@ from module.common.log.projection import (
     LogProjection,
     ProjectedMessage,
     ProjectedPart,
+    ProjectedReply,
 )
 from module.common.log.providers.dice_log_v105 import (
     DiceLogV105Provider,
@@ -95,7 +96,11 @@ def _projection():
                 nickname="调查员",
                 source="user",
                 message_type="ambient",
-                reply=None,
+                reply=ProjectedReply(
+                    message_id="origin-1",
+                    author="守密人",
+                    excerpt=("第一行线索", "第二行线索"),
+                ),
                 parts=(ProjectedPart("text", "你好，世界"),),
                 message_id="message-1",
             ),
@@ -147,7 +152,12 @@ async def test_v105_request_preserves_wire_contract(monkeypatch, token):
                 "imUserId": "10001",
                 "uniformId": "QQ:10001",
                 "time": 1784534400,
-                "message": "你好，世界",
+                "message": (
+                    "> 守密人（消息 origin-1）\n"
+                    "> 第一行线索\n"
+                    "> 第二行线索\n"
+                    "你好，世界"
+                ),
                 "isDice": False,
                 "commandId": None,
                 "commandInfo": None,
@@ -155,6 +165,41 @@ async def test_v105_request_preserves_wire_contract(monkeypatch, token):
             }
         ],
     }
+
+
+def test_v105_payload_uses_only_projected_reply_for_unresolved_targets():
+    projection = _projection()
+    message = projection.messages[0]
+    unresolved = LogProjection(
+        log_id=projection.log_id,
+        group_id=projection.group_id,
+        log_name=projection.log_name,
+        created_at=projection.created_at,
+        view=projection.view,
+        record_upper_id=projection.record_upper_id,
+        messages=(
+            ProjectedMessage(
+                record_id=message.record_id,
+                time=message.time,
+                user_id=message.user_id,
+                nickname=message.nickname,
+                source=message.source,
+                message_type=message.message_type,
+                reply=ProjectedReply(message_id="hidden-or-recalled"),
+                parts=(ProjectedPart("text", "公开正文"),),
+                message_id=message.message_id,
+            ),
+        ),
+    )
+
+    payload = json.loads(
+        zlib.decompress(provider_module._compressed_payload(unresolved)).decode("utf-8")
+    )
+
+    assert payload["items"][0]["message"] == (
+        "> [回复消息：hidden-or-recalled]\n公开正文"
+    )
+    assert "第一行线索" not in payload["items"][0]["message"]
 
 
 @pytest.mark.asyncio
@@ -211,3 +256,45 @@ async def test_v105_timeout_and_empty_endpoint_are_explicit_failures():
     unavailable = DiceLogV105Provider("")
     with pytest.raises(ProviderUnavailableError, match="not configured"):
         await unavailable.publish(_projection(), request_id="request-2", requested_by="1")
+
+
+@pytest.mark.asyncio
+async def test_v105_rejects_bearer_token_for_remote_http_without_requesting():
+    factory = _SessionFactory(_FakeResponse())
+    provider = DiceLogV105Provider(
+        "http://provider.test/api/log",
+        token="secret-token",
+        session_factory=factory,
+    )
+
+    with pytest.raises(ProviderUnavailableError, match="requires HTTPS") as raised:
+        await provider.publish(_projection(), request_id="request-1", requested_by="1")
+
+    assert factory.request is None
+    assert "secret-token" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://provider.test/api/log",
+        "http://localhost:8080/api/log",
+        "http://127.0.0.2:8080/api/log",
+        "http://[::1]:8080/api/log",
+    ],
+)
+async def test_v105_allows_bearer_token_for_https_and_loopback_http(endpoint):
+    factory = _SessionFactory(_FakeResponse())
+    provider = DiceLogV105Provider(
+        endpoint,
+        token="secret-token",
+        session_factory=factory,
+    )
+
+    await provider.publish(_projection(), request_id="request-1", requested_by="1")
+
+    url, kwargs = factory.request
+    assert url == endpoint
+    assert kwargs["headers"] == {"Authorization": "Bearer secret-token"}
+    assert kwargs["allow_redirects"] is False

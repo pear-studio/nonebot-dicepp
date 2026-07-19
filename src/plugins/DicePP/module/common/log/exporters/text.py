@@ -5,6 +5,7 @@ from pathlib import Path
 from ..projection import LogProjection, ProjectedReply
 from ..types import LogExportFormat
 from .base import AtomicFileExporter
+from .metadata import export_view_label
 
 
 class TextLogExporter(AtomicFileExporter):
@@ -21,7 +22,7 @@ def render_text(projection: LogProjection) -> str:
         f"日志 ID：{projection.log_id}",
         f"群 ID：{projection.group_id}",
         f"创建时间：{projection.created_at:%Y-%m-%d %H:%M:%S}",
-        f"导出视图：{projection.view.value}",
+        f"导出视图：{export_view_label(projection.view)}",
         f"记录快照：{projection.record_upper_id}",
         "",
     ]

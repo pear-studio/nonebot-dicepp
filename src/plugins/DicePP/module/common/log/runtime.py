@@ -150,11 +150,7 @@ class LogRuntime:
         return await self.publisher.publish(request)
 
     async def latest_link(self, log_id: str) -> LogPublication | None:
-        if self.publisher is None:
-            raise LogPublicationUnavailableError(
-                self.publication_error or "Web 日志发布未配置"
-            )
-        return await self.publisher.latest_link(log_id)
+        return await self._repository.get_latest_successful_publication(log_id)
 
 
 class LogPublicationUnavailableError(RuntimeError):

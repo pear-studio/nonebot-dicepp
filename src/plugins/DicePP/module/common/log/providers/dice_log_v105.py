@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import zlib
 from collections.abc import Callable
@@ -9,7 +10,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from ..projection import LogProjection
+from ..projection import LogProjection, ProjectedMessage
 from ..publisher import ProviderPublishResult
 
 PROTOCOL_VERSION = 105
@@ -53,6 +54,10 @@ class DiceLogV105Provider:
         del request_id  # The v105 wire format has no request-id field.
         if not _is_http_url(self._endpoint):
             raise ProviderUnavailableError("Web publication endpoint is not configured")
+        if self._token and not _accepts_bearer_token(self._endpoint):
+            raise ProviderUnavailableError(
+                "Bearer token requires HTTPS for non-loopback Web publication endpoints"
+            )
 
         form = aiohttp.FormData()
         form.add_field("name", projection.log_name)
@@ -78,6 +83,7 @@ class DiceLogV105Provider:
                     self._endpoint,
                     data=form,
                     headers=headers,
+                    allow_redirects=False,
                 ) as response:
                     body = await response.text()
                     status = int(response.status)
@@ -117,7 +123,7 @@ def _compressed_payload(projection: LogProjection) -> bytes:
                 "imUserId": user_id,
                 "uniformId": f"QQ:{user_id}" if user_id else "",
                 "time": int(message.time.timestamp()),
-                "message": message.readable_text,
+                "message": _render_projected_message(message),
                 "isDice": False,
                 "commandId": None,
                 "commandInfo": None,
@@ -132,6 +138,20 @@ def _compressed_payload(projection: LogProjection) -> bytes:
     return zlib.compress(raw)
 
 
+def _render_projected_message(message: ProjectedMessage) -> str:
+    """Render only the already-filtered projection, matching TXT/DOCX semantics."""
+    lines: list[str] = []
+    reply = message.reply
+    if reply is not None:
+        if reply.author is None:
+            lines.append(f"> [回复消息：{reply.message_id}]")
+        else:
+            lines.append(f"> {reply.author}（消息 {reply.message_id}）")
+            lines.extend(f"> {line}" for line in reply.excerpt)
+    lines.append(message.readable_text)
+    return "\n".join(lines)
+
+
 def _parse_response(body: str) -> dict[str, Any]:
     try:
         parsed = json.loads(body)
@@ -143,6 +163,21 @@ def _parse_response(body: str) -> dict[str, Any]:
 def _is_http_url(value: str) -> bool:
     parsed = urlparse(value)
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _accepts_bearer_token(value: str) -> bool:
+    parsed = urlparse(value)
+    if parsed.scheme == "https":
+        return True
+    if parsed.scheme != "http" or parsed.hostname is None:
+        return False
+    hostname = parsed.hostname.casefold()
+    if hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 def _redact_secret(value: str, secret: str) -> str:

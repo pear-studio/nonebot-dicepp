@@ -28,13 +28,13 @@ pytestmark = [pytest.mark.integration, pytest.mark.log]
 NOW = datetime(2026, 7, 20, 16, 0, 0)
 
 
-def _projection() -> LogProjection:
+def _projection(view: LogExportView = LogExportView.CURATED) -> LogProjection:
     return LogProjection(
         log_id="log-12345678",
         group_id="group-1",
         log_name="雾都夜话",
         created_at=NOW,
-        view=LogExportView.CURATED,
+        view=view,
         record_upper_id=2,
         messages=(
             ProjectedMessage(
@@ -77,8 +77,19 @@ def _target(tmp_path: Path, format: LogExportFormat, suffix: str):
 
 
 @pytest.mark.asyncio
-async def test_text_and_docx_export_the_same_projection_semantics(tmp_path: Path) -> None:
-    projection = _projection()
+@pytest.mark.parametrize(
+    ("view", "view_label"),
+    [
+        (LogExportView.CURATED, "跑团正文"),
+        (LogExportView.COMPLETE, "全部记录"),
+    ],
+)
+async def test_text_and_docx_export_the_same_projection_semantics(
+    tmp_path: Path,
+    view: LogExportView,
+    view_label: str,
+) -> None:
+    projection = _projection(view)
     text_target = _target(tmp_path, LogExportFormat.TXT, ".txt")
     docx_target = _target(tmp_path, LogExportFormat.DOCX, ".docx")
 
@@ -89,11 +100,18 @@ async def test_text_and_docx_export_the_same_projection_semantics(tmp_path: Path
     assert "日志：雾都夜话" in text
     assert "日志 ID：log-12345678" in text
     assert "群 ID：group-1" in text
+    assert f"导出视图：{view_label}" in text
     assert "> 调查员（消息 m1）" in text
     assert "门后有地图[图片未归档]" in text
     document = Document(docx_artifact.path)
     document_text = "\n".join(p.text for p in document.paragraphs)
-    for expected in ("雾都夜话", "日志 ID：log-12345678", "打开房门", "门后有地图[图片未归档]"):
+    for expected in (
+        "雾都夜话",
+        "日志 ID：log-12345678",
+        f"导出视图：{view_label}",
+        "打开房门",
+        "门后有地图[图片未归档]",
+    ):
         assert expected in document_text
     assert text_artifact.db_local_path.startswith("logs/")
     assert docx_artifact.size > 0
