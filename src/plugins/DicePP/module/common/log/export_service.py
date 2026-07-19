@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Protocol
 
+from core.command import (
+    BotCommandDispatchResult,
+    BotSendFileCommand,
+    FileDeliveryOutcome,
+)
+from core.communication import GroupMessagePort
 from core.data.log_repository import LogRepository
 from core.data.models import LogExport
 
@@ -30,8 +36,16 @@ class ArtifactResult:
     format: LogExportFormat
     export_id: int
     generation_status: LogGenerationStatus
+    delivery_status: LogDeliveryStatus
     artifact: GeneratedArtifact | None = None
-    error: str | None = None
+    generation_error: str | None = None
+    delivery_error: str | None = None
+    audit_error: str | None = None
+
+    @property
+    def error(self) -> str | None:
+        """Compatibility summary; new callers should inspect the phase fields."""
+        return self.generation_error or self.delivery_error or self.audit_error
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +60,12 @@ class ExportBatchResult:
             for result in self.artifacts
             if result.artifact is not None
         )
+
+
+class BotCommandDispatcher(Protocol):
+    async def process_bot_command(
+        self, command: BotSendFileCommand
+    ) -> BotCommandDispatchResult | None: ...
 
 
 class LogExportCoordinator:
@@ -103,10 +123,11 @@ class LogExportCoordinator:
                 await self._mark_failed(export, error)
                 results.append(
                     ArtifactResult(
-                        format,
-                        _required_export_id(export),
-                        LogGenerationStatus.FAILED,
-                        error=error,
+                        format=format,
+                        export_id=_required_export_id(export),
+                        generation_status=LogGenerationStatus.FAILED,
+                        delivery_status=LogDeliveryStatus.NOT_ATTEMPTED,
+                        generation_error=error,
                     )
                 )
             return ExportBatchResult(request, tuple(results))
@@ -126,10 +147,11 @@ class LogExportCoordinator:
                 await self._mark_failed(export, error)
                 results.append(
                     ArtifactResult(
-                        format,
-                        _required_export_id(export),
-                        LogGenerationStatus.FAILED,
-                        error=error,
+                        format=format,
+                        export_id=_required_export_id(export),
+                        generation_status=LogGenerationStatus.FAILED,
+                        delivery_status=LogDeliveryStatus.NOT_ATTEMPTED,
+                        generation_error=error,
                     )
                 )
                 continue
@@ -169,23 +191,102 @@ class LogExportCoordinator:
                     error = f"{error}; audit update failed: {_error_note(persistence_exc)}"
                 results.append(
                     ArtifactResult(
-                        format,
-                        _required_export_id(export),
-                        LogGenerationStatus.FAILED,
-                        error=error,
+                        format=format,
+                        export_id=_required_export_id(export),
+                        generation_status=LogGenerationStatus.FAILED,
+                        delivery_status=LogDeliveryStatus.NOT_ATTEMPTED,
+                        generation_error=error,
                     )
                 )
                 continue
 
             results.append(
                 ArtifactResult(
-                    format,
-                    _required_export_id(export),
-                    LogGenerationStatus.SUCCESS,
+                    format=format,
+                    export_id=_required_export_id(export),
+                    generation_status=LogGenerationStatus.SUCCESS,
+                    delivery_status=LogDeliveryStatus.PENDING,
                     artifact=artifact,
                 )
             )
         return ExportBatchResult(request, tuple(results))
+
+    async def deliver(
+        self,
+        batch: ExportBatchResult,
+        *,
+        proxy: BotCommandDispatcher,
+        account: str,
+        folder_name: str = "跑团log",
+    ) -> ExportBatchResult:
+        """Deliver generated artifacts independently and persist actual outcomes."""
+        exports_by_id: dict[int, LogExport] = {}
+        audit_load_error: str | None = None
+        try:
+            exports_by_id = {
+                export.id: export
+                for export in await self._repository.list_exports(batch.request.log_id)
+                if export.id is not None
+            }
+        except Exception as exc:
+            audit_load_error = _error_note(exc)
+
+        delivered: list[ArtifactResult] = []
+        for result in batch.artifacts:
+            if (
+                result.generation_status is not LogGenerationStatus.SUCCESS
+                or result.artifact is None
+                or result.delivery_status is LogDeliveryStatus.SUCCESS
+            ):
+                delivered.append(result)
+                continue
+
+            target = GroupMessagePort(batch.request.group_id)
+            display_name = _delivery_display_name(
+                folder_name, result.artifact.group_file_name
+            )
+            command = BotSendFileCommand(
+                account,
+                str(result.artifact.path.resolve()),
+                display_name,
+                [target],
+            )
+            try:
+                dispatch = await proxy.process_bot_command(command)
+                delivery_status, delivery_error, note = _delivery_outcome(
+                    dispatch, target
+                )
+            except Exception as exc:
+                delivery_status = LogDeliveryStatus.FAILED
+                delivery_error = _error_note(exc)
+                note = delivery_error
+
+            audit_error = audit_load_error
+            export = exports_by_id.get(result.export_id)
+            if export is None and audit_error is None:
+                audit_error = f"Missing log export audit row: {result.export_id}"
+            if export is not None:
+                updated = export.model_copy(
+                    update={
+                        "delivery_status": delivery_status.value,
+                        "note": note,
+                    }
+                )
+                try:
+                    await self._repository.update_export(updated)
+                    exports_by_id[result.export_id] = updated
+                except Exception as exc:
+                    audit_error = _error_note(exc)
+
+            delivered.append(
+                replace(
+                    result,
+                    delivery_status=delivery_status,
+                    delivery_error=delivery_error,
+                    audit_error=audit_error,
+                )
+            )
+        return ExportBatchResult(batch.request, tuple(delivered))
 
     async def _create_pending_exports(
         self, request: ExportRequest, formats: tuple[LogExportFormat, ...]
@@ -228,3 +329,37 @@ def _required_export_id(export: LogExport) -> int:
 def _error_note(exc: BaseException) -> str:
     message = str(exc).strip()
     return f"{type(exc).__name__}: {message}"[:500]
+
+
+def _delivery_display_name(folder_name: str, group_file_name: str) -> str:
+    folder = folder_name.strip().strip("/\\").strip()
+    return f"{folder}/{group_file_name}" if folder else group_file_name
+
+
+def _delivery_outcome(
+    dispatch: BotCommandDispatchResult | None,
+    target: GroupMessagePort,
+) -> tuple[LogDeliveryStatus, str | None, str | None]:
+    if dispatch is None:
+        error = "File dispatcher returned no structured delivery result"
+        return LogDeliveryStatus.FAILED, error, error
+    if not isinstance(dispatch, BotCommandDispatchResult):
+        error = f"Unsupported dispatch result: {type(dispatch).__name__}"
+        return LogDeliveryStatus.FAILED, error, error
+
+    deliveries = [item for item in dispatch.file_deliveries if item.target == target]
+    if not deliveries:
+        error = "File dispatcher returned no delivery result for the target group"
+        return LogDeliveryStatus.FAILED, error, error
+    delivery = deliveries[0]
+    if delivery.outcome in {
+        FileDeliveryOutcome.FOLDER_SUCCESS,
+        FileDeliveryOutcome.ROOT_SUCCESS,
+    }:
+        return LogDeliveryStatus.SUCCESS, None, None
+    if delivery.outcome is FileDeliveryOutcome.ROOT_FALLBACK_SUCCESS:
+        note = f"delivery_outcome={delivery.outcome.value}"
+        return LogDeliveryStatus.SUCCESS, None, note
+
+    error = delivery.error or f"File delivery outcome: {delivery.outcome.value}"
+    return LogDeliveryStatus.FAILED, error, error

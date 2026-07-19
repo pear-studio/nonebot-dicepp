@@ -10,6 +10,12 @@ import pytest
 import pytest_asyncio
 from docx import Document
 
+from core.command import (
+    BotCommandDispatchResult,
+    FileDeliveryOutcome,
+    FileDeliveryResult,
+)
+from core.communication import GroupMessagePort
 from core.data import LogRepository
 from core.data.models import LogRecord
 from core.data.schema import ensure_bot_log_schema
@@ -68,6 +74,61 @@ async def _add_record(
             message_id=message_id,
         )
     )
+
+
+async def _generate_batch(
+    log_parts,
+    *,
+    group_id: str,
+    formats: tuple[LogExportFormat, ...] | None = None,
+):
+    repository, service, data_root = log_parts
+    started = await service.turn_on(group_id, "交付测试", requested_by="owner")
+    await _add_record(repository, started.session.id, "需要交付", message_id="m1")
+    stopped = await service.turn_off(group_id, requested_by="owner")
+    assert stopped.export_request is not None
+    request = (
+        stopped.export_request
+        if formats is None
+        else replace(stopped.export_request, formats=formats)
+    )
+    coordinator = LogExportCoordinator(
+        repository,
+        output_root=data_root / "logs",
+        bot_data_root=data_root,
+    )
+    return repository, coordinator, await coordinator.generate(request), started.session.id
+
+
+class _FakeDeliveryProxy:
+    def __init__(self, outcomes) -> None:
+        self._outcomes = list(outcomes)
+        self.commands = []
+
+    async def process_bot_command(self, command):
+        self.commands.append(command)
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if outcome == "empty":
+            return BotCommandDispatchResult(command=command)
+        if outcome is None:
+            return None
+        error = "adapter rejected upload" if outcome in {
+            FileDeliveryOutcome.FAILED,
+            FileDeliveryOutcome.UNSUPPORTED,
+        } else None
+        return BotCommandDispatchResult(
+            command=command,
+            file_deliveries=(
+                FileDeliveryResult(
+                    target=command.targets[0],
+                    outcome=outcome,
+                    requested_folder="跑团log",
+                    error=error,
+                ),
+            ),
+        )
 
 
 class _SpyProjector:
@@ -302,3 +363,170 @@ async def test_empty_snapshot_remains_empty(log_parts) -> None:
     )
     assert "记录快照：0" in docx_text
     assert "调查员" not in docx_text
+
+
+@pytest.mark.asyncio
+async def test_delivery_tracks_each_artifact_and_skips_generation_failure(
+    log_parts,
+) -> None:
+    repository, coordinator, batch, log_id = await _generate_batch(
+        log_parts,
+        group_id="delivery-1",
+        formats=(
+            LogExportFormat.TXT,
+            LogExportFormat.DOCX,
+            LogExportFormat.HTML,
+        ),
+    )
+    assert [item.delivery_status for item in batch.artifacts] == [
+        LogDeliveryStatus.PENDING,
+        LogDeliveryStatus.PENDING,
+        LogDeliveryStatus.NOT_ATTEMPTED,
+    ]
+    proxy = _FakeDeliveryProxy(
+        [FileDeliveryOutcome.FOLDER_SUCCESS, FileDeliveryOutcome.FAILED]
+    )
+
+    delivered = await coordinator.deliver(
+        batch, proxy=proxy, account="bot-42"
+    )
+
+    assert [item.delivery_status for item in delivered.artifacts] == [
+        LogDeliveryStatus.SUCCESS,
+        LogDeliveryStatus.FAILED,
+        LogDeliveryStatus.NOT_ATTEMPTED,
+    ]
+    assert delivered.artifacts[0].delivery_error is None
+    assert "adapter rejected" in (delivered.artifacts[1].delivery_error or "")
+    assert delivered.artifacts[2].generation_error is not None
+    assert len(proxy.commands) == 2
+    for command, artifact in zip(proxy.commands, batch.successful_artifacts):
+        assert command.bot_id == "bot-42"
+        assert command.file == str(artifact.path.resolve())
+        assert command.display_name == f"跑团log/{artifact.group_file_name}"
+        assert command.targets == [GroupMessagePort("delivery-1")]
+
+    exports = {item.format: item for item in await repository.list_exports(log_id)}
+    assert exports["txt"].delivery_status == LogDeliveryStatus.SUCCESS.value
+    assert exports["docx"].delivery_status == LogDeliveryStatus.FAILED.value
+    assert exports["html"].delivery_status == LogDeliveryStatus.NOT_ATTEMPTED.value
+    assert batch.successful_artifacts[1].path.exists()
+
+
+@pytest.mark.asyncio
+async def test_root_fallback_is_success_and_is_preserved_in_audit_note(log_parts) -> None:
+    repository, coordinator, batch, log_id = await _generate_batch(
+        log_parts,
+        group_id="delivery-2",
+        formats=(LogExportFormat.TXT,),
+    )
+    proxy = _FakeDeliveryProxy([FileDeliveryOutcome.ROOT_FALLBACK_SUCCESS])
+
+    delivered = await coordinator.deliver(
+        batch,
+        proxy=proxy,
+        account="bot-42",
+        folder_name="/自定义目录/",
+    )
+
+    result = delivered.artifacts[0]
+    assert result.delivery_status is LogDeliveryStatus.SUCCESS
+    assert result.delivery_error is None
+    assert proxy.commands[0].display_name.startswith("自定义目录/")
+    export = (await repository.list_exports(log_id))[0]
+    assert export.delivery_status == LogDeliveryStatus.SUCCESS.value
+    assert export.note == "delivery_outcome=root_fallback_success"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_outcome", "error_fragment"),
+    [
+        (FileDeliveryOutcome.FAILED, "adapter rejected"),
+        (FileDeliveryOutcome.UNSUPPORTED, "adapter rejected"),
+        ("empty", "no delivery result"),
+        (None, "no structured delivery result"),
+        (RuntimeError("network down"), "network down"),
+    ],
+)
+async def test_first_delivery_failure_does_not_block_second_artifact(
+    log_parts, first_outcome, error_fragment
+) -> None:
+    repository, coordinator, batch, log_id = await _generate_batch(
+        log_parts,
+        group_id="delivery-continue",
+    )
+    proxy = _FakeDeliveryProxy(
+        [first_outcome, FileDeliveryOutcome.ROOT_SUCCESS]
+    )
+
+    delivered = await coordinator.deliver(
+        batch, proxy=proxy, account="bot-42"
+    )
+
+    assert len(proxy.commands) == 2
+    assert [item.delivery_status for item in delivered.artifacts] == [
+        LogDeliveryStatus.FAILED,
+        LogDeliveryStatus.SUCCESS,
+    ]
+    assert error_fragment in (delivered.artifacts[0].delivery_error or "")
+    exports = {item.format: item for item in await repository.list_exports(log_id)}
+    assert exports["txt"].delivery_status == LogDeliveryStatus.FAILED.value
+    assert exports["docx"].delivery_status == LogDeliveryStatus.SUCCESS.value
+    assert error_fragment in (exports["txt"].note or "")
+    assert all(artifact.path.exists() for artifact in batch.successful_artifacts)
+
+
+class _FailDeliveryAuditRepository(LogRepository):
+    fail_delivery_audit = False
+
+    async def update_export(self, export):
+        if self.fail_delivery_audit and export.delivery_status != LogDeliveryStatus.PENDING.value:
+            raise RuntimeError("delivery audit unavailable")
+        await super().update_export(export)
+
+
+@pytest.mark.asyncio
+async def test_external_success_survives_audit_failure_without_retransmission(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "log.db"
+    ensure_bot_log_schema(db_path)
+    db = await aiosqlite.connect(db_path)
+    await db.execute("PRAGMA foreign_keys=ON;")
+    repository = _FailDeliveryAuditRepository(db)
+    service = LogService(
+        repository,
+        clock=lambda: NOW,
+        log_id_factory=lambda: "log-delivery-audit",
+        request_id_factory=lambda: "request-delivery-audit",
+    )
+    data_root = tmp_path / "bot"
+    try:
+        parts = repository, service, data_root
+        _, coordinator, batch, log_id = await _generate_batch(
+            parts,
+            group_id="delivery-audit",
+            formats=(LogExportFormat.TXT,),
+        )
+        local_path = batch.successful_artifacts[0].path
+        repository.fail_delivery_audit = True
+        proxy = _FakeDeliveryProxy([FileDeliveryOutcome.FOLDER_SUCCESS])
+
+        delivered = await coordinator.deliver(
+            batch, proxy=proxy, account="bot-42"
+        )
+
+        result = delivered.artifacts[0]
+        assert result.delivery_status is LogDeliveryStatus.SUCCESS
+        assert "delivery audit unavailable" in (result.audit_error or "")
+        assert local_path.exists()
+        assert (await repository.list_exports(log_id))[0].delivery_status == "pending"
+
+        repeated = await coordinator.deliver(
+            delivered, proxy=proxy, account="bot-42"
+        )
+        assert repeated.artifacts[0].delivery_status is LogDeliveryStatus.SUCCESS
+        assert len(proxy.commands) == 1
+    finally:
+        await db.close()
