@@ -1,5 +1,5 @@
 from .bot_core import BOT_CORE_TARGET
-from .bot_log import BOT_LOG_TARGET
+from .bot_log import BOT_LOG_TARGET, ensure_bot_log_schema
 from .instance import DicePPDatabase, INSTANCE_TARGET
 from .lifecycle import (
     AsyncSchemaMigration,
@@ -20,6 +20,7 @@ from .lifecycle import (
 __all__ = [
     "BOT_CORE_TARGET",
     "BOT_LOG_TARGET",
+    "ensure_bot_log_schema",
     "DicePPDatabase",
     "INSTANCE_TARGET",
     "AsyncSchemaMigration",

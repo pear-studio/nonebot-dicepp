@@ -1,7 +1,12 @@
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel
+
+
+class LogGroupState(BaseModel):
+    group_id: str
+    current_log_id: str | None = None
+    updated_at: datetime
 
 
 class LogSession(BaseModel):
@@ -9,27 +14,59 @@ class LogSession(BaseModel):
     group_id: str
     name: str
     recording: bool = False
+    created_by: str | None = None
     created_at: datetime
     updated_at: datetime
-    record_begin_at: str = ""
-    last_warn: str = ""
-    filter_outside: bool = False
-    filter_command: bool = False
-    filter_bot: bool = False
-    filter_media: bool = False
-    filter_forum_code: bool = False
-    upload_time: Optional[str] = None
-    upload_file: Optional[str] = None
-    upload_note: Optional[str] = None
-    url: Optional[str] = None
+    last_message_at: datetime | None = None
+    record_begin_at: datetime | None = None
+    last_warn_at: datetime | None = None
+
+
+class LogSessionSummary(BaseModel):
+    session: LogSession
+    record_count: int
+    latest_export_at: datetime | None = None
 
 
 class LogRecord(BaseModel):
-    id: Optional[int] = None
+    id: int | None = None
     log_id: str
     time: datetime
     user_id: str
     nickname: str = ""
-    content: str
     source: str
-    message_id: Optional[str] = None
+    message_type: str
+    plain_content: str
+    raw_content: str
+    segments_json: str | None = None
+    message_id: str | None = None
+    recalled_at: datetime | None = None
+
+
+class LogExport(BaseModel):
+    id: int | None = None
+    request_id: str
+    log_id: str
+    format: str
+    view: str
+    record_upper_id: int | None = None
+    created_at: datetime
+    local_path: str | None = None
+    group_file_name: str | None = None
+    generation_status: str
+    delivery_status: str
+    note: str | None = None
+
+
+class LogPublication(BaseModel):
+    id: int | None = None
+    request_id: str
+    log_id: str
+    provider: str
+    view: str
+    record_upper_id: int | None = None
+    created_at: datetime
+    published_at: datetime | None = None
+    url: str | None = None
+    status: str
+    note: str | None = None

@@ -6,10 +6,10 @@ import aiosqlite
 from core.config.basic import Paths
 from core.data.schema import (
     BOT_CORE_TARGET,
-    BOT_LOG_TARGET,
     SchemaLifecycleError,
     apply_schema_target,
     current_version,
+    ensure_bot_log_schema,
     pending_versions,
 )
 from .repository import Repository
@@ -157,7 +157,7 @@ class BotDatabase:
         os.makedirs(self._bot_dir, exist_ok=True)
 
         apply_schema_target(self._db_path, BOT_CORE_TARGET)
-        apply_schema_target(self._log_db_path, BOT_LOG_TARGET)
+        ensure_bot_log_schema(self._log_db_path)
 
         self._db = await aiosqlite.connect(self._db_path)
         await self._db.execute("PRAGMA journal_mode=WAL;")
@@ -210,7 +210,7 @@ class BotDatabase:
     async def run_migrations(self) -> None:
         try:
             apply_schema_target(self._db_path, BOT_CORE_TARGET)
-            apply_schema_target(self._log_db_path, BOT_LOG_TARGET)
+            ensure_bot_log_schema(self._log_db_path)
         except SchemaLifecycleError:
             raise
 
