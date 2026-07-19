@@ -3,6 +3,7 @@
 import asyncio
 import datetime as dt
 import os
+from itertools import count
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -12,10 +13,24 @@ from typing import Any, Callable, Dict, List, Optional
 # 导致 ContextVar 读写分离。
 from core.bot import Bot
 from core.config import Paths
-from core.communication import MessageMetaData, MessageSender, GroupInfo, GroupMemberInfo
+from core.communication import (
+    GroupInfo,
+    GroupMemberInfo,
+    MessageMetaData,
+    MessageSender,
+    PostSendEvent,
+)
+from core.message_types import MessageType
 from utils.logger import logger, restore_runtime_logging
 from adapter import ClientProxy
-from core.command import BotCommandBase, BotSendMsgCommand
+from core.command import (
+    BotCommandBase,
+    BotCommandDispatchResult,
+    BotSendFileCommand,
+    BotSendMsgCommand,
+    FileDeliveryOutcome,
+    FileDeliveryResult,
+)
 from utils.sequence_runtime import SequenceRuntime
 # 注意：必须使用裸绝对导入 `module.roll.karma_runtime`，
 # 因为 Bot 内部大量使用该路径导入此模块。
@@ -32,6 +47,11 @@ class CaptureProxy(ClientProxy):
     def __init__(self):
         super().__init__()
         self.commands: List[BotCommandBase] = []
+        self.bot: Bot | None = None
+        self._message_ids = count(1)
+
+    def bind_bot(self, bot: Bot | None) -> None:
+        self.bot = bot
 
     async def get_group_list(self) -> List[GroupInfo]:
         """返回空群组列表（shell 模式下无实际群组）"""
@@ -52,10 +72,58 @@ class CaptureProxy(ClientProxy):
     async def process_bot_command(self, command: BotCommandBase):
         """捕获单个命令"""
         self.commands.append(command)
+        deliveries = ()
+        if (
+            isinstance(command, BotSendMsgCommand)
+            and self.bot is not None
+            and not command.skip_history_record
+        ):
+            message_type = MessageType.from_str(command.message_type).value
+            for target in command.targets:
+                await self.bot.dispatch_post_send_event(
+                    PostSendEvent(
+                        group_id=target.group_id or None,
+                        user_id=(
+                            str(self.bot.account)
+                            if target.group_id
+                            else target.user_id
+                        ),
+                        role="assistant",
+                        message_type=message_type,
+                        content=command.msg,
+                        display_name="我",
+                        platform_message_id=(
+                            f"shell-message-{next(self._message_ids)}"
+                        ),
+                        history_stream_id=command.msg_id,
+                    )
+                )
+        if isinstance(command, BotSendFileCommand):
+            folder = (
+                command.display_name.split("/", 1)[0]
+                if "/" in command.display_name
+                else None
+            )
+            deliveries = tuple(
+                FileDeliveryResult(
+                    target=target,
+                    outcome=(
+                        FileDeliveryOutcome.FOLDER_SUCCESS
+                        if folder
+                        else FileDeliveryOutcome.ROOT_SUCCESS
+                    ),
+                    requested_folder=folder,
+                )
+                for target in command.targets
+            )
+        return BotCommandDispatchResult(
+            command=command,
+            file_deliveries=deliveries,
+        )
 
     async def process_bot_command_list(self, command_list: List[BotCommandBase]):
         """捕获命令列表"""
-        self.commands.extend(command_list)
+        return [await self.process_bot_command(command) for command in command_list]
 
     def get_display_text(self) -> str:
         """将捕获的命令转换为可读的文本输出"""
@@ -88,6 +156,12 @@ class CaptureProxy(ClientProxy):
                     "type": "send_msg",
                     "msg": cmd.msg,
                     "targets": targets,
+                })
+            elif isinstance(cmd, BotSendFileCommand):
+                result.append({
+                    "type": "send_file",
+                    "file": cmd.file,
+                    "display_name": cmd.display_name,
                 })
             else:
                 result.append({
@@ -136,6 +210,7 @@ class BotRunner:
             # 创建 Bot 实例
             account = bot_id_for_session(self.session_dir.name)
             self.bot = Bot(account=account, no_tick=not self.tick)
+            self.proxy.bind_bot(self.bot)
 
             # 配置
             self.bot.config.master = ["shell_master"]
@@ -169,6 +244,7 @@ class BotRunner:
                 except Exception:
                     logger.exception("Shell Bot startup cleanup failed")
                 self.bot = None
+            self.proxy.bind_bot(None)
             self._runtime_started_at = None
             self._runtime_clock_original = None
             raise
@@ -184,6 +260,7 @@ class BotRunner:
 
                 set_clock(self._runtime_clock_original)
             self.bot = None
+            self.proxy.bind_bot(None)
             self._started = False
             self._runtime_started_at = None
             self._runtime_clock_original = None

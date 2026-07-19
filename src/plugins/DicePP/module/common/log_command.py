@@ -909,11 +909,6 @@ def record_incoming_message(bot: Bot,
     return commands
 
 
-@custom_user_command(readable_name="跑团日志指令",
-                     priority=DPP_COMMAND_PRIORITY_DEFAULT,
-                     flag=DPP_COMMAND_FLAG_DEFAULT,
-                     cluster=DPP_COMMAND_CLUSTER_DEFAULT,
-                     group_only=True)
 class LogCommand(UserCommandBase):
     """运行日志核心指令"""
 
@@ -1745,8 +1740,6 @@ def delete_log_record_by_message_id(bot: Bot, group_id: str, message_id: str) ->
             pass
 
 
-@custom_user_command(readable_name="跑团日志记录器", priority=DPP_COMMAND_PRIORITY_USUAL_LOWER_BOUND - 10,
-                     flag=0, cluster=DPP_COMMAND_CLUSTER_DEFAULT, group_only=True)
 class LogRecorderCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)
@@ -1786,8 +1779,6 @@ class LogRecorderCommand(UserCommandBase):
         return ""
 
 
-@custom_user_command(readable_name="日志统计指令", priority=DPP_COMMAND_PRIORITY_DEFAULT,
-                     flag=DPP_COMMAND_FLAG_INFO, cluster=DPP_COMMAND_CLUSTER_DEFAULT, group_only=True)
 class LogStatCommand(UserCommandBase):
     def __init__(self, bot: Bot):
         super().__init__(bot)

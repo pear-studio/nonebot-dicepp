@@ -184,10 +184,17 @@ class LogRecorder:
 
 def _is_log_command(content: str) -> bool:
     normalized = content.replace("。", ".", 1)
-    return normalized == ".log" or (
+    if normalized == ".log" or (
         normalized.startswith(".log")
         and len(normalized) > 4
         and normalized[4].isspace()
+    ):
+        return True
+    parts = normalized.split()
+    return (
+        len(parts) >= 2
+        and parts[0] == ".stat"
+        and parts[1] in {"log", "日志"}
     )
 
 

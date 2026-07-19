@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import aiosqlite
 import pytest
@@ -13,9 +14,11 @@ from core.communication import (
     MessageSender,
     PostSendEvent,
 )
+from core.bot import Bot
 from core.data import LogRepository
 from core.data.schema import ensure_bot_log_schema
 from module.common.log import LogRuntime
+from module.common.log.publisher import ProviderPublishResult
 
 pytestmark = [pytest.mark.integration, pytest.mark.log]
 
@@ -23,7 +26,20 @@ NOW = datetime(2026, 7, 20, 17, 0, 0)
 
 
 class _FakeBot:
-    def __init__(self) -> None:
+    def __init__(self, data_path: Path) -> None:
+        self.account = "bot-1"
+        self.data_path = str(data_path)
+        self.proxy = None
+        self.config = SimpleNamespace(
+            log=SimpleNamespace(
+                web=SimpleNamespace(
+                    provider="dice_log_v105",
+                    endpoint="",
+                    token="",
+                    timeout_seconds=15.0,
+                )
+            )
+        )
         self.platform_hooks = []
         self.post_send_hooks = []
         self.recall_hooks = []
@@ -65,7 +81,7 @@ async def runtime_parts(tmp_path: Path):
     db = await aiosqlite.connect(path)
     await db.execute("PRAGMA foreign_keys=ON;")
     repository = LogRepository(db)
-    bot = _FakeBot()
+    bot = _FakeBot(tmp_path / "bot")
     runtime = LogRuntime(
         bot,
         repository,
@@ -85,6 +101,13 @@ def _user_meta(message_id: str, content: str = "玩家行动") -> MessageMetaDat
     meta = MessageMetaData(content, content, sender, group_id="g1")
     meta.message_id = message_id
     return meta
+
+
+class _InjectedProvider:
+    name = "injected"
+
+    async def publish(self, projection, *, request_id, requested_by):
+        return ProviderPublishResult("https://logs.test/injected")
 
 
 @pytest.mark.asyncio
@@ -163,3 +186,77 @@ async def test_close_is_idempotent_unregisters_in_reverse_and_stops_dispatch(
     assert after_results == []
     records = await repository.get_records(active.session.id)
     assert [record.message_id for record in records] == ["before-close"]
+
+
+def test_refresh_publication_provider_uses_latest_web_config(runtime_parts):
+    bot, _, runtime = runtime_parts
+    initial_provider = runtime.publisher._provider
+    assert initial_provider._endpoint == ""
+    assert initial_provider._token == ""
+
+    bot.config.log.web.endpoint = "https://logs.test/v105"
+    bot.config.log.web.token = "new-token"
+    bot.config.log.web.timeout_seconds = 9.0
+    runtime.refresh_publication_provider()
+
+    refreshed_provider = runtime.publisher._provider
+    assert refreshed_provider is not initial_provider
+    assert refreshed_provider._endpoint == "https://logs.test/v105"
+    assert refreshed_provider._token == "new-token"
+    assert refreshed_provider._timeout_seconds == 9.0
+
+    bot.config.log.web.provider = "unknown"
+    runtime.refresh_publication_provider()
+    assert runtime.publisher is None
+    assert runtime.publication_error == "不支持的 Web 日志服务：unknown"
+
+
+def test_refresh_publication_provider_preserves_injected_provider(runtime_parts):
+    bot, repository, _ = runtime_parts
+    provider = _InjectedProvider()
+    runtime = LogRuntime(bot, repository, publication_provider=provider)
+    original_publisher = runtime.publisher
+
+    bot.config.log.web.provider = "unknown"
+    runtime.refresh_publication_provider()
+
+    assert runtime.publisher is original_publisher
+    assert runtime.publisher._provider is provider
+    assert runtime.publication_error is None
+
+
+def test_bot_reload_config_refreshes_log_publication_provider(monkeypatch):
+    import core.bot.dicebot as dicebot_module
+
+    new_config = SimpleNamespace(
+        log=SimpleNamespace(level="INFO"),
+        persona="new-persona",
+        persona_ai=SimpleNamespace(character_path="characters/new"),
+        health_monitor=SimpleNamespace(
+            heartbeat_timeout_seconds=11,
+            consecutive_fail_threshold=4,
+            failure_log_interval_seconds=23,
+        ),
+    )
+    bot = object.__new__(Bot)
+    bot._cfg_loader = SimpleNamespace(reload=lambda: new_config)
+    bot.config = SimpleNamespace()
+    bot._persona_loader = SimpleNamespace(
+        reload=lambda: None,
+        set_character_path=lambda _path: None,
+    )
+    bot.loc_helper = SimpleNamespace(
+        reset_to_default=lambda: None,
+        set_persona=lambda _persona: None,
+    )
+    bot.health_monitor = SimpleNamespace()
+    refreshed_with = []
+    bot.log_runtime = SimpleNamespace(
+        refresh_publication_provider=lambda: refreshed_with.append(bot.config)
+    )
+    monkeypatch.setattr(dicebot_module, "configure_log_level", lambda _level: None)
+
+    result = Bot.reload_config(bot)
+
+    assert result is new_config
+    assert refreshed_with == [new_config]

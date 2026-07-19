@@ -9,6 +9,8 @@ from .recorder import (
     PostSendEvent,
 )
 from .runtime import LogRuntime
+from .command import LogCommand
+from .publisher import PublicationResult, PublicationStatus
 from .export_service import (
     ArtifactResult,
     ExportBatchResult,
@@ -61,6 +63,9 @@ __all__ = [
     "PostSendEvent",
     "MessageRecallEvent",
     "LogRuntime",
+    "LogCommand",
+    "PublicationResult",
+    "PublicationStatus",
     "ArtifactResult",
     "ExportBatchResult",
     "LogExportCoordinator",

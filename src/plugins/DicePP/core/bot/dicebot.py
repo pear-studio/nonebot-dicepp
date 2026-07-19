@@ -584,6 +584,7 @@ class Bot:
           - Persona data    (PersonaLoader, including character_path changes)
           - Localization    (reset_to_default + set_persona)
           - HealthMonitor   (heartbeat_timeout, fail_threshold, log_interval)
+          - Log Web provider (provider, endpoint, token, timeout)
 
         Subsystems NOT covered (require full restart):
           - ControlChannelClient address (sourced from env vars at startup)
@@ -591,6 +592,9 @@ class Bot:
         new_cfg = self._cfg_loader.reload()
         self.config = new_cfg
         configure_log_level(self.config.log.level)
+
+        if self.log_runtime is not None:
+            self.log_runtime.refresh_publication_provider()
 
         # Refresh subsystems that capture config at construction time
         self._persona_loader.reload()

@@ -11,6 +11,7 @@ T = TypeVar("T", bound="MessageType")
 class MessageType(StrEnum):
     CHAT = "chat"
     COMMAND = "command"
+    LOG_CONTROL = "log_control"
     PROACTIVE = "proactive"
     AMBIENT = "ambient"
     SYSTEM_NOTICE = "system_notice"

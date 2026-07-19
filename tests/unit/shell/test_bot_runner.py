@@ -11,7 +11,10 @@ import pytest
 from module.persona.character.models import Character, PersonaExtensions
 from module.persona.command import PersonaCommand
 from plugins.DicePP.shell import bot_runner as bot_runner_module
-from plugins.DicePP.shell.bot_runner import BotRunner
+from core.command import BotSendMsgCommand
+from core.communication import GroupMessagePort, PrivateMessagePort
+from core.message_types import MessageType
+from plugins.DicePP.shell.bot_runner import BotRunner, CaptureProxy
 from utils.time import SteppedClock, get_clock, set_clock
 
 
@@ -70,6 +73,47 @@ class _FakeLife:
 
     async def tick_daily(self) -> None:
         self.daily_times.append(get_clock().now())
+
+
+class _PostSendBot:
+    account = "shell-bot"
+
+    def __init__(self) -> None:
+        self.events = []
+
+    async def dispatch_post_send_event(self, event) -> None:
+        self.events.append(event)
+
+
+@pytest.mark.asyncio
+async def test_capture_proxy_command_list_dispatches_each_target_once() -> None:
+    proxy = CaptureProxy()
+    bot = _PostSendBot()
+    proxy.bind_bot(bot)
+    first = BotSendMsgCommand("shell-bot", "日志已开启", [GroupMessagePort("g1")])
+    first.message_type = MessageType.LOG_CONTROL
+    second = BotSendMsgCommand(
+        "shell-bot",
+        "私聊回复",
+        [PrivateMessagePort("private-user")],
+    )
+
+    results = await proxy.process_bot_command_list([first, second])
+
+    assert [result.command for result in results] == [first, second]
+    assert proxy.commands == [first, second]
+    assert len(bot.events) == 2
+    assert [event.group_id for event in bot.events] == ["g1", None]
+    assert [event.user_id for event in bot.events] == ["shell-bot", "private-user"]
+    assert [event.platform_message_id for event in bot.events] == [
+        "shell-message-1",
+        "shell-message-2",
+    ]
+    assert [event.message_type for event in bot.events] == [
+        "log_control",
+        "command",
+    ]
+    assert [event.content for event in bot.events] == ["日志已开启", "私聊回复"]
 
 
 class _FakeApp:
