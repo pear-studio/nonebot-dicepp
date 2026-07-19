@@ -1,13 +1,20 @@
-# 跑团 Log 功能重构设计
+# 跑团 Log 功能架构与行为契约
 
-本文记录 DicePP 跑团聊天日志功能的现状诊断、产品取舍和重构目标，供后续 agent
-直接拆分任务与实施。
-
-本文描述的是已讨论确认的目标设计，不代表当前代码已经实现。
+本文定义 DicePP 当前跑团聊天日志功能的用户行为、数据不变量、模块边界和验收契约。
+实现与测试应持续满足本文；未来的 HTML 与图片归档能力也必须沿用这里定义的生命周期、
+内容投影和外部副作用边界。
 
 相关代码：
 
-- `src/plugins/DicePP/module/common/log_command.py`
+- `src/plugins/DicePP/module/common/log/command.py`
+- `src/plugins/DicePP/module/common/log/service.py`
+- `src/plugins/DicePP/module/common/log/recorder.py`
+- `src/plugins/DicePP/module/common/log/projection.py`
+- `src/plugins/DicePP/module/common/log/export_service.py`
+- `src/plugins/DicePP/module/common/log/exporters/`
+- `src/plugins/DicePP/module/common/log/publisher.py`
+- `src/plugins/DicePP/module/common/log/providers/dice_log_v105.py`
+- `src/plugins/DicePP/module/common/log/runtime.py`
 - `src/plugins/DicePP/core/data/log_repository.py`
 - `src/plugins/DicePP/core/data/models/log.py`
 - `src/plugins/DicePP/core/data/schema/bot_log.py`
@@ -17,98 +24,60 @@
 数据目录与 schema lifecycle 的上层约束见
 [data-architecture-3.0.md](./data-architecture-3.0.md)。
 
-## 背景
-
-现有 log 功能最初作为一套完整的跑团日志系统合入，包含：
-
-- 每群多份命名日志；
-- 玩家消息和 Bot 消息自动记录；
-- `new/on/off/halt/end/list/stat/get/del/set` 指令；
-- TXT、DOCX 和论坛代码导出；
-- QQ 群文件上传；
-- 第三方云端日志发布；
-- 消息、参与者、检定、属性变化和骰面统计；
-- 长时间与大消息量提醒；
-- 消息撤回同步删除。
-
-随后项目把旧 DataManager 和同步 `log_db.py` 迁移到 `BotDatabase` 与
-`LogRepository`，但业务命令没有完成接线，形成半迁移状态。
-
-当前生产问题最先表现为 `.log new` 抛出：
-
-```text
-NameError: name 'get_connection' is not defined
-```
-
-进一步诊断确认，这不是单一漏 import：
-
-1. 旧同步 `log_db.py` 已删除，但 `get_connection`、`upsert_log`、
-   `insert_record`、`fetch_records` 等调用点仍然存在。
-2. `_load_group_payload()` 每次返回新的空 payload。
-3. `_save_group_payload()` 是 no-op，群级当前日志、过滤和统计状态无法跨消息保存。
-4. `_generate_file()` 已改成 async，但 `_handle_end()` 仍同步调用，稳定触发
-   coroutine 未 await 的错误。
-5. 新 `LogRepository` 没有按群列出日志、按名称查询日志或保存当前日志指针的 API。
-6. 当前测试只覆盖纯函数和 Repository CRUD，没有覆盖完整日志生命周期。
-
-最小复现已确认：
-
-```text
-修改群 payload 后重新加载       -> 状态丢失
-执行 .log new                  -> NameError
-执行 .log end                  -> cannot unpack non-iterable coroutine object
-```
-
-因此本次不采用恢复旧同步函数的桥接修复，而是按新异步数据层重新建立业务模型。
-
-## 目标
+## 核心原则
 
 - 保留用户真正需要的跑团聊天录制能力。
-- 保持现有 `on/off` 使用习惯，不为用户增加不必要的状态概念。
+- 保持 `on/off` 使用习惯，不为用户增加不必要的状态概念。
 - 让日志状态和消息在 Bot 重启后可靠恢复。
 - 玩家指令与 Bot 回复通过统一消息 hook 记录，不依赖命令优先级。
 - 始终保存录制期间的完整文本数据，默认导出跑团正文，可显式导出全部记录。
 - TXT 作为稳定、可恢复的基础导出格式。
 - 导出和 Web 发布与日志生命周期解耦。
-- TXT 与 DOCX 作为第一阶段标准文件输出；为未来的图片归档和单文件 HTML
+- TXT 与 DOCX 作为当前标准文件输出；为未来的图片归档和单文件 HTML
   富媒体导出预留接口与数据结构。
 - 让每个模块可以单独测试，避免继续维护单个超大命令文件。
 
-## 不纳入第一阶段
+## 当前能力边界与扩展方向
 
-- 新增日志创建者、群管理员或骰主权限限制。
+当前不包含以下能力：
+
+- 日志创建者、群管理员或骰主权限限制。
 - 高级日志统计。
 - 基于 Bot 回复文本猜测检定、属性变化或骰运。
 - 默认启用图片二进制归档。
 - 自动发布第三方云端日志。
-- 第一阶段 HTML 文件导出。
+- HTML 文件导出；当前只识别该选项并明确回复暂未支持。
 - 自动删除已经上传到 QQ 群文件或第三方服务的副本。
 - 论坛 BBCode 导出。
+
+HTML 和图片归档属于已定义边界的扩展能力：HTML 必须保持单文件，图片必须在消息到达后
+异步归档，并遵守容量、MIME 与引用清理约束。它们不得改变当前文本记录的权威地位，也
+不得让普通导出隐式访问第三方服务。
 
 ## 设计决策摘要
 
 | 决策点 | 选择 |
 |--------|------|
 | 用户可见状态 | 只区分正在记录与未记录，不增加不可继续的 closed 状态 |
-| 数据兼容 | 旧 Log 数据不保留；直接重写现有 schema 和业务逻辑 |
+| 数据兼容 | 不保留旧 Log 业务数据；已知旧结构在启动时事务性重建为当前 schema |
 | 当前日志 | 每群保留一个 `current_log_id` |
 | 开关指令 | 只保留 `.log on` / `.log off`，不再区分 new/end/halt |
 | `.log on [名称]` | 统一创建、续录和切换日志 |
 | `.log off` | 停止当前录制、保留当前选择并执行标准导出 |
 | `.log set` | 删除；不再在采集时永久丢弃消息 |
 | 导出内容 | 默认跑团正文，可用 `all` / `完整` 导出全部记录 |
-| 统计 | 第一阶段删除 `.log stat` 和 `.stat log` |
-| 权限 | 保持现状，不新增权限门控 |
-| 标准导出 | 当前为正文版 TXT + DOCX；HTML 实现后加入默认组合 |
+| 统计 | 当前不提供 `.log stat` 和 `.stat log` |
+| 权限 | 沿用全局命令权限，不在 Log 内新增权限门控 |
+| 标准导出 | 当前为正文版 TXT + DOCX；未来 HTML 可加入默认组合 |
 | TXT | 保留为基础权威格式和失败兜底 |
-| DOCX | 第一阶段实现，并纳入标准导出 |
-| HTML | 后续输出内嵌 CSS 与图片的单个 `.html` 文件 |
-| 图片 | 保存结构化消息段；二进制下载和归档后续启用 |
+| DOCX | 已纳入标准导出 |
+| HTML | 未来输出内嵌 CSS 与图片的单个 `.html` 文件 |
+| 图片 | 当前保存结构化消息段；未来可增加二进制下载和归档 |
 | Web 发布 | 合并到 `.log export <名称> web`，任何普通导出都不得隐式发布 |
 | 已有链接 | `.log export <名称> link` 只读，不产生网络副作用 |
 | 论坛代码 | 删除 |
 | 千条提醒 | 删除 |
-| 长时间提醒 | 可保留或延后，不作为第一阶段阻塞项 |
+| 长时间提醒 | 当前不启用；`last_warn_at` 不产生用户可见行为 |
 
 ---
 
@@ -116,7 +85,7 @@ NameError: name 'get_connection' is not defined
 
 ### 1.1 主帮助
 
-第一阶段主帮助展示：
+当前主帮助展示：
 
 ```text
 .log on [名称]              开始、继续或切换日志
@@ -132,7 +101,7 @@ NameError: name 'get_connection' is not defined
 .log export <名称>                  标准导出：正文版 TXT + DOCX
 .log export <名称> txt              只导出正文版 TXT
 .log export <名称> docx             只导出正文版 DOCX
-.log export <名称> html             只导出正文版单文件 HTML，后续提供
+.log export <名称> html             单文件 HTML；当前明确回复暂未支持
 .log export <名称> web              发布正文版网页
 .log export <名称> link             查看最近一次成功发布的网页链接
 .log export <名称> all              标准导出全部记录
@@ -169,7 +138,7 @@ NameError: name 'get_connection' is not defined
 - 将当前日志设为未记录状态，保留 `current_log_id`。
 - 状态可靠提交后执行标准导出：生成正文版 TXT 与 DOCX，并尝试分别上传 QQ
   群文件。
-- HTML 实现后加入标准导出组合，但 Web 发布永远不属于标准导出。
+- 未来 HTML 可加入标准导出组合，但 Web 发布永远不属于标准导出。
 - 导出或上传失败不恢复 recording；数据库记录仍可通过 `.log export` 重试。
 - 已经处于 off 状态时只返回当前状态，不重复生成和上传文件。
 - 之后可以用不带名称的 `.log on` 继续。
@@ -195,7 +164,7 @@ NameError: name 'get_connection' is not defined
 
 导出不改变日志状态。
 
-第一阶段支持：
+当前支持：
 
 ```text
 .log export <名称>
@@ -208,17 +177,10 @@ NameError: name 'get_connection' is not defined
 ```
 
 不指定类型时执行与 `.log off` 相同的标准导出组合，但不改变 recording。只指定 `all`
-时使用相同格式组合导出全部记录：
+时使用相同格式组合导出全部记录。显式指定 `txt` 或 `docx` 时只生成一种格式。`web`
+显式发布到配置的第三方 provider；`link` 只读取最近一次成功链接，不发起网络请求。
 
-```text
-.log export <名称> txt
-.log export <名称> docx
-```
-
-显式指定 `txt` 或 `docx` 时只生成一种格式。`web` 显式发布到配置的第三方
-provider；`link` 只读取最近一次成功链接，不发起网络请求。
-
-后续增加：
+`html` 和 `html all` 已保留在指令语法中，但当前明确回复暂未支持，不生成占位文件：
 
 ```text
 .log export <名称> html
@@ -233,20 +195,20 @@ provider；`link` 只读取最近一次成功链接，不发起网络请求。
 - 正在记录的日志不能删除。
 - 删除日志时级联删除消息记录。
 - 删除当前但已 off 的日志时清空 `current_log_id`。
-- 第一阶段保持现有权限行为和单步删除行为，不新增确认流程。
+- 沿用全局命令权限和单步删除行为，不新增确认流程。
 - 若日志曾上传到群文件或第三方服务，回复中应明确这些外部副本不会自动删除。
 
 ### 1.7 已移除指令
 
 以下指令不保留隐藏别名，只返回功能已移除或新入口提示：
 
-| 旧指令 | 新版响应 |
+| 旧指令 | 当前响应 |
 |--------|----------|
 | `.log new <名称>` | 提示使用 `.log on <名称>` |
 | `.log end` / `.log halt` | 提示使用 `.log off` |
 | `.log get <名称>` | 提示使用 `.log export <名称> link`，不得触发上传 |
 | `.log publish <名称>` | 提示使用 `.log export <名称> web` |
-| `.log set ...` | 回复新版始终保存完整数据，请在导出时使用默认正文或 `all` |
+| `.log set ...` | 回复当前日志始终保存完整数据，请在导出时使用默认正文或 `all` |
 | `.log stat ...` | 回复统计功能暂未提供 |
 | `.stat log ...` | 回复统计功能暂未提供 |
 
@@ -301,10 +263,7 @@ off
 
 ### 3.1 统一 Hook
 
-现有玩家消息通过低优先级 `LogRecorderCommand` 捕获，导致已识别指令可能在到达记录器前
-被命令系统截断。
-
-目标结构：
+当前采集结构：
 
 ```text
 入站消息 Hook
@@ -390,15 +349,14 @@ recalled_at
 - `message_id`: 用于撤回定位。
 - `recalled_at`: 撤回标记，默认导出排除。
 
-昵称以记录时值为主。导出时可以补查昵称，但不应默认用新群名片覆盖历史昵称。
+昵称使用记录时保存的值，导出不会用新的群名片覆盖历史昵称。
 
 ---
 
 ## 4. 跑团正文与全部记录
 
-旧 `.log set` 在采集前永久丢弃消息，且群级过滤与日志级数据库字段语义不一致。
-
-新设计始终保存完整文本记录，在导出时决定展示视图。
+系统始终保存录制期间的完整文本记录，只在导出时决定展示视图。`.log set` 不再提供
+采集过滤，避免不可恢复的数据丢失。
 
 ### 4.1 跑团正文
 
@@ -422,14 +380,14 @@ recalled_at
 - 保留场外发言；
 - 保留玩家与 Bot 指令；
 - 保留媒体占位和结构化信息；
-- 被撤回消息默认仍不显示，除非未来增加单独的审计导出模式。
+- 被撤回消息不显示；当前不提供审计导出模式。
 
 用户通过 `all` 或中文别名 `完整` 选择该视图。代码内部可以使用稳定枚举，但用户帮助、
 回复和文件元数据统一使用“跑团正文”与“全部记录”。
 
 ### 4.3 不再提供采集过滤
 
-第一阶段不提供以下采集开关：
+当前不提供以下采集开关：
 
 - outside；
 - command；
@@ -443,30 +401,31 @@ recalled_at
 
 ## 5. 导出器
 
-内容选择与格式渲染必须分层。`LogProjection` 先把同一个 records 快照转换为跑团正文或
-全部记录的结构化展示模型，统一完成过滤、回复引用、@、媒体占位和撤回排除；TXT、DOCX、
-HTML 与 Web 不得各自重复实现内容筛选。
+内容选择与格式渲染必须分层。`LogProjector` 先把同一个 records 快照转换为
+`LogProjection`，统一完成跑团正文或全部记录的过滤、回复引用、@、媒体占位和撤回排除；
+TXT、DOCX、HTML 与 Web 不得各自重复实现内容筛选。
 
 定义独立 Exporter 接口，使格式扩展不进入 LogCommand：
 
 ```python
 class LogExporter(Protocol):
-    format_name: str
+    format: ClassVar[LogExportFormat]
+    suffix: ClassVar[str]
 
-    async def export(
+    async def generate(
         self,
-        session: LogSession,
         projection: LogProjection,
-    ) -> ExportResult:
+        target: ExportTarget,
+    ) -> GeneratedArtifact:
         ...
 ```
 
-实现按优先级拆分：
+当前实现与扩展位置：
 
 ```text
-TextLogExporter       第一阶段
-DocxLogExporter       第一阶段
-HtmlLogExporter       图片归档阶段
+TextLogExporter       当前实现
+DocxLogExporter       当前实现
+HtmlLogExporter       未来单文件 HTML 扩展
 ```
 
 一次导出请求固定一个 records 快照，并记录 `record_upper_id`。不指定格式的标准导出
@@ -498,7 +457,7 @@ TXT 是基础权威格式，至少保留：
 
 ### 5.2 DOCX
 
-DOCX 第一阶段实现，并与 TXT 一起组成标准导出。显式指定 `docx` 时只生成 DOCX。
+DOCX 已与 TXT 一起组成标准导出。显式指定 `docx` 时只生成 DOCX。
 
 至少包含：
 
@@ -506,13 +465,13 @@ DOCX 第一阶段实现，并与 TXT 一起组成标准导出。显式指定 `do
 - 清晰的发言分隔；
 - 稳定的用户颜色；
 - 回复引用样式；
-- 第一阶段图片未归档占位符；
-- 后续图片归档启用后的尺寸限制和失败占位符。
+- 当前图片未归档占位符；
+- 未来图片归档启用后的尺寸限制和失败占位符。
 
 ### 5.3 HTML
 
-HTML 是需要支持的离线格式，但不纳入第一阶段。实现后始终输出一个自包含 `.html`
-文件，不输出 ZIP 或外部 assets 目录：
+HTML 是已定义边界的未来离线格式。启用后始终输出一个自包含 `.html` 文件，不输出 ZIP
+或外部 assets 目录：
 
 ```text
 <日志名>_群<group_id>_<log_id短码>_<request_id短码>_<导出时间>.html
@@ -530,20 +489,21 @@ HTML 是需要支持的离线格式，但不纳入第一阶段。实现后始终
 - 支持点击查看原图；
 - 不依赖 Word 对 WebP、GIF 等格式的兼容性。
 
-Base64 会增加文件体积，因此图片归档阶段必须同时落地单图大小、附件数量和单日志
+Base64 会增加文件体积，因此图片归档能力必须同时落地单图大小、附件数量和单日志
 总容量限制。
 
-HTML 实现后加入标准导出组合。标准导出当前生成 TXT + DOCX，届时生成
+HTML 启用后加入标准导出组合。标准导出当前生成 TXT + DOCX，届时生成
 TXT + DOCX + HTML；显式指定格式的 `.log export` 始终只生成一种文件。
 
 ### 5.4 QQ 群文件
 
-- `.log off` 默认上传标准导出的正文版 TXT 与 DOCX；HTML 实现后同时上传 HTML。
+- `.log off` 默认上传标准导出的正文版 TXT 与 DOCX；未来 HTML 启用后同时上传 HTML。
 - 不指定格式的 `.log export` 上传相同标准组合，但不改变日志状态。
-- 显式 `.log export <名称> <txt|docx|html>` 只生成并上传指定格式。
+- 显式 `.log export <名称> <txt|docx>` 只生成并上传指定格式；未来 HTML 启用后遵循
+  同一规则。
 - 优先查找已有“跑团log”文件夹。
 - 文件夹不存在时上传根目录。
-- 第一阶段不要求自动创建文件夹。
+- 不要求自动创建文件夹。
 - 上传失败不应回滚已经成功保存的日志状态。
 - 同一次标准导出中某个文件失败不影响其他文件；结果回复分别说明各 artifact 状态。
 - QQ 适配器或 ClientProxy 必须把每个文件的结构化交付结果返回给导出编排层，不能仅创建
@@ -553,23 +513,15 @@ TXT + DOCX + HTML；显式指定格式的 `.log export` 始终只生成一种文
 
 ## 6. 图片与附件预留
 
-### 6.1 当前基础
+### 6.1 当前消息段能力
 
-项目已有：
+当前通过 `core.command.cq_extractor.extract_segments()` 保存结构化消息段，TXT、DOCX 和
+未来格式共享同一份 `LogProjection`。图片二进制尚不归档，日志资源也不复用 Persona
+图片目录；两者具有不同的生命周期、引用和清理策略。
 
-- `core.command.cq_extractor.extract_segments()`；
-- Persona 的异步图片下载与缓存实现；
-- `httpx`；
-- 内容 hash；
-- 图片大小限制；
-- `python-docx`；
-- Jinja2。
+### 6.2 当前保存契约
 
-因此保存图片技术上可行，但需要独立处理日志生命周期和磁盘容量。
-
-### 6.2 第一阶段
-
-第一阶段应做到：
+当前实现：
 
 - 保存 `raw_content`；
 - 保存 `segments_json`；
@@ -577,14 +529,14 @@ TXT + DOCX + HTML；显式指定格式的 `.log export` 始终只生成一种文
 - Exporter 接口能够识别图片段；
 - 没有本地资源时输出 `[图片未归档]`。
 
-第一阶段不下载图片二进制。由于 QQ URL 可能过期，这一阶段的历史图片以后可能无法补救；
-这是明确接受的文本优先取舍，不应在用户提示中暗示图片已经归档。
+当前不下载图片二进制。由于 QQ URL 可能过期，未归档的历史图片以后可能无法补救；这是
+明确接受的文本优先取舍，不应在用户提示中暗示图片已经归档。
 
-### 6.3 后续图片归档
+### 6.3 图片归档扩展契约
 
 QQ 图片 URL 可能过期。真正归档必须在收到消息后尽快异步下载，不能等到导出时。
 
-建议增加：
+启用图片归档时增加：
 
 ```text
 log_assets
@@ -612,7 +564,7 @@ data/bots/<bot_id>/log_assets/
 
 不要直接复用 `data/persona_images`，因为 Persona 与 Log 的清理、引用和保留策略不同。
 
-后续需要：
+扩展能力必须包含：
 
 - 内容 hash 去重；
 - 单图片大小限制；
@@ -624,7 +576,7 @@ data/bots/<bot_id>/log_assets/
 - HTML 使用 `data:` URI / Base64 的单文件嵌入策略；
 - 单日志附件总容量限制，控制单文件 HTML 膨胀。
 
-可预留配置：
+配置建议沿用以下结构：
 
 ```json
 {
@@ -643,10 +595,7 @@ data/bots/<bot_id>/log_assets/
 
 ## 7. Web 发布
 
-现有 `.log end` 默认把群聊内容、QQ ID、昵称、时间和消息 ID 上传到外部服务。
-zlib 只提供压缩，不提供内容加密。
-
-目标行为：
+当前行为：
 
 ```text
 .log off / .log export <名称>
@@ -663,8 +612,10 @@ zlib 只提供压缩，不提供内容加密。
 
 约束：
 
-- 删除含义模糊且默认开启的 `upload_enable`。provider endpoint 为空时 Web 发布不可用；
-  endpoint 已配置时，也只有显式 `web` 选项才能触发网络请求。
+- 配置模型不包含 `upload_enable`。配置 loader 只负责把旧 `upload_endpoint` /
+  `upload_token` 一次性整理到 `log.web` 并移除旧键；它不会恢复自动上传语义。
+- provider endpoint 为空时 Web 发布不可用；endpoint 已配置时，也只有显式 `web`
+  选项才能触发网络请求。
 - 默认发布跑团正文，`web all` / `web 完整` 才发布全部记录，并明确提示其中包含场外与
   Log 管理消息。
 - `.log export <名称> link` 不得产生上传副作用。
@@ -674,7 +625,7 @@ zlib 只提供压缩，不提供内容加密。
   Web provider 混入 TXT、DOCX、HTML Exporter。
 - 保存 provider、内容视图、records 快照上界、URL、发布时间和结果。
 - `.log del` 明确提示远端副本不会自动删除。
-- 后续只有在服务提供可靠删除 API 时才考虑 `.log unpublish`。
+- 不提供 `.log unpublish`；远端副本删除不属于当前能力。
 
 ---
 
@@ -682,7 +633,7 @@ zlib 只提供压缩，不提供内容加密。
 
 ### 8.1 统计
 
-第一阶段删除高级统计：
+当前不提供高级统计：
 
 - `.log stat`；
 - `.stat log`；
@@ -695,19 +646,12 @@ zlib 只提供压缩，不提供内容加密。
 
 `.log list` 中的消息数量通过数据库 `COUNT` 取得，不建立独立统计系统。
 
-未来需要统计时，应消费 Roll 模块提供的结构化事件，不解析 Bot 文本。
+任何统计扩展都必须消费 Roll 模块提供的结构化事件，不得解析 Bot 文本。
 
 ### 8.2 提醒
 
-删除每 1000 条玩家消息提醒。
-
-连续记录时间提醒不是第一阶段阻塞项。若保留：
-
-- 使用持久化时间；
-- 提醒不进入跑团正文；
-- 阈值使用配置而非硬编码；
-- 文字明确为连续录制时间；
-- 不维护独立 session message count。
+当前不提供每 1000 条玩家消息提醒或连续记录时间提醒。`last_warn_at` 作为 schema 字段保留，
+但不产生用户可见行为，也不维护独立 session message count。
 
 ---
 
@@ -715,7 +659,7 @@ zlib 只提供压缩，不提供内容加密。
 
 撤回不能依赖当前日志。
 
-目标流程：
+当前流程：
 
 ```text
 收到群撤回事件
@@ -730,7 +674,7 @@ zlib 只提供压缩，不提供内容加密。
 - 避免增量统计回滚问题；
 - 将来支持明确的审计策略。
 
-第一阶段没有高级统计，因此撤回只需影响记录查询和导出。
+当前没有高级统计，因此撤回只影响记录查询和导出。
 
 已经生成或上传的文件不会自动更新。云端副本和群文件也不会自动删除，用户提示必须如实说明。
 
@@ -738,7 +682,7 @@ zlib 只提供压缩，不提供内容加密。
 
 ## 10. 权限
 
-第一阶段保持现有命令权限，不新增：
+当前沿用全局命令权限，不新增：
 
 - 日志创建者专属权限；
 - 群管理员权限；
@@ -747,15 +691,14 @@ zlib 只提供压缩，不提供内容加密。
 
 日志会话可以保存 `created_by` 作为元数据，但不用于门控。
 
-权限治理如果以后需要，应单独设计，不和本次 Log 重构绑定。
-这意味着普通群成员仍可 off、del 或显式 Web 发布；本次接受该现有行为，不在 Log
-内部手写一套局部权限规则。
+权限治理如需扩展，应单独设计，不与 Log 生命周期绑定。这意味着普通群成员仍可 off、
+del 或显式 Web 发布；Log 内部不手写一套局部权限规则。
 
 ---
 
 ## 11. 数据模型
 
-目标数据库继续使用：
+当前数据库使用：
 
 ```text
 data/bots/<bot_id>/log.db
@@ -839,7 +782,7 @@ note               TEXT
 
 ### 11.5 `log_publications`
 
-第一阶段 Web 发布增加：
+Web 发布记录使用：
 
 ```text
 id                 INTEGER PRIMARY KEY AUTOINCREMENT
@@ -859,30 +802,14 @@ note               TEXT
 
 ### 11.6 附件表
 
-第一阶段可以只保留设计与 Repository 接口位置，图片归档实施时再创建
-`log_assets` / `log_record_assets`。
-
-如果第一阶段已经保存 `segments_json`，后续增加附件表不需要重写消息采集结构。
+当前 schema 不创建附件表。未来启用图片归档时再创建 `log_assets` /
+`log_record_assets`；由于 records 已保存 `segments_json`，该扩展不需要重写消息采集结构。
 
 ---
 
 ## 12. 模块边界
 
-现有 `log_command.py` 同时负责：
-
-- 命令解析；
-- 生命周期；
-- 内存状态；
-- 数据库操作；
-- 消息采集；
-- 统计；
-- 文件生成；
-- QQ 群文件；
-- 第三方 HTTP；
-- 撤回；
-- 遗留兼容处理。
-
-目标拆分：
+当前目录结构：
 
 ```text
 module/common/log/
@@ -890,61 +817,62 @@ module/common/log/
   service.py
   recorder.py
   projection.py
+  export_service.py
   exporters/
     base.py
     text.py
-    html.py
     docx.py
   publisher.py
-  media.py
+  providers/
+    dice_log_v105.py
+  runtime.py
+  types.py
+  errors.py
 ```
 
 职责：
 
 | 模块 | 职责 |
 |------|------|
-| `LogCommand` | 解析指令并调用 Service |
-| `LogService` | 生命周期、不变量、导出编排 |
+| `LogCommand` | 解析指令、生成用户回复并调用 Runtime |
+| `LogRuntime` | 组装服务、注册消息 Hook、刷新 Web provider |
+| `LogService` | 生命周期、群级串行化、事务不变量与导出请求快照 |
 | `LogRepository` | SQLite 查询与持久化 |
 | `LogRecorder` | 入站/出站 Hook、消息结构化 |
-| `LogProjection` | 统一生成跑团正文或全部记录的结构化展示模型 |
-| `LogExporter` | 格式生成 |
+| `LogProjector` / `LogProjection` | 生成并承载跑团正文或全部记录的结构化展示模型 |
+| `LogExportCoordinator` | 多格式生成、群文件交付与逐 artifact 审计 |
+| `LogExporter` | 单一文件格式生成；当前实现 TXT 与 DOCX |
 | `LogPublisher` | `.log export ... web` 的显式第三方发布 |
-| `LogMediaStore` | 后续图片下载、去重与清理 |
+| `DiceLogV105Provider` | Dice Log v105 协议适配与异步 HTTP |
 
-Command 不直接执行 SQL、HTTP 或文件格式细节。
+Command 不直接执行 SQL、HTTP 或文件格式细节。未来的 `HtmlLogExporter` 和
+`LogMediaStore` 分别进入 exporters 与媒体存储边界，不改变 Command 或 Repository 的
+职责。
 
 ---
 
-## 13. 旧数据处理
+## 13. Schema 所有权与启动校验
 
-历史实现可能存在两类数据：
-
-```text
-旧 DataManager log_session payload
-旧 DATA_PATH/log/log.db
-```
-
-新路径是：
+Log 数据库固定为：
 
 ```text
 data/bots/<bot_id>/log.db
 ```
 
-现有旧 Log 数据不保留。本次不提供记录级迁移、一次性导入工具或运行时 legacy fallback，
-也不新增 `bot_log` schema 版本或 forward migration。直接替换当前 latest schema
-定义、Repository 和原有业务逻辑。
+旧 Log 业务数据不在兼容范围内。系统不提供记录级迁移、一次性导入工具或运行时 legacy
+fallback，也不为这套结构建立 `bot_log` v2 双轨或 forward migration；启动时只接受当前
+latest schema，或对已知旧结构执行破坏性重建。
 
-由于已存在的损坏数据库可能已被 schema lifecycle 标记为当前版本，初始化时必须
-在使用业务表前检查其结构是否符合本文定义：
+初始化在使用业务表前检查结构是否符合本文定义：
 
 1. 表、必需列、关键索引或约束缺失，或命中已知旧结构时，视为旧损坏库。
 2. 在一个 SQLite 事务中删除 Log 业务表，按当前 latest schema 重建表、
    索引与约束；旧记录不读取、不转换。
 3. 重建失败时整体回滚，不能留下半套业务表。
 4. 重建成功后，下次启动的结构检查必须直接通过，不得再次清空新数据。
+5. 未知的 unmanaged 表或额外业务表不执行破坏性删除，初始化明确拒绝并报告表名。
 
-`LogRepository` 不再通过 `_ensure_table()` 私自创建业务表；schema 的唯一 owner 是
+`LogRepository` 不通过查询路径私自创建业务表；schema 的唯一 owner 是
 `BOT_LOG_TARGET`。结构探测和破坏性重建属于 schema 初始化责任，不应散落到
 Repository 查询路径。
 
@@ -968,7 +896,7 @@ Repository 查询路径。
 
 ## 15. 验收场景
 
-第一阶段至少覆盖以下真实调用链。
+当前验收至少覆盖以下真实调用链。
 
 ### 15.1 生命周期
 
@@ -1045,7 +973,7 @@ off 期间发言
 - 两者不修改数据库记录。
 - TXT 与 DOCX 使用同一个 projection 快照，内容选择一致。
 - 不指定格式时生成 TXT + DOCX；显式指定格式时只生成一种。
-- HTML 第一阶段明确回复暂不支持，不生成占位文件。
+- HTML 当前明确回复暂不支持，不生成占位文件。
 
 ### 15.5 撤回
 
@@ -1069,11 +997,11 @@ off 期间发言
 - 图片 CQ 被解析为 segment。
 - `segments_json` 正确持久化。
 - 没有下载资源时 TXT 输出占位符。
-- 后续启用图片归档时不需要改变 records 基本结构。
+- 未来启用图片归档时不需要改变 records 基本结构。
 
 ---
 
-## 16. 测试策略
+## 16. 测试与验收契约
 
 ### 16.1 Repository
 
@@ -1085,7 +1013,7 @@ off 期间发言
 - 日志级联删除；
 - export request/artifact 历史；
 - publication 历史；
-- 新建数据库直接得到当前目标结构；
+- 新建数据库直接得到当前 schema；
 - 已知旧损坏表结构会被破坏性重建；
 - 重建后写入新数据并再次启动，新数据不会被重复清空。
 
@@ -1124,7 +1052,7 @@ off 期间发言
 - 不同群与多次导出不覆盖；
 - TXT/DOCX 内容视图一致；
 - 标准导出共享 request_id 和 record_upper_id；
-- HTML 未实现时明确拒绝。
+- HTML 当前未启用时明确拒绝。
 
 ### 16.5 Publisher
 
@@ -1140,37 +1068,8 @@ off 期间发言
 
 ---
 
-## 17. 实施顺序
+## 17. 行为不变量与维护原则
 
-本次可直接在 `master` 上按阶段实施，每个阶段通过对应验证后独立提交：
-
-1. **数据层与生命周期核心**：直接重写当前 `bot_log` schema、models 与
-   `LogRepository`，实现旧损坏表探测与只执行一次的破坏性重建；新建
-   `LogService`，完成 on/off/list/del、群级串行化和事务不变量。
-2. **消息记录链路**：把玩家记录迁到平台事件级入站 Hook；清理出站 Hook，
-   取得真实发送结果与 `message_id`；统一写入 `LogRecorder`，并实现撤回标记。
-3. **内容投影与文件生成**：实现跑团正文/全部记录 `LogProjection`、
-   `TextLogExporter` 与 `DocxLogExporter`，固定快照与逐 artifact 结果记录。
-4. **玩家指令与群文件交付**：按第 1 章重写命令入口，接入标准导出和每个
-   artifact 的 QQ 群文件真实交付结果；对 HTML 返回明确的暂不支持提示。
-5. **Web 发布**：实现显式 `web` / 只读 `link` 的 `LogPublisher`，只使用 mock HTTP
-   验证网络边界。
-6. **清理与总验收**：删除旧同步裸函数调用、空 payload loader、旧统计、论坛代码
-   和旧状态命令路径；运行 Log 单元/集成测试、schema 重建测试、指令 E2E 与
-   受影响回归测试。
-
-各阶段的开发、测试与独立审查可交由分工明确的 subagent 执行；集成负责人只在
-检查 diff、用户行为、数据不变量与验证结果后接受该阶段。并行任务必须划分不重叠的
-文件所有权，提交按阶段串行完成。
-
-后续再独立实现图片归档与单文件 `HtmlLogExporter`，完成后把 HTML 加入标准导出。
-不恢复旧同步 bridge，也不为已损坏的 Log 功能建立过渡兼容层。
-
----
-
-## 18. 完成标准
-
-- `log_command.py` 不再引用已删除的同步 DB 函数。
 - 所有 DB、昵称、网络和导出异步调用正确 await。
 - Bot 重启后当前日志和 recording 状态正确恢复。
 - 玩家骰点指令与 Bot 结果均被记录。
@@ -1187,4 +1086,9 @@ off 期间发言
 - 核心生命周期拥有一条真实 E2E 测试。
 - 已知旧损坏 Log 表结构会在事务中破坏性重建，不保留旧业务数据。
 - 重建后的数据库再次启动不会重复清空，当前日志、recording 和 records 继续保留。
-- HTML 第一阶段不实现；后续提供内嵌 CSS 与图片的单个 `.html`，并加入标准导出。
+- 配置兼容只负责把旧 `upload_*` 键整理到 `log.web`；不得恢复默认上传行为。
+- 旧指令只返回迁移提示，不得成为隐藏的业务别名。
+- 新格式必须复用 `LogProjection`、稳定快照和逐 artifact 审计，不得在 Command 中复制
+  内容筛选、文件生成或网络逻辑。
+- HTML 当前未启用；未来启用时提供内嵌 CSS 与图片的单个 `.html`，并加入标准导出。
+- 图片归档扩展不得改变现有 records 语义，也不得默认开启不受限的二进制下载。
