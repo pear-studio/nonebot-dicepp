@@ -322,7 +322,6 @@ class NoneBotClientProxy(ClientProxy):
                             requested_folder=folder_name,
                         )
                     )
-                    await self._dispatch_file_post_send(target.group_id, real_name)
                     continue
 
             try:
@@ -370,34 +369,11 @@ class NoneBotClientProxy(ClientProxy):
                     requested_folder=folder_name,
                 )
             )
-            await self._dispatch_file_post_send(target.group_id, real_name)
 
         return BotCommandDispatchResult(
             command=command,
             file_deliveries=tuple(deliveries),
         )
-
-    async def _dispatch_file_post_send(self, group_id: str, real_name: str) -> None:
-        try:
-            await _trigger_post_send_hooks(
-                all_bots,
-                self.bot.self_id,
-                PostSendEvent(
-                    group_id=group_id,
-                    user_id=str(self.bot.self_id),
-                    role="assistant",
-                    message_type="file",
-                    content=f"[文件]{real_name}",
-                    display_name="我",
-                    platform_message_id=None,
-                    history_stream_id=None,
-                ),
-            )
-        except Exception as exc:
-            logger.warning(
-                f"[OneBot][Upload][PostSendHookFail] "
-                f"group={group_id} file={real_name} err={exc}"
-            )
 
     async def _handle_delay(self, command: BotDelayCommand) -> None:
         await asyncio.sleep(command.seconds)

@@ -31,8 +31,10 @@ def _proxy():
 
 
 @pytest.mark.asyncio
-async def test_folder_upload_success_returns_folder_delivery():
+async def test_folder_upload_success_returns_delivery_without_post_send_event(monkeypatch):
     proxy, bot = _proxy()
+    post_send = AsyncMock()
+    monkeypatch.setattr(nonebot_adapter, "_trigger_post_send_hooks", post_send)
     bot.call_api.side_effect = [
         {"folders": [{"folder_name": "跑团log", "folder_id": "folder-1"}]},
         None,
@@ -55,6 +57,7 @@ async def test_folder_upload_success_returns_folder_delivery():
         name="log.txt",
         folder="folder-1",
     )
+    post_send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -78,8 +81,10 @@ async def test_direct_root_upload_success_returns_root_delivery():
 
 
 @pytest.mark.asyncio
-async def test_missing_folder_falls_back_to_root():
+async def test_missing_folder_falls_back_without_post_send_event(monkeypatch):
     proxy, bot = _proxy()
+    post_send = AsyncMock()
+    monkeypatch.setattr(nonebot_adapter, "_trigger_post_send_hooks", post_send)
     bot.call_api.side_effect = [{"folders": []}, None]
     command = BotSendFileCommand(
         "42",
@@ -97,6 +102,7 @@ async def test_missing_folder_falls_back_to_root():
         file="C:/tmp/log.txt",
         name="log.txt",
     )
+    post_send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -121,8 +127,10 @@ async def test_folder_upload_failure_falls_back_to_root():
 
 
 @pytest.mark.asyncio
-async def test_folder_and_root_failures_remain_failed_after_notice_succeeds():
+async def test_file_upload_failure_returns_failed_without_post_send_event(monkeypatch):
     proxy, bot = _proxy()
+    post_send = AsyncMock()
+    monkeypatch.setattr(nonebot_adapter, "_trigger_post_send_hooks", post_send)
     bot.call_api.side_effect = [
         {"folders": [{"folder_name": "跑团log", "folder_id": "folder-1"}]},
         RuntimeError("folder upload failed"),
@@ -146,6 +154,7 @@ async def test_folder_and_root_failures_remain_failed_after_notice_succeeds():
         group_id=104,
         message="文件发送失败！",
     )
+    post_send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -189,25 +198,3 @@ async def test_multiple_targets_are_delivered_independently_in_order():
         group_id=302,
         message="文件发送失败！",
     )
-
-
-@pytest.mark.asyncio
-async def test_post_send_failure_does_not_replace_success_or_stop_later_targets(
-    monkeypatch,
-):
-    proxy, bot = _proxy()
-    bot.call_api.return_value = None
-    post_send = AsyncMock(side_effect=[RuntimeError("hook failed"), None])
-    monkeypatch.setattr(nonebot_adapter, "_trigger_post_send_hooks", post_send)
-    targets = [GroupMessagePort("401"), GroupMessagePort("402")]
-    command = BotSendFileCommand("42", "C:/tmp/log.txt", "log.txt", targets)
-
-    result = await proxy.process_bot_command(command)
-
-    assert [item.target for item in result.file_deliveries] == targets
-    assert [item.outcome for item in result.file_deliveries] == [
-        FileDeliveryOutcome.ROOT_SUCCESS,
-        FileDeliveryOutcome.ROOT_SUCCESS,
-    ]
-    assert bot.call_api.await_count == 2
-    assert post_send.await_count == 2
