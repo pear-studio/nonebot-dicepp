@@ -506,6 +506,11 @@ class Conversation:
                 tool_calls = m.get("tool_calls")
                 if tool_calls:
                     messages_total += estimate_tokens(json.dumps(tool_calls, ensure_ascii=False))
+                provider_context = m.get("_provider_context")
+                if isinstance(provider_context, dict):
+                    messages_total += estimate_tokens(json.dumps(
+                        provider_context, ensure_ascii=False,
+                    ))
             if messages_total > token_budget:
                 return ConversationRunResult(
                     final_reason="rotation_needed",
@@ -695,6 +700,11 @@ class Conversation:
                 for p in content:
                     if isinstance(p, dict):
                         total += estimate_tokens(p.get("text", ""))
+            provider_context = msg.get("_provider_context")
+            if isinstance(provider_context, dict):
+                total += estimate_tokens(json.dumps(
+                    provider_context, ensure_ascii=False,
+                ))
         return int(total)
 
     def render(self, system_prompt: str) -> List[dict]:

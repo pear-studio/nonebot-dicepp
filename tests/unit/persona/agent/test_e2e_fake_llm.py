@@ -28,6 +28,8 @@ from plugins.DicePP.module.persona.agent.runtime_types import (
     ToolSpec,
 )
 from plugins.DicePP.module.persona.agent.loop import AgentLoop
+from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventStore
+from plugins.DicePP.module.persona.agent.llm_gateway import LLMGatewayResult
 from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
 from plugins.DicePP.module.persona.agent.state import AgentRunState
 from plugins.DicePP.module.persona.llm.selection import CHAT
@@ -46,11 +48,19 @@ class FakeLLMGateway:
 
     async def complete(self, *, request, state, timeout=None, run_id=""):
         if self.call_count >= len(self.responses):
-            content, tool_calls = "", []
+            response = LLMGatewayResult(
+                content="", tool_calls=[], usage={},
+                provider="fake", model="fake-model",
+            )
         else:
-            content, tool_calls = self.responses[self.call_count]
+            response = self.responses[self.call_count]
         self.requests.append(request)
         self.call_count += 1
+
+        if isinstance(response, LLMGatewayResult):
+            return response
+
+        content, tool_calls = response
 
         class R:
             pass
@@ -61,6 +71,7 @@ class FakeLLMGateway:
         r.model = "fake-model"
         r.usage = {"input": 10, "output": 20, "cache_read": 0}
         r.reasoning_content = None
+        r.finish_reason = "tool_calls" if r.tool_calls else "stop"
         return r
 
 
@@ -366,7 +377,7 @@ class TestOutputSpecCorrection:
 
     @pytest.mark.asyncio
     async def test_direct_text_triggers_correction(self):
-        """模型直接文本（不调用 output 工具）→ 注入纠正消息"""
+        """直接文本完整进入纠错上下文，但只有显式 output 工具提交被接受。"""
         output_spec = OutputSpec(
             name="say",
             description="输出你的发言",
@@ -376,11 +387,29 @@ class TestOutputSpecCorrection:
         # Round 1: 模型直接文本 → 纠正
         # Round 2: 模型调用 say → 成功
         fake_llm = FakeLLMGateway([
-            ("直接回复文本（不调用工具）", []),
-            ("", [_make_tc(0, "say", {"content": "正确输出"})]),
+            LLMGatewayResult(
+                content="直接回复文本（不调用工具）",
+                tool_calls=[],
+                usage={"input": 10, "output": 20},
+                provider="provider-a",
+                model="model-a",
+                reasoning_content="先直接回答试试",
+                finish_reason="stop",
+            ),
+            LLMGatewayResult(
+                content="",
+                tool_calls=[_make_tc(0, "say", {"content": "正确输出"})],
+                usage={"input": 12, "output": 8},
+                provider="provider-a",
+                model="model-a",
+                finish_reason="tool_calls",
+            ),
         ])
 
-        loop = AgentLoop(llm_gateway=fake_llm)
+        event_store = MagicMock(spec=EventStore)
+        event_store.write_event = AsyncMock()
+        event_bus = AgentEventBus(event_store=event_store)
+        loop = AgentLoop(llm_gateway=fake_llm, event_bus=event_bus)
         buffer = MessageBuffer.from_initial([
             {"role": "system", "content": "sys"}, {"role": "user", "content": "hi"},
         ])
@@ -397,12 +426,256 @@ class TestOutputSpecCorrection:
         assert result.completion.code == "output_collected"
         assert result.output.arguments["content"] == "正确输出"
 
-        # message_delta 中应包含纠正用户消息（[系统指令] 前缀，role=user）
+        # 第二轮必须在同一个前缀之后看到完整模型轮，再看到纠正指令。
+        second_messages = fake_llm.requests[1].messages
+        first_turn, correction = second_messages[-2:]
+        assert first_turn["role"] == "assistant"
+        assert first_turn["content"] == "直接回复文本（不调用工具）"
+        provider_context = first_turn["_provider_context"]
+        assert provider_context["provider"] == "provider-a"
+        assert provider_context["model"] == "model-a"
+        assert provider_context["finish_reason"] == "stop"
+        assert provider_context["reasoning_content"] == "先直接回答试试"
+        assert correction["role"] == "user"
+        assert correction["content"].startswith("[系统指令]")
+        assert "你必须调用 say" in correction["content"]
+        assert fake_llm.requests[1].preferred_provider == "provider-a"
+        assert fake_llm.requests[1].preferred_model == "model-a"
+
+        # 完整纠错轨迹会作为成功 run 的 message_delta 返回。
         delta = result.message_delta
-        user_msgs = [m for m in delta if m["role"] == "user"]
-        correction_msgs = [m for m in user_msgs if "[系统指令]" in str(m.get("content", ""))]
-        assert len(correction_msgs) >= 1
-        assert "你必须调用" in str(correction_msgs[0]["content"])
+        assert [m["role"] for m in delta] == [
+            "assistant", "user", "assistant", "tool",
+        ]
+        assert result.output.text is None
+
+        written_events = [call.args[0] for call in event_store.write_event.await_args_list]
+        corrections = [e for e in written_events if e.event_type == "CorrectionInjected"]
+        warnings = [e for e in written_events if e.event_type == "AgentWarning"]
+        assert len(corrections) == 1
+        assert warnings == []
+        assert state.warning_count == 0
+
+    @pytest.mark.asyncio
+    async def test_correction_exhaustion_emits_warning(self):
+        """可恢复纠正不算 warning，只有预算耗尽的终止异常才计数。"""
+        output_spec = OutputSpec(
+            name="say",
+            description="输出你的发言",
+            args_schema=_SayArgs,
+        )
+        fake_llm = FakeLLMGateway([
+            ("第一次直接回复", []),
+            ("第二次仍然直接回复", []),
+        ])
+        event_store = MagicMock(spec=EventStore)
+        event_store.write_event = AsyncMock()
+        state = _make_state()
+
+        result = await AgentLoop(
+            llm_gateway=fake_llm,
+            event_bus=AgentEventBus(event_store=event_store),
+        ).run(
+            buffer=MessageBuffer.from_initial([
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hi"},
+            ]),
+            state=state,
+            toolkit=ToolKit(),
+            output_spec=output_spec,
+            limits=LoopLimits(max_rounds=5, max_corrections=1),
+            selection=CHAT,
+            interaction_id="test",
+        )
+
+        assert result.completion.kind == "limit_reached"
+        assert result.completion.code == "max_corrections"
+        written_events = [call.args[0] for call in event_store.write_event.await_args_list]
+        assert len([e for e in written_events if e.event_type == "CorrectionInjected"]) == 1
+        warnings = [e for e in written_events if e.event_type == "AgentWarning"]
+        assert len(warnings) == 1
+        assert warnings[0].payload["code"] == "max_corrections"
+        assert state.warning_count == 1
+
+    @pytest.mark.asyncio
+    async def test_max_rounds_exhaustion_emits_warning(self):
+        """持续调用普通工具但不提交 output，轮次耗尽必须可观测。"""
+        event_store = MagicMock(spec=EventStore)
+        event_store.write_event = AsyncMock()
+        state = _make_state()
+        fake_llm = FakeLLMGateway([
+            ("", [_make_tc(0, "search", {})]),
+        ])
+        toolkit = ToolKit(tools={
+            "search": ToolSpec(
+                name="search",
+                description="搜索",
+                args_schema=type("Args", (BaseModel,), {}),
+                handler=_ok_handler,
+            ),
+        })
+
+        result = await AgentLoop(
+            llm_gateway=fake_llm,
+            event_bus=AgentEventBus(event_store=event_store),
+        ).run(
+            buffer=MessageBuffer.from_initial([
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "查完再回答"},
+            ]),
+            state=state,
+            toolkit=toolkit,
+            output_spec=OutputSpec(
+                name="say", description="输出", args_schema=_SayArgs,
+            ),
+            limits=LoopLimits(max_rounds=1, max_corrections=3),
+            selection=CHAT,
+            interaction_id="test",
+        )
+
+        assert result.completion.kind == "limit_reached"
+        assert result.completion.code == "max_rounds"
+        warnings = [
+            call.args[0]
+            for call in event_store.write_event.await_args_list
+            if call.args[0].event_type == "AgentWarning"
+        ]
+        assert [event.payload["code"] for event in warnings] == ["max_rounds"]
+        assert state.warning_count == 1
+
+    @pytest.mark.asyncio
+    async def test_normal_tool_turn_is_appended_once_before_tool_result(self):
+        """普通工具轮完整且只追加一次，fallback 成功后更新 Run 内模型亲和。"""
+        output_spec = OutputSpec(
+            name="say",
+            description="输出你的发言",
+            args_schema=_SayArgs,
+        )
+        fake_llm = FakeLLMGateway([
+            LLMGatewayResult(
+                content="先查一次",
+                tool_calls=[_make_tc(0, "search", {})],
+                usage={"input": 10, "output": 5},
+                provider="provider-a",
+                model="model-a",
+                reasoning_content="需要普通工具",
+                finish_reason="tool_calls",
+            ),
+            # 模拟 pinned provider 调用错误后由 Gateway 回退成功。
+            LLMGatewayResult(
+                content="再查一次",
+                tool_calls=[_make_tc(1, "search", {})],
+                usage={"input": 12, "output": 5},
+                provider="provider-b",
+                model="model-b",
+                reasoning_content="换模型后继续",
+                finish_reason="tool_calls",
+            ),
+            LLMGatewayResult(
+                content="",
+                tool_calls=[_make_tc(2, "say", {"content": "工具结果已确认"})],
+                usage={"input": 14, "output": 5},
+                provider="provider-b",
+                model="model-b",
+                finish_reason="tool_calls",
+            ),
+        ])
+        toolkit = ToolKit(tools={
+            "search": ToolSpec(
+                name="search",
+                description="搜索",
+                args_schema=type("Args", (BaseModel,), {}),
+                handler=_ok_handler,
+            ),
+        })
+
+        result = await AgentLoop(llm_gateway=fake_llm).run(
+            buffer=MessageBuffer.from_initial([
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "查完再回答"},
+            ]),
+            state=_make_state(),
+            toolkit=toolkit,
+            output_spec=output_spec,
+            limits=LoopLimits(max_rounds=5),
+            selection=CHAT,
+            interaction_id="test",
+        )
+
+        assert result.output.arguments["content"] == "工具结果已确认"
+        second_delta = fake_llm.requests[1].messages[2:]
+        assert [m["role"] for m in second_delta] == ["assistant", "tool"]
+        assert second_delta[0]["content"] == "先查一次"
+        assert second_delta[0]["_provider_context"]["reasoning_content"] == "需要普通工具"
+        assert second_delta[1] == {
+            "role": "tool", "tool_call_id": "call_0", "content": "ok",
+        }
+        assert sum(
+            msg.get("tool_calls", [{}])[0].get("id") == "call_0"
+            for msg in fake_llm.requests[2].messages
+            if msg.get("role") == "assistant" and msg.get("tool_calls")
+        ) == 1
+        assert fake_llm.requests[1].preferred_provider == "provider-a"
+        assert fake_llm.requests[1].preferred_model == "model-a"
+        assert fake_llm.requests[2].preferred_provider == "provider-b"
+        assert fake_llm.requests[2].preferred_model == "model-b"
+
+    @pytest.mark.asyncio
+    async def test_tool_limit_keeps_calls_paired_and_skipped_output_unaccepted(self):
+        """工具超限时每个 call 都有结果，被跳过的 output 不能完成 run。"""
+        fake_llm = FakeLLMGateway([
+            ("", [
+                _make_tc(0, "search", {}),
+                _make_tc(1, "search", {}),
+                _make_tc(2, "say", {"content": "不应接受"}),
+            ]),
+            ("", [_make_tc(3, "say", {"content": "最终答案"})]),
+        ])
+        toolkit = ToolKit(tools={
+            "search": ToolSpec(
+                name="search",
+                description="搜索",
+                args_schema=type("Args", (BaseModel,), {}),
+                handler=_ok_handler,
+            ),
+        })
+
+        result = await AgentLoop(llm_gateway=fake_llm).run(
+            buffer=MessageBuffer.from_initial([
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "查完再回答"},
+            ]),
+            state=_make_state(),
+            toolkit=toolkit,
+            output_spec=OutputSpec(
+                name="say", description="输出", args_schema=_SayArgs,
+            ),
+            limits=LoopLimits(max_rounds=3, max_tools_per_round=2),
+            selection=CHAT,
+            interaction_id="test",
+        )
+
+        assert result.output.arguments["content"] == "最终答案"
+        delta = result.message_delta
+        second_assistant = next(
+            i for i, message in enumerate(delta[1:], start=1)
+            if message["role"] == "assistant"
+        )
+        first_round = delta[:second_assistant]
+        call_ids = [
+            call["id"] for call in first_round[0]["tool_calls"]
+        ]
+        result_ids = [
+            message["tool_call_id"]
+            for message in first_round
+            if message["role"] == "tool"
+        ]
+        assert result_ids == call_ids
+        skipped = next(
+            message for message in first_round
+            if message.get("tool_call_id") == "call_2"
+        )
+        assert "未执行" in skipped["content"]
 
     @pytest.mark.asyncio
     async def test_output_none_direct_text_ok(self):

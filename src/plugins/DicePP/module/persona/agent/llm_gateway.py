@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import List, Mapping, Optional
 
 from utils.logger import logger
 
@@ -33,6 +33,8 @@ class LLMRequest:
     tools: Optional[List[dict]] = None
     temperature: Optional[float] = None
     selection: SelectionPolicy = CHAT
+    preferred_provider: str = ""
+    preferred_model: str = ""
 
     @property
     def tool_count(self) -> int:
@@ -53,6 +55,7 @@ class LLMGatewayResult:
     provider: str
     model: str
     reasoning_content: Optional[str] = None
+    finish_reason: str = ""
     error: Optional[str] = None
 
 
@@ -93,11 +96,23 @@ class LLMGateway:
             配额检查由调用方（AgentRuntime）负责，Gateway 层不做配额校验。
         """
         policy = request.selection
-        candidates = self._router.build_candidates(policy)
+        candidates = list(self._router.build_candidates(policy))
         if not candidates:
             raise ServiceUnavailableError(
                 f"没有可用的模型匹配 policy: {policy}"
             )
+
+        # 一次 Agent Run 在首次成功后粘住同一 candidate。
+        # 只有该 candidate 的实际调用报错后，下方既有 fallback
+        # 机制才可切换；不允许在轮次之间静默重新路由。
+        preferred = _preferred_candidate(request)
+        if preferred is not None:
+            if preferred not in candidates:
+                raise ServiceUnavailableError(
+                    f"当前 run 绑定的模型不再可用: "
+                    f"{preferred[0]}/{preferred[1]}"
+                )
+            candidates = [preferred, *[key for key in candidates if key != preferred]]
 
         last_error: Optional[str] = None
         total_candidates = len(candidates)
@@ -111,6 +126,9 @@ class LLMGateway:
             # 从 model_configs 读取 thinking 配置
             mconfig = self._router.get_model_config(key)
             thinking = mconfig.thinking if mconfig else False
+            provider_messages = _render_messages_for_candidate(
+                request.messages, provider_name, model_name,
+            )
 
             # 事件：候选选择
             await self._event_bus.emit(
@@ -129,7 +147,7 @@ class LLMGateway:
 
                 try:
                     resp = await provider.generate(
-                        messages=request.messages,
+                        messages=provider_messages,
                         tools=request.tools,
                         temperature=request.temperature,
                         timeout=timeout or self._router.timeout,
@@ -169,6 +187,7 @@ class LLMGateway:
                         provider_name=provider_name,
                         model_name=model_name,
                         total_candidates=total_candidates,
+                        messages=provider_messages,
                         error=f"{kind.value}: {e}",
                     )
                     raise ServiceUnavailableError(
@@ -206,7 +225,7 @@ class LLMGateway:
                     "ModelResponseReceived",
                     ModelResponseReceivedPayload(
                         round_index=state.tool_rounds,
-                        content_ignored=bool(tool_calls),
+                        content_ignored=False,
                         content_preview=content[:200],
                         tool_calls=[{"id": tc["id"], "name": tc["name"]}
                                     for tc in tool_calls],
@@ -226,6 +245,7 @@ class LLMGateway:
                     provider_name=provider_name,
                     model_name=model_name,
                     total_candidates=total_candidates,
+                    messages=provider_messages,
                     response=resp.content or "",
                     tool_calls=tool_calls,
                     latency_ms=int(resp.latency_ms) if resp.latency_ms is not None else None,
@@ -247,6 +267,7 @@ class LLMGateway:
                     provider=provider_name,
                     model=model_name,
                     reasoning_content=resp.reasoning_content,
+                    finish_reason=resp.finish_reason or "",
                 )
 
         # 注：for 循环必然通过 return（成功）或 raise（失败）退出，
@@ -262,6 +283,7 @@ class LLMGateway:
         provider_name: str,
         model_name: str,
         total_candidates: int,
+        messages: Optional[List[dict]] = None,
         response: str = "",
         tool_calls: Optional[List[dict]] = None,
         latency_ms: Optional[int] = None,
@@ -287,7 +309,10 @@ class LLMGateway:
                 run_id=run_id,
                 model=model_name,
                 tier=request.selection.category,
-                messages=json.dumps(request.messages, ensure_ascii=False),
+                messages=json.dumps(
+                    messages if messages is not None else request.messages,
+                    ensure_ascii=False,
+                ),
                 response=response,
                 tool_calls=json.dumps(
                     [{"id": tc["id"], "name": tc["name"], "arguments": tc.get("arguments", "")}
@@ -339,3 +364,52 @@ def _tool_choice_for(request: LLMRequest) -> Optional[str]:
     # thinking 模型不兼容 "required"，且 REQUIRED_ONE_OF 的强制语义
     # 由 AgentLoop L1 纠正 + 同名校验承担，层次更清晰。
     return "auto"
+
+
+def _preferred_candidate(request: LLMRequest) -> tuple[str, str] | None:
+    """返回 request 的 run 内 candidate 亲和键。
+
+    provider/model 必须同时存在；单边绑定会导致无法判定
+    provider-native 续接上下文是否兼容。
+    """
+    if not request.preferred_provider and not request.preferred_model:
+        return None
+    if not request.preferred_provider or not request.preferred_model:
+        raise ValueError("preferred_provider 和 preferred_model 必须同时设置")
+    return request.preferred_provider, request.preferred_model
+
+
+def _render_messages_for_candidate(
+    messages: List[dict], provider: str, model: str,
+) -> List[dict]:
+    """将 Runtime 消息渲染为单个 provider API 可接受的消息。
+
+    语义轨迹（content/tool_calls/tool result）始终保留。内部字段
+    一律不传给 API；只当来源 provider/model 与当前 candidate
+    完全一致时，才恢复当前支持的 ``reasoning_content``。
+    """
+    rendered_messages: List[dict] = []
+    public_fields = {
+        "role", "content", "name", "tool_calls", "tool_call_id",
+        "function_call",
+    }
+    for message in messages:
+        rendered = {
+            key: value
+            for key, value in message.items()
+            if key in public_fields
+        }
+        context = message.get("_provider_context")
+        compatible = (
+            isinstance(context, Mapping)
+            and context.get("provider") == provider
+            and context.get("model") == model
+        )
+        if compatible and message.get("role") == "assistant":
+            reasoning = context.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                rendered["reasoning_content"] = reasoning
+
+        rendered_messages.append(rendered)
+
+    return rendered_messages

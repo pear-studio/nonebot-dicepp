@@ -166,10 +166,11 @@ class ConversationStore(Store):
             await db.execute(
                 "INSERT INTO persona_session_message "
                 "(session_id, role, content, tool_calls, tool_call_id, name, "
-                " message_stream_id, entry_type, sequence) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " provider_context, message_stream_id, entry_type, sequence) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (sid, f["role"], f["content"], f["tool_calls"], f["tool_call_id"],
-                 f["name"], f["message_stream_id"], f["entry_type"], seq),
+                 f["name"], f["provider_context"], f["message_stream_id"],
+                 f["entry_type"], seq),
             )
         await db.commit()
         return str(sid)
@@ -199,12 +200,13 @@ class ConversationStore(Store):
                 await db.execute(
                     "INSERT INTO persona_session_message "
                     "(session_id, role, content, tool_calls, tool_call_id, name, "
-                    " message_stream_id, entry_type, sequence) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, "
+                    " provider_context, message_stream_id, entry_type, sequence) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "
                     " (SELECT COALESCE(MAX(sequence), -1) + 1 "
                     "  FROM persona_session_message WHERE session_id=?))",
                     (sid, f["role"], f["content"], f["tool_calls"], f["tool_call_id"],
-                     f["name"], f["message_stream_id"], f["entry_type"], sid),
+                     f["name"], f["provider_context"], f["message_stream_id"],
+                     f["entry_type"], sid),
                 )
             # 刷新会话活跃时间。加 status='active' 过滤：run() 的 _persist_new 不持 per-scope
             # 锁，可能在并发 close/rotate 把 session 标记 closed 之后才落到这里；此时不应把已
@@ -251,7 +253,7 @@ class ConversationStore(Store):
 
         msg_cursor = await db.execute(
             "SELECT role, content, tool_calls, tool_call_id, name, "
-            "message_stream_id, entry_type "
+            "provider_context, message_stream_id, entry_type "
             "FROM persona_session_message WHERE session_id=? ORDER BY sequence",
             (sid,),
         )
@@ -305,7 +307,8 @@ def _decompose_message(msg: dict) -> dict:
     if entry_type == ENTRY_TYPE_REF:
         return {
             "role": role, "content": "", "tool_calls": "", "tool_call_id": "",
-            "name": None, "message_stream_id": msg.get("message_stream_id"),
+            "name": None, "provider_context": "",
+            "message_stream_id": msg.get("message_stream_id"),
             "entry_type": ENTRY_TYPE_REF,
         }
     content = msg.get("content", "")
@@ -321,10 +324,16 @@ def _decompose_message(msg: dict) -> dict:
         tool_calls = _serialize_plain_string_if_ambiguous(tool_calls)
     elif tool_calls:
         tool_calls = _SERIALIZED_PREFIX + json.dumps(tool_calls, ensure_ascii=False)
+    provider_context = msg.get("_provider_context")
+    if isinstance(provider_context, dict) and provider_context:
+        provider_context_raw = json.dumps(provider_context, ensure_ascii=False)
+    else:
+        provider_context_raw = ""
     return {
         "role": role, "content": content,
         "tool_calls": tool_calls or "", "tool_call_id": msg.get("tool_call_id", "") or "",
-        "name": msg.get("name"), "message_stream_id": None,
+        "name": msg.get("name"), "provider_context": provider_context_raw,
+        "message_stream_id": None,
         "entry_type": ENTRY_TYPE_OWN,
     }
 
@@ -343,8 +352,9 @@ def _recompose_message(row) -> dict:
     tool_calls = _cell(row, 2, "tool_calls")
     tool_call_id = _cell(row, 3, "tool_call_id")
     name = _cell(row, 4, "name")
-    msid = _cell(row, 5, "message_stream_id")
-    entry_type = _cell(row, 6, "entry_type") or ENTRY_TYPE_OWN
+    provider_context_raw = _cell(row, 5, "provider_context")
+    msid = _cell(row, 6, "message_stream_id")
+    entry_type = _cell(row, 7, "entry_type") or ENTRY_TYPE_OWN
     if entry_type == ENTRY_TYPE_REF:
         return {
             "role": role,
@@ -361,6 +371,13 @@ def _recompose_message(row) -> dict:
         out["tool_call_id"] = tool_call_id
     if name:
         out["name"] = name
+    if provider_context_raw:
+        try:
+            provider_context = json.loads(provider_context_raw)
+        except (TypeError, json.JSONDecodeError):
+            provider_context = None
+        if isinstance(provider_context, dict):
+            out["_provider_context"] = provider_context
     return out
 
 

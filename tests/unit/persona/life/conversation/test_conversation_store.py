@@ -63,6 +63,7 @@ class TestConversationStore:
                 tool_calls TEXT DEFAULT '',
                 tool_call_id TEXT DEFAULT '',
                 name TEXT,
+                provider_context TEXT NOT NULL DEFAULT '',
                 message_stream_id INTEGER,
                 entry_type TEXT NOT NULL DEFAULT 'own',
                 sequence INTEGER DEFAULT 0,
@@ -437,6 +438,26 @@ class TestStoreRoundtripRuntimeShapes:
         c = restored.messages[0].get("content")
         assert isinstance(c, list), f"多模态 content 应为 list，实际为 {type(c).__name__}"
         assert c[0]["type"] == "text"
+
+    @pytest.mark.asyncio
+    async def test_provider_context_roundtrip(self, conv_store):
+        """模型续接元数据跨 Conversation 落库/重载后不丢失。"""
+        provider_context = {
+            "provider": "deepseek",
+            "model": "deepseek-reasoner",
+            "finish_reason": "stop",
+            "reasoning_content": "先检索群聊事实",
+            "message_fields": {},
+        }
+        sid = await conv_store.put("", self._snap(messages=[{
+            "role": "assistant",
+            "content": "蓝色柜子",
+            "_provider_context": provider_context,
+        }]))
+
+        restored = await conv_store.get(sid)
+
+        assert restored.messages[0]["_provider_context"] == provider_context
 
     @pytest.mark.asyncio
     async def test_content_plain_text_unchanged(self, conv_store):

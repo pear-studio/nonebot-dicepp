@@ -19,17 +19,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-import uuid
 from collections import Counter
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from utils.logger import logger
 
 from .event_bus import AgentEventBus
 from .events import (
     AgentWarningPayload,
+    CorrectionInjectedPayload,
 )
 from .llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
 from .message_buffer import MessageBuffer
@@ -39,6 +38,7 @@ from .runtime_types import (
     BillingEntry,
     BillingSummary,
     LoopLimits,
+    ModelTurn,
     OutputSpec,
     RunCompletion,
     RunOutput,
@@ -114,6 +114,8 @@ class AgentLoop:
                 tools=llm_tools if llm_tools else None,
                 temperature=None,
                 selection=selection,
+                preferred_provider=provider,
+                preferred_model=model,
             )
 
             # LLM 调用
@@ -138,10 +140,22 @@ class AgentLoop:
             model = result.model
 
             content = result.content or ""
-            tool_calls = result.tool_calls
+            all_tool_calls = list(result.tool_calls)
+
+            # 模型响应是一个完整的 assistant turn。必须先记录，
+            # 再解释其中的工具调用或决定是否纠错；否则模型的
+            # 直接文本/思考会从纠错轮上下文中消失。
+            buffer.add_model_turn(ModelTurn(
+                content=content,
+                tool_calls=all_tool_calls,
+                reasoning_content=getattr(result, "reasoning_content", None),
+                provider=provider,
+                model=model,
+                finish_reason=getattr(result, "finish_reason", "") or "",
+            ))
 
             # ── 无工具调用时的处理 ──
-            if not tool_calls:
+            if not all_tool_calls:
                 if output_spec is None:
                     if content.strip():
                         # 允许直接文本完成
@@ -171,12 +185,24 @@ class AgentLoop:
                     # output 必需但模型给了直接文本/空响应 → correction
                     if correction_streak < limits.max_corrections:
                         correction_streak += 1
-                        self._inject_correction(
-                            buffer, correction_streak,
-                            f"你必须调用 {output_spec.name} 来提交最终结果，不要直接回复文本。",
+                        await self._inject_correction(
+                            buffer=buffer,
+                            state=state,
+                            reason="output_tool_required",
+                            round_index=round_idx,
+                            text=(
+                                f"你必须调用 {output_spec.name} 来提交最终结果，"
+                                "不要直接回复文本。"
+                            ),
                         )
                         continue
                     else:
+                        await self._emit_warning(
+                            state=state,
+                            code="max_corrections",
+                            message="output correction 耗尽",
+                            round_index=round_idx,
+                        )
                         return RunResult(
                             run_id=state.run_id,
                             interaction_id=interaction_id,
@@ -190,38 +216,41 @@ class AgentLoop:
                         )
 
             # ── 截断工具调用数 ──
-            if len(tool_calls) > limits.max_tools_per_round:
-                tool_calls = tool_calls[:limits.max_tools_per_round]
-
-            # ── 追加 assistant 消息 ──
-            assistant_msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": content,
-                "tool_calls": [
-                    {"id": tc["id"], "type": "function",
-                     "function": {"name": tc["name"], "arguments": tc["arguments"]}}
-                    for tc in tool_calls
-                ],
-            }
-            buffer.add_message(assistant_msg)
+            tool_calls = all_tool_calls[:limits.max_tools_per_round]
+            skipped_tool_calls = all_tool_calls[limits.max_tools_per_round:]
 
             # ── call_index 分配 ──
             call_index_map: dict[str, int] = {}
-            for i, tc in enumerate(tool_calls):
+            for i, tc in enumerate(all_tool_calls):
                 call_index_map[tc["id"]] = i
 
             # ── same_name_index 计算 ──
             name_counter: Counter[str] = Counter()
             same_name_map: dict[str, int] = {}
-            for tc in tool_calls:
+            for tc in all_tool_calls:
                 name_counter[tc["name"]] += 1
                 same_name_map[tc["id"]] = name_counter[tc["name"]] - 1
 
             # ── 分流：output vs 普通工具（并发执行普通工具）──
-            tool_results: list[dict] = []  # [{tool_call_id, content, status, _is_output, _call_index}]
+            tool_results: list[dict] = [
+                {
+                    "tool_call_id": tc["id"],
+                    "content": (
+                        "未执行：超过本轮允许的工具调用数上限 "
+                        f"({limits.max_tools_per_round})"
+                    ),
+                    "status": "error",
+                    "_is_output": bool(
+                        output_collector is not None
+                        and tc["name"] == output_collector.name
+                    ),
+                    "_call_index": call_index_map[tc["id"]],
+                }
+                for tc in skipped_tool_calls
+            ]  # [{tool_call_id, content, status, _is_output, _call_index}]
             # 同轮多次 output 时，最后一个成功 output 是 candidate
             candidate_output_idx: int | None = None
-            any_tool_error = False
+            any_tool_error = bool(skipped_tool_calls)
 
             # 第一遍：分类为 output 或普通工具；output 本地解析，普通工具收集执行任务
             output_tasks: list[dict] = []
@@ -341,6 +370,7 @@ class AgentLoop:
                 })
 
             round_idx += 1
+            state.tool_rounds = round_idx
 
             # ── correction streak 管理 ──
             if any_tool_error or output_invalidated_by_ordering:
@@ -366,14 +396,26 @@ class AgentLoop:
                     and round_idx >= limits.max_rounds - 1
                     and not output_accepted_this_round
                     and correction_streak < limits.max_corrections):
-                self._inject_correction(
-                    buffer, correction_streak + 1,
-                    f"这是最后一轮，你必须调用 {output_spec.name} 提交最终结果。",
+                await self._inject_correction(
+                    buffer=buffer,
+                    state=state,
+                    reason="final_output_reminder",
+                    round_index=round_idx,
+                    text=(
+                        f"这是最后一轮，你必须调用 "
+                        f"{output_spec.name} 提交最终结果。"
+                    ),
                 )
                 correction_streak += 1
 
             # ── correction streak 耗尽 ──
             if correction_streak >= limits.max_corrections and output_spec is not None and final_output is None:
+                await self._emit_warning(
+                    state=state,
+                    code="max_corrections",
+                    message="连续纠错预算耗尽",
+                    round_index=round_idx,
+                )
                 return RunResult(
                     run_id=state.run_id,
                     interaction_id=interaction_id,
@@ -387,6 +429,12 @@ class AgentLoop:
                 )
 
         # ── max_rounds 耗尽 ──
+        await self._emit_warning(
+            state=state,
+            code="max_rounds",
+            message="模型调用轮次预算耗尽",
+            round_index=round_idx,
+        )
         return RunResult(
             run_id=state.run_id,
             interaction_id=interaction_id,
@@ -436,13 +484,49 @@ class AgentLoop:
             logger.warning(f"[AgentLoop] 工具 {spec.name} 执行失败: {e}")
             return ToolResult(observation=f"工具执行失败: {e}", status="error")
 
-    @staticmethod
-    def _inject_correction(
-        buffer: MessageBuffer, streak: int, text: str,
+    async def _inject_correction(
+        self,
+        *,
+        buffer: MessageBuffer,
+        state: AgentRunState,
+        reason: str,
+        round_index: int,
+        text: str,
     ) -> None:
-        """注入纠正消息到 buffer"""
+        """注入纠正消息并记录结构化事件。"""
         msg = make_sys_msg(text)
         buffer.add_message(msg)
+        if self._event_bus is not None:
+            await self._event_bus.emit(
+                "CorrectionInjected",
+                CorrectionInjectedPayload(
+                    reason=reason,
+                    round_index=round_index,
+                    message=msg["content"],
+                ),
+                state,
+            )
+
+    async def _emit_warning(
+        self,
+        *,
+        state: AgentRunState,
+        code: str,
+        message: str,
+        round_index: int,
+    ) -> None:
+        """记录会影响 run 终态的警告。"""
+        state.warning_count += 1
+        if self._event_bus is not None:
+            await self._event_bus.emit(
+                "AgentWarning",
+                AgentWarningPayload(
+                    code=code,
+                    message=message,
+                    round_index=round_index,
+                ),
+                state,
+            )
 
     @staticmethod
     def _accumulate_billing(

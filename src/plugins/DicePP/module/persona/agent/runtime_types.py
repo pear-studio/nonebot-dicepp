@@ -15,6 +15,57 @@ from pydantic import BaseModel, Field
 from ..llm.selection import CHAT, SelectionPolicy
 
 
+@dataclass(frozen=True)
+class ModelTurn:
+    """一次成功模型调用的结构化 assistant turn。
+
+    ``content`` 和 ``reasoning_content`` 始终分层保存。后者以内部
+    provider context 形式进入 MessageBuffer，只由 LLMGateway 在续接
+    相同 provider/model 时恢复，不会拼接到用户可见正文。
+
+    当前只保存 DeepSeek/OpenAI-compatible 路径稳定提供的字段，
+    不尝试透传其他 provider 的私有消息结构。
+    """
+
+    content: str = ""
+    tool_calls: list[dict] = field(default_factory=list)
+    reasoning_content: str | None = None
+    provider: str = ""
+    model: str = ""
+    finish_reason: str = ""
+
+    def to_message(self) -> dict[str, Any]:
+        """转换为 Runtime/Conversation 保存的 assistant 消息。
+
+        ``_provider_context`` 是 Runtime 内部字段；Gateway 向 API 发送前
+        必须移除它，并只为兼容 candidate 恢复所需续接字段。
+        """
+        message: dict[str, Any] = {
+            "role": "assistant",
+            "content": self.content,
+        }
+        if self.tool_calls:
+            message["tool_calls"] = [
+                {
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                    },
+                }
+                for tc in self.tool_calls
+            ]
+
+        message["_provider_context"] = {
+            "provider": self.provider,
+            "model": self.model,
+            "finish_reason": self.finish_reason,
+            "reasoning_content": self.reasoning_content,
+        }
+        return message
+
+
 # ── T5 业务 OutputSpec args schemas ─────────────────────────────────
 
 

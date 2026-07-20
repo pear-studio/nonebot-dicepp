@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .runtime_types import ModelTurn
+
 
 @dataclass
 class MessageBuffer:
@@ -26,6 +28,10 @@ class MessageBuffer:
 
     def add_messages(self, msgs: list[dict]) -> None:
         self._delta.extend(msgs)
+
+    def add_model_turn(self, turn: ModelTurn) -> None:
+        """追加一个完整的结构化 assistant turn。"""
+        self._delta.append(turn.to_message())
 
     def get_messages(self) -> list[dict]:
         """返回完整消息列表（initial + delta）"""

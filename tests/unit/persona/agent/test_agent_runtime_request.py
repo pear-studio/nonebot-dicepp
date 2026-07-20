@@ -478,6 +478,47 @@ class TestMultimodalObservation:
 
 class TestTerminalEvent:
     @pytest.mark.asyncio
+    async def test_runtime_injects_sys_instruction_notice_without_mutating_request(self):
+        """Runtime 向实际模型上下文注入说明，同时保持调用方消息不可变。"""
+        from unittest.mock import patch
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from plugins.DicePP.module.persona.llm.router import LLMRouter
+        from plugins.DicePP.module.persona.agent.sys_instruction import SYS_INSTRUCTION_NOTICE
+
+        store = Mock(spec=PersonaDataStore)
+        store.insert_agent_run = AsyncMock()
+        store.update_agent_run = AsyncMock()
+        store.insert_agent_event = AsyncMock()
+        runtime = AgentRuntime(router=Mock(spec=LLMRouter), store=store)
+        original_messages = [
+            {"role": "system", "content": "你是测试角色"},
+            {"role": "user", "content": "你好"},
+        ]
+        request = AgentRunRequest(
+            interaction_id="i_test",
+            messages=original_messages,
+            tools=ToolKit(),
+            output=None,
+            selection=CHAT,
+            limits=LoopLimits(max_rounds=3, max_corrections=2),
+            metadata=RunMetadata(agent_name="test", run_tag="test"),
+        )
+        fake_result = AgentRunResult(
+            run_id="r_test",
+            interaction_id="i_test",
+            completion=RunCompletion(kind="completed", code="direct_content"),
+            output=RunOutput(text="hello"),
+        )
+
+        mocked_run = AsyncMock(return_value=fake_result)
+        with patch.object(AgentLoop, "run", mocked_run):
+            await runtime.run(request)
+
+        runtime_messages = mocked_run.await_args.kwargs["buffer"].get_messages()
+        assert SYS_INSTRUCTION_NOTICE in runtime_messages[0]["content"]
+        assert original_messages[0]["content"] == "你是测试角色"
+
+    @pytest.mark.asyncio
     async def test_run_request_emits_terminal_event_on_completed(self):
         """AgentRuntime.run() 成功时 emit AgentRunFinished，RunSummarySink 更新状态。"""
         from unittest.mock import patch

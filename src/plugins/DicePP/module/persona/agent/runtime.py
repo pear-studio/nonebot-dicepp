@@ -25,6 +25,7 @@ from .runtime_types import (
 )
 from .sinks import RunSummarySink
 from .state import AgentRunState
+from .sys_instruction import inject_sys_notice
 
 
 def new_run_id() -> str:
@@ -75,7 +76,11 @@ class AgentRuntime:
             limits=self._limits,
         )
 
-        buffer = MessageBuffer.from_initial(request.messages)
+        # SYS_INSTRUCTION_NOTICE 只属于本次 Runtime 装配。复制消息
+        # dict 后再注入，避免原地污染 caller 持有的 request.messages。
+        initial_messages = [dict(message) for message in request.messages]
+        inject_sys_notice(initial_messages)
+        buffer = MessageBuffer.from_initial(initial_messages)
 
         await event_store.write_run(
             run_id=run_id, interaction_id=request.interaction_id,

@@ -10,6 +10,7 @@ from .runtime_types import (
     BillingEntry,
     BillingSummary,
     LoopLimits,
+    ModelTurn,
     OutputSpec,
     RunCompletion,
     RunMetadata,

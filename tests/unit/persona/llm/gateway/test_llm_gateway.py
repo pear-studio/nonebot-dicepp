@@ -144,6 +144,54 @@ class TestLLMGateway:
         assert result.provider == "p2"
 
     @pytest.mark.asyncio
+    async def test_preferred_candidate_stays_first_but_real_error_can_fallback(
+        self, gateway, mock_router,
+    ):
+        """Run 内亲和候选优先；真实调用错误仍允许回退到 Router 后续候选。"""
+        preferred = Mock()
+        preferred.generate = AsyncMock(side_effect=RuntimeError("timeout"))
+        fallback = Mock()
+        fallback.generate = AsyncMock(return_value=_make_llm_resp(content="fallback ok"))
+        # Router 本轮原始顺序发生变化，Gateway 仍应先尝试 Run 已选模型。
+        mock_router.build_candidates.return_value = [("p2", "m2"), ("p1", "m1")]
+        mock_router._model_providers = {
+            ("p1", "m1"): preferred,
+            ("p2", "m2"): fallback,
+        }
+        mock_router.stats = {
+            "p1": {"requests": 0, "errors": 0},
+            "p2": {"requests": 0, "errors": 0},
+        }
+        request = _make_request(
+            messages=[
+                {"role": "user", "content": "hi"},
+                {
+                    "role": "assistant",
+                    "content": "draft",
+                    "_provider_context": {
+                        "provider": "p1",
+                        "model": "m1",
+                        "reasoning_content": "private reasoning",
+                    },
+                },
+            ],
+            preferred_provider="p1",
+            preferred_model="m1",
+        )
+
+        result = await gateway.complete(request, _make_state())
+
+        preferred.generate.assert_awaited_once()
+        fallback.generate.assert_awaited_once()
+        preferred_turn = preferred.generate.await_args.kwargs["messages"][-1]
+        assert "_provider_context" not in preferred_turn
+        assert preferred_turn["reasoning_content"] == "private reasoning"
+        fallback_turn = fallback.generate.await_args.kwargs["messages"][-1]
+        assert fallback_turn == {"role": "assistant", "content": "draft"}
+        assert result.provider == "p2"
+        assert result.model == "m2"
+
+    @pytest.mark.asyncio
     async def test_all_candidates_fail(self, gateway, mock_router):
         provider1 = Mock()
         provider1.generate = AsyncMock(side_effect=RuntimeError("err1"))

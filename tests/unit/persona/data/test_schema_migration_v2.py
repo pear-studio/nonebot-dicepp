@@ -1,11 +1,11 @@
-"""Schema v2 迁移测试。
+"""Persona schema 迁移测试。
 
 覆盖真实的 v1→v2 升级路径与新建 v2 库：
 - 新列 scope_namespace/scope_key/message_stream_id/entry_type + summary_text
 - partial unique index 保证同 scope 至多一个 active
 - 旧的无 scope active 行被标记 legacy
 - summary_text 列存在且 DEFAULT ''
-- 迁移后元数据版本推进到 2
+- 迁移后元数据版本推进到最新版本
 """
 
 from __future__ import annotations
@@ -17,6 +17,9 @@ import pytest
 
 from plugins.DicePP.core.data.schema.lifecycle import ensure_schema_async
 from plugins.DicePP.module.persona.data.schema import PERSONA_TARGET
+from plugins.DicePP.module.persona.data.schema_sql import (
+    MIGRATE_PERSONA_V2_STATEMENTS,
+)
 
 # 迁移前（v1）的 persona_session / message 建表语句 —— 不含 scope/ref 列。
 V1_CREATE_SESSION = """
@@ -80,6 +83,21 @@ async def _build_v1_db(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
 
+async def _build_v2_db(conn: aiosqlite.Connection) -> None:
+    """构造只完成 v2 迁移、尚未包含 provider_context 的数据库。"""
+    await _build_v1_db(conn)
+    for statement in MIGRATE_PERSONA_V2_STATEMENTS:
+        await conn.execute(statement)
+    await conn.execute(
+        "UPDATE schema_metadata SET value='2' WHERE key='current_version'"
+    )
+    await conn.execute(
+        "INSERT INTO schema_migrations (version, name, applied_at) VALUES "
+        "(2, 'scope_ref_and_summary', '2026-01-02T00:00:00+00:00')"
+    )
+    await conn.commit()
+
+
 async def _columns(conn: aiosqlite.Connection, table: str) -> set[str]:
     async with conn.execute(f"PRAGMA table_info({table})") as cur:
         rows = await cur.fetchall()
@@ -95,19 +113,48 @@ def _col_name(row) -> str:
 
 
 class TestV2Migration:
+    async def test_v2_to_v3_adds_provider_context_without_losing_messages(self):
+        async with aiosqlite.connect(":memory:") as conn:
+            await _build_v2_db(conn)
+            await conn.execute(
+                "INSERT INTO persona_session "
+                "(user_id, character_id, scope_namespace, scope_key) "
+                "VALUES ('u1', 'c1', 'chat.private', 'u1')"
+            )
+            await conn.execute(
+                "INSERT INTO persona_session_message "
+                "(session_id, role, content, sequence) "
+                "VALUES (1, 'assistant', '已有回复', 0)"
+            )
+            await conn.commit()
+
+            result = await ensure_schema_async(conn, PERSONA_TARGET)
+
+            assert result.applied_versions == [3]
+            assert result.target_version == 3
+            assert "provider_context" in await _columns(
+                conn, "persona_session_message",
+            )
+            async with conn.execute(
+                "SELECT content, provider_context "
+                "FROM persona_session_message WHERE session_id=1"
+            ) as cursor:
+                row = await cursor.fetchone()
+            assert row == ("已有回复", "")
+
     async def test_migration_adds_scope_and_ref_columns(self):
         async with aiosqlite.connect(":memory:") as conn:
             await _build_v1_db(conn)
             result = await ensure_schema_async(conn, PERSONA_TARGET)
 
-            assert result.applied_versions == [2]
-            assert result.target_version == 2
+            assert result.applied_versions == [2, 3]
+            assert result.target_version == 3
 
             session_cols = await _columns(conn, "persona_session")
             assert {"scope_namespace", "scope_key", "summary_text"} <= session_cols
 
             message_cols = await _columns(conn, "persona_session_message")
-            assert {"message_stream_id", "entry_type"} <= message_cols
+            assert {"message_stream_id", "entry_type", "provider_context"} <= message_cols
 
     async def test_migration_marks_old_active_as_legacy(self):
         async with aiosqlite.connect(":memory:") as conn:
@@ -175,13 +222,13 @@ class TestV2Migration:
                 row = await cur.fetchone()
             assert row[0] == 3
 
-    async def test_fresh_v2_db_has_columns_and_unique_index(self, temp_db):
-        # temp_db 走 create_latest（v2），验证新建库与迁移库一致
+    async def test_fresh_db_has_columns_and_unique_index(self, temp_db):
+        # temp_db 走 create_latest，验证新建库与迁移库一致
         conn = temp_db.db
         session_cols = await _columns(conn, "persona_session")
         assert {"scope_namespace", "scope_key", "summary_text"} <= session_cols
         message_cols = await _columns(conn, "persona_session_message")
-        assert {"message_stream_id", "entry_type"} <= message_cols
+        assert {"message_stream_id", "entry_type", "provider_context"} <= message_cols
 
         await conn.execute(
             "INSERT INTO persona_session "

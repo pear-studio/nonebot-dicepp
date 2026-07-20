@@ -494,6 +494,20 @@ class TestConversationEstimateTokens:
         assert est > 0
         assert est < 10  # very short message
 
+    def test_estimate_includes_provider_reasoning(self):
+        conv = Conversation()
+        conv._messages.append({
+            "role": "assistant",
+            "content": "",
+            "_provider_context": {
+                "provider": "deepseek",
+                "model": "deepseek-reasoner",
+                "reasoning_content": "需要计入预算的推理内容" * 20,
+            },
+        })
+
+        assert conv.estimate_tokens() > 20
+
 
 class TestSnapshotSerialization:
     """Snapshot 序列化测试"""
@@ -1160,4 +1174,32 @@ class TestTokenBudget:
 
         assert result.final_reason == "rotation_needed", \
             f"期望 rotation_needed (tool_calls JSON 计入预算)，实际: {result.final_reason}"
+        runtime.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_provider_reasoning_counted_towards_token_budget(self):
+        """长期保存的 reasoning 不能绕过 Run 前 token 预算。"""
+        runtime = MagicMock()
+        runtime.run = AsyncMock()
+        conv = Conversation(runtime=runtime)
+        conv._id = "test03"
+        conv._messages.append({
+            "role": "assistant",
+            "content": "",
+            "_provider_context": {
+                "provider": "deepseek",
+                "model": "deepseek-reasoner",
+                "reasoning_content": "这是很长的模型推理轨迹" * 30,
+            },
+        })
+
+        result = await conv.run(
+            system_prompt="",
+            user_input="",
+            interaction_id="provider_context_budget",
+            record_user_input=False,
+            token_budget=20,
+        )
+
+        assert result.final_reason == "rotation_needed"
         runtime.run.assert_not_called()

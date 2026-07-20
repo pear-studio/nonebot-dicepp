@@ -394,6 +394,7 @@ CREATE TABLE IF NOT EXISTS persona_session_message (
     tool_calls TEXT DEFAULT '',
     tool_call_id TEXT DEFAULT '',
     name TEXT,
+    provider_context TEXT NOT NULL DEFAULT '',
     message_stream_id INTEGER,
     entry_type TEXT NOT NULL DEFAULT 'own',
     sequence INTEGER NOT NULL DEFAULT 0,
@@ -422,6 +423,13 @@ MIGRATE_PERSONA_V2_STATEMENTS = [
     CREATE_PERSONA_SESSION_ACTIVE_SCOPE_INDEX,
     CREATE_PERSONA_SESSION_SCOPE_INDEX,
     "ALTER TABLE persona_session ADD COLUMN summary_text TEXT NOT NULL DEFAULT '';",
+]
+
+
+# ── Schema v3 迁移：模型轮 provider 原生续接上下文 ─────────
+MIGRATE_PERSONA_V3_STATEMENTS = [
+    "ALTER TABLE persona_session_message "
+    "ADD COLUMN provider_context TEXT NOT NULL DEFAULT '';",
 ]
 
 
