@@ -14,6 +14,8 @@ class PostSendEvent:
     display_name: str
     platform_message_id: str | None
     history_stream_id: int | None
+    # 发送方会自行维护 Persona message_stream；其他发送后订阅者仍应处理本事件。
+    history_managed_by_sender: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,7 +8,7 @@ class SendPort(Protocol):
     最小行为契约：
     - 失败不抛异常，返回 bool 表示成功/失败
     - 群/私聊路由由实现自行处理
-    - skip_history_record 控制是否记录历史（语义由实现定义）
+    - skip_history_record 表示调用方自行维护 Persona 历史
     """
 
     async def send(

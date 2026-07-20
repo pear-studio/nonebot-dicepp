@@ -138,7 +138,7 @@ class NoneBotClientProxy(ClientProxy):
         raw_type = getattr(command, "message_type", None)
         msg_type_val = MessageType.from_str(raw_type).value if raw_type else "command"
         history_stream_id = getattr(command, "msg_id", None)
-        skip_hook = getattr(command, "skip_history_record", False)
+        history_managed_by_sender = getattr(command, "skip_history_record", False)
 
         for target in command.targets:
             if target.group_id:
@@ -147,46 +147,46 @@ class NoneBotClientProxy(ClientProxy):
                     f" msg_len={len(command.msg)}"
                 )
                 response = await self.bot.send_group_msg(group_id=int(target.group_id), message=CQMessage(command.msg))
-                if not skip_hook:
-                    await _trigger_post_send_hooks(
-                        all_bots,
-                        self.bot.self_id,
-                        PostSendEvent(
-                            group_id=target.group_id,
-                            user_id=str(self.bot.self_id),
-                            role="assistant",
-                            message_type=msg_type_val,
-                            content=command.msg,
-                            display_name="我",
-                            platform_message_id=_platform_message_id(
-                                response, operation="send_group_msg"
-                            ),
-                            history_stream_id=history_stream_id,
+                await _trigger_post_send_hooks(
+                    all_bots,
+                    self.bot.self_id,
+                    PostSendEvent(
+                        group_id=target.group_id,
+                        user_id=str(self.bot.self_id),
+                        role="assistant",
+                        message_type=msg_type_val,
+                        content=command.msg,
+                        display_name="我",
+                        platform_message_id=_platform_message_id(
+                            response, operation="send_group_msg"
                         ),
-                    )
+                        history_stream_id=history_stream_id,
+                        history_managed_by_sender=history_managed_by_sender,
+                    ),
+                )
             else:
                 logger.info(
                     f"[OneBot] send_private_msg -> user_id={target.user_id}"
                     f" msg_len={len(command.msg)}"
                 )
                 response = await self.bot.send_private_msg(user_id=int(target.user_id), message=CQMessage(command.msg))
-                if not skip_hook:
-                    await _trigger_post_send_hooks(
-                        all_bots,
-                        self.bot.self_id,
-                        PostSendEvent(
-                            group_id=None,
-                            user_id=target.user_id,
-                            role="assistant",
-                            message_type=msg_type_val,
-                            content=command.msg,
-                            display_name="我",
-                            platform_message_id=_platform_message_id(
-                                response, operation="send_private_msg"
-                            ),
-                            history_stream_id=history_stream_id,
+                await _trigger_post_send_hooks(
+                    all_bots,
+                    self.bot.self_id,
+                    PostSendEvent(
+                        group_id=None,
+                        user_id=target.user_id,
+                        role="assistant",
+                        message_type=msg_type_val,
+                        content=command.msg,
+                        display_name="我",
+                        platform_message_id=_platform_message_id(
+                            response, operation="send_private_msg"
                         ),
-                    )
+                        history_stream_id=history_stream_id,
+                        history_managed_by_sender=history_managed_by_sender,
+                    ),
+                )
 
     async def _handle_leave_group(self, command: BotLeaveGroupCommand) -> None:
         await self.bot.set_group_leave(group_id=int(command.target_group_id))

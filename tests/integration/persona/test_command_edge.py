@@ -131,6 +131,23 @@ class TestGroupChatRecorder(IsolatedAsyncioTestCase):
 
         self.store.add_message_stream.assert_not_awaited()
 
+    async def test_sender_managed_history_skips_duplicate_persona_write(self):
+        from core.communication import PostSendEvent
+
+        await self.cmd._group_chat_recorder(PostSendEvent(
+            group_id="g1",
+            user_id="u1",
+            role="assistant",
+            message_type="chat",
+            content="hello",
+            display_name="小明",
+            platform_message_id="platform-1",
+            history_stream_id=None,
+            history_managed_by_sender=True,
+        ))
+
+        self.store.add_message_stream.assert_not_awaited()
+
 
 @pytest.mark.unit
 class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):

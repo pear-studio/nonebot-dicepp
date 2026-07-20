@@ -46,10 +46,10 @@ class MessagePort(EventSharePort):
         （如 1s tick / LLM 流式响应）上叠加多次裸 await；
         如需 fire-and-forget 请自行 ``asyncio.create_task`` 包装。
 
-        分段调度器应显式传 skip_history_record=True，
-        把"分段消息不记历史"的决策留在分段域。
+        分段调度器应显式传 skip_history_record=True，表示由调用方在投递成功后
+        自行维护 Persona 历史；发送后事件仍会广播给 Log 等其他订阅者。
 
-        :param skip_history_record: None 时默认 False（不跳过历史）。群聊分段调度等特殊路径可显式传 True。
+        :param skip_history_record: None 时默认 False；True 表示调用方自行维护 Persona 历史。
         :param msg_id: message_stream 表中的行 ID，供 post_send_hook 使用。
         :param message_type: 消息类型，默认 CHAT。日报路径传 SYSTEM_LOG。
         """

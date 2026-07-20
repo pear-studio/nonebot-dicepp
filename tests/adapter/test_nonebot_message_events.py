@@ -61,6 +61,24 @@ async def test_onebot_send_uses_platform_ids_without_confusing_history_id(regist
 
 
 @pytest.mark.asyncio
+async def test_sender_managed_history_still_emits_post_send_event(registered_bot):
+    post_send_hook = AsyncMock()
+    registered_bot._post_send_hooks.append(post_send_hook)
+    nonebot = MagicMock()
+    nonebot.self_id = "42"
+    nonebot.send_group_msg = AsyncMock(return_value={"message_id": 703})
+    proxy = NoneBotClientProxy(nonebot)
+    command = BotSendMsgCommand("42", "Persona 回复", [GroupMessagePort("100")])
+    command.skip_history_record = True
+
+    await proxy._handle_send_msg(command)
+
+    event = post_send_hook.await_args.args[0]
+    assert event.platform_message_id == "703"
+    assert event.history_managed_by_sender is True
+
+
+@pytest.mark.asyncio
 async def test_failed_onebot_send_does_not_trigger_post_send_hook(registered_bot):
     post_send_hook = AsyncMock()
     registered_bot._post_send_hooks.append(post_send_hook)

@@ -25,6 +25,7 @@ class BotSendMsgCommand(BotCommandBase):
         self.bot_id = bot_id
         self.msg = msg
         self.targets = targets
+        # 发送方自行维护 Persona message_stream；不抑制通用发送后事件。
         self.skip_history_record: bool = False
         self.message_type: MessageType = MessageType.COMMAND
         self.msg_id: Optional[int] = None

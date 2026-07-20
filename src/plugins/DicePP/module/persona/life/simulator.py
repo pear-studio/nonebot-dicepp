@@ -298,8 +298,14 @@ class LifeSimulator:
             )
             return
 
-        # R8(a): 先投递（skip_history_record=True 防止 adapter 出站 hook 写入重复 stream），成功后再落记录
-        if not await self.port.send(user_id, group_id, content, skip_history_record=True):
+        # R8(a): 先投递（发送方自行维护 stream），成功后再落记录
+        if not await self.port.send(
+            user_id,
+            group_id,
+            content,
+            skip_history_record=True,
+            message_type=MessageType.PROACTIVE,
+        ):
             logger.warning(
                 "_send_msg 发送失败: user_id=%s group_id=%s content=%s...",
                 user_id, group_id, content[:30],

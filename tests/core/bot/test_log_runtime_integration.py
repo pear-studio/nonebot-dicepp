@@ -116,6 +116,7 @@ async def test_real_bot_routes_platform_send_and_recall_once(log_bot: Bot):
             display_name="骰娘",
             platform_message_id="bot-message-1",
             history_stream_id=None,
+            history_managed_by_sender=True,
         )
     )
     recalled_at = datetime(2026, 7, 20, 18, 30, 0)

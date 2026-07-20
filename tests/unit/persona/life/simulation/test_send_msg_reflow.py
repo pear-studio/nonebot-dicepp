@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 from plugins.DicePP.module.persona.gateway.port import MessagePort
 from plugins.DicePP.module.persona.life.simulator import LifeSimulator, LifeConfig
 from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
+from plugins.DicePP.module.persona.data.models import MessageType
 
 
 def _make_simulator(*, event_chain=None, proactive_msgs=None,
@@ -71,8 +72,8 @@ class TestSendMsgDisplayName:
         assert call_kwargs['display_name'] == "测试角色"
 
     @pytest.mark.asyncio
-    async def test_send_with_skip_history_record(self):
-        """R8: port.send 传入 skip_history_record=True 防止 hook 写入重复 stream。"""
+    async def test_send_declares_sender_managed_proactive_history(self):
+        """主动消息由发送方维护历史，同时向发送后事件声明正确类型。"""
         sim = _make_simulator()
         sim.store.add_message_stream = AsyncMock(return_value=999)
         sim.port.send = AsyncMock(return_value=True)
@@ -82,6 +83,7 @@ class TestSendMsgDisplayName:
         sim.port.send.assert_awaited_once_with(
             'u2', 'g2', 'hi',
             skip_history_record=True,
+            message_type=MessageType.PROACTIVE,
         )
 
 

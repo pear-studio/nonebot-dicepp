@@ -198,12 +198,16 @@ class PersonaCommand(UserCommandBase):
         """消息发送后记录器回调（跨模块 bot 回复统一入流）
 
         - history_stream_id 非 None：persona 聊天路径已自行写入，无需处理
-        - history_stream_id 为 None：直接写入 message_stream（非 persona 命令回复路径）
+        - history_managed_by_sender：发送方会在投递成功后自行写入，无需处理
+        - 其他事件：直接写入 message_stream（非 persona 命令回复路径）
         """
         if not self.data_store:
             return
         try:
-            if event.history_stream_id is not None:
+            if (
+                event.history_stream_id is not None
+                or event.history_managed_by_sender
+            ):
                 return  # persona 聊天路径已在 ChatSession 等调用方写入
             msg_type = MessageType.from_str(event.message_type)
             await self.data_store.add_message_stream(
@@ -664,7 +668,7 @@ class PersonaCommand(UserCommandBase):
             await self._send(user_id, group_id, content)
             return
         try:
-            # R11(1): 先发送（skip_history_record=True 防止 hook 重复写入 stream）
+            # R11(1): 先发送（发送方自行维护 stream，其他发送后订阅者仍会收到事件）
             if not await self.app.port.send(
                 user_id, group_id, content,
                 skip_history_record=True,

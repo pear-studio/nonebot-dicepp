@@ -73,11 +73,7 @@ class CaptureProxy(ClientProxy):
         """捕获单个命令"""
         self.commands.append(command)
         deliveries = ()
-        if (
-            isinstance(command, BotSendMsgCommand)
-            and self.bot is not None
-            and not command.skip_history_record
-        ):
+        if isinstance(command, BotSendMsgCommand) and self.bot is not None:
             message_type = MessageType.from_str(command.message_type).value
             for target in command.targets:
                 await self.bot.dispatch_post_send_event(
@@ -96,6 +92,7 @@ class CaptureProxy(ClientProxy):
                             f"shell-message-{next(self._message_ids)}"
                         ),
                         history_stream_id=command.msg_id,
+                        history_managed_by_sender=command.skip_history_record,
                     )
                 )
         if isinstance(command, BotSendFileCommand):

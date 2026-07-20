@@ -116,6 +116,25 @@ async def test_capture_proxy_command_list_dispatches_each_target_once() -> None:
     assert [event.content for event in bot.events] == ["日志已开启", "私聊回复"]
 
 
+@pytest.mark.asyncio
+async def test_capture_proxy_emits_event_for_sender_managed_history() -> None:
+    proxy = CaptureProxy()
+    bot = _PostSendBot()
+    proxy.bind_bot(bot)
+    command = BotSendMsgCommand(
+        "shell-bot",
+        "Persona 回复",
+        [GroupMessagePort("g1")],
+    )
+    command.skip_history_record = True
+
+    await proxy.process_bot_command(command)
+
+    assert len(bot.events) == 1
+    assert bot.events[0].content == "Persona 回复"
+    assert bot.events[0].history_managed_by_sender is True
+
+
 class _FakeApp:
     def __init__(self, life: _FakeLife):
         self.life = life

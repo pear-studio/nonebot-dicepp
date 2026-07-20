@@ -11,7 +11,7 @@ class SendAction:
     user_id: str
     group_id: str
     content: str
-    skip_history_record: bool = False  # 是否跳过 adapter 层历史记录
+    skip_history_record: bool = False  # 是否由发送方自行维护 Persona 历史
 
 
 class MessageStage(ABC):
