@@ -378,16 +378,10 @@ class ShareScheduler(BoundaryReceiver):
         low = (center - jitter) % 1440
         high = (center + jitter) % 1440
 
-        # 窗口末尾强制触发（兜底），使用 >= 防止 tick 延迟跳过 high 分钟导致丢失
-        if low <= high:
-            # 非跨午夜：窗口末尾在 high
-            if now_m >= high:
-                return True
-        else:
-            # 跨午夜：窗口末尾段为 [0, high]
-            # now_m 在 [low, 1439]（窗口前段）走概率，不强制触发
-            if now_m <= high:
-                return True
+        # 窗口末尾强制触发（兜底）。跨午夜时 [0, high) 仍属于随机段，
+        # 只有 high 本身是窗口末尾，不能把午夜后的整段都视为强制触发。
+        if now_m == high:
+            return True
 
         # 窗口宽度（分钟数）
         if low <= high:

@@ -310,10 +310,10 @@ class TestShouldTriggerMidnightWrap:
         s._last_event_date = s._get_today_str()
         return s
 
-    def test_midnight_wrap_window_start_does_not_force(self, scheduler):
+    @pytest.mark.parametrize("now_m", [1430, 0])
+    def test_midnight_wrap_non_end_minutes_do_not_force(self, scheduler, now_m):
         """center=0, jitter=15 → low=1425, high=15。
-        now_m=1430（窗口前段 [1425,1439]）不应强制触发，应走概率分支。
-        复现 bug: 当前 `now_m >= high`（1430 >= 15）误判为 True。
+        午夜前的前段与午夜后未到 high 的后段都应走概率分支。
         """
         from unittest.mock import patch
         scheduler.config.proactive_share_schedule_jitter_minutes = 15
@@ -330,11 +330,9 @@ class TestShouldTriggerMidnightWrap:
             "plugins.DicePP.module.persona.life.share_scheduler.random_module.Random",
             _MockRandom,
         ):
-            result = scheduler._should_trigger(now_m=1430, center=0, label="test")
-        # BUG: 当前代码 now_m >= high (1430 >= 15) → True，本测试应 FAIL
-        # 修复后 low>high 分支检查 now_m <= high (1430 <= 15 → False) → 走概率 → False
+            result = scheduler._should_trigger(now_m=now_m, center=0, label="test")
         assert result is False, (
-            f"now_m=1430 在窗口前段不应强制触发，expected False, got {result}"
+            f"now_m={now_m} 未到窗口末尾，不应强制触发"
         )
 
     def test_midnight_wrap_window_end_forces_trigger(self, scheduler):
