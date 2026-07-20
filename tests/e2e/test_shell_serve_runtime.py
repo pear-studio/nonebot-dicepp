@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.processes import stop_server_process
+
 
 pytestmark = pytest.mark.e2e
 
@@ -80,7 +82,6 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
 
     _cli(env, "init", "e2e", "--group", "group-e2e")
     session_dir = registry_root / ".dicepp-shell" / "e2e"
-    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     dashboard_port = _find_free_port()
     dashboard_env = env.copy()
     dashboard_env["DICEPP_PROJECT_ROOT"] = str(session_dir)
@@ -89,14 +90,14 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
     dashboard_env["DASHBOARD_PORT"] = str(dashboard_port)
     dashboard_env["DICEPP_MANAGER_RUNTIME"] = "unavailable"
     dashboard = subprocess.Popen(
-        [sys.executable, "-m", "dashboard"],
+        [sys.executable, "-m", "tests.helpers.dashboard_server"],
         cwd=PROJECT_ROOT,
         env=_hermetic_env(dashboard_env),
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
-        creationflags=creationflags,
     )
     process: subprocess.Popen[str] | None = None
     try:
@@ -124,7 +125,7 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
             stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
-            creationflags=creationflags,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         runtime_path = session_dir / "runtime.json"
         deadline = time.monotonic() + 15
@@ -200,9 +201,24 @@ def test_serve_routes_cli_messages_and_registers_real_bot_with_dashboard(
         assert not runtime_path.exists()
         assert not (session_dir / "runtime.lock").exists()
     finally:
-        if process is not None and process.poll() is None:
-            process.terminate()
-            process.wait(timeout=10)
-        if dashboard.poll() is None:
-            dashboard.terminate()
-            dashboard.wait(timeout=10)
+        try:
+            if process is not None:
+                stop_server_process(
+                    process,
+                    name="Shell runtime",
+                    request_stop=lambda: _cli(
+                        env,
+                        "serve",
+                        "--stop",
+                        "e2e",
+                        "--timeout",
+                        "10",
+                    ),
+                )
+        finally:
+            assert dashboard.stdin is not None
+            stop_server_process(
+                dashboard,
+                name="Dashboard e2e server",
+                request_stop=dashboard.stdin.close,
+            )

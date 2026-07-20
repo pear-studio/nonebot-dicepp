@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -18,6 +19,7 @@ from tests.dashboard.playwright_support import (
     route_setup_allowed_status,
     wait_for_server,
 )
+from tests.helpers.processes import stop_server_process
 
 # ── Module-level skip if playwright or browser not available ──
 
@@ -91,9 +93,10 @@ def dashboard_url(tmp_path: Path) -> str:
         env.pop(key, None)
 
     proc = subprocess.Popen(
-        ["uv", "run", "python", "-m", "dashboard"],
+        [sys.executable, "-m", "tests.helpers.dashboard_server"],
         cwd=str(PROJECT_ROOT),
         env=env,
+        stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -102,12 +105,12 @@ def dashboard_url(tmp_path: Path) -> str:
         wait_for_server(f"{base_url}/api/auth/status")
         yield base_url
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        assert proc.stdin is not None
+        stop_server_process(
+            proc,
+            name="Dashboard smoke server",
+            request_stop=proc.stdin.close,
+        )
 
 
 def test_smoke_auth_flow(dashboard_url: str) -> None:

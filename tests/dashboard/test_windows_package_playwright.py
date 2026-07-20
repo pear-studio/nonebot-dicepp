@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -97,6 +98,12 @@ def dashboard_exe_url(tmp_path: Path) -> str:
             try:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
+                warnings.warn(
+                    "Packaged Dashboard server 等待 10 秒后仍未退出，"
+                    "将强制终止进程。",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
                 proc.kill()
                 proc.wait()
 
