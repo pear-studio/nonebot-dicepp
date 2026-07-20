@@ -145,35 +145,48 @@ BOT_LOG_BUSINESS_TABLES = {
     "records",
 }
 _LEGACY_TABLES = {"logs", "records"}
-_LEGACY_LOG_COLUMNS = {
-    "id",
-    "group_id",
-    "name",
-    "created_at",
-    "updated_at",
-    "recording",
-    "record_begin_at",
-    "last_warn",
-    "filter_outside",
-    "filter_command",
-    "filter_bot",
-    "filter_media",
-    "filter_forum_code",
-    "upload_time",
-    "upload_file",
-    "upload_note",
-    "url",
-}
-_LEGACY_RECORD_COLUMNS = {
-    "id",
-    "log_id",
-    "time",
-    "user_id",
-    "nickname",
-    "content",
-    "source",
-    "message_id",
-}
+_LEGACY_SCHEMA_SQL = [
+    """
+    CREATE TABLE IF NOT EXISTS logs (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        recording INTEGER NOT NULL DEFAULT 0,
+        record_begin_at TEXT NOT NULL,
+        last_warn TEXT NOT NULL,
+        filter_outside INTEGER NOT NULL DEFAULT 0,
+        filter_command INTEGER NOT NULL DEFAULT 0,
+        filter_bot INTEGER NOT NULL DEFAULT 0,
+        filter_media INTEGER NOT NULL DEFAULT 0,
+        filter_forum_code INTEGER NOT NULL DEFAULT 0,
+        upload_time TEXT,
+        upload_file TEXT,
+        upload_note TEXT,
+        url TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_logs_group ON logs(group_id);",
+    """
+    CREATE TABLE IF NOT EXISTS records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        log_id TEXT NOT NULL,
+        time TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        nickname TEXT,
+        content TEXT NOT NULL,
+        source TEXT NOT NULL,
+        message_id TEXT,
+        FOREIGN KEY(log_id) REFERENCES logs(id) ON DELETE CASCADE
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_records_log ON records(log_id);",
+    "CREATE INDEX IF NOT EXISTS idx_records_msg ON records(message_id);",
+    "CREATE INDEX IF NOT EXISTS idx_records_user_id_desc ON records(user_id, id DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_records_log_id_desc ON records(log_id, id DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_records_time ON records(time);",
+]
 _LIFECYCLE_TABLES = {"schema_metadata", "schema_migrations"}
 
 
@@ -189,11 +202,11 @@ BOT_LOG_TARGET = SchemaTarget(
 
 
 def ensure_bot_log_schema(db_path: str | Path) -> SchemaRunResult:
-    """Ensure the redesigned v1 bot-log schema, destructively adopting known legacy DBs.
+    """Ensure the redesigned v1 bot-log schema, adopting only known legacy DBs.
 
-    ``bot_log`` was unusable before this layout and has no data compatibility promise.
-    The generic lifecycle cannot distinguish two layouts with the same target version,
-    so this target performs one conservative structural check before delegating to it.
+    Known pre-redesign data remains outside the compatibility promise and is rebuilt
+    transactionally. Any other structural drift fails closed so that indexes, columns,
+    or triggers can never cause silent data loss.
     """
 
     path = Path(db_path)
@@ -218,12 +231,18 @@ def ensure_bot_log_schema(db_path: str | Path) -> SchemaRunResult:
         lifecycle_result = ensure_schema(conn, BOT_LOG_TARGET)
         if _schema_signature(conn) == _expected_schema_signature():
             return lifecycle_result
-        if user_tables <= BOT_LOG_BUSINESS_TABLES:
-            _rebuild_managed_schema(conn)
+        managed_tables = _user_tables(conn)
+        names = ", ".join(sorted(managed_tables))
+        if _is_known_legacy_schema(conn, managed_tables):
+            _rebuild_managed_legacy_schema(conn)
             return lifecycle_result
-        names = ", ".join(sorted(user_tables))
+        if not managed_tables <= BOT_LOG_BUSINESS_TABLES:
+            raise SchemaVersionError(
+                "Managed bot_log schema contains unknown business tables; refusing "
+                f"destructive rebuild. tables=[{names}]"
+            )
         raise SchemaVersionError(
-            "Managed bot_log schema contains unknown business tables; refusing "
+            "Managed bot_log schema does not match current layout; refusing "
             f"destructive rebuild. tables=[{names}]"
         )
     finally:
@@ -262,7 +281,7 @@ def _adopt_unmanaged_legacy_schema(conn: sqlite3.Connection) -> SchemaRunResult:
     return SchemaRunResult(0, 1, [1], created=True)
 
 
-def _rebuild_managed_schema(conn: sqlite3.Connection) -> None:
+def _rebuild_managed_legacy_schema(conn: sqlite3.Connection) -> None:
     try:
         conn.execute("BEGIN IMMEDIATE")
         _drop_business_tables(conn)
@@ -287,11 +306,9 @@ def _drop_business_tables(conn: sqlite3.Connection) -> None:
 
 
 def _is_known_legacy_schema(conn: sqlite3.Connection, user_tables: set[str]) -> bool:
-    if user_tables != _LEGACY_TABLES:
-        return False
     return (
-        _table_columns(conn, "logs") == _LEGACY_LOG_COLUMNS
-        and _table_columns(conn, "records") == _LEGACY_RECORD_COLUMNS
+        user_tables == _LEGACY_TABLES
+        and _schema_signature(conn) == _expected_legacy_schema_signature()
     )
 
 
@@ -307,13 +324,6 @@ def _user_tables(conn: sqlite3.Connection) -> set[str]:
         name
         for name in _all_tables(conn)
         if not name.startswith("sqlite_") and name not in _LIFECYCLE_TABLES
-    }
-
-
-def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
-    return {
-        str(row[1])
-        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     }
 
 
@@ -339,6 +349,15 @@ def _expected_schema_signature() -> tuple[tuple[str, str, str], ...]:
     conn = sqlite3.connect(":memory:")
     try:
         create_bot_log_schema(conn)
+        return _schema_signature(conn)
+    finally:
+        conn.close()
+
+
+def _expected_legacy_schema_signature() -> tuple[tuple[str, str, str], ...]:
+    conn = sqlite3.connect(":memory:")
+    try:
+        execute_many(conn, _LEGACY_SCHEMA_SQL)
         return _schema_signature(conn)
     finally:
         conn.close()

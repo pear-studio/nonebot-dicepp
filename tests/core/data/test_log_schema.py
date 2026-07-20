@@ -39,6 +39,7 @@ LEGACY_SCHEMA_SQL = [
         url TEXT
     )
     """,
+    "CREATE INDEX idx_logs_group ON logs(group_id)",
     """
     CREATE TABLE records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +53,11 @@ LEGACY_SCHEMA_SQL = [
         FOREIGN KEY(log_id) REFERENCES logs(id) ON DELETE CASCADE
     )
     """,
+    "CREATE INDEX idx_records_log ON records(log_id)",
+    "CREATE INDEX idx_records_msg ON records(message_id)",
+    "CREATE INDEX idx_records_user_id_desc ON records(user_id, id DESC)",
+    "CREATE INDEX idx_records_log_id_desc ON records(log_id, id DESC)",
+    "CREATE INDEX idx_records_time ON records(time)",
 ]
 
 
@@ -204,7 +210,39 @@ def test_unknown_unmanaged_schema_is_rejected_without_data_loss(tmp_path: Path):
         assert conn.execute("SELECT value FROM irreplaceable").fetchall() == [("保留",)]
 
 
-def test_managed_incomplete_schema_rebuilds_once_then_preserves_new_data(tmp_path: Path):
+@pytest.mark.parametrize(
+    ("managed", "expected_error"),
+    [
+        (False, UnmanagedDatabaseError),
+        (True, SchemaVersionError),
+    ],
+)
+def test_legacy_schema_with_unknown_index_is_rejected_without_data_loss(
+    tmp_path: Path,
+    managed: bool,
+    expected_error: type[Exception],
+):
+    path = tmp_path / "log.db"
+    if managed:
+        apply_schema_target(path, LEGACY_MANAGED_TARGET)
+    else:
+        with sqlite3.connect(path) as conn:
+            _create_legacy(conn)
+    _insert_legacy_data(path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE INDEX operator_added_index ON logs(name)")
+
+    with pytest.raises(expected_error):
+        ensure_bot_log_schema(path)
+
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT name FROM logs").fetchall() == [("旧日志",)]
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'operator_added_index'"
+        ).fetchone() == ("operator_added_index",)
+
+
+def test_managed_current_schema_drift_is_rejected_without_data_loss(tmp_path: Path):
     path = tmp_path / "log.db"
     ensure_bot_log_schema(path)
     with sqlite3.connect(path) as conn:
@@ -216,21 +254,14 @@ def test_managed_incomplete_schema_rebuilds_once_then_preserves_new_data(tmp_pat
         )
         conn.execute("DROP INDEX idx_records_time")
 
-    ensure_bot_log_schema(path)
+    with pytest.raises(SchemaVersionError, match="does not match current layout"):
+        ensure_bot_log_schema(path)
 
     with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT name FROM logs").fetchall() == []
-        conn.execute(
-            """
-            INSERT INTO logs (id, group_id, name, created_at, updated_at)
-            VALUES ('after-rebuild', 'g1', '重建后保留', '2026-02-02', '2026-02-02')
-            """
-        )
-
-    ensure_bot_log_schema(path)
-
-    with sqlite3.connect(path) as conn:
-        assert conn.execute("SELECT name FROM logs").fetchall() == [("重建后保留",)]
+        assert conn.execute("SELECT name FROM logs").fetchall() == [("不能误删",)]
+        assert "idx_records_time" not in {
+            str(row[1]) for row in conn.execute("PRAGMA index_list(records)")
+        }
 
 
 def test_managed_schema_with_unknown_business_table_is_rejected(tmp_path: Path):
