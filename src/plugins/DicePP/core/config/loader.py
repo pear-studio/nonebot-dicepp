@@ -24,6 +24,7 @@ _BOTS_DIR = "bots"
 _GLOBAL_CONFIG = "global.json"
 _GLOBAL_USER = "user.json"
 _ACCOUNT_TEMPLATE = "_template.json"
+_COMMENT_METADATA_PREFIX = "_comment"
 
 _CRITICAL_FIELD_NAMES = {
     "master",
@@ -278,6 +279,9 @@ def _canonicalize_model_dict(
     for key in raw:
         if key in consumed:
             continue
+        if key.startswith(_COMMENT_METADATA_PREFIX):
+            canonical[key] = raw[key]
+            continue
         current_path = field_path + (key,)
         if _is_critical_path(current_path):
             raise _config_validation_error(
@@ -375,8 +379,6 @@ def _apply_env_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
         "DICE_COMMAND_SPLIT": ["command_split"],
         "DICE_DICEHUB_API_URL": ["dicehub", "api_url"],
         "DICE_DICEHUB_API_KEY": ["dicehub", "api_key"],
-        "DICE_DICEHUB_ENABLE": ["dicehub", "enable"],
-        "DICE_DICEHUB_HEARTBEAT_INTERVAL": ["dicehub", "heartbeat_interval"],
         "DICE_LOG_LEVEL": ["log", "level"],
         "DICE_LOG_WEB_PROVIDER": ["log", "web", "provider"],
         "DICE_LOG_WEB_ENDPOINT": ["log", "web", "endpoint"],

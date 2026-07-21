@@ -34,6 +34,22 @@ def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _assert_json_subset(expected, actual) -> None:
+    if isinstance(expected, dict):
+        assert isinstance(actual, dict)
+        for key, value in expected.items():
+            assert key in actual, f"canonical rewrite dropped {key!r}"
+            _assert_json_subset(value, actual[key])
+        return
+    if isinstance(expected, list):
+        assert isinstance(actual, list)
+        assert len(actual) == len(expected)
+        for expected_item, actual_item in zip(expected, actual):
+            _assert_json_subset(expected_item, actual_item)
+        return
+    assert actual == expected
+
+
 class _DataDir:
     """Thin wrapper around a tmp directory mimicking the config/ layout."""
 
@@ -290,6 +306,41 @@ def test_canonical_rewrite_drops_unknown_ordinary_fields(dd):
     assert "old_plain_field" not in saved
     assert "max_short_term_chars" not in saved["persona_ai"]
     assert saved["persona_ai"]["enabled"] is True
+
+
+def test_canonical_rewrite_preserves_comment_metadata(dd):
+    _write(dd.global_cfg, {
+        "_comment": "top-level guidance",
+        "chat_interval": 99,
+        "persona_ai": {
+            "_comment_persona": "nested guidance",
+            "enabled": True,
+        },
+    })
+
+    with patch("core.config.loader.logger.warning") as warning:
+        cfg = dd.loader().load()
+    saved = _read(dd.global_cfg)
+
+    assert saved["_comment"] == "top-level guidance"
+    assert saved["persona_ai"]["_comment_persona"] == "nested guidance"
+    assert "_comment" not in cfg.model_dump()
+    assert "_comment_persona" not in cfg.persona_ai.model_dump()
+    assert not any(
+        call.args
+        and str(call.args[0]).startswith("[Config] Dropping unknown field")
+        for call in warning.call_args_list
+    )
+
+
+def test_shipped_global_config_has_no_fields_dropped_by_canonical_rewrite(dd):
+    project_root = Path(__file__).resolve().parents[3]
+    shipped = _read(project_root / "config" / "global.json")
+    _write(dd.global_cfg, shipped)
+
+    dd.loader().load()
+
+    _assert_json_subset(shipped, _read(dd.global_cfg))
 
 
 def test_canonical_rewrite_defaultizes_recoverable_ordinary_field_error(dd):

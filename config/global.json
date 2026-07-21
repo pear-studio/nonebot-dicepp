@@ -24,9 +24,7 @@
     "api_url": "",
     "api_key": "",
     "webchat_url": "",
-    "name": "未命名",
-    "enable": true,
-    "heartbeat_interval": 180
+    "name": "未命名"
   },
 
   "roll": {
@@ -129,7 +127,6 @@
     "background_llm_timeout_seconds": 90,
     "timezone": "Asia/Shanghai",
 
-    "max_short_term_chars": 1500,
     "max_messages": 15,
 
     "tools_max_rounds": 10,
@@ -144,7 +141,6 @@
     "segment_hard_limit": 120,
     "segment_count_max": 10,
     "segment_max_delay": 10.0,
-    "segment_round_callbacks_max": 3,
 
     "game_enabled": true,
     "scoring_interval": 5,
