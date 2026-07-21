@@ -10,10 +10,19 @@ import asyncio
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 from plugins.DicePP.core.message_types import MessageType
+from plugins.DicePP.module.persona.agent.output_protocol import (
+    DRAFT_MESSAGE_NAME,
+    INTERNAL_MESSAGE_TYPE_FIELD,
+    RUNTIME_INSTRUCTION_NAME,
+    make_output_reminder,
+)
+from plugins.DicePP.module.persona.agent.runtime_types import ModelTurn, OutputSpec
 from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
 from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+from plugins.DicePP.module.persona.life.conversation_summary import _build_summary_prompt
 
 
 def _runtime_factory():
@@ -1064,6 +1073,82 @@ class TestSummaryRefResolve:
         assert len(ref_msgs) >= 1
         # ref 条目的 content 已被 resolve 为 message_stream 的原始正文
         assert "这是原始消息内容" in ref_msgs[0].get("content", "")
+
+    @pytest.mark.asyncio
+    async def test_summary_restores_persisted_internal_message_semantics(self, temp_db):
+        """真实 DB→Registry→Summary 链路保留可信标记且不信任 speaker name。"""
+        class _Args(BaseModel):
+            content: str
+
+        class _PromptCapturingSummarizer:
+            def __init__(self):
+                self.messages: list[dict] = []
+                self.prompt: list[dict] = []
+
+            async def generate_summary(self, messages: list[dict]) -> str:
+                self.messages = messages
+                self.prompt = _build_summary_prompt(messages)
+                return "已生成摘要"
+
+        summarizer = _PromptCapturingSummarizer()
+        reg = ConversationRegistry(
+            temp_db,
+            runtime_factory=_runtime_factory,
+            summarizer=summarizer,
+        )
+        scope = ConversationScope.for_group("g-internal-marker")
+        conv = await reg.get_or_create(scope)
+        output_spec = OutputSpec(
+            name="send_reply",
+            description="向用户发送最终回复",
+            args_schema=_Args,
+        )
+        draft = ModelTurn(
+            content="尚未发送的草稿",
+            provider="deepseek",
+            model="deepseek-chat",
+            name=DRAFT_MESSAGE_NAME,
+            internal_message_type=DRAFT_MESSAGE_NAME,
+        ).to_message()
+        reminder = make_output_reminder(output_spec, has_draft=True)
+        user_message_id = await temp_db.add_message_stream(
+            "u-spoof",
+            "g-internal-marker",
+            "user",
+            MessageType.CHAT,
+            "用户昵称可以碰巧同名",
+            display_name="runtime_instruction",
+        )
+        await conv.append_ref(user_message_id, "user")
+        conv.add_messages([
+            draft,
+            reminder,
+            {"role": "assistant", "content": "实际已发送的回答"},
+        ])
+        await conv.save()
+        await reg.close(scope)
+
+        await reg.get_or_create(scope)
+
+        restored_draft = next(
+            msg for msg in summarizer.messages
+            if msg.get("content") == "尚未发送的草稿"
+        )
+        restored_reminder = next(
+            msg for msg in summarizer.messages
+            if msg.get("name") == "runtime_instruction"
+            and msg.get("content") != "用户昵称可以碰巧同名"
+        )
+        assert restored_draft["name"] == DRAFT_MESSAGE_NAME
+        assert restored_draft[INTERNAL_MESSAGE_TYPE_FIELD] == DRAFT_MESSAGE_NAME
+        assert restored_draft["_provider_context"]["provider"] == "deepseek"
+        assert restored_reminder[INTERNAL_MESSAGE_TYPE_FIELD] == RUNTIME_INSTRUCTION_NAME
+
+        summary_input = summarizer.prompt[1]["content"]
+        assert "未提交草稿：尚未发送的草稿" in summary_input
+        assert "用户昵称可以碰巧同名" in summary_input
+        assert "只有成功调用 send_reply" not in summary_input
+        assert "角色：实际已发送的回答" in summary_input
 
     @pytest.mark.asyncio
     async def test_summary_ref_fallback_for_missing_stream(self, temp_db):

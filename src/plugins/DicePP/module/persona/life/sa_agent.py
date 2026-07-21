@@ -149,15 +149,10 @@ class SAAgent(Agent):
             threads_per_front=threads_per_front,
         )
 
-        # finish_plan OutputSpec — SA 必须调用此输出标记规划完成
+        # finish_plan OutputSpec — 提交本次规划结果
         finish_plan_spec = OutputSpec(
             name="finish_plan",
-            description=(
-                "提交规划结果，标记本次规划完成。"
-                "即使无需修改，也必须调用此工具。"
-                "summary 简短说明做了什么或为什么无需调整。"
-                "changed 表示是否修改了 story_deck 或 fronts。"
-            ),
+            description="提交本次叙事规划结果，并结束本次规划。",
             args_schema=FinishPlanArgs,
         )
 

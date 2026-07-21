@@ -21,6 +21,10 @@ from weakref import WeakKeyDictionary
 from utils.logger import logger
 from utils.time import get_clock
 from ..data.store import PersonaDataStore
+from ..agent.output_protocol import (
+    INTERNAL_MESSAGE_TYPE_FIELD,
+    get_internal_message_type,
+)
 from .conversation import ENTRY_TYPE_OWN, ENTRY_TYPE_REF, Snapshot, Store
 
 
@@ -324,8 +328,18 @@ def _decompose_message(msg: dict) -> dict:
         tool_calls = _serialize_plain_string_if_ambiguous(tool_calls)
     elif tool_calls:
         tool_calls = _SERIALIZED_PREFIX + json.dumps(tool_calls, ensure_ascii=False)
-    provider_context = msg.get("_provider_context")
-    if isinstance(provider_context, dict) and provider_context:
+    raw_provider_context = msg.get("_provider_context")
+    provider_context = (
+        dict(raw_provider_context)
+        if isinstance(raw_provider_context, dict)
+        else {}
+    )
+    internal_message_type = get_internal_message_type(msg)
+    if internal_message_type:
+        # 复用既有 JSON 列持久化 Runtime 私有标记；公开 name 仅作为
+        # provider 可见语义，不能作为内部消息身份凭据。
+        provider_context[INTERNAL_MESSAGE_TYPE_FIELD] = internal_message_type
+    if provider_context:
         provider_context_raw = json.dumps(provider_context, ensure_ascii=False)
     else:
         provider_context_raw = ""
@@ -377,7 +391,16 @@ def _recompose_message(row) -> dict:
         except (TypeError, json.JSONDecodeError):
             provider_context = None
         if isinstance(provider_context, dict):
-            out["_provider_context"] = provider_context
+            internal_message_type = provider_context.pop(
+                INTERNAL_MESSAGE_TYPE_FIELD, "",
+            )
+            validated_type = get_internal_message_type({
+                INTERNAL_MESSAGE_TYPE_FIELD: internal_message_type,
+            })
+            if validated_type:
+                out[INTERNAL_MESSAGE_TYPE_FIELD] = validated_type
+            if provider_context:
+                out["_provider_context"] = provider_context
     return out
 
 

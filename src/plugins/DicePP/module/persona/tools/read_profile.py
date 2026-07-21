@@ -3,7 +3,7 @@ from ..agent.runtime_types import ToolSpec, ToolResult, ToolExecutionContext
 from pydantic import BaseModel, Field
 
 class _ReadProfileArgs(BaseModel):
-    """读取用户档案参数（无参数）"""
+    """读取玩家档案参数（无参数）"""
     pass
 
 
@@ -13,7 +13,7 @@ async def _read_profile_handler(parsed: BaseModel, ctx: ToolExecutionContext) ->
 
 READ_PROFILE_TOOL = ToolSpec(
     name="read_profile",
-    description="读取当前用户的档案信息，包括已知的事实和偏好。类似 cat profile.txt。",
+    description="读取当前玩家的档案信息，包括已知的事实和偏好。类似 cat profile.txt。",
     args_schema=_ReadProfileArgs,
     handler=_read_profile_handler,
 )
@@ -28,9 +28,9 @@ def build_read_profile_tool(store, user_id="", group_id="") -> ToolSpec:
 
         profile = await store.get_user_profile(user_id)
         if not profile or not profile.facts:
-            return ToolResult(observation="暂无该用户的档案信息")
+            return ToolResult(observation="暂无该玩家的档案信息")
 
-        lines = ["【用户档案】"]
+        lines = ["【玩家档案】"]
         for key, value in profile.facts.items():
             lines.append(f"{key}: {value}")
 
@@ -38,7 +38,7 @@ def build_read_profile_tool(store, user_id="", group_id="") -> ToolSpec:
 
     return ToolSpec(
         name="read_profile",
-        description="读取当前用户的档案信息，包括已知的事实和偏好。类似 cat profile.txt。",
+        description="读取当前玩家的档案信息，包括已知的事实和偏好。类似 cat profile.txt。",
         args_schema=_ReadProfileArgs,
         handler=handler,
     )

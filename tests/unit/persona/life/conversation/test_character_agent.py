@@ -307,6 +307,7 @@ class TestCharacterAgentNoEndConversation:
             "energy": 50, "mood": 50, "health": 50,
         })
         assert "end_conversation" not in spec.tools.tools
+        assert spec.output.description == "提交角色对当前场景的反应、行动意图与场景结束意愿。"
 
     def test_reaction_user_prompt_no_end_conversation(self, agent):
         """reaction user_prompt 不含 end_conversation 字样。"""
@@ -315,6 +316,8 @@ class TestCharacterAgentNoEndConversation:
         })
         assert "end_conversation" not in prompt
         assert "want_to_end=true" in prompt
+        assert "不要直接回复文本" not in prompt
+        assert "调用 say" not in prompt
 
     def test_dm_want_to_end_prompt_no_end_conversation(self, agent):
         """dm_want_to_end=True 时不出现 end_conversation。"""
@@ -352,14 +355,16 @@ class TestDiarySubmitDiaryOutputSpec:
         })
         assert spec.output is not None
         assert spec.output.name == "submit_diary"
+        assert spec.output.description == "提交角色的日记内容，由系统保存为当日日记。"
 
-    def test_diary_user_prompt_no_record_diary_entry(self, agent):
-        """diary user_prompt 不含 record_diary_entry 字样。"""
+    def test_diary_user_prompt_does_not_duplicate_output_protocol(self, agent):
+        """日记任务 prompt 不重复 Runtime 的输出提交协议。"""
         prompt = agent._build_diary_user_prompt({
             "events": [], "character_name": "T",
         })
         assert "record_diary_entry" not in prompt
-        assert "submit_diary" in prompt
+        assert "submit_diary" not in prompt
+        assert "不要直接回复文本" not in prompt
 
 
 class TestFormatStatePrompt:

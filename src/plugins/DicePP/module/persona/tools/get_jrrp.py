@@ -17,7 +17,7 @@ class _GetJrrpArgs(BaseModel):
     """今日运势查询参数"""
     user_id: str | None = Field(
         default=None,
-        description="要查询运势的用户 QQ ID。私聊时若省略则默认查询当前用户。",
+        description="要查询运势的玩家 QQ ID。私聊时若省略则默认查询当前玩家。",
     )
 
 
@@ -27,7 +27,7 @@ async def _get_jrrp_handler(parsed: BaseModel, ctx: ToolExecutionContext) -> Too
 
 GET_JRRP_TOOL = ToolSpec(
     name="get_jrrp",
-    description="查询指定用户的今日运势（今日人品/JRRP），返回运势值和趋势。私聊时可省略 user_id 查询自己的运势。",
+    description="查询指定玩家的今日运势（今日人品/JRRP），返回运势值和趋势。私聊时可省略 user_id 查询当前玩家自己的运势。",
     args_schema=_GetJrrpArgs,
     handler=_get_jrrp_handler,
 )
@@ -40,7 +40,7 @@ def build_get_jrrp_tool(user_id_default="", timezone: str = "Asia/Shanghai") -> 
         user_id = (parsed.user_id or "").strip() or user_id_default
 
         if not user_id:
-            return ToolResult(observation="请输入有效的用户 ID。")
+            return ToolResult(observation="请输入有效的玩家 QQ ID。")
 
         now = wall_now(timezone)
         result = compute_jrrp(user_id, now)
@@ -55,7 +55,7 @@ def build_get_jrrp_tool(user_id_default="", timezone: str = "Asia/Shanghai") -> 
 
     return ToolSpec(
         name="get_jrrp",
-        description="查询指定用户的今日运势（今日人品/JRRP），返回运势值和趋势。私聊时可省略 user_id 查询自己的运势。",
+        description="查询指定玩家的今日运势（今日人品/JRRP），返回运势值和趋势。私聊时可省略 user_id 查询当前玩家自己的运势。",
         args_schema=_GetJrrpArgs,
         handler=handler,
     )

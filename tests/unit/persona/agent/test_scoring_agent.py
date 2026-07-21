@@ -130,16 +130,18 @@ class TestScoringAgentAnalysisPrompt:
         assert "亲密度 50.0" in prompt
 
         # 验证包含对话记录
-        assert "你好呀" in prompt
-        assert "你好！今天怎么样？" in prompt
+        assert "玩家: 你好呀" in prompt
+        assert "角色: 你好！今天怎么样？" in prompt
 
-        # 验证包含已知用户信息（facts）
+        # 验证包含已知玩家信息（facts）
+        assert "已知的玩家信息" in prompt
         assert "小明" in prompt
         assert "读书" in prompt
         assert "游戏" in prompt
 
-        # 验证包含工具调用说明
-        assert "submit_score" in prompt
+        # 提交协议由 Runtime 根据 OutputSpec 统一注入
+        assert "submit_score" not in prompt
+        assert "不要直接回复文本" not in prompt
 
     def test_build_analysis_prompt_with_warn_pending(self):
         """验证 warn_pending 标记出现在 prompt 中"""

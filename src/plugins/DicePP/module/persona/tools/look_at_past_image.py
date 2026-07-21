@@ -27,7 +27,7 @@ async def _look_at_past_image_handler(parsed: BaseModel, ctx: ToolExecutionConte
 LOOK_AT_PAST_IMAGE_TOOL = ToolSpec(
     name="look_at_past_image",
     description=(
-        "查看对话历史中用户发送的图片。"
+        "查看对话历史中玩家发送的图片。"
         "image_hash 从上下文标记 [图片 <hash>] 或 [表情 <hash>] 中复制。"
     ),
     args_schema=_LookAtPastImageArgs,
@@ -103,7 +103,7 @@ def build_look_at_past_image_tool(
     return ToolSpec(
         name="look_at_past_image",
         description=(
-            "查看对话历史中用户发送的图片。"
+            "查看对话历史中玩家发送的图片。"
             "image_hash 从上下文标记 [图片 <hash>] 或 [表情 <hash>] 中复制。"
         ),
         args_schema=LookAtPastImageArgs,

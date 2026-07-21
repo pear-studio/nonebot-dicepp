@@ -176,11 +176,7 @@ class ChatAgent:
 
         send_reply = OutputSpec(
             name="send_reply",
-            description=(
-                "发送回复内容。这是唯一必须调用的输出方法。"
-                "如果之前已用 send_reply_segment 发送了前置分段，"
-                "本调用提交最后一段内容。"
-            ),
+            description="通过聊天通道向玩家发送最终回复，并结束本轮交流。",
             args_schema=SendReplyArgs,
         )
 

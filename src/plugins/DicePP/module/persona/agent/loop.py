@@ -33,6 +33,7 @@ from .events import (
 from .llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
 from .message_buffer import MessageBuffer
 from .output_collector import OutputCollector
+from .output_protocol import DRAFT_MESSAGE_NAME, make_output_reminder
 from .runtime_types import (
     AgentRunResult as RunResult,
     BillingEntry,
@@ -49,7 +50,6 @@ from .runtime_types import (
 )
 
 from .state import AgentRunState
-from .sys_instruction import make_sys_msg
 from ..llm.selection import SelectionPolicy
 
 
@@ -152,6 +152,16 @@ class AgentLoop:
                 provider=provider,
                 model=model,
                 finish_reason=getattr(result, "finish_reason", "") or "",
+                name=(
+                    DRAFT_MESSAGE_NAME
+                    if output_spec is not None and content.strip()
+                    else ""
+                ),
+                internal_message_type=(
+                    DRAFT_MESSAGE_NAME
+                    if output_spec is not None and content.strip()
+                    else ""
+                ),
             ))
 
             # ── 无工具调用时的处理 ──
@@ -190,9 +200,8 @@ class AgentLoop:
                             state=state,
                             reason="output_tool_required",
                             round_index=round_idx,
-                            text=(
-                                f"你必须调用 {output_spec.name} 来提交最终结果，"
-                                "不要直接回复文本。"
+                            message=make_output_reminder(
+                                output_spec, has_draft=bool(content.strip()),
                             ),
                         )
                         continue
@@ -401,9 +410,8 @@ class AgentLoop:
                     state=state,
                     reason="final_output_reminder",
                     round_index=round_idx,
-                    text=(
-                        f"这是最后一轮，你必须调用 "
-                        f"{output_spec.name} 提交最终结果。"
+                    message=make_output_reminder(
+                        output_spec, has_draft=False, final=True,
                     ),
                 )
                 correction_streak += 1
@@ -491,18 +499,17 @@ class AgentLoop:
         state: AgentRunState,
         reason: str,
         round_index: int,
-        text: str,
+        message: dict,
     ) -> None:
         """注入纠正消息并记录结构化事件。"""
-        msg = make_sys_msg(text)
-        buffer.add_message(msg)
+        buffer.add_message(message)
         if self._event_bus is not None:
             await self._event_bus.emit(
                 "CorrectionInjected",
                 CorrectionInjectedPayload(
                     reason=reason,
                     round_index=round_index,
-                    message=msg["content"],
+                    message=message["content"],
                 ),
                 state,
             )

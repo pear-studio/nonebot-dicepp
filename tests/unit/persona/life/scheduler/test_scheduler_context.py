@@ -253,7 +253,7 @@ class TestFormatRecentHistory:
         msg2.role = "assistant"
         msg2.content = "你好呀"
         result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg1, msg2])
-        assert "- 用户: 你好" in result
+        assert "- 玩家: 你好" in result
         assert "- 我: 你好呀" in result
 
     def test_system_role(self):
@@ -275,7 +275,7 @@ class TestFormatRecentHistory:
         msg.role = "unknown"
         msg.content = "未知内容"
         result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
-        assert "- 用户: 未知内容" in result  # 兜底为"用户"
+        assert "- 玩家: 未知内容" in result  # 兜底为"玩家"
 
     def test_long_content_truncation(self):
         msg = MagicMock()
@@ -306,7 +306,7 @@ class TestFormatRecentHistory:
         msg.created_at = datetime(2026, 5, 11, 9, 15)
         result = ProactiveScheduler._format_recent_history(self._mock_scheduler(), [msg])
         assert "[05-11 09:15" in result
-        assert "] 用户: 你好" in result
+        assert "] 玩家: 你好" in result
 
 
 if __name__ == "__main__":

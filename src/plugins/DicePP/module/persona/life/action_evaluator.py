@@ -37,9 +37,7 @@ _SYSTEM_PROMPT = """你是行为可行性评估专家。根据以下信息判断
 硬约束：
 1. 反瞬移：角色当前位置基于今日事件推断。不能从一个地点瞬间跳到另一个。
 2. 反并发：进行中活动未结束时，不能同时做另一件事。
-3. 时间合理性：深夜不适合外出活动，体力低不适合剧烈活动。
-
-你必须通过调用 submit_evaluation 工具来输出结果，不要直接回复文本。"""
+3. 时间合理性：深夜不适合外出活动，体力低不适合剧烈活动。"""
 
 
 class ActionEvaluator:
@@ -159,7 +157,7 @@ class ActionEvaluator:
                 tools=ToolKit(),
                 output=OutputSpec(
                     name="submit_evaluation",
-                    description="提交行动可行性评估结果",
+                    description="提交行动可行性评估结果。",
                     args_schema=RecordEvaluationArgs,
                 ),
                 selection=SCORING,

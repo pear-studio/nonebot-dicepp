@@ -15,6 +15,7 @@ from .events import AgentRunStartedPayload, AgentRunFinishedPayload
 from .llm_gateway import LLMGateway
 from .loop import AgentLoop
 from .message_buffer import MessageBuffer
+from .output_protocol import inject_output_protocol
 from .runtime_types import (
     AgentRunRequest,
     AgentRunResult,
@@ -25,7 +26,6 @@ from .runtime_types import (
 )
 from .sinks import RunSummarySink
 from .state import AgentRunState
-from .sys_instruction import inject_sys_notice
 
 
 def new_run_id() -> str:
@@ -76,10 +76,11 @@ class AgentRuntime:
             limits=self._limits,
         )
 
-        # SYS_INSTRUCTION_NOTICE 只属于本次 Runtime 装配。复制消息
-        # dict 后再注入，避免原地污染 caller 持有的 request.messages。
+        # OutputSpec 协议从首次调用起就是稳定 prompt 的一部分。复制消息
+        # dict 后再装配，避免原地污染 caller 持有的 request.messages。
         initial_messages = [dict(message) for message in request.messages]
-        inject_sys_notice(initial_messages)
+        if request.output is not None:
+            inject_output_protocol(initial_messages, request.output)
         buffer = MessageBuffer.from_initial(initial_messages)
 
         await event_store.write_run(

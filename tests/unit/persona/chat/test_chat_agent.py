@@ -132,6 +132,8 @@ class TestExecuteTurn:
         agent = self._make_agent(conv)
         outcome = await agent.execute_turn("u1", "", "hi")
         assert conv.run.call_args.kwargs.get("record_user_input") is False
+        output = conv.run.call_args.kwargs["output"]
+        assert output.description == "通过聊天通道向玩家发送最终回复，并结束本轮交流。"
         assert outcome.status == "sent"
 
     @pytest.mark.asyncio
@@ -237,7 +239,7 @@ class TestProactiveFakeLLM:
         assert gateway.call_count == 2
         assert outcome.sent is True
         assert delivery.sent_contents == ["正确的主动回复"]
-        assert "不要直接输出文本" in gateway.requests[0].messages[0]["content"]
+        assert "不要直接输出文本" not in gateway.requests[0].messages[0]["content"]
 
 
 class TestSpeakerPropagation:

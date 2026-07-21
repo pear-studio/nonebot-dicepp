@@ -11,6 +11,7 @@ from typing import List, Optional, Protocol, runtime_checkable
 from utils.logger import logger
 
 from ..llm.selection import SUMMARIZE
+from ..agent.output_protocol import is_runtime_instruction, is_unsubmitted_draft
 from .conversation import DANGLING_REF_FALLBACK, NOTIFICATION_PREFIX
 
 
@@ -78,13 +79,19 @@ def _build_summary_prompt(messages: list[dict]) -> list[dict]:
         # summary-of-summary 漂移退化：摘要输入不应包含上一段摘要或系统通知。
         if isinstance(content, str) and content.startswith(NOTIFICATION_PREFIX):
             continue
+        if is_runtime_instruction(msg):
+            # Runtime 提交提醒属于执行协议，不是用户发言或领域事实。
+            continue
         if role == "user":
-            lines.append(f"用户：{content}")
+            lines.append(f"玩家：{content}")
         elif role == "assistant":
             # 跳过 content 去空白后为空的 assistant 条目（如纯 tool_calls 消息），
             # 否则会产出无意义的 "角色：" 空行污染摘要输入。
             if isinstance(content, str) and content.strip():
-                lines.append(f"角色：{content}")
+                if is_unsubmitted_draft(msg):
+                    lines.append(f"未提交草稿：{content}")
+                else:
+                    lines.append(f"角色：{content}")
     conversation_text = "\n".join(lines) if lines else "(空)"
     return [
         {
@@ -93,6 +100,7 @@ def _build_summary_prompt(messages: list[dict]) -> list[dict]:
                 "你是一个角色扮演对话的摘要助手。请用一段中文总结以下对话的关键信息，"
                 "用于下一段对话的上下文前缀。要求：\n"
                 "- 只记录明确发生的内容，不推断不编造\n"
+                "- 未提交草稿不是角色已经对外表达的内容，不得当作已经发生的对话\n"
                 "- 保留准确的名称和关系状态\n"
                 "- 包括当前话题、未完成事项、角色承诺、关系变化\n"
                 "- 用 150-250 字概括\n"

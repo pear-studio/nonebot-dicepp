@@ -25,4 +25,15 @@ from .runtime_types import (
 from .state import AgentRunState
 from .sinks import RunSummarySink
 from .llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
-from .sys_instruction import SYS_INSTRUCTION_PREFIX, make_sys_msg, inject_sys_notice
+from .output_protocol import (
+    DRAFT_MESSAGE_NAME,
+    INTERNAL_MESSAGE_TYPE_FIELD,
+    OUTPUT_PROTOCOL_HEADING,
+    RUNTIME_INSTRUCTION_NAME,
+    build_output_protocol,
+    inject_output_protocol,
+    get_internal_message_type,
+    is_runtime_instruction,
+    is_unsubmitted_draft,
+    make_output_reminder,
+)

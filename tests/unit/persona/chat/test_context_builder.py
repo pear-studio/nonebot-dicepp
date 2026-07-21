@@ -48,7 +48,7 @@ class TestContextBuilderCharacterBook:
         system_content = messages[0]["content"]
         assert "【世界书】" in system_content
         assert "苏晓的猫叫墨墨。" in system_content
-        assert system_content.index("【你对用户的了解") < system_content.index("【世界书】")
+        assert system_content.index("【你对玩家的了解") < system_content.index("【世界书】")
 
     def test_lore_position_before_diary(self):
         char = self._make_character([
@@ -273,7 +273,7 @@ class TestBuildDebugInfo:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 分段回复引导
+# 回复长度约束
 # ═══════════════════════════════════════════════════════════════════
 
 class TestContextBuilderSegmentGuide:
@@ -281,7 +281,7 @@ class TestContextBuilderSegmentGuide:
     def _make_character(self):
         return Character(name="苏晓", description="一个温柔的AI伴侣")
 
-    def test_segment_guide_injected_with_defaults(self):
+    def test_segment_guide_injects_only_length_limits(self):
         char = self._make_character()
         from plugins.DicePP.module.persona.chat.context import SegmentGuide
         builder = ContextBuilder(
@@ -295,10 +295,12 @@ class TestContextBuilderSegmentGuide:
             history_dicts=[{"role": "user", "content": "hi"}],
         )
         system = messages[0]["content"]
-        assert "send_reply_segment" in system
-        assert "send_reply" in system
+        assert "【回复长度】" in system
         assert "80" in system
         assert "120" in system
+        assert "send_reply_segment" not in system
+        assert "send_reply" not in system
+        assert "不要直接输出文本" not in system
         assert "delay_before" not in system
 
     def test_segment_guide_reflects_custom_values(self):
@@ -333,9 +335,10 @@ class TestContextBuilderSegmentGuide:
         )
         system = messages[0]["content"]
         name_idx = system.index("苏晓")
-        guide_idx = system.index("【回复规则】")
-        remind_idx = system.index("请记住用户说过的话")
+        guide_idx = system.index("【回复长度】")
+        remind_idx = system.index("请记住玩家说过的话")
         assert name_idx < guide_idx < remind_idx
+        assert "玩家发言（role=user）的 name" in system
 
     def test_segment_guide_disabled_when_segment_enabled_false(self):
         char = self._make_character()
@@ -345,11 +348,11 @@ class TestContextBuilderSegmentGuide:
             history_dicts=[{"role": "user", "content": "hi"}],
         )
         system = messages[0]["content"]
-        assert "【回复规则】" not in system
+        assert "【回复长度】" not in system
 
 
 # ═══════════════════════════════════════════════════════════════════
-# proactive prompt 输出协议
+# proactive prompt
 # ═══════════════════════════════════════════════════════════════════
 
 class TestContextBuilderProactivePrompt:
@@ -357,13 +360,13 @@ class TestContextBuilderProactivePrompt:
     def _make_character(self):
         return Character(name="苏晓", description="一个温柔的AI伴侣")
 
-    def test_proactive_prompt_contains_send_reply_protocol(self):
-        """proactive prompt 包含 send_reply 调用协议"""
+    def test_proactive_prompt_does_not_duplicate_output_protocol(self):
+        """输出协议由 Runtime 注入，不在 Agent prompt 中重复维护。"""
         char = self._make_character()
         builder = ContextBuilder(char, segment_guide=None)
         prompt = builder.build_static_prompt_proactive()
-        assert "send_reply" in prompt
-        assert "不要直接输出文本" in prompt
+        assert "send_reply" not in prompt
+        assert "不要直接输出文本" not in prompt
 
     def test_proactive_prompt_excludes_segment_params(self):
         """proactive prompt 不含分段参数（send_reply_segment / 单段上限 / 总字数硬上限）"""

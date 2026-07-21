@@ -166,5 +166,5 @@ class Character(BaseModel):
                 result.append(DEFAULT_RELATION_LABELS[i])
         return result
 
-    def format_mes_example(self, user_name: str = "用户") -> str:
+    def format_mes_example(self, user_name: str = "玩家") -> str:
         return self.mes_example.replace("{{user}}", user_name).replace("{{char}}", self.name)

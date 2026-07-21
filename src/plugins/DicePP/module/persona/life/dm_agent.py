@@ -131,7 +131,7 @@ class DMAgent(Agent):
 1. 第三人称客观叙述
 2. context_summary 为事件摘要，不超过 60 字
 3. 给出该事件对角色体力/心情/健康的影响（delta，可选，-20~+20）
-4. 必须通过调用 say 工具输出。同意对方的结束提议时，调用 say 并设置 want_to_end=true。"""
+4. 同意对方的结束提议时，设置 want_to_end=true。"""
 
         return system_prompt
 
@@ -165,7 +165,7 @@ class DMAgent(Agent):
                 f"- 如果有需要裁决的行动（风险/难度），暗骰裁决后叙述结果（不展示DC和骰值）\n"
                 f"- 如果角色在观察/回忆/辨别，可直接补充合理细节\n"
                 f"- 如果角色只是日常表达、没有需要你介入的内容，可以自然收束（设置 want_to_end=true）\n"
-                f"- 如果角色已提议结束且你也同意，调用 say 并设置 want_to_end=true"
+                f"- 如果角色已提议结束且你也同意，设置 want_to_end=true"
             )
 
         user_prompt = (
@@ -179,8 +179,8 @@ class DMAgent(Agent):
         if char_want_to_end:
             user_prompt += (
                 "\n\n[提示] 角色认为当前场景可以收束了。"
-                "如果你也同意，调用 say 并设置 want_to_end=true。"
-                "如果你还有需要补充的信息，正常 say 即可（会覆盖结束提议）。"
+                "如果你也同意，设置 want_to_end=true。"
+                "如果你还有需要补充的信息，继续叙述即可（会覆盖结束提议）。"
             )
 
         return user_prompt

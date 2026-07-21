@@ -430,6 +430,7 @@ class TestOutputSpecCorrection:
         second_messages = fake_llm.requests[1].messages
         first_turn, correction = second_messages[-2:]
         assert first_turn["role"] == "assistant"
+        assert first_turn["name"] == "unsubmitted_draft"
         assert first_turn["content"] == "直接回复文本（不调用工具）"
         provider_context = first_turn["_provider_context"]
         assert provider_context["provider"] == "provider-a"
@@ -437,8 +438,9 @@ class TestOutputSpecCorrection:
         assert provider_context["finish_reason"] == "stop"
         assert provider_context["reasoning_content"] == "先直接回答试试"
         assert correction["role"] == "user"
-        assert correction["content"].startswith("[系统指令]")
-        assert "你必须调用 say" in correction["content"]
+        assert correction["name"] == "runtime_instruction"
+        assert "内部草稿" in correction["content"]
+        assert "只有成功调用 say" in correction["content"]
         assert fake_llm.requests[1].preferred_provider == "provider-a"
         assert fake_llm.requests[1].preferred_model == "model-a"
 
@@ -455,6 +457,60 @@ class TestOutputSpecCorrection:
         assert len(corrections) == 1
         assert warnings == []
         assert state.warning_count == 0
+
+    @pytest.mark.asyncio
+    async def test_tool_then_draft_then_reminder_then_output_keeps_causal_order(self):
+        """普通工具完成后直接文本仍按同一稳定前缀纠正并显式提交。"""
+        fake_llm = FakeLLMGateway([
+            ("", [_make_tc(0, "search", {})]),
+            ("根据搜索结果生成的草稿", []),
+            ("", [_make_tc(1, "say", {"content": "最终提交"})]),
+        ])
+        toolkit = ToolKit(tools={
+            "search": ToolSpec(
+                name="search",
+                description="搜索",
+                args_schema=type("Args", (BaseModel,), {}),
+                handler=_ok_handler,
+            ),
+        })
+        initial = [
+            {"role": "system", "content": "稳定 system"},
+            {"role": "user", "content": "先搜索再回答"},
+        ]
+
+        result = await AgentLoop(llm_gateway=fake_llm).run(
+            buffer=MessageBuffer.from_initial(initial),
+            state=_make_state(),
+            toolkit=toolkit,
+            output_spec=OutputSpec(
+                name="say", description="提交最终回复", args_schema=_SayArgs,
+            ),
+            limits=LoopLimits(max_rounds=5, max_corrections=2),
+            selection=CHAT,
+            interaction_id="test",
+        )
+
+        assert result.success
+        assert result.output.arguments["content"] == "最终提交"
+        assert [request.messages[0] for request in fake_llm.requests] == [
+            initial[0], initial[0], initial[0],
+        ]
+        assert [message["role"] for message in result.message_delta] == [
+            "assistant", "tool", "assistant", "user", "assistant", "tool",
+        ]
+        search_call, search_result, draft, reminder, output_call, output_result = (
+            result.message_delta
+        )
+        assert search_call["tool_calls"][0]["function"]["name"] == "search"
+        assert search_result == {
+            "role": "tool", "tool_call_id": "call_0", "content": "ok",
+        }
+        assert draft["content"] == "根据搜索结果生成的草稿"
+        assert draft["name"] == "unsubmitted_draft"
+        assert reminder["name"] == "runtime_instruction"
+        assert output_call["tool_calls"][0]["function"]["name"] == "say"
+        assert output_result["tool_call_id"] == "call_1"
 
     @pytest.mark.asyncio
     async def test_correction_exhaustion_emits_warning(self):

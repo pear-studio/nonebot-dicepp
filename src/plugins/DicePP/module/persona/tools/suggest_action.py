@@ -19,7 +19,7 @@ async def _suggest_action_handler(parsed: BaseModel, ctx: ToolExecutionContext) 
 SUGGEST_ACTION_TOOL = ToolSpec(
     name="suggest_action",
     description="当对话中产生了角色可能想做的行动灵感时调用此工具。"
-                "行动灵感可能来自：用户给角色的建议、角色主动提出的想法、"
+                "行动灵感可能来自：玩家给角色的建议、角色主动提出的想法、"
                 "或聊天中自然涌现的灵光一闪。"
                 "调用后角色会在合适的时机自主决定是否执行，你不需要等待结果。",
     args_schema=_SuggestActionArgs,
@@ -70,7 +70,7 @@ def build_suggest_action_tool(
     return ToolSpec(
         name="suggest_action",
         description="当对话中产生了角色可能想做的行动灵感时调用此工具。"
-                    "行动灵感可能来自：用户给角色的建议、角色主动提出的想法、"
+                    "行动灵感可能来自：玩家给角色的建议、角色主动提出的想法、"
                     "或聊天中自然涌现的灵光一闪。"
                     "调用后角色会在合适的时机自主决定是否执行，你不需要等待结果。",
         args_schema=_SuggestActionArgs,

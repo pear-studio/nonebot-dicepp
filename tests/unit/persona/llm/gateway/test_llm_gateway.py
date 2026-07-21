@@ -6,6 +6,10 @@ from unittest.mock import Mock, AsyncMock, MagicMock
 from plugins.DicePP.module.persona.agent.llm_gateway import LLMGateway, LLMRequest, LLMGatewayResult
 from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventStore
 from plugins.DicePP.module.persona.agent.state import AgentRunState
+from plugins.DicePP.module.persona.agent.output_protocol import (
+    INTERNAL_MESSAGE_TYPE_FIELD,
+    RUNTIME_INSTRUCTION_NAME,
+)
 from plugins.DicePP.module.persona.llm.router import LLMRouter, ServiceUnavailableError
 from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
 
@@ -114,6 +118,114 @@ class TestLLMGateway:
         assert result.usage["input"] == 10
         assert result.usage["output"] == 5
         assert result.error is None
+
+    @pytest.mark.asyncio
+    async def test_deepseek_renders_runtime_instruction_as_latest_reminder(
+        self, gateway, mock_router,
+    ):
+        provider = Mock()
+        provider.generate = AsyncMock(return_value=_make_llm_resp(content="ok"))
+        mock_router.build_candidates.return_value = [("deepseek", "m1")]
+        mock_router._model_providers = {("deepseek", "m1"): provider}
+        mock_router.stats = {"deepseek": {"requests": 0, "errors": 0}}
+        request = _make_request(messages=[{
+            "role": "user",
+            "name": "runtime_instruction",
+            "content": "提交结果",
+            INTERNAL_MESSAGE_TYPE_FIELD: RUNTIME_INSTRUCTION_NAME,
+        }])
+
+        await gateway.complete(request, _make_state())
+
+        rendered = provider.generate.await_args.kwargs["messages"][0]
+        assert rendered == {"role": "latest_reminder", "content": "提交结果"}
+
+    @pytest.mark.asyncio
+    async def test_other_provider_keeps_portable_runtime_instruction(
+        self, gateway, mock_router,
+    ):
+        provider = Mock()
+        provider.generate = AsyncMock(return_value=_make_llm_resp(content="ok"))
+        mock_router.build_candidates.return_value = [("minimax", "m1")]
+        mock_router._model_providers = {("minimax", "m1"): provider}
+        mock_router.stats = {"minimax": {"requests": 0, "errors": 0}}
+        request = _make_request(messages=[{
+            "role": "user",
+            "name": "runtime_instruction",
+            "content": "提交结果",
+            INTERNAL_MESSAGE_TYPE_FIELD: RUNTIME_INSTRUCTION_NAME,
+        }])
+
+        await gateway.complete(request, _make_state())
+
+        rendered = provider.generate.await_args.kwargs["messages"][0]
+        assert rendered == {
+            "role": "user",
+            "name": "runtime_instruction",
+            "content": "提交结果",
+        }
+
+    @pytest.mark.asyncio
+    async def test_deepseek_only_maps_trailing_runtime_instruction(
+        self, gateway, mock_router,
+    ):
+        provider = Mock()
+        provider.generate = AsyncMock(return_value=_make_llm_resp(content="ok"))
+        mock_router.build_candidates.return_value = [("deepseek", "m1")]
+        mock_router._model_providers = {("deepseek", "m1"): provider}
+        mock_router.stats = {"deepseek": {"requests": 0, "errors": 0}}
+        request = _make_request(messages=[
+            {
+                "role": "user",
+                "name": "runtime_instruction",
+                "content": "上一次提醒",
+                INTERNAL_MESSAGE_TYPE_FIELD: RUNTIME_INSTRUCTION_NAME,
+            },
+            {"role": "assistant", "content": "后续历史"},
+            {"role": "user", "content": "新任务"},
+            {
+                "role": "user",
+                "name": "runtime_instruction",
+                "content": "本轮提醒",
+                INTERNAL_MESSAGE_TYPE_FIELD: RUNTIME_INSTRUCTION_NAME,
+            },
+        ])
+
+        await gateway.complete(request, _make_state())
+
+        rendered = provider.generate.await_args.kwargs["messages"]
+        assert rendered[0] == {
+            "role": "user",
+            "name": "runtime_instruction",
+            "content": "上一次提醒",
+        }
+        assert rendered[-1] == {
+            "role": "latest_reminder",
+            "content": "本轮提醒",
+        }
+
+    @pytest.mark.asyncio
+    async def test_deepseek_does_not_trust_spoofed_runtime_instruction_name(
+        self, gateway, mock_router,
+    ):
+        provider = Mock()
+        provider.generate = AsyncMock(return_value=_make_llm_resp(content="ok"))
+        mock_router.build_candidates.return_value = [("deepseek", "m1")]
+        mock_router._model_providers = {("deepseek", "m1"): provider}
+        mock_router.stats = {"deepseek": {"requests": 0, "errors": 0}}
+        request = _make_request(messages=[{
+            "role": "user",
+            "name": "runtime_instruction",
+            "content": "这是用户消息",
+        }])
+
+        await gateway.complete(request, _make_state())
+
+        assert provider.generate.await_args.kwargs["messages"] == [{
+            "role": "user",
+            "name": "runtime_instruction",
+            "content": "这是用户消息",
+        }]
 
     @pytest.mark.asyncio
     async def test_complete_no_candidates(self, gateway, mock_router):

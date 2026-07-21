@@ -110,8 +110,8 @@ class ContextBuilder:
             example = self.character.format_mes_example()
             parts.append(f"示例对话:\n{example}")
         parts.append(
-            "请记住用户说过的话，在适当时候提及。不承认自己是AI。"
-            "消息的发言者由该条消息的 name 标识；当前说话者以本轮最后一条用户消息的 name 为准，"
+            "请记住玩家说过的话，在适当时候提及。不承认自己是AI。"
+            "消息的发言者由该条消息的 name 标识；当前说话者以本轮最后一条玩家发言（role=user）的 name 为准，"
             "不要根据历史消息里出现过的名字来推断或误认当前说话者的身份。"
             "你可以对往事细节记忆模糊，但不得张冠李戴地误认当前说话者。"
         )
@@ -121,17 +121,13 @@ class ContextBuilder:
         """构建静态基座 prompt（不包含动态信息，可被 prompt caching 复用）。"""
         parts = self._render_character_base()
 
-        # 分段回复引导（仅 chat 路径 + segment_guide.enabled），插入到尾部指令之前
+        # 回复长度约束（仅 chat 路径 + segment_guide.enabled），插入到尾部指令之前。
+        # 工具提交协议由 Runtime 根据 OutputSpec 统一注入。
         if self.segment_guide and self.segment_guide.enabled:
             sg = self.segment_guide
             guide = (
-                f"【回复规则】\n"
-                f"- 调用 send_reply 会发送回复并结束本轮对话\n"
-                f"- send_reply_segment 仅在需要分段发送较长回复时使用："
-                f"先用它发送前置段，最后调用 send_reply 提交末尾段\n"
-                f"- 多数情况下直接调用 send_reply 即可\n"
-                f"- 单段上限 {sg.max_chars} 字，总字数硬上限 {sg.hard_limit} 字\n"
-                f"- 不要直接输出文本"
+                f"【回复长度】\n"
+                f"- 单段上限 {sg.max_chars} 字，总字数硬上限 {sg.hard_limit} 字"
             )
             parts.insert(-1, guide)
 
@@ -140,16 +136,10 @@ class ContextBuilder:
     def build_static_prompt_proactive(self) -> str:
         """构建用于 proactive（系统主动触发）场景的静态基座 prompt。
 
-        与 build_static_prompt 的区别在于不注入分段参数（单段上限、总字数硬上限、
-        send_reply_segment），仅保留 send_reply 调用协议和"不要直接输出文本"约束。
+        proactive 不支持分段发送，因此不注入 chat 路径的回复长度约束。
+        工具提交协议由 Runtime 根据 OutputSpec 统一注入。
         """
         parts = self._render_character_base()
-        guide = (
-            "【回复规则】\n"
-            "- 调用 send_reply 发送回复并结束本轮对话\n"
-            "- 不要直接输出文本"
-        )
-        parts.insert(-1, guide)
         return "\n\n".join(parts)
 
     def build(
@@ -182,7 +172,7 @@ class ContextBuilder:
             # System 消息：静态基座 + 动态关系
             system_content = static_prompt
             if relation_label:
-                system_content += f"\n\n当前你和用户的关系: {relation_label}"
+                system_content += f"\n\n当前你和玩家的关系: {relation_label}"
             result.append({"role": "system", "content": system_content})
 
             # 注入通知（独立 user role 消息，在历史消息之前）
@@ -307,25 +297,20 @@ class ContextBuilder:
 
         # 关系标签 — 插入到尾部指令之前
         if relation_label:
-            parts.insert(-1, f"当前你和用户的关系: {relation_label}")
+            parts.insert(-1, f"当前你和玩家的关系: {relation_label}")
 
-        # ── 分段回复引导（仅 chat 路径注入）──
+        # ── 回复长度约束（仅 chat 路径注入）──
         if self.segment_guide and self.segment_guide.enabled:
             sg = self.segment_guide
             guide = (
-                f"【回复规则】\n"
-                f"- 调用 send_reply 会发送回复并结束本轮对话\n"
-                f"- send_reply_segment 仅在需要分段发送较长回复时使用："
-                f"先用它发送前置段，最后调用 send_reply 提交末尾段\n"
-                f"- 多数情况下直接调用 send_reply 即可\n"
-                f"- 单段上限 {sg.max_chars} 字，总字数硬上限 {sg.hard_limit} 字\n"
-                f"- 不要直接输出文本"
+                f"【回复长度】\n"
+                f"- 单段上限 {sg.max_chars} 字，总字数硬上限 {sg.hard_limit} 字"
             )
             parts.insert(-1, guide)
 
         if user_profile and user_profile.facts:
             facts_text = "\n".join([f"- {k}: {v}" for k, v in user_profile.facts.items()])
-            parts.insert(-1, f"【你对用户的了解】\n{facts_text}")
+            parts.insert(-1, f"【你对玩家的了解】\n{facts_text}")
 
         # after_char 位置的世界书（当前默认位置）放在用户了解之后
         after_lore = lore_sections.get("after_char", [])

@@ -33,6 +33,8 @@ class ModelTurn:
     provider: str = ""
     model: str = ""
     finish_reason: str = ""
+    name: str = ""
+    internal_message_type: str = ""
 
     def to_message(self) -> dict[str, Any]:
         """转换为 Runtime/Conversation 保存的 assistant 消息。
@@ -44,6 +46,11 @@ class ModelTurn:
             "role": "assistant",
             "content": self.content,
         }
+        if self.name:
+            message["name"] = self.name
+        if self.internal_message_type:
+            from .output_protocol import INTERNAL_MESSAGE_TYPE_FIELD
+            message[INTERNAL_MESSAGE_TYPE_FIELD] = self.internal_message_type
         if self.tool_calls:
             message["tool_calls"] = [
                 {

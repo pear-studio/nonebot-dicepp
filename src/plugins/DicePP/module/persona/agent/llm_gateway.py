@@ -24,6 +24,7 @@ from .events import (
     ModelCandidateSucceededPayload,
     ModelResponseReceivedPayload,
 )
+from .output_protocol import is_runtime_instruction
 from .state import AgentRunState
 @dataclass
 class LLMRequest:
@@ -393,12 +394,30 @@ def _render_messages_for_candidate(
         "role", "content", "name", "tool_calls", "tool_call_id",
         "function_call",
     }
-    for message in messages:
+    trailing_instruction_start = len(messages)
+    while trailing_instruction_start > 0:
+        candidate = messages[trailing_instruction_start - 1]
+        if not is_runtime_instruction(candidate):
+            break
+        trailing_instruction_start -= 1
+
+    for index, message in enumerate(messages):
         rendered = {
             key: value
             for key, value in message.items()
             if key in public_fields
         }
+        if (
+            provider.casefold() == "deepseek"
+            and index >= trailing_instruction_start
+            and is_runtime_instruction(message)
+        ):
+            # latest_reminder 是 DeepSeek 的追加式控制角色。只映射本次请求
+            # 尾部的即时提醒；已经进入历史的提醒保留 portable user 语义。
+            rendered = {
+                "role": "latest_reminder",
+                "content": message.get("content", ""),
+            }
         context = message.get("_provider_context")
         compatible = (
             isinstance(context, Mapping)

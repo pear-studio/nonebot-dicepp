@@ -6,7 +6,7 @@ def format_message_results(results, max_chars: int = 180) -> str:
     """格式化消息检索结果为纯文本，参与者映射提供匿名化"""
     participants: Dict[str, str] = {}
     uids = sorted({msg.user_id for msg in results if msg.role != "assistant" and msg.user_id})
-    anon_map: Dict[str, str] = {uid: f"用户{i + 1}" for i, uid in enumerate(uids)}
+    anon_map: Dict[str, str] = {uid: f"玩家{i + 1}" for i, uid in enumerate(uids)}
     for msg in results:
         if msg.role == "assistant":
             participants["assistant"] = "我"

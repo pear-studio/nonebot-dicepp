@@ -170,7 +170,7 @@ class RelationChangeSource(ChangeSource):
 
         return [Notification(
             source_id=self.source_id,
-            content=f"通知: 你和用户的关系现在是{current_label}。",
+            content=f"通知: 你和当前玩家的关系现在是{current_label}。",
             name=self.name,
         )], current_label
 
@@ -205,7 +205,7 @@ class ProfileFactsChangeSource(ChangeSource):
         facts_lines = "\n".join([f"- {k}: {v}" for k, v in profile.facts.items()])
         return [Notification(
             source_id=self.source_id,
-            content=f"你对用户有了新的了解：\n{facts_lines}",
+            content=f"你对当前玩家有了新的了解：\n{facts_lines}",
             name=self.name,
         )], current_hash
 

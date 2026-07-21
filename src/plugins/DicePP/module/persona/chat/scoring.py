@@ -55,7 +55,6 @@ class ScoringAgent:
             messages,
             current_profile or UserProfile(user_id="", facts={}),
             relationship,
-            tool_name=tool_name,
             warn_pending=warn_pending,
         )
 
@@ -67,7 +66,7 @@ class ScoringAgent:
             )
             output_spec = OutputSpec(
                 name=tool_name,
-                description="记录评分结果：亲密度变化、信誉标记和用户事实提取",
+                description="提交本轮对话的关系评分与玩家事实提取结果。",
                 args_schema=RecordScoreArgs,
             )
             request = AgentRunRequest(
@@ -142,14 +141,13 @@ class ScoringAgent:
         messages: List[Dict[str, str]],
         profile: UserProfile,
         relationship: Optional[RelationshipState] = None,
-        tool_name: str = "submit_score",
         *,
         warn_pending: bool = False,
     ) -> str:
         dialogue_lines = []
         now = wall_now(self.timezone)
         for msg in messages:
-            role = "用户" if msg["role"] == "user" else "AI"
+            role = "玩家" if msg["role"] == "user" else "角色"
             rel = format_relative_time(msg.get("created_at"), now)
             extra = f" {rel}" if rel else ""
             prefix = f"{format_timestamp(msg.get('created_at'), now)}{extra}"
@@ -172,7 +170,7 @@ class ScoringAgent:
         warn_info = ""
         if warn_pending:
             warn_info = (
-                "\n**注意**：上轮对话中用户有不当言论，AI 已设置警告标记（warn_pending）。"
+                "\n**注意**：上轮对话中玩家有不当言论，角色已设置警告标记（warn_pending）。"
                 "本轮如继续恶意行为，可以扣减 reputation。\n"
             )
 
@@ -180,7 +178,7 @@ class ScoringAgent:
 
 1. 评估亲密度（intimacy）变化，范围 -5.0 到 +5.0
 2. 评估是否需要扣减信誉（reputation_delta）——仅限恶意行为（骚扰、谩骂、恶意刷屏等），范围 -30 到 0
-3. 提取用户相关信息（名字、爱好、宠物等）
+3. 提取玩家相关信息（名字、爱好、宠物等）
 
 **注意**：熟悉度（familiarity）由系统自动根据互动频率计算，你不需要评估。
 
@@ -190,17 +188,15 @@ class ScoringAgent:
 ## 对话记录
 {dialogue}
 
-## 已知的用户信息
+## 已知的玩家信息
 {existing_facts}
 
-你必须通过调用 {tool_name} 工具来输出结果，不要直接回复文本。
-
 评分指南：
-- intimacy 基于用户的态度、话题深度、情感表达
-- 用户友好、分享个人信息、表达情感 → 正分
-- 用户冷淡、敷衍、负面态度 → 负分
+- intimacy 基于玩家的态度、话题深度、情感表达
+- 玩家友好、分享个人信息、表达情感 → 正分
+- 玩家冷淡、敷衍、负面态度 → 负分
 - reputation_delta 仅在明确恶意行为时扣分（-30~0），正常互动为 0
-- **扣分前警告规则**：检查 AI 回复是否已包含不认可/警告表述；若已警告或上轮有 warn_pending 标记，则可以扣减 reputation；否则 reputation_delta 保持 0，系统会设置 warn_pending 在下一轮警告用户
+- **扣分前警告规则**：检查角色回复是否已包含不认可/警告表述；若已警告或上轮有 warn_pending 标记，则可以扣减 reputation；否则 reputation_delta 保持 0，系统会设置 warn_pending 在下一轮警告玩家
 - 提取的事实要简洁具体"""
 
         return prompt

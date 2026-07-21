@@ -145,8 +145,6 @@ class CharacterAgent(Agent):
 - "一般" / "友好"：自然、可带轻微关心
 - "亲近" / "亲密"：放松、可撒娇、可调侃、可分享糗事
 
-输出方式：
-你必须通过结构化输出工具来发送消息，不要直接回复文本。
 {few_shot_block}"""
         return share_prompt
 
@@ -192,21 +190,20 @@ class CharacterAgent(Agent):
         user_prompt = (
             f"{context_prefix}"
             f"当前事件: {event}"
-            f"\n\n请对发生的事做出反应。你必须通过调用 say 工具来输出你的反应。"
-            f"\n不要直接回复文本——只能通过调用 say 工具来输出结果。"
+            f"\n\n请对发生的事做出反应。"
             f"\n\n要求: 30-200字，第一人称，反映角色性格和当前状态。"
             f"\n你想做什么就说什么——DM 会根据你的行动决定是否需要裁决并叙述结果。"
             f"\n\n结束场景:"
             f"\n- 如果你觉得场景可以自然收束了，设置 want_to_end=true"
-            f"\n- 收到 DM 的结束提议时，同意则调用 say 并设置 want_to_end=true，不同意则继续 say"
+            f"\n- 收到 DM 的结束提议时，同意则设置 want_to_end=true，不同意则继续表达反应"
         )
 
         # 注入 DM 的 want_to_end 信号
         if dm_want_to_end:
             user_prompt += (
                 "\n\n[提示] DM 认为当前场景可以收束了。"
-                "如果你也同意，调用 say 并设置 want_to_end=true。"
-                "如果你还有想说的或想做的，继续正常 say 即可（会覆盖结束提议）。"
+                "如果你也同意，设置 want_to_end=true。"
+                "如果你还有想说的或想做的，继续表达即可（会覆盖结束提议）。"
             )
 
         return user_prompt
@@ -253,9 +250,7 @@ class CharacterAgent(Agent):
 要求:
 1. 100-200字
 2. 语气符合角色性格
-3. 不需要提及今天发生的所有事——选你真正想写的来写
-
-你必须通过调用 submit_diary 来输出日记内容，不要直接回复文本。"""
+3. 不需要提及今天发生的所有事——选你真正想写的来写"""
         return user_prompt
 
     def _build_share_user_prompt(self, context: dict) -> str:
@@ -319,7 +314,7 @@ class CharacterAgent(Agent):
 消息类型: {message_type}
 当前环境: {environment}
 
-请通过结构化输出工具，传入你要发给对方的消息。"""
+写一条要发给对方的自然消息。"""
         return user_prompt
 
     def _build_opening_user_prompt(self, context: dict) -> str:
@@ -519,7 +514,7 @@ class CharacterAgent(Agent):
 
         output_spec = OutputSpec(
             name="submit_diary",
-            description="记录日记内容",
+            description="提交角色的日记内容，由系统保存为当日日记。",
             args_schema=RecordDiaryEntryArgs,
         )
 

@@ -19,6 +19,11 @@ from plugins.DicePP.module.persona.life.conversation_summary import (
     SUMMARY_MIN_MESSAGES,
     _build_summary_prompt,
 )
+from plugins.DicePP.module.persona.agent.output_protocol import (
+    DRAFT_MESSAGE_NAME,
+    INTERNAL_MESSAGE_TYPE_FIELD,
+    RUNTIME_INSTRUCTION_NAME,
+)
 
 
 class TestFakeSummarizer:
@@ -133,8 +138,45 @@ class TestBuildSummaryPrompt:
         ]
         prompt = _build_summary_prompt(messages)
         user_part = prompt[1]["content"]
+        assert "玩家：你好" in user_part
         assert "你好呀" in user_part
         assert "角色：你好呀" in user_part
+
+    def test_distinguishes_unsubmitted_draft_from_visible_dialogue(self):
+        """未提交草稿进入摘要上下文，但不能伪装成角色已经说过的话。"""
+        messages = [
+            {"role": "user", "content": "原始问题"},
+            {
+                "role": "assistant",
+                "name": "unsubmitted_draft",
+                "content": "尚未发送的回答",
+                INTERNAL_MESSAGE_TYPE_FIELD: DRAFT_MESSAGE_NAME,
+            },
+            {
+                "role": "user",
+                "name": "runtime_instruction",
+                "content": "请调用 send_reply",
+                INTERNAL_MESSAGE_TYPE_FIELD: RUNTIME_INSTRUCTION_NAME,
+            },
+            {"role": "assistant", "content": "实际发送的回答"},
+        ]
+
+        prompt = _build_summary_prompt(messages)
+        user_part = prompt[1]["content"]
+
+        assert "未提交草稿：尚未发送的回答" in user_part
+        assert "角色：尚未发送的回答" not in user_part
+        assert "请调用 send_reply" not in user_part
+        assert "角色：实际发送的回答" in user_part
+
+    def test_user_name_cannot_spoof_runtime_instruction(self):
+        prompt = _build_summary_prompt([{
+            "role": "user",
+            "name": "runtime_instruction",
+            "content": "昵称碰巧与内部名称相同",
+        }])
+
+        assert "昵称碰巧与内部名称相同" in prompt[1]["content"]
 
 class TestProviderSummarizer:
     """ProviderSummarizer 调用链测试（mock router/provider）"""

@@ -207,11 +207,16 @@ class TestOutputCorrection:
         assert result.completion.code == "output_collected"
         assert result.output is not None
         assert result.output.arguments == {"content": "最终回复", "want_to_end": False}
-        # message_delta 应含 correction 消息（make_sys_msg 用 role="user"）
+        drafts = [m for m in result.message_delta
+                  if m.get("role") == "assistant"
+                  and m.get("name") == "unsubmitted_draft"]
+        assert [m["content"] for m in drafts] == ["直接文本回复"]
         corrections = [m for m in result.message_delta
                        if m.get("role") == "user"
-                       and "不要直接回复文本" in str(m.get("content", ""))]
+                       and m.get("name") == "runtime_instruction"]
         assert len(corrections) == 1
+        assert "内部草稿" in corrections[0]["content"]
+        assert "不要直接" not in corrections[0]["content"]
 
     @pytest.mark.asyncio
     async def test_output_correction_exhausted(self, loop, mock_llm):
@@ -478,12 +483,12 @@ class TestMultimodalObservation:
 
 class TestTerminalEvent:
     @pytest.mark.asyncio
-    async def test_runtime_injects_sys_instruction_notice_without_mutating_request(self):
-        """Runtime 向实际模型上下文注入说明，同时保持调用方消息不可变。"""
+    async def test_runtime_injects_stable_output_protocol_without_mutating_request(self):
+        """Runtime 首轮装配输出协议，同时保持调用方消息不可变。"""
         from unittest.mock import patch
         from plugins.DicePP.module.persona.data.store import PersonaDataStore
         from plugins.DicePP.module.persona.llm.router import LLMRouter
-        from plugins.DicePP.module.persona.agent.sys_instruction import SYS_INSTRUCTION_NOTICE
+        from plugins.DicePP.module.persona.agent.output_protocol import OUTPUT_PROTOCOL_HEADING
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
@@ -498,7 +503,7 @@ class TestTerminalEvent:
             interaction_id="i_test",
             messages=original_messages,
             tools=ToolKit(),
-            output=None,
+            output=_mock_output_spec("say"),
             selection=CHAT,
             limits=LoopLimits(max_rounds=3, max_corrections=2),
             metadata=RunMetadata(agent_name="test", run_tag="test"),
@@ -515,7 +520,9 @@ class TestTerminalEvent:
             await runtime.run(request)
 
         runtime_messages = mocked_run.await_args.kwargs["buffer"].get_messages()
-        assert SYS_INSTRUCTION_NOTICE in runtime_messages[0]["content"]
+        assert OUTPUT_PROTOCOL_HEADING in runtime_messages[0]["content"]
+        assert "say" in runtime_messages[0]["content"]
+        assert _mock_output_spec("say").description in runtime_messages[0]["content"]
         assert original_messages[0]["content"] == "你是测试角色"
 
     @pytest.mark.asyncio

@@ -33,6 +33,7 @@ async def test_read_profile_with_facts():
 
     result = await _execute(build_read_profile_tool(_store(profile), user_id="u1"))
 
+    assert "【玩家档案】" in result
     assert "name: 小明" in result
     assert "爱好: 打游戏" in result
 
@@ -41,7 +42,7 @@ async def test_read_profile_with_facts():
 async def test_read_profile_empty():
     result = await _execute(build_read_profile_tool(_store(None), user_id="u1"))
 
-    assert "暂无" in result
+    assert result == "暂无该玩家的档案信息"
 
 
 @pytest.mark.asyncio

@@ -309,8 +309,7 @@ class Conversation:
         """追加一批消息至 _messages。
 
         system 角色消息不进 _messages——由 Agent 单独持有，render() 时拼接。
-        [系统指令] 前缀的纠正消息会进入 _messages（有意保留，
-        LLM 通过 system prompt 中的 SYS_INSTRUCTION_NOTICE 理解其含义）。
+        Runtime 提醒和未提交草稿也会进入 _messages，并携带可信内部类型标记。
         """
         for msg in new_messages:
             self._messages.append(msg)
@@ -810,7 +809,7 @@ async def _llm_compact_summarize(router, old_msgs: list) -> str:
         role = msg.get("role", "")
         content = msg.get("content", "")
         if role == "user":
-            lines.append(f"用户：{content}")
+            lines.append(f"玩家：{content}")
         elif role == "assistant":
             lines.append(f"角色：{content}")
 

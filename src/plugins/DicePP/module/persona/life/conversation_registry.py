@@ -26,7 +26,7 @@ from utils.time import get_clock
 from ..data.store import PersonaDataStore
 from .conversation import DANGLING_REF_FALLBACK, NOTIFICATION_PREFIX, ChangeSource, Conversation
 from .conversation_scope import ConversationScope
-from .conversation_store import ConversationStore, _cell
+from .conversation_store import ConversationStore, _cell, _recompose_message
 from .conversation_summary import SUMMARY_MIN_MESSAGES, Summarizer
 
 # 依赖注入的工厂类型
@@ -648,31 +648,22 @@ class ConversationRegistry:
 
         # Step 5: 加载消息并解析内容
         msg_cursor = await db.execute(
-            "SELECT role, content, entry_type, message_stream_id "
+            "SELECT role, content, tool_calls, tool_call_id, name, "
+            "provider_context, message_stream_id, entry_type "
             "FROM persona_session_message WHERE session_id=? ORDER BY sequence",
             (old_sid,),
         )
         msg_rows = await msg_cursor.fetchall()
 
         # 构建消息列表，解析 ref 条目引用 message_stream 正文
-        messages: list[dict] = []
+        messages = [_recompose_message(row) for row in msg_rows]
         ref_ids: list[int] = []
-        for r in msg_rows:
-            entry_type = str(_cell(r, 2, "entry_type") or "own")
-            role = str(_cell(r, 0, "role") or "")
-            if entry_type == "ref":
-                msid_raw = _cell(r, 3, "message_stream_id")
+        for message in messages:
+            if message.get("entry_type") == "ref":
+                msid_raw = message.get("message_stream_id")
                 if msid_raw is not None:
                     ref_ids.append(int(msid_raw))
-                messages.append({
-                    "role": role,
-                    "entry_type": "ref",
-                    "message_stream_id": int(msid_raw) if msid_raw is not None else None,
-                    "content": "",
-                })
-            else:
-                content = str(_cell(r, 1, "content") or "")
-                messages.append({"role": role, "content": content, "entry_type": "own"})
+                message["content"] = ""
 
         # 从 message_stream 加载 ref 内容（W2: 缺失记录统一 DANGLING_REF_FALLBACK）
         if ref_ids:

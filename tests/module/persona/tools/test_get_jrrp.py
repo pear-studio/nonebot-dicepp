@@ -56,7 +56,7 @@ async def test_explicit_user_id(monkeypatch):
 async def test_group_chat_empty_user_id(monkeypatch):
     result = await _execute("", monkeypatch)
 
-    assert "请输入有效的用户 ID" in result
+    assert "请输入有效的玩家 QQ ID" in result
 
 
 async def test_empty_string_user_id_falls_back_to_default(monkeypatch):

@@ -31,7 +31,7 @@ def test_single_user():
         _FakeMsg("u1", "user", "你好", "小王", datetime(2026, 5, 21, 15, 0, 0)),
     ]
     result = format_message_results(msgs)
-    assert "用户1" in result
+    assert "玩家1" in result
     assert "小王" in result
     assert "你好" in result
 
@@ -44,8 +44,8 @@ def test_multiple_participants():
         _FakeMsg("u2", "user", "world", "Bob", datetime(2026, 5, 21, 15, 1, 0)),
     ]
     result = format_message_results(msgs)
-    assert "用户1" in result
-    assert "用户2" in result
+    assert "玩家1" in result
+    assert "玩家2" in result
     assert "Alice" in result
     assert "Bob" in result
 

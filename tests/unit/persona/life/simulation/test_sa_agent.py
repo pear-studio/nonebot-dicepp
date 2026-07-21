@@ -190,6 +190,7 @@ class TestSAAgent:
         assert isinstance(spec, AgentRunSpec)
         assert spec.output is not None
         assert spec.output.name == "finish_plan"
+        assert spec.output.description == "提交本次叙事规划结果，并结束本次规划。"
         assert "finish_plan" not in spec.tools.tools  # OutputSpec 不在 ToolKit 里
         assert len(spec.tools.tools) >= 5  # 5 个 SA 工具
 

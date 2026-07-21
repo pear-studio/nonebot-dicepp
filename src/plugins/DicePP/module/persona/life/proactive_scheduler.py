@@ -394,9 +394,9 @@ class ProactiveScheduler(BoundaryReceiver):
             return "（无）"
         lines = []
         now = self._now()
-        role_map = {"user": "用户", "assistant": "我", "system": "系统", "tool": "工具"}
+        role_map = {"user": "玩家", "assistant": "我", "system": "系统", "tool": "工具"}
         for msg in messages[-limit:]:
-            role_label = role_map.get(msg.role, "用户")
+            role_label = role_map.get(msg.role, "玩家")
             content = msg.content
             if len(content) > 50:
                 content = content[:47] + "..."

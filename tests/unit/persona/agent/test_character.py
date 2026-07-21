@@ -59,6 +59,9 @@ class TestCharacter:
         assert "{{user}}" not in formatted
         assert "苏晓" in formatted
 
+        default_formatted = char.format_mes_example()
+        assert "玩家: 你好" in default_formatted
+
 
 class TestPersonaExtensions:
     """测试 PersonaExtensions 事件时刻生成"""

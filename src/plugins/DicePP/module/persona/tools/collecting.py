@@ -44,19 +44,19 @@ class RecordDiaryEntryArgs(BaseModel):
 
 
 class RecordShareMessageArgs(BaseModel):
-    """调用此工具输出你要发给对方的分享消息。20-60字的第一人称口语消息，禁止出现角色名和第三人称描写。不要直接回复文本，必须通过此工具输出。"""
+    """待提交的角色分享消息。"""
     message: str = Field(
         ..., min_length=20, max_length=60,
-        description="20-60字的分享消息",
+        description="20-60字的第一人称口语消息，禁止出现角色名和第三人称描写",
     )
 
 
 class RecordScoreArgs(BaseModel):
-    """记录评分结果：亲密度变化、信誉标记和用户事实提取。"""
+    """记录评分结果：亲密度变化、信誉标记和玩家事实提取。"""
     intimacy: float = Field(default=0.0, ge=-5.0, le=5.0, description="亲密度变化，范围 -5.0 到 +5.0")
     reputation_delta: float = Field(default=0.0, ge=-30.0, le=0.0, description="信誉扣分标记，范围 -30 到 0")
-    warning_issued: bool = Field(default=False, description="本次是否对用户发出了警告（扣分前的前置信号）")
-    facts: Dict[str, Any] = Field(default_factory=dict, description="提取或更新的用户事实，key-value 形式")
+    warning_issued: bool = Field(default=False, description="本次是否对玩家发出了警告（扣分前的前置信号）")
+    facts: Dict[str, Any] = Field(default_factory=dict, description="提取或更新的玩家事实，key-value 形式")
 
 
 
@@ -71,24 +71,14 @@ async def _collecting_handler(parsed: BaseModel, ctx: ToolExecutionContext) -> T
 
 SAY_TOOL_DM = ToolSpec(
     name="say",
-    description=(
-        "向角色叙述周围发生的事。使用第三人称客观叙述，只描述可观察的行为和状态。"
-        "通过 energy_delta/mood_delta/health_delta 标注事件对角色的影响。"
-        "want_to_end=true 表示你提议结束当前场景。对方会收到提示。"
-        "同意对方的结束提议时再次 say(want_to_end=true)。"
-    ),
+    description="提交 DM 对角色的场景叙述、状态影响与场景结束意愿。",
     args_schema=SayArgs,
     handler=_collecting_handler,
 )
 
 SAY_TOOL_CHARACTER = ToolSpec(
     name="say",
-    description=(
-        "表达你的反应、感受和想做的事。从第一人称视角说话。"
-        "DM 会阅读你的发言，自动判断你的行动是否需要裁决并叙述结果。"
-        "want_to_end=true 表示你提议结束当前场景。"
-        "收到 DM 的结束提议时，同意则 say(want_to_end=true)，不同意则继续 say。"
-    ),
+    description="提交角色对当前场景的反应、行动意图与场景结束意愿。",
     args_schema=SayArgs,
     handler=_collecting_handler,
 )
