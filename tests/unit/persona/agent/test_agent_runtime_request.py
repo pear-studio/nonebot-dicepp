@@ -541,7 +541,22 @@ class TestTerminalEvent:
             completion=RunCompletion(kind="completed", code="direct_content"),
             output=RunOutput(text="hello"),
             message_delta=[],
-            billing=BillingSummary(),
+            billing=BillingSummary(entries=[
+                BillingEntry(
+                    provider="primary",
+                    model="model-a",
+                    usage=UsageReport(
+                        status="reported", tokens_in=10, tokens_out=5,
+                    ),
+                ),
+                BillingEntry(
+                    provider="fallback",
+                    model="model-b",
+                    usage=UsageReport(
+                        status="reported", tokens_in=20, tokens_out=8,
+                    ),
+                ),
+            ]),
         )
 
         with patch.object(AgentLoop, "run", AsyncMock(return_value=fake_result)):
@@ -558,8 +573,11 @@ class TestTerminalEvent:
             result = await runtime.run(request)
 
         assert result.completion.kind == "completed"
-        # RunSummarySink 在 AgentRunFinished 事件时调用 store.update_agent_run
-        store.update_agent_run.assert_called()
+        updates = store.update_agent_run.await_args.kwargs
+        assert updates["provider"] == "fallback"
+        assert updates["model"] == "model-b"
+        assert updates["tokens_in"] == 30
+        assert updates["tokens_out"] == 13
 
     @pytest.mark.asyncio
     async def test_run_request_emits_terminal_event_on_failed(self):
@@ -600,8 +618,10 @@ class TestTerminalEvent:
             result = await runtime.run(request)
 
         assert result.completion.kind == "failed"
-        # 失败时也应更新 run 状态
-        store.update_agent_run.assert_called()
+        updates = store.update_agent_run.await_args.kwargs
+        assert updates["status"] == "failed"
+        assert "provider" not in updates
+        assert "model" not in updates
 
     @pytest.mark.asyncio
     async def test_invalid_request_skips_db_writes(self):

@@ -112,6 +112,9 @@ class AgentRuntime:
         # ── 写入 terminal event，让 RunSummarySink 更新 persona_agent_runs ──
         is_error = result.completion.kind == "failed"
         event_type = "AgentRunFailed" if is_error else "AgentRunFinished"
+        last_successful_call = (
+            result.billing.entries[-1] if result.billing.entries else None
+        )
         await bus.emit(
             event_type,
             AgentRunFinishedPayload(
@@ -124,8 +127,10 @@ class AgentRuntime:
                 tokens_output=sum(
                     e.usage.tokens_out for e in result.billing.entries
                 ),
-                provider="",
-                model="",
+                provider=(
+                    last_successful_call.provider if last_successful_call else ""
+                ),
+                model=last_successful_call.model if last_successful_call else "",
             ),
             state,
         )
