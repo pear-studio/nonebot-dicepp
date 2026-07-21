@@ -24,6 +24,10 @@ CHARACTER_NAME = "persona-llm-test-dnd"
 CHARACTER_DISPLAY_NAME = "艾琳娜·银枝"
 TEST_GROUP_ID = "llm_test_group"
 SCENARIO_ORDER = ("warp", "private", "group")
+PRIVATE_CHAT_RUNS = 7
+GROUP_CHAT_RUNS = 7
+PRIVATE_INTERACTIONS_BY_USER = (7,)
+GROUP_INTERACTIONS_BY_USER = (1, 6)
 
 
 class PreparationError(RuntimeError):
@@ -308,6 +312,11 @@ def estimate_agent_runs(
     config: Any,
     character: Any,
 ) -> tuple[AgentRunEstimate, ...]:
+    scoring_interval = config.persona_ai.scoring_interval
+
+    def scoring_runs(interactions_by_user: Sequence[int]) -> int:
+        return sum(count // scoring_interval for count in interactions_by_user)
+
     results: list[AgentRunEstimate] = []
     for scenario in scenarios:
         if scenario == "warp":
@@ -348,16 +357,34 @@ def estimate_agent_runs(
         elif scenario == "private":
             results.append(
                 AgentRunEstimate(
-                    scenario="私聊多轮",
-                    entries=(("Chat", 2),),
+                    scenario="私聊跑团多轮",
+                    entries=(
+                        ("Chat", PRIVATE_CHAT_RUNS),
+                        (
+                            "Scoring",
+                            scoring_runs(PRIVATE_INTERACTIONS_BY_USER),
+                        ),
+                    ),
+                    notes=(
+                        "包含一次真实 roll_dice 验收、warp 事件查询和私聊秘密写入。",
+                    ),
                 )
             )
         elif scenario == "group":
             results.append(
                 AgentRunEstimate(
-                    scenario="群聊多人上下文",
-                    entries=(("Chat", 1),),
-                    notes=("第一条普通群消息只进入上下文，不触发 Persona 回复。",),
+                    scenario="群聊跑团多人上下文",
+                    entries=(
+                        ("Chat", GROUP_CHAT_RUNS),
+                        (
+                            "Scoring",
+                            scoring_runs(GROUP_INTERACTIONS_BY_USER),
+                        ),
+                    ),
+                    notes=(
+                        "三条普通群消息只进入上下文，不触发 Persona 回复。",
+                        "包含多人归属、事实覆盖、roll_dice、角色书与私聊泄漏验收。",
+                    ),
                 )
             )
         else:
