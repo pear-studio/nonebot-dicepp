@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from plugins.DicePP.shell.main import _print_dry_run, _print_warp_result, main
+from shell.main import _print_dry_run, _print_warp_result, main
 
 
 def test_main_help_lists_runtime_warp_commands(monkeypatch, capsys):

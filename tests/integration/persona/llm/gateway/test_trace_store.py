@@ -3,7 +3,7 @@
 import json
 import pytest
 from datetime import datetime, timedelta
-from plugins.DicePP.utils.time import wall_now
+from utils.time import wall_now
 
 from module.persona.data.models import LLMTraceRecord
 

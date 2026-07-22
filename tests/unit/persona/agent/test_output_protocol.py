@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 
-from plugins.DicePP.module.persona.agent.output_protocol import (
+from module.persona.agent.output_protocol import (
     DRAFT_MESSAGE_NAME,
     INTERNAL_MESSAGE_TYPE_FIELD,
     OUTPUT_PROTOCOL_HEADING,
@@ -10,7 +10,7 @@ from plugins.DicePP.module.persona.agent.output_protocol import (
     inject_output_protocol,
     make_output_reminder,
 )
-from plugins.DicePP.module.persona.agent.runtime_types import OutputSpec
+from module.persona.agent.runtime_types import OutputSpec
 
 
 class _Args(BaseModel):

@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from module.dice_hub.manager import HubManager, HUB_KEY_NICKNAME
-from plugins.DicePP.core.config.pydantic_models import BotConfig
+from core.config.pydantic_models import BotConfig
 
 
 class _FakeBot:

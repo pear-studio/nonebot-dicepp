@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plugins.DicePP.module.persona.llm.coordinator import SubmitResult
+from module.persona.llm.coordinator import SubmitResult
 
 
 class MockCoordinator:

@@ -12,9 +12,9 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 
 from core.communication import MessageMetaData
-from plugins.DicePP.module.persona.chat.chat_shared import ChatCallContext
-from plugins.DicePP.module.persona.chat.orchestrator import ChatOutcome
-from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+from module.persona.chat.chat_shared import ChatCallContext
+from module.persona.chat.orchestrator import ChatOutcome
+from core.config.pydantic_models import PersonaConfig
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -346,9 +346,9 @@ class TestHandleJrrp:
         使用真实 ChatOrchestrator（非裸 AsyncMock），确保 ctx=ChatCallContext
         传参不会被静默吞掉。裸 AsyncMock 接受任意 kwargs 是这个 bug 逃过测试的根因。
         """
-        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
-        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from module.persona.chat.orchestrator import ChatOrchestrator
+        from module.persona.chat.chat_config import ChatConfig
+        from module.persona.data.store import PersonaDataStore
 
         # 构造真实 ChatOrchestrator（依赖全部 mock，但 chat() 是真实方法）
         store = MagicMock(spec=PersonaDataStore)
@@ -531,7 +531,7 @@ class TestChatSignatureContract:
     def test_chat_accepts_ctx_parameter(self):
         """ChatOrchestrator.chat() 签名包含 ctx 参数"""
         import inspect
-        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
+        from module.persona.chat.orchestrator import ChatOrchestrator
 
         sig = inspect.signature(ChatOrchestrator.chat)
         params = dict(sig.parameters)
@@ -543,7 +543,7 @@ class TestChatSignatureContract:
     def test_chat_rejects_legacy_kwargs(self):
         """ChatOrchestrator.chat() 不接受已废弃的独立 keyword 参数"""
         import inspect
-        from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
+        from module.persona.chat.orchestrator import ChatOrchestrator
 
         sig = inspect.signature(ChatOrchestrator.chat)
         params = dict(sig.parameters)

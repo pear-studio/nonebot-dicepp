@@ -1,6 +1,6 @@
 """Unit tests for MessageMetaData auto-correction invariants."""
 
-from plugins.DicePP.core.communication.message import MessageMetaData, MessageSender
+from core.communication.message import MessageMetaData, MessageSender
 
 
 def test_private_message_auto_to_me():

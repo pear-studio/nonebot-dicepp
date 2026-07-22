@@ -17,7 +17,7 @@ from module.misc.jrrp_utils import JrrpResult
 #   JrrpCommand 在模块加载时执行 `from .jrrp_utils import compute_jrrp`，
 #   符号绑定在 jrrp_command 命名空间，patch jrrp_utils 不影响已绑定的引用。
 # - PersonaCommand._handle_jrrp 使用运行时 `from module.misc.jrrp_utils import compute_jrrp`，
-#   不受此 patch 影响。该路径的 mock 在 tests/module/persona/test_jrrp_persona.py
+#   不受此 patch 影响。该路径的 mock 在 tests/unit/persona/test_jrrp_persona.py
 #   中通过 `patch("module.misc.jrrp_utils.compute_jrrp")` 覆盖。
 # - 当前集成 Bot 中 persona 未启用，PersonaCommand 不拦截 .jrrp，无实际覆盖盲区。
 #   若将来集成 Bot 启用 persona，需同步更新本文件的 mock 范围。

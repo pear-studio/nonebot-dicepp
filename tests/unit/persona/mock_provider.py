@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 
-from plugins.DicePP.module.persona.llm.providers.protocol import (
+from module.persona.llm.providers.protocol import (
     LLMResponse,
     LLMProvider,
     TokenUsage,

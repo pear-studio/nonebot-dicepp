@@ -4,9 +4,9 @@ import httpx
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 
-from plugins.DicePP.module.persona.llm.errors import ErrorKind
-from plugins.DicePP.module.persona.llm.providers.minimax_image import MiniMaxImageProvider
-from plugins.DicePP.module.persona.llm.providers.protocol import ErrorClass
+from module.persona.llm.errors import ErrorKind
+from module.persona.llm.providers.minimax_image import MiniMaxImageProvider
+from module.persona.llm.providers.protocol import ErrorClass
 
 
 class TestClassifyError2013:

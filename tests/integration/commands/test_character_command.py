@@ -365,7 +365,7 @@ class TestCharacterLongRest(_CharBotBase):
         assert any(word in result for word in ["找不到", "不存在", "角色卡"])
 
 
-# ── Appended from tests/core/command/test_character_commands.py ────────────
+# ── Additional character command coverage ────────────────────────────────
 
 class TestCharacterCardIntegration:
     async def test_no_card_found(self, h):

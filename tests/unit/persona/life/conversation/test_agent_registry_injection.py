@@ -17,13 +17,13 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from plugins.DicePP.module.persona.life.agent import Agent
-from plugins.DicePP.module.persona.life.character_agent import CharacterAgent
-from plugins.DicePP.module.persona.life.dm_agent import DMAgent
-from plugins.DicePP.module.persona.life.sa_agent import SAAgent
-from plugins.DicePP.module.persona.life.change_sources import CharacterStateChangeSource
-from plugins.DicePP.module.persona.life.conversation import Conversation
-from plugins.DicePP.module.persona.life.conversation_scope import (
+from module.persona.life.agent import Agent
+from module.persona.life.character_agent import CharacterAgent
+from module.persona.life.dm_agent import DMAgent
+from module.persona.life.sa_agent import SAAgent
+from module.persona.life.change_sources import CharacterStateChangeSource
+from module.persona.life.conversation import Conversation
+from module.persona.life.conversation_scope import (
     ConversationScope,
     NS_LIFE_DM,
     NS_LIFE_CHARACTER,
@@ -301,7 +301,7 @@ class TestRegistryChangeSourceFactory:
 
     def test_life_character_gets_CharacterStateChangeSource(self):
         """life.character scope → [CharacterStateChangeSource]。"""
-        from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+        from module.persona.life.conversation_registry import ConversationRegistry
 
         store = MagicMock()
         factory = lambda scope: (
@@ -318,7 +318,7 @@ class TestRegistryChangeSourceFactory:
 
     def test_life_dm_gets_empty(self):
         """life.dm scope → []。"""
-        from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+        from module.persona.life.conversation_registry import ConversationRegistry
 
         store = MagicMock()
         factory = lambda scope: (
@@ -334,7 +334,7 @@ class TestRegistryChangeSourceFactory:
 
     def test_default_factory_empty(self):
         """未传 change_source_factory 时返回空列表。"""
-        from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
+        from module.persona.life.conversation_registry import ConversationRegistry
 
         reg = ConversationRegistry(MagicMock(), runtime_factory=MagicMock())
         sources = reg._change_source_factory(ConversationScope.for_life_dm("x"))
@@ -351,7 +351,7 @@ class TestFactoryRegistryInjection:
 
     @pytest.mark.asyncio
     async def test_dm_and_character_injected_sa_not(self):
-        from plugins.DicePP.module.persona.factory import _build_life
+        from module.persona.factory import _build_life
 
         store = MagicMock()
         character = MagicMock()
@@ -372,14 +372,14 @@ class TestFactoryRegistryInjection:
         sa_agent = SAAgent(store=MagicMock(), router=MagicMock())
 
         # Mock 内部重对象
-        with patch("plugins.DicePP.module.persona.factory.ProactiveConfig") as MockPC, \
-             patch("plugins.DicePP.module.persona.factory.TargetSelector") as MockTS, \
-             patch("plugins.DicePP.module.persona.factory.ProactiveScheduler") as MockPS, \
-             patch("plugins.DicePP.module.persona.factory.ShareScheduler") as MockSS, \
-             patch("plugins.DicePP.module.persona.factory.DiaryConfig") as MockDC, \
-             patch("plugins.DicePP.module.persona.factory.DiaryGenerator") as MockDG, \
-             patch("plugins.DicePP.module.persona.factory.LifeConfig") as MockLC, \
-             patch("plugins.DicePP.module.persona.factory.LifeSimulator") as MockLS:
+        with patch("module.persona.factory.ProactiveConfig") as MockPC, \
+             patch("module.persona.factory.TargetSelector") as MockTS, \
+             patch("module.persona.factory.ProactiveScheduler") as MockPS, \
+             patch("module.persona.factory.ShareScheduler") as MockSS, \
+             patch("module.persona.factory.DiaryConfig") as MockDC, \
+             patch("module.persona.factory.DiaryGenerator") as MockDG, \
+             patch("module.persona.factory.LifeConfig") as MockLC, \
+             patch("module.persona.factory.LifeSimulator") as MockLS:
 
             MockPSInstance = MagicMock()
             MockPSInstance.load_persistent_state = AsyncMock()

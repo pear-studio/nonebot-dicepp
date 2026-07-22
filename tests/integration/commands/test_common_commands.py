@@ -181,7 +181,7 @@ class TestWelcomeCommandIntegration(_BotTestBase):
         )
 
 
-# ── Appended from tests/core/command/test_bot_admin.py ──────────────────
+# ── Bot administration coverage ─────────────────────────────────────────
 
 class TestBotActivate:
     async def test_bot_info(self, h):
@@ -305,7 +305,7 @@ class TestMaster:
                            checker=lambda s: "|Private: 1234|" in s and "发送消息: abc 至 1234 (类型:user)" in s)
 
 
-# ── Appended from tests/core/command/test_nickname.py ───────────────────
+# ── Nickname command coverage ───────────────────────────────────────────
 
 class TestNickname:
     async def test_set_group_nickname(self, h):

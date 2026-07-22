@@ -15,7 +15,7 @@ from core.data.models import UserStat as UserStatModel
 from core.data.models import GroupStat as GroupStatModel
 from core.statistics.user_stat import UserStatInfo
 from core.statistics.group_stat import GroupStatInfo
-from plugins.DicePP.core.config.pydantic_models import BotConfig
+from core.config.pydantic_models import BotConfig
 
 
 # ══════════════════════════════════════════════════════════════════════

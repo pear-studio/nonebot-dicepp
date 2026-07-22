@@ -7,8 +7,8 @@ import aiosqlite
 import pytest
 from unittest.mock import patch
 
-from plugins.DicePP.module.persona.data.store import PersonaDataStore
-from plugins.DicePP.module.persona.data.models import ScoringFailure
+from module.persona.data.store import PersonaDataStore
+from module.persona.data.models import ScoringFailure
 
 
 @pytest.mark.asyncio

@@ -7,10 +7,10 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
-from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
-from plugins.DicePP.module.persona.data.models import RelationshipState
-from plugins.DicePP.module.persona.life.types import AgentResult
+from module.persona.life.proactive_scheduler import ProactiveScheduler
+from module.persona.life.proactive_config import ProactiveConfig
+from module.persona.data.models import RelationshipState
+from module.persona.life.types import AgentResult
 from utils.time import set_test_clock
 
 
@@ -133,7 +133,7 @@ class TestProactiveSchedulerMissYou:
         fake_now = datetime(2024, 1, 4, 10, 0, 0)
         set_test_clock(fake_now,)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.random.random",
+            "module.persona.life.proactive_scheduler.random.random",
             lambda: 0.0,
         )
         rel = RelationshipState(
@@ -260,7 +260,7 @@ class TestProactiveSchedulerMissProbability:
         """疏远阶段(score=30)概率 50%，random<0.5 → 触发"""
         fake_now = datetime(2024, 1, 4, 10, 0, 0)
         set_test_clock(fake_now,)
-        monkeypatch.setattr("plugins.DicePP.module.persona.life.proactive_scheduler.random.random", lambda: 0.3)
+        monkeypatch.setattr("module.persona.life.proactive_scheduler.random.random", lambda: 0.3)
         rel = self._make_rel(30.0, fake_now)
         mock_data_store.list_active_relationships.return_value = [rel]
         mock_data_store.get_daily_events.return_value = [self._make_event()]
@@ -277,7 +277,7 @@ class TestProactiveSchedulerMissProbability:
         """疏远阶段(score=30)概率 50%，random>=0.5 → 跳过"""
         fake_now = datetime(2024, 1, 4, 10, 0, 0)
         set_test_clock(fake_now,)
-        monkeypatch.setattr("plugins.DicePP.module.persona.life.proactive_scheduler.random.random", lambda: 0.7)
+        monkeypatch.setattr("module.persona.life.proactive_scheduler.random.random", lambda: 0.7)
         rel = self._make_rel(30.0, fake_now)
         mock_data_store.list_active_relationships.return_value = [rel]
         mock_data_store.get_daily_events.return_value = [self._make_event()]
@@ -319,7 +319,7 @@ class TestProactiveSchedulerMissProbability:
         fake_now = datetime(2024, 1, 4, 10, 0, 0)
         set_test_clock(fake_now,)
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.life.proactive_scheduler.random.random",
+            "module.persona.life.proactive_scheduler.random.random",
             lambda: 0.0,
         )
         rel = RelationshipState(
@@ -391,7 +391,7 @@ class TestProactiveSchedulerMissProbability:
 
     def test_miss_probability_stage_zero_never_triggers(self):
         """验证阶段 0（冷淡）的想念触发概率为 0，永不触发"""
-        from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
+        from module.persona.life.proactive_scheduler import ProactiveScheduler
         assert ProactiveScheduler._MISS_PROBABILITY[0] == 0.0
 
 
@@ -423,7 +423,7 @@ class TestProactiveSchedulerMessageCreation:
 
     @pytest.mark.asyncio
     async def test_create_miss_you_message(self, scheduler):
-        from plugins.DicePP.module.persona.life.models import ShareTarget
+        from module.persona.life.models import ShareTarget
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
         mock_agent = AsyncMock()
         mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="有点想你了呢~"))

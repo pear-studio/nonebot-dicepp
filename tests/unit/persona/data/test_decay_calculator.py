@@ -6,10 +6,10 @@ Phase 7c: DecayCalculator 边界条件单元测试
 
 import pytest
 from datetime import datetime, timedelta
-from plugins.DicePP.utils.time import wall_now
+from utils.time import wall_now
 
-from plugins.DicePP.module.persona.data.models import RelationshipState
-from plugins.DicePP.module.persona.game.decay import DecayCalculator, DecayConfig
+from module.persona.data.models import RelationshipState
+from module.persona.game.decay import DecayCalculator, DecayConfig
 
 
 class TestDecayCalculatorEdgeCases:

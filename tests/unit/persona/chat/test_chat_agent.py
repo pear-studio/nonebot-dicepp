@@ -12,18 +12,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-from plugins.DicePP.module.persona.chat.chat_agent import ChatAgent
-from plugins.DicePP.module.persona.chat.context import ContextBuilder
-from plugins.DicePP.module.persona.character.models import Character
-from plugins.DicePP.module.persona.agent.loop import AgentLoop
-from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
-from plugins.DicePP.module.persona.agent.state import AgentRunState
-from plugins.DicePP.module.persona.chat.orchestrator import ChatOrchestrator
-from plugins.DicePP.module.persona.data.store import PersonaDataStore
-from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
-from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
-from plugins.DicePP.module.persona.llm.selection import CHAT, CHAT_WITH_IMAGE
+from module.persona.chat.chat_config import ChatConfig
+from module.persona.chat.chat_agent import ChatAgent
+from module.persona.chat.context import ContextBuilder
+from module.persona.character.models import Character
+from module.persona.agent.loop import AgentLoop
+from module.persona.agent.message_buffer import MessageBuffer
+from module.persona.agent.state import AgentRunState
+from module.persona.chat.orchestrator import ChatOrchestrator
+from module.persona.data.store import PersonaDataStore
+from module.persona.life.conversation import Conversation, ConversationRunResult
+from module.persona.life.conversation_scope import ConversationScope
+from module.persona.llm.selection import CHAT, CHAT_WITH_IMAGE
 
 
 def _make_config():
@@ -476,7 +476,7 @@ class TestExecuteTurnBranches:
                           completion_kind="completed", output_arguments={"content": "ok"})
         agent = self._agent(ConversationScope.for_group("g1"), conv, delivery=None)
         with patch(
-            "plugins.DicePP.module.persona.chat.chat_agent.get_clock",
+            "module.persona.chat.chat_agent.get_clock",
             return_value=MagicMock(
                 now=MagicMock(return_value=datetime(2026, 7, 21, 17, 55, 15)),
             ),

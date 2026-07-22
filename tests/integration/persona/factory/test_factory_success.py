@@ -19,8 +19,8 @@ import aiosqlite
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.factory import create_persona, PersonaApp
-from plugins.DicePP.core.config.pydantic_models import (
+from module.persona.factory import create_persona, PersonaApp
+from core.config.pydantic_models import (
     PersonaConfig,
     ProviderConfig,
     ModelConfig,
@@ -140,7 +140,7 @@ class TestCreatePersonaSuccess:
         """走完整 create_persona 路径，验证返回 PersonaApp 实例。"""
         # ── 1. Patch CharacterLoader ────────────────────────
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.factory.CharacterLoader",
+            "module.persona.factory.CharacterLoader",
             FakeCharacterLoader,
         )
 
@@ -150,12 +150,12 @@ class TestCreatePersonaSuccess:
             return {}
 
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.factory.LLMRouter.probe_all_models",
+            "module.persona.factory.LLMRouter.probe_all_models",
             _noop_probe,
         )
         # start_probe_task → 无操作（避免 asyncio 后台任务）
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.factory.LLMRouter.start_probe_task",
+            "module.persona.factory.LLMRouter.start_probe_task",
             lambda self: None,
         )
 
@@ -206,7 +206,7 @@ class TestCreatePersonaSuccess:
     ):
         """验证 PersonaApp 的四个句柄类型及公有方法可安全调用。"""
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.factory.CharacterLoader",
+            "module.persona.factory.CharacterLoader",
             FakeCharacterLoader,
         )
 
@@ -214,11 +214,11 @@ class TestCreatePersonaSuccess:
             return {}
 
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.factory.LLMRouter.probe_all_models",
+            "module.persona.factory.LLMRouter.probe_all_models",
             _noop_probe,
         )
         monkeypatch.setattr(
-            "plugins.DicePP.module.persona.factory.LLMRouter.start_probe_task",
+            "module.persona.factory.LLMRouter.start_probe_task",
             lambda self: None,
         )
 
@@ -283,14 +283,14 @@ class TestCreatePersonaFromPersonaMappings:
 
     def test_decay_config_from_persona(self):
         """DecayConfig.from_persona 映射所有字段。"""
-        from plugins.DicePP.module.persona.game.decay import DecayConfig
+        from module.persona.game.decay import DecayConfig
         config = _make_persona_config()
         dc = DecayConfig.from_persona(config)
         assert dc.enabled == config.decay_enabled
 
     def test_chat_config_from_persona(self):
         """ChatConfig.from_persona 映射所有字段。"""
-        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
+        from module.persona.chat.chat_config import ChatConfig
         config = _make_persona_config()
         cc = ChatConfig.from_persona(config)
         assert cc.max_history_turns == config.max_history_turns
@@ -298,7 +298,7 @@ class TestCreatePersonaFromPersonaMappings:
 
     def test_character_life_config_from_persona(self):
         """CharacterLifeConfig.from_persona 映射所有字段。"""
-        from plugins.DicePP.module.persona.life.character_life import (
+        from module.persona.life.character_life import (
             CharacterLifeConfig,
         )
         config = _make_persona_config()
@@ -307,7 +307,7 @@ class TestCreatePersonaFromPersonaMappings:
 
     def test_proactive_config_from_persona(self):
         """ProactiveConfig.from_persona 映射所有字段。"""
-        from plugins.DicePP.module.persona.life.proactive_config import (
+        from module.persona.life.proactive_config import (
             ProactiveConfig,
         )
         config = _make_persona_config()
@@ -316,15 +316,15 @@ class TestCreatePersonaFromPersonaMappings:
 
     def test_life_config_from_persona(self):
         """LifeConfig.from_persona 映射所有字段。"""
-        from plugins.DicePP.module.persona.life.simulator import LifeConfig
+        from module.persona.life.simulator import LifeConfig
         config = _make_persona_config()
         lc = LifeConfig.from_persona(config)
         assert lc.timezone == config.timezone
 
     def test_chat_config_default_session_budget(self):
         """ChatConfig 默认 session token budget 应与常量一致。"""
-        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-        from plugins.DicePP.module.persona.data.models import (
+        from module.persona.chat.chat_config import ChatConfig
+        from module.persona.data.models import (
             DEFAULT_SESSION_TOKEN_BUDGET,
         )
         config = _make_persona_config()
@@ -334,7 +334,7 @@ class TestCreatePersonaFromPersonaMappings:
 
     def test_decay_config_defaults(self):
         """DecayConfig.from_persona 在禁用 decay 时使用正确的默认值。"""
-        from plugins.DicePP.module.persona.game.decay import DecayConfig
+        from module.persona.game.decay import DecayConfig
         config = _make_persona_config()
         dc = DecayConfig.from_persona(config)
         assert dc.familiarity_half_life_days == 35

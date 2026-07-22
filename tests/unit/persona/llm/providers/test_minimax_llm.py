@@ -5,10 +5,10 @@ import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock
 
-from plugins.DicePP.module.persona.llm.errors import ErrorKind
-from plugins.DicePP.module.persona.llm.providers.minimax_llm import MiniMaxProvider
-from plugins.DicePP.module.persona.llm.providers.openai import OpenAIProvider
-from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, ErrorClass
+from module.persona.llm.errors import ErrorKind
+from module.persona.llm.providers.minimax_llm import MiniMaxProvider
+from module.persona.llm.providers.openai import OpenAIProvider
+from module.persona.llm.providers.protocol import LLMResponse, ErrorClass
 
 
 class TestMiniMaxProvider:

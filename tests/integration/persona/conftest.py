@@ -18,7 +18,7 @@ async def temp_db():
     """Provide an initialized in-memory persona store."""
     import aiosqlite
 
-    from plugins.DicePP.module.persona.data.store import PersonaDataStore
+    from module.persona.data.store import PersonaDataStore
 
     async with (
         aiosqlite.connect(":memory:") as persona_db,

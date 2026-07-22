@@ -158,6 +158,54 @@ def test_all_layers_reject_fragile_repository_lookup(
     assert _codes(tests_root) == {"PTH001"}
 
 
+@pytest.mark.parametrize("layer", ["unit", "integration", "support"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from plugins.DicePP.utils.time import wall_now\n",
+        "import plugins.DicePP.module.persona.factory\n",
+        (
+            "from unittest.mock import patch\n"
+            "patch('plugins.DicePP.utils.time.wall_now')\n"
+        ),
+    ],
+)
+def test_in_process_layers_reject_package_qualified_dicepp_imports(
+    tmp_path: Path,
+    layer: str,
+    source: str,
+) -> None:
+    tests_root = _write_source(tmp_path, layer, source)
+
+    assert _codes(tests_root) == {"IMP002"}
+
+
+def test_system_layer_allows_package_qualified_boundary_imports(
+    tmp_path: Path,
+) -> None:
+    tests_root = _write_source(
+        tmp_path,
+        "system",
+        "from plugins.DicePP.shell.main import main\n",
+    )
+
+    assert check_test_layout(tests_root) == []
+
+
+def test_dashboard_integration_allows_its_explicit_package_boundary(
+    tmp_path: Path,
+) -> None:
+    tests_root = tmp_path / "tests"
+    target = tests_root / "integration" / "dashboard" / "test_boundary.py"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "from plugins.DicePP.module.dashboard_reporter.protocol import encode\n",
+        encoding="utf-8",
+    )
+
+    assert check_test_layout(tests_root) == []
+
+
 def test_quick_marker_is_restricted_to_fast_layers(tmp_path: Path) -> None:
     tests_root = _write_source(
         tmp_path,

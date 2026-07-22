@@ -1,7 +1,6 @@
 """Shared helpers for Dashboard Playwright smoke tests."""
 
 import json
-import os
 import socket
 import time
 import urllib.request
@@ -32,17 +31,12 @@ _CHROMIUM_RESTRICTED_EPHEMERAL_PORTS = frozenset({
 
 
 def launch_browser(chromium):
-    """Launch the CI-managed Chromium, with local system Chrome fallback."""
+    """Launch the Playwright-managed Chromium used by full regression."""
     launch_options = {
         "headless": True,
         "args": ["--no-sandbox", "--disable-setuid-sandbox"],
     }
-    try:
-        return chromium.launch(**launch_options)
-    except Exception:
-        if os.environ.get("DICEPP_REQUIRE_PLAYWRIGHT") == "1":
-            raise
-        return chromium.launch(channel="chrome", **launch_options)
+    return chromium.launch(**launch_options)
 
 
 def can_launch_browser(sync_playwright) -> bool:

@@ -340,7 +340,7 @@ class TestKarmaDice(_RollCmdBotBase):
         assert any(word in result for word in ["清空", "reset", "清"])
 
 
-# ── Appended from tests/core/command/test_roll_dice.py ───────────────────
+# ── Additional roll command coverage ────────────────────────────────────
 
 class TestRollDice:
     async def test_basic_roll(self, h):

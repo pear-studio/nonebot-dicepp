@@ -14,13 +14,13 @@ import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.life.character_life import CharacterLife, CharacterLifeConfig
-from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
-from plugins.DicePP.module.persona.data.store import PersonaDataStore
-from plugins.DicePP.module.persona.data.models import CharacterState
-from plugins.DicePP.module.persona.life.types import EventGenerationResult, EventReactionResult, AgentResult
+from module.persona.life.character_life import CharacterLife, CharacterLifeConfig
+from module.persona.character.models import Character, PersonaExtensions
+from module.persona.data.store import PersonaDataStore
+from module.persona.data.models import CharacterState
+from module.persona.life.types import EventGenerationResult, EventReactionResult, AgentResult
 from utils.time import SteppedClock, set_clock, get_clock, WallClock
-from plugins.DicePP.utils.time import wall_now
+from utils.time import wall_now
 
 
 # ── 多天 mock 响应工厂 ──────────────────────────────────────────────

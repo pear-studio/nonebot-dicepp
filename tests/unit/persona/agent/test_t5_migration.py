@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 import pytest
 from pydantic import BaseModel
 
-from plugins.DicePP.module.persona.agent.runtime_types import (
+from module.persona.agent.runtime_types import (
     AgentRunRequest,
     AgentRunResult,
     BillingSummary,
@@ -34,10 +34,10 @@ from plugins.DicePP.module.persona.agent.runtime_types import (
     ToolResult,
     ToolSpec,
 )
-from plugins.DicePP.module.persona.agent.loop import AgentLoop
-from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
-from plugins.DicePP.module.persona.agent.state import AgentRunState
-from plugins.DicePP.module.persona.llm.selection import CHAT
+from module.persona.agent.loop import AgentLoop
+from module.persona.agent.message_buffer import MessageBuffer
+from module.persona.agent.state import AgentRunState
+from module.persona.llm.selection import CHAT
 
 
 # ── Fake LLM Gateway ─────────────────────────────────────────
@@ -354,7 +354,7 @@ class TestChatSegments:
     @pytest.mark.asyncio
     async def test_send_reply_segment_schema_no_phase_no_delay(self):
         """send_reply_segment 的 LLM 可见 schema 不含 phase/delay_before"""
-        from plugins.DicePP.module.persona.tools.send_reply_segment import build_send_reply_segment_tool
+        from module.persona.tools.send_reply_segment import build_send_reply_segment_tool
 
         # 用 None delivery_queue 测试 schema（不实际发送）
         class FakeQueue:
@@ -434,8 +434,8 @@ class TestChatSegments:
     @pytest.mark.asyncio
     async def test_chat_with_images_user_input_is_list(self):
         """R1: 有图时 Conversation.run() 的 user_input 应为 list[dict]"""
-        from plugins.DicePP.module.persona.life.conversation import Conversation
-        from plugins.DicePP.module.persona.agent.runtime_types import AgentRunResult as ARR
+        from module.persona.life.conversation import Conversation
+        from module.persona.agent.runtime_types import AgentRunResult as ARR
 
         mock_runtime = MagicMock()
         mock_runtime.run = AsyncMock(return_value=ARR(
@@ -479,7 +479,7 @@ class TestChatSegments:
     @pytest.mark.asyncio
     async def test_send_reply_segment_rejects_overlong(self):
         """R6: 超过 max_chars 时 handler 返回 error"""
-        from plugins.DicePP.module.persona.tools.send_reply_segment import build_send_reply_segment_tool
+        from module.persona.tools.send_reply_segment import build_send_reply_segment_tool
 
         class FakeQueue:
             def enqueue(self, item):
@@ -509,7 +509,7 @@ class TestChatSegments:
     @pytest.mark.asyncio
     async def test_send_reply_segment_accepts_within_limit(self):
         """R6: 不超过 max_chars 时正常通过"""
-        from plugins.DicePP.module.persona.tools.send_reply_segment import build_send_reply_segment_tool
+        from module.persona.tools.send_reply_segment import build_send_reply_segment_tool
 
         class FakeQueue:
             def enqueue(self, item):
@@ -536,7 +536,7 @@ class TestChatSegments:
     @pytest.mark.asyncio
     async def test_send_reply_segment_rejects_when_count_reaches_max(self):
         """segment_count_max 达到上限时 handler 返回 error"""
-        from plugins.DicePP.module.persona.tools.send_reply_segment import build_send_reply_segment_tool
+        from module.persona.tools.send_reply_segment import build_send_reply_segment_tool
 
         interim_count = {"i1": 0}
 
@@ -571,7 +571,7 @@ class TestChatSegments:
     @pytest.mark.asyncio
     async def test_send_reply_segment_accepts_below_max(self):
         """segment_count_max 未达上限时正常通过"""
-        from plugins.DicePP.module.persona.tools.send_reply_segment import build_send_reply_segment_tool
+        from module.persona.tools.send_reply_segment import build_send_reply_segment_tool
 
         class FakeQueue:
             def enqueue(self, item):
@@ -599,8 +599,8 @@ class TestChatSegments:
     @pytest.mark.asyncio
     async def test_chat_without_images_user_input_is_str(self):
         """R1: 无图时 Conversation.run() 的 user_input 仍为 str（不引入回归）"""
-        from plugins.DicePP.module.persona.life.conversation import Conversation
-        from plugins.DicePP.module.persona.agent.runtime_types import AgentRunResult as ARR
+        from module.persona.life.conversation import Conversation
+        from module.persona.agent.runtime_types import AgentRunResult as ARR
 
         mock_runtime = MagicMock()
         mock_runtime.run = AsyncMock(return_value=ARR(
@@ -737,7 +737,7 @@ class TestDeliveryQueue:
     @pytest.mark.asyncio
     async def test_first_message_no_delay(self):
         """第一条消息应立即发送（不延时）"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -766,7 +766,7 @@ class TestDeliveryQueue:
     @pytest.mark.asyncio
     async def test_sent_stream_ids_captured_on_success(self):
         """成功送达后记录 message_stream 行 id（供 assistant ref）。"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
         mock_port = MagicMock()
@@ -784,7 +784,7 @@ class TestDeliveryQueue:
     @pytest.mark.asyncio
     async def test_sent_stream_ids_empty_on_failed_send(self):
         """发送失败不写 message_stream，sent_stream_ids 为空（未送达不入可见历史）。"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
         mock_port = MagicMock()
@@ -803,7 +803,7 @@ class TestDeliveryQueue:
     @pytest.mark.asyncio
     async def test_consecutive_messages_get_jitter(self):
         """连续到达的消息应补 0.5s~1.5s 随机间隔"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -837,7 +837,7 @@ class TestDeliveryQueue:
     @pytest.mark.asyncio
     async def test_segment_phase_written_to_stream(self):
         """segment_phase 正确写入 message_stream"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -869,7 +869,7 @@ class TestDeliveryQueue:
     @pytest.mark.asyncio
     async def test_worker_exits_after_drain(self):
         """enqueue + drain 后 worker 不再 running"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -893,7 +893,7 @@ class TestDeliveryQueue:
     @pytest.mark.asyncio
     async def test_idle_worker_does_not_poll_forever(self):
         """空队列 idle 后 worker 退出，不持续空轮询"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -918,7 +918,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_call_index_1_before_0_sorted_correctly(self):
         """同一 interaction：先 enqueue call_index=1，sleep 后 enqueue call_index=0 → 发送顺序 0,1"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -949,7 +949,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_first_delivery_index_can_be_nonzero(self):
         """普通工具可占用 call_index=0；首个 delivery item 为 1 时也必须发送"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -975,7 +975,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_interaction_a_missing_index_does_not_block_b(self):
         """A 缺 call_index=0 时 B 能正常发送，不被 A 阻塞"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -1009,7 +1009,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_same_interaction_consecutive_triggers_jitter(self):
         """同一 interaction 连续快速 enqueue 0,1,2 → 触发 jitter"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -1043,7 +1043,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_different_interactions_no_cross_jitter(self):
         """不同 interaction 连续发送不触发 cross-interaction jitter"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -1072,7 +1072,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_drain_waits_for_buffered_items(self):
         """drain() 对 pending buffer 中的项目也能正确等待"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -1103,7 +1103,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_next_call_index_helper(self):
         """next_call_index() 返回正确值"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -1133,7 +1133,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_count_interim_reserved_before_send(self):
         """count_interim 在 interim enqueue 前 reserve，final 段不计数"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -1174,7 +1174,7 @@ class TestDeliveryQueueOrdering:
     @pytest.mark.asyncio
     async def test_count_interim_isolated_per_interaction(self):
         """不同 interaction 的 count_interim 互相独立"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
 
@@ -1277,10 +1277,10 @@ class TestFinalCallIndexFallback:
     @pytest.mark.asyncio
     async def test_final_call_index_follows_interim(self):
         """output_call_index=None 时 final 的 segment_index 应为中间段之后的下一个 index"""
-        from plugins.DicePP.module.persona.chat.delivery_queue import (
+        from module.persona.chat.delivery_queue import (
             DeliveryQueue, DeliveryItem,
         )
-        from plugins.DicePP.module.persona.life.conversation import ConversationRunResult
+        from module.persona.life.conversation import ConversationRunResult
 
         mock_port = MagicMock()
         mock_port.send = AsyncMock(return_value=True)

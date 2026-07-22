@@ -17,11 +17,11 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from pydantic import BaseModel, Field
 
-from plugins.DicePP.module.persona.agent.loop import AgentLoop
-from plugins.DicePP.module.persona.agent.llm_gateway import LLMGateway, LLMGatewayResult
-from plugins.DicePP.module.persona.agent.message_buffer import MessageBuffer
-from plugins.DicePP.module.persona.agent.output_collector import OutputCollector
-from plugins.DicePP.module.persona.agent.runtime_types import (
+from module.persona.agent.loop import AgentLoop
+from module.persona.agent.llm_gateway import LLMGateway, LLMGatewayResult
+from module.persona.agent.message_buffer import MessageBuffer
+from module.persona.agent.output_collector import OutputCollector
+from module.persona.agent.runtime_types import (
     AgentRunResult,
     BillingEntry,
     BillingSummary,
@@ -35,16 +35,16 @@ from plugins.DicePP.module.persona.agent.runtime_types import (
     ToolSpec,
     UsageReport,
 )
-from plugins.DicePP.module.persona.agent.state import AgentRunState
-from plugins.DicePP.module.persona.agent.runtime_types import LoopLimits
-from plugins.DicePP.module.persona.agent.runtime import AgentRuntime
-from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventStore
-from plugins.DicePP.module.persona.agent.sinks import RunSummarySink
-from plugins.DicePP.module.persona.agent.runtime_types import (
+from module.persona.agent.state import AgentRunState
+from module.persona.agent.runtime_types import LoopLimits
+from module.persona.agent.runtime import AgentRuntime
+from module.persona.agent.event_bus import AgentEventBus, EventStore
+from module.persona.agent.sinks import RunSummarySink
+from module.persona.agent.runtime_types import (
     AgentRunRequest,
     RunMetadata,
 )
-from plugins.DicePP.module.persona.llm.selection import CHAT
+from module.persona.llm.selection import CHAT
 
 
 # ── Test args schemas ──────────────────────────────────────────────
@@ -488,8 +488,8 @@ class TestTerminalEvent:
     async def test_runtime_propagates_run_identity_to_loop_state(self):
         """RunMetadata 身份必须进入每轮 Gateway 共用的 run state。"""
         from unittest.mock import patch
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
@@ -527,9 +527,9 @@ class TestTerminalEvent:
     async def test_runtime_injects_stable_output_protocol_without_mutating_request(self):
         """Runtime 首轮装配输出协议，同时保持调用方消息不可变。"""
         from unittest.mock import patch
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
-        from plugins.DicePP.module.persona.agent.output_protocol import OUTPUT_PROTOCOL_HEADING
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.llm.router import LLMRouter
+        from module.persona.agent.output_protocol import OUTPUT_PROTOCOL_HEADING
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
@@ -570,8 +570,8 @@ class TestTerminalEvent:
     async def test_run_request_emits_terminal_event_on_completed(self):
         """AgentRuntime.run() 成功时 emit AgentRunFinished，RunSummarySink 更新状态。"""
         from unittest.mock import patch
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
@@ -631,8 +631,8 @@ class TestTerminalEvent:
     async def test_run_request_emits_terminal_event_on_failed(self):
         """AgentRuntime.run() 失败时 emit AgentRunFailed。"""
         from unittest.mock import patch
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
@@ -675,8 +675,8 @@ class TestTerminalEvent:
     async def test_invalid_request_skips_db_writes(self):
         """invalid request 不调用 store.insert_agent_run 等 DB 方法。"""
         from unittest.mock import patch
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
@@ -709,8 +709,8 @@ class TestTerminalEvent:
     @pytest.mark.asyncio
     async def test_name_collision_skips_db_writes(self):
         """output/tool 重名时不写 DB。"""
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.llm.router import LLMRouter
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.llm.router import LLMRouter
 
         store = Mock(spec=PersonaDataStore)
         store.insert_agent_run = AsyncMock()
@@ -1050,7 +1050,7 @@ class TestRequestValidation:
 
     def test_output_tool_name_collision_fails_fast(self):
         """OutputSpec.name 与 ToolKit.tools 重名时返回 invalid_request。"""
-        from plugins.DicePP.module.persona.agent.runtime_types import validate_run_request
+        from module.persona.agent.runtime_types import validate_run_request
 
         class SayArgs(BaseModel):
             content: str
@@ -1070,7 +1070,7 @@ class TestRequestValidation:
 
     def test_empty_interaction_id_rejected(self):
         """interaction_id 为空时返回 invalid_request。"""
-        from plugins.DicePP.module.persona.agent.runtime_types import validate_run_request
+        from module.persona.agent.runtime_types import validate_run_request
 
         result = validate_run_request(ToolKit(), None, "")
         assert result is not None

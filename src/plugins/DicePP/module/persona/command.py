@@ -724,7 +724,7 @@ class PersonaCommand(UserCommandBase):
             )
 
             # R11(3): 追加 ref 到 Conversation
-            from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+            from module.persona.life.conversation_scope import ConversationScope
             scope = ConversationScope.from_chat(user_id, group_id)
             chat_registry = self.app.chat.registry if self.app.chat else None
             if chat_registry:

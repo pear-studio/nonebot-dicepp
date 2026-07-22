@@ -22,9 +22,6 @@ from tests.support.dashboard.playwright import (
 )
 from tests.support.processes import stop_server_process
 
-# ── Module-level skip if playwright or browser not available ──
-
-playwright = pytest.importorskip("playwright", reason="playwright is not installed")
 from playwright.sync_api import expect, sync_playwright
 
 
@@ -36,15 +33,13 @@ PROJECT_ROOT = repo_root()
 
 @pytest.fixture(scope="module", autouse=True)
 def require_playwright_chromium() -> None:
-    """Probe Chromium during test setup, never while pytest collects modules."""
+    """Require the managed Chromium for every default full regression."""
     if can_launch_browser(sync_playwright):
         return
-    if os.environ.get("DICEPP_REQUIRE_PLAYWRIGHT") == "1":
-        raise RuntimeError(
-            "Playwright Chromium is required but cannot be launched. "
-            "Run `playwright install chromium` before this test."
-        )
-    pytest.skip("Playwright Chromium is not installed")
+    pytest.fail(
+        "Playwright Chromium is required but cannot be launched. "
+        "Run `uv run playwright install chromium` before the full regression."
+    )
 
 
 # ── Module-level helpers ──

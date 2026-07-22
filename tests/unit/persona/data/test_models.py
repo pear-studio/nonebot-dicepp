@@ -3,9 +3,9 @@
 """
 from datetime import datetime
 import pytest
-from plugins.DicePP.module.persona.data.models import ScoreDeltas, RelationshipState, UserProfile, DEFAULT_RELATION_LABELS
-from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
-from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+from module.persona.data.models import ScoreDeltas, RelationshipState, UserProfile, DEFAULT_RELATION_LABELS
+from module.persona.character.models import Character, PersonaExtensions
+from core.config.pydantic_models import PersonaConfig
 
 class TestScoreDeltas:
     """测试 ScoreDeltas (intimacy + reputation_delta)"""
@@ -214,11 +214,11 @@ class TestPersonaConfig:
 
     def test_from_persona_no_attribute_error(self):
         """所有 from_persona 调用 PersonaConfig() 不应抛 AttributeError"""
-        from plugins.DicePP.module.persona.life.character_life import CharacterLifeConfig
-        from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-        from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
-        from plugins.DicePP.module.persona.life.simulator import LifeConfig
-        from plugins.DicePP.module.persona.game.decay import DecayConfig
+        from module.persona.life.character_life import CharacterLifeConfig
+        from module.persona.chat.chat_config import ChatConfig
+        from module.persona.life.proactive_config import ProactiveConfig
+        from module.persona.life.simulator import LifeConfig
+        from module.persona.game.decay import DecayConfig
 
         cfg = PersonaConfig()
         for factory in [CharacterLifeConfig, ChatConfig, ProactiveConfig, LifeConfig, DecayConfig]:
@@ -256,13 +256,13 @@ class TestCharacterState:
 
     def test_extra_ignore(self):
         """CharacterState 接受额外字段时不报错"""
-        from plugins.DicePP.module.persona.data.models import CharacterState
+        from module.persona.data.models import CharacterState
         state = CharacterState(energy=80, unknown_field='should be ignored', legacy_extra={'old_key': 'old_value'})
         assert state.energy == 80
 
     def test_default_values(self):
         """默认值验证"""
-        from plugins.DicePP.module.persona.data.models import CharacterState
+        from module.persona.data.models import CharacterState
         state = CharacterState()
         assert state.energy is None
         assert state.mood is None
@@ -270,7 +270,7 @@ class TestCharacterState:
 
     def test_extra_ignore_does_not_store_unknown(self):
         """extra 字段不会出现在 model_dump 中"""
-        from plugins.DicePP.module.persona.data.models import CharacterState
+        from module.persona.data.models import CharacterState
         state = CharacterState(energy=80, extra_field='ignored')
         dumped = state.model_dump()
         assert 'extra_field' not in dumped

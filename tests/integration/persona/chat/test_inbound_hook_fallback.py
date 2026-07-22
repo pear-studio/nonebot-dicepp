@@ -7,16 +7,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from plugins.DicePP.module.persona.agent.runtime_types import (
+from module.persona.agent.runtime_types import (
     AgentRunResult, RunCompletion, RunOutput, BillingSummary,
 )
-from plugins.DicePP.module.persona.chat.chat_agent import ChatAgent
-from plugins.DicePP.module.persona.chat.chat_config import ChatConfig
-from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.data.models import MessageType
-from plugins.DicePP.module.persona.data.store import PersonaDataStore
-from plugins.DicePP.module.persona.life.conversation import Conversation
-from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+from module.persona.chat.chat_agent import ChatAgent
+from module.persona.chat.chat_config import ChatConfig
+from module.persona.command import PersonaCommand
+from module.persona.data.models import MessageType
+from module.persona.data.store import PersonaDataStore
+from module.persona.life.conversation import Conversation
+from module.persona.life.conversation_scope import ConversationScope
 
 
 # ── helpers ──────────────────────────────────────────────
@@ -172,7 +172,7 @@ class TestR2InboundHookFallback:
     @pytest.mark.asyncio
     async def test_identical_old_user_ref_does_not_mask_missing_current_ref_after_reload(self, temp_db):
         """旧 ref 即使与当前输入完全相同，也不能冒充本次 hook 的成功证据。"""
-        from plugins.DicePP.module.persona.life.conversation_store import ConversationStore
+        from module.persona.life.conversation_store import ConversationStore
 
         runtime = MagicMock()
         runtime.run = AsyncMock(return_value=_make_runtime_result(arguments={"content": "你好"}))
@@ -205,7 +205,7 @@ class TestR2InboundHookFallback:
     @pytest.mark.asyncio
     async def test_current_inbound_stream_id_proves_hook_success_without_duplicate(self, temp_db):
         """当前 hook 明确传回的 stream id 存在于 Conversation 时不重复兜底。"""
-        from plugins.DicePP.module.persona.life.conversation_store import ConversationStore
+        from module.persona.life.conversation_store import ConversationStore
 
         runtime = MagicMock()
         runtime.run = AsyncMock(return_value=_make_runtime_result(arguments={"content": "你好"}))

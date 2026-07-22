@@ -3,14 +3,14 @@ import pytest
 from dataclasses import asdict
 from unittest.mock import Mock, AsyncMock
 
-from plugins.DicePP.module.persona.agent.sinks import RunSummarySink
-from plugins.DicePP.module.persona.agent.events import (
+from module.persona.agent.sinks import RunSummarySink
+from module.persona.agent.events import (
     AgentEvent,
     AgentRunFinishedPayload,
     AgentWarningPayload,
 )
-from plugins.DicePP.module.persona.agent.state import AgentRunState
-from plugins.DicePP.module.persona.agent.event_bus import EventStore
+from module.persona.agent.state import AgentRunState
+from module.persona.agent.event_bus import EventStore
 
 
 def _make_state(**kwargs) -> AgentRunState:

@@ -8,11 +8,11 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
-from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
-from plugins.DicePP.module.persona.data.models import RelationshipState
-from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
-from plugins.DicePP.module.persona.life.models import ShareTarget
+from module.persona.life.proactive_scheduler import ProactiveScheduler
+from module.persona.life.proactive_config import ProactiveConfig
+from module.persona.data.models import RelationshipState
+from module.persona.character.models import Character, PersonaExtensions
+from module.persona.life.models import ShareTarget
 from utils.time import set_test_clock, wall_now
 
 
@@ -249,7 +249,7 @@ class TestCharacterActiveExtendedEnd:
 
     @pytest.fixture
     def mock_config(self):
-        from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
+        from module.persona.life.proactive_config import ProactiveConfig
         return ProactiveConfig(
             enabled=True,
             timezone="Asia/Shanghai",
@@ -494,7 +494,7 @@ class TestProactiveSchedulerForcePolicy:
         )
 
         mock_agent = MagicMock()
-        from plugins.DicePP.module.persona.life.types import AgentResult
+        from module.persona.life.types import AgentResult
         mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data=agent_result))
         scheduler.character_agent = mock_agent
 

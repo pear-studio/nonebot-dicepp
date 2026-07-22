@@ -38,7 +38,7 @@ async def query_store(tmp_path):
 @pytest_asyncio.fixture
 async def in_memory_persona_store():
     """提供 :memory: SQLite 的 PersonaDataStore（真实 store，非 mock）。"""
-    from plugins.DicePP.module.persona.data.store import PersonaDataStore
+    from module.persona.data.store import PersonaDataStore
 
     async with aiosqlite.connect(":memory:") as persona_db, \
          aiosqlite.connect(":memory:") as core_db:

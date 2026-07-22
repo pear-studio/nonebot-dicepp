@@ -10,11 +10,11 @@ import pytest
 
 from module.persona.character.models import Character, PersonaExtensions
 from module.persona.command import PersonaCommand
-from plugins.DicePP.shell import bot_runner as bot_runner_module
+from shell import bot_runner as bot_runner_module
 from core.command import BotSendMsgCommand
 from core.communication import GroupMessagePort, PrivateMessagePort
 from core.message_types import MessageType
-from plugins.DicePP.shell.bot_runner import BotRunner, CaptureProxy
+from shell.bot_runner import BotRunner, CaptureProxy
 from utils.time import SteppedClock, get_clock, set_clock
 
 

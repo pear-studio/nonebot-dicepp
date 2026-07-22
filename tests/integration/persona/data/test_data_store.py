@@ -6,9 +6,9 @@ Phase 7c: PersonaDataStore CRUD 单元测试 — 核心 CRUD
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
-from plugins.DicePP.utils.time import wall_now
-from plugins.DicePP.module.persona.data.store import PersonaDataStore
-from plugins.DicePP.module.persona.data.models import UserProfile, RelationshipState, LLMTraceRecord, UserLLMConfig, ScoreEvent, ScoreDeltas
+from utils.time import wall_now
+from module.persona.data.store import PersonaDataStore
+from module.persona.data.models import UserProfile, RelationshipState, LLMTraceRecord, UserLLMConfig, ScoreEvent, ScoreDeltas
 
 class TestMessageCRUD:
     """测试统一消息表 CRUD"""
@@ -16,7 +16,7 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_add_and_get_recent_messages(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
         await store.add_message_stream('u1', '', 'assistant', MessageType.CHAT, 'hi')
         msgs = await store.get_recent_messages('u1', limit=10)
@@ -29,7 +29,7 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_message_stream_segment_metadata_roundtrip(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', '', 'assistant', MessageType.CHAT, 'part1', agent_run_id='run_1', interaction_id='turn_1', segment_index=0, segment_phase='interim')
         msgs = await store.get_recent_messages('u1', limit=10)
         assert len(msgs) == 1
@@ -41,7 +41,7 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_get_recent_messages_order_and_limit(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         for i in range(5):
             await store.add_message_stream('u1', '', 'user', MessageType.CHAT, f'msg{i}')
         msgs = await store.get_recent_messages('u1', limit=3)
@@ -54,7 +54,7 @@ class TestMessageCRUD:
     async def test_chat_visible_messages_not_pruned(self, temp_db):
         # 阶段 1：用户可见 chat 消息被 Conversation 引用，取消破坏性数量裁剪。
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         store._message_stream_max_per_group = 2
         store._PRUNE_INTERVAL_WRITES = 1
         for i in range(5):
@@ -141,7 +141,7 @@ class TestMessageCRUD:
     async def test_read_message_stream_batch(self, temp_db):
         # 供 Conversation 引用展开：按 id 批量取回权威正文。
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         id1 = await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'first', 'Alice')
         id2 = await store.add_message_stream('u2', 'g1', 'user', MessageType.CHAT, 'second', 'Bob')
 
@@ -154,7 +154,7 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_read_message_stream_batch_empty_and_missing(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         assert await store.read_message_stream_batch([]) == {}
         real = await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'x')
         # 不存在的 id 不出现在结果中（悬空引用由调用方 fallback）
@@ -164,7 +164,7 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_get_group_messages(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'hello', 'Alice')
         await store.add_message_stream('u2', 'g1', 'user', MessageType.COMMAND, 'hi', 'Bob')
         await store.add_message_stream('bot', 'g1', 'assistant', MessageType.CHAT, 'welcome', '我')
@@ -177,7 +177,7 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_search_messages_keyword(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, '奈雪的茶很好喝', 'A')
         await store.add_message_stream('u2', 'g1', 'user', MessageType.CHAT, '今天天气不错', 'B')
         results = await store.search_messages('g1', keyword='奈雪', limit=10)
@@ -187,7 +187,7 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_search_messages_type_filter(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'chat msg', 'A')
         await store.add_message_stream('u2', 'g1', 'user', MessageType.COMMAND, '.r 1d20', 'B')
         results = await store.search_messages('g1', type=MessageType.COMMAND, limit=10)
@@ -197,7 +197,7 @@ class TestMessageCRUD:
     @pytest.mark.asyncio
     async def test_count_messages(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         assert await store.count_messages('u1', '') == 0
         assert await store.count_messages('u1', 'g1') == 0
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'private')
@@ -210,7 +210,7 @@ class TestMessageCRUD:
     async def test_get_recent_messages_excludes_system_log(self, temp_db):
         """SYSTEM_LOG 消息不出现在 get_recent_messages 结果中"""
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
         await store.add_message_stream('u1', '', 'assistant', MessageType.SYSTEM_LOG, 'daily report')
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'world')
@@ -223,7 +223,7 @@ class TestMessageCRUD:
     async def test_system_log_persisted_but_hidden(self, temp_db):
         """SYSTEM_LOG 消息写入 message_stream 但不出现在上下文查询中"""
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', '', 'assistant', MessageType.SYSTEM_LOG, 'report')
         msgs = await store.get_recent_messages('u1', limit=10)
         assert len(msgs) == 0
@@ -330,7 +330,7 @@ class TestDiaryAndDailyEventsCRUD:
     @pytest.mark.asyncio
     async def test_update_character_state_updates_timestamp(self, temp_db):
         """update_character_state 应同时更新 updated_at 字段。"""
-        from plugins.DicePP.module.persona.data.models import CharacterState
+        from module.persona.data.models import CharacterState
         store = temp_db
         await store.db.execute('INSERT OR REPLACE INTO persona_character_state (id, text, updated_at) VALUES (1, ?, ?)', ('old', '2024-01-01T00:00:00'))
         await store.db.commit()
@@ -472,7 +472,7 @@ class TestReadMessages:
     @pytest.mark.asyncio
     async def test_read_messages_group_basic(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'hello', 'Alice')
         await store.add_message_stream('u2', 'g1', 'user', MessageType.CHAT, 'hi', 'Bob')
         results = await store.read_messages('u1', 'g1', limit=10)
@@ -483,7 +483,7 @@ class TestReadMessages:
     @pytest.mark.asyncio
     async def test_read_messages_private(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'private msg')
         await store.add_message_stream('u2', '', 'user', MessageType.CHAT, 'other msg')
         results = await store.read_messages('u1', '', limit=10)
@@ -493,7 +493,7 @@ class TestReadMessages:
     @pytest.mark.asyncio
     async def test_read_messages_with_offset(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         for i in range(5):
             await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, f'msg{i}', 'Alice')
         results = await store.read_messages('u1', 'g1', limit=2, offset=2)
@@ -504,7 +504,7 @@ class TestReadMessages:
     @pytest.mark.asyncio
     async def test_read_messages_filter_user(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'from u1')
         await store.add_message_stream('u2', 'g1', 'user', MessageType.CHAT, 'from u2')
         results = await store.read_messages('u1', 'g1', limit=10, filter_user_id='u2')
@@ -515,7 +515,7 @@ class TestReadMessages:
     async def test_read_messages_private_filter_cannot_leak_other_user(self, temp_db):
         # 越权修复：私聊 scope 下 filter_user_id 不能改变查询目标读他人私聊。
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, '我的私聊')
         await store.add_message_stream('victim', '', 'user', MessageType.CHAT, '受害者私聊')
         results = await store.read_messages('u1', '', limit=10, filter_user_id='victim')
@@ -528,7 +528,7 @@ class TestSearchMessagesPrivate:
     @pytest.mark.asyncio
     async def test_search_messages_private(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, '奈雪的茶好喝')
         await store.add_message_stream('u2', '', 'user', MessageType.CHAT, '奈雪不好喝')
         results = await store.search_messages('', keyword='奈雪', user_id='u1', limit=10)
@@ -539,7 +539,7 @@ class TestSearchMessagesPrivate:
     async def test_search_messages_private_filter_cannot_leak_other_user(self, temp_db):
         # 越权修复：私聊 scope 下 filter_user_id 不能改变查询目标搜他人私聊。
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, '奈雪的茶好喝')
         await store.add_message_stream('victim', '', 'user', MessageType.CHAT, '奈雪机密')
         results = await store.search_messages(
@@ -579,7 +579,7 @@ class TestCharacterStateCRUD:
 
     @pytest.mark.asyncio
     async def test_get_and_update_character_state(self, temp_db):
-        from plugins.DicePP.module.persona.data.models import CharacterState
+        from module.persona.data.models import CharacterState
         store = temp_db
         state = await store.get_character_state()
         assert isinstance(state, CharacterState)
@@ -618,7 +618,7 @@ class TestGetDailyChatStats:
     @pytest.mark.asyncio
     async def test_counts_only_chat_messages(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream('u1', 'g1', 'assistant', MessageType.CHAT, 'hi', 'Bot')
         await store.add_message_stream('u2', 'g1', 'user', MessageType.CHAT, 'hello', 'Alice')
@@ -635,7 +635,7 @@ class TestGetDailyChatStats:
     @pytest.mark.asyncio
     async def test_top_users_ordering_and_display_name(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'a', 'Charlie')
         await store.add_message_stream('u2', 'g1', 'user', MessageType.CHAT, 'b', 'Alice')
@@ -655,7 +655,7 @@ class TestGetDailyChatStats:
     @pytest.mark.asyncio
     async def test_top_users_no_display_name_falls_back_to_id(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'hi', '')
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'there', '')
@@ -668,7 +668,7 @@ class TestGetDailyChatStats:
     @pytest.mark.asyncio
     async def test_top_groups_ordering(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'a')
         await store.add_message_stream('u2', 'g2', 'user', MessageType.CHAT, 'b')
@@ -686,7 +686,7 @@ class TestGetDailyChatStats:
     @pytest.mark.asyncio
     async def test_group_id_empty_string_excluded(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream('u1', '', 'user', MessageType.CHAT, 'private')
         stats = await store.get_daily_chat_stats(date)
@@ -696,7 +696,7 @@ class TestGetDailyChatStats:
     @pytest.mark.asyncio
     async def test_new_users_only_counts_first_time_chatters(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         fixed_now = self._freeze_store_time(store)
         today = fixed_now.date().isoformat()
         earlier = (fixed_now - timedelta(days=1)).date().isoformat()
@@ -710,7 +710,7 @@ class TestGetDailyChatStats:
     @pytest.mark.asyncio
     async def test_less_than_three_users_returns_all(self, temp_db):
         store = temp_db
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         date = self._freeze_store_time(store).date().isoformat()
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'hi')
         await store.add_message_stream('u1', 'g1', 'user', MessageType.CHAT, 'again')
@@ -917,7 +917,7 @@ class TestSwitchPersonaDb:
     async def test_switch_persona_db_basic(self, tmp_path):
         """切换后新库能正常读写，旧库已关闭"""
         import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from module.persona.data.store import PersonaDataStore
         db_dir = str(tmp_path)
         old_path = f'{db_dir}/personas_data_old.db'
         new_path = f'{db_dir}/personas_data_new.db'
@@ -940,7 +940,7 @@ class TestSwitchPersonaDb:
     async def test_switch_persona_db_open_failure_rollback(self, tmp_path):
         """模拟 open 失败时应回滚到旧状态"""
         import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from module.persona.data.store import PersonaDataStore
         db_dir = str(tmp_path)
         old_path = f'{db_dir}/personas_data_old.db'
         async with aiosqlite.connect(':memory:') as core_db:
@@ -961,7 +961,7 @@ class TestSwitchPersonaDb:
     async def test_switch_persona_db_memory_raises(self):
         """:memory: 路径应抛出 ValueError"""
         import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from module.persona.data.store import PersonaDataStore
         async with aiosqlite.connect(':memory:') as core_db:
             store = PersonaDataStore(':memory:', core_db)
             store._persona_db = await aiosqlite.connect(':memory:')
@@ -975,8 +975,8 @@ class TestMigrateCodeSetting:
     async def test_migrate_code_setting_first_run(self):
         """首次迁移正确写入 global_settings"""
         import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.factory import _migrate_code_setting
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.factory import _migrate_code_setting
         async with aiosqlite.connect(':memory:') as persona_db, aiosqlite.connect(':memory:') as core_db:
             store = PersonaDataStore(':memory:', core_db)
             store._persona_db = persona_db
@@ -992,8 +992,8 @@ class TestMigrateCodeSetting:
     async def test_migrate_code_setting_idempotent(self):
         """已存在 global_settings 时不覆盖"""
         import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.factory import _migrate_code_setting
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.factory import _migrate_code_setting
         async with aiosqlite.connect(':memory:') as persona_db, aiosqlite.connect(':memory:') as core_db:
             store = PersonaDataStore(':memory:', core_db)
             store._persona_db = persona_db
@@ -1008,8 +1008,8 @@ class TestMigrateCodeSetting:
     async def test_migrate_code_setting_no_old_code(self):
         """旧表无 code 时无操作"""
         import aiosqlite
-        from plugins.DicePP.module.persona.data.store import PersonaDataStore
-        from plugins.DicePP.module.persona.factory import _migrate_code_setting
+        from module.persona.data.store import PersonaDataStore
+        from module.persona.factory import _migrate_code_setting
         async with aiosqlite.connect(':memory:') as persona_db, aiosqlite.connect(':memory:') as core_db:
             store = PersonaDataStore(':memory:', core_db)
             store._persona_db = persona_db
@@ -1023,7 +1023,7 @@ class TestPersonaScopeFilter:
 
     @pytest.mark.asyncio
     async def test_ambient_included_in_recent_messages(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await temp_db.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
         await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'ambient noise')
         msgs = await temp_db.get_recent_messages('u1', '')
@@ -1032,7 +1032,7 @@ class TestPersonaScopeFilter:
 
     @pytest.mark.asyncio
     async def test_ambient_included_in_earliest_message_time(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         t_early = '2026-01-01T10:00:00'
         t_late = '2026-06-01T10:00:00'
         await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'noise')
@@ -1047,7 +1047,7 @@ class TestPersonaScopeFilter:
 
     @pytest.mark.asyncio
     async def test_ambient_included_in_count_messages(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'a')
         await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'b')
         await temp_db.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
@@ -1056,7 +1056,7 @@ class TestPersonaScopeFilter:
 
     @pytest.mark.asyncio
     async def test_ambient_included_in_read_messages(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'noise')
         await temp_db.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
         msgs = await temp_db.read_messages('u1', '')
@@ -1065,7 +1065,7 @@ class TestPersonaScopeFilter:
 
     @pytest.mark.asyncio
     async def test_proactive_not_counted_in_chat_stats(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         y = (wall_now() - timedelta(days=1)).strftime('%Y-%m-%d')
         ts = f'{y}T10:00:00'
         await temp_db.add_message_stream('u1', '', 'assistant', MessageType.CHAT, 'chat reply')
@@ -1077,7 +1077,7 @@ class TestPersonaScopeFilter:
 
     @pytest.mark.asyncio
     async def test_search_messages_ambient_included(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'ambient msg')
         await temp_db.add_message_stream('u1', '', 'user', MessageType.CHAT, 'chat msg')
         results = await temp_db.search_messages('', user_id='u1')
@@ -1086,7 +1086,7 @@ class TestPersonaScopeFilter:
 
     @pytest.mark.asyncio
     async def test_search_messages_chat_type_excludes_ambient(self, temp_db):
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
         await temp_db.add_message_stream('u1', '', 'user', MessageType.AMBIENT, 'noise')
         await temp_db.add_message_stream('u1', '', 'user', MessageType.CHAT, 'hello')
         results = await temp_db.search_messages('', user_id='u1', type=MessageType.CHAT)
@@ -1098,7 +1098,7 @@ class TestScoringFailureCRUD:
 
     @pytest.mark.asyncio
     async def test_record_and_get_scoring_failure(self, temp_db):
-        from plugins.DicePP.module.persona.data.models import ScoringFailure
+        from module.persona.data.models import ScoringFailure
         store = temp_db
         failure = ScoringFailure(user_id='u1', group_id='g1', messages_count=5, error='LLM returned invalid JSON', raw_response='{"bad": json}', conversation_digest='u: hello')
         await store.record_scoring_failure(failure)
@@ -1117,7 +1117,7 @@ class TestScoringFailureCRUD:
     @pytest.mark.asyncio
     async def test_prune_scoring_failures(self, temp_db, monkeypatch):
         from datetime import datetime
-        from plugins.DicePP.module.persona.data.models import ScoringFailure
+        from module.persona.data.models import ScoringFailure
         store = temp_db
         monkeypatch.setattr(store, '_wall_now', lambda: datetime(2026, 6, 10, 12, 0, 0))
         failure = ScoringFailure(user_id='u1', error='old error', created_at=datetime(2026, 5, 1, 0, 0, 0))
@@ -1184,7 +1184,7 @@ class TestTokenUsage:
         from datetime import datetime
         store = temp_db
         monkeypatch.setattr(store, '_wall_now', lambda: datetime(2026, 6, 10, 12, 0, 0))
-        from plugins.DicePP.module.persona.data.models import LLMTraceRecord
+        from module.persona.data.models import LLMTraceRecord
         t1 = LLMTraceRecord(session_id='s1', user_id='u1', model='gpt-4o', tier='primary', messages='[]', response='r1', tokens_in=10, tokens_out=5, status='success')
         t2 = LLMTraceRecord(session_id='s2', user_id='u1', model='gpt-4o', tier='primary', messages='[]', response='r2', tokens_in=20, tokens_out=10, status='success')
         await store.add_llm_trace(t1)
@@ -1208,7 +1208,7 @@ class TestTopRelationships:
     @pytest.mark.asyncio
     async def test_top_relationships_returns_ordered(self, temp_db):
         store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
+        from module.persona.data.models import RelationshipState
         rels = [RelationshipState(user_id='u_a', familiarity=80, intimacy=80), RelationshipState(user_id='u_b', familiarity=60, intimacy=60), RelationshipState(user_id='u_c', familiarity=40, intimacy=40)]
         for r in rels:
             await store.update_relationship(r)
@@ -1237,7 +1237,7 @@ class TestPruneMethods:
     @pytest.mark.asyncio
     async def test_prune_score_history(self, temp_db, monkeypatch):
         from datetime import datetime
-        from plugins.DicePP.module.persona.data.models import ScoreEvent, ScoreDeltas
+        from module.persona.data.models import ScoreEvent, ScoreDeltas
         store = temp_db
         monkeypatch.setattr(store, '_wall_now', lambda: datetime(2026, 6, 10, 12, 0, 0))
         old = ScoreEvent(user_id='u1', deltas=ScoreDeltas(intimacy=1.0), composite_before=0, composite_after=1, reason='old', created_at=datetime(2026, 1, 1))
@@ -1411,7 +1411,7 @@ class TestSessionCRUD:
     async def test_add_and_get_session_messages(self, temp_db):
         store = temp_db
         from datetime import datetime
-        from plugins.DicePP.module.persona.data.models import PersonaSessionMessage
+        from module.persona.data.models import PersonaSessionMessage
         session = await store.create_session(user_id='u1', character_id='char1', static_prompt='test', static_hash='h1', token_budget=64000, status='active', last_active_at=datetime(2026, 6, 1, 12, 0, 0))
         msgs = [PersonaSessionMessage(session_id=session.session_id, role='user', content='hello'), PersonaSessionMessage(session_id=session.session_id, role='assistant', content='world')]
         await store.add_session_messages(session.session_id, msgs)
@@ -1514,7 +1514,7 @@ class TestReputationRecovery:
     async def test_reputation_recovery_basic(self, temp_db):
         """reputation 每日恢复 +2"""
         store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
+        from module.persona.data.models import RelationshipState
         rel = RelationshipState(user_id='u1', familiarity=10.0, intimacy=5.0, reputation=80.0)
         await store.update_relationship(rel)
         now = datetime(2026, 6, 2, 12, 0, 0)
@@ -1529,7 +1529,7 @@ class TestReputationRecovery:
     async def test_reputation_recovery_already_full(self, temp_db):
         """reputation 已达 100 不恢复"""
         store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
+        from module.persona.data.models import RelationshipState
         rel = RelationshipState(user_id='u1', reputation=100.0)
         await store.update_relationship(rel)
         now = datetime(2026, 6, 2, 12, 0, 0)
@@ -1541,7 +1541,7 @@ class TestReputationRecovery:
     async def test_reputation_recovery_same_day_skipped(self, temp_db):
         """同一天已恢复过不再重复恢复"""
         store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
+        from module.persona.data.models import RelationshipState
         now = datetime(2026, 6, 2, 12, 0, 0)
         rel = RelationshipState(user_id='u1', reputation=80.0)
         rel.last_reputation_recovery_date = now
@@ -1554,7 +1554,7 @@ class TestReputationRecovery:
     async def test_reputation_recovery_without_persist(self, temp_db):
         """persist=False 时只改内存不写库"""
         store = temp_db
-        from plugins.DicePP.module.persona.data.models import RelationshipState
+        from module.persona.data.models import RelationshipState
         rel = RelationshipState(user_id='u1', reputation=80.0)
         await store.update_relationship(rel)
         now = datetime(2026, 6, 2, 12, 0, 0)
@@ -1573,9 +1573,9 @@ class TestAmbientRefResolution:
     async def test_recent_ambient_refs_resolvable_during_retention(self, temp_db):
         store = temp_db
         from unittest.mock import MagicMock
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
-        from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+        from core.message_types import MessageType
+        from module.persona.life.conversation_registry import ConversationRegistry
+        from module.persona.life.conversation_scope import ConversationScope
 
         # 近期 ambient 不受冷数据清理影响，应始终可供 ref 展开。
         msg_ids: list[int] = []

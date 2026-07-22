@@ -4,13 +4,13 @@ from datetime import datetime
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from plugins.DicePP.module.persona.life.character_life import (
+from module.persona.life.character_life import (
     CharacterLife,
     CharacterLifeConfig,
 )
-from plugins.DicePP.module.persona.character.models import Character, PersonaExtensions
-from plugins.DicePP.module.persona.data.models import CharacterState
-from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
+from module.persona.character.models import Character, PersonaExtensions
+from module.persona.data.models import CharacterState
+from module.persona.agent.runtime_types import ToolExecutionContext
 
 
 def _make_character(sleep_messages=None):
@@ -177,7 +177,7 @@ class TestSuggestActionRelationshipGate:
 
     @pytest.mark.asyncio
     async def test_below_threshold_skips(self):
-        from plugins.DicePP.module.persona.tools.suggest_action import build_suggest_action_tool
+        from module.persona.tools.suggest_action import build_suggest_action_tool
 
         store = AsyncMock()
         rel = MagicMock()
@@ -197,7 +197,7 @@ class TestSuggestActionRelationshipGate:
 
     @pytest.mark.asyncio
     async def test_above_threshold_proceeds(self):
-        from plugins.DicePP.module.persona.tools.suggest_action import build_suggest_action_tool
+        from module.persona.tools.suggest_action import build_suggest_action_tool
 
         store = AsyncMock()
         rel = MagicMock()
@@ -223,7 +223,7 @@ class TestSuggestActionRelationshipGate:
 
     @pytest.mark.asyncio
     async def test_missing_relationship_skips(self):
-        from plugins.DicePP.module.persona.tools.suggest_action import build_suggest_action_tool
+        from module.persona.tools.suggest_action import build_suggest_action_tool
 
         store = AsyncMock()
         store.get_relationship = AsyncMock(return_value=None)
@@ -241,7 +241,7 @@ class TestSuggestActionRelationshipGate:
 
     @pytest.mark.asyncio
     async def test_lock_serializes_injection(self):
-        from plugins.DicePP.module.persona.tools.suggest_action import build_suggest_action_tool
+        from module.persona.tools.suggest_action import build_suggest_action_tool
 
         life_lock = asyncio.Lock()
         store = AsyncMock()

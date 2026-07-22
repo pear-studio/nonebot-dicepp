@@ -2,11 +2,11 @@
 import asyncio
 import pytest
 
-from plugins.DicePP.module.persona.llm.errors import (
+from module.persona.llm.errors import (
     ErrorKind, RecoveryAction, classify, classify_from_provider, user_message,
 )
-from plugins.DicePP.module.persona.llm.router import QuotaExceeded
-from plugins.DicePP.module.persona.llm.providers.protocol import NonRetryableError, ErrorClass
+from module.persona.llm.router import QuotaExceeded
+from module.persona.llm.providers.protocol import NonRetryableError, ErrorClass
 
 
 # ── ErrorKind 属性和 Recovery 映射 ──────────────────────────

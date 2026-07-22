@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from plugins.DicePP.module.persona.chat.compression import (
+from module.persona.chat.compression import (
     ensure_tool_pairs,
     estimate_session_tokens,
     should_compress,

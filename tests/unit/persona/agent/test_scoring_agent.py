@@ -5,8 +5,8 @@
 import pytest
 
 
-from plugins.DicePP.module.persona.chat.scoring import ScoringAgent
-from plugins.DicePP.module.persona.data.models import ScoreDeltas, UserProfile
+from module.persona.chat.scoring import ScoringAgent
+from module.persona.data.models import ScoreDeltas, UserProfile
 
 
 class TestScoringAgentParsing:
@@ -111,7 +111,7 @@ class TestScoringAgentAnalysisPrompt:
 
     def test_build_analysis_prompt_contains_required_fields(self):
         """验证评分分析 prompt 包含必要的上下文字段"""
-        from plugins.DicePP.module.persona.data.models import UserProfile, RelationshipState
+        from module.persona.data.models import UserProfile, RelationshipState
         agent = ScoringAgent(None, timezone="Asia/Shanghai")
 
         messages = [
@@ -146,7 +146,7 @@ class TestScoringAgentAnalysisPrompt:
     def test_build_analysis_prompt_with_warn_pending(self):
         """验证 warn_pending 标记出现在 prompt 中"""
         agent = ScoringAgent(None, timezone="Asia/Shanghai")
-        from plugins.DicePP.module.persona.data.models import UserProfile
+        from module.persona.data.models import UserProfile
 
         messages = [{"role": "user", "content": "hello"}]
         profile = UserProfile(user_id="u1", facts={})

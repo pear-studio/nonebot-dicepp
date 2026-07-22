@@ -16,8 +16,8 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock, patch
 from unittest.async_case import IsolatedAsyncioTestCase
 
-from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.data.models import (
+from module.persona.command import PersonaCommand
+from module.persona.data.models import (
     RelationshipState,
     UserProfile,
     UserLLMConfig,
@@ -265,7 +265,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
         fake_char = MagicMock()
         fake_char.name = "TestChar"
         with patch(
-            "plugins.DicePP.module.persona.character.loader.CharacterLoader"
+            "module.persona.character.loader.CharacterLoader"
         ) as mock_loader_cls:
             mock_loader_cls.return_value.load.return_value = fake_char
             self.cmd.app.update_character = AsyncMock()
@@ -278,7 +278,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
 
     async def test_admin_reload_load_fail(self):
         with patch(
-            "plugins.DicePP.module.persona.character.loader.CharacterLoader"
+            "module.persona.character.loader.CharacterLoader"
         ) as mock_loader_cls:
             mock_loader_cls.return_value.load.return_value = None
             meta = self.make_private_meta(".ai admin reload", user_id=self.user_id)
@@ -286,7 +286,7 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
             assert "无法加载角色卡" in self.get_sent_content(self.cmd)
 
     async def test_admin_events(self):
-        from plugins.DicePP.module.persona.character.models import PersonaExtensions
+        from module.persona.character.models import PersonaExtensions
         ext = PersonaExtensions(daily_events_count=2, event_day_start_hour=8, event_day_end_hour=22, event_jitter_minutes=0)
         self.cmd.app.chat.character.extensions = ext
         meta = self.make_private_meta(".ai admin events", user_id=self.user_id)
@@ -296,13 +296,13 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
     async def test_admin_diary(self):
         self.store.get_diary = AsyncMock(return_value=None)
         self.store.get_daily_events = AsyncMock(return_value=[])
-        with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
+        with patch("utils.time.wall_now") as mock_wall:
             mock_wall.return_value = datetime(2026, 4, 15, 12, 0, 0)
             meta = self.make_private_meta(".ai admin diary", user_id=self.user_id)
             await self.cmd.process_msg(".ai admin diary", meta, "admin")
             assert "今天" in self.get_sent_content(self.cmd)
 
-        with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
+        with patch("utils.time.wall_now") as mock_wall:
             mock_wall.return_value = datetime(2026, 4, 15, 12, 0, 0)
             meta2 = self.make_private_meta(".ai admin diary -1", user_id=self.user_id)
             await self.cmd.process_msg(".ai admin diary -1", meta2, "admin")
@@ -311,13 +311,13 @@ class TestAdminCommands(IsolatedAsyncioTestCase):
     async def test_admin_today_yesterday_compat(self):
         self.store.get_diary = AsyncMock(return_value=None)
         self.store.get_daily_events = AsyncMock(return_value=[])
-        with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
+        with patch("utils.time.wall_now") as mock_wall:
             mock_wall.return_value = datetime(2026, 4, 15, 12, 0, 0)
             meta = self.make_private_meta(".ai admin today", user_id=self.user_id)
             await self.cmd.process_msg(".ai admin today", meta, "admin")
             assert "今天" in self.get_sent_content(self.cmd)
 
-        with patch("plugins.DicePP.utils.time.wall_now") as mock_wall:
+        with patch("utils.time.wall_now") as mock_wall:
             mock_wall.return_value = datetime(2026, 4, 15, 12, 0, 0)
             meta2 = self.make_private_meta(".ai admin yesterday", user_id=self.user_id)
             await self.cmd.process_msg(".ai admin yesterday", meta2, "admin")

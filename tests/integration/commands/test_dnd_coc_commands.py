@@ -110,7 +110,7 @@ class TestCocMiscCommandIntegration:
         assert "选到了" not in result, ".coc 不应被 .c 随机选择指令处理"
 
 
-# ── Appended from tests/core/command/test_misc_commands.py ──────────────
+# ── Miscellaneous command coverage ──────────────────────────────────────
 
 class TestDNDCOC:
     async def test_dnd_single(self, h):

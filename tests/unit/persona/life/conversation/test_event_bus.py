@@ -4,10 +4,10 @@ import json
 import pytest
 from unittest.mock import Mock, AsyncMock, MagicMock
 
-from plugins.DicePP.module.persona.agent.event_bus import AgentEventBus, EventStore, EventSink
-from plugins.DicePP.module.persona.agent.events import AgentRunStartedPayload, AgentEvent
-from plugins.DicePP.module.persona.agent.state import AgentRunState
-from plugins.DicePP.module.persona.data.store import PersonaDataStore
+from module.persona.agent.event_bus import AgentEventBus, EventStore, EventSink
+from module.persona.agent.events import AgentRunStartedPayload, AgentEvent
+from module.persona.agent.state import AgentRunState
+from module.persona.data.store import PersonaDataStore
 
 
 def _make_state(**kwargs) -> AgentRunState:

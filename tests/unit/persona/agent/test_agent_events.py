@@ -3,7 +3,7 @@ import dataclasses
 
 import pytest
 
-from plugins.DicePP.module.persona.agent.events import (
+from module.persona.agent.events import (
     AgentEvent,
     AgentRunStartedPayload,
     AgentRunFinishedPayload,

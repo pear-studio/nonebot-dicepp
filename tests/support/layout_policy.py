@@ -18,6 +18,8 @@ SUPPORT_LAYERS = frozenset({"support", "fixtures"})
 ALLOWED_TOP_LEVEL = RUNNABLE_LAYERS | SUPPORT_LAYERS
 ALLOWED_ROOT_FILES = frozenset({"__init__.py", "conftest.py"})
 QUICK_LAYERS = frozenset({"unit", "integration"})
+CANONICAL_IMPORT_LAYERS = frozenset({"unit", "integration", "support"})
+DICEPP_PACKAGE_PREFIX = "plugins" + ".DicePP"
 LEGACY_SELECTION_MARKERS = frozenset(
     {
         "compatibility",
@@ -180,17 +182,28 @@ class _PolicyVisitor(ast.NodeVisitor):
             self.aliases[local_name] = alias.name if alias.asname else local_name
             if _is_conftest_module(alias.name):
                 self._add(node, "IMP001", "tests must not import conftest")
+            if self._uses_noncanonical_dicepp_import(alias.name):
+                self._add_noncanonical_import(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         module = node.module or ""
         self.imported_modules.add(module)
         if _is_conftest_module(module):
             self._add(node, "IMP001", "tests must not import conftest")
+        if self._uses_noncanonical_dicepp_import(module):
+            self._add_noncanonical_import(node)
         for alias in node.names:
             qualified = f"{module}.{alias.name}" if module else alias.name
             self.aliases[alias.asname or alias.name] = qualified
             if alias.name == "conftest" or _is_conftest_module(qualified):
                 self._add(node, "IMP001", "tests must not import conftest")
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if (
+            isinstance(node.value, str)
+            and self._uses_noncanonical_dicepp_import(node.value)
+        ):
+            self._add_noncanonical_import(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
         qualified = self._qualified_value(node.value)
@@ -334,6 +347,28 @@ class _PolicyVisitor(ast.NodeVisitor):
         return any(
             module == prefix or module.startswith(f"{prefix}.")
             for module in self.imported_modules
+        )
+
+    def _uses_noncanonical_dicepp_import(self, value: str) -> bool:
+        return (
+            self.layer in CANONICAL_IMPORT_LAYERS
+            and not self._is_dashboard_package_boundary_test()
+            and (
+                value == DICEPP_PACKAGE_PREFIX
+                or value.startswith(f"{DICEPP_PACKAGE_PREFIX}.")
+            )
+        )
+
+    def _is_dashboard_package_boundary_test(self) -> bool:
+        """Dashboard integration tests exercise its deliberate plugin-package boundary."""
+        return self.layer == "integration" and self.path.parent.name == "dashboard"
+
+    def _add_noncanonical_import(self, node: ast.AST) -> None:
+        self._add(
+            node,
+            "IMP002",
+            "in-process tests must use core/module/utils/... instead of "
+            f"{DICEPP_PACKAGE_PREFIX}.*",
         )
 
     def _is_file_path_expression(self, node: ast.AST) -> bool:

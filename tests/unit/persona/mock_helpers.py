@@ -2,7 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from plugins.DicePP.module.persona.data.models import UserLLMConfig
+from module.persona.data.models import UserLLMConfig
 
 
 class MockDataStore:

@@ -6,8 +6,8 @@ import re
 
 import pytest
 
-from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
-from plugins.DicePP.module.persona.tools.get_jrrp import (
+from module.persona.agent.runtime_types import ToolExecutionContext
+from module.persona.tools.get_jrrp import (
     GET_JRRP_TOOL,
     build_get_jrrp_tool,
 )
@@ -29,7 +29,7 @@ def _ctx() -> ToolExecutionContext:
 
 async def _execute(user_id_default: str, monkeypatch, **kwargs) -> str:
     monkeypatch.setattr(
-        "plugins.DicePP.module.persona.tools.get_jrrp.wall_now",
+        "module.persona.tools.get_jrrp.wall_now",
         lambda timezone_name=None: FIXED_NOW,
     )
     tool = build_get_jrrp_tool(user_id_default=user_id_default)
@@ -99,11 +99,11 @@ async def test_seed_fixed_different_user_different(monkeypatch):
 
 
 async def test_seed_fixed_known_value(monkeypatch):
-    from plugins.DicePP.utils.time import datetime_to_str_day
+    from utils.time import datetime_to_str_day
 
     fixed_now = datetime(2024, 3, 1, 8, 0, 0)
     monkeypatch.setattr(
-        "plugins.DicePP.module.persona.tools.get_jrrp.wall_now",
+        "module.persona.tools.get_jrrp.wall_now",
         lambda timezone_name=None: fixed_now,
     )
 

@@ -8,10 +8,10 @@ from unittest.mock import MagicMock
 import json
 import aiosqlite
 
-from plugins.DicePP.module.persona.life.conversation_store import (
+from module.persona.life.conversation_store import (
     ConversationStore, _APPEND_LOCKS, _append_lock_for, _parse_conv_id,
 )
-from plugins.DicePP.module.persona.life.conversation import Snapshot
+from module.persona.life.conversation import Snapshot
 
 
 class TestParseConvId:

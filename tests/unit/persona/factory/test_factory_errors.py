@@ -15,14 +15,14 @@ create_persona 在 Phase 2 之后用具名异常 PersonaInitError 报告初始�
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.factory import create_persona
-from plugins.DicePP.module.persona.exceptions import (
+from module.persona.factory import create_persona
+from module.persona.exceptions import (
     PersonaInitError,
     PersonaConfigError,
     PersonaCharacterLoadError,
     PersonaStorageError,
 )
-from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+from core.config.pydantic_models import PersonaConfig
 
 
 class FakeLoaderReturnsNone:
@@ -47,7 +47,7 @@ class FakeLoaderReturnsChar:
 
 def _make_providers_config():
     """最小有效的 providers 配置（真实 PersonaConfig 子字段）"""
-    from plugins.DicePP.core.config.pydantic_models import ProviderConfig, ModelConfig
+    from core.config.pydantic_models import ProviderConfig, ModelConfig
     model = ModelConfig(
         name="gpt-4o",
         category="llm",
@@ -117,7 +117,7 @@ async def test_character_load_failure_raises(monkeypatch):
     bot = _make_bot()
 
     monkeypatch.setattr(
-        "plugins.DicePP.module.persona.factory.CharacterLoader",
+        "module.persona.factory.CharacterLoader",
         FakeLoaderReturnsNone,
     )
 
@@ -133,7 +133,7 @@ async def test_missing_api_key_raises(monkeypatch):
     bot = _make_bot(has_providers=False)
 
     monkeypatch.setattr(
-        "plugins.DicePP.module.persona.factory.CharacterLoader",
+        "module.persona.factory.CharacterLoader",
         FakeLoaderReturnsChar,
     )
 
@@ -149,13 +149,13 @@ async def test_db_not_connected_raises(monkeypatch):
     bot = _make_bot(db_connected=False)
 
     monkeypatch.setattr(
-        "plugins.DicePP.module.persona.factory.CharacterLoader",
+        "module.persona.factory.CharacterLoader",
         FakeLoaderReturnsChar,
     )
 
     # 防止真的构造 LLMRouter 失败：替换为 MagicMock
     monkeypatch.setattr(
-        "plugins.DicePP.module.persona.factory.LLMRouter",
+        "module.persona.factory.LLMRouter",
         MagicMock(return_value=MagicMock()),
     )
 

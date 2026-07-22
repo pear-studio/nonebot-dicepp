@@ -5,8 +5,8 @@ import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch
 
-from plugins.DicePP.module.persona.llm.providers.openai import OpenAIProvider, NonRetryableError
-from plugins.DicePP.module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
+from module.persona.llm.providers.openai import OpenAIProvider, NonRetryableError
+from module.persona.llm.providers.protocol import LLMResponse, TokenUsage, ToolCall
 
 
 class TestOpenAIProvider:
@@ -301,7 +301,7 @@ class TestOpenAIProvider:
 
     def test_usage_status_missing(self, provider):
         """无 usage 时 usage_status='missing'"""
-        from plugins.DicePP.module.persona.llm.providers.openai import OpenAIProvider
+        from module.persona.llm.providers.openai import OpenAIProvider
         resp_mock = Mock()
         resp_mock.usage = None
         resp_mock.choices = [Mock()]

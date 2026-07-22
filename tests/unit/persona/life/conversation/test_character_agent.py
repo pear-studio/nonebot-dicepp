@@ -4,14 +4,14 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 import json
 import pytest
-from plugins.DicePP.module.persona.life.character_agent import CharacterAgent
-from plugins.DicePP.module.persona.life.types import AgentResult, EventReactionResult
-from plugins.DicePP.module.persona.life.conversation import ConversationRunResult
-from plugins.DicePP.module.persona.data.models import CharacterState
+from module.persona.life.character_agent import CharacterAgent
+from module.persona.life.types import AgentResult, EventReactionResult
+from module.persona.life.conversation import ConversationRunResult
+from module.persona.data.models import CharacterState
 
 
 _CONV_RUN_PATH = (
-    'plugins.DicePP.module.persona.life.conversation.Conversation.run'
+    'module.persona.life.conversation.Conversation.run'
 )
 
 
@@ -372,7 +372,7 @@ class TestFormatStatePrompt:
 
     def test_no_intention_param(self):
         """验证无 intention 参数时输出不含 '当前意向'"""
-        from plugins.DicePP.module.persona.life.character_agent import CharacterAgent
+        from module.persona.life.character_agent import CharacterAgent
         result = CharacterAgent._format_state_prompt(energy=80, mood=60, health=90)
         assert '体力' in result
         assert '心情' in result
@@ -381,7 +381,7 @@ class TestFormatStatePrompt:
 
     def test_handles_all_none(self):
         """验证全部 None 时返回默认提示"""
-        from plugins.DicePP.module.persona.life.character_agent import CharacterAgent
+        from module.persona.life.character_agent import CharacterAgent
         result = CharacterAgent._format_state_prompt(energy=None, mood=None, health=None)
         assert result == '无记录'
 

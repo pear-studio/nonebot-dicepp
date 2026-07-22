@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.data.models import MessageType
-from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
+from module.persona.command import PersonaCommand
+from module.persona.data.models import MessageType
+from module.persona.life.conversation_scope import ConversationScope
 
 
 def _make_command(msg_id=123):

@@ -1,8 +1,8 @@
 # DicePP Test Suite — shared reusable workflow for CI and Release gates
 #
 # 测试层级由 tests/unit、integration、system、external 目录表达。
-# CI 先运行固定 quick 代表集，再运行一次完整离线回归；浏览器、容器和
-# Windows 安装包保留各自的环境级验收，external 不在默认 CI 中运行。
+# CI 先运行固定 quick 代表集，再运行包含 Dashboard 浏览器测试的完整离线回归；
+# 容器和 Windows 安装包保留独立环境验收，external 不在默认 CI 中运行。
 
 name: Test Suite
 
@@ -38,30 +38,6 @@ jobs:
       - name: Run quick representative suite
         run: |
           uv run pytest -m quick -n0 --tb=short -q
-
-  playwright:
-    name: Dashboard Playwright
-    runs-on: ubuntu-latest
-    needs: quick
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-      - name: Install dependencies
-        run: |
-          uv sync --frozen --group dev
-      - name: Install Playwright Chromium
-        run: |
-          uv run playwright install --with-deps chromium
-      - name: Run Dashboard browser tests
-        env:
-          DICEPP_REQUIRE_PLAYWRIGHT: "1"
-        run: |
-          uv run pytest tests/system/browser/dashboard/test_smoke_playwright.py --tb=short -q
 
   dashboard-image:
     name: Dashboard Image
@@ -180,7 +156,6 @@ jobs:
           Invoke-PackagedExe "dist/DicePP/DicePP.exe" @("--smoke-check") | Out-Null
       - name: Run Windows Dashboard UI smoke
         env:
-          DICEPP_REQUIRE_PLAYWRIGHT: "1"
           DICEPP_WINDOWS_PACKAGE_SMOKE: "1"
           DICEPP_DASHBOARD_EXE: dist/DicePP/DicePP.exe
         run: |
@@ -210,6 +185,9 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --frozen --group dev
+      - name: Install Playwright Chromium
+        run: |
+          uv run playwright install --with-deps chromium
       - name: Run full regression with coverage
         run: |
           uv run pytest --cov --cov-report=term-missing --cov-report=xml

@@ -448,7 +448,7 @@ class Bot:
         # 检查 PersonaCommand 实例的实际运行状态，而非 config 静态值：
         # config.enabled=True 但 PersonaApp 初始化失败时，实例 enabled=False，
         # 此处应与实例状态同步，避免日报和旧通知双双缺失。
-        from plugins.DicePP.module.persona.command import PersonaCommand
+        from module.persona.command import PersonaCommand
         persona_running = any(
             isinstance(cmd, PersonaCommand) and cmd.enabled
             for cmd in self.command_dict.values()

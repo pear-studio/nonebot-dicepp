@@ -12,17 +12,17 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
-from plugins.DicePP.core.message_types import MessageType
-from plugins.DicePP.module.persona.agent.output_protocol import (
+from core.message_types import MessageType
+from module.persona.agent.output_protocol import (
     DRAFT_MESSAGE_NAME,
     INTERNAL_MESSAGE_TYPE_FIELD,
     RUNTIME_INSTRUCTION_NAME,
     make_output_reminder,
 )
-from plugins.DicePP.module.persona.agent.runtime_types import ModelTurn, OutputSpec
-from plugins.DicePP.module.persona.life.conversation_registry import ConversationRegistry
-from plugins.DicePP.module.persona.life.conversation_scope import ConversationScope
-from plugins.DicePP.module.persona.life.conversation_summary import _build_summary_prompt
+from module.persona.agent.runtime_types import ModelTurn, OutputSpec
+from module.persona.life.conversation_registry import ConversationRegistry
+from module.persona.life.conversation_scope import ConversationScope
+from module.persona.life.conversation_summary import _build_summary_prompt
 
 
 def _runtime_factory():
@@ -98,7 +98,7 @@ class TestRunLifecycleLease:
     async def test_rotate_summarizes_messages_committed_before_lease_release(
         self, temp_db,
     ):
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="完整摘要")
         reg = ConversationRegistry(
@@ -351,7 +351,7 @@ class TestSilenceRotation:
 
     async def test_append_visible_triggers_silence_rotation(self, temp_db):
         """P1-1: 静默超时后 append_visible 触发轮换。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = await self._make_registry(temp_db, group_silence_seconds=0)
         scope = ConversationScope.for_group("g1")
@@ -385,7 +385,7 @@ class TestSilenceRotation:
 
     async def test_silence_within_threshold_no_rotation(self, temp_db):
         """P1-2: 静默恰在阈值内，不触发轮换。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = await self._make_registry(temp_db, group_silence_seconds=86400)
         scope = ConversationScope.for_group("g1")
@@ -405,7 +405,7 @@ class TestSilenceRotation:
 
     async def test_no_active_session_no_rotation(self, temp_db):
         """无活跃 session 时不触发轮换。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = await self._make_registry(temp_db, group_silence_seconds=0)
         scope = ConversationScope.for_group("g1")
@@ -428,7 +428,7 @@ class TestSummaryInheritance:
 
     async def test_summary_inherited_on_new_session(self, temp_db):
         """P1-9: 关闭旧 session → get_or_create 新 conv 继承摘要。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="上轮摘要文本")
         reg = await self._make_registry(temp_db, summarizer=summarizer)
@@ -458,7 +458,7 @@ class TestSummaryInheritance:
 
     async def test_summary_failure_does_not_block(self, temp_db):
         """P1-10: 摘要生成失败（异常）不阻断新 conv 创建。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(fail=True)
         reg = await self._make_registry(temp_db, summarizer=summarizer)
@@ -486,7 +486,7 @@ class TestSummaryInheritance:
 
     async def test_summary_scope_isolation_single_registry(self, temp_db):
         """W6: 单一 registry 实例 + SQL scope 过滤保证摘要隔离。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="scope摘要")
         reg = await self._make_registry(temp_db, summarizer=summarizer)
@@ -532,7 +532,7 @@ class TestSummaryInheritance:
 
     async def test_short_session_skips_summary(self, temp_db):
         """P1-12: 短会话（<4 条消息）跳过摘要生成。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer()
         reg = await self._make_registry(temp_db, summarizer=summarizer)
@@ -554,7 +554,7 @@ class TestSummaryInheritance:
 
     async def test_existing_summary_not_overwritten(self, temp_db):
         """P1-14: 已有 summary_text 不重写。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="新摘要")
         reg = await self._make_registry(temp_db, summarizer=summarizer)
@@ -582,8 +582,8 @@ class TestSummaryInheritance:
 
     async def test_summary_prefix_stable_after_appends(self, temp_db):
         """P1-13: 摘要注入后 append_ref 不会影响前缀位置。"""
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from core.message_types import MessageType
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="摘要前缀")
         reg = await self._make_registry(temp_db, summarizer=summarizer)
@@ -612,7 +612,7 @@ class TestSummaryInheritance:
 
     async def test_summary_inheritance_chain_s2(self, temp_db):
         """S2: 三段摘要继承链——S1(有摘要)→S2(无摘要但消息足, 应为其生成)→S3(继承 S2 新摘要, 非 S1 旧摘要)。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         # 按调用次数返回不同摘要文本的 FakeSummarizer
         class CountingSummarizer:
@@ -676,7 +676,7 @@ class TestRotate:
 
     async def test_rotate_carry_over_last_user_ref(self, temp_db):
         """rotate 后新 conv._messages[-1] 是 ref, role='user', msid 匹配原消息。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = _make_registry(temp_db)
         scope = ConversationScope.for_group("g1")
@@ -705,7 +705,7 @@ class TestRotate:
 
     async def test_rotate_only_last_user_ref_carried(self, temp_db):
         """只有最后一条 user ref 被 carry-over，更早的不携带。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = _make_registry(temp_db)
         scope = ConversationScope.for_group("g1")
@@ -736,7 +736,7 @@ class TestRotate:
 
     async def test_rotate_old_conv_closed(self, temp_db):
         """rotate 后旧 session status='closed'，DB 中保持完整。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = _make_registry(temp_db)
         scope = ConversationScope.for_group("g1")
@@ -774,7 +774,7 @@ class TestAppendVisibleIfActive:
 
     async def test_active_session_append_ref_success(self, temp_db):
         """scope 已有 active session 时 append_ref 成功。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = _make_registry(temp_db)
         scope = ConversationScope.for_group("g1")
@@ -808,7 +808,7 @@ class TestAppendVisibleIfActive:
 
     async def test_cache_hit_still_works(self, temp_db):
         """peek_cached 命中时也返回 conv 并 append_ref。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = _make_registry(temp_db)
         scope = ConversationScope.for_group("g1")
@@ -845,8 +845,8 @@ class TestConcurrentClose:
         并发 close 执行不打断 run 的正常完成。"""
         import asyncio
         from unittest.mock import AsyncMock, MagicMock
-        from plugins.DicePP.module.persona.life.conversation import ConversationRunResult
-        from plugins.DicePP.module.persona.agent.runtime_types import (
+        from module.persona.life.conversation import ConversationRunResult
+        from module.persona.agent.runtime_types import (
             AgentRunResult, RunCompletion, RunOutput, BillingSummary,
         )
 
@@ -902,7 +902,7 @@ class TestConcurrentRunAndVisibleAppend:
         """DB 写入竞争不应让 ambient ref 与 run delta 在重载后换位。"""
         from unittest.mock import AsyncMock
 
-        from plugins.DicePP.module.persona.agent.runtime_types import (
+        from module.persona.agent.runtime_types import (
             AgentRunResult,
             BillingSummary,
             RunCompletion,
@@ -980,8 +980,8 @@ class TestSilenceTokenCombination:
     async def test_silence_and_token_only_one_new_session(self, temp_db):
         """同时设 last_active_at 过期 + 消息超预算,
         静默检查优先触发轮换，只创建 1 个新 session。"""
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from core.message_types import MessageType
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="摘要")
         reg = ConversationRegistry(
@@ -1038,8 +1038,8 @@ class TestSummaryRefResolve:
     @pytest.mark.asyncio
     async def test_summary_resolves_ref_content(self, temp_db):
         """append_ref 创建的 ref 条目在 _ensure_summary_for_scope 中正确解析出原始正文。"""
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from core.message_types import MessageType
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="包含引用的摘要")
         reg = ConversationRegistry(
@@ -1154,8 +1154,8 @@ class TestSummaryRefResolve:
     @pytest.mark.asyncio
     async def test_summary_ref_fallback_for_missing_stream(self, temp_db):
         """message_stream 中缺失的 ref 条目使用 DANGLING_REF_FALLBACK。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
-        from plugins.DicePP.module.persona.life.conversation import DANGLING_REF_FALLBACK
+        from module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation import DANGLING_REF_FALLBACK
 
         summarizer = FakeSummarizer(return_text="回退摘要")
         reg = ConversationRegistry(
@@ -1195,8 +1195,8 @@ class TestSummaryReadBatchFailure:
     async def test_read_batch_failure_logged(self, temp_db):
         """read_message_stream_batch 异常应被记录（而非完全静默）"""
         from unittest.mock import patch, AsyncMock
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from core.message_types import MessageType
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="摘要")
         reg = ConversationRegistry(
@@ -1221,7 +1221,7 @@ class TestSummaryReadBatchFailure:
             AsyncMock(side_effect=RuntimeError("DB failure")),
         ):
             with patch(
-                "plugins.DicePP.module.persona.life.conversation_registry"
+                "module.persona.life.conversation_registry"
                 ".logger.warning",
             ) as mock_warning:
                 await reg.get_or_create(scope)
@@ -1242,7 +1242,7 @@ class TestRetryIntegration:
     def _make_runtime_result(final_text="回复文本",
                               completion_kind="completed",
                               completion_code="output_collected"):
-        from plugins.DicePP.module.persona.agent.runtime_types import (
+        from module.persona.agent.runtime_types import (
             AgentRunResult, RunCompletion, RunOutput, BillingSummary,
         )
         return AgentRunResult(
@@ -1258,8 +1258,8 @@ class TestRetryIntegration:
         """S1: 真实 rotate 验证 rotation_needed→rotate→new conv carry-over→retry 成功。"""
         from itertools import count
         from unittest.mock import AsyncMock, MagicMock
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from core.message_types import MessageType
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="摘要")
         reg = ConversationRegistry(
@@ -1328,8 +1328,8 @@ class TestRetryIntegration:
     async def test_retry_carry_over_preserves_summary(self, temp_db):
         """S1 变体: rotate 时旧 conv 已有摘要, 新 conv 继承同一摘要。"""
         from unittest.mock import AsyncMock, MagicMock
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from core.message_types import MessageType
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="已有摘要文本")
         reg = ConversationRegistry(
@@ -1401,8 +1401,8 @@ class TestSummaryInjectionFailRecovery:
 
     @pytest.mark.asyncio
     async def test_retry_injects_summary_after_failed_save(self, temp_db, monkeypatch):
-        from plugins.DicePP.module.persona.life.conversation_store import ConversationStore
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_store import ConversationStore
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer = FakeSummarizer(return_text="失败恢复摘要")
         reg = ConversationRegistry(
@@ -1558,9 +1558,9 @@ class TestCA3TwoPhaseInheritance:
     async def test_ca3_two_phase_silence_inherits_summary(self, temp_db):
         """静默轮换路径: 两阶段（锁内 close → 锁外 _ensure_summary → 锁内 create_new）
         新 conv 继承摘要前缀，摘要 UPDATE 写入刚关闭的 session。"""
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
-        from plugins.DicePP.module.persona.life.conversation import NOTIFICATION_PREFIX
+        from core.message_types import MessageType
+        from module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation import NOTIFICATION_PREFIX
 
         summarizer = FakeSummarizer(return_text="静默轮换摘要")
         reg = await self._make_registry(temp_db, summarizer=summarizer,
@@ -1606,9 +1606,9 @@ class TestCA3TwoPhaseInheritance:
     async def test_ca3_two_phase_rotate_inherits_summary(self, temp_db):
         """rotate 路径: 两阶段（锁内 close → 锁外 _ensure_summary → 锁内 create_new）
         新 conv 继承摘要前缀，摘要 UPDATE 写入刚关闭的 session。"""
-        from plugins.DicePP.core.message_types import MessageType
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
-        from plugins.DicePP.module.persona.life.conversation import NOTIFICATION_PREFIX
+        from core.message_types import MessageType
+        from module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation import NOTIFICATION_PREFIX
 
         summarizer = FakeSummarizer(return_text="轮换摘要")
         reg = await self._make_registry(temp_db, summarizer=summarizer)
@@ -1655,8 +1655,8 @@ class TestCA3TwoPhaseInheritance:
     async def test_ca3_two_phase_summary_writes_only_to_immediate_previous(self, temp_db):
         """两阶段路径不错误地写入更旧 session：S1(closed+摘要)→S2(active)→rotate→
         新摘要只写 S2, S1 原摘要不变。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
-        from plugins.DicePP.module.persona.life.conversation import NOTIFICATION_PREFIX
+        from module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation import NOTIFICATION_PREFIX
 
         # 按调用次数返回不同摘要
         class _CountingSummarizer:
@@ -1716,7 +1716,7 @@ class TestCA6ClearCacheRotate:
 
     async def test_ca6_clear_cache_rotate_db_fallback_carry_over(self, temp_db):
         """clear_cache → old_conv 为 None → _find_last_user_ref_from_db 兜底。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = _make_registry(temp_db)
         scope = ConversationScope.for_group("g1")
@@ -1746,7 +1746,7 @@ class TestCA6ClearCacheRotate:
 
     async def test_ca6_no_clear_cache_rotate_memory_carry_over(self, temp_db):
         """不 clear_cache 时 rotate 从内存取 old_conv._messages 的 carry-over。"""
-        from plugins.DicePP.core.message_types import MessageType
+        from core.message_types import MessageType
 
         reg = _make_registry(temp_db)
         scope = ConversationScope.for_group("g1")
@@ -1851,7 +1851,7 @@ class TestCA7CacheGeneration:
 
 def _make_summarizer():
     """返回一个 FakeSummarizer，每次 generate_summary 记录调用。"""
-    from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+    from module.persona.life.conversation_summary import FakeSummarizer
     return FakeSummarizer(return_text="")
 
 
@@ -1861,7 +1861,7 @@ class TestSummaryCAS:
     @pytest.mark.asyncio
     async def test_two_summarizers_only_one_wins(self, temp_db):
         """两个 summarizer 返回不同文本 → CAS 保证只有一个写入，另一个回读胜者。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         summarizer_a = FakeSummarizer(return_text="摘要A")
         summarizer_b = FakeSummarizer(return_text="摘要B")
@@ -1921,7 +1921,7 @@ class TestSummaryNoCrossSegmentFallback:
     @pytest.mark.asyncio
     async def test_no_cross_segment_inheritance(self, temp_db):
         """S1(有摘要)→S2(无摘要)→S3: S3 不应继承 S1 的摘要。"""
-        from plugins.DicePP.module.persona.life.conversation_summary import FakeSummarizer
+        from module.persona.life.conversation_summary import FakeSummarizer
 
         scope = ConversationScope.for_group("g1")
 

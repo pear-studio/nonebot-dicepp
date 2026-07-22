@@ -2,7 +2,7 @@
 
 import pytest
 
-from plugins.DicePP.utils.sequence_runtime import SequenceRuntime
+from utils.sequence_runtime import SequenceRuntime
 
 
 class TestSequenceRuntime:

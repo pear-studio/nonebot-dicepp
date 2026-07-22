@@ -1,7 +1,7 @@
 """format_timestamp 单元测试"""
 from datetime import datetime
 
-from plugins.DicePP.utils.time import format_timestamp
+from utils.time import format_timestamp
 
 
 class TestFormatTimestamp:

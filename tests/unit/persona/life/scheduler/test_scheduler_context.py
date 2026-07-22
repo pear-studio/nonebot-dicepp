@@ -5,15 +5,15 @@
 """
 
 from datetime import datetime
-from plugins.DicePP.utils.time import wall_now
+from utils.time import wall_now
 
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.life.proactive_scheduler import ProactiveScheduler
-from plugins.DicePP.module.persona.life.proactive_config import ProactiveConfig
-from plugins.DicePP.module.persona.data.models import RelationshipState
-from plugins.DicePP.module.persona.life.types import AgentResult
+from module.persona.life.proactive_scheduler import ProactiveScheduler
+from module.persona.life.proactive_config import ProactiveConfig
+from module.persona.data.models import RelationshipState
+from module.persona.life.types import AgentResult
 
 
 def _make_mock_character():
@@ -29,7 +29,7 @@ def _make_mock_character():
 @pytest.fixture
 def mock_data_store():
     store = MagicMock()
-    from plugins.DicePP.module.persona.data.models import CharacterState
+    from module.persona.data.models import CharacterState
     store.get_user_profile = AsyncMock(return_value=None)
     store.get_relationship = AsyncMock(return_value=None)
     store.get_recent_messages = AsyncMock(return_value=[])
@@ -78,7 +78,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_defaults_when_no_data(self, scheduler, mock_data_store):
         """当 rel=None, user_profile=None, recent_msgs=[] 时使用默认值"""
-        from plugins.DicePP.module.persona.life.models import ShareTarget
+        from module.persona.life.models import ShareTarget
 
         mock_agent = MagicMock()
         mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data="默认消息"))
@@ -107,7 +107,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_with_relationship(self, scheduler, mock_data_store):
         """当有关系记录时 warmth_label 和 score 正确解析"""
-        from plugins.DicePP.module.persona.life.models import ShareTarget
+        from module.persona.life.models import ShareTarget
 
         rel = RelationshipState(user_id="u1", intimacy=100, familiarity=50)
         mock_data_store.get_relationship = AsyncMock(return_value=rel)
@@ -134,7 +134,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_returns_none_on_agent_failure(self, scheduler):
         """generate_share_message 返回 None 时 _build_and_generate_share_message 也返回 None"""
-        from plugins.DicePP.module.persona.life.models import ShareTarget
+        from module.persona.life.models import ShareTarget
 
         mock_agent = MagicMock()
         mock_agent.share = AsyncMock(return_value=AgentResult(success=True, data=None))
@@ -154,7 +154,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_no_agent(self, scheduler):
         """character_agent 为 None 时返回 None"""
-        from plugins.DicePP.module.persona.life.models import ShareTarget
+        from module.persona.life.models import ShareTarget
 
         scheduler.character_agent = None
         target = ShareTarget(user_id="u1", priority=100, score=70.0)
@@ -170,7 +170,7 @@ class TestBuildAndGenerateShareMessage:
     @pytest.mark.asyncio
     async def test_build_and_generate_share_message_db_error(self, scheduler, mock_data_store):
         """数据库查询异常时返回 None 并记录 warning"""
-        from plugins.DicePP.module.persona.life.models import ShareTarget
+        from module.persona.life.models import ShareTarget
 
         mock_data_store.get_user_profile = AsyncMock(side_effect=Exception("db error"))
 

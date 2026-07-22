@@ -8,7 +8,7 @@ from urllib import error as urllib_error
 
 import pytest
 
-from plugins.DicePP.shell.client import (
+from shell.client import (
     cancel_job,
     fetch_job,
     ShellRuntimeRequestError,
@@ -17,7 +17,7 @@ from plugins.DicePP.shell.client import (
     send_message,
     start_warp,
 )
-from plugins.DicePP.shell.session import RuntimeInfo
+from shell.session import RuntimeInfo
 
 
 @pytest.fixture

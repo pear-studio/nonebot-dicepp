@@ -262,7 +262,7 @@ class TestInitiativeMultiUser(_InitBotBase):
         assert any(word in result for word in ["没有", "不存在", "没有找到"])
 
 
-# ── Appended from tests/core/command/test_initiative.py ──────────────────
+# ── Additional initiative coverage ──────────────────────────────────────
 
 class TestInitiativeBasic:
     async def test_no_init_list(self, h):

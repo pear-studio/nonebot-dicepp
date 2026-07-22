@@ -4,13 +4,13 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from plugins.DicePP.module.persona.life.conversation import (
+from module.persona.life.conversation import (
     Conversation, Snapshot, Notification,
 )
-from plugins.DicePP.module.persona.life.change_sources import (
+from module.persona.life.change_sources import (
     DateChangeSource, ProfileFactsChangeSource,
 )
-from plugins.DicePP.module.persona.agent.runtime_types import (
+from module.persona.agent.runtime_types import (
     AgentRunResult as NewAgentRunResult,
     RunCompletion,
     RunOutput,
@@ -161,7 +161,7 @@ class TestFullRunPipeline:
     @pytest.mark.asyncio
     async def test_profile_source_detects_change(self):
         """ProfileFactsChangeSource 检测 facts 变化"""
-        from plugins.DicePP.module.persona.data.models import UserProfile
+        from module.persona.data.models import UserProfile
 
         store_mock = MagicMock()
         profile1 = UserProfile(user_id="u1", facts={"爱好": "种花"})

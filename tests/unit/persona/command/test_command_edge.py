@@ -15,9 +15,9 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, AsyncMock, mock_open, patch
 from unittest.async_case import IsolatedAsyncioTestCase
 
-from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.module.persona.chat.orchestrator import ChatOutcome
-from plugins.DicePP.module.persona.data.models import (
+from module.persona.command import PersonaCommand
+from module.persona.chat.orchestrator import ChatOutcome
+from module.persona.data.models import (
     RelationshipState,
     UserProfile,
     UserLLMConfig,
@@ -49,7 +49,7 @@ class TestEdgeAndExceptionPaths(IsolatedAsyncioTestCase):
         self.cmd.app.chat_with_user = AsyncMock(return_value="你好呀")
 
     async def test_quota_exceeded(self):
-        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
+        from module.persona.llm.router import QuotaExceeded
         self.cmd.app.chat_with_user = AsyncMock(side_effect=QuotaExceeded("配额超限"))
         meta = self.make_private_meta("你好")
         meta.to_me = True
@@ -153,7 +153,7 @@ class TestSegmentedPathPreservesGroupActivity(IsolatedAsyncioTestCase):
     """
 
     async def asyncSetUp(self):
-        from plugins.DicePP.core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
+        from core.config.pydantic_models import PersonaConfig, ProviderConfig, ModelConfig
         # 与 default_persona_config() 同源, 但启用 group_activity
         persona = PersonaConfig(
             enabled=True,
@@ -241,9 +241,9 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
         self.cmd.app.chat_with_user = AsyncMock(return_value="收到表情包啦")
 
         # 保留真实图片解析/缓存控制流，但 mock 文件系统以维持 unit 隔离。
-        from plugins.DicePP.module.persona.image_cache import ImageCache
+        from module.persona.image_cache import ImageCache
         self.cmd.image_cache = ImageCache()
-        mkdir_patch = patch("plugins.DicePP.module.persona.image_cache.os.makedirs")
+        mkdir_patch = patch("module.persona.image_cache.os.makedirs")
         open_patch = patch(
             "builtins.open",
             mock_open(read_data="data:image/png;base64,iVBORw0KGgo="),
@@ -271,7 +271,7 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
                                sender=MessageSender("u1", "测试用户"),
                                group_id="", to_me=True)
 
-        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
             await self.cmd.process_msg("", meta, None)
 
         self.cmd.app.chat_with_user.assert_awaited_once()
@@ -300,7 +300,7 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
         meta.sender.card = "银月团长"
         self.bot.get_nickname = AsyncMock(return_value="银月游侠")
 
-        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
             await self.cmd.process_msg("", meta, None)
 
         self.cmd.app.chat_with_user.assert_awaited_once()
@@ -328,7 +328,7 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
                                sender=MessageSender("u1", "测试用户"),
                                group_id="", to_me=True)
 
-        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
             await self.cmd.process_msg("", meta, None)
 
         self.cmd.app.chat_with_user.assert_awaited_once()
@@ -356,7 +356,7 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
                                sender=MessageSender("u1", "测试用户"),
                                group_id="", to_me=True)
 
-        with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
+        with patch("module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
             await self.cmd.process_msg("", meta, None)
 
         self.cmd.app.chat_with_user.assert_awaited_once()

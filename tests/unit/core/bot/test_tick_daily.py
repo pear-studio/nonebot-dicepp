@@ -150,7 +150,7 @@ async def test_tick_daily_suppresses_master_notification_when_persona_running():
     persona_cmd = _FakePersonaCommand(enabled=True)
     bot.command_dict = {"persona": persona_cmd}
 
-    with patch("plugins.DicePP.module.persona.command.PersonaCommand", _FakePersonaCommand):
+    with patch("module.persona.command.PersonaCommand", _FakePersonaCommand):
         bot_commands = []
         bot.config.persona_ai = PersonaConfig(daily_report_enabled=True)
         await Bot.tick_daily(bot, bot_commands)
@@ -181,7 +181,7 @@ async def test_tick_daily_sends_master_notification_when_daily_report_disabled()
     persona_cmd = _FakePersonaCommand(enabled=True)
     bot.command_dict = {"persona": persona_cmd}
 
-    with patch("plugins.DicePP.module.persona.command.PersonaCommand", _FakePersonaCommand):
+    with patch("module.persona.command.PersonaCommand", _FakePersonaCommand):
         bot_commands = []
         await Bot.tick_daily(bot, bot_commands)
 
@@ -198,7 +198,7 @@ async def test_tick_daily_sends_master_notification_when_persona_not_enabled():
     persona_cmd = _FakePersonaCommand(enabled=False)
     bot.command_dict = {"persona": persona_cmd}
 
-    with patch("plugins.DicePP.module.persona.command.PersonaCommand", _FakePersonaCommand):
+    with patch("module.persona.command.PersonaCommand", _FakePersonaCommand):
         bot_commands = []
         await Bot.tick_daily(bot, bot_commands)
 

@@ -307,7 +307,9 @@ def test_canonical_rewrite_preserves_comment_metadata(dd):
 
 
 def test_shipped_global_config_has_no_fields_dropped_by_canonical_rewrite(dd):
-    project_root = Path(__file__).resolve().parents[3]
+    from tests.support.paths import find_repository_root
+
+    project_root = find_repository_root(Path(__file__))
     shipped = _read(project_root / "config" / "global.json")
     _write(dd.global_cfg, shipped)
 

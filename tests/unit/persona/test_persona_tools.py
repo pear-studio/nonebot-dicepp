@@ -2,7 +2,7 @@
 
 import pytest
 
-from plugins.DicePP.module.persona.data.store import PersonaDataStore
+from module.persona.data.store import PersonaDataStore
 
 
 @pytest.fixture
@@ -41,8 +41,8 @@ class TestAESEncryption:
 
 class TestRollDiceTool:
     async def _roll(self, expression: str):
-        from plugins.DicePP.module.persona.agent.runtime_types import ToolExecutionContext
-        from plugins.DicePP.module.persona.tools.roll_dice import ROLL_DICE_TOOL
+        from module.persona.agent.runtime_types import ToolExecutionContext
+        from module.persona.tools.roll_dice import ROLL_DICE_TOOL
 
         return await ROLL_DICE_TOOL.handler(
             ROLL_DICE_TOOL.args_schema(expression=expression),
@@ -98,7 +98,7 @@ class TestRollDiceTool:
 
 class TestQuotaExceededException:
     def test_quota_exceeded_exception(self):
-        from plugins.DicePP.module.persona.llm.router import QuotaExceeded
+        from module.persona.llm.router import QuotaExceeded
 
         with pytest.raises(QuotaExceeded) as exc_info:
             raise QuotaExceeded("今日配额已用完")

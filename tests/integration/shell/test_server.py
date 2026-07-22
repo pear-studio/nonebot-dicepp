@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from plugins.DicePP.shell.server import create_shell_app
+from shell.server import create_shell_app
 
 
 class FakeBotRunner:

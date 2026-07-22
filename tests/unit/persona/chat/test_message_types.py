@@ -2,7 +2,7 @@
 MessageType 枚举的单元测试（新增 AMBIENT / PROACTIVE）
 """
 import pytest
-from plugins.DicePP.core.message_types import MessageType
+from core.message_types import MessageType
 
 
 class TestMessageType:

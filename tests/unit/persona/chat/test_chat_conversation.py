@@ -1,8 +1,8 @@
 """ChatConversation 测试 — Conversation 在 Chat 上下文中的使用（T6 新路径）"""
 import pytest
 
-from plugins.DicePP.module.persona.life.conversation import Conversation, ConversationRunResult
-from plugins.DicePP.module.persona.agent.runtime_types import (
+from module.persona.life.conversation import Conversation, ConversationRunResult
+from module.persona.agent.runtime_types import (
     AgentRunResult, RunCompletion, RunOutput, BillingSummary,
 )
 

@@ -1,5 +1,5 @@
 """
-tests/module/roll/test_roll_parse_args.py
+tests/unit/module/roll/test_roll_parse_args.py
 
 覆盖 _parse_roll_args 的各个分支场景：
   - 无 flags 的基本表达式

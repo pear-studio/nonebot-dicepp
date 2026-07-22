@@ -7,9 +7,9 @@ PersonaApp 是工厂 create_persona 的返回值，持有 chat/life/store/port �
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 
-from plugins.DicePP.module.persona.factory import PersonaApp
-from plugins.DicePP.module.persona.command import PersonaCommand
-from plugins.DicePP.core.config.pydantic_models import PersonaConfig
+from module.persona.factory import PersonaApp
+from module.persona.command import PersonaCommand
+from core.config.pydantic_models import PersonaConfig
 
 
 def _make_app() -> PersonaApp:
