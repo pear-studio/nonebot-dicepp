@@ -14,7 +14,9 @@ from plugins.DicePP.module.persona.agent.event_bus import EventStore
 
 
 def _make_state(**kwargs) -> AgentRunState:
-    defaults = dict(run_id="r1", interaction_id="t1")
+    defaults = dict(
+        run_id="r1", interaction_id="t1", user_id="", group_id="",
+    )
     defaults.update(kwargs)
     return AgentRunState(**defaults)
 

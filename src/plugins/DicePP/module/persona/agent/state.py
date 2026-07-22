@@ -6,10 +6,12 @@ from dataclasses import dataclass, field
 
 @dataclass
 class AgentRunState:
-    """单次 Agent run 的最小可变状态，由 AgentLoop.run() 维护"""
+    """单次 Agent run 的身份与可变状态，由 AgentLoop.run() 维护。"""
 
     run_id: str
     interaction_id: str
+    user_id: str
+    group_id: str
 
     status: str = "running"
     tool_rounds: int = 0

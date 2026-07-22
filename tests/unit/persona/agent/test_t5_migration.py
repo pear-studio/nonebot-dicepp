@@ -104,6 +104,7 @@ async def _edit_handler(parsed, ctx: ToolExecutionContext) -> ToolResult:
 def _make_state(run_id="test-run", interaction_id="test-interaction"):
     return AgentRunState(
         run_id=run_id, interaction_id=interaction_id,
+        user_id="", group_id="",
     )
 
 

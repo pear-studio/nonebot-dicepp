@@ -305,8 +305,8 @@ class LLMGateway:
         try:
             trace = LLMTraceRecord(
                 interaction_id=state.interaction_id or run_id,
-                user_id=getattr(state, "user_id", "") or "",
-                group_id=getattr(state, "group_id", "") or "",
+                user_id=state.user_id,
+                group_id=state.group_id,
                 run_id=run_id,
                 model=model_name,
                 tier=request.selection.category,

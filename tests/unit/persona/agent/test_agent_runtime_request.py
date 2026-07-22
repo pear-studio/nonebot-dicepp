@@ -84,7 +84,9 @@ def _make_tc(name: str, args: dict, tc_id: str = "tc_1") -> dict:
 
 
 def _make_state(**kwargs) -> AgentRunState:
-    defaults = dict(run_id="r1", interaction_id="t1")
+    defaults = dict(
+        run_id="r1", interaction_id="t1", user_id="", group_id="",
+    )
     defaults.update(kwargs)
     return AgentRunState(**defaults)
 
@@ -482,6 +484,45 @@ class TestMultimodalObservation:
 
 
 class TestTerminalEvent:
+    @pytest.mark.asyncio
+    async def test_runtime_propagates_run_identity_to_loop_state(self):
+        """RunMetadata 身份必须进入每轮 Gateway 共用的 run state。"""
+        from unittest.mock import patch
+        from plugins.DicePP.module.persona.data.store import PersonaDataStore
+        from plugins.DicePP.module.persona.llm.router import LLMRouter
+
+        store = Mock(spec=PersonaDataStore)
+        store.insert_agent_run = AsyncMock()
+        store.update_agent_run = AsyncMock()
+        store.insert_agent_event = AsyncMock()
+        runtime = AgentRuntime(router=Mock(spec=LLMRouter), store=store)
+        request = AgentRunRequest(
+            interaction_id="i_test",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=ToolKit(),
+            output=None,
+            selection=CHAT,
+            limits=LoopLimits(max_rounds=3, max_corrections=2),
+            metadata=RunMetadata(
+                agent_name="test", run_tag="test",
+                user_id="u1", group_id="g1",
+            ),
+        )
+        fake_result = AgentRunResult(
+            run_id="r_test",
+            interaction_id="i_test",
+            completion=RunCompletion(kind="completed", code="direct_content"),
+            output=RunOutput(text="hello"),
+        )
+
+        mocked_run = AsyncMock(return_value=fake_result)
+        with patch.object(AgentLoop, "run", mocked_run):
+            await runtime.run(request)
+
+        state = mocked_run.await_args.kwargs["state"]
+        assert state.user_id == "u1"
+        assert state.group_id == "g1"
+
     @pytest.mark.asyncio
     async def test_runtime_injects_stable_output_protocol_without_mutating_request(self):
         """Runtime 首轮装配输出协议，同时保持调用方消息不可变。"""

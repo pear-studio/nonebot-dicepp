@@ -65,7 +65,12 @@ class AgentRuntime:
         agent_name = request.metadata.agent_name
         run_tag = request.metadata.run_tag
 
-        state = AgentRunState(run_id=run_id, interaction_id=request.interaction_id)
+        state = AgentRunState(
+            run_id=run_id,
+            interaction_id=request.interaction_id,
+            user_id=request.metadata.user_id,
+            group_id=request.metadata.group_id,
+        )
 
         event_store = EventStore(self._store)
         bus = AgentEventBus(event_store=event_store, sinks=[RunSummarySink(event_store)])

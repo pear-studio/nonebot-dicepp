@@ -25,7 +25,9 @@ def _make_llm_resp(content="ok", tool_calls=None) -> LLMResponse:
 
 
 def _make_state(**kwargs) -> AgentRunState:
-    defaults = dict(run_id="r1", interaction_id="t1")
+    defaults = dict(
+        run_id="r1", interaction_id="t1", user_id="", group_id="",
+    )
     defaults.update(kwargs)
     return AgentRunState(**defaults)
 
@@ -409,7 +411,7 @@ class TestLLMGateway:
 
         bus = AgentEventBus(event_store=mock_event_store)
         gateway = LLMGateway(router=mock_router, event_bus=bus)
-        state = _make_state()
+        state = _make_state(user_id="u1", group_id="g1")
         req = _make_request()
 
         result = await gateway.complete(req, state, run_id="run-123")
@@ -419,6 +421,8 @@ class TestLLMGateway:
         trace = mock_data_store.add_llm_trace.call_args[0][0]
         assert trace.run_id == "run-123"
         assert trace.interaction_id == "t1"  # state.interaction_id 优先于 run_id
+        assert trace.user_id == "u1"
+        assert trace.group_id == "g1"
         assert trace.reasoning_content == "thinking..."
         assert trace.latency_ms == 123
         assert trace.status == "success"
@@ -463,7 +467,7 @@ class TestLLMGateway:
 
         bus = AgentEventBus(event_store=mock_event_store)
         gateway = LLMGateway(router=mock_router, event_bus=bus)
-        state = _make_state()
+        state = _make_state(user_id="u-fail", group_id="g-fail")
         req = _make_request()
 
         with pytest.raises(ServiceUnavailableError):
@@ -475,8 +479,8 @@ class TestLLMGateway:
         assert trace.status == "failed"
         assert trace.error == "network_error: connection refused"
         assert trace.run_id == "run-fail"
-        assert trace.user_id == ""
-        assert trace.group_id == ""
+        assert trace.user_id == "u-fail"
+        assert trace.group_id == "g-fail"
         assert trace.tokens_in == 0
         assert trace.tokens_out == 0
         assert trace.tier is not None

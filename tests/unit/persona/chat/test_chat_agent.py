@@ -206,6 +206,8 @@ class _LoopRuntime:
             state=AgentRunState(
                 run_id="proactive-test-run",
                 interaction_id=request.interaction_id,
+                user_id="",
+                group_id="",
             ),
             toolkit=request.tools,
             output_spec=request.output,

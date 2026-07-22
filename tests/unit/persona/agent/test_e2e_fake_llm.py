@@ -76,7 +76,10 @@ class FakeLLMGateway:
 
 
 def _make_state(run_id="test-run", interaction_id="test-interaction"):
-    return AgentRunState(run_id=run_id, interaction_id=interaction_id)
+    return AgentRunState(
+        run_id=run_id, interaction_id=interaction_id,
+        user_id="", group_id="",
+    )
 
 
 def _make_tc(index: int, name: str, arguments: dict) -> dict:
