@@ -39,6 +39,7 @@ class AgentRunEstimate:
     scenario: str
     entries: tuple[tuple[str, int], ...]
     notes: tuple[str, ...] = ()
+    upper_bound: bool = False
 
 
 @dataclass(frozen=True)
@@ -352,6 +353,7 @@ def estimate_agent_runs(
                         "离线估算按 24 小时窗口最多触及 2 个日历日；"
                         "serve 后以 warp --dry-run 为准。",
                     ),
+                    upper_bound=True,
                 )
             )
         elif scenario == "private":
@@ -561,8 +563,55 @@ def format_summary(prepared: PreparedSession) -> str:
             f"{prepared.background_max_rounds}",
             f"  - sa_max_rounds: {prepared.sa_max_rounds}",
             "尚未启动 Runtime，未执行模型 probe，也未发出任何 LLM 请求。",
+            "",
+            format_confirmation(prepared),
         )
     )
+    return "\n".join(lines)
+
+
+def format_confirmation(prepared: PreparedSession) -> str:
+    """生成 serve 前给用户确认的最小 Agent Run 摘要。"""
+
+    estimates = prepared.estimates
+    total = sum(
+        count
+        for estimate in estimates
+        for _, count in estimate.entries
+        if count > 0
+    )
+    has_upper_bound = any(estimate.upper_bound for estimate in estimates)
+    total_label = "预计最多" if has_upper_bound else "共"
+    lines = [
+        "启动真实 LLM 测试前请确认：",
+        "",
+        f"- 场景：{'、'.join(estimate.scenario for estimate in estimates)}",
+        f"- Agent Run：{total_label} {total} 次",
+    ]
+
+    if len(estimates) == 1:
+        lines.extend(
+            f"  - {label.replace('（上界）', '')}：{count} 次"
+            for label, count in estimates[0].entries
+            if count > 0
+        )
+    else:
+        for estimate in estimates:
+            entries = [
+                (label.replace("（上界）", ""), count)
+                for label, count in estimate.entries
+                if count > 0
+            ]
+            subtotal = sum(count for _, count in entries)
+            subtotal_label = f"最多 {subtotal}" if estimate.upper_bound else str(subtotal)
+            distribution = "、".join(
+                f"{label} {count}" for label, count in entries
+            )
+            lines.append(
+                f"  - {estimate.scenario}：{subtotal_label} 次（{distribution}）"
+            )
+
+    lines.extend(("", "确认开始？"))
     return "\n".join(lines)
 
 

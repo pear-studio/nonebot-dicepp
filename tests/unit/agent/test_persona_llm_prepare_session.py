@@ -93,6 +93,63 @@ def _isolate_shell_sessions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return shell_session
 
 
+def _prepared_for_confirmation(
+    *estimates: prepare.AgentRunEstimate,
+) -> prepare.PreparedSession:
+    return prepare.PreparedSession(
+        name="test-session",
+        path=Path("test-session"),
+        credential_path=Path("test_llm.local.json"),
+        providers=("deepseek",),
+        probe_models=("deepseek/model",),
+        scenarios=tuple(estimate.scenario for estimate in estimates),
+        estimates=estimates,
+        background_max_rounds=10,
+        sa_max_rounds=100,
+    )
+
+
+def test_confirmation_summary_prioritizes_single_scenario_total() -> None:
+    prepared = _prepared_for_confirmation(
+        prepare.AgentRunEstimate(
+            scenario="群聊跑团多人上下文",
+            entries=(("Chat", 10), ("Scoring", 1), ("Unused", 0)),
+        )
+    )
+
+    assert prepare.format_confirmation(prepared) == (
+        "启动真实 LLM 测试前请确认：\n\n"
+        "- 场景：群聊跑团多人上下文\n"
+        "- Agent Run：共 11 次\n"
+        "  - Chat：10 次\n"
+        "  - Scoring：1 次\n\n"
+        "确认开始？"
+    )
+
+
+def test_confirmation_summary_groups_scenarios_and_marks_upper_bound() -> None:
+    prepared = _prepared_for_confirmation(
+        prepare.AgentRunEstimate(
+            scenario="一天连续 warp",
+            entries=(("DM（上界）", 12), ("Diary", 1)),
+            upper_bound=True,
+        ),
+        prepare.AgentRunEstimate(
+            scenario="私聊跑团多轮",
+            entries=(("Chat", 7), ("Scoring", 1)),
+        ),
+    )
+
+    assert prepare.format_confirmation(prepared) == (
+        "启动真实 LLM 测试前请确认：\n\n"
+        "- 场景：一天连续 warp、私聊跑团多轮\n"
+        "- Agent Run：预计最多 21 次\n"
+        "  - 一天连续 warp：最多 13 次（DM 12、Diary 1）\n"
+        "  - 私聊跑团多轮：8 次（Chat 7、Scoring 1）\n\n"
+        "确认开始？"
+    )
+
+
 def test_prepare_session_writes_valid_workspace_without_exposing_key(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

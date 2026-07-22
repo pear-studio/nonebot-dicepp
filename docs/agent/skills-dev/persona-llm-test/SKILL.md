@@ -21,15 +21,25 @@ uv run python docs/agent/skills-dev/persona-llm-test/scripts/prepare_session.py 
 
 脚本只创建隔离 session、合并并验证配置、复制测试角色卡、输出 Agent Run 估算；不会启动 Runtime 或调用 LLM。临时 session 只启用本地文件中提供了 key 的正式 provider，模型与 Router 规则仍全部沿用正式配置。不得显示或复述凭据。
 
-## 费用确认
+## 启动确认
 
-在任何 `serve` 前统一向用户确认：
+在任何 `serve` 前，只向用户展示本次场景与 Agent Run 总数/分布：
 
-- session 与所选场景
-- 将读取的本地凭据文件路径
-- 脚本给出的 Agent Run 估算及正式配置中的相关 max rounds
-- Runtime 启动会 probe 已启用模型
-- fallback 可能性
+```text
+启动真实 LLM 测试前请确认：
+
+- 场景：<场景>
+- Agent Run：共 <总数> 次
+  - <非零 Agent 类型>：<数量> 次
+
+确认开始？
+```
+
+- 总数优先，分布只列非零类型。
+- 多场景按场景分组，每个场景在同一行紧凑列出 Agent 类型分布。
+- 确定数量写“共 N 次”；包含 warp 等动态上界时写“预计最多 N 次”。
+- 若只执行固定场景的一部分，以实际计划为准缩减脚本给出的完整场景估算。
+- session、凭据路径、provider、probe、max rounds、fallback、执行步骤和收尾规则属于内部准备或结果汇报信息，不写入启动确认。
 
 用户确认前不得启动 `serve`、probe 模型或发出任何真实 LLM 请求。
 
