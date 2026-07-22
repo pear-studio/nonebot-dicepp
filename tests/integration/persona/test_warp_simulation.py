@@ -200,7 +200,6 @@ async def _run_warp_loop(
 # ── 测试 ─────────────────────────────────────────────────────────────
 
 
-@pytest.mark.integration
 class TestWarpSimulation:
     """多天 timewarp 推进测试"""
 

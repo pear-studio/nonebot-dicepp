@@ -67,7 +67,6 @@ class TestShouldCompress:
         assert should_compress(95, 100) is True
 
 
-@pytest.mark.unit
 class TestEnsureToolPairs:
     """ensure_tool_pairs 各类场景"""
 

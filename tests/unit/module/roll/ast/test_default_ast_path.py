@@ -1,0 +1,138 @@
+"""
+Tests for the default AST-only roll path.
+
+These guard the public contract after removing the legacy engine: command code
+gets RollResult objects, AST semantic errors are wrapped as RollDiceError, and
+the hot sampling path stays AST-only.
+"""
+
+from io import StringIO
+from unittest.mock import patch
+
+import pytest
+from utils.logger import logger
+
+from module.roll.ast_engine.adapter import exec_roll_exp_unified
+from module.roll.roll_utils import RollDiceError
+
+
+class TestDefaultPathIsAST:
+    """The default public roll API executes through the AST adapter."""
+
+    def test_exec_roll_exp_unified_returns_roll_result(self):
+        result = exec_roll_exp_unified("1+2")
+        assert result.get_val() == 3
+        assert result.get_exp() == "1+2"
+
+    def test_ast_error_becomes_roll_dice_error(self):
+        from module.roll.ast_engine.errors import RollSyntaxError
+
+        with patch(
+            "module.roll.ast_engine.adapter.exec_roll_exp_ast",
+            side_effect=RollSyntaxError("syntax error", expression="bad_expr"),
+        ):
+            with pytest.raises(RollDiceError):
+                exec_roll_exp_unified("bad_expr")
+
+    def test_unexpected_ast_error_becomes_roll_dice_error(self):
+        with patch(
+            "module.roll.ast_engine.adapter.exec_roll_exp_ast",
+            side_effect=ValueError("unexpected internal error"),
+        ):
+            with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
+                exec_roll_exp_unified("1D20")
+
+    def test_ast_errors_are_logged(self):
+        from module.roll.ast_engine.errors import RollSyntaxError
+
+        output = StringIO()
+        handler_id = logger.add(output, level="ERROR", format="{message}")
+        try:
+            with patch(
+                "module.roll.ast_engine.adapter.exec_roll_exp_ast",
+                side_effect=RollSyntaxError("err", expression="x"),
+            ):
+                with pytest.raises(RollDiceError):
+                    exec_roll_exp_unified("x")
+        finally:
+            logger.remove(handler_id)
+        assert "roll_engine=ast" in output.getvalue()
+
+    @pytest.mark.parametrize("error_cls", [ValueError, RuntimeError])
+    def test_unexpected_ast_error_wraps_as_roll_dice_error(self, error_cls, monkeypatch):
+        """AST 引擎内部异常必须包装为 RollDiceError（守门测试）。"""
+        from module.roll.ast_engine import adapter
+        from module.roll.roll_utils import RollDiceError
+
+        def _explode(*args, **kwargs):
+            raise error_cls("boom")
+        monkeypatch.setattr(adapter, "build_roll_result", _explode)
+
+        output = StringIO()
+        handler_id = logger.add(output, level="ERROR", format="{message}")
+        try:
+            with pytest.raises(RollDiceError, match="掷骰引擎内部错误"):
+                adapter.exec_roll_exp_unified("1D20")
+        finally:
+            logger.remove(handler_id)
+
+        logs = output.getvalue()
+        assert "roll_engine=ast" in logs and error_cls.__name__ in logs, (
+            f"应记录 roll_engine=ast + {error_cls.__name__} 日志，实际: {logs}"
+        )
+
+
+class TestComputeExpAstPath:
+    """The expectation-sampling path uses the AST sampling API."""
+
+    def test_sample_roll_exp_ast_returns_int(self):
+        from module.roll.ast_engine import sample_roll_exp_ast
+
+        result = sample_roll_exp_ast("3+4")
+        assert result == 7
+
+    def test_sample_roll_exp_ast_dice_in_range(self):
+        from module.roll.ast_engine import sample_roll_exp_ast
+
+        for _ in range(20):
+            val = sample_roll_exp_ast("1D6")
+            assert 1 <= val <= 6
+
+    def test_normal_roll_path_still_works_for_dice(self):
+        result = exec_roll_exp_unified("1D6+2")
+        assert 3 <= result.get_val() <= 8
+
+
+class TestIsRollExp:
+    """验证 is_roll_exp() 对各种输入的正确判定。"""
+
+    def test_plain_text_returns_false(self):
+        """普通文本如 'hello' 不是有效的掷骰表达式。"""
+        from module.roll.ast_engine.adapter import is_roll_exp
+        assert is_roll_exp("hello") is False
+        assert is_roll_exp("some random text") is False
+        assert is_roll_exp("你好") is False
+
+    def test_pure_number_returns_true(self):
+        """纯数字是有效的掷骰表达式（求值为常量）。"""
+        from module.roll.ast_engine.adapter import is_roll_exp
+        assert is_roll_exp("42") is True
+        assert is_roll_exp("0") is True
+        assert is_roll_exp("-5") is True
+
+    def test_valid_dice_expression_returns_true(self):
+        """有效的掷骰表达式如 '1d20+5' 返回 True。"""
+        from module.roll.ast_engine.adapter import is_roll_exp
+        assert is_roll_exp("1D20+5") is True
+        assert is_roll_exp("3d6") is True
+        assert is_roll_exp("D20") is True
+        assert is_roll_exp("(1+2)*3") is True
+        assert is_roll_exp("2d20k1+5") is True
+
+    def test_invalid_expression_returns_false(self):
+        """无效表达式如 '@@@' 返回 False。"""
+        from module.roll.ast_engine.adapter import is_roll_exp
+        assert is_roll_exp("@@@") is False
+        assert is_roll_exp("1+") is False
+        assert is_roll_exp("(1+2") is False
+        assert is_roll_exp("a+b") is False

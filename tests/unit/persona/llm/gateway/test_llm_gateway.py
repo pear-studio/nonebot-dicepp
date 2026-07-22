@@ -56,6 +56,7 @@ class TestLLMRequest:
         assert req.message_count == 2
 
 
+@pytest.mark.quick
 class TestLLMGateway:
     """LLMGateway — 包装 LLMRouter"""
 

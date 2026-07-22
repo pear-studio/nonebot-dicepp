@@ -179,6 +179,7 @@ class TestContextBuilderCharacterBook:
 # 6.4 build() 消息列表结构
 # ═══════════════════════════════════════════════════════════════════
 
+@pytest.mark.quick
 class TestBuildMessageStructure:
 
     def _make_character(self):

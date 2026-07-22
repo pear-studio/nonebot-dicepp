@@ -119,7 +119,6 @@ class TestOpenAIProvider:
         assert len(resp.tool_calls) == 10
 
     @pytest.mark.asyncio
-    @pytest.mark.slow
     async def test_exponential_backoff_retry(self, provider):
         """可重试错误退避重试 3 次后成功"""
         mock_client = Mock()

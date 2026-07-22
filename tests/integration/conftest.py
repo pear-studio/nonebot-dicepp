@@ -1,15 +1,35 @@
+"""Fixtures shared by current-process integration tests."""
+
+from __future__ import annotations
+
 import pytest
-from pathlib import Path
+
+from core.bot import Bot
+from tests.support.bot import TestProxy, new_test_account
+from tests.support.fs_utils import rmtree_retry
 
 
-def pytest_collection_modifyitems(items):
-    """Apply integration marker to all tests under tests/integration/."""
-    integration_dir = Path(__file__).parent.resolve()
-    for item in items:
-        item_path = getattr(item, "fspath", None)
-        if item_path is not None:
-            try:
-                Path(item_path).resolve().relative_to(integration_dir)
-                item.add_marker(pytest.mark.integration)
-            except ValueError:
-                pass
+@pytest.fixture(scope="class")
+def shared_bot():
+    test_bot = Bot(new_test_account("test_bot"), no_tick=True)
+    test_bot.config.master = ["test_master"]
+    test_proxy = TestProxy()
+    test_bot.set_client_proxy(test_proxy)
+    test_bot.delay_init_debug()
+    test_proxy.mute = True
+    yield test_bot
+    test_bot.shutdown_debug()
+    rmtree_retry(test_bot.data_path)
+
+
+@pytest.fixture
+def fresh_bot():
+    test_bot = Bot(new_test_account("test_bot_fresh"), no_tick=True)
+    test_bot.config.master = ["test_master"]
+    test_proxy = TestProxy()
+    test_bot.set_client_proxy(test_proxy)
+    test_bot.delay_init_debug()
+    test_proxy.mute = True
+    yield test_bot, test_proxy
+    test_bot.shutdown_debug()
+    rmtree_retry(test_bot.data_path)

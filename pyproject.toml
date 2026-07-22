@@ -76,22 +76,17 @@ builtin_plugins = []
 # ── pytest 配置 ─────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
-pythonpath = ["src"]
+testpaths = ["tests/unit", "tests/integration", "tests/system"]
+pythonpath = [".", "src", "src/plugins/DicePP"]
 python_files = ["unit_test.py", "test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test*"]
-addopts = "--tb=short -m \"not real_llm\" --timeout=30 --strict-markers --strict-config -n auto --dist loadfile"
+addopts = "--tb=short --timeout=30 --strict-markers --strict-config --import-mode=importlib -n auto --dist loadfile"
 markers = [
-    "unit: Unit tests for individual modules (no external I/O, all dependencies mocked)",
-    "e2e: End-to-end tests exercising the full bot lifecycle (may start real services)",
-    "real_llm: Tests that call real LLM APIs (cost money, require API key)",
-    "integration: Integration tests for command flow",
-    "slow: Tests that take a long time to run",
-    "compatibility: Compatibility corpus tests for product-level behavior contracts",
-    "karma: Tests for karma system",
-    "log: Tests for logging system",
-    "legacy: Tests for legacy code paths pending migration or removal",
+    "quick: Stable representative tests for high-frequency local and CI feedback",
+]
+filterwarnings = [
+    "error::pytest.PytestUnhandledThreadExceptionWarning",
 ]
 
 # ── coverage 配置（替代 .coveragerc）─────────────────────────────────────────

@@ -1,0 +1,115 @@
+import asyncio
+import json
+
+import pytest
+import websockets
+
+from adapter.web_chat_adapter import WebChatAdapter
+from adapter.web_chat_proxy import WebChatProxy
+from core.command import BotSendMsgCommand
+from core.communication import PrivateMessagePort
+
+
+class _MiniBot:
+    def __init__(self, proxy, fail: bool = False):
+        self.proxy = proxy
+        self.fail = fail
+
+    async def process_message(self, msg, meta):
+        if self.fail or msg == ".err":
+            raise RuntimeError("boom")
+        command = BotSendMsgCommand("bot", f"reply:{msg}", [PrivateMessagePort(meta.user_id)])
+        await self.proxy.process_bot_command(command)
+        return [command]
+
+
+class TestWebChatConnection:
+    """WebSocket 连接与消息集成测试"""
+
+    @pytest.mark.asyncio
+    async def test_auth_failure_does_not_reconnect_loop(self):
+        auth_count = 0
+
+        async def handler(ws):
+            nonlocal auth_count
+            await ws.recv()
+            auth_count += 1
+            await ws.send(json.dumps({"v": 1, "type": "auth_result", "status": "failed", "message": "bad key"}))
+            await ws.close()
+
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            adapter = WebChatAdapter(f"ws://127.0.0.1:{port}/ws/bot/", "bad-key")
+            bot = _MiniBot(proxy=None)  # type: ignore[arg-type]
+            await adapter.start(bot)
+            await asyncio.wait_for(adapter._run_task, timeout=2)
+            assert auth_count == 1
+
+    @pytest.mark.asyncio
+    async def test_integration_user_message_to_bot_message_and_error(self):
+        received_from_bot = []
+        ready = asyncio.Event()
+        done = asyncio.Event()
+
+        async def handler(ws):
+            try:
+                auth = json.loads(await ws.recv())
+                assert auth["type"] == "auth"
+                await ws.send(json.dumps({"v": 1, "type": "auth_result", "status": "ok"}))
+                ready.set()
+                await ws.send(json.dumps({"v": 1, "type": "user_message", "user_id": "u-1", "content": ".r d20", "ack_id": "ack-1"}))
+                received_from_bot.append(json.loads(await ws.recv()))
+                await ws.send(json.dumps({"v": 1, "type": "user_message", "user_id": "u-1", "content": ".err", "ack_id": "ack-2"}))
+                received_from_bot.append(json.loads(await ws.recv()))
+                await ws.close()
+            finally:
+                done.set()
+
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            adapter = WebChatAdapter(f"ws://127.0.0.1:{port}/ws/bot/", "k")
+            proxy = WebChatProxy(adapter)
+            bot = _MiniBot(proxy=proxy)
+            await adapter.start(bot)
+            await asyncio.wait_for(ready.wait(), timeout=2)
+            await asyncio.wait_for(done.wait(), timeout=2)
+            await adapter.close()
+
+        assert received_from_bot[0]["type"] == "bot_message"
+        assert received_from_bot[0]["user_id"] == "u-1"
+        assert received_from_bot[0]["correlation_id"] == "ack-1"
+        assert received_from_bot[1]["type"] == "error"
+        assert received_from_bot[1]["correlation_id"] == "ack-2"
+
+    @pytest.mark.asyncio
+    async def test_unknown_type_and_oversized_frame_produce_error(self):
+        received_from_bot = []
+        ready = asyncio.Event()
+        done = asyncio.Event()
+
+        async def handler(ws):
+            try:
+                await ws.recv()
+                await ws.send(json.dumps({"v": 1, "type": "auth_result", "status": "ok"}))
+                ready.set()
+                await ws.send(json.dumps({"v": 1, "type": "mystery", "user_id": "u-1", "ack_id": "ack-x"}))
+                received_from_bot.append(json.loads(await ws.recv()))
+                await ws.send("x" * ((64 * 1024) + 16))
+                received_from_bot.append(json.loads(await ws.recv()))
+                await ws.close()
+            finally:
+                done.set()
+
+        async with websockets.serve(handler, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            adapter = WebChatAdapter(f"ws://127.0.0.1:{port}/ws/bot/", "k")
+            bot = _MiniBot(proxy=None)  # type: ignore[arg-type]
+            await adapter.start(bot)
+            await asyncio.wait_for(ready.wait(), timeout=2)
+            await asyncio.wait_for(done.wait(), timeout=2)
+            await adapter.close()
+
+        assert received_from_bot[0]["type"] == "error"
+        assert received_from_bot[0]["error_code"] == "UNKNOWN_TYPE"
+        assert received_from_bot[1]["type"] == "error"
+        assert received_from_bot[1]["error_code"] == "PAYLOAD_TOO_LARGE"

@@ -71,7 +71,6 @@ def life(temp_db, mock_agents, character, config):
     life.boundary_receiver = MagicMock()
     return life
 
-@pytest.mark.integration
 class TestCharacterDaySimulation:
     """完整一天模拟 — 分阶段聚焦测试"""
 

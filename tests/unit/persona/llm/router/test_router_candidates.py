@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from plugins.DicePP.module.persona.llm.router import LLMRouter
 from plugins.DicePP.module.persona.llm.selection import SelectionPolicy, CHAT, SCORING
 from plugins.DicePP.utils.time import wall_now
-from tests.unit.persona.conftest import (
+from tests.unit.persona.mock_helpers import (
     MockDataStore,
     MockQuotaConfig,
     make_mock_providers,

@@ -21,7 +21,6 @@ def _cleanup(name: str) -> None:
         shutil.rmtree(session_dir)
 
 
-@pytest.mark.integration
 class TestSessionManagement:
     def test_create_and_load_session(self):
         _cleanup("test_create")
