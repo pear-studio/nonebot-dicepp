@@ -18,6 +18,8 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from dicepp_meta import get_project_info, get_version
+
 from .auth import (
     create_session,
     get_session,
@@ -82,7 +84,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="DicePP Dashboard", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="DicePP Dashboard", version=get_version(), lifespan=lifespan)
 
 _LOGIN_FAILURE_LIMIT = 5
 _LOGIN_FAILURE_COOLDOWN_SECONDS = 30
@@ -522,6 +524,7 @@ async def auth_status(request: Request):
         "authenticated": authenticated,
         "setup_allowed": setup_allowed,
         "setup_message": "" if setup_allowed else _setup_denied_message(),
+        "project": get_project_info(),
     })
 
 

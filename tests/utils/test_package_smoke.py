@@ -21,3 +21,10 @@ def test_pyinstaller_spec_collects_cryptography_submodules():
     spec = Path("scripts/build/dicepp.spec").read_text(encoding="utf-8")
 
     assert "collect_submodules('cryptography')" in spec
+
+
+def test_pyinstaller_spec_collects_shared_project_metadata():
+    spec = Path("scripts/build/dicepp.spec").read_text(encoding="utf-8")
+
+    assert "collect_submodules('dicepp_meta')" in spec
+    assert "os.path.join(PROJECT_ROOT, 'src')" in spec

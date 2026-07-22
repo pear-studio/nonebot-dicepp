@@ -2,10 +2,12 @@
 
 import sqlite3
 import time
+from importlib.metadata import version as package_version
 
 from fastapi.testclient import TestClient
 
-from dashboard.src.app import _LOGIN_FAILURE_LIMIT
+from dashboard.src import __version__ as dashboard_version
+from dashboard.src.app import _LOGIN_FAILURE_LIMIT, app
 from dashboard.src.config import DashboardPaths
 from tests.dashboard.conftest import setup_auth
 
@@ -26,6 +28,13 @@ def _count_sessions(client: TestClient) -> int:
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
+
+
+def test_dashboard_runtime_versions_follow_installed_package():
+    expected = package_version("dicepp")
+
+    assert dashboard_version == expected
+    assert app.version == expected
 
 
 class TestPasswordSetup:
@@ -184,6 +193,30 @@ class TestAuthStatus:
         data = resp.json()
         assert data["initialized"] is False
         assert data["authenticated"] is False
+        assert data["project"]["name"] == "DicePP"
+        assert data["project"]["display_version"] == f"v{package_version('dicepp')}"
+        assert data["project"]["author"] == "梨子"
+        assert data["project"]["contributors"] == [
+            {
+                "name": "调零",
+                "github": "zeroxilo",
+                "url": "https://github.com/zeroxilo",
+            },
+            {
+                "name": "云朵松饼糖",
+                "github": "nubeslove",
+                "url": "https://github.com/nubeslove",
+            },
+        ]
+        assert data["project"]["docs_url"] == (
+            "https://docs.qq.com/doc/DV3hFWUx6VG1MUnhp"
+        )
+        assert data["project"]["source_url"] == (
+            "https://github.com/pear-studio/nonebot-dicepp"
+        )
+        assert data["project"]["contributors_url"] == (
+            "https://github.com/pear-studio/nonebot-dicepp/blob/master/docs/contributors.md"
+        )
 
     def test_auth_status_after_setup(self, test_client: TestClient):
         """After setup with auto-login, status shows initialised and authenticated."""

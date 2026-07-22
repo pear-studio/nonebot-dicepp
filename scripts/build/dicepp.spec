@@ -123,6 +123,7 @@ hiddenimports += collect_submodules('nonebot')
 hiddenimports += collect_submodules('nonebot_adapter_onebot')
 hiddenimports += collect_submodules('lark')
 hiddenimports += collect_submodules('cryptography')
+hiddenimports += collect_submodules('dicepp_meta')
 
 # ============================================================
 # Data Files - 需要打包的非 Python 文件
@@ -164,6 +165,7 @@ a = Analysis(
     [os.path.join(PROJECT_ROOT, 'bot.py')],
     pathex=[
         PROJECT_ROOT,
+        os.path.join(PROJECT_ROOT, 'src'),
         os.path.join(PROJECT_ROOT, 'src', 'plugins', 'DicePP'),
     ],
     binaries=[],

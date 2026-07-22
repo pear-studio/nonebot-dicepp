@@ -14,6 +14,7 @@ from typing import Callable, Optional
 
 import aiohttp
 
+from dicepp_meta import get_version
 from frozen import is_frozen
 from utils.network import format_url_host
 from module.dashboard_reporter.protocol import (
@@ -90,7 +91,7 @@ class ControlChannelClient:
         self._tasks: set[asyncio.Task] = set()
 
         # Status reporting
-        self._version = _get_version()
+        self._version = get_version()
         self._connection_authenticated = False
 
     # ── public ────────────────────────────────────────────────────────────
@@ -271,11 +272,3 @@ class ControlChannelClient:
             await self._ws.send_str(encode(reload_result_msg(self._bot_id, ok, errors, reply_to=rid)))
         except Exception as exc:
             logger.warning(f"[ControlChannel] failed to send reload_result: {exc}")
-
-
-def _get_version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("dicepp")
-    except Exception:
-        return "unknown"

@@ -3,8 +3,10 @@ common 模块测试
 - 单元测试：NicknameCommand.is_legal_nickname 等纯逻辑
 - 集成测试：.nn / .bot / .help / .welcome 指令行为
 """
-import pytest
+from importlib.metadata import version as package_version
 from unittest.async_case import IsolatedAsyncioTestCase
+
+import pytest
 
 from tests.fs_utils import rmtree_retry
 
@@ -231,7 +233,14 @@ class TestWelcomeCommandIntegration(_BotTestBase):
 @pytest.mark.integration
 class TestBotActivate:
     async def test_bot_info(self, h):
-        await h.send_group(".bot", checker=lambda s: "DicePP by 梨子" in s)
+        expected = f"DicePP v{package_version('dicepp')}"
+        await h.send_group(
+            ".bot",
+            target_checker=lambda commands: (
+                len(commands) == 1
+                and getattr(commands[0], "msg", None) == expected
+            ),
+        )
 
     async def test_activate_on_off_cycle(self, h):
         await h.send_group(".bot on", group_id="group_activate", checker=lambda s: not s)
@@ -260,7 +269,47 @@ class TestBotActivate:
 @pytest.mark.integration
 class TestHelp:
     async def test_help_main(self, h):
-        await h.send_group(".help", checker=lambda s: "DicePP" in s)
+        expected_version = f"DicePP v{package_version('dicepp')}"
+        await h.send_group(
+            ".help",
+            target_checker=lambda commands: (
+                len(commands) == 1
+                and getattr(commands[0], "msg", "").startswith(expected_version + "\n")
+                and ".help关于 查看项目与贡献者信息" in commands[0].msg
+            ),
+        )
+
+    async def test_help_about_shows_author_and_contributors(self, h):
+        expected = "\n".join([
+            f"DicePP v{package_version('dicepp')}",
+            "作者：梨子",
+            "贡献者：调零（@zeroxilo）、云朵松饼糖（@nubeslove）",
+            "DicePP说明手册：https://docs.qq.com/doc/DV3hFWUx6VG1MUnhp",
+            "源码：https://github.com/pear-studio/nonebot-dicepp",
+        ])
+        await h.send_group(
+            ".help关于",
+            target_checker=lambda commands: (
+                len(commands) == 1
+                and getattr(commands[0], "msg", None) == expected
+            ),
+        )
+
+    async def test_help_links_remains_about_alias(self, h):
+        expected = "\n".join([
+            f"DicePP v{package_version('dicepp')}",
+            "作者：梨子",
+            "贡献者：调零（@zeroxilo）、云朵松饼糖（@nubeslove）",
+            "DicePP说明手册：https://docs.qq.com/doc/DV3hFWUx6VG1MUnhp",
+            "源码：https://github.com/pear-studio/nonebot-dicepp",
+        ])
+        await h.send_group(
+            ".help链接",
+            target_checker=lambda commands: (
+                len(commands) == 1
+                and getattr(commands[0], "msg", None) == expected
+            ),
+        )
 
     async def test_help_roll(self, h):
         await h.send_group(".help r", checker=lambda s: "骰" in s)

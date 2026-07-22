@@ -1,12 +1,31 @@
-from importlib.metadata import version as _get_pkg_version
+from dicepp_meta import (
+    PROJECT_AUTHOR,
+    PROJECT_CONTRIBUTOR_GITHUB,
+    PROJECT_CONTRIBUTORS,
+    PROJECT_DOCS_URL,
+    PROJECT_NAME,
+    PROJECT_SOURCE_URL,
+    get_display_version,
+)
 
 
 def get_bot_version() -> str:
     """返回运行时版本号，格式 vX.Y.Z，从已安装包 metadata 读取。"""
-    return f"v{_get_pkg_version('dicepp')}"
+    return get_display_version()
 
 
-BOT_DESCRIBE = "DicePP by 梨子 & 调零 & 云朵松饼糖"
+BOT_DESCRIBE = PROJECT_NAME
+
+BOT_ABOUT = "\n".join([
+    f"{PROJECT_NAME} {get_bot_version()}",
+    f"作者：{PROJECT_AUTHOR}",
+    "贡献者：" + "、".join(
+        f"{name}（@{PROJECT_CONTRIBUTOR_GITHUB[name]}）"
+        for name in PROJECT_CONTRIBUTORS
+    ),
+    f"DicePP说明手册：{PROJECT_DOCS_URL}",
+    f"源码：{PROJECT_SOURCE_URL}",
+])
 
 BOT_AGREEMENT = "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议视为同意并承诺遵守此协议，否则请移除骰娘。\n" \
                 "2.不允许禁言骰娘或刷屏掷骰等对骰娘的不友善行为，这些行为将会提高骰娘被制裁的风险。开关骰娘响应请使用.bot on/off。\n" \
@@ -18,5 +37,4 @@ BOT_AGREEMENT = "1.邀请骰娘, 使用掷骰服务和在群内阅读此协议�
                 "8.本协议内容可能改动，请注意查看最新协议。\n" \
                 "9.本服务最终解释权归服务提供方所有。"
 
-BOT_GIT_LINK = "DicePP说明手册: https://docs.qq.com/doc/DV3hFWUx6VG1MUnhp\n" \
-               "源码: https://github.com/pear-studio/nonebot-dicepp"
+BOT_GIT_LINK = f"DicePP说明手册：{PROJECT_DOCS_URL}\n源码：{PROJECT_SOURCE_URL}"

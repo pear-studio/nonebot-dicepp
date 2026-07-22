@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+from importlib.metadata import version as package_version
 
 import pytest
 
@@ -91,6 +92,10 @@ def _client():
         token="test-token",
         on_reload=lambda: None,
     )
+
+
+def test_client_reports_installed_package_version():
+    assert _client()._version == package_version("dicepp")
 
 
 @pytest.mark.asyncio

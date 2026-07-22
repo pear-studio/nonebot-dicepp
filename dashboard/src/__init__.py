@@ -1,1 +1,3 @@
-__version__ = "1.0.0"
+from dicepp_meta import get_version
+
+__version__ = get_version()

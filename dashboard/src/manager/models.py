@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from importlib import metadata as importlib_metadata
 from typing import Any, Literal
 from uuid import uuid4
+
+from dicepp_meta import get_version
 
 ManagerAction = Literal["start", "stop", "restart"]
 OperationStatus = Literal["queued", "running", "succeeded", "failed", "rejected"]
@@ -14,8 +15,6 @@ RuntimeState = Literal["unknown", "stopped", "running"]
 
 MANAGER_API_VERSION = 1
 OPERATION_SCHEMA_VERSION = 1
-_DICEPP_PACKAGE_NAME = "dicepp"
-
 VALID_ACTIONS: set[str] = {"start", "stop", "restart"}
 
 
@@ -26,10 +25,7 @@ def utc_now() -> str:
 
 def get_dicepp_version() -> str:
     """Return the installed DicePP package version for Manager health metadata."""
-    try:
-        return importlib_metadata.version(_DICEPP_PACKAGE_NAME)
-    except Exception:
-        return "unknown"
+    return get_version()
 
 
 @dataclass

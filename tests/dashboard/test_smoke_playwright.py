@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from importlib.metadata import version as package_version
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -128,6 +129,42 @@ def test_smoke_auth_flow(dashboard_url: str) -> None:
             page.locator("#login-password").fill("test_pass")
             page.get_by_role("button", name="登录").click()
             page.wait_for_selector('[data-testid="main-dashboard"]', timeout=10000)
+
+            # The sidebar version opens the shared project/about information.
+            expected_version = f"v{package_version('dicepp')}"
+            about_button = page.get_by_test_id("dashboard-about-button")
+            expect(about_button).to_contain_text(expected_version)
+            about_button.click()
+            about_dialog = page.get_by_test_id("dashboard-about-dialog")
+            expect(about_dialog).to_be_visible()
+            expect(about_dialog).to_contain_text(expected_version)
+            expect(about_dialog).to_contain_text("作者")
+            expect(about_dialog).to_contain_text("梨子")
+            expect(about_dialog).to_contain_text("调零")
+            expect(about_dialog).to_contain_text("@zeroxilo")
+            expect(about_dialog).to_contain_text("云朵松饼糖")
+            expect(about_dialog).to_contain_text("@nubeslove")
+            assert about_dialog.get_by_role(
+                "link", name="调零 (@zeroxilo)", exact=True
+            ).get_attribute("href") == "https://github.com/zeroxilo"
+            assert about_dialog.get_by_role(
+                "link", name="云朵松饼糖 (@nubeslove)", exact=True
+            ).get_attribute("href") == "https://github.com/nubeslove"
+            assert about_dialog.get_by_role(
+                "link", name="说明手册", exact=True
+            ).get_attribute("href") == "https://docs.qq.com/doc/DV3hFWUx6VG1MUnhp"
+            assert about_dialog.get_by_role(
+                "link", name="源代码", exact=True
+            ).get_attribute("href") == (
+                "https://github.com/pear-studio/nonebot-dicepp"
+            )
+            assert about_dialog.get_by_role(
+                "link", name="完整贡献者清单", exact=True
+            ).get_attribute("href") == (
+                "https://github.com/pear-studio/nonebot-dicepp/blob/master/docs/contributors.md"
+            )
+            page.get_by_role("button", name="关闭关于窗口").click()
+            expect(about_dialog).not_to_be_visible()
 
             # 3. Clear cookies and reload to see login page
             page.context.clear_cookies()

@@ -12,12 +12,14 @@ import sys
 import textwrap
 import time
 from concurrent.futures import ThreadPoolExecutor
+from importlib.metadata import version as package_version
 from pathlib import Path
 from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
 
+import dicepp_meta
 from dashboard.src.config import ManagerRuntimeSettings
 from dashboard.src.app import _compute_bot_statuses
 from dashboard.src.manager import (
@@ -1184,8 +1186,7 @@ class TestManagerStatus:
         assert data["health"]["operation_schema_version"] == OPERATION_SCHEMA_VERSION
         assert isinstance(data["health"]["manager_api_version"], int)
         assert isinstance(data["health"]["operation_schema_version"], int)
-        assert isinstance(data["health"]["dicepp_version"], str)
-        assert data["health"]["dicepp_version"]
+        assert data["health"]["dicepp_version"] == package_version("dicepp")
         bots = {bot["bot_id"]: bot for bot in data["bots"]}
         assert set(bots) >= {"test_bot", "another_bot"}
         assert bots["test_bot"]["manager"] == {
@@ -1209,9 +1210,9 @@ class TestManagerStatus:
         setup_auth(test_client)
 
         def missing_version(_package_name: str) -> str:
-            raise manager_models.importlib_metadata.PackageNotFoundError
+            raise dicepp_meta.importlib_metadata.PackageNotFoundError
 
-        monkeypatch.setattr(manager_models.importlib_metadata, "version", missing_version)
+        monkeypatch.setattr(dicepp_meta.importlib_metadata, "version", missing_version)
 
         resp = test_client.get("/api/manager/status")
 

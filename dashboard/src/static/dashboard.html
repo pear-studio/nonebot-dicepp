@@ -102,8 +102,12 @@
         </template>
       </nav>
 
-      <!-- Logout -->
-      <div class="p-3 border-t border-gray-700">
+      <!-- Project info and logout -->
+      <div class="p-3 border-t border-gray-700 space-y-2">
+        <button data-testid="dashboard-about-button" @click="aboutOpen = true" class="flex w-full items-center justify-between text-xs text-gray-400 hover:text-white transition">
+          <span>关于 DicePP</span>
+          <span x-text="projectInfo.display_version"></span>
+        </button>
         <button @click="logout" class="flex items-center text-sm text-gray-400 hover:text-white transition">
           <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
           退出登录
@@ -1423,6 +1427,43 @@
         </div>
       </div>
     </main>
+
+    <!-- About DicePP modal -->
+    <div x-show="aboutOpen" x-cloak @keydown.escape.window="aboutOpen = false"
+         @click.self="aboutOpen = false"
+         class="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+      <section data-testid="dashboard-about-dialog" role="dialog" aria-modal="true" aria-labelledby="dashboard-about-title"
+               class="w-full max-w-md rounded-lg bg-white shadow-xl">
+        <header class="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 id="dashboard-about-title" class="text-lg font-bold text-gray-900" x-text="projectInfo.name"></h2>
+            <p class="text-sm text-gray-500" x-text="projectInfo.display_version"></p>
+          </div>
+          <button @click="aboutOpen = false" aria-label="关闭关于窗口" class="text-2xl leading-none text-gray-400 hover:text-gray-700">&times;</button>
+        </header>
+        <div class="space-y-4 px-5 py-4 text-sm">
+          <div>
+            <div class="text-xs text-gray-500">作者</div>
+            <div class="mt-1 font-medium text-gray-800" x-text="projectInfo.author"></div>
+          </div>
+          <div>
+            <div class="text-xs text-gray-500">贡献者</div>
+            <div class="mt-1 flex flex-wrap gap-2">
+              <template x-for="contributor in projectInfo.contributors" :key="contributor.github">
+                <a :href="contributor.url" target="_blank" rel="noopener noreferrer"
+                   class="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700 hover:bg-blue-100"
+                   x-text="`${contributor.name} (@${contributor.github})`"></a>
+              </template>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-x-4 gap-y-2 border-t pt-4">
+            <a :href="projectInfo.docs_url" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">说明手册</a>
+            <a :href="projectInfo.source_url" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">源代码</a>
+            <a :href="projectInfo.contributors_url" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">完整贡献者清单</a>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </div>
 
@@ -1438,6 +1479,19 @@ function app() {
     setupMessage: '',
     loginPassword: '',
     loginError: '',
+
+    // ── Project info ──
+    aboutOpen: false,
+    projectInfo: {
+      name: 'DicePP',
+      version: 'unknown',
+      display_version: 'unknown',
+      author: '',
+      contributors: [],
+      docs_url: '',
+      source_url: '',
+      contributors_url: '',
+    },
 
     // ── Navigation ──
     currentTab: 'overview',
@@ -1626,6 +1680,7 @@ function app() {
     async checkAuth() {
       try {
         const data = await this.api('/api/auth/status');
+        if (data.project) this.projectInfo = data.project;
         if (!data.initialized) {
           this.setupAllowed = data.setup_allowed;
           this.setupMessage = data.setup_message || '';
@@ -1704,6 +1759,7 @@ function app() {
         console?.warn('[DicePP] Logout error:', err);
       }
       this.sessionState = 'login';
+      this.aboutOpen = false;
       this.bots = [];
       this.selectedBotId = '';
       this.monitorBots = [];

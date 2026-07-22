@@ -21,6 +21,7 @@ DicePP 是一个面向骰主的 QQ 跑团机器人，支持 Windows 和 Linux �
 | 配置账号、主人、API Key、常用开关 | [docs/configuration.md](docs/configuration.md) |
 | 启用 Persona AI 对话 | [docs/persona.md](docs/persona.md) |
 | 参与开发 | [docs/dev/guide.md](docs/dev/guide.md) |
+| 查看贡献者 | [docs/contributors.md](docs/contributors.md) |
 
 ## 基本流程
 

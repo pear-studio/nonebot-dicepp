@@ -6,7 +6,7 @@ from core.command import UserCommandBase, custom_user_command
 from core.command import BotCommandBase, BotSendMsgCommand
 from core.command import CommandTextParser
 from core.communication import MessageMetaData, PrivateMessagePort, GroupMessagePort
-from core.config import get_bot_version, BOT_DESCRIBE, BOT_GIT_LINK
+from core.config import get_bot_version, BOT_ABOUT, BOT_DESCRIBE
 
 _HELP_PARSER = CommandTextParser(command_prefix="help")
 
@@ -19,7 +19,7 @@ MAX_NICKNAME_LENGTH = 30  # 昵称长度上限
 
 HELP_INFO_DEFAULT = "@骰娘 .bot on/off 开启或关闭骰娘\n" \
                     ".help指令 查看指令列表\n" \
-                    ".help链接 查看源码地址\n" \
+                    ".help关于 查看项目与贡献者信息\n" \
                     ".help协议 查看使用协议\n" \
                     ".help更新 查看最近更新内容\n" \
                     "DicePP说明手册: https://docs.qq.com/doc/DV3hFWUx6VG1MUnhp\n" \
@@ -85,8 +85,8 @@ class HelpCommand(UserCommandBase):
                 if description_text:
                     feedback += description_text + "\n"
             return feedback[:-1] if feedback else "暂无信息"
-        elif keyword == "链接":
-            return BOT_GIT_LINK
+        elif keyword in {"关于", "链接"}:
+            return BOT_ABOUT
         elif keyword == "协议":
             return self.bot.config.agreement
         elif keyword == "更新":  # ToDo: 更新内容
