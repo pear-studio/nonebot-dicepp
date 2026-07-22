@@ -63,6 +63,7 @@ COPY pyproject.toml uv.lock ./
 COPY src/ src/
 COPY config/global.json config/global.json
 COPY config/bots/_template.json config/bots/_template.json
+COPY templates/ templates/
 
 # 设置环境变量
 ENV PATH="/app/.venv/bin:$PATH"

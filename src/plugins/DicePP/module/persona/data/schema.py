@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from dicepp_data import PERSONA_SCHEMA
 from plugins.DicePP.core.data.schema.lifecycle import (
     AsyncSchemaMigration,
     SchemaMigration,
@@ -45,8 +46,8 @@ async def _migrate_persona_v3_async(conn) -> None:
 
 
 PERSONA_TARGET = SchemaTarget(
-    name="persona",
-    latest_version=3,
+    name=PERSONA_SCHEMA.name,
+    latest_version=PERSONA_SCHEMA.latest_version,
     create_latest_schema=create_persona_schema,
     create_latest_schema_async=create_persona_schema_async,
     migrations=(

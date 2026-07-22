@@ -7,14 +7,22 @@ the path, no out-of-band configuration needed.
 """
 from pathlib import Path
 
+from dicepp_data import InstanceLayout
+from plugins.DicePP.core.config.basic import Paths
 from plugins.DicePP.core.data.schema import DicePPDatabase
+
+
+def _layout_for(project_root: Path) -> InstanceLayout:
+    layout = Paths.instance_layout()
+    requested_root = Path(project_root).expanduser().resolve()
+    return layout if layout.root == requested_root else InstanceLayout.from_root(requested_root)
 
 
 def ensure_token(project_root: Path) -> str:
     """Read existing token, or generate + persist a new one. Returns the token."""
-    return DicePPDatabase(project_root).ensure_local_control_token()
+    return DicePPDatabase(_layout_for(project_root)).ensure_local_control_token()
 
 
 def read_token(project_root: Path) -> str | None:
     """Read the token, or return None if it has not been generated yet."""
-    return DicePPDatabase(project_root).read_local_control_token()
+    return DicePPDatabase(_layout_for(project_root)).read_local_control_token()

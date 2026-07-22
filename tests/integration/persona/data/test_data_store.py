@@ -1030,6 +1030,23 @@ class TestPersonaStoreLifecycle:
             assert store._persona_db_path == old_path
             await store.close()
 
+    @pytest.mark.asyncio
+    async def test_switch_persona_db_rejects_character_path_escape(self, tmp_path):
+        """角色名只能替换 DataAsset 的单个动态路径参数。"""
+        import aiosqlite
+
+        old_path = tmp_path / 'personas_data_old.db'
+        async with aiosqlite.connect(':memory:') as core_db:
+            store = PersonaDataStore(str(old_path), core_db)
+            await store.open()
+
+            with pytest.raises(ValueError, match='one path segment'):
+                await store.switch_persona_db('../outside')
+
+            assert Path(store._persona_db_path) == old_path
+            assert not (tmp_path.parent / 'outside.db').exists()
+            await store.close()
+
 class TestMigrateCodeSetting:
     """_migrate_code_setting 测试"""
 

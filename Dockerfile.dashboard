@@ -63,6 +63,7 @@ COPY pyproject.toml ./
 COPY src/ src/
 COPY dashboard/ dashboard/
 COPY config/ config/
+COPY templates/ templates/
 
 # Runtime environment
 ENV PATH="/app/.venv/bin:$PATH"

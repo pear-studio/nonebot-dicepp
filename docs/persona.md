@@ -68,16 +68,20 @@ https://api.minimaxi.com/v1
 
 ## 准备角色卡
 
-仓库自带默认角色：
+角色卡属于实例用户数据，存放在：
 
 ```text
-content/characters/default/
+content/characters/{角色名}/
 ```
 
-如果想新建角色，把 `content/characters/default/` 整个文件夹复制一份，例如复制成：
+DicePP 不会在启动或升级时自动生成 `content/characters/default/`。程序包内的 `templates/characters/default/` 是只读模板资源，预留给 Dashboard 的“新建角色”功能，不会被 Bot 当作角色卡读取。
+
+当前可手动建立角色目录，例如：
 
 ```text
 content/characters/mychar/
+  character.yaml
+  skin.yaml
 ```
 
 然后把 `config/bots/{账号}.json` 中的 `persona` 改成：
@@ -85,6 +89,8 @@ content/characters/mychar/
 ```json
 "persona": "mychar"
 ```
+
+如果配置了角色名但实例 `content/characters/{角色名}/character.yaml` 不存在，Persona AI 不会从程序模板静默回退；请先创建或导入角色卡。
 
 角色卡写法见 [persona-character-card.md](./persona-character-card.md)。
 

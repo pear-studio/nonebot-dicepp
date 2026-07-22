@@ -4,6 +4,7 @@ import re
 import sqlite3
 from pathlib import Path
 
+from dicepp_data import BOT_LOG_SCHEMA
 from .lifecycle import (
     APPLICATION_NAME,
     SchemaRunResult,
@@ -195,8 +196,8 @@ def create_bot_log_schema(conn: sqlite3.Connection) -> None:
 
 
 BOT_LOG_TARGET = SchemaTarget(
-    name="bot_log",
-    latest_version=1,
+    name=BOT_LOG_SCHEMA.name,
+    latest_version=BOT_LOG_SCHEMA.latest_version,
     create_latest_schema=create_bot_log_schema,
 )
 

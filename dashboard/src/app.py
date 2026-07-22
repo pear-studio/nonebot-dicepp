@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from dicepp_data import PERSONA_DB_ASSET
 from dicepp_meta import get_project_info, get_version
 
 from .auth import (
@@ -1773,10 +1774,13 @@ _overview_logger = logging.getLogger("dashboard.overview")
 
 def _find_persona_db(bot_id: str) -> Optional[Path]:
     """Scan bot data dir for personas_data_*.db, return the newest by mtime."""
-    bot_dir = DashboardPaths.DATA_BOTS_DIR / bot_id
-    if not bot_dir.exists():
-        return None
-    matches = list(bot_dir.glob("personas_data_*.db"))
+    matches = [
+        match.path
+        for match in PERSONA_DB_ASSET.iter_matches(
+            DashboardPaths.instance_layout(),
+            bot_id=bot_id,
+        )
+    ]
     if not matches:
         return None
     if len(matches) > 1:

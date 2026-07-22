@@ -163,6 +163,7 @@ datas = [
     # 运行时数据（data/）和用户内容（content/）由用户自行挂载，不打包
     (os.path.join(PROJECT_ROOT, 'config', 'global.json'),           os.path.join('config')),
     (os.path.join(PROJECT_ROOT, 'config', 'bots', '_template.json'), os.path.join('config', 'bots')),
+    (os.path.join(PROJECT_ROOT, 'templates'), os.path.join('templates')),
 ]
 
 # Keep only non-Python package resources as datas. DicePP's Python modules are

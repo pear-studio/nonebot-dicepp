@@ -14,8 +14,11 @@ DicePP 使用 JSON 配置。新手通常只需要改三个地方：
 | `config/user.json` | API Key、密钥等敏感信息 | 不提交 |
 | `config/bots/_template.json` | 账号配置模板 | 可以 |
 | `config/bots/{QQ号}.json` | 具体机器人账号配置 | 不提交 |
-| `content/characters/` | Persona 角色卡和皮肤 | 默认只提交示例 |
+| `content/` | 用户自己的角色卡、牌组、查询库等内容 | 不提交 |
 | `data/` | 运行时数据 | 不提交 |
+| `templates/characters/default/` | 随版本发布的只读角色模板，供未来 Dashboard 新建角色使用 | 可以 |
+
+`content/` 完全属于当前实例。DicePP 启动和升级不会从 `templates/` 自动复制、合并或覆盖内容；只有用户显式新建或导入后，文件才会进入 `content/`。
 
 ## 配置优先级
 
@@ -91,6 +94,7 @@ API Key 放在 `config/user.json`：
 | `DICE_NICKNAME` | 覆盖机器人昵称 |
 | `DICE_PERSONA` | 覆盖默认人设 |
 | `DICEPP_PROJECT_ROOT` | 覆盖项目根目录，一般不用 |
+| `DICEPP_DATA_DIR` | 兼容旧部署：只覆盖运行时 `data/` 目录；Bot 与 Dashboard 使用同一解析规则 |
 | `DPP_ADMIN_HOST` | Dashboard 地址（bot 用于建立 WebSocket 控制通道） | `127.0.0.1` |
 | `DPP_ADMIN_PORT` | Dashboard 端口 | `4090` |
 
@@ -127,5 +131,7 @@ docker exec dicepp cat /app/config/user.json
 - `config/`：配置
 - `content/`：角色卡、牌组、查询数据等内容
 - `data/`：运行时数据
+
+Bot、Dashboard 和 Manager 通过同一份实例布局解析这些目录。除兼容旧部署的 `DICEPP_DATA_DIR` 外，建议让三个目录保持在同一个实例根目录，便于归档和跨平台迁移。
 
 3.0 尚未提供旧 `Data` 目录的自动迁移。若你手上仍有旧版本 `Data` 资产，请先整体备份，再根据当前 `config/`、`content/`、`data/` 文档手工整理到新目录结构；不要假设旧 Excel 文件会被自动兼容或自动导入。

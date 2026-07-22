@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from dicepp_data import BOT_CORE_SCHEMA
 from .lifecycle import SchemaTarget, execute_many
 
 
@@ -142,7 +143,7 @@ def create_bot_core_schema(conn: sqlite3.Connection) -> None:
 
 
 BOT_CORE_TARGET = SchemaTarget(
-    name="bot_core",
-    latest_version=1,
+    name=BOT_CORE_SCHEMA.name,
+    latest_version=BOT_CORE_SCHEMA.latest_version,
     create_latest_schema=create_bot_core_schema,
 )

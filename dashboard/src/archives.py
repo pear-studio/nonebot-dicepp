@@ -15,6 +15,12 @@ from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Iterator
 from uuid import uuid4
 
+from dicepp_data import (
+    ARCHIVE_PROFILE_REGULAR,
+    DATA_CATALOG,
+    InstanceLayout,
+)
+
 from .config import DashboardPaths
 from .manager.models import get_dicepp_version
 
@@ -23,13 +29,8 @@ MANIFEST_NAME = "manifest.json"
 CHECKSUM_ALGORITHM = "sha256"
 
 SCOPE_INCLUDED = [
-    "config/user.json",
-    "config/bots/*.json",
-    "data/dicepp.db",
-    "data/bots/*/bot_data.db",
-    "data/bots/*/log.db",
-    "data/bots/*/personas_data_*.db",
-    "data/local_images",
+    asset.logical_glob
+    for asset in DATA_CATALOG.for_profile(ARCHIVE_PROFILE_REGULAR)
 ]
 SCOPE_EXCLUDED = [
     "config/global.json",
@@ -86,7 +87,7 @@ class ArchiveRestorePlanBlockedError(ArchiveError):
 
 def backups_dir(paths: type[DashboardPaths] = DashboardPaths) -> Path:
     """Return the default Dashboard archive directory."""
-    return paths.DATA_ROOT / "backups"
+    return InstanceLayout.from_legacy_paths(paths).backups_dir
 
 
 def _utc_now() -> datetime:
@@ -117,70 +118,15 @@ def _safe_arcname(arcname: str) -> str:
     return posix.as_posix()
 
 
-def _iter_regular_files(root: Path, arc_prefix: str) -> list[ArchivePayload]:
-    """Return ordinary files under *root* without following symlink directories."""
-    if not root.exists() or root.is_symlink() or not root.is_dir():
-        return []
-
-    payloads: list[ArchivePayload] = []
-    for current, dirnames, filenames in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        dirnames[:] = [
-            name for name in dirnames
-            if not (current_path / name).is_symlink()
-        ]
-        for filename in filenames:
-            path = current_path / filename
-            if path.is_symlink() or not path.is_file():
-                continue
-            rel = path.relative_to(root).as_posix()
-            payloads.append(ArchivePayload(path=path, arcname=_safe_arcname(f"{arc_prefix}/{rel}")))
-    return sorted(payloads, key=lambda item: item.arcname)
-
-
-def _regular_file(path: Path, arcname: str) -> list[ArchivePayload]:
-    if not path.exists() or path.is_symlink() or not path.is_file():
-        return []
-    return [ArchivePayload(path=path, arcname=_safe_arcname(arcname))]
-
-
-def _iter_config_payloads(paths: type[DashboardPaths]) -> list[ArchivePayload]:
-    payloads: list[ArchivePayload] = []
-    payloads.extend(_regular_file(Path(paths.CONFIG_USER), "config/user.json"))
-
-    bots_root = Path(paths.CONFIG_BOTS_DIR)
-    if bots_root.exists() and not bots_root.is_symlink() and bots_root.is_dir():
-        for bot_config in sorted(bots_root.glob("*.json"), key=lambda item: item.name):
-            if bot_config.name == "_template.json":
-                continue
-            payloads.extend(
-                _regular_file(bot_config, f"config/bots/{bot_config.name}")
-            )
-    return payloads
-
-
 def collect_archive_payloads(
     paths: type[DashboardPaths] = DashboardPaths,
 ) -> list[ArchivePayload]:
     """Collect files included in the first save-archive format."""
-    data_root = Path(paths.DATA_BOTS_DIR).parent
-    payloads: list[ArchivePayload] = []
-    payloads.extend(_iter_config_payloads(paths))
-    payloads.extend(_regular_file(data_root / "dicepp.db", "data/dicepp.db"))
-
-    bots_root = Path(paths.DATA_BOTS_DIR)
-    if bots_root.exists() and not bots_root.is_symlink() and bots_root.is_dir():
-        for bot_dir in sorted(bots_root.iterdir(), key=lambda item: item.name):
-            if bot_dir.is_symlink() or not bot_dir.is_dir():
-                continue
-            prefix = f"data/bots/{bot_dir.name}"
-            payloads.extend(_regular_file(bot_dir / "bot_data.db", f"{prefix}/bot_data.db"))
-            payloads.extend(_regular_file(bot_dir / "log.db", f"{prefix}/log.db"))
-            for persona_db in sorted(bot_dir.glob("personas_data_*.db")):
-                payloads.extend(_regular_file(persona_db, f"{prefix}/{persona_db.name}"))
-
-    payloads.extend(_iter_regular_files(data_root / "local_images", "data/local_images"))
-    return sorted(payloads, key=lambda item: item.arcname)
+    layout = InstanceLayout.from_legacy_paths(paths)
+    return [
+        ArchivePayload(path=match.path, arcname=_safe_arcname(match.logical_path))
+        for match in DATA_CATALOG.collect(layout, ARCHIVE_PROFILE_REGULAR)
+    ]
 
 
 def _archive_filename(now: datetime, description: str | None) -> str:
@@ -531,38 +477,10 @@ def _sha256_zip_member(archive: zipfile.ZipFile, arcname: str) -> str:
 
 
 def _archive_arcname_in_restore_scope(arcname: str) -> bool:
-    if arcname == "data/dicepp.db" or arcname == "config/user.json":
-        return True
-
-    if arcname.startswith("config/bots/"):
-        relative = PurePosixPath(arcname.removeprefix("config/bots/"))
-        return (
-            len(relative.parts) == 1
-            and relative.name != "_template.json"
-            and relative.suffix == ".json"
-            and not relative.is_absolute()
-            and ".." not in relative.parts
-        )
-
-    if arcname.startswith("data/bots/"):
-        relative = PurePosixPath(arcname.removeprefix("data/bots/"))
-        if len(relative.parts) != 2 or relative.is_absolute() or ".." in relative.parts:
-            return False
-        filename = relative.parts[1]
-        return filename in {"bot_data.db", "log.db"} or (
-            filename.startswith("personas_data_") and filename.endswith(".db")
-        )
-
-    if arcname.startswith("data/local_images/"):
-        relative = PurePosixPath(arcname.removeprefix("data/local_images/"))
-        return (
-            bool(relative.parts)
-            and relative.as_posix() not in {"", "."}
-            and not relative.is_absolute()
-            and ".." not in relative.parts
-        )
-
-    return False
+    return DATA_CATALOG.find_for_logical_path(
+        arcname,
+        profile=ARCHIVE_PROFILE_REGULAR,
+    ) is not None
 
 
 def verify_archive(
@@ -646,7 +564,7 @@ def _verify_open_archive(
 
 
 def _data_root(paths: type[DashboardPaths]) -> Path:
-    return Path(paths.DATA_BOTS_DIR).parent
+    return InstanceLayout.from_legacy_paths(paths).data_root
 
 
 def _path_is_relative_to(path: Path, root: Path) -> bool:
@@ -719,73 +637,24 @@ def _restore_target_for_arcname(
     if not _is_safe_manifest_arcname(arcname):
         return f"Unsafe archive path cannot be restored: {arcname!r}"
 
-    data_root = _data_root(paths)
-    if arcname == "data/dicepp.db":
-        target = data_root / "dicepp.db"
-        root = data_root
-        problem = _restore_parent_precondition_problem(target, root)
-        if problem is not None:
-            return f"{problem} ({arcname})"
-        return target, root, arcname
+    asset = DATA_CATALOG.find_for_logical_path(
+        arcname,
+        profile=ARCHIVE_PROFILE_REGULAR,
+    )
+    if asset is None:
+        return f"Unsupported restore path: {arcname}"
 
-    if arcname == "config/user.json":
-        target = Path(paths.CONFIG_USER)
-        root = Path(paths.CONFIG_DIR)
-        problem = _restore_parent_precondition_problem(target, root)
-        if problem is not None:
-            return f"{problem} ({arcname})"
-        return target, root, arcname
-
-    if arcname.startswith("config/bots/"):
-        relative = PurePosixPath(arcname.removeprefix("config/bots/"))
-        if (
-            len(relative.parts) != 1
-            or relative.name == "_template.json"
-            or relative.suffix != ".json"
-            or relative.is_absolute()
-            or ".." in relative.parts
-        ):
-            return f"Unsupported restore path: {arcname}"
-        target = Path(paths.CONFIG_BOTS_DIR) / relative.name
-        root = Path(paths.CONFIG_BOTS_DIR)
-        problem = _restore_parent_precondition_problem(target, root)
-        if problem is not None:
-            return f"{problem} ({arcname})"
-        return target, root, arcname
-
-    if arcname.startswith("data/bots/"):
-        relative = PurePosixPath(arcname.removeprefix("data/bots/"))
-        if len(relative.parts) != 2 or relative.is_absolute() or ".." in relative.parts:
-            return f"Unsupported restore path: {arcname}"
-        filename = relative.parts[1]
-        if filename not in {"bot_data.db", "log.db"} and not (
-            filename.startswith("personas_data_") and filename.endswith(".db")
-        ):
-            return f"Unsupported restore path: {arcname}"
-        target = Path(paths.DATA_BOTS_DIR).joinpath(*relative.parts)
-        root = Path(paths.DATA_BOTS_DIR)
-        problem = _restore_parent_precondition_problem(target, root)
-        if problem is not None:
-            return f"{problem} ({arcname})"
-        return target, root, arcname
-
-    if arcname.startswith("data/local_images/"):
-        relative = PurePosixPath(arcname.removeprefix("data/local_images/"))
-        if (
-            not relative.parts
-            or relative.as_posix() in {"", "."}
-            or relative.is_absolute()
-            or ".." in relative.parts
-        ):
-            return f"Archive path does not name a restorable file: {arcname}"
-        target = (data_root / "local_images").joinpath(*relative.parts)
-        root = data_root / "local_images"
-        problem = _restore_parent_precondition_problem(target, root)
-        if problem is not None:
-            return f"{problem} ({arcname})"
-        return target, root, f"data/local_images/{relative.as_posix()}"
-
-    return f"Unsupported restore path: {arcname}"
+    layout = InstanceLayout.from_legacy_paths(paths)
+    resolved = asset.restore_target(layout, arcname)
+    if resolved is None:
+        return f"Unsupported restore path: {arcname}"
+    problem = _restore_parent_precondition_problem(
+        resolved.path,
+        resolved.scope_root,
+    )
+    if problem is not None:
+        return f"{problem} ({arcname})"
+    return resolved.path, resolved.scope_root, arcname
 
 
 def _restore_action_for_target(target: Path) -> tuple[str, str | None]:

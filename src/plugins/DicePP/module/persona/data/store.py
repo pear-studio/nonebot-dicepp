@@ -20,6 +20,7 @@ from pydantic import ValidationError
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from dicepp_data import PERSONA_DB_ASSET
 from ..utils.privacy import mask_sensitive_string
 
 from .models import (
@@ -223,8 +224,12 @@ class PersonaDataStore:
         """关闭当前 persona_db，打开新角色的 persona_db（先开后关策略）"""
         if self._persona_db_path == ":memory:":
             raise ValueError("switch_persona_db 不适用于 :memory: 数据库")
-        dir_path = os.path.dirname(self._persona_db_path)
-        new_path = os.path.join(dir_path, f"personas_data_{new_character_name}.db")
+        new_path = str(
+            PERSONA_DB_ASSET.resolve_sibling(
+                self._persona_db_path,
+                character=new_character_name,
+            )
+        )
         new_conn = await self._connect_initialized_persona_db(new_path)
         old_db = self._persona_db
         old_path = self._persona_db_path

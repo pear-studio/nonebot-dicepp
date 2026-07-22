@@ -1,8 +1,8 @@
-import os
 from typing import Optional
 
 import aiosqlite
 
+from dicepp_data import BOT_CORE_ASSET, BOT_LOG_ASSET
 from plugins.DicePP.core.config.basic import Paths
 from plugins.DicePP.core.data.schema import (
     BOT_CORE_TARGET,
@@ -36,9 +36,10 @@ from .models import (
 class BotDatabase:
     def __init__(self, bot_id: str):
         self._bot_id = bot_id
-        self._bot_dir = str(Paths.bot_data_dir(bot_id))
-        self._db_path = os.path.join(self._bot_dir, "bot_data.db")
-        self._log_db_path = os.path.join(self._bot_dir, "log.db")
+        layout = Paths.instance_layout()
+        self._bot_dir = str(layout.bot_data_dir(bot_id))
+        self._db_path = str(BOT_CORE_ASSET.resolve(layout, bot_id=bot_id))
+        self._log_db_path = str(BOT_LOG_ASSET.resolve(layout, bot_id=bot_id))
 
         self._db: Optional[aiosqlite.Connection] = None
         self._log_db: Optional[aiosqlite.Connection] = None
@@ -154,7 +155,7 @@ class BotDatabase:
         # allow idempotent connect() (some packaged runs may receive events early)
         if self._db is not None and self._log_db is not None:
             return
-        os.makedirs(self._bot_dir, exist_ok=True)
+        Paths.bot_data_dir(self._bot_id).mkdir(parents=True, exist_ok=True)
 
         apply_schema_target(self._db_path, BOT_CORE_TARGET)
         ensure_bot_log_schema(self._log_db_path)

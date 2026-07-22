@@ -21,6 +21,7 @@ datas = [
         os.path.join(PROJECT_ROOT, "dashboard", "src", "static"),
         os.path.join("dashboard", "src", "static"),
     ),
+    (os.path.join(PROJECT_ROOT, "templates"), "templates"),
 ]
 datas += copy_metadata("dicepp")
 

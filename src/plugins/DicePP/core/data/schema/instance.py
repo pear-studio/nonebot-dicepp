@@ -4,6 +4,7 @@ import secrets
 import sqlite3
 from pathlib import Path
 
+from dicepp_data import INSTANCE_DB_ASSET, INSTANCE_SCHEMA, InstanceLayout
 from .lifecycle import SchemaTarget, apply_schema_target, execute_many, utc_iso
 
 
@@ -24,8 +25,8 @@ def create_instance_schema(conn: sqlite3.Connection) -> None:
 
 
 INSTANCE_TARGET = SchemaTarget(
-    name="instance",
-    latest_version=1,
+    name=INSTANCE_SCHEMA.name,
+    latest_version=INSTANCE_SCHEMA.latest_version,
     create_latest_schema=create_instance_schema,
 )
 
@@ -33,9 +34,14 @@ INSTANCE_TARGET = SchemaTarget(
 class DicePPDatabase:
     """Synchronous short-connection access to instance-level DicePP state."""
 
-    def __init__(self, project_root: Path) -> None:
-        self.project_root = Path(project_root)
-        self.db_path = self.project_root / "data" / "dicepp.db"
+    def __init__(self, project_root: Path | InstanceLayout) -> None:
+        layout = (
+            project_root
+            if isinstance(project_root, InstanceLayout)
+            else InstanceLayout.from_root(project_root)
+        )
+        self.project_root = layout.root
+        self.db_path = INSTANCE_DB_ASSET.resolve(layout)
 
     def ensure_schema(self) -> None:
         apply_schema_target(self.db_path, INSTANCE_TARGET)

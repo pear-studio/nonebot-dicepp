@@ -158,8 +158,6 @@ config/personas/*.local.json
 content/**
 !content/**/
 !content/**/.gitkeep
-!content/characters/default/character.yaml
-!content/characters/default/skin.yaml
 src/plugins/DicePP/module/misc/log_command.py
 
 # uv lock 文件用于 CI frozen sync，需要追踪

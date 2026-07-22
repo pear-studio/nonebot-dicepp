@@ -1333,6 +1333,66 @@ class TestArchiveApi:
             for problem in verification["problems"]
         )
 
+    def test_directory_asset_root_cannot_be_verified_planned_or_restored_as_file(
+        self,
+        test_client: TestClient,
+        tmp_dashboard_paths: Path,
+    ):
+        """A v1 zip cannot replace a managed directory root with a file payload."""
+        local_images = tmp_dashboard_paths / "data" / "local_images"
+        local_images.mkdir(parents=True)
+        (local_images / "existing.png").write_bytes(b"existing")
+        _write_verify_zip(
+            tmp_dashboard_paths,
+            "directory-root-as-file.zip",
+            payloads={"data/local_images": "not a directory"},
+        )
+        setup_auth(test_client)
+
+        verification_response = test_client.post(
+            _api_archive_verify_path("directory-root-as-file.zip")
+        )
+        plan_response = test_client.post(
+            _api_archive_restore_plan_path("directory-root-as-file.zip")
+        )
+        restore_response = test_client.post(
+            _api_archive_restore_path("directory-root-as-file.zip"),
+            json={"confirm_restore": True},
+        )
+
+        assert verification_response.status_code == 200
+        verification = verification_response.json()["verification"]
+        assert verification["verified"] is False
+        assert verification["restorable_files"] == []
+        assert any(
+            "Unsupported restore path: data/local_images" in problem
+            for problem in verification["problems"]
+        )
+        assert plan_response.status_code == 409
+        assert restore_response.status_code == 409
+        assert local_images.is_dir()
+        assert (local_images / "existing.png").read_bytes() == b"existing"
+        assert not list((tmp_dashboard_paths / "data" / "backups").glob("*pre-restore*.zip"))
+
+    def test_restore_targets_use_asset_specific_scope_roots(
+        self,
+        tmp_dashboard_paths: Path,
+    ):
+        cases = {
+            "config/bots/test_bot.json": tmp_dashboard_paths / "config" / "bots",
+            "data/bots/test_bot/bot_data.db": tmp_dashboard_paths / "data" / "bots",
+            "data/local_images/avatar.png": tmp_dashboard_paths / "data" / "local_images",
+        }
+
+        for arcname, expected_root in cases.items():
+            mapped = archives._restore_target_for_arcname(
+                arcname,
+                paths=DashboardPaths,
+            )
+            assert not isinstance(mapped, str)
+            _target, scope_root, _display = mapped
+            assert scope_root == expected_root
+
     def test_archive_verify_manifest_declared_as_payload_returns_problem(
         self, test_client: TestClient, tmp_dashboard_paths: Path
     ):

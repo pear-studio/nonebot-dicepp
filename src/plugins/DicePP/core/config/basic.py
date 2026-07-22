@@ -1,35 +1,28 @@
 import os
 from pathlib import Path
 
+from dicepp_data import InstanceLayout
 from plugins.DicePP.utils.logger import logger
 from plugins.DicePP.frozen import get_project_root
 
 
-def _derive_paths(root: Path) -> dict[str, Path]:
-    """Single source of truth for every project-relative path.
-
-    Both the import-time initialization and configure_project_root() build the
-    Paths attributes from this map, so a new path is declared in exactly one
-    place and the two entry points can never drift out of sync.
-    """
-    config = root / "config"
-    data = root / "data"
-    content = root / "content"
+def _derive_paths(layout: InstanceLayout) -> dict[str, Path]:
+    """Compatibility attribute map backed by the shared instance layout."""
     return {
-        "PROJECT_ROOT": root,
-        "CONFIG_DIR": config,
-        "CONFIG_GLOBAL": config / "global.json",
-        "CONFIG_USER": config / "user.json",
-        "CONFIG_BOTS_DIR": config / "bots",
-        "DATA_DIR": data,
-        "DATA_BOTS_DIR": data / "bots",
-        "LOCAL_IMG_DIR": data / "local_images",
-        "CONTENT_DIR": content,
-        "CONTENT_CHARACTERS_DIR": content / "characters",
-        "CONTENT_QUERIES_DIR": content / "queries",
-        "CONTENT_DECKS_DIR": content / "decks",
-        "CONTENT_RANDOM_DIR": content / "random",
-        "CONTENT_EXCEL_DIR": content / "excel",
+        "PROJECT_ROOT": layout.root,
+        "CONFIG_DIR": layout.config_dir,
+        "CONFIG_GLOBAL": layout.config_global,
+        "CONFIG_USER": layout.config_user,
+        "CONFIG_BOTS_DIR": layout.config_bots_dir,
+        "DATA_DIR": layout.data_root,
+        "DATA_BOTS_DIR": layout.data_bots_dir,
+        "LOCAL_IMG_DIR": layout.local_images_dir,
+        "CONTENT_DIR": layout.content_dir,
+        "CONTENT_CHARACTERS_DIR": layout.content_characters_dir,
+        "CONTENT_QUERIES_DIR": layout.content_queries_dir,
+        "CONTENT_DECKS_DIR": layout.content_decks_dir,
+        "CONTENT_RANDOM_DIR": layout.content_random_dir,
+        "CONTENT_EXCEL_DIR": layout.content_excel_dir,
     }
 
 
@@ -51,10 +44,12 @@ class Paths:
     CONTENT_DECKS_DIR: Path
     CONTENT_RANDOM_DIR: Path
     CONTENT_EXCEL_DIR: Path
+    _layout: InstanceLayout
 
     @classmethod
-    def _apply_root(cls, root: Path) -> None:
-        for name, path in _derive_paths(root).items():
+    def _apply_layout(cls, layout: InstanceLayout) -> None:
+        cls._layout = layout
+        for name, path in _derive_paths(layout).items():
             setattr(cls, name, path)
 
     @classmethod
@@ -66,11 +61,20 @@ class Paths:
         at an isolated workspace. This remains deliberately process-global:
         callers must not run Bots from different roots concurrently.
         """
-        cls._apply_root(Path(project_root).expanduser().resolve())
+        cls._apply_layout(
+            InstanceLayout.from_root(
+                project_root,
+                data_root=os.environ.get("DICEPP_DATA_DIR"),
+            )
+        )
+
+    @classmethod
+    def instance_layout(cls) -> InstanceLayout:
+        return InstanceLayout.from_legacy_paths(cls)
 
     @classmethod
     def bot_data_dir(cls, bot_id: str) -> Path:
-        return cls.DATA_BOTS_DIR / bot_id
+        return cls.instance_layout().bot_data_dir(bot_id)
 
     @classmethod
     def ensure_dirs(cls) -> None:
@@ -143,4 +147,4 @@ class Paths:
 
 # Populate all derived paths from the project root at import time. Kept out of
 # the class body so the derivation logic lives only in _derive_paths.
-Paths._apply_root(Path(get_project_root()))
+Paths._apply_layout(InstanceLayout.from_env(Path(get_project_root())))

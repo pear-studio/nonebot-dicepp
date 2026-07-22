@@ -19,14 +19,16 @@ content/characters/{角色名}/
 例如：
 
 ```json
-"persona": "default"
+"persona": "mychar"
 ```
 
 会加载：
 
 ```text
-content/characters/default/character.yaml
+content/characters/mychar/character.yaml
 ```
+
+程序包内的 `templates/characters/default/` 只是 Dashboard 未来创建角色时可使用的只读模板。Bot 只读取实例 `content/characters/`，不会自动复制或加载模板。
 
 ## 最小角色卡
 

@@ -7,6 +7,8 @@ import os
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+
+from dicepp_data import PERSONA_DB_ASSET
 from plugins.DicePP.utils.logger import logger
 from plugins.DicePP.core.bot import Bot
 from plugins.DicePP.core.config.basic import Paths
@@ -242,7 +244,13 @@ async def _build_store(bot: Bot, config, character_name: str) -> PersonaDataStor
         raise PersonaStorageError("数据库未初始化（bot.db 或 bot.db._db 为 None）")
 
     bot_dir = Paths.bot_data_dir(bot.account)
-    persona_db_path = str(bot_dir / f"personas_data_{character_name}.db")
+    persona_db_path = str(
+        PERSONA_DB_ASSET.resolve(
+            Paths.instance_layout(),
+            bot_id=str(bot.account),
+            character=character_name,
+        )
+    )
     os.makedirs(str(bot_dir), exist_ok=True)
 
     store = PersonaDataStore(
