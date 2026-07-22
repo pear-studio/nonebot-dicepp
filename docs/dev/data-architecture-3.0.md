@@ -1,5 +1,9 @@
 # DicePP 3.0 数据状态架构
 
+> Manager 常驻化、事务化精确恢复和自动升级的后续目标架构见
+> [Manager、归档恢复与自动升级架构](manager-archive-update-architecture.md)，
+> 严格顺序实施计划见 [Manager、归档恢复与自动升级实施计划](manager-archive-update-plan.md)。
+
 本文记录 3.0.0 正式发布前需要稳定下来的数据状态、迁移、Manager 与存档恢复设计。目标是让自托管用户在 3.0.0 后拥有清晰的升级路径、状态边界和恢复手段，避免正式发布后再背负不必要的兼容债。
 
 ## 目标
