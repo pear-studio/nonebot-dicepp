@@ -220,6 +220,7 @@ class ChatOrchestrator:
                         image_data_urls=image_data_urls,
                         transient_message=transient_message,
                         inbound_message_stream_id=ctx.inbound_message_stream_id,
+                        speaker_name=ctx.nickname,
                     )
                 # Stage B: rotation_needed → close+rotate 后重试
                 if result.reason == "rotation_needed":
@@ -296,6 +297,7 @@ class ChatOrchestrator:
                             image_data_urls=ctx.image_data_urls,
                             transient_message=ctx.transient_message,
                             inbound_message_stream_id=ctx.inbound_message_stream_id,
+                            speaker_name=ctx.nickname,
                         )
                     # Stage B: rotation_needed → close+rotate 后重试
                     if result.reason == "rotation_needed":

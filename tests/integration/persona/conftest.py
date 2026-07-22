@@ -77,6 +77,7 @@ def default_persona_config():
 
 def make_mock_bot(persona_config=None):
     bot = MagicMock()
+    bot.get_nickname = AsyncMock(return_value="测试用户")
     bot.config.persona_ai = persona_config or default_persona_config()
     bot.config.persona = "test_char"
     bot.config.admin = []

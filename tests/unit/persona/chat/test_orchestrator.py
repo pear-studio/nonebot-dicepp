@@ -1058,7 +1058,8 @@ class TestF2RealRegistryIntegration:
             max_history_turns=20,
             max_history_tokens=8000,
             lore_token_budget=1000,
-            group_session_token_budget=50,
+            # 足以容纳 carry-over 的一条规范玩家记录，但远小于旧 session。
+            group_session_token_budget=200,
         )
 
         orch = ChatOrchestrator(

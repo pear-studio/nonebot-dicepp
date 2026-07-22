@@ -249,8 +249,9 @@ class TestAppendVisible:
         conv = await reg.append_visible(scope, msid, "user")
         rendered = await conv.render_resolved("SYS")
         assert rendered[0] == {"role": "system", "content": "SYS"}
-        # 阶段 2：说话者身份走 OpenAI name 字段，content 只含正文
-        assert rendered[1] == {"role": "user", "content": "万生说你好", "name": "万生"}
+        assert rendered[1] == {
+            "role": "user", "content": "万生说你好", "name": "uid_u1",
+        }
 
     async def test_append_visible_persists_ref(self, temp_db):
         reg = _make_registry(temp_db)

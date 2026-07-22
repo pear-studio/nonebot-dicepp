@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -284,12 +285,14 @@ class TestSpeakerPropagation:
 
         conv = self._completed_conv()
         agent = self._agent(ConversationScope.for_group("g1"), conv, store=store)
-        await agent.execute_turn("u1", "g1", "hi")
+        await agent.execute_turn("u1", "g1", "hi", speaker_name="小周")
 
         transient = conv.run.call_args.kwargs["transient_context_messages"]
         blob = "\n".join(m["content"] for m in (transient or []))
+        assert "当前说话者（小周）" in blob
         assert "关系是朋友" in blob
         assert "下棋" in blob
+        assert conv.run.call_args.kwargs["group_transcript_in_content"] is True
 
     @pytest.mark.asyncio
     async def test_private_scope_no_group_speaker_status(self):
@@ -300,6 +303,7 @@ class TestSpeakerPropagation:
         await agent.execute_turn("u1", "", "hi")
         # 私聊不注入群说话者状态（私聊有持久 ChangeSource）
         store.get_relationship.assert_not_awaited()
+        assert conv.run.call_args.kwargs["group_transcript_in_content"] is False
 
 
 class TestAssistantRefRecording:
@@ -465,6 +469,33 @@ class TestExecuteTurnBranches:
         # 有图 → selection 切 CHAT_WITH_IMAGE，且当轮图片作为 transient 注入
         assert conv.run.call_args.kwargs["selection"] is CHAT_WITH_IMAGE
         assert conv.run.call_args.kwargs["transient_context_messages"]
+
+    @pytest.mark.asyncio
+    async def test_group_image_transient_keeps_speaker_identity(self):
+        conv = self._conv(final_text="ok", final_reason="stop",
+                          completion_kind="completed", output_arguments={"content": "ok"})
+        agent = self._agent(ConversationScope.for_group("g1"), conv, delivery=None)
+        with patch(
+            "plugins.DicePP.module.persona.chat.chat_agent.get_clock",
+            return_value=MagicMock(
+                now=MagicMock(return_value=datetime(2026, 7, 21, 17, 55, 15)),
+            ),
+        ):
+            await agent.execute_turn(
+                "u1", "g1", "看这张地图", speaker_name="小周",
+                image_data_urls=["data:image/png;base64,AAAA"],
+            )
+
+        transient = conv.run.call_args.kwargs["transient_context_messages"]
+        image_message = next(m for m in transient if isinstance(m.get("content"), list))
+        assert image_message["name"] == "uid_u1"
+        text_parts = [
+            part["text"] for part in image_message["content"]
+            if part.get("type") == "text"
+        ]
+        assert text_parts == [
+            "[2026-07-21 17:55:15] [玩家] [uid: u1] [昵称: 小周] 看这张地图"
+        ]
 
     @pytest.mark.asyncio
     async def test_no_image_uses_plain_chat_selection(self):

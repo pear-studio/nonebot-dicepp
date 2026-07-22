@@ -16,10 +16,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
 
 from utils.logger import logger
+from utils.time import get_clock
 
 from ..data.models import MessageType
 from ..life.conversation import Conversation
 from ..life.conversation_scope import ConversationScope
+from ..transcript import (
+    format_player_message,
+    provider_user_name,
+    sanitize_speaker_label,
+)
 from .chat_shared import ChatOutcome, _router_has_quota
 
 if TYPE_CHECKING:
@@ -65,7 +71,9 @@ class ChatAgent:
     def conversation(self) -> Conversation:
         return self._conversation
 
-    async def _group_speaker_status(self, user_id: str) -> List[dict]:
+    async def _group_speaker_status(
+        self, user_id: str, speaker_name: str = "",
+    ) -> List[dict]:
         """群聊：当前说话者的关系/画像作为 turn_only 状态注入（不持久、不锚定）。
 
         群 scope 共享 Conversation，注册绑定单一 user 的持久 ChangeSource 会形成
@@ -73,19 +81,21 @@ class ChatAgent:
         以 transient 注入，只在本轮可见。best-effort：查询失败不阻断本轮。
         """
         notes: List[str] = []
+        label_name = sanitize_speaker_label(speaker_name)
+        subject = f"当前说话者（{label_name}）" if label_name else "当前说话者"
         try:
             rel = await self._store.get_relationship(user_id)
             labels = self._character.get_relation_labels()
             if rel is not None and labels:
                 _, label = rel.get_relation_level(labels)
-                notes.append(f"你和当前说话者的关系是{label}。")
+                notes.append(f"你和{subject}的关系是{label}。")
         except Exception:
             logger.debug("group_speaker_status: 关系查询失败，跳过", exc_info=True)
         try:
             profile = await self._store.get_user_profile(user_id)
             if profile is not None and getattr(profile, "facts", None):
                 facts_lines = "\n".join(f"- {k}: {v}" for k, v in profile.facts.items())
-                notes.append(f"你对当前说话者的了解：\n{facts_lines}")
+                notes.append(f"你对{subject}的了解：\n{facts_lines}")
         except Exception:
             logger.debug("group_speaker_status: 画像查询失败，跳过", exc_info=True)
         if not notes:
@@ -274,6 +284,7 @@ class ChatAgent:
         image_data_urls: Optional[List[str]] = None,
         transient_message: Optional[str] = None,
         inbound_message_stream_id: Optional[int] = None,
+        speaker_name: str = "",
     ) -> ChatOutcome:
         """执行一轮 chat：Conversation.run() + send_reply_segment + send_reply。
 
@@ -315,22 +326,34 @@ class ChatAgent:
         #    写入 message_stream 并 append 进本 scope Conversation（在 run 之前）。
         #    带图片的当轮内容作为 transient 注入，使多模态模型本轮可见。
         has_images = bool(image_data_urls)
+        current_turn_at = get_clock().now()
         transient_list: List[dict] = []
         # 群聊：当前说话者关系/画像按轮 turn_only 注入（私聊已有持久 ChangeSource）
+        resolved_nickname = speaker_name or user_id
         if self._scope.is_group:
-            transient_list.extend(await self._group_speaker_status(user_id))
+            transient_list.extend(
+                await self._group_speaker_status(user_id, resolved_nickname)
+            )
         if transient_message:
             transient_list.append(
                 {"role": "user", "name": "系统", "content": transient_message}
             )
         if has_images:
+            image_user_input = user_input
+            if self._scope.is_group:
+                image_user_input = format_player_message(
+                    user_input, user_id, resolved_nickname, current_turn_at,
+                )
             embedded = embed_images_in_last_user_message(
-                [{"role": "user", "content": user_input}],
+                [{"role": "user", "content": image_user_input}],
                 image_data_urls,
             )
-            transient_list.append(
-                {"role": "user", "content": embedded[0]["content"]}
-            )
+            image_message = {"role": "user", "content": embedded[0]["content"]}
+            if self._scope.is_group:
+                stable_name = provider_user_name(user_id)
+                if stable_name:
+                    image_message["name"] = stable_name
+            transient_list.append(image_message)
 
         # 5. 配额检查（Runtime 之前执行，mock router 跳过）
         if _router_has_quota(self._router):
@@ -368,6 +391,7 @@ class ChatAgent:
             transient_context_messages=transient_list or None,
             record_user_input=False,
             token_budget=token_budget,
+            group_transcript_in_content=self._scope.is_group,
         )
 
         # 阶段 3b：Stage B 硬轮换信号透传
@@ -378,7 +402,16 @@ class ChatAgent:
         # append_visible 以 ref 形式写入 Conversation。若当前 ref 缺失，直接追加
         # user_input 并 save，确保后续轮次和 Store 重载都能看到当前正文。
         if result.completion_kind == "completed" and not has_current_user_ref:
-            conv.add_message("user", user_input)
+            fallback_content = user_input
+            fallback_message: dict = {"role": "user", "content": fallback_content}
+            if self._scope.is_group:
+                stable_name = provider_user_name(user_id)
+                if stable_name:
+                    fallback_message["name"] = stable_name
+                fallback_message["content"] = format_player_message(
+                    fallback_content, user_id, resolved_nickname, current_turn_at,
+                )
+            conv.add_messages([fallback_message])
             await conv.save()
 
         # 配额计数（LLM 调用已完成，mock router 跳过）

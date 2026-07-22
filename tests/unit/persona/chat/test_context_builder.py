@@ -338,7 +338,7 @@ class TestContextBuilderSegmentGuide:
         guide_idx = system.index("【回复长度】")
         remind_idx = system.index("请记住玩家说过的话")
         assert name_idx < guide_idx < remind_idx
-        assert "玩家发言（role=user）的 name" in system
+        assert "最后一条[玩家]消息的 uid" in system
 
     def test_segment_guide_disabled_when_segment_enabled_false(self):
         char = self._make_character()
@@ -946,7 +946,10 @@ class TestAntiAnchorConstraint:
         char = Character(name="苏晓", description="温柔的伙伴")
         builder = ContextBuilder(char)
         prompt = builder.build_static_prompt()
-        # 约束当前说话者以本轮 name 为准，禁止从历史名字误认
+        # 稳定 uid 与可读昵称职责分离，禁止从历史名字误认。
         assert "name" in prompt
+        assert "[时间] [玩家] [uid: 账号] [昵称: 称呼]" in prompt
+        assert "uid 是稳定的玩家身份" in prompt
+        assert "[我]表示你自己的发言" in prompt
         assert "当前说话者" in prompt
         assert "误认" in prompt

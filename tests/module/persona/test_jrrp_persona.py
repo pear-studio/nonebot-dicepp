@@ -7,6 +7,7 @@ Covers:
 - is_command=True propagation through ChatSession.chat
 - PersonaApp.is_awake() delegation to sleep_gate
 """
+import re
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 
@@ -189,11 +190,43 @@ class TestHandleJrrp:
         chat_kwargs = app.chat.chat_command.await_args.kwargs
         assert chat_kwargs.get("ctx").transient_message is not None, \
             "应传入 transient_message"
-        assert "[事件] test_user 查询了今日运势" in chat_kwargs["ctx"].transient_message, \
-            f"transient_message 应包含事件内容，实际: {chat_kwargs['transient_message'][:80]}..."
+        assert re.match(
+            r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \[事件\] ",
+            chat_kwargs["ctx"].transient_message,
+        )
+        assert (
+            "[事件] [uid: U123] [昵称: test_user] 查询了今日运势"
+            in chat_kwargs["ctx"].transient_message
+        )
         assert "今日: 75/100" in chat_kwargs["ctx"].transient_message
         # LLM 评语已由 chat delivery 发送，命令层不再二次 _send
         cmd._send.assert_not_awaited()
+
+    async def test_group_context_uses_dicepp_resolved_nickname(
+        self, mock_jrrp_result,
+    ):
+        """群 .jrrp 与普通聊天共用 DicePP 正式称呼，不让群名片覆盖角色名。"""
+        app = MagicMock()
+        app.chat.chat_command = AsyncMock(
+            return_value=ChatOutcome(status="sent", sent_count=1)
+        )
+        cmd = _make_cmd(app=app)
+        cmd.bot.get_nickname = AsyncMock(return_value="银月游侠")
+        cmd._send = AsyncMock()
+        meta = _make_meta(group_id="G1", nickname="账号昵称")
+        meta.sender.card = "银月团长"
+
+        with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
+            with patch("utils.time.get_current_date_raw"):
+                await cmd._handle_jrrp("U123", "G1", meta)
+
+        ctx = app.chat.chat_command.await_args.kwargs["ctx"]
+        assert ctx.nickname == "银月游侠"
+        assert (
+            "[事件] [uid: U123] [昵称: 银月游侠] 查询了今日运势"
+            in ctx.transient_message
+        )
+        assert "银月团长" not in ctx.transient_message
 
     async def test_fallback_when_llm_raises(self, mock_jrrp_result):
         """LLM 异常时回退到 format_jrrp_text（数值 + 趋势，和原版 JrrpCommand 一致）"""
@@ -370,15 +403,22 @@ class TestHandleJrrp:
         cmd = _make_cmd(app=app)
         cmd._send = AsyncMock()
 
-        meta = _make_meta()
+        meta = _make_meta(group_id="G1", nickname="账号昵称")
+        meta.sender.card = "银月团长"
         with patch("module.misc.jrrp_utils.compute_jrrp", return_value=mock_jrrp_result):
             with patch("utils.time.get_current_date_raw"):
-                result = await cmd._handle_jrrp("U123", "", meta)
+                result = await cmd._handle_jrrp("U123", "G1", meta)
 
         # 不抛 TypeError 即为通过；LLM 评语由 delivery 发送，命令层不再 _send
         assert result == []
         cmd._send.assert_not_awaited()
         mock_agent.execute_turn.assert_awaited_once()
+        turn_kwargs = mock_agent.execute_turn.await_args.kwargs
+        assert turn_kwargs["speaker_name"] == "test_user"
+        assert (
+            "[事件] [uid: U123] [昵称: test_user] 查询了今日运势"
+            in turn_kwargs["transient_message"]
+        )
 
 
 # ── Test: is_command=True propagation ────────────────────────────────────
@@ -461,7 +501,7 @@ class TestJrrpLLMContext:
         assert ctx is not None, "应传入 ctx (ChatCallContext)"
         tm = ctx.transient_message
         assert tm is not None, "ctx.transient_message 不应为 None"
-        assert "[事件] test_user 查询了今日运势" in tm, \
+        assert "[事件] [uid: U123] [昵称: test_user] 查询了今日运势" in tm, \
             f"transient_message 应包含 [事件] 前缀，实际: {tm[:80]}..."
         assert "今日: 75/100" in tm, \
             f"transient_message 应包含今日运势值，实际: {tm[:80]}..."

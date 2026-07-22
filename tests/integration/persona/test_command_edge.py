@@ -296,6 +296,8 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
         meta = MessageMetaData(plain_msg="", raw_msg=raw,
                                sender=MessageSender("u1", "测试用户"),
                                group_id="g1", to_me=True)
+        meta.sender.card = "银月团长"
+        self.bot.get_nickname = AsyncMock(return_value="银月游侠")
 
         with patch("plugins.DicePP.module.persona.image_cache.httpx.AsyncClient", return_value=mock_client):
             await self.cmd.process_msg("", meta, None)
@@ -305,6 +307,7 @@ class TestEmojiAndImageOnlyMessages(IsolatedAsyncioTestCase):
         assert call_kwargs["image_data_urls"] is not None
         assert len(call_kwargs["image_data_urls"]) == 1
         assert call_kwargs["image_data_urls"][0].startswith("data:image/")
+        assert call_kwargs["nickname"] == "银月游侠"
 
     async def test_private_regular_image_falls_back_to_chat(self):
         """私聊纯 sub_type=0 图片（下载成功）→ 正常进 chat_with_user，image_data_urls 非空"""

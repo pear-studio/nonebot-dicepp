@@ -29,7 +29,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, runtime_checkable
-import re
 import json
 import uuid
 
@@ -46,6 +45,11 @@ from ..agent.runtime_types import (
     ToolKit,
 )
 from ..llm.selection import CHAT, SelectionPolicy
+from ..transcript import (
+    format_assistant_message,
+    format_player_message,
+    provider_user_name,
+)
 
 
 # 通知消息 content 前缀
@@ -64,31 +68,6 @@ DANGLING_REF_FALLBACK = "[对话历史已被清除]"
 # stream_loader：按 message_stream_id 批量取回权威消息记录。
 # 返回 {id: obj}，obj 需提供 .role 与 .content（如 UnifiedMessage）。
 StreamLoader = Callable[[List[int]], Awaitable[Dict[int, Any]]]
-
-
-# 说话者名（OpenAI 原生 name 字段）净化。display_name 源自用户可控的 QQ 群名片/
-# 昵称，注入前须净化：控制字符可破坏 HTTP/JSON 框架或触发严格端点校验，空白为历史
-# OpenAI name 禁用项（QQ 昵称常含空格），超长可被端点拒绝。保留 CJK/emoji 等可见字符
-# ——现网 CJK name 已稳定工作，证明端点容忍非 ASCII，无需剔除（剔除反而抹掉说话者身份）。
-_NAME_MAX_LEN = 64
-_WHITESPACE_RUN_RE = re.compile(r"\s+")
-_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-
-
-def _sanitize_speaker_name(raw: str) -> str:
-    """净化说话者名以安全注入 OpenAI name 字段。
-
-    步骤：空白（含 \\n\\t）折叠为单下划线 → 剔除其余控制字符 → 去首尾下划线 →
-    截断到安全长度。净化后为空（如全控制字符）返回空串，调用方据此省略 name。
-    """
-    if not raw:
-        return ""
-    cleaned = _WHITESPACE_RUN_RE.sub("_", raw)
-    cleaned = _CONTROL_CHARS_RE.sub("", cleaned)
-    cleaned = cleaned.strip("_")
-    if len(cleaned) > _NAME_MAX_LEN:
-        cleaned = cleaned[:_NAME_MAX_LEN]
-    return cleaned
 
 
 # ── Snapshot & Store ──────────────────────────────────
@@ -346,12 +325,18 @@ class Conversation:
         if new_entries:
             await self._store.append(self._id, new_entries)
 
-    async def render_resolved(self, system_prompt: str) -> List[dict]:
+    async def render_resolved(
+        self,
+        system_prompt: str,
+        *,
+        group_transcript_in_content: bool = False,
+    ) -> List[dict]:
         """render 的引用展开版：ref 条目按 message_stream_id 取回正文后拼装。
 
-        展开时把 message_stream 的 display_name 注入 OpenAI 原生 `name`
-        字段来标识说话者（每条 ref 独立携带自己的说话者，非全局锚点；正文 content
-        不含名字，避免"首个名字锚定"）。display_name 为空时不加 name。
+        用户 ref 的 OpenAI `name` 由稳定 user_id 派生，display_name 仅作为可读昵称；
+        assistant ref 不携带 name，身份由 role 表达。群聊调用方可启用
+        group_transcript_in_content，把消息同时渲染成规范聊天记录行，避免模型忽略
+        name 元数据；私聊和 Life 默认不改正文。
         悬空引用（正文已被清除）兜底为 DANGLING_REF_FALLBACK。
         内部自有条目（通知/工具/摘要）原样保留。
         """
@@ -381,12 +366,18 @@ class Conversation:
                     content = DANGLING_REF_FALLBACK
                 msg: dict = {"role": m.get("role", "user"), "content": content}
                 display_name = getattr(record, "display_name", "") if record is not None else ""
-                if display_name:
-                    # 说话者身份走 OpenAI 原生 name 字段，不进 content 正文；
-                    # display_name 不可信（用户可控昵称），注入前净化，净化后为空则省略。
-                    safe_name = _sanitize_speaker_name(display_name)
-                    if safe_name:
-                        msg["name"] = safe_name
+                user_id = getattr(record, "user_id", "") if record is not None else ""
+                created_at = getattr(record, "created_at", None) if record is not None else None
+                if msg["role"] == "user":
+                    stable_name = provider_user_name(user_id)
+                    if stable_name:
+                        msg["name"] = stable_name
+                    if group_transcript_in_content and user_id:
+                        msg["content"] = format_player_message(
+                            content, user_id, display_name or user_id, created_at,
+                        )
+                elif group_transcript_in_content and msg["role"] == "assistant":
+                    msg["content"] = format_assistant_message(content, created_at)
                 rendered.append(msg)
             else:
                 rendered.append(dict(m))
@@ -411,6 +402,7 @@ class Conversation:
         transient_context_messages: list[dict] | None = None,
         record_user_input: bool = True,
         token_budget: int = 0,
+        group_transcript_in_content: bool = False,
     ) -> ConversationRunResult:
         """T3 新执行模板：fetch → render → AgentRuntime.run() → commit/save。
 
@@ -473,7 +465,10 @@ class Conversation:
         notifs, pending_cursors = await self.fetch_notifications()
 
         # 2. render — 拼装完整消息（引用条目按 message_stream_id 展开）
-        messages = await self.render_resolved(system_prompt)
+        messages = await self.render_resolved(
+            system_prompt,
+            group_transcript_in_content=group_transcript_in_content,
+        )
         # pending notification context 作为持久上下文注入（成功后保存）
         pending_persistent: list[dict] = [n.to_message() for n in notifs]
         messages.extend(pending_persistent)

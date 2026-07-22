@@ -18,6 +18,8 @@ from plugins.DicePP.module.persona.life.conversation_scope import ConversationSc
 def _make_command(msg_id=123):
     # 绕过需要 Bot 的 __init__，直接装配 hook 依赖。
     cmd = PersonaCommand.__new__(PersonaCommand)
+    cmd.bot = MagicMock()
+    cmd.bot.get_nickname = AsyncMock(return_value="DicePP称呼")
     cmd.data_store = MagicMock()
     cmd.data_store.add_message_stream = AsyncMock(return_value=msg_id)
     cmd.image_cache = MagicMock()
@@ -78,12 +80,33 @@ class TestInboundRecorderWiring:
             type=MessageType.CHAT.value, content="万生说你好", display_name="万生",
         )
         cmd.data_store.add_message_stream.assert_awaited_once()
+        assert (
+            cmd.data_store.add_message_stream.await_args.kwargs["display_name"]
+            == "DicePP称呼"
+        )
         registry.append_visible.assert_awaited_once()
         scope, mid, role = registry.append_visible.call_args[0]
         assert scope == ConversationScope.for_group("g1")
         assert mid == 555
         assert role == "user"
         assert evidence_id == 555
+
+    async def test_nickname_lookup_failure_keeps_inbound_message(self):
+        """称呼库故障只降级显示名，不能丢消息事实或 Conversation ref。"""
+        cmd, registry = _make_command(msg_id=556)
+        cmd.bot.get_nickname = AsyncMock(side_effect=RuntimeError("db unavailable"))
+
+        evidence_id = await cmd._inbound_message_recorder(
+            user_id="u1", group_id="g1", role="user",
+            type=MessageType.CHAT.value, content="你好", display_name="群名片",
+        )
+
+        assert evidence_id == 556
+        assert (
+            cmd.data_store.add_message_stream.await_args.kwargs["display_name"]
+            == "群名片"
+        )
+        registry.append_visible.assert_awaited_once()
 
     async def test_private_message_appends_private_scope(self):
         cmd, registry = _make_command(msg_id=7)

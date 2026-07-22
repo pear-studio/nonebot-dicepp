@@ -10,6 +10,7 @@ import time
 import asyncio
 import uuid
 from utils.logger import logger, _request_id_var
+from utils.time import get_clock
 
 from datetime import timedelta
 
@@ -31,6 +32,7 @@ from .report.daily_report import DailyReportGenerator
 from .gateway.port import MessagePort
 from .gateway.pipeline import MessagePipeline, TruncateStage
 from .image_cache import ImageCache
+from .transcript import format_event_message, format_player_identity
 from core.command.cq_extractor import extract_segments
 
 
@@ -191,6 +193,24 @@ class PersonaCommand(UserCommandBase):
         """统一解析用户显示名称（优先级：群名片 > 昵称 > user_id）"""
         return meta.sender.card or meta.sender.nickname or meta.nickname or meta.user_id
 
+    async def _resolve_persona_nickname(
+        self,
+        user_id: str,
+        group_id: str,
+        fallback: str = "",
+    ) -> str:
+        """按 DicePP 正式 fallback 规则解析 Persona 对玩家的称呼。"""
+        try:
+            nickname = await self.bot.get_nickname(user_id, group_id)
+            if nickname:
+                return nickname
+        except Exception:
+            logger.opt(exception=True).warning(
+                f"[Persona] 解析玩家称呼失败，使用消息显示名: "
+                f"user={user_id} group={group_id}"
+            )
+        return fallback or user_id
+
     async def _group_chat_recorder(
         self,
         event: PostSendEvent,
@@ -256,13 +276,19 @@ class PersonaCommand(UserCommandBase):
                 raw_msg, self.image_cache, force_download=is_private,
             )
 
+            resolved_name = display_name
+            if role == "user":
+                resolved_name = await self._resolve_persona_nickname(
+                    user_id, group_id, fallback=display_name,
+                )
+
             msg_id = await self.data_store.add_message_stream(
                 user_id=user_id,
                 group_id=group_id,
                 role=role,
                 type=msg_type,
                 content=content,
-                display_name=display_name,
+                display_name=resolved_name,
                 image_meta=image_meta,
             )
 
@@ -410,7 +436,7 @@ class PersonaCommand(UserCommandBase):
         inbound_message_stream_id = getattr(meta, "inbound_message_stream_id", None)
         user_id = meta.user_id
         group_id = meta.group_id or ""
-        nickname = meta.nickname or ""
+        fallback_name = self._resolve_display_name(meta)
         is_private = not meta.group_id
 
         # 设置本次请求的 trace_id 上下文；finally 块保证异常路径也能 reset
@@ -475,6 +501,9 @@ class PersonaCommand(UserCommandBase):
                 elif is_at_trigger:
                     if self.app and self.enabled:
                         try:
+                            nickname = await self._resolve_persona_nickname(
+                                user_id, group_id, fallback=fallback_name,
+                            )
                             # 检测当前消息中的图片（始终下载，包括表情包）
                             image_meta, image_data_urls = await resolve_images(
                                 meta.raw_msg, self.image_cache, force_download=True,
@@ -575,8 +604,10 @@ class PersonaCommand(UserCommandBase):
         # 1. 计算运势
         result = compute_jrrp(user_id, get_current_date_raw())
 
-        # 2. 获取用户显示名
-        user_name = await self.bot.get_nickname(user_id, group_id)
+        # 2. 与普通 Persona 消息共用 DicePP 正式称呼解析语义。
+        user_name = await self._resolve_persona_nickname(
+            user_id, group_id, fallback=self._resolve_display_name(meta),
+        )
 
         # 3. 构建注入 LLM 的事件消息
         #    通过 transient_message 旁路直接注入 LLM 上下文，不写入 message_stream，
@@ -588,12 +619,13 @@ class PersonaCommand(UserCommandBase):
         else:
             change_text = "与昨日相同"
 
-        event_msg = (
-            f"[事件] {user_name} 查询了今日运势\n"
+        event_content = (
+            f"{format_player_identity(user_id, user_name)} 查询了今日运势\n"
             f"今日: {result.jrrp}/100 | 昨日: {result.zrrp}/100 | 变化: {change_text}\n"
             f"\n"
             f"请以角色身份就此说一两句话，自然地提及运势数值。"
         )
+        event_msg = format_event_message(event_content, get_clock().now())
 
         # 4. 调 LLM 生成角色评语
         #    transient_message=event_msg：事件仅注入当前 LLM 上下文，不持久化。
