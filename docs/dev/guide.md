@@ -50,7 +50,13 @@ rg "Repository|key_fields|migrations" src/plugins/DicePP/core/data src/plugins/D
 uv sync --group dev
 ```
 
-运行测试：
+固定 quick 代表集用于高频反馈，串行目标为 60 秒内：
+
+```bash
+uv run pytest -m quick -n0
+```
+
+完整离线回归（默认排除 `tests/external/`）：
 
 ```bash
 uv run pytest
@@ -59,10 +65,13 @@ uv run pytest
 常用窄范围：
 
 ```bash
-uv run pytest tests/core/ -v
-uv run pytest tests/module/ -v
+uv run pytest tests/unit/core/ -v
+uv run pytest tests/integration/commands/ -v
 uv run pytest tests/unit/persona/ -v
 ```
+
+目录层级、资源边界、CI 分组与 external 确认规则见
+[测试架构](testing.md)。
 
 本地启动：
 

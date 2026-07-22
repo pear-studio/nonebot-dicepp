@@ -9,6 +9,7 @@ description: 完成代码、测试、配置、文档或 agent 改动后主动使
 
 ## 验证选择
 
+- 高频反馈先运行固定 quick 代表集；它用于尽快发现跨模块常见回归，不代替完整回归。
 - 局部代码改动：优先运行直接相关的测试文件、测试目录或最小 pytest 选择器。
 - 共享逻辑、核心框架、数据层、迁移、配置或测试基础设施改动：扩大到相关模块测试，必要时运行全量默认 pytest。
 - 用户可见的机器人指令行为：配合 `dicepp-shell` 做交互验收，优先验证真实输入输出。
@@ -17,7 +18,13 @@ description: 完成代码、测试、配置、文档或 agent 改动后主动使
 
 ## 常用入口
 
-项目 pytest 默认配置已排除 `real_llm`：
+固定 quick 代表集（串行，目标 60 秒内）：
+
+```bash
+uv run pytest -m quick -n0
+```
+
+完整离线回归会运行 `unit/`、`integration/` 和 `system/`，并使用受 CPU 上限约束的自适应并行；`external/` 不在默认收集路径：
 
 ```bash
 uv run pytest
@@ -30,7 +37,7 @@ uv run pytest tests/path_or_file.py
 uv run pytest tests/some_module/
 ```
 
-涉及真实 LLM、外部 API、付费服务、慢速 e2e 或生产数据前，先向用户确认范围、成本和风险。
+测试层级和资源边界见 `docs/dev/testing.md`。涉及 `tests/external/`、真实 LLM、外部 API、付费服务或生产数据前，先向用户确认范围、成本和风险，并显式指定路径运行。
 
 ## 汇报格式
 
@@ -46,3 +53,4 @@ uv run pytest tests/some_module/
 - 不默认生成测试报告文件。
 - 不把覆盖率作为唯一目标；优先验证行为契约和风险面。
 - 测试设计质量由 `auto-test-guard` 约束；本技能负责选择并执行验证范围。
+- `quick` 成功不能替代 push 前当前 HEAD 上的完整离线回归。

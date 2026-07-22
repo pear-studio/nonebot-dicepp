@@ -77,4 +77,4 @@ python docs/agent/skills-dev/dashboard-dev-serve/scripts/dev_dashboard.py stop
 
 - **Dashboard 面板看真 Bot**:起完后浏览器开 `http://<本机 IP>:5090`,登录后能看到 Bot 注册(`shell_dashboard-dev`)、心跳、状态。发消息用 `dicepp-shell send dashboard-dev --user u1 --msg ".r 1d20"`。
 - **控制通道调试**:在 Dashboard 改配置→点 reload,Bot 的 `_control_channel` 收 reload 指令并按指令断开重连。
-- **验收 shell serve 链路**:本 workflow 的 e2e(`tests/e2e/test_shell_serve_runtime.py`)即为这套机制的单测版,此技能是手动联调版的封装。
+- **验收 shell serve 链路**: `tests/system/process/shell/test_shell_serve_runtime.py` 是这套机制的自动化系统测试,此技能是手动联调版的封装。

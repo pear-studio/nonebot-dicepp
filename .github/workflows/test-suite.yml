@@ -1,15 +1,8 @@
 # DicePP Test Suite — shared reusable workflow for CI and Release gates
 #
-# 测试分层 (pytest marker 体系):
-#   1. fast     — 主体单元/模块测试 (排除 slow/integration/e2e/real_llm)
-#   2. slow     — 统计采样、蒙特卡洛等耗时测试
-#   3. integration — 跨模块集成测试
-#   4. e2e      — 完整 bot 生命周期测试
-#   5. compatibility — AST 引擎兼容性语料 (必须 100% 通过)
-#   6. playwright — Dashboard 浏览器流程（CI 强制安装 Chromium，不允许跳过）
-#   7. dashboard-image — Dashboard 容器构建与 HTTP 冒烟
-#   8. windows-package — Windows 双 EXE 构建、冒烟与 ZIP 组装
-#   9. coverage — 非 real_llm 测试覆盖率门槛
+# 测试层级由 tests/unit、integration、system、external 目录表达。
+# CI 先运行固定 quick 代表集，再运行一次完整离线回归；浏览器、容器和
+# Windows 安装包保留各自的环境级验收，external 不在默认 CI 中运行。
 
 name: Test Suite
 
@@ -17,8 +10,8 @@ on:
   workflow_call:
 
 jobs:
-  fast:
-    name: Fast Tests
+  quick:
+    name: Quick Feedback
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,90 +32,17 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --frozen --group dev
-      - name: Run fast tests
+      - name: Check test architecture
         run: |
-          uv run pytest -m "not (slow or integration or e2e or real_llm)" --tb=short -q
-
-  slow:
-    name: Slow Tests
-    runs-on: ubuntu-latest
-    needs: fast
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-      - name: Install dependencies
+          uv run python -m tools.check_test_layout tests
+      - name: Run quick representative suite
         run: |
-          uv sync --frozen --group dev
-      - name: Run slow tests
-        run: |
-          uv run pytest -m "slow and not integration and not e2e and not real_llm" --tb=short -q
-
-  integration:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: fast
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-      - name: Install dependencies
-        run: |
-          uv sync --frozen --group dev
-      - name: Run integration tests
-        run: |
-          uv run pytest -m "integration and not e2e and not real_llm" --tb=short -q
-
-  e2e:
-    name: E2E Tests
-    runs-on: ubuntu-latest
-    needs: fast
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-      - name: Install dependencies
-        run: |
-          uv sync --frozen --group dev
-      - name: Run e2e tests
-        run: |
-          uv run pytest -m "e2e and not real_llm" --tb=short -q
-
-  compatibility:
-    name: Compatibility Corpus
-    runs-on: ubuntu-latest
-    needs: fast
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-      - name: Install dependencies
-        run: |
-          uv sync --frozen --group dev
-      - name: Run compatibility corpus
-        run: |
-          uv run pytest -m compatibility -v --tb=long -x
+          uv run pytest -m quick -n0 --tb=short -q
 
   playwright:
     name: Dashboard Playwright
     runs-on: ubuntu-latest
-    needs: fast
+    needs: quick
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -141,12 +61,12 @@ jobs:
         env:
           DICEPP_REQUIRE_PLAYWRIGHT: "1"
         run: |
-          uv run pytest tests/dashboard/test_smoke_playwright.py --tb=short -q
+          uv run pytest tests/system/browser/dashboard/test_smoke_playwright.py --tb=short -q
 
   dashboard-image:
     name: Dashboard Image
     runs-on: ubuntu-latest
-    needs: fast
+    needs: quick
     steps:
       - uses: actions/checkout@v4
       - name: Validate Docker Compose
@@ -182,7 +102,7 @@ jobs:
   windows-package:
     name: Windows Package
     runs-on: windows-latest
-    needs: fast
+    needs: quick
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -264,7 +184,7 @@ jobs:
           DICEPP_WINDOWS_PACKAGE_SMOKE: "1"
           DICEPP_DASHBOARD_EXE: dist/DicePP/DicePP.exe
         run: |
-          uv run pytest tests/dashboard/test_windows_package_playwright.py --tb=short -q
+          uv run pytest tests/system/package/windows/test_windows_package_playwright.py --tb=short -q
       - name: Package artifact
         shell: pwsh
         run: |
@@ -275,10 +195,10 @@ jobs:
           path: DicePP-ci-win64.zip
           retention-days: 3
 
-  coverage:
-    name: Coverage
+  full:
+    name: Full Offline Regression
     runs-on: ubuntu-latest
-    needs: fast
+    needs: quick
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -290,6 +210,6 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --frozen --group dev
-      - name: Run coverage
+      - name: Run full regression with coverage
         run: |
-          uv run pytest -m "not real_llm" --cov --cov-report=term-missing --cov-report=xml
+          uv run pytest --cov --cov-report=term-missing --cov-report=xml

@@ -212,6 +212,14 @@ metadata:
 
 8. **推送 release commit 与 tag**
 
+   推送前必须在最终 release commit（即当前 HEAD）上成功运行完整离线回归：
+
+   ```bash
+   uv run pytest
+   ```
+
+   只有本次会话已在同一 HEAD 上成功运行且之后没有代码、配置或测试改动时可以复用结果。失败或未完成时不得推送 release commit/tag。
+
    运行：
 
    ```bash

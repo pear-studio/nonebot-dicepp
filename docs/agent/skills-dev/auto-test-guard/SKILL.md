@@ -20,6 +20,8 @@ description: 在准备新增、修改、重写测试，修复 bug 并添加回�
 
 答不清楚就先读附近测试和相关实现；不要为了“有测试”而写测试。
 
+测试落点和可使用资源必须遵守 `docs/dev/testing.md`：层级由目录表达，项目选择 marker 只有 `quick`。可复用 helper 放 `tests/support/`，静态数据放 `tests/fixtures/`，测试模块不得导入 `conftest`。
+
 ## 应该写
 
 - 测试名表达行为，而不是实现步骤。
@@ -39,6 +41,8 @@ description: 在准备新增、修改、重写测试，修复 bug 并添加回�
 - 与已有测试只差无意义参数。
 - 用大而模糊的 snapshot 代替语义断言。
 - 需要真实外部依赖却没有隔离、marker 或明确说明。
+- 用旧的 `unit`、`integration`、`e2e`、`slow` 等 marker 代替正确目录。
+- 为了让测试进入 `quick` 而降低断言质量，或把 system/external 测试标成 `quick`。
 
 ## 完成前
 
