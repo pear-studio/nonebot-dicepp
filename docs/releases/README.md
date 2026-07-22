@@ -70,8 +70,9 @@ version-release (skill)               version-deploy (skill)
 2. 选择递增级别 (patch/minor/major)
 3. 创建 `docs/releases/vX.Y.Z.md`（风险元数据）
 4. `bump-my-version` 递增版本号 + 自动 commit + tag
-5. `git push origin master --tags`
-6. GHA 自动构建镜像 + 创建 GitHub Release + 上传 compose 文件、Windows zip 和 Linux amd64 offline zip
+5. 在当前 HEAD 上运行完整回归 `uv run pytest`
+6. `git push origin master --tags`
+7. GHA 自动构建镜像 + 创建 GitHub Release + 上传 compose 文件、Windows zip 和 Linux amd64 offline zip
 
 ### 基线建立
 
@@ -79,8 +80,9 @@ version-release (skill)               version-deploy (skill)
 
 1. 确认 `docs/releases/vX.Y.Z.md` 就绪
 2. 确认所有代码已 commit
-3. `git tag vX.Y.Z` → `git push origin master --tags`
-4. 等待 GHA 完成
+3. 在当前 HEAD 上运行完整回归 `uv run pytest`
+4. `git tag vX.Y.Z` → `git push origin master --tags`
+5. 等待 GHA 完成
 
 ### 生产部署 (version-deploy 技能)
 

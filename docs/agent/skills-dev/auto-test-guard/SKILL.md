@@ -22,6 +22,8 @@ description: 在准备新增、修改、重写测试，修复 bug 并添加回�
 
 测试落点和可使用资源必须遵守 `docs/dev/testing.md`：层级由目录表达，项目选择 marker 只有 `quick`。可复用 helper 放 `tests/support/`，静态数据放 `tests/fixtures/`，测试模块不得导入 `conftest`。
 
+unit、integration 和 support 使用生产运行时内部的裸导入 `core/module/utils/...`；只有测试明确外部包边界时才允许 `plugins.DicePP.*`，并须满足布局检查器约束。
+
 ## 应该写
 
 - 测试名表达行为，而不是实现步骤。

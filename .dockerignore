@@ -30,7 +30,6 @@ htmlcov
 .temp
 *.md
 *.log
-Makefile
 Dockerfile*
 docker-compose*
 

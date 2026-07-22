@@ -1,6 +1,6 @@
 ---
 name: auto-test-run
-description: 完成代码、测试、配置、文档或 agent 改动后主动使用。根据 DicePP 改动风险选择最小可信验证范围，执行 pytest、dicepp-shell 或其他必要检查，并向用户汇报已运行、未运行和失败项；不得默认调用真实 LLM、外部 API、付费服务或高成本 e2e。
+description: 完成代码、测试、配置、文档或 agent 改动后主动使用。根据 DicePP 改动风险选择最小可信验证范围，执行 pytest、dicepp-shell 或其他必要检查，并向用户汇报已运行、未运行和失败项；不得默认调用真实 LLM、外部 API、付费服务或高成本 system/external 验收。
 ---
 
 # Auto Test Run
@@ -24,7 +24,15 @@ description: 完成代码、测试、配置、文档或 agent 改动后主动使
 uv run pytest -m quick -n0
 ```
 
-完整离线回归会运行 `unit/`、`integration/` 和 `system/`，并使用受 CPU 上限约束的自适应并行；`external/` 不在默认收集路径：
+完整离线回归会运行 `unit/`、`integration/` 和 `system/`，包括 Dashboard Playwright，
+并使用受 CPU 上限约束的自适应并行；`external/` 不在默认收集路径。首次运行先安装
+Playwright 管理的 Chromium：
+
+```bash
+uv run playwright install chromium
+```
+
+随后运行：
 
 ```bash
 uv run pytest

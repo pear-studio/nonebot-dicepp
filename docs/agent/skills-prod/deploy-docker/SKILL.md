@@ -41,7 +41,7 @@ metadata:
 
 ## Preferred Entrypoints
 
-优先使用明确的 Docker Compose 命令，不调用项目 shell wrapper 或 Makefile 部署入口：
+优先使用明确的 Docker Compose 命令，不调用项目 shell wrapper：
 
 - DicePP bot 服务优先使用当前项目的 'docker compose'。
 - DicePP 在线版本更新使用 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose pull/up`；离线镜像包更新使用 `docker load` 导入目标镜像后执行 `DICEPP_IMAGE_TAG=vX.Y.Z docker compose up -d --pull never`。两种方式都默认作用于当前 compose project 的 DicePP 服务整体，而不是只更新单个 `bot` service。
@@ -105,7 +105,7 @@ metadata:
 ## Important Notes
 
 - 不把 Docker 运维操作和版本选择混在一起；版本选择由 'version-deploy' 处理。
-- 不调用 Makefile 或 scripts/deploy wrapper 执行生产部署。
+- 不调用 scripts/deploy 等 wrapper 执行生产部署。
 - 不自动执行 destructive cleanup。
 - 不修改持久化数据；备份与恢复需要用户明确授权和专门流程。
 - 如果命令需要 sudo, 先说明原因和范围。

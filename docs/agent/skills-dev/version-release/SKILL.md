@@ -280,12 +280,14 @@ metadata:
 3. 确认 `.bot` 运行版本与包版本一致。
 4. 确认 GHCR workflow (release.yml) 与 `.dockerignore` 已准备好。
 5. 确认工作区干净, 所有改动已提交到 master, 当前 commit 是想要固化的基线 commit。
-6. 手工创建并推送 tag:
+6. 在当前 HEAD 上运行 `uv run pytest`。只有本次会话已在同一 HEAD 上成功运行且
+   之后没有代码、配置或测试改动时可以复用；失败或未完成时不得继续。
+7. 手工创建并推送 tag:
    ```bash
    git tag vX.Y.Z
    git push origin master --tags
    ```
-7. 等待 GitHub Actions 完成, 验证镜像和 GitHub Release。参考本技能 step 9。
+8. 等待 GitHub Actions 完成, 验证镜像和 GitHub Release。参考本技能 step 9。
 
 ## RC / Prerelease Test Notes
 
@@ -294,14 +296,17 @@ metadata:
 1. 选择目标正式版本作为基底；如果 `3.0.0` 尚未正式发布, 测试版从 `3.0.0rc1` 开始；已有正式版后再使用下一个版本的 RC。
 2. 将 `pyproject.toml` 版本更新为目标 RC 版本, 并准备对应的 `docs/releases/vX.Y.ZrcN.md`。
 3. 运行 `uv lock`, 并确认 `uv.lock` 中 `dicepp` 版本等于目标 RC 版本；把 `pyproject.toml`、`uv.lock` 和 `docs/releases/vX.Y.ZrcN.md` 提交到同一个 RC release commit。
-4. 创建并推送 tag:
+4. 在最终 RC commit（当前 HEAD）上运行 `uv run pytest`。只有本次会话已在同一
+   HEAD 上成功运行且之后没有代码、配置或测试改动时可以复用；失败或未完成时
+   不得继续。
+5. 创建并推送 tag:
    ```bash
    git tag vX.Y.ZrcN
    git push origin master --tags
    ```
-5. GitHub Actions 会构建 Docker 镜像和 Windows EXE, 运行版本一致性检查和冒烟测试。
-6. RC 发布只推送 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.ZrcN`, 不更新 `:latest`。
-7. GitHub Release 会标记为 Prerelease。
+6. GitHub Actions 会构建 Docker 镜像和 Windows EXE, 运行版本一致性检查和冒烟测试。
+7. RC 发布只推送 `ghcr.io/pear-studio/nonebot-dicepp:vX.Y.ZrcN`, 不更新 `:latest`。
+8. GitHub Release 会标记为 Prerelease。
 
 RC 测试通过后, 正式发布仍使用纯数字版本 `vX.Y.Z`。
 

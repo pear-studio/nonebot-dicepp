@@ -48,6 +48,7 @@ rg "Repository|key_fields|migrations" src/plugins/DicePP/core/data src/plugins/D
 
 ```bash
 uv sync --group dev
+uv run playwright install chromium
 ```
 
 固定 quick 代表集用于高频反馈，串行目标为 60 秒内：
@@ -56,7 +57,7 @@ uv sync --group dev
 uv run pytest -m quick -n0
 ```
 
-完整离线回归（默认排除 `tests/external/`）：
+完整离线回归（包含 Dashboard 浏览器测试，默认排除 `tests/external/`）：
 
 ```bash
 uv run pytest

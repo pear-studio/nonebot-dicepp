@@ -24,6 +24,12 @@ marker 是 `quick`。
 `tests/support/`，静态数据放到 `tests/fixtures/`。测试模块禁止导入任何
 `conftest`；需要复用的对象必须移到显式可导入的 support 模块。
 
+DicePP 运行时内部的 canonical namespace 是 `core/module/utils/adapter/shell`
+等裸路径。unit、integration 和 support 不得改用 `plugins.DicePP.*`，否则同一
+源码可能形成两份 module、singleton 或 ContextVar。只有明确验证外部包边界的
+system 测试，以及 Dashboard integration 中匹配正式跨包调用的测试可以使用完整
+包路径。将全部生产代码统一迁移到完整包命名空间属于独立架构任务。
+
 根 `conftest.py` 会在测试模块导入前为每个 pytest worker 创建隔离的应用目录，
 并在会话结束后检查真实仓库未被污染。这是全套测试的安全边界；具体 Bot、数据库
 和 Dashboard fixture 仍只在相应 integration/system 层注册。
@@ -56,9 +62,12 @@ marker 是 `quick`。
 - quick 的选择遵循“先覆盖宽度、预算内再补深度”：至少覆盖 core、adapter、
   utils、roll、Persona、Dashboard，并包含少量高信号 integration 契约。新增
   quick 项时应重新测量串行总时长；不因追求数量降低断言质量。
-- full suite 按目录运行 `unit/`、`integration/`、`system/`，不依赖额外的层级
-  marker。标准命令 `uv run pytest` 使用自适应 xdist：默认保留一个 CPU、最多
-  4 workers，因此 2 核环境自动串行；显式 `-n0` 始终覆盖默认并行。
+- full suite 按目录运行 `unit/`、`integration/`、`system/`，包括 Dashboard
+  Playwright 浏览器回归，不依赖额外的层级 marker。首次运行前安装受 Playwright
+  管理的 Chromium：`uv run playwright install chromium`。缺少 Python 包或
+  Chromium 时 full 直接失败，不根据本机是否碰巧安装系统 Chrome 改变测试集合。
+  标准命令 `uv run pytest` 使用自适应 xdist：默认保留一个 CPU、最多 4 workers，
+  因此 2 核环境自动串行；显式 `-n0` 始终覆盖默认并行。
 - `external/` 默认不收集，必须由操作者显式选择，并在运行前确认凭据、成本和
   对外副作用。
 
@@ -83,6 +92,8 @@ uv run python -m tools.check_test_layout path\to\tests
 
 - `tests/` 顶层位置；
 - 导入 `conftest`；
+- unit/integration/support 中不属于显式 Dashboard 包边界的 `plugins.DicePP.*`
+  导入和 patch 目标；
 - 用 `Path(__file__).parents[n]` 推算仓库根目录；
 - unit 中直接连接 SQLite、构造完整 Bot/TestClient，或使用系统级资源；
 - integration 中使用子进程、listener/server 或浏览器；
@@ -96,8 +107,8 @@ uv run python -m tools.check_test_layout path\to\tests
 
 ## CI 与 push 门禁
 
-共享 CI 依次提供：quick 代表集、一次带覆盖率的完整离线回归、Dashboard
-Playwright、Dashboard 镜像冒烟和 Windows 安装包验收。兼容语料、慢测试及普通
+共享 CI 提供：quick 代表集、一次带覆盖率且包含 Dashboard Playwright 的完整离线
+回归、Dashboard 镜像冒烟和 Windows 安装包验收。兼容语料、浏览器、慢测试及普通
 integration/system 已包含在完整回归中，不再按旧 marker 重复执行。
 
 Agent 每次 push 前必须在当前 HEAD 上成功运行 `uv run pytest`。只有本次会话已经

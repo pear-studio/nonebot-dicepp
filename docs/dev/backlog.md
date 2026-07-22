@@ -12,6 +12,23 @@
 
 ---
 
+## architecture
+
+### [B-260722-587045] 统一 DicePP 为完整包命名空间
+- 创建: 2026-07-22
+- 优先级: P1
+- 类型: refactor
+- 改动量: XL
+- 问题表现:
+  - DicePP 生产源码内部目前主要使用 core/module/utils 等裸导入，但插件入口、Dashboard、Shell 与部分测试仍使用 plugins.DicePP.*。
+  - 同一进程同时加载两种路径时，同一源码会形成不同 module 对象，导致 singleton、ContextVar、dataclass 类型身份和 monkeypatch 不一致。
+  - 2026-07-22 测试架构审查已复现失效 patch 与 ConversationScope 双类型；当前仅先统一测试侧裸导入并限制包路径使用范围。
+- 开发备忘:
+  - 独立评估将生产源码、入口与跨包调用统一迁移为 plugins.DicePP.*，或采用一致的包内相对导入；实施前重新验证方案，不受本条建议约束。
+  - 覆盖 NoneBot 插件加载、bot.py、Dashboard、dicepp-shell、PyInstaller hidden imports、Docker/Windows 包和 smoke test。
+  - 清理不再需要的 sys.path 注入与兼容别名，并增加同一源码不会以两个模块名加载的回归验证。
+  - 风险点：循环导入、NoneBot 插件发现、PyInstaller 收集和现有跨进程入口，需在独立 feature branch 分阶段验证。
+
 ## persona
 
 ### [B-260601-ef9e5a] 用户自带 API Key 功能（.ai key config）
