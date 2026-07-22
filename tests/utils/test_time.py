@@ -38,14 +38,21 @@ class TestDatetimeToStr:
 
 @pytest.mark.unit
 class TestDatetimeToInt:
-    def test_conversion(self):
-        # 测试环境本地时区为东八区，与 china_tz 一致。
-        # datetime_to_int 通过 time.mktime(timetuple()) 将 datetime 视为本地时间戳。
-        # 2024-01-15 14:10:45 +0800 == 1705299045
+    def test_aware_datetime_uses_its_own_timezone(self, monkeypatch):
+        monkeypatch.setattr(time_module, "mktime", lambda _: 0)
         dt = datetime.datetime(2024, 1, 15, 14, 10, 45, tzinfo=china_tz)
-        result = datetime_to_int(dt)
-        assert isinstance(result, int)
-        assert result == 1705299045
+        same_in_utc = datetime.datetime(
+            2024, 1, 15, 6, 10, 45, tzinfo=datetime.timezone.utc
+        )
+
+        assert datetime_to_int(dt) == 1705299045
+        assert datetime_to_int(same_in_utc) == 1705299045
+
+    def test_naive_datetime_is_interpreted_as_beijing_time(self, monkeypatch):
+        monkeypatch.setattr(time_module, "mktime", lambda _: 0)
+        dt = datetime.datetime(2024, 1, 15, 14, 10, 45)
+
+        assert datetime_to_int(dt) == 1705299045
 
 
 @pytest.mark.unit

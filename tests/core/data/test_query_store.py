@@ -1,10 +1,21 @@
-import os
 import pytest
+import pytest_asyncio
 import aiosqlite
 
 pytestmark = pytest.mark.integration
 
 QUERY_DATA_FIELD_LIST = ["名称", "英文", "来源", "分类", "标签", "内容"]
+
+
+@pytest_asyncio.fixture
+async def query_store():
+    from core.data.query_store import QueryStore
+
+    store = QueryStore()
+    try:
+        yield store
+    finally:
+        await store.close_all()
 
 
 async def _create_test_db(path: str, rows: list[tuple]) -> None:
@@ -30,10 +41,8 @@ class TestQueryStoreConnect:
     """connect_path / has_database / list_databases / close_all"""
 
     @pytest.mark.asyncio
-    async def test_connect_single_db(self, tmp_path):
-        from core.data.query_store import QueryStore
-
-        store = QueryStore()
+    async def test_connect_single_db(self, tmp_path, query_store):
+        store = query_store
         db_path = str(tmp_path / "test.db")
         await _create_test_db(db_path, [("foo", "", "src", "cat", "", "bar")])
 
@@ -45,9 +54,7 @@ class TestQueryStoreConnect:
         assert store.has_database("test") is False
 
     @pytest.mark.asyncio
-    async def test_connect_directory_recursively_loads_dbs(self, tmp_path):
-        from core.data.query_store import QueryStore
-
+    async def test_connect_directory_recursively_loads_dbs(self, tmp_path, query_store):
         sub = tmp_path / "sub"
         sub.mkdir()
         db1 = str(sub / "a.db")
@@ -55,44 +62,38 @@ class TestQueryStoreConnect:
         await _create_test_db(db1, [])
         await _create_test_db(db2, [])
 
-        store = QueryStore()
+        store = query_store
         await store.connect_path(str(tmp_path))
         assert store.has_database("a") is True
         assert store.has_database("b") is True
 
     @pytest.mark.asyncio
-    async def test_connect_directory_skips_journal(self, tmp_path):
-        from core.data.query_store import QueryStore
-
+    async def test_connect_directory_skips_journal(self, tmp_path, query_store):
         db_path = str(tmp_path / "d.db")
         await _create_test_db(db_path, [])
         journal = str(tmp_path / "d.db-journal")
         with open(journal, "w") as f:
             f.write("junk")
 
-        store = QueryStore()
+        store = query_store
         await store.connect_path(str(tmp_path))
         assert store.has_database("d") is True
 
     @pytest.mark.asyncio
-    async def test_connect_nonexistent_path_creates_parent_dir(self, tmp_path):
-        from core.data.query_store import QueryStore
-
+    async def test_connect_nonexistent_path_creates_parent_dir(self, tmp_path, query_store):
         target = tmp_path / "new_dir"
-        store = QueryStore()
+        store = query_store
         result = await store.connect_path(str(target))
         assert target.exists()
 
     @pytest.mark.asyncio
-    async def test_close_all_disconnects_all(self, tmp_path):
-        from core.data.query_store import QueryStore
-
+    async def test_close_all_disconnects_all(self, tmp_path, query_store):
         db1 = str(tmp_path / "x.db")
         db2 = str(tmp_path / "y.db")
         await _create_test_db(db1, [])
         await _create_test_db(db2, [])
 
-        store = QueryStore()
+        store = query_store
         await store.connect_path(str(tmp_path))
         assert len(store.list_databases()) == 2
 
@@ -104,12 +105,10 @@ class TestQueryStoreExecutemany:
     """executemany / execute 方法"""
 
     @pytest.mark.asyncio
-    async def test_executemany_inserts_and_commits(self, tmp_path):
-        from core.data.query_store import QueryStore
-
+    async def test_executemany_inserts_and_commits(self, tmp_path, query_store):
         db_path = str(tmp_path / "d.db")
         await _create_test_db(db_path, [])
-        store = QueryStore()
+        store = query_store
         await store.connect_path(db_path)
 
         await store.executemany(
@@ -123,10 +122,8 @@ class TestQueryStoreExecutemany:
         assert rows[0][0] == "a1"
 
     @pytest.mark.asyncio
-    async def test_execute_raises_on_unloaded_db(self, tmp_path):
-        from core.data.query_store import QueryStore, QueryStoreError
-
-        store = QueryStore()
+    async def test_execute_raises_on_unloaded_db(self, tmp_path, query_store):
+        store = query_store
         with pytest.raises(RuntimeError, match="not loaded"):
             await store.execute("nonexistent", "SELECT 1")
 
@@ -135,14 +132,12 @@ class TestQueryStoreSearch:
     """search 搜索契约"""
 
     @pytest.mark.asyncio
-    async def test_search_single_db_returns_results(self, tmp_path):
-        from core.data.query_store import QueryStore
-
+    async def test_search_single_db_returns_results(self, tmp_path, query_store):
         db_path = str(tmp_path / "d.db")
         await _create_test_db(db_path, [
             ("火球术", "Fireball", "PHB", "法术", "伤害", "3d6"),
         ])
-        store = QueryStore()
+        store = query_store
         await store.connect_path(db_path)
 
         result = await store.search(["d"], ["火球术"])
@@ -151,33 +146,29 @@ class TestQueryStoreSearch:
         assert result["results"][0]["name"] == "火球术"
 
     @pytest.mark.asyncio
-    async def test_search_empty_tokens_returns_empty(self, tmp_path):
-        from core.data.query_store import QueryStore
-
+    async def test_search_empty_tokens_returns_empty(self, tmp_path, query_store):
         db_path = str(tmp_path / "d.db")
         await _create_test_db(db_path, [("foo", "", "", "", "", "")])
-        store = QueryStore()
+        store = query_store
         await store.connect_path(db_path)
 
         result = await store.search(["d"], [])
         assert result == {"results": [], "total": 0}
 
     @pytest.mark.asyncio
-    async def test_search_raises_on_unloaded_db(self, tmp_path):
-        from core.data.query_store import QueryStore, QueryStoreError
+    async def test_search_raises_on_unloaded_db(self, tmp_path, query_store):
+        from core.data.query_store import QueryStoreError
 
-        store = QueryStore()
+        store = query_store
         with pytest.raises(QueryStoreError, match="未加载"):
             await store.search(["nonexistent"], ["foo"])
 
     @pytest.mark.asyncio
-    async def test_search_pagination(self, tmp_path):
-        from core.data.query_store import QueryStore
-
+    async def test_search_pagination(self, tmp_path, query_store):
         db_path = str(tmp_path / "d.db")
         rows = [(f"name{i}", "", "src", "", "", f"content{i}") for i in range(10)]
         await _create_test_db(db_path, rows)
-        store = QueryStore()
+        store = query_store
         await store.connect_path(db_path)
 
         result = await store.search(["d"], ["name"], limit=3, offset=2)
@@ -187,16 +178,14 @@ class TestQueryStoreSearch:
         assert result["results"][2]["name"] == "name4"
 
     @pytest.mark.asyncio
-    async def test_search_private_overrides_master(self, tmp_path):
+    async def test_search_private_overrides_master(self, tmp_path, query_store):
         """私设库中的同名条目应覆盖主库条目。"""
-        from core.data.query_store import QueryStore
-
         master = str(tmp_path / "master.db")
         private = str(tmp_path / "private.db")
         await _create_test_db(master, [("火球术", "Fireball", "PHB", "", "", "3d6")])
         await _create_test_db(private, [("火球术", "Fireball", "私设", "", "", "4d6")])
 
-        store = QueryStore()
+        store = query_store
         await store.connect_path(str(tmp_path))
 
         result = await store.search(["master", "private"], ["火球术"])

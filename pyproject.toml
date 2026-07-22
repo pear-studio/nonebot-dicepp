@@ -81,7 +81,7 @@ pythonpath = ["src"]
 python_files = ["unit_test.py", "test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test*"]
-addopts = "--tb=short -m \"not real_llm\" --timeout=30 --strict-markers --strict-config"
+addopts = "--tb=short -m \"not real_llm\" --timeout=30 --strict-markers --strict-config -n auto --dist loadfile"
 markers = [
     "unit: Unit tests for individual modules (no external I/O, all dependencies mocked)",
     "e2e: End-to-end tests exercising the full bot lifecycle (may start real services)",

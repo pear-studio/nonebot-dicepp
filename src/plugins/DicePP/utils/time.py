@@ -1,4 +1,3 @@
-import time
 import datetime
 
 from typing import Optional, Union, Protocol, runtime_checkable
@@ -185,9 +184,13 @@ def datetime_to_str(input_datetime: datetime) -> str:
 
 def datetime_to_int(input_datetime: datetime) -> int:
     """
-    将datetime转换为int, 即localtime, 时区默认为东八区, 单位为秒
+    将 datetime 转换为 Unix 时间戳（秒）。
+
+    带时区的 datetime 按其自身时区解释；不带时区的 datetime 按北京时间解释。
     """
-    return int(time.mktime(input_datetime.timetuple()))
+    if input_datetime.tzinfo is None or input_datetime.utcoffset() is None:
+        input_datetime = input_datetime.replace(tzinfo=china_tz)
+    return int(input_datetime.timestamp())
 
 
 def int_to_datetime(timestamp: int) -> datetime:
