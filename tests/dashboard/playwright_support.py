@@ -7,6 +7,30 @@ import time
 import urllib.request
 
 
+# Chromium blocks these non-privileged ports even on localhost.  Keep the list
+# aligned with net/base/port_util.cc; privileged ports are not candidates for
+# an OS-assigned ephemeral port and are intentionally omitted here.
+_CHROMIUM_RESTRICTED_EPHEMERAL_PORTS = frozenset({
+    1719,
+    1720,
+    1723,
+    2049,
+    3659,
+    4045,
+    5060,
+    5061,
+    6000,
+    6566,
+    6665,
+    6666,
+    6667,
+    6668,
+    6669,
+    6697,
+    10080,
+})
+
+
 def launch_browser(chromium):
     """Launch the CI-managed Chromium, with local system Chrome fallback."""
     launch_options = {
@@ -32,11 +56,18 @@ def can_launch_browser(sync_playwright) -> bool:
         return False
 
 
-def find_free_port() -> int:
-    """Return a free TCP port on 127.0.0.1."""
+def _find_os_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def find_free_port() -> int:
+    """Return a browser-safe free TCP port on 127.0.0.1."""
+    while True:
+        port = _find_os_free_port()
+        if port not in _CHROMIUM_RESTRICTED_EPHEMERAL_PORTS:
+            return port
 
 
 def wait_for_server(url: str, timeout: float = 15) -> None:
