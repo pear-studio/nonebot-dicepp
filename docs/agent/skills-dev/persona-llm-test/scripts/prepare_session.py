@@ -25,9 +25,9 @@ CHARACTER_DISPLAY_NAME = "艾琳娜·银枝"
 TEST_GROUP_ID = "llm_test_group"
 SCENARIO_ORDER = ("warp", "private", "group")
 PRIVATE_CHAT_RUNS = 7
-GROUP_CHAT_RUNS = 7
+GROUP_CHAT_RUNS = 10
 PRIVATE_INTERACTIONS_BY_USER = (7,)
-GROUP_INTERACTIONS_BY_USER = (1, 6)
+GROUP_INTERACTIONS_BY_USER = (1, 2, 7)
 
 
 class PreparationError(RuntimeError):
@@ -383,7 +383,8 @@ def estimate_agent_runs(
                     ),
                     notes=(
                         "三条普通群消息只进入上下文，不触发 Persona 回复。",
-                        "包含多人归属、事实覆盖、roll_dice、角色书与私聊泄漏验收。",
+                        "包含多人归属、事实覆盖、roll_dice、角色书、私聊泄漏与"
+                        "三人连续 .jrrp 验收。",
                     ),
                 )
             )

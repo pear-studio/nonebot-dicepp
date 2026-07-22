@@ -177,6 +177,7 @@ def test_prepare_session_writes_valid_workspace_without_exposing_key(
     assert "私聊跑团多轮" in summary
     assert "群聊跑团多人上下文" in summary
     assert "Chat: 7" in summary
+    assert "Chat: 10" in summary
     assert summary.count("Scoring: 1") == 2
 
 
