@@ -13,9 +13,13 @@ TEST_SUITE_WORKFLOW = ROOT / ".github" / "workflows" / "test-suite.yml"
 WINDOWS_PACKAGE_SCRIPT = ROOT / "scripts" / "build" / "assemble_windows_package.ps1"
 
 
-def _workflow_step(workflow_path: Path, job_name: str, step_name: str) -> dict:
+def _workflow_job(workflow_path: Path, job_name: str) -> dict:
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    for step in workflow["jobs"][job_name]["steps"]:
+    return workflow["jobs"][job_name]
+
+
+def _workflow_step(workflow_path: Path, job_name: str, step_name: str) -> dict:
+    for step in _workflow_job(workflow_path, job_name)["steps"]:
         if step.get("name") == step_name:
             return step
     raise AssertionError(f"{step_name} step not found in {workflow_path.name}:{job_name}")
@@ -57,6 +61,36 @@ def test_linux_offline_package_embeds_docs_and_usage_guide():
     assert 'cat > "${PACKAGE_DIR}/使用说明.md"' in script
     assert 'zip -r "${PACKAGE_ZIP}" "${PACKAGE_DIR}"' in script
     assert 'sha256sum "${PACKAGE_ZIP}" > "${PACKAGE_SHA}"' not in script
+
+
+def test_runtime_image_ci_runs_isolated_plugin_preflight_after_quick_feedback():
+    job = _workflow_job(TEST_SUITE_WORKFLOW, "runtime-image")
+    build = _workflow_step(TEST_SUITE_WORKFLOW, "runtime-image", "Build Runtime image")
+    smoke = _workflow_step(TEST_SUITE_WORKFLOW, "runtime-image", "Smoke test Runtime image")
+
+    assert job["runs-on"] == "ubuntu-latest"
+    assert job["needs"] == "quick"
+    assert build["run"].strip() == "docker build -f Dockerfile -t dicepp-runtime:ci ."
+    assert smoke["run"].strip() == (
+        "docker run --rm --network=none dicepp-runtime:ci python bot.py --smoke-check"
+    )
+    assert "services" not in job
+    assert "docker compose" not in "\n".join(
+        step.get("run", "") for step in job["steps"]
+    )
+
+
+def test_release_bot_image_smoke_preflights_local_tag_without_network():
+    image = "ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}"
+    build = _workflow_step(RELEASE_WORKFLOW, "build-docker", "Build image (local only)")
+    smoke = _workflow_step(RELEASE_WORKFLOW, "build-docker", "Smoke test image")
+    script = smoke["run"]
+
+    assert build["with"]["load"] is True
+    assert image in build["with"]["tags"]
+    assert f'IMAGE="{image}"' in script
+    assert 'docker run --rm --network=none "$IMAGE" python bot.py --version' in script
+    assert 'docker run --rm --network=none "$IMAGE" python bot.py --smoke-check' in script
 
 
 def test_create_release_does_not_pass_empty_zip_argument():

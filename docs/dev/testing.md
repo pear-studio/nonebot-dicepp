@@ -117,8 +117,8 @@ uv run python -m tools.check_test_layout path\to\tests
 ## CI 与 push 门禁
 
 共享 CI 提供：quick 代表集、一次带覆盖率且包含 Dashboard Playwright 的完整离线
-回归、Dashboard 镜像冒烟和 Windows 安装包验收。兼容语料、浏览器、慢测试及普通
-integration/system 已包含在完整回归中，不再按旧 marker 重复执行。
+回归、Dashboard 与 Bot Runtime Docker 镜像冒烟，以及 Windows 安装包验收。兼容语料、
+浏览器、慢测试及普通 integration/system 已包含在完整回归中，不再按旧 marker 重复执行。
 
 Agent 每次 push 前必须在当前 HEAD 上成功运行 `uv run pytest`。只有本次会话已经
 在同一 HEAD 上成功运行，且之后没有代码、配置或测试改动时，才可以复用结果。

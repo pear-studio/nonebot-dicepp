@@ -75,6 +75,19 @@ jobs:
         run: |
           docker rm -f dicepp-dashboard-smoke 2>/dev/null || true
 
+  runtime-image:
+    name: Runtime Image
+    runs-on: ubuntu-latest
+    needs: quick
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Runtime image
+        run: |
+          docker build -f Dockerfile -t dicepp-runtime:ci .
+      - name: Smoke test Runtime image
+        run: |
+          docker run --rm --network=none dicepp-runtime:ci python bot.py --smoke-check
+
   windows-package:
     name: Windows Package
     runs-on: windows-latest

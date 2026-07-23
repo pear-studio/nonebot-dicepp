@@ -59,13 +59,14 @@ jobs:
 
       - name: Smoke test image
         run: |
+          IMAGE="ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }}"
           EXPECTED="DicePP v${{ steps.version.outputs.version }}"
-          ACTUAL="$(docker run --rm ghcr.io/pear-studio/nonebot-dicepp:${{ steps.version.outputs.tag }} \
-            python bot.py --version)"
+          ACTUAL="$(docker run --rm --network=none "$IMAGE" python bot.py --version)"
           if [ "$ACTUAL" != "$EXPECTED" ]; then
             echo "Version mismatch: expected '$EXPECTED', got '$ACTUAL'"
             exit 1
           fi
+          docker run --rm --network=none "$IMAGE" python bot.py --smoke-check
 
       - name: Build Dashboard image (local only)
         uses: docker/build-push-action@v5
